@@ -10,11 +10,11 @@
 //! observer both hold to the launch pin through the recorded lineage path),
 //! so a failing check is routed to its owners by the round. The re-entered
 //! round re-decides the outcome and the observation runs again. Re-entry
-//! repeats while the situation the observation judged changes (the masked
-//! failure, the pin, the round's outcome). The first time a failure recurs on
-//! an unchanged situation is a stall, and a stall PAUSES the run with its
-//! evidence (Issue 262), as do `REOPEN_RUNAWAY_GUARD` re-entries since the
-//! last real progress: never a total count that ends the run. A failure no
+//! repeats while it makes progress. Progress is reaching a failing set (the sorted
+//! failing check ids, never the failure text) the run never reached
+//! (decision A); `REOPEN_STALL_LIMIT` refusals in a row that reach one
+//! already reached are a stall, and a stall PAUSES the run with its
+//! evidence (Issue 262): never a total count that ends the run. A failure no
 //! re-entry can act on (no acceptance stage, or a re-entry that errs) blocks
 //! the run by name: `NeedsReview`, naming the observation's reason or failing
 //! checks.
@@ -65,12 +65,12 @@ fn finishes(status: WorkflowV2Status) -> bool {
     matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
 }
 
-/// Re-entries since the last real progress (a completed observation with
-/// fewer failing checks than every one before it) after which the run
-/// pauses; kept in the ledger across pauses (`state::ReopenLedger`). Never
-/// a total: real progress resets it. It stops only a failure that keeps
-/// changing without ever shrinking; one that stops changing pauses at once.
-pub(super) const REOPEN_RUNAWAY_GUARD: usize = 64;
+/// Refusals in a row that reach a failing set the run already reached,
+/// after which the run pauses: the no-progress bound (decision A). One: a
+/// re-entry that leaves the run where an earlier one did gives the next
+/// nothing new to act on. A new failing set resets it, whatever its size;
+/// the sets reached are kept in the ledger across pauses.
+pub(super) const REOPEN_STALL_LIMIT: usize = 1;
 
 /// Why an observation does not let a finishing outcome commit.
 struct Refusal {
@@ -149,33 +149,23 @@ pub(super) async fn observe_before_commit(
             return Ok(summary);
         }
         let situation = state::situation(pc.store, &snapshot, &reason, &summary, record);
-        // Real progress: a completed observation with fewer failing checks
-        // than every one before it. It resets the runaway guard.
-        let failing = refusal.outcome.as_ref().map(|o| o.policy_finding_count);
-        if let Some(failing) = failing.filter(|f| ledger.fewest.is_none_or(|fewest| *f < fewest)) {
-            ledger.fewest = Some(failing);
-            ledger.since_progress = 0;
+        // Decision A: progress is a failing set the run never reached.
+        if ledger
+            .seen
+            .insert(state::failing_set(pc.store, pc.run_id, record))
+        {
+            ledger.revisits = 0;
+        } else {
+            ledger.revisits = ledger.revisits.saturating_add(1);
         }
-        if ledger.situations.contains(&situation) {
+        if ledger.revisits >= REOPEN_STALL_LIMIT {
             return Err(pause_reentry(
                 pc,
                 generation,
                 record,
-                &reason,
+                (&reason, &situation),
                 "no_progress",
-                "re-entering acceptance made no progress: the observation failed the same way on the same pin and acceptance outcome",
-            ));
-        }
-        if ledger.since_progress >= REOPEN_RUNAWAY_GUARD {
-            return Err(pause_reentry(
-                pc,
-                generation,
-                record,
-                &reason,
-                "runaway_guard",
-                &format!(
-                    "re-entering acceptance hit its runaway guard: {REOPEN_RUNAWAY_GUARD} re-entries with no real progress (no observation with fewer failing checks)"
-                ),
+                "re-entering acceptance made no progress: the run reached a failing set it had already reached",
             ));
         }
         let why = if let Some(reopen) = pc.reopen {
@@ -183,8 +173,6 @@ pub(super) async fn observe_before_commit(
             // Counted before the stage runs, so a pause inside it keeps it.
             record.reopen_before_commit(reason.clone())?;
             ledger.reopens = record.prior_observer_failures.clone();
-            ledger.situations.push(situation);
-            ledger.since_progress += 1;
             ledger.save(pc.store, pc.run_id, pc.expected_generation)?;
             match reopen.reopen(&summary).await {
                 Ok(Some(reopened)) => {
@@ -223,7 +211,7 @@ fn pause_reentry(
     pc: &PreCommit<'_>,
     generation: u64,
     record: &FinalizationRecordV1,
-    reason: &str,
+    (reason, situation): (&str, &str),
     cause: &'static str,
     why: &str,
 ) -> WorkflowError {
@@ -236,6 +224,7 @@ fn pause_reentry(
         "cause": cause,
         "why": why,
         "reason": reason,
+        "observation": situation,
         "reopens": record.prior_observer_failures.len(),
         "prior_observer_failures": record.prior_observer_failures,
     });

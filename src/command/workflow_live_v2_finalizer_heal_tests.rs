@@ -1,6 +1,6 @@
-//! Progress is judged on what changed, never on ids a retry mints; re-entry
-//! that keeps changing is bounded only by `REOPEN_RUNAWAY_GUARD`, counted
-//! across a pause, and it pauses the run, never ends it (Issue 262).
+//! Progress is a failing set the run never reached (round 3, decision A);
+//! a revisit pauses the run, never ends it, and the sets reached are kept
+//! across a pause (Issue 262).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -12,8 +12,8 @@ use archon_workflow::{
 use super::super::super::workflow_live_v2_script::WorkflowV2ScriptSummary;
 use super::super::super::workflow_run_finalizer_tests::{seed_call, snapshot, spec, summary};
 use super::super::{RunEndObserverContext, WorkflowRunEndObserver, finalize_summary_with_gate};
-use super::state::{ReopenLedger, masked};
-use super::{REOPEN_RUNAWAY_GUARD, Reopened, RunEndReopen};
+use super::state::masked;
+use super::{Reopened, RunEndReopen};
 
 #[test]
 fn masking_hides_minted_ids_and_counts_but_keeps_the_failure() {
@@ -58,7 +58,7 @@ impl WorkflowRunEndObserver for EverNew {
     fn observe(&self, _: &RunEndObserverContext<'_>) -> WorkflowResult<RunEndObserverOutcomeV1> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         assert!(
-            call <= 2 * REOPEN_RUNAWAY_GUARD,
+            call <= 200,
             "re-entry did not stop after {call} observations"
         );
         Err(WorkflowError::StageFailed(format!(
@@ -143,11 +143,12 @@ pub(super) fn setup() -> (tempfile::TempDir, WorkflowStore, String) {
     (temp, store, run.id)
 }
 
-/// B1 / Issue 262: a failure that keeps changing without clearing is
-/// re-entered past the old fixed limit of three, and only the runaway guard
-/// stops it: by pausing the run with the evidence, never by ending it.
+/// Round 3 (decision A): progress is a failing set the run never reached,
+/// never the failure's text. Observations that fail with ever-new errors but
+/// no failing check reach the same (empty) failing set again: the first
+/// revisit pauses the run, with the evidence, and never ends it.
 #[tokio::test]
-async fn reentry_continues_while_the_failure_changes_and_the_guard_pauses() {
+async fn changing_errors_without_a_new_failing_set_pause_at_the_first_revisit() {
     let (temp, store, run_id) = setup();
     let observer = EverNew {
         from: 0,
@@ -159,19 +160,13 @@ async fn reentry_continues_while_the_failure_changes_and_the_guard_pauses() {
     };
     let error = finalize(&store, &run_id, temp.path(), &observer, &reentry)
         .await
-        .expect_err("the runaway guard pauses");
+        .expect_err("a revisit pauses");
     let WorkflowError::ControlPaused(message) = &error else {
         panic!("a stopped re-entry pauses, never ends the run: {error:?}");
     };
-    assert!(
-        message.contains("runaway guard") && message.contains("probe"),
-        "{message}"
-    );
-    assert_eq!(reentry.calls.load(Ordering::SeqCst), REOPEN_RUNAWAY_GUARD);
+    assert!(message.contains("made no progress"), "{message}");
+    assert_eq!(reentry.calls.load(Ordering::SeqCst), 1);
     assert_eq!(store.load_state(&run_id).unwrap().status, RunStatus::Paused);
-    // The ledger is kept: a resume continues the count.
-    let ledger = ReopenLedger::load(&store, &run_id).unwrap();
-    assert_eq!(ledger.reopens.len(), REOPEN_RUNAWAY_GUARD);
     let events = std::fs::read_to_string(store.events_path(&run_id)).unwrap();
     assert!(
         events.contains("run_end_acceptance_observer_stall_pause"),
@@ -179,10 +174,10 @@ async fn reentry_continues_while_the_failure_changes_and_the_guard_pauses() {
     );
 }
 
-/// B1: re-entries made before a pause count after it; the resumed
-/// finalization gets only what the guard leaves.
+/// The failing sets reached are kept across a pause: a resumed finalization
+/// that reaches one of them again pauses without re-entering.
 #[tokio::test]
-async fn reentries_before_a_pause_count_toward_the_guard_after_it() {
+async fn the_failing_sets_reached_survive_a_pause() {
     let (temp, store, run_id) = setup();
     let first = EverNew {
         from: 0,
@@ -190,14 +185,15 @@ async fn reentries_before_a_pause_count_toward_the_guard_after_it() {
     };
     let paused = Reentry {
         calls: AtomicUsize::new(0),
-        pause_at: 2,
+        pause_at: 1,
     };
     let error = finalize(&store, &run_id, temp.path(), &first, &paused)
         .await
-        .expect_err("the pause stops finalization");
+        .expect_err("the operator pause stops finalization");
     assert!(matches!(error, WorkflowError::ControlPaused(_)), "{error}");
-    let ledger = ReopenLedger::load(&store, &run_id).unwrap();
-    assert_eq!(ledger.reopens.len(), 2, "the paused re-entry counted");
+    let mut run = store.load_state(&run_id).unwrap();
+    run.status = RunStatus::Running;
+    store.save_state(&run).unwrap();
 
     let resumed = EverNew {
         from: 1000,
@@ -209,14 +205,9 @@ async fn reentries_before_a_pause_count_toward_the_guard_after_it() {
     };
     let error = finalize(&store, &run_id, temp.path(), &resumed, &reentry)
         .await
-        .expect_err("the runaway guard pauses");
+        .expect_err("the set was reached before the pause");
     assert!(matches!(error, WorkflowError::ControlPaused(_)), "{error}");
-    assert_eq!(
-        reentry.calls.load(Ordering::SeqCst),
-        REOPEN_RUNAWAY_GUARD - 2
-    );
-    let ledger = ReopenLedger::load(&store, &run_id).unwrap();
-    assert_eq!(ledger.reopens.len(), REOPEN_RUNAWAY_GUARD);
+    assert_eq!(reentry.calls.load(Ordering::SeqCst), 0);
 }
 
 #[path = "workflow_live_v2_finalizer_heal_progress_tests.rs"]

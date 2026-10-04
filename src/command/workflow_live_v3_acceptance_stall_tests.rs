@@ -142,3 +142,30 @@ async fn a_stalled_round_never_pauses_a_newer_generation() {
         "no pause evidence for a pause that never happened"
     );
 }
+
+/// Round 3 (decision A): the failing sets a run reached, and how many rounds
+/// in a row revisited one, are kept across a pause and resume. A paused
+/// round's first attempt counts: its replay that revisits a set reached
+/// before is the second revisit in a row, and pauses.
+#[tokio::test]
+async fn revisits_are_counted_across_attempts_of_a_round() {
+    let fixture = fixture(true);
+    let missing = fixture.repo.path().join("missing");
+    // Round 1: REQ-2 and REQ-9 fail. Round 2: only REQ-9.
+    run(&fixture, &execution(1, 3, &[])).await.unwrap();
+    std::fs::write(&missing, "x").unwrap();
+    run(&fixture, &execution(2, 3, &[])).await.unwrap();
+    // Round 3 revisits round 1's set: the first revisit escalates.
+    std::fs::remove_file(&missing).unwrap();
+    let first = run(&fixture, &execution(3, 3, &[])).await.unwrap();
+    assert_eq!(first.data["escalate"], true, "{first:#?}");
+    // Its replay revisits round 2's set: the second revisit in a row.
+    std::fs::write(&missing, "x").unwrap();
+    let error = run(&fixture, &execution(3, 3, &[]))
+        .await
+        .expect_err("two revisits in a row are a stall");
+    assert!(
+        matches!(error, WorkflowError::ControlPaused(_)),
+        "{error:?}"
+    );
+}

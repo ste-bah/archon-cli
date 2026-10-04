@@ -108,55 +108,54 @@ fn failing(n: u32, count: u32) -> AcceptanceRoundRecordV1 {
     )
 }
 
-/// Issue 262, round 2: no round count ends or pauses the loop. Every round
-/// here fails fewer checks than any before it, so round 64 and past never
-/// pause, however long the loop has run.
+/// Issue 262: no round count ends or pauses the loop. Every round here
+/// reaches a failing set never seen, so round 64 and past never pause.
 #[test]
-fn a_loop_that_keeps_shrinking_never_hits_the_runaway_guard() {
-    let total = ACCEPTANCE_RUNAWAY_GUARD as u32 + 10;
-    let history: Vec<_> = (1..=total).map(|n| failing(n, 200 - n)).collect();
+fn a_loop_that_keeps_reaching_new_failing_sets_never_pauses() {
+    let history: Vec<_> = (1..=74).map(|n| failing(n, 200 - n)).collect();
     for n in 1..history.len() {
         let decision = decide(&history[..n], &history[n]);
-        assert_eq!(
-            decision.pause,
-            None,
-            "round {} shrank the failing set",
-            n + 1
-        );
+        assert_eq!(decision.pause, None, "round {} reached a new set", n + 1);
         assert!(!decision.final_round);
     }
 }
 
-/// The guard counts rounds since the last real progress (a failing set
-/// smaller than any before), never a total: new failing states of the same
-/// size keep the loop going only up to the guard, and one round that does
-/// shrink the set resets it, so a resumed round can advance.
+/// Round 3 (decision A): progress is a failing set this run never reached,
+/// never beating the all-time minimum. After a regression from 1 failing
+/// check to 100, every round that repairs one more reaches a new set: no
+/// pause, at round 65 or ever.
 #[test]
-fn the_runaway_guard_counts_rounds_since_the_last_real_progress() {
-    // Ten rounds of real progress, then states never seen but never smaller.
-    let mut history: Vec<_> = (1..=10).map(|n| failing(n, 100 - n)).collect();
-    let mut n = 11;
-    let same_size = |n: u32| {
-        round(
-            n,
-            (0..90)
-                .map(|id| failed(&format!("AC-{n}-{id}"), "x"))
-                .collect(),
-        )
-    };
-    while history.len() < 10 + ACCEPTANCE_RUNAWAY_GUARD - 1 {
-        let next = same_size(n);
-        assert_eq!(decide(&history, &next).pause, None, "round {n}");
+fn recovery_after_a_regression_is_progress_on_every_new_failing_set() {
+    let mut history = vec![round(1, vec![failed("AC-ONLY", "x")])];
+    for (n, count) in (2..).zip((37..=100).rev()) {
+        let next = failing(n, count);
+        let decision = decide(&history, &next);
+        assert_eq!(decision.pause, None, "round {n} repaired a check");
+        assert_eq!(decision.stalled_rounds, 0, "round {n}");
         history.push(next);
-        n += 1;
     }
-    let guard = same_size(n);
-    assert!(made_progress(&history, &guard), "a state never seen");
-    assert_eq!(decide(&history, &guard).pause, Some(PAUSE_RUNAWAY_GUARD));
-    // Resumed: the paused round runs again and fails fewer checks than any
-    // round before it. That is progress, and the loop goes on.
-    let resumed = failing(n, 50);
-    assert_eq!(decide(&history, &resumed).pause, None);
+}
+
+/// A failing set reached before counts toward the stall, whatever its size;
+/// a set never reached resets the count.
+#[test]
+fn a_revisited_failing_set_counts_toward_the_stall_and_a_new_one_resets_it() {
+    let set = |n: u32, ids: &[&str]| round(n, ids.iter().map(|id| failed(id, "x")).collect());
+    let a = set(1, &["AC-1"]);
+    let b = set(2, &["AC-2"]);
+    let again_a = set(3, &["AC-1"]);
+    let c = set(4, &["AC-3"]);
+    let history = vec![a.clone(), b.clone()];
+    let decision = decide(&history, &again_a);
+    assert_eq!((decision.stalled_rounds, decision.escalate), (1, true));
+    let history = vec![a.clone(), b.clone(), again_a.clone()];
+    assert_eq!(decide(&history, &c).stalled_rounds, 0, "a new set resets");
+    let history = vec![a.clone(), b.clone(), again_a.clone(), c.clone()];
+    assert_eq!(decide(&history, &set(5, &["AC-1"])).stalled_rounds, 1);
+    let history = vec![a, b, again_a, c, set(5, &["AC-1"])];
+    let decision = decide(&history, &set(6, &["AC-2"]));
+    assert_eq!(decision.stalled_rounds, 2);
+    assert_eq!(decision.pause, Some(PAUSE_NO_PROGRESS));
 }
 
 #[test]
@@ -199,4 +198,27 @@ fn earlier_rounds_read_the_latest_attempt_of_each_round() {
     assert_eq!(earlier[0].attempt, 2);
     assert_eq!(earlier[0].checks.len(), 2);
     assert!(earlier_rounds(dir.path(), 1).is_empty());
+}
+
+/// Round 3 (decision A): the states reached and the revisit count are
+/// persisted, so a resumed round keeps them; a run with no ledger yet gets
+/// the one its round records leave.
+#[test]
+fn the_ledger_is_persisted_and_rebuilt_from_records_when_absent() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = round(1, vec![failed("AC-1", "x")]);
+    let b = round(2, vec![failed("AC-2", "x")]);
+    write_round_record(dir.path(), &a).unwrap();
+    write_round_record(dir.path(), &b).unwrap();
+    let rebuilt = ProgressLedger::load(dir.path(), 3);
+    assert_eq!(
+        rebuilt,
+        ProgressLedger::from_history(&[a.clone(), b.clone()])
+    );
+    let mut ledger = rebuilt;
+    assert_eq!(ledger.observe(&round(3, vec![failed("AC-1", "y")])), 1);
+    ledger.save(dir.path()).unwrap();
+    let resumed = ProgressLedger::load(dir.path(), 3);
+    assert_eq!(resumed.revisits, 1);
+    assert_eq!(resumed.seen.len(), 2);
 }

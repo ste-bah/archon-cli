@@ -167,9 +167,13 @@ pub(super) async fn run_acceptance_stage(
     record.operational_errors.extend(refused.findings);
     // A2: the loop ends on a clean round or on nothing to act on; never on a
     // round count, an error the host can retry, or a check it can reassign.
-    let decision = progress::decide(&progress::earlier_rounds(&run_dir, request.round), &record);
+    // Decision A: the failing states this run reached and the revisits in a
+    // row, kept across attempts and resumes.
+    let mut ledger = progress::ProgressLedger::load(&run_dir, request.round);
+    let decision = progress::decide_with(&mut ledger, &record);
     record.final_round = decision.final_round;
     let path = write_round_record(&run_dir, &record)?;
+    ledger.save(&run_dir)?;
     // Issue 262: a stall (or the runaway guard) pauses the run with the
     // round's record as evidence; it never ends the loop or fails the run.
     if let Some(cause) = decision.pause {
