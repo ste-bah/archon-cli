@@ -467,3 +467,31 @@ fn item_revocation_refuses_a_linked_archive_before_any_move() {
     assert!(!call.join("revoked").exists());
     let _ = store;
 }
+
+#[cfg(unix)]
+#[test]
+fn item_restart_and_a_file_at_revoked_are_refused_before_any_mutation() {
+    for case in ["item-restart-linked-call", "task-restart-file-at-revoked"] {
+        let temp = tempfile::tempdir().unwrap();
+        let (store, run) = generated_run(&temp, &[CALL]);
+        let v2 = v2_store(&store, &run);
+        landed_then_superseded(&v2, "T-A");
+        let current = v2.branch_outcome_path(CALL, &item("T-A").id);
+        let call = current.parent().unwrap().to_path_buf();
+        let state_before = std::fs::read(store.run_dir(&run.id).join("state.json")).unwrap();
+        let refused = if case == "item-restart-linked-call" {
+            let away = call.parent().unwrap().parent().unwrap().join("call-away");
+            std::fs::rename(&call, &away).unwrap();
+            std::os::unix::fs::symlink(&away, &call).unwrap();
+            invalidate_generated_v2_item(&store, &run, CALL, "T-A").is_err()
+        } else {
+            std::fs::write(call.join("revoked"), b"not a directory").unwrap();
+            restart_generated_v2_task(&store, &run, "T-A").is_err()
+        };
+        assert!(refused, "{case}");
+        let state_after = std::fs::read(store.run_dir(&run.id).join("state.json")).unwrap();
+        assert_eq!(state_before, state_after, "{case}: state changed");
+        assert_eq!(v2.restart_epoch().unwrap(), 0, "{case}");
+        assert!(current.exists(), "{case}");
+    }
+}
