@@ -6,8 +6,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 use std::time::Duration;
 
-#[cfg(windows)]
-use process_wrap::tokio::JobObject;
 #[cfg(unix)]
 use process_wrap::tokio::ProcessGroup;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
@@ -67,25 +65,19 @@ pub(crate) enum CommandExecution {
 ///
 /// Asking the tree to die is not the same as it being dead: `killpg` returns
 /// once SIGKILL is queued, and a member can keep running user code for a while
-/// after that (issue #240, loaded macOS box: median ~5ms, max ~56ms). So the
-/// gate reports only what it went on to observe.
+/// after that (issue #240, loaded macOS box: median ~5ms, max ~56ms).
+/// `TerminateJobObject` does not wait either (issue #242). So the gate reports
+/// only what it went on to observe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TreeTermination {
-    /// The process group was observed empty (`killpg` reported ESRCH).
-    #[cfg_attr(not(unix), allow(dead_code))]
+    /// The process group was observed empty (`killpg` reported ESRCH), or the
+    /// job object's accounting reported no active process.
     Confirmed,
     /// Members were still present when `TREE_EXIT_BOUND` ran out.
-    #[cfg_attr(not(unix), allow(dead_code))]
     StillPresent,
-    /// The group could not be identified, `killpg` failed with an unexpected
-    /// error, or it still answered EPERM when the bound ran out.
-    #[cfg_attr(not(unix), allow(dead_code))]
+    /// The group or job could not be identified or queried, or the group
+    /// still answered EPERM when the bound ran out.
     CheckFailed,
-    /// The platform path cannot observe the tree. On Windows the job object
-    /// that holds it is private to `process-wrap`, so `TerminateJobObject` -
-    /// which, like `killpg`, does not wait - is the last thing the gate sees.
-    #[cfg_attr(unix, allow(dead_code))]
-    Unverified,
 }
 
 impl TreeTermination {
@@ -94,7 +86,6 @@ impl TreeTermination {
             Self::Confirmed => "process group confirmed empty",
             Self::StillPresent => "process group still had members after the termination bound",
             Self::CheckFailed => "process group termination check failed",
-            Self::Unverified => "process tree termination not verifiable on this platform",
         }
     }
 }
@@ -109,7 +100,6 @@ impl TreeTermination {
 /// The wait runs on a blocking thread, so cancelling the gate future does not
 /// stop it: a runtime dropped mid-wait waits for that thread, for up to this
 /// bound, before shutdown completes.
-#[cfg(unix)]
 const TREE_EXIT_BOUND: Duration = Duration::from_secs(5);
 
 /// Pacing between group checks; a pacing interval, not a budget.
@@ -196,13 +186,19 @@ pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<Co
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Windows: suspended until it is in a job the gate owns (issue #242), so
+    // nothing it starts is outside the job, and the gate can confirm the job
+    // is empty after a timeout. process-wrap's own job is private to it.
+    #[cfg(windows)]
+    command.creation_flags(archon_shell::job_object::CREATE_SUSPENDED_FLAG);
     let mut command = CommandWrap::from(command);
     command.wrap(KillOnDrop);
     #[cfg(unix)]
     command.wrap(ProcessGroup::leader());
-    #[cfg(windows)]
-    command.wrap(JobObject);
     let mut child = command.spawn()?;
+    // Dropping the job kills every process still in it.
+    #[cfg(windows)]
+    let job = confine_in_job(child.as_ref())?;
     // `ProcessGroup::leader()` makes the child's pid the group id. Read it now:
     // once the direct child is reaped, `id()` no longer reports it.
     #[cfg(unix)]
@@ -227,8 +223,8 @@ pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<Co
             let child_outcome = cleanup_child(&mut child).await;
             #[cfg(unix)]
             let tree = confirm_tree_terminated(group).await;
-            #[cfg(not(unix))]
-            let tree = TreeTermination::Unverified;
+            #[cfg(windows)]
+            let tree = confirm_job_terminated(job).await;
             Ok(CommandExecution::TimedOut {
                 child: child_outcome,
                 tree,
@@ -292,6 +288,36 @@ fn await_group_exit(pgid: libc::pid_t, bound: Duration) -> TreeTermination {
             return pending;
         }
         std::thread::sleep(TREE_EXIT_POLL);
+    }
+}
+
+/// Put the suspended child in a fresh job, killed on close, and let it run.
+#[cfg(windows)]
+fn confine_in_job(
+    child: &dyn ChildWrapper,
+) -> io::Result<std::sync::Arc<archon_shell::job_object::Job>> {
+    let inner = child.inner_child();
+    let (Some(pid), Some(handle)) = (inner.id(), inner.raw_handle()) else {
+        return Err(io::Error::other(
+            "compilation child has no process handle to confine",
+        ));
+    };
+    let job = archon_shell::job_object::Job::create(None)?;
+    job.adopt_suspended(handle, pid)?;
+    Ok(std::sync::Arc::new(job))
+}
+
+/// Terminate the timed-out job until its accounting reports no active
+/// process, within `TREE_EXIT_BOUND`, off the runtime thread (the same
+/// real-time wait as the unix group check).
+#[cfg(windows)]
+async fn confirm_job_terminated(
+    job: std::sync::Arc<archon_shell::job_object::Job>,
+) -> TreeTermination {
+    match tokio::task::spawn_blocking(move || job.kill_and_confirm(TREE_EXIT_BOUND)).await {
+        Ok(Ok(0)) => TreeTermination::Confirmed,
+        Ok(Ok(_)) => TreeTermination::StillPresent,
+        _ => TreeTermination::CheckFailed,
     }
 }
 
