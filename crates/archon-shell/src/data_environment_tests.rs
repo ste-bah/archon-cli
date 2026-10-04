@@ -257,6 +257,8 @@ fn cluster_bindings_and_download_sources_are_refused() {
         "SE_DRIVER_MIRROR_URL",
         "SE_CHROMEDRIVER_MIRROR_URL",
         "SHARP_DIST_BASE_URL",
+        "MONGOMS_DOWNLOAD_URL",
+        "DOWNLOAD_HOST",
     ] {
         assert!(check_data_variable(name).is_err(), "{name} was accepted");
     }
