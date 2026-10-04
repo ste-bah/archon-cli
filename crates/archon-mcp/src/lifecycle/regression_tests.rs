@@ -19,8 +19,8 @@ const VALUES: &[&str] = &[
 fn config() -> ServerConfig {
     serde_json::from_value(json!({
         "name": "regression", "command": "unused",
-        "env": {"ordinary": VALUES[0], "overlap": VALUES[1], "short": "tiny"},
-        "headers": {"X-Ordinary": VALUES[2], "X-Quoted": VALUES[3]}
+        "env": {"API_KEY": VALUES[0], "ACCESS_TOKEN": VALUES[1], "SHORT_TOKEN": "tiny"},
+        "headers": {"X-Private-Key": VALUES[2], "X-Auth-Quoted": VALUES[3]}
     }))
     .expect("fixture config")
 }
@@ -148,6 +148,7 @@ impl std::io::Write for Capture {
 }
 #[tokio::test]
 async fn startup_logs_redact_configured_values() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let capture = Capture(Arc::new(Mutex::new(Vec::new())));
     let subscriber =
         tracing_subscriber::registry().with(RedactionLayer::with_writer(capture.clone()));
@@ -162,6 +163,7 @@ async fn startup_logs_redact_configured_values() {
 }
 #[tokio::test]
 async fn startup_errors_redact_configured_values() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let mut cfg = config();
     cfg.transport = payload();
     let errors = McpServerManager::new().start_all(vec![cfg]).await;
@@ -169,6 +171,7 @@ async fn startup_errors_redact_configured_values() {
 }
 #[tokio::test]
 async fn initialization_errors_redact_configured_values() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let error = client("init-error")
         .await
         .err()
@@ -177,6 +180,7 @@ async fn initialization_errors_redact_configured_values() {
 }
 #[tokio::test]
 async fn client_call_errors_redact_configured_values() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let client = client("rpc-error").await.expect("initialize");
     let error = client
         .call_tool("probe", None)
@@ -186,6 +190,7 @@ async fn client_call_errors_redact_configured_values() {
 }
 #[tokio::test]
 async fn bridge_call_errors_redact_configured_values() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let result = tool(Arc::new(client("rpc-error").await.expect("initialize")))
         .execute(Value::Null, &ToolContext::default())
         .await;
@@ -194,6 +199,7 @@ async fn bridge_call_errors_redact_configured_values() {
 }
 #[tokio::test]
 async fn client_error_content_redacts_all_content_fields() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let result = client("content-error")
         .await
         .expect("initialize")
@@ -205,6 +211,7 @@ async fn client_error_content_redacts_all_content_fields() {
 }
 #[tokio::test]
 async fn bridge_error_content_redacts_configured_values() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let result = tool(Arc::new(client("content-error").await.expect("initialize")))
         .execute(Value::Null, &ToolContext::default())
         .await;
@@ -213,6 +220,7 @@ async fn bridge_error_content_redacts_configured_values() {
 }
 #[tokio::test]
 async fn bridge_input_errors_redact_configured_values() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let result = tool(Arc::new(client("content-error").await.expect("initialize")))
         .execute(json!(payload()), &ToolContext::default())
         .await;
@@ -221,6 +229,7 @@ async fn bridge_input_errors_redact_configured_values() {
 }
 #[tokio::test]
 async fn discovery_errors_and_logs_redact_configured_values() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let manager = manager("list-error").await;
     let error = manager
         .tools_for("regression")
@@ -360,6 +369,7 @@ async fn progressing_discovery_then_stall_obeys_idle_only_budget() {
 
 #[tokio::test]
 async fn spawn_errors_redact_configured_executable_values() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let mut cfg = config();
     cfg.command = format!("/missing/{}", payload());
     let error = crate::transport::spawn_transport(&cfg)
@@ -371,6 +381,7 @@ async fn spawn_errors_redact_configured_executable_values() {
 #[cfg(unix)]
 #[tokio::test]
 async fn child_stderr_is_logged_with_configured_value_redaction() {
+    let _registry = archon_observability::secret_values::scoped_registry_for_tests();
     let capture = Capture(Arc::new(Mutex::new(Vec::new())));
     let subscriber =
         tracing_subscriber::registry().with(RedactionLayer::with_writer(capture.clone()));
@@ -379,7 +390,7 @@ async fn child_stderr_is_logged_with_configured_value_redaction() {
         cfg.command = "/bin/sh".into();
         cfg.args = vec![
             "-c".into(),
-            "printf '%s\\n' \"$ordinary\" \"$overlap\" \"$short\" >&2; cat".into(),
+            "printf '%s\\n' \"$API_KEY\" \"$ACCESS_TOKEN\" \"$SHORT_TOKEN\" >&2; cat".into(),
         ];
         let _transport = crate::transport::spawn_transport(&cfg).expect("shell transport");
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -393,3 +404,6 @@ async fn child_stderr_is_logged_with_configured_value_redaction() {
     );
     clean(&log);
 }
+
+#[path = "round2_tests.rs"]
+mod round2_tests;

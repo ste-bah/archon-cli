@@ -15,7 +15,8 @@ use crate::types::{McpError, ServerConfig};
 /// The child process is spawned with piped stdin/stdout for JSON-RPC
 /// communication. Stderr is piped through the redacted diagnostic log sink.
 pub fn spawn_transport(config: &ServerConfig) -> Result<TokioChildProcess, McpError> {
-    config.configured_secrets().register();
+    let secrets = config.configured_secrets();
+    secrets.register();
     let env_clone: HashMap<String, String> = config.env.clone();
     let args_clone: Vec<String> = config.args.clone();
 
@@ -30,27 +31,73 @@ pub fn spawn_transport(config: &ServerConfig) -> Result<TokioChildProcess, McpEr
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| {
-            McpError::Transport(format!("failed to spawn '{}': {}", config.command, e)).redacted()
+            McpError::Transport(format!("failed to spawn '{}': {}", config.command, e))
+                .redacted(&secrets)
         })?;
     if let Some(stderr) = stderr {
-        use tokio::io::{AsyncBufReadExt, BufReader};
         use tracing::instrument::WithSubscriber;
         let server = archon_observability::redaction::redact_text(&config.name);
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            loop {
-                match lines.next_line().await {
-                    Ok(Some(line)) => tracing::info!(%server, diagnostic = %archon_observability::redaction::redact_text(&line), "MCP server stderr"),
-                    Ok(None) => break,
-                    Err(error) => {
-                        tracing::warn!(%server, error = %archon_observability::redaction::redact_text(&error.to_string()), "MCP stderr read failed");
-                        break;
-                    }
-                }
-            }
-        }.with_current_subscriber());
+        tokio::spawn(drain_stderr(stderr, server).with_current_subscriber());
     }
     Ok(transport)
+}
+
+/// Bound both buffering and each logged diagnostic, while retaining the pipe
+/// until EOF. Oversized lines are omitted as a whole so a truncated credential
+/// cannot leak a prefix. Each chunk still drains through the next newline.
+const MAX_STDERR_LINE_BYTES: usize = 4096;
+
+pub(crate) async fn drain_stderr(reader: impl tokio::io::AsyncRead + Unpin, server: String) {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+    let mut reader = BufReader::new(reader);
+    let mut bytes = Vec::with_capacity(MAX_STDERR_LINE_BYTES + 1);
+    let mut discarding = false;
+    loop {
+        bytes.clear();
+        let result = (&mut reader)
+            .take((MAX_STDERR_LINE_BYTES + 1) as u64)
+            .read_until(b'\n', &mut bytes)
+            .await;
+        match result {
+            Ok(count) => {
+                discarding |= count > MAX_STDERR_LINE_BYTES;
+                if count <= MAX_STDERR_LINE_BYTES || bytes.last() == Some(&b'\n') {
+                    if discarding {
+                        log_stderr(&server, "[stderr line omitted: exceeds 4096 bytes]");
+                    } else if count > 0 {
+                        log_stderr(
+                            &server,
+                            String::from_utf8_lossy(&bytes).trim_end_matches(['\n', '\r']),
+                        );
+                    }
+                    discarding = false;
+                }
+                if count == 0 {
+                    break;
+                }
+            }
+            Err(error) => {
+                // Don't emit a partial value after a failed read. Resume draining
+                // after transient errors, with backoff to avoid a busy loop.
+                discarding |= !bytes.is_empty();
+                tracing::warn!(%server, error = %archon_observability::redaction::redact_text(&error.to_string()), "MCP stderr read failed");
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }
+    }
+}
+
+fn log_stderr(server: &str, line: &str) {
+    let mut diagnostic = archon_observability::redaction::redact_text(line);
+    // Lossy UTF-8 decoding can expand bytes; cap only after complete redaction.
+    if diagnostic.len() > MAX_STDERR_LINE_BYTES {
+        let mut end = MAX_STDERR_LINE_BYTES;
+        while !diagnostic.is_char_boundary(end) {
+            end -= 1;
+        }
+        diagnostic.truncate(end);
+    }
+    tracing::info!(%server, %diagnostic, "MCP server stderr");
 }
 
 #[cfg(test)]

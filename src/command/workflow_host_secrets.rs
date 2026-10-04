@@ -9,23 +9,13 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 
-use archon_observability::secret_values::SecretValues;
+use archon_observability::secret_values::{SecretValues, is_credential_name};
 use archon_workflow::{GateEnvelopeV1, WorkflowError, WorkflowResult};
 
 use super::workflow_host_command_catalog::HostCommandResolutionContext;
 
 /// Provider settings that are configuration, not credentials.
 const PROVIDER_SETTINGS: &[&str] = &["ARCHON_MODEL", "ARCHON_EFFORT", "ARCHON_CONFIG_DIR"];
-const SECRET_NAME_PARTS: &[&str] = &[
-    "KEY",
-    "TOKEN",
-    "SECRET",
-    "PASSWORD",
-    "PASS",
-    "AUTH",
-    "CREDENTIAL",
-    "PRIVATE",
-];
 #[cfg(test)]
 pub(crate) use archon_observability::secret_values::REDACTED_VALUE as REDACTED;
 
@@ -46,10 +36,7 @@ impl HostSecrets {
         let values = context
             .acceptance_environment_allowlist
             .iter()
-            .filter(|name| {
-                let name = name.to_ascii_uppercase();
-                SECRET_NAME_PARTS.iter().any(|part| name.contains(part))
-            })
+            .filter(|name| is_credential_name(name))
             .chain(
                 context
                     .freeze_provider_environment

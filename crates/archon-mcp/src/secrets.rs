@@ -1,41 +1,56 @@
 //! Sanitize protocol errors at the boundary, preserving their typed variants.
 use crate::types::{McpError, ServerConfig};
-use archon_observability::redaction::redact_text;
-use archon_observability::secret_values::SecretValues;
+use archon_observability::secret_values::{SecretValues, is_credential_name};
 
 impl ServerConfig {
-    /// Environment and header values supplied to this server (eight chars or more).
+    /// Only credential-named environment/header values belong to this server.
     pub fn configured_secrets(&self) -> SecretValues {
-        SecretValues::new(
+        let headers = self
+            .headers
+            .iter()
+            .flat_map(|headers| headers.iter())
+            .filter(|(name, _)| is_credential_name(name) || name.eq_ignore_ascii_case("Cookie"));
+        let mut secrets = SecretValues::new(
             self.env
-                .values()
-                .chain(self.headers.iter().flat_map(|headers| headers.values()))
-                .map(String::as_str),
-        )
+                .iter()
+                .filter(|(name, _)| is_credential_name(name))
+                .map(|(_, value)| value.as_str())
+                .chain(headers.clone().map(|(_, value)| value.as_str())),
+        );
+        for (name, value) in headers {
+            if name.to_ascii_uppercase().contains("AUTH") {
+                secrets = secrets.with_authorization(value);
+            }
+        }
+        secrets
     }
 }
 impl McpError {
-    pub(crate) fn redacted(self) -> Self {
+    pub(crate) fn redacted(self, secrets: &SecretValues) -> Self {
         match self {
-            Self::ConfigParse(text) => Self::ConfigParse(redact_text(&text)),
+            Self::ConfigParse(text) => Self::ConfigParse(secrets.text(&text)),
             Self::ConfigIo(error) => Self::ConfigIo(std::io::Error::new(
                 error.kind(),
-                redact_text(&error.to_string()),
+                secrets.text(&error.to_string()),
             )),
-            Self::Transport(text) => Self::Transport(redact_text(&text)),
+            Self::Transport(text) => Self::Transport(secrets.text(&text)),
             Self::InitFailed { server, reason } => Self::InitFailed {
-                server: redact_text(&server),
-                reason: redact_text(&reason),
+                server: secrets.text(&server),
+                reason: secrets.text(&reason),
             },
-            Self::ToolCallFailed(text) => Self::ToolCallFailed(redact_text(&text)),
-            Self::ServerNotFound(name) => Self::ServerNotFound(redact_text(&name)),
-            Self::ServerNotReady(name, state) => Self::ServerNotReady(redact_text(&name), state),
-            Self::Shutdown(text) => Self::Shutdown(redact_text(&text)),
+            Self::ToolCallFailed(text) => Self::ToolCallFailed(secrets.text(&text)),
+            Self::ServerNotFound(name) => Self::ServerNotFound(secrets.text(&name)),
+            Self::ServerNotReady(name, state) => Self::ServerNotReady(secrets.text(&name), state),
+            Self::Shutdown(text) => Self::Shutdown(secrets.text(&text)),
             Self::Json(error) => Self::Json(<serde_json::Error as serde::de::Error>::custom(
-                redact_text(&error.to_string()),
+                secrets.text(&error.to_string()),
             )),
-            Self::MaxRestartsExceeded(name) => Self::MaxRestartsExceeded(redact_text(&name)),
+            Self::MaxRestartsExceeded(name) => Self::MaxRestartsExceeded(secrets.text(&name)),
             Self::Timeout(duration) => Self::Timeout(duration),
         }
     }
 }
+
+#[cfg(test)]
+#[path = "secrets_tests.rs"]
+mod tests;

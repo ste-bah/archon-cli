@@ -253,3 +253,20 @@ done
         result.err()
     );
 }
+
+#[tokio::test]
+async fn round2_workflow_recovery_hint_preserves_ordinary_words() {
+    let mut cfg = missing("credentials-service");
+    cfg.command.clear();
+    cfg.transport = "http".into();
+    let manager = archon_mcp::lifecycle::McpServerManager::new();
+    let error = start_servers(&manager, vec![(cfg, true)], DEADLINE)
+        .await
+        .map(|_| ())
+        .expect_err("missing endpoint")
+        .to_string();
+    assert!(
+        error.contains("check the configured transport, endpoint and credentials and retry"),
+        "{error}"
+    );
+}

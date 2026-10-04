@@ -169,11 +169,12 @@ impl McpServerManager {
             let mut servers = self.servers.write().await;
             let entry = servers
                 .get_mut(name)
-                .ok_or_else(|| McpError::ServerNotFound(name.into()).redacted())?;
+                .ok_or_else(|| McpError::ServerNotFound(name.into()))?;
 
             if entry.restart_count >= MAX_RESTART_ATTEMPTS {
                 entry.state = ServerState::Stopped;
-                return Err(McpError::MaxRestartsExceeded(name.into()).redacted());
+                return Err(McpError::MaxRestartsExceeded(name.into())
+                    .redacted(&entry.config.configured_secrets()));
             }
 
             entry.restart_count += 1;
@@ -335,7 +336,7 @@ impl McpServerManager {
             let servers = self.servers.read().await;
             let entry = servers
                 .get(server_name)
-                .ok_or_else(|| McpError::ServerNotFound(server_name.into()).redacted())?;
+                .ok_or_else(|| McpError::ServerNotFound(server_name.into()))?;
             match (&entry.client, entry.state) {
                 (Some(client), ServerState::Ready) => {
                     (Arc::clone(client), entry.config.tool_policy.clone())
@@ -344,7 +345,7 @@ impl McpServerManager {
                     return Err(McpError::ToolCallFailed(format!(
                         "server '{server_name}' is not ready (state {state:?})"
                     ))
-                    .redacted());
+                    .redacted(&entry.config.configured_secrets()));
                 }
             }
         };
