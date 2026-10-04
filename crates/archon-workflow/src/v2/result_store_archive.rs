@@ -94,6 +94,9 @@ impl WorkflowV2ResultStore {
                     err.kind(),
                     std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
                 ) => {}
+            // Outside a restart a failed removal is retried by the next lookup;
+            // only the restart path needs the flat directory gone durably.
+            Err(_) if !self.durable => {}
             Err(err) => return Err(WorkflowError::io(&flat, err)),
         }
         Ok(())
