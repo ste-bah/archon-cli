@@ -94,6 +94,8 @@ impl<'de> Visitor<'de> for Seed<'_> {
         let mut fields = Map::new();
         // Per key: copies read so far, and the defects the latest copy added.
         let mut copies: HashMap<String, (usize, Range<usize>)> = HashMap::new();
+        // Defects that name a copy; the message gets the total once known.
+        let mut labels = Vec::new();
         while let Some(key) = map.next_key::<String>()? {
             let (shape, closed) = match self.shape {
                 Some(Shape::Object(object)) => (
@@ -116,16 +118,17 @@ impl<'de> Visitor<'de> for Seed<'_> {
             })?;
             let added = start..self.defects.len();
             let previous = fields.insert(key.clone(), value);
-            let (count, latest) = copies.entry(key).or_insert((0, 0..0));
+            let (count, latest) = copies.entry(key.clone()).or_insert((0, 0..0));
             *count += 1;
             let earlier = std::mem::replace(latest, added);
             let Some(previous) = previous else {
                 continue;
             };
-            // The streaming reader reads every copy, so an overwritten copy
-            // keeps all of its defects. They get the copy's own identity:
-            // repairing one copy must not be hidden by an equal defect in
-            // another copy of the same field.
+            // The reader stops at the first invalid copy or, for a struct, at
+            // the first repeated copy. Deleting or repairing any one copy
+            // exposes the next, so every copy is its own problem: its defects
+            // and its repeat are counted once each and never merge with an
+            // equal defect of another copy. A map reads every value.
             let walked = self.defects.len();
             if let Some(shape) = shape {
                 shape.walk(Some(&previous), &at, self.defects);
@@ -133,13 +136,30 @@ impl<'de> Visitor<'de> for Seed<'_> {
             let copy = *count - 1;
             for index in earlier.chain(walked..self.defects.len()) {
                 overwritten(&mut self.defects[index], &at, copy);
+                labels.push((index, key.clone(), copy, false));
             }
             // Closed structs refuse a repeated field, known or forbidden.
             if closed && (shape.is_some() || denies_unknown(self.shape)) {
-                let mut defect = shape_defect(&at, "is a duplicate field; keep one valid copy");
-                defect.identity.location = "shape/duplicate".into();
+                let mut defect = shape_defect(&at, "");
+                defect.identity.location = format!("shape/duplicate/{count}");
+                labels.push((self.defects.len(), key, *count, true));
                 self.defects.push(defect);
             }
+        }
+        for (index, key, copy, repeat) in labels {
+            let total = copies[&key].0;
+            let defect = &mut self.defects[index];
+            defect.message = if repeat {
+                format!(
+                    "{}: copy {copy} repeats the field ({total} copies); keep one valid copy",
+                    defect.identity.subject
+                )
+            } else {
+                format!(
+                    "{} (in copy {copy} of {total} of a duplicated field; the reader checks it)",
+                    defect.message
+                )
+            };
         }
         Ok(Value::Object(fields))
     }
@@ -149,16 +169,13 @@ fn denies_unknown(shape: Option<&Shape>) -> bool {
     matches!(shape, Some(Shape::Object(object)) if object.deny_unknown)
 }
 
-/// Mark a defect as belonging to copy `copy` of the duplicated field at `at`.
+/// Give a defect the identity of copy `copy` of the duplicated field at `at`.
 /// The field's depth names which enclosing field was duplicated (it is a
 /// prefix of the subject), so nested duplicated copies stay distinct without
-/// putting submitted keys into the location.
+/// putting submitted keys into the location. Counts are additive per copy,
+/// so renumbering after a deletion never hides the deleted copy's defects.
 fn overwritten(defect: &mut ValidationDefect, at: &str, copy: usize) {
     let depth = at.split('/').count();
     let identity = &mut defect.identity;
     identity.location = format!("shape/overwritten/{depth}/{copy}/{}", identity.location);
-    defect.message = format!(
-        "{} (in copy {copy} of duplicated field {at}; the reader checks every copy)",
-        defect.message
-    );
 }

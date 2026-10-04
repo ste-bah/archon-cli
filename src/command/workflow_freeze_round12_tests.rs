@@ -98,7 +98,9 @@ fn workflow_freeze_round12_overwritten_invalid_values_remain_visible() {
 }
 
 #[test]
-fn workflow_freeze_round12_duplicate_pointers_dedup_and_survive_positional_structs() {
+fn workflow_freeze_round12_duplicate_pointers_count_each_repeat_and_survive_positional_structs() {
+    // Round 14: each repeated copy is its own defect. Merging them let a
+    // deletion change the reader's error without changing the count.
     let document = br#"[1,"d",[["T","f",[],[],[],[{"kind":"file","kind":"file","kind":"file","artifact_path":"a","artifact_path":"a"}]]]]"#;
     assert!(serde_json::from_slice::<TaskSkeleton>(document).is_err());
     let defects = element_shape_defects(document, &TASK_SHAPE);
@@ -106,7 +108,10 @@ fn workflow_freeze_round12_duplicate_pointers_dedup_and_survive_positional_struc
         .iter()
         .map(|d| d.identity.subject.as_str())
         .collect();
-    assert_eq!(subjects, ["2/0/5/0/artifact_path", "2/0/5/0/kind"]);
+    assert_eq!(
+        subjects,
+        ["2/0/5/0/artifact_path", "2/0/5/0/kind", "2/0/5/0/kind"]
+    );
 }
 
 #[test]
