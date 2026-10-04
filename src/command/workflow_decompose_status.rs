@@ -13,7 +13,7 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
     if !path.exists() {
         return Ok(None);
     }
-    let state: FixedDecompositionStateV1 = serde_json::from_slice(
+    let mut state: FixedDecompositionStateV1 = serde_json::from_slice(
         &std::fs::read(&path)
             .with_context(|| format!("reading fixed decomposition status {}", path.display()))?,
     )
@@ -21,6 +21,10 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
     let checkpoint = v2_store.load_checkpoint()?.unwrap_or_default();
     let records = v2_store.load_call_records()?;
+    crate::command::workflow_decompose_state::reconcile_interrupted(
+        &mut state.dispositions,
+        &records,
+    );
     let mut out = String::from("\nfixed decomposition:\n");
     out.push_str("run_kind: fixed_decomposition_v1\n");
     out.push_str(&format!(
@@ -52,6 +56,7 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
     ));
     append_provider_route(store, run_id, &mut out)?;
     append_call_summary(&records, &mut out);
+    append_interrupted_calls(store, run_id, &records, &mut out);
     if !state.attempts.is_empty() {
         out.push_str("attempts:\n");
         for (subject, attempt) in state.attempts {
@@ -177,6 +182,10 @@ fn append_call_summary(records: &[archon_workflow::WorkflowV2CallRecord], out: &
     let mut interrupted = 0usize;
     let mut failed = 0usize;
     for record in records {
+        if crate::command::workflow_decompose_state::interruption_reason(record).is_some() {
+            interrupted += 1;
+            continue;
+        }
         match record.status {
             archon_workflow::WorkflowV2Status::Accepted
             | archon_workflow::WorkflowV2Status::Noop => accepted += 1,
@@ -253,6 +262,47 @@ fn append_call_summary(records: &[archon_workflow::WorkflowV2CallRecord], out: &
         out.push_str(&format!("last_error: {}\n", one_line(last_error, 180)));
     } else {
         out.push_str("last_error: none\n");
+    }
+}
+
+/// Issue-258: each call run control stopped, and how to re-run it. Its record
+/// is `NeedsReview`, so a resume dispatches the call again.
+fn append_interrupted_calls(
+    store: &WorkflowStore,
+    run_id: &str,
+    records: &[archon_workflow::WorkflowV2CallRecord],
+    out: &mut String,
+) {
+    let mut any = false;
+    for record in records {
+        let Some(reason) = crate::command::workflow_decompose_state::interruption_reason(record)
+        else {
+            continue;
+        };
+        any = true;
+        let what = record.call.options.host_command.as_ref().map_or_else(
+            || format!("method={}", record.call.method.as_str()),
+            |request| format!("capability={}", request.command_id),
+        );
+        let elapsed = record.result.data["elapsed_seconds"]
+            .as_u64()
+            .map_or_else(|| "unknown".to_string(), |value| value.to_string());
+        out.push_str(&format!(
+            "interrupted_call: {} {what} reason={reason} elapsed_secs={elapsed}\n",
+            record.call.id
+        ));
+    }
+    // Exactly the statuses `workflow decompose --resume` accepts.
+    let resumable = store.load_state(run_id).is_ok_and(|run| {
+        matches!(
+            run.status,
+            archon_workflow::RunStatus::Paused | archon_workflow::RunStatus::Cancelled
+        )
+    });
+    if any && resumable {
+        out.push_str(&format!(
+            "interrupted calls re-run on resume: archon workflow resume --live --yes {run_id}\n"
+        ));
     }
 }
 

@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{Duration, Instant};
+#[cfg(test)]
+use std::time::Duration;
 
 use archon_workflow::{
     WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowStore, WorkflowUiEvent,
@@ -29,14 +30,8 @@ use archon_workflow::v2::source_graph::{
     complete_source_task_graph, dynamic_wave_source_metadata, input_hash_with_source_fingerprint,
 };
 
-// The terminal-call marker is part of the lifecycle host port's contract: the
-// host writes it, the driver routes on it. One definition, in the crate that
-// owns the port.
+// The native lifecycle still consumes the port marker through this module.
 use archon_workflow::TERMINAL_HOST_CALL_MARKER;
-#[cfg(not(test))]
-const WORKFLOW_JS_WATCHDOG: Duration = Duration::from_secs(60);
-#[cfg(test)]
-const WORKFLOW_JS_WATCHDOG: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone)]
 pub(super) struct WorkflowV2ScriptSummary {
@@ -87,6 +82,7 @@ pub(super) struct WorkflowV2ScriptRunner {
     /// bootstrap and the authored run it hands off to are one logical run, and
     /// taint must not be laundered by the clone.
     reexecuted_task_closure: Arc<StdMutex<std::collections::BTreeSet<String>>>,
+    pending_calls: workflow_live_v2_script_host_pending::PendingCalls,
 }
 
 impl WorkflowV2ScriptRunner {
@@ -119,6 +115,7 @@ impl WorkflowV2ScriptRunner {
             raw_outcomes_allowed: false,
             executor_lease: None,
             reexecuted_task_closure: Arc::new(StdMutex::new(Default::default())),
+            pending_calls: Arc::default(),
         }
     }
 
@@ -190,13 +187,18 @@ impl WorkflowV2ScriptRunner {
         mut self,
         harness_source: &str,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+        // Issue-253: the generation a later control outcome must be past.
+        let start = observe_start(&self.workflow_store, &self.run_id)?;
         self.initialize_repository_audit().await?;
         let script_args = self.script_args.clone();
         let host = Arc::new(WorkflowScriptHost {
             scaffold_hash: workflow_scaffold_hash(harness_source),
             envelope_shape: script_envelope_shape(harness_source),
             runner: self,
-            accumulator: Arc::new(Mutex::new(WorkflowScriptAccumulator::default())),
+            accumulator: Arc::new(Mutex::new(WorkflowScriptAccumulator {
+                script_driven: true,
+                ..WorkflowScriptAccumulator::default()
+            })),
             tool_host: std::sync::OnceLock::new(),
             tool_budget: Arc::new(std::sync::Mutex::new(Default::default())),
         });
@@ -217,6 +219,13 @@ impl WorkflowV2ScriptRunner {
         let source = script_source(harness_source, script_args.as_ref());
         let host_for_js = host.clone();
         let watchdog_for_js = watchdog.clone();
+        let watchdog_for_deadline = watchdog.clone();
+        // A notification failure the HOST raised, recorded here so the
+        // outcome never depends on text a script can write.
+        let notification_failure: Arc<StdMutex<Option<String>>> = Arc::default();
+        let notification_for_js = notification_failure.clone();
+        let host_control: Arc<StdMutex<Option<HostControlStop>>> = Arc::default();
+        let control_for_js = host_control.clone();
         let js_result = context
             .async_with(async move |ctx| {
                 ctx.globals().set(
@@ -224,16 +233,43 @@ impl WorkflowV2ScriptRunner {
                     Func::from(Async(move |method: String, payload: String| {
                         let host = host_for_js.clone();
                         let watchdog = watchdog_for_js.clone();
+                        let notification = notification_for_js.clone();
+                        let control = control_for_js.clone();
                         Box::pin(async move {
                             watchdog.pause();
                             let result = Box::pin(host.execute(method, payload)).await;
+                            // Issue-285: refused calls are instant, so after a
+                            // terminal stop one budget runs without resets.
+                            if host.accumulator.lock().await.terminal_host_stop {
+                                watchdog.start_terminal_budget();
+                            }
                             watchdog.resume();
-                            result.map_err(|err| {
-                                rquickjs::Error::new_from_js_message(
-                                    "archon workflow host",
-                                    "string",
-                                    err.to_string(),
+                            if let Err(WorkflowError::NotificationDelivery(message)) = &result
+                                && let Ok(mut slot) = notification.lock()
+                            {
+                                slot.get_or_insert_with(|| message.clone());
+                            }
+                            result.or_else(|err| {
+                                // Issue-253: run control resolves to a typed
+                                // envelope; every other error rejects as before.
+                                control_envelope(
+                                    &host.runner.workflow_store,
+                                    &host.runner.run_id,
+                                    &err,
                                 )
+                                .map(|(envelope, observed)| {
+                                    if let Ok(mut slot) = control.lock() {
+                                        slot.get_or_insert(observed);
+                                    }
+                                    envelope
+                                })
+                                .ok_or_else(|| {
+                                    rquickjs::Error::new_from_js_message(
+                                        "archon workflow host",
+                                        "string",
+                                        err.to_string(),
+                                    )
+                                })
                             })
                         })
                     })),
@@ -248,36 +284,75 @@ impl WorkflowV2ScriptRunner {
                         ));
                     }
                 };
-                match promise.into_future::<String>().await.catch(&ctx) {
+                // Issue-285: a script idle forever after a terminal stop runs
+                // no JavaScript to interrupt, so the budget also ends the wait.
+                let settled = tokio::select! {
+                    biased;
+                    settled = promise.into_future::<String>() => settled,
+                    () = watchdog_for_deadline.terminal_budget_spent() => {
+                        return Ok(Err(format!(
+                            "workflow.js did not settle within {WORKFLOW_JS_WATCHDOG:?} of the host's terminal stop"
+                        )));
+                    }
+                };
+                Ok(match settled.catch(&ctx) {
                     Ok(result) => Ok(result),
                     Err(err) => Err(rquickjs::Error::new_from_js_message(
                         "workflow.js",
                         "string",
                         err.to_string(),
-                    )),
-                }
+                    )
+                    .to_string()),
+                })
             })
             .await;
-        match js_result {
+        // Covers the deadline, CPU interruption and scripts that return while
+        // siblings are pending. No future is polled once `async_with` has
+        // returned, so no sibling can publish while this snapshot is taken.
+        let terminal_stop = host.accumulator.lock().await.terminal_host_stop;
+        if terminal_stop {
+            host.interrupt_terminal_calls().await;
+        }
+        let outcome = js_result.unwrap_or_else(|err| Err(err.to_string()));
+        // A host stop survives a concurrent resume while this script unwinds.
+        // Round 7 (#285): after a terminal host stop only a stored operator
+        // pause or cancel outranks it; a fence a later lifecycle edit raised
+        // in a pending call never forges a control outcome.
+        let observed = if terminal_stop {
+            None
+        } else {
+            host_control.lock().ok().and_then(|slot| slot.clone())
+        };
+        if let Some(control) = control_outcome(
+            &host.runner.workflow_store,
+            &host.runner.run_id,
+            start,
+            observed.as_ref(),
+            outcome.as_ref().err().map(String::as_str),
+        ) {
+            return Err(control);
+        }
+        // Host evidence decides the outcome even if the script returns, catches
+        // the rejection, or throws unrelated text. No later audit can replace it.
+        // A normal return still reports what the script returned.
+        if host.accumulator.lock().await.terminal_host_stop {
+            let mut summary = host.summary().await;
+            summary.script_result = outcome.ok();
+            return Ok(summary);
+        }
+        match outcome {
             Ok(result) => {
                 let mut summary = host.summary().await;
                 summary.script_result = Some(result);
                 host.runner.finalize_repository_audit(summary).await
             }
-            Err(err) => {
-                let error = err.to_string();
-                if error.contains(TERMINAL_HOST_CALL_MARKER) {
-                    let summary = host.summary().await;
-                    return host.runner.finalize_repository_audit(summary).await;
-                }
-                let workflow_error = workflow_js_error(error.clone());
-                if matches!(
-                    workflow_error,
-                    WorkflowError::ControlPaused(_)
-                        | WorkflowError::ControlCancelled(_)
-                        | WorkflowError::NotificationDelivery(_)
-                ) {
-                    return Err(workflow_error);
+            Err(error) => {
+                let recorded = notification_failure
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.clone());
+                if let Some(message) = recorded {
+                    return Err(WorkflowError::NotificationDelivery(message));
                 }
                 let summary = host.mark_script_failure(&error).await;
                 Ok(summary)
@@ -286,58 +361,12 @@ impl WorkflowV2ScriptRunner {
     }
 }
 
-#[derive(Clone)]
-struct WorkflowJsWatchdog {
-    active_since: Arc<StdMutex<Option<Instant>>>,
-}
+#[path = "workflow_live_v2_script_host_pending.rs"]
+mod workflow_live_v2_script_host_pending;
 
-impl WorkflowJsWatchdog {
-    fn new() -> Self {
-        Self {
-            active_since: Arc::new(StdMutex::new(Some(Instant::now()))),
-        }
-    }
-
-    fn pause(&self) {
-        if let Ok(mut active_since) = self.active_since.lock() {
-            *active_since = None;
-        }
-    }
-
-    fn resume(&self) {
-        if let Ok(mut active_since) = self.active_since.lock() {
-            *active_since = Some(Instant::now());
-        }
-    }
-
-    fn should_interrupt(&self) -> bool {
-        let Ok(active_since) = self.active_since.lock() else {
-            return true;
-        };
-        active_since.is_some_and(|started| started.elapsed() >= WORKFLOW_JS_WATCHDOG)
-    }
-}
-
-fn workflow_js_error(error: String) -> WorkflowError {
-    if let Some(message) = extract_run_control_message(&error, "workflow paused by run control:") {
-        return WorkflowError::ControlPaused(message);
-    }
-    if let Some(message) = extract_run_control_message(&error, "workflow cancelled by run control:")
-    {
-        return WorkflowError::ControlCancelled(message);
-    }
-    if let Some(message) =
-        extract_run_control_message(&error, "required workflow notification delivery failed:")
-    {
-        return WorkflowError::NotificationDelivery(message);
-    }
-    WorkflowError::SpecInvalid(format!("workflow.js execution failed: {error}"))
-}
-
-fn extract_run_control_message(error: &str, marker: &str) -> Option<String> {
-    let start = error.find(marker)?;
-    Some(error[start..].trim().to_string())
-}
+#[path = "workflow_live_v2_script_watchdog.rs"]
+mod workflow_live_v2_script_watchdog;
+use workflow_live_v2_script_watchdog::{WORKFLOW_JS_WATCHDOG, WorkflowJsWatchdog};
 
 struct WorkflowScriptAccumulator {
     status: WorkflowV2Status,
@@ -348,6 +377,11 @@ struct WorkflowScriptAccumulator {
     failed_call: Option<String>,
     failed_result_path: Option<String>,
     next_action: Option<String>,
+    terminal_host_stop: bool,
+    /// Issue-285: a JavaScript script drives this host, so a terminal stop is
+    /// sticky and refuses later calls. The native lifecycle driver is host code
+    /// and keeps its own host-built fallback report.
+    script_driven: bool,
     /// Consecutive calls that failed without ever starting. Run-scoped: the
     /// bound only means anything across calls.
     never_started: NeverStartedStreak,
@@ -364,10 +398,25 @@ impl Default for WorkflowScriptAccumulator {
             failed_call: None,
             failed_result_path: None,
             next_action: None,
+            terminal_host_stop: false,
+            script_driven: false,
             never_started: NeverStartedStreak::default(),
         }
     }
 }
+
+impl WorkflowScriptAccumulator {
+    /// A trusted terminal stop that a script can no longer change.
+    fn terminal_locked(&self) -> bool {
+        self.terminal_host_stop && self.script_driven
+    }
+}
+
+#[path = "workflow_live_v2_script_control.rs"]
+mod workflow_live_v2_script_control;
+use workflow_live_v2_script_control::{
+    HostControlStop, control_envelope, control_outcome, observe_start,
+};
 
 #[path = "workflow_live_v2_script_host.rs"]
 mod workflow_live_v2_script_host;
@@ -430,6 +479,15 @@ mod workflow_live_v3_author;
 #[cfg(test)]
 #[path = "workflow_live_v2_script_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_script_control_forgery_tests.rs"]
+mod workflow_live_v2_script_control_forgery_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_script_control_tests.rs"]
+mod workflow_live_v2_script_control_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_script_pause_rerun_tests.rs"]
+mod workflow_live_v2_script_pause_rerun_tests;
 // End-to-end lifecycle coverage stays here: it drives the real
 // `LiveV2AgentClient`/`WorkflowScriptHost` stack through the driver's public
 // surface, which is exactly what cannot be built from inside archon-workflow.

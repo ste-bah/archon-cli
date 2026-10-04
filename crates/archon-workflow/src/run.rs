@@ -103,6 +103,10 @@ pub struct WorkflowRun {
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub generation: u64,
+    /// Generation at the last executor replacement. Ordinary edits and stops
+    /// preserve it. Missing legacy values conservatively use `generation`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_generation: Option<u64>,
     pub stages: BTreeMap<String, StageState>,
     pub items: BTreeMap<String, ItemState>,
     pub root: PathBuf,
@@ -123,10 +127,17 @@ impl WorkflowRun {
             created_at: now,
             updated_at: now,
             generation: 0,
+            executor_generation: Some(0),
             stages,
             items: BTreeMap::new(),
             root: root.into(),
         }
+    }
+
+    /// Does the executor launched at `generation` still own this run?
+    pub fn execution_owned_at(&self, generation: u64) -> bool {
+        self.generation >= generation
+            && self.executor_generation.unwrap_or(self.generation) <= generation
     }
 
     pub fn mark_updated(&mut self) {

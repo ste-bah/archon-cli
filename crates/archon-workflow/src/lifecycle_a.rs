@@ -107,8 +107,17 @@ impl LifecycleController {
             };
             let archive = restart_archive_plan(&run, &action);
             let forced_record = forced_accept_record(&action);
+            let replaces_executor = matches!(action, LifecycleAction::Resume)
+                || (prior.status != RunStatus::Running
+                    && matches!(action, LifecycleAction::RestartStage(_)
+                        | LifecycleAction::RestartItem { .. }
+                        | LifecycleAction::ForceAcceptStage { .. }));
+            run.executor_generation.get_or_insert(run.generation);
             let mut event = apply_action(&mut run, action)?;
             run.generation = run.generation.saturating_add(1);
+            if replaces_executor {
+                run.executor_generation = Some(run.generation);
+            }
             event.1["generation"] = serde_json::json!(run.generation);
             let mut v2_invalidated = Vec::new();
             if let Some(target) = &v2_target {

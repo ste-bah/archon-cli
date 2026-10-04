@@ -163,6 +163,25 @@ fn reclaimed_cancelled_owner_releases_root_without_deleting_evidence() {
     super::super::workflow_decompose::create_claimed_run(&store, root, run.spec, &state).unwrap();
 }
 
+/// Round 5 (#253): reclaim revokes the old executor's ownership, not only its
+/// generation, so an executor still unwinding cannot finalize the run.
+#[test]
+fn round5_workflow_task_root_reclaim_revokes_executor_ownership() {
+    let (_temp, store, mut run, _state) = reclaim_fixture();
+    run.status = RunStatus::Cancelled;
+    store.save_state(&run).unwrap();
+    let old = store.load_state(&run.id).unwrap().generation;
+    super::super::workflow_task_root_reclaim::reclaim_with_liveness(&store, &run.id, true, || {
+        Ok(())
+    })
+    .unwrap();
+    let reclaimed = store.load_state(&run.id).unwrap();
+    assert!(
+        !reclaimed.execution_owned_at(old),
+        "the pre-reclaim executor still owns {reclaimed:?}"
+    );
+}
+
 /// A run that failed (the set gate stopped it, say) holds nothing: its root
 /// can be entered again by a fresh launch without reclaim-task-root, which is
 /// what a frozen-chain resume over a dead run needs. Cancelled and paused

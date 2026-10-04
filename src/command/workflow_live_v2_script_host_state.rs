@@ -149,6 +149,44 @@ impl WorkflowScriptHost {
         Ok(true)
     }
 
+    /// False means the owning executor must rerun this call after an edit.
+    pub(super) async fn publish_dispatched_call(
+        &self,
+        record: &WorkflowV2CallRecord,
+        generation: Option<u64>,
+        fenced: bool,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        use crate::command::workflow_live::workflow_live_v2::workflow_live_v2_fixed_persistence::{
+            CallPublication, persist_dispatched_call,
+        };
+        match persist_dispatched_call(
+            &self.runner.workflow_store,
+            &self.runner.run_id,
+            &self.runner.v2_store,
+            record,
+            generation,
+            fenced,
+        )? {
+            CallPublication::Superseded => Ok(false),
+            CallPublication::Published(event) => {
+                self.clear_inflight(&record.call.id);
+                if let Some(event) = event {
+                    self.runner
+                        .client
+                        .ui_sink
+                        .emit(event)
+                        .await
+                        .map_err(|error| {
+                            WorkflowError::NotificationDelivery(format!(
+                                "workflow progress delivery failed after durable log flush: {error}"
+                            ))
+                        })?;
+                }
+                Ok(true)
+            }
+        }
+    }
+
     pub(super) async fn persist_fixed_call_started(
         &self,
         execution: &WorkflowV2CallExecution,
@@ -206,6 +244,17 @@ impl WorkflowScriptHost {
         self.runner.v2_store.save_checkpoint(&checkpoint)
     }
 
+    pub(super) fn forget_completed_call(
+        &self,
+        call_id: &str,
+    ) -> archon_workflow::WorkflowResult<()> {
+        let Some(mut checkpoint) = self.runner.v2_store.load_checkpoint()? else {
+            return Ok(());
+        };
+        checkpoint.remove_completed_call(call_id);
+        self.runner.v2_store.save_checkpoint(&checkpoint)
+    }
+
     pub(in super::super) async fn mark_reused(
         &self,
         record: &WorkflowV2CallRecord,
@@ -238,10 +287,12 @@ impl WorkflowScriptHost {
         let mut acc = self.accumulator.lock().await;
         // Counted as the execution that recorded it was: a replayed review
         // map or superseded round is not a completed call.
-        acc.status = merge_v2_status(
-            acc.status,
-            run_terminal_status_contribution(record, record.status),
-        );
+        if !acc.terminal_locked() {
+            acc.status = merge_v2_status(
+                acc.status,
+                run_terminal_status_contribution(record, record.status),
+            );
+        }
         acc.reused += 1;
         if is_reusable_status(record.status) {
             acc.completed += 1;
@@ -269,12 +320,15 @@ impl WorkflowScriptHost {
         let mut acc = self.accumulator.lock().await;
         // A final report is the script speaking for the whole run: its status
         // overrides accumulated call severities so script-recovered failures
-        // do not doom an otherwise accepted run.
-        if record.call.method == WorkflowV2HostMethod::FinalReport {
-            acc.status = status;
-        } else {
-            acc.status =
-                merge_v2_status(acc.status, run_terminal_status_contribution(record, status));
+        // do not doom an otherwise accepted run. A trusted terminal stop is
+        // sticky for a script, including while dispatched calls finish.
+        if !acc.terminal_locked() {
+            if record.call.method == WorkflowV2HostMethod::FinalReport {
+                acc.status = status;
+            } else {
+                acc.status =
+                    merge_v2_status(acc.status, run_terminal_status_contribution(record, status));
+            }
         }
         acc.executed += 1;
         if is_reusable_status(status) {
@@ -321,6 +375,10 @@ impl WorkflowScriptHost {
         next_action: String,
     ) {
         let mut acc = self.accumulator.lock().await;
+        if acc.terminal_locked() {
+            return;
+        }
+        acc.terminal_host_stop = true;
         if record.call.method == WorkflowV2HostMethod::FinalReport {
             acc.status = record.status;
         } else {
@@ -338,6 +396,10 @@ impl WorkflowScriptHost {
         let next_action =
             "fix the workflow.js/runtime error, then resume or start a fresh workflow".to_string();
         let mut acc = self.accumulator.lock().await;
+        if acc.terminal_locked() {
+            drop(acc);
+            return self.summary().await;
+        }
         acc.status = merge_v2_status(acc.status, WorkflowV2Status::Failed);
         acc.failed_call = Some("workflow.js".to_string());
         acc.failed_result_path = None;

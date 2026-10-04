@@ -36,7 +36,10 @@ use super::workflow_live_v2_script::WorkflowV2ScriptSummary;
 
 #[path = "workflow_live_v3_run_end_reopen.rs"]
 mod reopen;
+#[path = "workflow_live_v3_run_end_stop.rs"]
+mod stop_control;
 pub(super) use reopen::AcceptanceReentry;
+pub(super) use stop_control::stop;
 
 /// Finalize a generated run. The authored kind passes through the acceptance
 /// gate first; every other kind finalizes exactly as before. Returns the
@@ -58,6 +61,7 @@ pub(super) async fn finalize_run(
         summary,
         v2_store,
         None,
+        None,
     )
     .await
 }
@@ -73,6 +77,7 @@ pub(super) async fn finalize_run_reentering(
     summary: WorkflowV2ScriptSummary,
     v2_store: &WorkflowV2ResultStore,
     reentry: Option<AcceptanceReentry<'_>>,
+    expected_generation: Option<u64>,
 ) -> Result<WorkflowV2ScriptSummary> {
     let observer =
         super::workflow_run_end_observer::FixedRunEndAcceptanceObserver::new(store.clone());
@@ -85,6 +90,7 @@ pub(super) async fn finalize_run_reentering(
         v2_store,
         &observer,
         reentry,
+        expected_generation,
     )
     .await
 }
@@ -99,6 +105,7 @@ pub(super) async fn finalize_run_observed(
     v2_store: &WorkflowV2ResultStore,
     observer: &dyn super::workflow_live_v2_finalizer::WorkflowRunEndObserver,
     reentry: Option<AcceptanceReentry<'_>>,
+    expected_generation: Option<u64>,
 ) -> Result<WorkflowV2ScriptSummary> {
     let (summary, gate) = if run_kind == WorkflowRunKind::AuthoredTaskWorkflow {
         apply_acceptance_gate(store, run_id, v2_store, summary)?
@@ -116,7 +123,7 @@ pub(super) async fn finalize_run_observed(
         &summary,
         v2_store,
         Some(observer),
-        None,
+        expected_generation,
         gate,
         reopen
             .as_ref()
@@ -133,6 +140,7 @@ pub(super) async fn finalize_run_observed(
                 run_kind,
                 archon_workflow::RunStatus::Paused,
                 &message,
+                expected_generation,
             )?;
             Err(archon_workflow::WorkflowError::ControlPaused(message).into())
         }
@@ -143,23 +151,12 @@ pub(super) async fn finalize_run_observed(
                 run_kind,
                 archon_workflow::RunStatus::Cancelled,
                 &message,
+                expected_generation,
             )?;
             Err(archon_workflow::WorkflowError::ControlCancelled(message).into())
         }
         Err(error) => Err(error.into()),
     }
-}
-
-fn stop(
-    store: &WorkflowStore,
-    run_id: &str,
-    run_kind: WorkflowRunKind,
-    status: archon_workflow::RunStatus,
-    message: &str,
-) -> WorkflowResult<()> {
-    super::workflow_live_v2_finalizer::finalize_run_status(
-        store, run_id, run_kind, status, message, None,
-    )
 }
 
 /// Read the last acceptance round and hold the summary to it.

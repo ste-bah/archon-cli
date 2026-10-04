@@ -160,6 +160,7 @@ pub(super) async fn finalize_summary_with_gate(
         let summary = &gated;
         store.with_run_lock(run_id, |locked| {
             require_generation_owner(locked, run_id, expected_generation)?;
+            archon_workflow::poll_v2_run_control(locked, run_id, "finalization")?;
             let checked = audit_finalizer::gate(locked, run_id, summary)?;
             if checked.status != summary.status {
                 return Err(WorkflowError::StateCorrupt(
@@ -185,6 +186,7 @@ pub(super) async fn finalize_summary_with_gate(
 
     store.with_run_lock(run_id, |locked| {
         require_generation_owner(locked, run_id, expected_generation)?;
+        archon_workflow::poll_v2_run_control(locked, run_id, "finalization")?;
         archon_workflow::v2::run_state_sync::sync_v2_summary_to_run(
             locked,
             run_id,
@@ -259,6 +261,9 @@ pub(super) fn finalize_run_status(
     detail: &str,
     expected_generation: Option<u64>,
 ) -> WorkflowResult<()> {
+    let Some(status) = executor_status(store, run_id, expected_generation, status)? else {
+        return Ok(());
+    };
     let persisted = read_persisted_record(store, run_id)?;
     let disposition = identity::run_status_disposition(persisted.as_ref(), run_kind, &status)?;
     let mut record = match (disposition, persisted) {
@@ -275,6 +280,9 @@ pub(super) fn finalize_run_status(
     }
     store.with_run_lock(run_id, |locked| {
         require_generation_owner(locked, run_id, expected_generation)?;
+        if !operator_control_unchanged(locked, run_id, expected_generation, &status)? {
+            return Ok(());
+        }
         archon_workflow::v2::run_state_sync::persist_terminal_run_status(
             locked,
             run_id,
@@ -296,12 +304,49 @@ fn reconcile_terminal_status(
 ) -> WorkflowResult<()> {
     store.with_run_lock(run_id, |locked| {
         require_generation_owner(locked, run_id, expected_generation)?;
+        if !operator_control_unchanged(locked, run_id, expected_generation, status)? {
+            return Ok(());
+        }
         archon_workflow::v2::run_state_sync::persist_terminal_run_status(
             locked,
             run_id,
             status.clone(),
         )
     })
+}
+
+/// Issue-253: what an executor (a caller fenced by `expected_generation`) may
+/// write. A stop the operator made outranks it: an executor control stop
+/// records the operator's stop, any other executor outcome is dropped and the
+/// run stays resumable. An unfenced caller writes what it asks.
+fn executor_status(
+    store: &WorkflowStore,
+    run_id: &str,
+    expected_generation: Option<u64>,
+    status: RunStatus,
+) -> WorkflowResult<Option<RunStatus>> {
+    if expected_generation.is_none() {
+        return Ok(Some(status));
+    }
+    let stored = store.load_state(run_id)?.status;
+    let operator_stop = matches!(stored, RunStatus::Paused | RunStatus::Cancelled);
+    Ok(match status {
+        RunStatus::Paused | RunStatus::Cancelled if operator_stop => Some(stored),
+        _ if operator_stop => None,
+        status => Some(status),
+    })
+}
+
+/// The same decision again under the run lock: an operator stop made after
+/// the first read drops this write.
+fn operator_control_unchanged(
+    store: &WorkflowStore,
+    run_id: &str,
+    expected_generation: Option<u64>,
+    status: &RunStatus,
+) -> WorkflowResult<bool> {
+    let allowed = executor_status(store, run_id, expected_generation, status.clone())?;
+    Ok(allowed.as_ref() == Some(status))
 }
 
 fn require_generation_owner(
@@ -313,9 +358,9 @@ fn require_generation_owner(
         return Ok(());
     };
     let current = store.load_state(run_id)?;
-    if current.generation != expected {
+    if !current.execution_owned_at(expected) {
         return Err(WorkflowError::ControlCancelled(format!(
-            "fixed executor generation {expected} no longer owns run {run_id}; current generation is {}",
+            "executor generation {expected} no longer owns run {run_id}; current generation is {}",
             current.generation
         )));
     }

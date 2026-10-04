@@ -120,6 +120,7 @@ async fn finalize_with(
         &fixture.v2_store,
         observer,
         Some((&fixture.runtime, None, Some(&fixture.universe))),
+        None,
     )
     .await
     .expect("finalizes")

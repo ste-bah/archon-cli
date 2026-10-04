@@ -10,7 +10,7 @@ use super::workflow_decompose_state::{
     FIXED_STATE_PATH, FixedCallProjectionKind, project_fixed_call,
 };
 
-fn seed_state(store: &WorkflowStore, run_id: &str, log_path: &std::path::Path) {
+pub(super) fn seed_state(store: &WorkflowStore, run_id: &str, log_path: &std::path::Path) {
     let task_root = log_path.parent().unwrap();
     std::fs::create_dir_all(task_root).unwrap();
     let task_root = task_root
@@ -40,7 +40,7 @@ fn seed_state(store: &WorkflowStore, run_id: &str, log_path: &std::path::Path) {
         .unwrap();
 }
 
-fn host_record(run_id: &str) -> WorkflowV2CallRecord {
+pub(super) fn host_record(run_id: &str) -> WorkflowV2CallRecord {
     let outcome = archon_workflow::HostCommandResult {
         exit_code: Some(0),
         stdout: String::new(),
@@ -395,7 +395,8 @@ fn fixed_status_renders_sanitized_route_call_shadow_and_active_detail() {
 #[test]
 fn fixed_log_append_opens_the_actual_descriptor_with_nofollow() {
     let writer = include_str!("workflow_decompose_log.rs");
-    let projection = include_str!("workflow_decompose_state.rs");
+    // The projection's log writer lives in its helper module.
+    let projection = include_str!("workflow_decompose_state_subjects.rs");
     assert!(
         writer.contains("custom_flags(libc::O_NOFOLLOW)"),
         "{writer}"

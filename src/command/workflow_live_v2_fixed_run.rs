@@ -13,9 +13,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor,
     >,
 ) -> Result<String> {
-    run.status = RunStatus::Running;
-    run.mark_updated();
-    store.save_state(&run)?;
+    persist_fixed_start(store, &mut run)?;
     let execution_generation = run.generation;
 
     let runtime = WorkflowV2ScriptRuntime {
@@ -132,6 +130,22 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
     }
     Ok(report)
 }
+
+fn persist_fixed_start(
+    store: &WorkflowStore,
+    run: &mut WorkflowRun,
+) -> archon_workflow::WorkflowResult<()> {
+    let run_id = run.id.clone();
+    store.with_run_lock(&run_id, |locked| {
+        run.status = RunStatus::Running;
+        run.mark_updated();
+        locked.save_state(run)
+    })
+}
+
+#[cfg(test)]
+#[path = "workflow_live_v2_fixed_start_tests.rs"]
+mod start_tests;
 
 /// Mirrors a terminal run's reason into `.decompose.log`.
 ///

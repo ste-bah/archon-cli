@@ -2,6 +2,15 @@
 
 use super::*;
 
+/// The `code` a `WorkflowControlError` carries (Issue-253): run control
+/// (pause, cancel) stopped the host call, which is not an outcome of the work.
+pub const WORKFLOW_CONTROL_CODE: &str = "workflow_control";
+
+/// The key of the envelope a host returns, instead of an error, for a call
+/// run control stopped. The prelude turns it into a `WorkflowControlError`
+/// carrying the envelope's `kind` ("pause" or "cancel") and `message`.
+pub const WORKFLOW_CONTROL_ENVELOPE_KEY: &str = "__archon_control";
+
 pub fn script_source(harness_source: &str, script_args: Option<&serde_json::Value>) -> String {
     let normalized = normalize_workflow_export(harness_source);
     let v3_primitives = V3_PRIMITIVES_JS;
@@ -104,6 +113,21 @@ const __archonPendingCalls = new Set();
 let __archonToolSeq = 0;
 let __archonHostCommandSeq = 0;
 
+// Issue-253: run control reaches the script as a typed error, never as text
+// to match. A script tests `error.code === "{control_code}"` (or
+// `instanceof WorkflowControlError`) and `error.kind` ("pause" | "cancel"),
+// and lets it propagate: the host decides the run's outcome from the stored
+// run state either way.
+class __ArchonWorkflowControlError extends Error {{
+  constructor(kind, message) {{
+    super(message || `workflow ${{kind}} by run control`);
+    this.name = "WorkflowControlError";
+    this.code = "{control_code}";
+    this.kind = kind;
+  }}
+}}
+globalThis.WorkflowControlError = __ArchonWorkflowControlError;
+
 async function __archonCall(method, id, source, options) {{
   if (typeof id !== "string" || id.trim() === "") {{
     throw new Error(`w.${{method}} requires a non-empty string id`);
@@ -116,7 +140,13 @@ async function __archonCall(method, id, source, options) {{
   __archonPendingCalls.add(pendingKey);
   try {{
     const json = await __archonHost(method, JSON.stringify(payload));
-    return JSON.parse(json);
+    const result = JSON.parse(json);
+    if (result !== null && typeof result === "object" && !Array.isArray(result)
+        && Object.prototype.hasOwnProperty.call(result, "{control_key}")) {{
+      const control = result["{control_key}"] || {{}};
+      throw new __ArchonWorkflowControlError(control.kind, control.message);
+    }}
+    return result;
   }} finally {{
     __archonPendingCalls.delete(pendingKey);
   }}
@@ -187,6 +217,8 @@ async function __archonRun() {{
 }}
 
 __archonRun()
-"#
+"#,
+        control_code = WORKFLOW_CONTROL_CODE,
+        control_key = WORKFLOW_CONTROL_ENVELOPE_KEY,
     )
 }

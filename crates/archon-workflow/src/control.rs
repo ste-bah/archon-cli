@@ -30,6 +30,7 @@ impl RunControl {
     pub fn checkpoint(&self, local: &mut WorkflowRun) -> WorkflowResult<RunControlDecision> {
         let current = self.store.load_state(&self.run_id)?;
         let decision = decision_from_run(&current)?;
+        local.executor_generation = current.executor_generation;
         match decision {
             RunControlDecision::Continue => {
                 if current.generation > local.generation {

@@ -355,7 +355,9 @@ fn stale_generation_cannot_persist_accepted_fixed_call_or_checkpoint() {
     let execution = include_str!("workflow_live_v2_script_host_exec.rs");
     let state = include_str!("workflow_live_v2_script_host_state.rs");
     assert!(
-        execution.contains("FixedCallProjectionKind::Executed,\n            execution_generation,"),
+        execution.contains(
+            "publish_dispatched_call(&record, call_generation, self.call_fenced(&execution))"
+        ),
         "{execution}"
     );
     assert!(

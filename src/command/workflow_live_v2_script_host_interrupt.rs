@@ -13,6 +13,10 @@ use super::*;
 /// record is written without the paused/cancelled ownership check.
 pub(super) const NOTIFICATION_DELIVERY_REASON: &str = "notification_delivery_failed";
 
+/// The reason a pending call's record gives when a host terminal stop ended
+/// the script before the call settled (Issue-285).
+pub(super) const TERMINAL_HOST_STOP_REASON: &str = "terminal_host_stop";
+
 /// Whether `err` is a control decision that killed the call rather than an
 /// outcome of the work. `NotificationDelivery` is deliberately absent — see
 /// `execute`, which records it under [`NOTIFICATION_DELIVERY_REASON`].
@@ -32,7 +36,7 @@ impl WorkflowScriptHost {
     /// is that it did not complete and a human must decide. That status is
     /// outside `is_reusable_status`, so this can never be replayed as a success,
     /// and it takes no `residual_gaps` — an interrupted call establishes no gap.
-    pub(super) async fn save_interrupted_call_record(
+    pub(in super::super) async fn save_interrupted_call_record(
         &self,
         execution: &WorkflowV2CallExecution,
         reason: &str,
@@ -42,7 +46,7 @@ impl WorkflowScriptHost {
         input_hash: &str,
         source_fingerprint: Option<String>,
         dispatch_generation: Option<u64>,
-    ) {
+    ) -> archon_workflow::WorkflowResult<()> {
         let call_id = &execution.call.id;
         let elapsed_seconds = elapsed.as_secs();
         let detail = err.to_string();
@@ -86,7 +90,7 @@ impl WorkflowScriptHost {
         .with_source_metadata(source_fingerprint, None)
         .with_scaffold_hash(Some(self.scaffold_hash.clone()))
         .with_agent_sessions(sessions);
-        let control_reason = reason != NOTIFICATION_DELIVERY_REASON;
+        let control_reason = matches!(reason, "paused" | "cancelled");
         let persisted = self.runner.workflow_store.with_run_lock(
             &self.runner.run_id,
             |locked| {
@@ -102,13 +106,19 @@ impl WorkflowScriptHost {
                 );
                 // A control stop bumped the generation; a delivery failure
                 // did not, so the dispatching generation must still own it.
+                // Round 7 (#285): a terminal host stop happened before any
+                // later pause, restart or force-accept, so only executor
+                // ownership is required; the generation may have moved.
                 let owned = dispatch_generation.is_none_or(|generation| {
-                    current.generation
-                        == if control_reason {
-                            generation.saturating_add(1)
-                        } else {
-                            generation
-                        }
+                    if reason == TERMINAL_HOST_STOP_REASON {
+                        current
+                            .executor_generation
+                            .is_none_or(|owner| owner <= generation)
+                    } else if control_reason {
+                        current.generation == generation.saturating_add(1)
+                    } else {
+                        current.generation == generation
+                    }
                 });
                 if (control_reason && !control_state) || !owned {
                     return Err(WorkflowError::ControlCancelled(format!(
@@ -126,23 +136,30 @@ impl WorkflowScriptHost {
                     &record,
                     crate::command::workflow_decompose_state::FixedCallProjectionKind::Interrupted,
                 )?;
+                // An interruption completes nothing: it drops a stale
+                // completed mark but never creates a checkpoint.
+                self.forget_completed_call(&record.call.id)?;
                 self.emit_call_finished_event(&record);
                 Ok(event)
             },
         );
-        self.clear_inflight(call_id);
         let event = match persisted {
             Ok(event) => event,
             Err(err) => {
                 tracing::warn!(%call_id, reason, %err, "interrupted call evidence not saved");
-                return;
+                return Err(err);
             }
         };
+        self.clear_inflight(call_id);
+        if reason == TERMINAL_HOST_STOP_REASON {
+            self.mark_executed(&record, record.status).await;
+        }
         if let Some(event) = event
             && let Err(err) = self.runner.client.ui_sink.emit(event).await
         {
             tracing::warn!(%call_id, reason, %err, "interrupted call UI event not delivered");
         }
+        Ok(())
     }
 }
 

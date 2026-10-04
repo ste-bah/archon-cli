@@ -113,6 +113,17 @@ impl WorkflowScriptHost {
         method: String,
         payload: String,
     ) -> archon_workflow::WorkflowResult<String> {
+        let retry = (method.clone(), payload.clone());
+        {
+            // Issue-285: only script calls are refused; host fallbacks run.
+            let acc = self.accumulator.lock().await;
+            if acc.terminal_locked() {
+                return Err(WorkflowError::TerminalHostCall(format!(
+                    "run {} has already stopped with {:?}",
+                    self.runner.run_id, acc.status
+                )));
+            }
+        }
         // #189 Phase 4. Intercepted before the call is turned into a
         // `WorkflowV2CallExecution`: a tool call is not a workflow call. It
         // produces no stored record, takes part in no reuse, and has nothing to
@@ -336,12 +347,26 @@ impl WorkflowScriptHost {
                 .await;
         }
         self.require_fixed_generation_owned(execution_generation)?;
-        self.persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
-            .await?;
-        let call_id = execution.call.id.clone();
-        // Issue-213 C5: a host killed from here on is recorded at next start,
-        // with what the call's sessions had been doing.
+        // Track before the started projection's asynchronous UI delivery:
+        // a sibling stop must close that projection even while delivery waits.
         let dispatched_at = std::time::Instant::now();
+        let call_generation = Some(self.call_generation()?);
+        self.track_pending_call(
+            &execution,
+            attempt,
+            &input_hash,
+            source_metadata.source_fingerprint.clone(),
+            call_generation,
+            dispatched_at,
+        )?;
+        if let Err(err) = self
+            .persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
+            .await
+        {
+            self.forget_unwritten_pending_call(&execution.call.id);
+            return Err(err);
+        }
+        let call_id = execution.call.id.clone();
         let dispatched = self
             .refreshing_inflight(
                 &execution,
@@ -353,19 +378,46 @@ impl WorkflowScriptHost {
                     &execution,
                     source_metadata.source_task_graph.as_ref(),
                     execution_generation,
+                    call_generation,
                 )),
             )
             .await;
+        // Round 5 (#253): a result from before a lifecycle edit is dropped.
+        let dispatched = match dispatched {
+            Ok(Some(result)) if !self.call_superseded(&execution, call_generation) => Ok(result),
+            Err(err) if !self.call_superseded(&execution, call_generation) => Err(err),
+            _ => {
+                return self
+                    .redispatch_superseded(&execution, retry.0, retry.1)
+                    .await;
+            }
+        };
         let result = match dispatched {
             Ok(result) => result,
+            Err(err)
+                if control_interruption_reason(&err).is_none()
+                    && !matches!(&err, WorkflowError::NotificationDelivery(_)) =>
+            {
+                self.result_for_failed_dispatch(&call_id, err).await?
+            }
             Err(err) => {
-                if let Some(reason) = control_interruption_reason(&err) {
+                let control = control_interruption_reason(&err);
+                if control.is_some() {
                     // Issue-134: the run's call trees end before any record.
                     archon_tools::bash::end_process_groups_of(&self.runner.run_id);
-                    if !self.fixed_generation_may_record_interruption(execution_generation) {
+                    // Round 7 (#285): a prior terminal stop records the call.
+                    if !self.fixed_generation_may_record_interruption(execution_generation)
+                        || self.accumulator.lock().await.terminal_host_stop
+                    {
                         return Err(err);
                     }
-                    self.save_interrupted_call_record(
+                }
+                // Issue-213 C5: an undelivered call's record says why.
+                let reason = control.unwrap_or(
+                    workflow_live_v2_script_host_interrupt::NOTIFICATION_DELIVERY_REASON,
+                );
+                if let Err(save_err) = self
+                    .save_interrupted_call_record(
                         &execution,
                         reason,
                         &err,
@@ -375,29 +427,14 @@ impl WorkflowScriptHost {
                         source_metadata.source_fingerprint.clone(),
                         execution_generation,
                     )
-                    .await;
-                    return Err(err);
+                    .await
+                {
+                    // Round 7: the original stop stays the outcome.
+                    tracing::warn!(%call_id, %save_err, "interruption record not saved");
                 }
-                if matches!(&err, WorkflowError::NotificationDelivery(_)) {
-                    // Issue-213 C5: the call ran; its record says why it has
-                    // no result, like a paused or cancelled one.
-                    self.save_interrupted_call_record(
-                        &execution,
-                        workflow_live_v2_script_host_interrupt::NOTIFICATION_DELIVERY_REASON,
-                        &err,
-                        dispatched_at.elapsed(),
-                        attempt,
-                        &input_hash,
-                        source_metadata.source_fingerprint.clone(),
-                        execution_generation,
-                    )
-                    .await;
-                    return Err(err);
-                }
-                self.result_for_failed_dispatch(&call_id, err).await?
+                return Err(err);
             }
         };
-        self.require_fixed_generation_owned(execution_generation)?;
         let mut result = normalize_and_attach_review_findings(
             &execution,
             result,
@@ -422,7 +459,7 @@ impl WorkflowScriptHost {
             attempt,
             input_hash,
             result,
-            execution.depends_on,
+            execution.depends_on.clone(),
         )
         .with_source_metadata(
             source_metadata.source_fingerprint.clone(),
@@ -433,12 +470,14 @@ impl WorkflowScriptHost {
         .with_evidence_snapshot_hash(evidence_snapshot_hash)
         .with_dispatched_items(dispatched_items)
         .with_agent_sessions(self.take_call_sessions(&call_id));
-        self.persist_generation_owned_call_and_emit(
-            &record,
-            crate::command::workflow_decompose_state::FixedCallProjectionKind::Executed,
-            execution_generation,
-        )
-        .await?;
+        if !self
+            .publish_dispatched_call(&record, call_generation, self.call_fenced(&execution))
+            .await?
+        {
+            return self
+                .redispatch_superseded(&execution, retry.0, retry.1)
+                .await;
+        }
         self.clear_inflight(&call_id);
         self.mark_tasks_reexecuted(&record);
         self.mark_executed(&record, status).await;
@@ -464,8 +503,8 @@ impl WorkflowScriptHost {
                     "next_action": next_action,
                 }),
             );
-            return Err(WorkflowError::StageFailed(format!(
-                "{TERMINAL_HOST_CALL_MARKER} {} ended with {:?}",
+            return Err(WorkflowError::TerminalHostCall(format!(
+                "{} ended with {:?}",
                 record.call.id, record.status
             )));
         }

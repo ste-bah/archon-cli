@@ -252,7 +252,10 @@ mod tests {
             .join(archon_workflow::repository_audit::runtime::STATE_PATH);
         let before = std::fs::read(&state_path).unwrap();
         let mut run = audit.store.load_state(&audit.run_id).unwrap();
+        // Control moved to another executor (a resume does this). An edit on
+        // a running run keeps its executor and its audit (#253 round 5).
         run.generation += 1;
+        run.executor_generation = Some(run.generation);
         audit.store.save_state(&run).unwrap();
         let confirmation = format!("/workflow audit confirm {}", pending.id);
         assert!(pending.confirm(&confirmation).is_err());

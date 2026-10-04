@@ -274,17 +274,22 @@ async fn stale_notification_failure_in_flight_preserves_a_fresh_first_attempt() 
         assert_eq!(host.fixed_execution_generation().unwrap(), None);
         started_tx.send(()).unwrap();
         let failure = failure_rx.await.unwrap();
-        host.save_interrupted_call_record(
-            &old_execution,
-            NOTIFICATION_DELIVERY_REASON,
-            &failure,
-            std::time::Duration::from_secs(1),
-            attempt,
-            "in",
-            None,
-            None,
-        )
-        .await;
+        let saved = host
+            .save_interrupted_call_record(
+                &old_execution,
+                NOTIFICATION_DELIVERY_REASON,
+                &failure,
+                std::time::Duration::from_secs(1),
+                attempt,
+                "in",
+                None,
+                None,
+            )
+            .await;
+        assert!(
+            saved.is_err(),
+            "a stale session's interruption write must be refused"
+        );
     });
     started_rx.await.unwrap();
     archon_workflow::v2::restart::invalidate_generated_v2_call(&store, &run, &execution.call.id)
