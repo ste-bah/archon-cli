@@ -53,32 +53,35 @@ impl WorkflowScriptHost {
         }
     }
 
-    pub(super) async fn interrupt_terminal_calls(&self) -> archon_workflow::WorkflowResult<()> {
-        let pending = self
-            .runner
-            .pending_calls
-            .lock()
-            .map_err(|_| {
-                WorkflowError::StateCorrupt("pending workflow calls lock poisoned".into())
-            })?
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
+    /// Round 7 (#285): never fails. The terminal stop happened first, so a
+    /// later operator edit cannot turn it into a control outcome; a record
+    /// that cannot be saved is logged as evidence and the stop still ends
+    /// the run.
+    pub(super) async fn interrupt_terminal_calls(&self) {
+        let pending = match self.runner.pending_calls.lock() {
+            Ok(calls) => calls.values().cloned().collect::<Vec<_>>(),
+            Err(poisoned) => poisoned.into_inner().values().cloned().collect(),
+        };
         archon_tools::bash::end_process_groups_of(&self.runner.run_id);
         let error = WorkflowError::TerminalHostCall("host terminal stop ended pending work".into());
         for call in pending {
-            self.save_interrupted_call_record(
-                &call.execution,
-                "terminal_host_stop",
-                &error,
-                call.started.elapsed(),
-                call.attempt,
-                &call.input_hash,
-                call.source_fingerprint,
-                call.generation,
-            )
-            .await?;
+            let id = call.execution.call.id.clone();
+            if let Err(err) = self
+                .save_interrupted_call_record(
+                    &call.execution,
+                    "terminal_host_stop",
+                    &error,
+                    call.started.elapsed(),
+                    call.attempt,
+                    &call.input_hash,
+                    call.source_fingerprint,
+                    call.generation,
+                )
+                .await
+            {
+                tracing::warn!(call_id = %id, %err, "terminal stop interruption record not saved");
+                self.forget_pending_call(&id);
+            }
         }
-        Ok(())
     }
 }

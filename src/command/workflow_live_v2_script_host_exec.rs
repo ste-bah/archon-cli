@@ -346,8 +346,13 @@ impl WorkflowScriptHost {
             call_generation,
             dispatched_at,
         )?;
-        self.persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
-            .await?;
+        if let Err(err) = self
+            .persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
+            .await
+        {
+            self.forget_pending_call(&execution.call.id);
+            return Err(err);
+        }
         let call_id = execution.call.id.clone();
         let dispatched = self
             .refreshing_inflight(
@@ -376,14 +381,30 @@ impl WorkflowScriptHost {
         };
         let result = match dispatched {
             Ok(result) => result,
+            Err(err)
+                if control_interruption_reason(&err).is_none()
+                    && !matches!(&err, WorkflowError::NotificationDelivery(_)) =>
+            {
+                self.result_for_failed_dispatch(&call_id, err).await?
+            }
             Err(err) => {
-                if let Some(reason) = control_interruption_reason(&err) {
+                let control = control_interruption_reason(&err);
+                if control.is_some() {
                     // Issue-134: the run's call trees end before any record.
                     archon_tools::bash::end_process_groups_of(&self.runner.run_id);
-                    if !self.fixed_generation_may_record_interruption(execution_generation) {
+                    // Round 7 (#285): a prior terminal stop records the call.
+                    if !self.fixed_generation_may_record_interruption(execution_generation)
+                        || self.accumulator.lock().await.terminal_host_stop
+                    {
                         return Err(err);
                     }
-                    self.save_interrupted_call_record(
+                }
+                // Issue-213 C5: an undelivered call's record says why.
+                let reason = control.unwrap_or(
+                    workflow_live_v2_script_host_interrupt::NOTIFICATION_DELIVERY_REASON,
+                );
+                if let Err(save_err) = self
+                    .save_interrupted_call_record(
                         &execution,
                         reason,
                         &err,
@@ -393,26 +414,12 @@ impl WorkflowScriptHost {
                         source_metadata.source_fingerprint.clone(),
                         execution_generation,
                     )
-                    .await?;
-                    return Err(err);
+                    .await
+                {
+                    // Round 7: the original stop stays the outcome.
+                    tracing::warn!(%call_id, %save_err, "interruption record not saved");
                 }
-                if matches!(&err, WorkflowError::NotificationDelivery(_)) {
-                    // Issue-213 C5: the call ran; its record says why it has
-                    // no result, like a paused or cancelled one.
-                    self.save_interrupted_call_record(
-                        &execution,
-                        workflow_live_v2_script_host_interrupt::NOTIFICATION_DELIVERY_REASON,
-                        &err,
-                        dispatched_at.elapsed(),
-                        attempt,
-                        &input_hash,
-                        source_metadata.source_fingerprint.clone(),
-                        execution_generation,
-                    )
-                    .await?;
-                    return Err(err);
-                }
-                self.result_for_failed_dispatch(&call_id, err).await?
+                return Err(err);
             }
         };
         let mut result = normalize_and_attach_review_findings(
@@ -451,7 +458,7 @@ impl WorkflowScriptHost {
         .with_dispatched_items(dispatched_items)
         .with_agent_sessions(self.take_call_sessions(&call_id));
         if !self
-            .publish_dispatched_call(&record, call_generation)
+            .publish_dispatched_call(&record, call_generation, self.call_fenced(&execution))
             .await?
         {
             return self

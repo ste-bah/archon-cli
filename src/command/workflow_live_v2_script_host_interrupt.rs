@@ -13,6 +13,10 @@ use super::*;
 /// record is written without the paused/cancelled ownership check.
 pub(super) const NOTIFICATION_DELIVERY_REASON: &str = "notification_delivery_failed";
 
+/// The reason a pending call's record gives when a host terminal stop ended
+/// the script before the call settled (Issue-285).
+pub(super) const TERMINAL_HOST_STOP_REASON: &str = "terminal_host_stop";
+
 /// Whether `err` is a control decision that killed the call rather than an
 /// outcome of the work. `NotificationDelivery` is deliberately absent — see
 /// `execute`, which records it under [`NOTIFICATION_DELIVERY_REASON`].
@@ -98,13 +102,19 @@ impl WorkflowScriptHost {
                 );
                 // A control stop bumped the generation; a delivery failure
                 // did not, so the dispatching generation must still own it.
+                // Round 7 (#285): a terminal host stop happened before any
+                // later pause, restart or force-accept, so only executor
+                // ownership is required; the generation may have moved.
                 let owned = dispatch_generation.is_none_or(|generation| {
-                    current.generation
-                        == if control_reason {
-                            generation.saturating_add(1)
-                        } else {
-                            generation
-                        }
+                    if reason == TERMINAL_HOST_STOP_REASON {
+                        current
+                            .executor_generation
+                            .is_none_or(|owner| owner <= generation)
+                    } else if control_reason {
+                        current.generation == generation.saturating_add(1)
+                    } else {
+                        current.generation == generation
+                    }
                 });
                 if (control_reason && !control_state) || !owned {
                     return Err(WorkflowError::ControlCancelled(format!(
@@ -122,7 +132,9 @@ impl WorkflowScriptHost {
                     &record,
                     crate::command::workflow_decompose_state::FixedCallProjectionKind::Interrupted,
                 )?;
-                self.update_checkpoint(&record)?;
+                // An interruption completes nothing: it drops a stale
+                // completed mark but never creates a checkpoint.
+                self.forget_completed_call(&record.call.id)?;
                 self.emit_call_finished_event(&record);
                 Ok(event)
             },
@@ -135,7 +147,7 @@ impl WorkflowScriptHost {
             }
         };
         self.clear_inflight(call_id);
-        if reason == "terminal_host_stop" {
+        if reason == TERMINAL_HOST_STOP_REASON {
             self.mark_executed(&record, record.status).await;
         }
         if let Some(event) = event

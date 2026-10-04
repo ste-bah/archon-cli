@@ -19,6 +19,10 @@ mod round6_publication_tests;
 #[path = "workflow_live_v2_round6_terminal_tests.rs"]
 mod round6_terminal_tests;
 
+#[cfg(test)]
+#[path = "workflow_live_v2_round7_terminal_tests.rs"]
+mod round7_terminal_tests;
+
 pub(crate) async fn run_generated_v2_workflow(
     cwd: &Path,
     store: &WorkflowStore,

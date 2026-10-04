@@ -154,6 +154,7 @@ impl WorkflowScriptHost {
         &self,
         record: &WorkflowV2CallRecord,
         generation: Option<u64>,
+        fenced: bool,
     ) -> archon_workflow::WorkflowResult<bool> {
         use crate::command::workflow_live::workflow_live_v2::workflow_live_v2_fixed_persistence::{
             CallPublication, persist_dispatched_call,
@@ -164,6 +165,7 @@ impl WorkflowScriptHost {
             &self.runner.v2_store,
             record,
             generation,
+            fenced,
         )? {
             CallPublication::Superseded => Ok(false),
             CallPublication::Published(event) => {
@@ -239,6 +241,17 @@ impl WorkflowScriptHost {
         } else {
             checkpoint.remove_completed_call(&record.call.id);
         }
+        self.runner.v2_store.save_checkpoint(&checkpoint)
+    }
+
+    pub(super) fn forget_completed_call(
+        &self,
+        call_id: &str,
+    ) -> archon_workflow::WorkflowResult<()> {
+        let Some(mut checkpoint) = self.runner.v2_store.load_checkpoint()? else {
+            return Ok(());
+        };
+        checkpoint.remove_completed_call(call_id);
         self.runner.v2_store.save_checkpoint(&checkpoint)
     }
 

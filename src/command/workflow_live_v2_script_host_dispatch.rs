@@ -68,7 +68,7 @@ impl WorkflowScriptHost {
 
     /// Whether lifecycle edits fence this call. A host command and a write
     /// call land as a whole and are never dropped part way.
-    fn call_fenced(&self, execution: &WorkflowV2CallExecution) -> bool {
+    pub(super) fn call_fenced(&self, execution: &WorkflowV2CallExecution) -> bool {
         let fixed_agent = self.fixed_decomposition_state_present()
             && execution.call.method == WorkflowV2HostMethod::Agent;
         execution.call.method != WorkflowV2HostMethod::HostCommand
@@ -134,6 +134,14 @@ impl WorkflowScriptHost {
         Box<dyn std::future::Future<Output = archon_workflow::WorkflowResult<String>> + Send + 'a>,
     > {
         Box::pin(async move {
+            // Round 7 (#285): after a terminal host stop nothing reruns. The
+            // call stays pending, so the stop records it as interrupted.
+            if self.accumulator.lock().await.terminal_host_stop {
+                return Err(WorkflowError::TerminalHostCall(format!(
+                    "run {} stopped before superseded call {} could rerun",
+                    self.runner.run_id, execution.call.id
+                )));
+            }
             self.clear_inflight(&execution.call.id);
             drop(self.take_call_sessions(&execution.call.id));
             self.emit_v2_event(

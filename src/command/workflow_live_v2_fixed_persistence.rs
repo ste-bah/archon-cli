@@ -26,22 +26,46 @@ pub(super) fn persist_generation_owned_call(
     }
 }
 
+/// Round 7 (#253): only a fenced (agent) call is superseded by a lifecycle
+/// edit. A write call or host command has landed as a whole: its record is
+/// always published while this executor owns the run, and a pause is raised
+/// only after the record is saved.
 pub(super) fn persist_dispatched_call(
     store: &WorkflowStore,
     run_id: &str,
     v2: &WorkflowV2ResultStore,
     record: &WorkflowV2CallRecord,
     generation: Option<u64>,
+    fenced: bool,
 ) -> WorkflowResult<CallPublication> {
-    publish(
-        store,
-        run_id,
-        v2,
-        record,
-        FixedCallProjectionKind::Executed,
-        generation,
-        true,
-    )
+    if fenced {
+        return publish(
+            store,
+            run_id,
+            v2,
+            record,
+            FixedCallProjectionKind::Executed,
+            generation,
+            true,
+        );
+    }
+    #[cfg(test)]
+    publication_hook::run(store.run_dir(run_id));
+    store.with_run_lock(run_id, |locked| {
+        let current = locked.load_state(run_id)?;
+        // Executor ownership only: a pause, restart or force-accept moves
+        // the generation but not the executor; a takeover does.
+        if let Some(expected) = generation
+            && current.executor_generation.is_some_and(|owner| owner > expected)
+        {
+            return Err(WorkflowError::ControlCancelled(format!(
+                "executor generation {expected} no longer owns run {run_id}; landed call {} stays in flight for recovery",
+                record.call.id
+            )));
+        }
+        save_and_project(locked, run_id, v2, record, FixedCallProjectionKind::Executed)
+            .map(CallPublication::Published)
+    })
 }
 
 fn publish(
@@ -74,21 +98,33 @@ fn publish(
             )));
         }
         archon_workflow::poll_v2_run_control(locked, run_id, &record.call.id)?;
-        if kind != FixedCallProjectionKind::Reused {
-            v2.save_call_record(record)?;
-        }
-        let event = project_fixed_call(locked, run_id, record, kind)?;
-        if kind != FixedCallProjectionKind::Started {
-            let mut checkpoint = v2.load_checkpoint()?.unwrap_or_else(WorkflowV2Checkpoint::default);
-            if archon_workflow::v2::script::is_reusable_status(record.status) {
-                checkpoint.mark_completed(&record.call.id);
-            } else {
-                checkpoint.remove_completed_call(&record.call.id);
-            }
-            v2.save_checkpoint(&checkpoint)?;
-        }
-        Ok(CallPublication::Published(event))
+        save_and_project(locked, run_id, v2, record, kind).map(CallPublication::Published)
     })
+}
+
+fn save_and_project(
+    locked: &WorkflowStore,
+    run_id: &str,
+    v2: &WorkflowV2ResultStore,
+    record: &WorkflowV2CallRecord,
+    kind: FixedCallProjectionKind,
+) -> WorkflowResult<Option<WorkflowUiEvent>> {
+    if kind != FixedCallProjectionKind::Reused {
+        v2.save_call_record(record)?;
+    }
+    let event = project_fixed_call(locked, run_id, record, kind)?;
+    if kind != FixedCallProjectionKind::Started {
+        let mut checkpoint = v2
+            .load_checkpoint()?
+            .unwrap_or_else(WorkflowV2Checkpoint::default);
+        if archon_workflow::v2::script::is_reusable_status(record.status) {
+            checkpoint.mark_completed(&record.call.id);
+        } else {
+            checkpoint.remove_completed_call(&record.call.id);
+        }
+        v2.save_checkpoint(&checkpoint)?;
+    }
+    Ok(event)
 }
 
 #[cfg(test)]
