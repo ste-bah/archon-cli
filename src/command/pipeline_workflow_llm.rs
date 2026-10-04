@@ -435,3 +435,7 @@ mod tests {
 #[cfg(test)]
 #[path = "acceptance_scratch_guardian_tests.rs"]
 mod native_policy_tests;
+
+#[cfg(test)]
+#[path = "pipeline_workflow_continuation_fixture.rs"]
+pub(crate) mod continuation_fixture;

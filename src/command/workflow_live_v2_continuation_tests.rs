@@ -1,4 +1,7 @@
 use super::*;
+use crate::command::pipeline_workflow_llm::{
+    PipelineWorkflowLlmClient, continuation_fixture::RefusingContinuation,
+};
 use archon_workflow::WorkflowAgentOutcome;
 use std::sync::Mutex;
 
@@ -119,88 +122,6 @@ async fn preflight_reask_reuses_author_generation_and_original_request() {
     assert!(ids.iter().all(|c| c.1 == ids[0].1));
 }
 
-/// The executor refuses to continue the first session (it cannot restore it
-/// exactly, #241) and continues any later one. Every call answers from
-/// `replies` in order. `typed: false` raises the same words as an ordinary
-/// error, as a model value quoted into a validation error would.
-struct RefusingContinuation {
-    replies: Mutex<Vec<String>>,
-    calls: Mutex<Vec<(&'static str, String, String)>>,
-    typed: bool,
-}
-impl RefusingContinuation {
-    fn new(replies: &[&str]) -> Arc<Self> {
-        Self::build(replies, true)
-    }
-    fn build(replies: &[&str], typed: bool) -> Arc<Self> {
-        Arc::new(Self {
-            replies: Mutex::new(replies.iter().rev().map(|r| r.to_string()).collect()),
-            calls: Mutex::new(vec![]),
-            typed,
-        })
-    }
-    fn record(&self, kind: &'static str, call: &WorkflowAgentCall) -> String {
-        let prompt = serde_json::to_string(&call.messages).unwrap();
-        let mut calls = self.calls.lock().unwrap();
-        calls.push((kind, call.session_id.clone(), prompt));
-        calls[0].1.clone()
-    }
-    fn reply(&self) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
-        Ok(outcome(
-            self.replies.lock().unwrap().pop().expect("a reply"),
-        ))
-    }
-    fn kinds(&self) -> Vec<&'static str> {
-        self.calls
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|call| call.0)
-            .collect()
-    }
-    fn session(&self, index: usize) -> String {
-        self.calls.lock().unwrap()[index].1.clone()
-    }
-}
-#[async_trait::async_trait]
-impl WorkflowLlmClient for RefusingContinuation {
-    async fn send_message(
-        &self,
-        _: Vec<serde_json::Value>,
-        _: Vec<serde_json::Value>,
-        _: Vec<serde_json::Value>,
-        _: &str,
-    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
-        panic!("no provider")
-    }
-    async fn run_agent(
-        &self,
-        call: WorkflowAgentCall,
-    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
-        self.record("fresh", &call);
-        self.reply()
-    }
-    async fn continue_agent(
-        &self,
-        call: WorkflowAgentCall,
-    ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
-        if self.record("continue", &call) != call.session_id {
-            return self.reply();
-        }
-        let words = format!(
-            "cannot continue agent '{}': its confinement is only known to the process that \
-             started it; start a new agent",
-            call.session_id
-        );
-        Err(match self.typed {
-            true => archon_workflow::WorkflowError::port(
-                archon_tools::subagent_session::ContinuationRefused(words),
-            ),
-            false => archon_workflow::WorkflowError::port(anyhow::anyhow!("{words}")),
-        })
-    }
-}
-
 fn accepted() -> String {
     let mut result = archon_workflow::WorkflowV2Result::accepted("inspected");
     result
@@ -221,7 +142,14 @@ fn accepted_without_evidence() -> String {
 /// The client, and the receiver its activity sink needs kept open.
 fn live(port: Arc<RefusingContinuation>) -> (LiveV2AgentClient, impl Sized) {
     let (sink, rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
-    let client = LiveV2AgentClient::new(port, sink, vec![], "refused-run".into(), None, Some(10));
+    let client = LiveV2AgentClient::new(
+        PipelineWorkflowLlmClient::arc(port),
+        sink,
+        vec![],
+        "refused-run".into(),
+        None,
+        Some(10),
+    );
     (client, rx)
 }
 

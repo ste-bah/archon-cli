@@ -125,3 +125,33 @@ fn a_directory_whose_file_identity_cannot_be_read_has_no_placement() {
         .expect_err("a path and a creation time alone were accepted as a placement");
     assert!(error.contains("file identity"), "{error}");
 }
+
+#[test]
+fn placement_compares_the_full_volume_serial_and_128_bit_file_id() {
+    let stamp = |volume, id| {
+        Stamp::from_parts(PathBuf::from("workspace"), Some((volume, id)), None).unwrap()
+    };
+    let original = stamp(7, 11);
+    assert_ne!(original, stamp(7, (1u128 << 64) | 11));
+    assert_ne!(original, stamp((1u64 << 32) | 7, 11));
+}
+
+/// Exercise the real Windows lookup on an existing directory whose handle
+/// cannot be opened, rather than injecting a missing identity into a stamp.
+#[cfg(windows)]
+#[test]
+fn placement_refuses_a_directory_when_the_real_identity_lookup_fails() {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+
+    let temp = tempfile::tempdir().unwrap();
+    let metadata = std::fs::metadata(temp.path()).unwrap();
+    let _exclusive = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(temp.path())
+        .unwrap();
+    assert_eq!(file_identity(temp.path(), &metadata), None);
+    assert!(PlacementIdentity::of(temp.path()).is_err());
+}
