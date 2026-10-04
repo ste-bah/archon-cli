@@ -317,3 +317,33 @@ fn restart_revokes_a_superseded_non_json_landing_record() {
     );
     assert_revoked(&v2, "T-A");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_fifo_in_the_archive_never_blocks_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run(&temp, &[CALL]);
+    let v2 = v2_store(&store, &run);
+    landed_then_superseded(&v2, "T-A");
+    let fifo = v2
+        .branch_outcome_path(CALL, &item("T-A").id)
+        .parent()
+        .unwrap()
+        .join("superseded/planted.json");
+    let fifo_path = fifo.clone();
+    let path = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    let (done, wait) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ =
+            done.send(restart_generated_v2_task(&store, &run, "T-A").map_err(|e| e.to_string()));
+    });
+    let restarted = wait
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("restart blocked on a FIFO in the archive");
+    restarted.unwrap();
+    // The reuse readers still open archive entries (tracked separately), so
+    // the planted FIFO is removed before inspecting what restart revoked.
+    std::fs::remove_file(&fifo_path).unwrap();
+    assert_revoked(&v2, "T-A");
+}

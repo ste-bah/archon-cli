@@ -173,7 +173,13 @@ fn outcome_files_in(dir: &Path, archived: bool) -> WorkflowResult<Vec<PathBuf>> 
         let file_type = entry
             .file_type()
             .map_err(|err| WorkflowError::io(&path, err))?;
-        if !file_type.is_dir()
+        // A FIFO, socket or device is never an outcome and reading one could
+        // block while restart holds the run lock; a link is kept unless it
+        // resolves to such a file, and an unresolvable link fails the plan.
+        let readable = file_type.is_file()
+            || (file_type.is_symlink()
+                && fs::metadata(&path).map_or(true, |target| target.is_file()));
+        if readable
             && (archived || path.extension().and_then(|value| value.to_str()) == Some("json"))
         {
             files.push(path);
