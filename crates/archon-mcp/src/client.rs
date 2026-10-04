@@ -15,6 +15,12 @@ use rmcp::transport::IntoTransport;
 use crate::call_cancellation::await_response_cancel_on_drop;
 use crate::types::{McpError, McpToolDef, McpToolResult, ServerConfig, ToolContent};
 
+#[path = "discovery.rs"]
+mod discovery;
+
+/// No-progress budget shared by every tools/list path.
+pub(crate) const DISCOVERY_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Default timeout for the initialize handshake.
 const INIT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -23,8 +29,9 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// An MCP client connected to a single server process.
 pub struct McpClient {
-    service: RunningService<RoleClient, ()>,
+    service: RunningService<RoleClient, discovery::DiscoveryHandler>,
     server_name: String,
+    progress: rmcp::handler::client::progress::ProgressDispatcher,
 }
 
 impl McpClient {
@@ -38,54 +45,32 @@ impl McpClient {
         T: IntoTransport<RoleClient, E, A>,
         E: std::error::Error + Send + Sync + 'static,
     {
+        config.configured_secrets().register();
         let server_name = config.name.clone();
-
-        let service = tokio::time::timeout(INIT_TIMEOUT, serve_client((), transport))
+        let handler = discovery::DiscoveryHandler::default();
+        let progress = handler.0.clone();
+        let service = tokio::time::timeout(INIT_TIMEOUT, serve_client(handler, transport))
             .await
             .map_err(|_| McpError::Timeout(INIT_TIMEOUT))?
             .map_err(|e| McpError::InitFailed {
                 server: server_name.clone(),
                 reason: e.to_string(),
-            })?;
+            })
+            .map_err(McpError::redacted)?;
 
         tracing::info!(server = %server_name, "MCP client initialized");
 
         Ok(Self {
             service,
             server_name,
+            progress,
         })
     }
 
     /// Retrieve the list of tools advertised by this server.
     pub async fn list_tools(&self) -> Result<Vec<McpToolDef>, McpError> {
-        let result = self
-            .service
-            .list_tools(Default::default())
+        self.list_tools_with_idle_timeout(DISCOVERY_IDLE_TIMEOUT)
             .await
-            .map_err(|e| {
-                McpError::ToolCallFailed(format!(
-                    "tools/list failed on '{}': {}",
-                    self.server_name, e
-                ))
-            })?;
-
-        let tools = result
-            .tools
-            .into_iter()
-            .map(|t| {
-                let schema = serde_json::Value::Object((*t.input_schema).clone());
-                McpToolDef {
-                    name: t.name.to_string(),
-                    description: t.description.map(|d| d.to_string()),
-                    input_schema: schema,
-                    annotations: t.annotations,
-                    meta: t.meta.and_then(|meta| serde_json::to_value(meta).ok()),
-                    server_name: self.server_name.clone(),
-                }
-            })
-            .collect();
-
-        Ok(tools)
     }
 
     /// Invoke a tool by name with the given JSON arguments.
@@ -117,6 +102,7 @@ impl McpClient {
                     "tools/call '{}' could not be sent to '{}': {}",
                     name, self.server_name, e
                 ))
+                .redacted()
             })?;
 
         let response = await_response_cancel_on_drop(handle, CALL_TIMEOUT)
@@ -127,24 +113,49 @@ impl McpClient {
                     "tools/call '{}' failed on '{}': {}",
                     name, self.server_name, e
                 ))
+                .redacted()
             })?;
 
         let ServerResult::CallToolResult(result) = response else {
             return Err(McpError::ToolCallFailed(format!(
                 "tools/call '{}' on '{}' answered with the wrong result type",
                 name, self.server_name
-            )));
+            ))
+            .redacted());
         };
 
-        Ok(convert_tool_result(&result))
+        let mut converted = convert_tool_result(&result);
+        if converted.is_error {
+            for content in &mut converted.content {
+                match content {
+                    ToolContent::Text { text } => *text = self.redact(text),
+                    ToolContent::Image { data, mime_type } => {
+                        *data = self.redact(data);
+                        *mime_type = self.redact(mime_type);
+                    }
+                    ToolContent::Resource { uri, text } => {
+                        *uri = self.redact(uri);
+                        if let Some(text) = text {
+                            *text = self.redact(text);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(converted)
     }
 
     /// Gracefully shut down the connection to the MCP server.
     pub async fn shutdown(self) -> Result<(), McpError> {
         self.service.cancel().await.map_err(|e| {
             McpError::Shutdown(format!("shutdown failed for '{}': {}", self.server_name, e))
+                .redacted()
         })?;
         Ok(())
+    }
+
+    pub(crate) fn redact(&self, text: &str) -> String {
+        archon_observability::redaction::redact_text(text)
     }
 
     /// The name of the connected server.

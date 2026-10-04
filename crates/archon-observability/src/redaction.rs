@@ -114,7 +114,8 @@ pub(crate) const REDACTED: &str = "***REDACTED***";
 /// Apply the redaction regex to a field value.
 #[inline]
 pub(crate) fn redact(value: &str) -> String {
-    REDACTION_RE.replace_all(value, REDACTED).into_owned()
+    let value = crate::secret_values::redact_registered(value);
+    REDACTION_RE.replace_all(&value, REDACTED).into_owned()
 }
 
 /// Apply the same redaction to arbitrary text destined for a human.
@@ -363,7 +364,7 @@ where
         let Some(span) = ctx.span(&id) else {
             return;
         };
-        let name = span.name().to_string();
+        let name = redact(span.name());
         let Some(pending) = span.extensions_mut().remove::<PendingExport>() else {
             return;
         };
@@ -380,14 +381,14 @@ where
         event.record(&mut visitor);
         let meta = event.metadata();
         let level = meta.level();
-        let target = meta.target();
+        let target = redact(meta.target());
 
         // Collect span path for context. Walk from root so the outermost
         // span is first; useful for correlation across task_id scopes.
         let mut spans: Vec<String> = Vec::new();
         if let Some(span) = ctx.lookup_current() {
             for s in span.scope().from_root() {
-                spans.push(s.name().to_string());
+                spans.push(redact(s.name()));
             }
         }
 

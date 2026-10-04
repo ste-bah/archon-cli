@@ -26,6 +26,13 @@ use super::HTTP_CONNECT_TIMEOUT;
 ///   * `"ws"` / `"websocket"` — WebSocket JSON-RPC
 ///   * `"sse"`           — classic MCP Server-Sent Events (GET /sse + POST /message)
 pub(super) async fn connect_server(config: &ServerConfig) -> Result<McpClient, McpError> {
+    config.configured_secrets().register();
+    connect_server_inner(config)
+        .await
+        .map_err(McpError::redacted)
+}
+
+async fn connect_server_inner(config: &ServerConfig) -> Result<McpClient, McpError> {
     match config.transport.as_str() {
         "http" => {
             let url = config.url.as_deref().ok_or_else(|| {

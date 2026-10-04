@@ -13,8 +13,9 @@ use crate::types::{McpError, ServerConfig};
 /// Create a `TokioChildProcess` transport from a [`ServerConfig`].
 ///
 /// The child process is spawned with piped stdin/stdout for JSON-RPC
-/// communication and inherits stderr for diagnostic logging.
+/// communication. Stderr is piped through the redacted diagnostic log sink.
 pub fn spawn_transport(config: &ServerConfig) -> Result<TokioChildProcess, McpError> {
+    config.configured_secrets().register();
     let env_clone: HashMap<String, String> = config.env.clone();
     let args_clone: Vec<String> = config.args.clone();
 
@@ -25,8 +26,31 @@ pub fn spawn_transport(config: &ServerConfig) -> Result<TokioChildProcess, McpEr
         }
     });
 
-    TokioChildProcess::new(cmd)
-        .map_err(|e| McpError::Transport(format!("failed to spawn '{}': {}", config.command, e)))
+    let (transport, stderr) = TokioChildProcess::builder(cmd)
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            McpError::Transport(format!("failed to spawn '{}': {}", config.command, e)).redacted()
+        })?;
+    if let Some(stderr) = stderr {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        use tracing::instrument::WithSubscriber;
+        let server = archon_observability::redaction::redact_text(&config.name);
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => tracing::info!(%server, diagnostic = %archon_observability::redaction::redact_text(&line), "MCP server stderr"),
+                    Ok(None) => break,
+                    Err(error) => {
+                        tracing::warn!(%server, error = %archon_observability::redaction::redact_text(&error.to_string()), "MCP stderr read failed");
+                        break;
+                    }
+                }
+            }
+        }.with_current_subscriber());
+    }
+    Ok(transport)
 }
 
 #[cfg(test)]

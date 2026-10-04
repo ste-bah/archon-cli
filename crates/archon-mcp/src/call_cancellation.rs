@@ -35,7 +35,7 @@ pub(crate) async fn await_response_cancel_on_drop(
     budget: Duration,
 ) -> Option<Result<ServerResult, ServiceError>> {
     let RequestHandle { rx, peer, id, .. } = handle;
-    let mut guard = CancelOnDrop { peer, id: Some(id) };
+    let guard = CancelOnDrop::new(peer, id);
 
     let received = tokio::time::timeout(budget, rx).await.ok()?;
     // The wait is over either way: a closed channel means the connection is
@@ -45,15 +45,18 @@ pub(crate) async fn await_response_cancel_on_drop(
 }
 
 /// Sends `notifications/cancelled` unless disarmed first.
-struct CancelOnDrop {
+pub(crate) struct CancelOnDrop {
     peer: Peer<RoleClient>,
     id: Option<RequestId>,
 }
 
 impl CancelOnDrop {
-    /// Called once the response is in hand: the server is already done, so
-    /// cancelling would be a lie.
-    fn disarm(&mut self) {
+    pub(crate) fn new(peer: Peer<RoleClient>, id: RequestId) -> Self {
+        Self { peer, id: Some(id) }
+    }
+
+    /// A completed response no longer needs cancellation.
+    pub(crate) fn disarm(mut self) {
         self.id = None;
     }
 }
@@ -85,8 +88,17 @@ impl Drop for CancelOnDrop {
                 Some(request_id),
                 Some(DROPPED_REASON.to_string()),
             ));
-            if let Err(error) = peer.send_notification(notification.into()).await {
-                tracing::debug!(%error, "could not deliver MCP cancellation notification");
+            match tokio::time::timeout(
+                Duration::from_secs(2),
+                peer.send_notification(notification.into()),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    tracing::debug!(%error, "could not deliver MCP cancellation notification")
+                }
+                Err(_) => tracing::debug!("MCP cancellation delivery stalled"),
             }
         });
     }

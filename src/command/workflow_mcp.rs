@@ -8,7 +8,7 @@ use archon_mcp::types::{McpToolRisk, ServerConfig};
 use archon_permissions::rules::{RuleSet, ToolRule};
 use archon_tools::tool::Tool;
 
-/// How long one server gets to start and list its tools.
+/// Maximum silence during a server handshake or tool discovery.
 const SERVER_STARTUP: Duration = Duration::from_secs(15);
 
 pub(crate) async fn install_project_tools(
@@ -55,22 +55,22 @@ pub(crate) async fn install_project_tools(
     Ok(())
 }
 
-/// Starts each server and lists its tools within `deadline`. A server the
-/// project's own `.mcp.json` declares (`true` beside it) is required: if it
-/// cannot start or cannot list its tools, the call fails; one that lists no
-/// tools is healthy and only warned about. A server
-/// only the user's global configuration declares is a personal tool, not
-/// project authority, and stays a warning as it is in the interactive session.
+/// Start and discover each server with separate no-progress intervals.
+/// Project-declared servers are required; optional global servers warn and
+/// continue. Tool discovery may run as long as it continues making progress.
 async fn start_servers(
     manager: &archon_mcp::lifecycle::McpServerManager,
     configs: Vec<(ServerConfig, bool)>,
     deadline: Duration,
 ) -> Result<Vec<archon_mcp::tool_bridge::McpTool>> {
     let mut tools = Vec::new();
+    for (config, _) in &configs {
+        config.configured_secrets().register();
+    }
     for (config, required) in configs.into_iter().filter(|(config, _)| !config.disabled) {
         let name = config.name.clone();
         let command = config.command.clone();
-        let secrets = configured_values(&config);
+        let secrets = config.configured_secrets();
         let recovery = if command.is_empty() {
             "check the configured transport, endpoint and credentials and retry".to_string()
         } else {
@@ -78,36 +78,30 @@ async fn start_servers(
                 "make {command} resolvable on the PATH archon is started with and check the server configuration, then retry"
             )
         };
-        let outcome = tokio::time::timeout(deadline, async {
-            let errors = manager.start_all(vec![config]).await;
-            if !errors.is_empty() {
-                return Err(format!(
-                    "failed to start: {}",
-                    errors
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                ));
-            }
-            match manager.tools_for(&name).await {
+        let outcome = match tokio::time::timeout(deadline, manager.start_all(vec![config])).await {
+            Ok(errors) if !errors.is_empty() => Err(format!(
+                "failed to start: {}",
+                errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )),
+            Ok(_) => match manager.tools_for_with_idle_timeout(&name, deadline).await {
+                Err(archon_mcp::types::McpError::Timeout(_)) => Err(format!(
+                    "started but listing its tools failed: no progress within {}s",
+                    deadline.as_secs_f32()
+                )),
                 Err(error) => Err(format!("started but listing its tools failed: {error}")),
                 Ok(listed) => {
-                    // Healthy, just tool-less: a resources-only server exists.
                     if listed.is_empty() {
                         tracing::warn!(server = %name, "MCP server started but offers no tools");
                     }
                     Ok(listed)
                 }
-            }
-        })
-        .await
-        .unwrap_or_else(|_| {
-            Err(format!(
-                "did not start and list its tools within {}s",
-                deadline.as_secs_f32()
-            ))
-        });
+            },
+            Err(_) => Err(format!("did not start within {}s", deadline.as_secs_f32())),
+        };
         let reason = match outcome {
             Ok(listed) => {
                 tools.extend(listed);
@@ -115,10 +109,9 @@ async fn start_servers(
             }
             Err(reason) => reason,
         };
-        let failure = redact(
-            &format!("workflow MCP server '{name}' (executable '{command}') {reason}; {recovery}"),
-            &secrets,
-        );
+        let failure = archon_observability::redaction::redact_text(&secrets.text(&format!(
+            "workflow MCP server '{name}' (executable '{command}') {reason}; {recovery}"
+        )));
         if required {
             return Err(anyhow!(failure));
         }
@@ -128,28 +121,6 @@ async fn start_servers(
         );
     }
     Ok(tools)
-}
-
-/// Values the server configuration supplies to the server: environment and
-/// header values are where its credentials live, and a start error can echo
-/// them. Very short values are left alone, since masking them would only
-/// garble the message.
-fn configured_values(config: &ServerConfig) -> Vec<String> {
-    let mut values = config
-        .env
-        .values()
-        .chain(config.headers.iter().flat_map(|headers| headers.values()))
-        .filter(|value| value.len() >= 4)
-        .cloned()
-        .collect::<Vec<_>>();
-    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
-    values
-}
-
-fn redact(text: &str, secrets: &[String]) -> String {
-    secrets.iter().fold(text.to_string(), |text, secret| {
-        text.replace(secret.as_str(), "[REDACTED]")
-    })
 }
 
 fn policy_by_server<'a>(

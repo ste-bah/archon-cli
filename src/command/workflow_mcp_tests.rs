@@ -217,3 +217,39 @@ fn explicit_policy_allows_safe_and_risky_but_denies_unknown_and_dangerous() {
     assert_eq!(rules.always_allow.len(), 2);
     assert_eq!(rules.always_deny.len(), 2);
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn workflow_discovery_progress_has_no_total_time_limit() {
+    let temp = tempfile::tempdir().unwrap();
+    let script = temp.path().join("progress.sh");
+    std::fs::write(&script, r#"
+field() { printf '%s' "$1" | grep -o "\"$2\":[^,}]*" | head -n 1 | cut -d: -f2-; }
+while IFS= read -r line; do
+  id=$(field "$line" id)
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":%s,"capabilities":{"tools":{}},"serverInfo":{"name":"fixture","version":"0"}}}\n' "$id" "$(field "$line" protocolVersion)" ;;
+    *'"method":"tools/list"'*)
+      token=$(field "$line" progressToken)
+      for step in 1 2 3 4; do
+        sleep 0.1
+        printf '{"jsonrpc":"2.0","method":"notifications/progress","params":{"progressToken":%s,"progress":%s}}\n' "$token" "$step"
+      done
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}\n' "$id" ;;
+  esac
+done
+"#).unwrap();
+    let config = serde_json::from_value(serde_json::json!({
+        "name": "progress", "command": "/bin/sh", "args": [script]
+    }))
+    .unwrap();
+    let manager = archon_mcp::lifecycle::McpServerManager::new();
+    let result = start_servers(&manager, vec![(config, true)], Duration::from_millis(300)).await;
+    let _ = manager.shutdown_all().await;
+    assert!(
+        result.is_ok(),
+        "progressing discovery hit a total-time deadline: {:?}",
+        result.err()
+    );
+}

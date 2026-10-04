@@ -86,6 +86,7 @@ pub mod metrics;
 // installed as a second, unredacted sink.
 pub mod otlp;
 pub mod redaction;
+pub mod secret_values;
 pub mod task_registry;
 pub mod tracing;
 pub mod transport;
