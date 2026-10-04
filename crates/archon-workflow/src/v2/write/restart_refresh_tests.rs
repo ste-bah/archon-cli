@@ -138,7 +138,6 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
             item_id: "agents-2-0".into(),
         }),
         time_budget: BranchTimeBudget::CallTimeBudget,
-        pause: None,
     };
     // The agent wrote two files under its ownership before the session ended.
     std::fs::write(ws.join("src/lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
@@ -245,7 +244,6 @@ async fn a_branch_without_a_refresh_re_asks_unchanged() {
         },
         refresh: None,
         time_budget: BranchTimeBudget::CallTimeBudget,
-        pause: None,
     };
     run_worktree_branch_agent(
         "verify",
@@ -327,7 +325,6 @@ async fn a_host_cut_is_not_re_asked_by_the_loop() {
         },
         refresh: None,
         time_budget: BranchTimeBudget::Fixed(Some(Duration::from_secs(1_800))),
-        pause: None,
     };
     let result = run_worktree_branch_agent(
         "implement",

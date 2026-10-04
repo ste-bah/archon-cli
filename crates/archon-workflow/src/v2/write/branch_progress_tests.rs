@@ -1,7 +1,7 @@
-//! Issue 263, round 2: a write branch is bounded by no progress, never by a
-//! total count of re-asks or a total wall clock, and a branch that stops
-//! progressing pauses the run (resumable, with evidence) instead of ending
-//! its work as `NeedsReview`.
+//! Issue 263: a write branch is bounded by no progress, never by a total
+//! count of re-asks or a total wall clock. A branch that stops progressing
+//! reports its outcome (round 3, decision B): the wave captures its work and
+//! remediation proceeds; the run is not paused at the branch.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -56,7 +56,7 @@ fn shrinking(rejections: usize, stuck: bool, budget: Option<Duration>) -> Shrink
     }
 }
 
-fn branch(root: &std::path::Path, pause: Option<BranchPause>) -> WorktreeBranchExecution {
+fn branch(root: &std::path::Path) -> WorktreeBranchExecution {
     WorktreeBranchExecution {
         id: "implement-1-0".into(),
         role: "coder".into(),
@@ -74,7 +74,6 @@ fn branch(root: &std::path::Path, pause: Option<BranchPause>) -> WorktreeBranchE
         },
         refresh: None,
         time_budget: BranchTimeBudget::CallTimeBudget,
-        pause,
     }
 }
 
@@ -100,9 +99,7 @@ async fn a_branch_keeps_re_asking_while_its_overshoot_shrinks() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
     let dispatch = shrinking(20, false, None);
-    let result = run(&dispatch, &branch(temp.path(), None), &store)
-        .await
-        .unwrap();
+    let result = run(&dispatch, &branch(temp.path()), &store).await.unwrap();
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
     assert_eq!(dispatch.attempts.load(Ordering::SeqCst), 21);
 }
@@ -112,9 +109,7 @@ async fn a_spent_total_time_budget_does_not_end_a_progressing_branch() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
     let dispatch = shrinking(3, false, Some(Duration::ZERO));
-    let result = run(&dispatch, &branch(temp.path(), None), &store)
-        .await
-        .unwrap();
+    let result = run(&dispatch, &branch(temp.path()), &store).await.unwrap();
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
 }
 
@@ -139,29 +134,34 @@ fn running_run(project: &std::path::Path) -> (WorkflowStore, String, u64) {
     (store, run.id, generation)
 }
 
+/// Round 3 (decision B): a branch that stops converging never pauses the
+/// run. Its outcome carries the stall, so the wave captures its work and
+/// remediation runs; only remediation that makes no progress pauses.
 #[tokio::test]
-async fn a_branch_that_stops_converging_pauses_the_run_with_evidence() {
+async fn a_branch_that_stops_converging_reports_its_outcome_and_never_pauses() {
     let temp = tempfile::tempdir().unwrap();
     let (workflows, run_id, generation) = running_run(temp.path());
     let store = WorkflowV2ResultStore::new(workflows.run_dir(&run_id).join("v2"));
     let dispatch = shrinking(usize::MAX, true, None);
-    let pause = BranchPause {
-        store: workflows.clone(),
-        run_id: run_id.clone(),
-        generation,
-    };
-    let error = run(&dispatch, &branch(temp.path(), Some(pause)), &store)
-        .await
-        .expect_err("a stalled branch pauses the run");
-    assert!(
-        matches!(error, WorkflowError::ControlPaused(_)),
-        "{error:?}"
-    );
+    // The branch's own outcome: a stamped result, or the rejection the
+    // wave records as the branch's failure (capturing its work). Never a
+    // control error that would unwind the wave.
+    match run(&dispatch, &branch(temp.path()), &store).await {
+        Ok(result) => {
+            assert_ne!(result.status, WorkflowV2Status::Accepted);
+            assert_eq!(result.data["branch_no_progress"], true, "{result:#?}");
+        }
+        Err(error) => assert!(
+            !matches!(
+                error,
+                WorkflowError::ControlPaused(_) | WorkflowError::ControlCancelled(_)
+            ),
+            "{error:?}"
+        ),
+    }
     let state = workflows.load_state(&run_id).unwrap();
-    assert_eq!(state.status, RunStatus::Paused);
-    assert_eq!(state.generation, generation + 1);
-    let events = std::fs::read_to_string(workflows.events_path(&run_id)).unwrap();
-    assert!(events.contains("write_branch_stall_pause"), "{events}");
+    assert_eq!(state.status, RunStatus::Running);
+    assert_eq!(state.generation, generation);
     assert_eq!(
         dispatch.attempts.load(Ordering::SeqCst),
         2,
@@ -169,32 +169,104 @@ async fn a_branch_that_stops_converging_pauses_the_run_with_evidence() {
     );
 }
 
-#[tokio::test]
-async fn a_stale_branch_never_pauses_a_newer_generation() {
+/// Writes one more file into the worktree, then loses the provider
+/// connection, `drops` times; then accepts.
+struct WritesThenDrops {
+    attempts: AtomicUsize,
+    drops: usize,
+    writes: bool,
+}
+
+#[async_trait::async_trait]
+impl WorkflowAgentDispatch for WritesThenDrops {
+    fn fanout_parallelism(&self, _: Option<usize>) -> usize {
+        1
+    }
+    async fn run_call(
+        &self,
+        _task: &str,
+        root: Option<String>,
+        _: &WorkflowV2CallExecution,
+        _: &WorkflowV2AgentAdapter,
+        _: Option<&WorkflowV2ResultStore>,
+        _: Option<&WorkflowV2TaskUniverse>,
+    ) -> WorkflowResult<WorkflowV2Result> {
+        let n = self.attempts.fetch_add(1, Ordering::SeqCst);
+        if n >= self.drops {
+            return Ok(WorkflowV2Result::accepted("done"));
+        }
+        if self.writes {
+            let root = std::path::PathBuf::from(root.expect("worktree root"));
+            std::fs::write(root.join(format!("step-{n}.txt")), "more\n").unwrap();
+        }
+        Err(WorkflowError::port("response_failed: connection reset"))
+    }
+}
+
+fn git_worktree() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
-    let (workflows, run_id, generation) = running_run(temp.path());
-    let store = WorkflowV2ResultStore::new(workflows.run_dir(&run_id).join("v2"));
-    // The operator paused and resumed while the branch ran.
-    let mut state = workflows.load_state(&run_id).unwrap();
-    state.generation = generation + 2;
-    workflows.save_state(&state).unwrap();
-    let pause = BranchPause {
-        store: workflows.clone(),
-        run_id: run_id.clone(),
-        generation,
+    for args in [
+        vec!["init", "-q"],
+        vec!["config", "user.email", "t@example.invalid"],
+        vec!["config", "user.name", "t"],
+        vec!["commit", "-q", "--allow-empty", "-m", "base"],
+    ] {
+        crate::write_coordinator::worktree_isolation::run_git(&args, temp.path()).unwrap();
+    }
+    temp
+}
+
+/// Round 3 (decision C): a dropped connection after the session changed the
+/// worktree is progress: the drop streak starts again, so a branch whose
+/// every session advances the work is never stopped by drops.
+#[tokio::test]
+async fn transport_drops_after_worktree_progress_keep_re_asking() {
+    let worktree = git_worktree();
+    let side = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(side.path().join("v2"));
+    let dispatch = WritesThenDrops {
+        attempts: AtomicUsize::new(0),
+        drops: crate::v2::transport_retry::MAX_TRANSPORT_RETRIES + 4,
+        writes: true,
     };
-    let error = run(
-        &shrinking(usize::MAX, true, None),
-        &branch(temp.path(), Some(pause)),
+    let result = run_worktree_branch_agent(
+        "implement",
+        None,
+        &dispatch,
         &store,
+        WorkflowV2AgentAdapter::new(),
+        &branch(worktree.path()),
+        None,
     )
-    .await
-    .expect_err("the obsolete branch stops");
-    assert!(
-        matches!(error, WorkflowError::ControlCancelled(_)),
-        "{error:?}"
+    .await;
+    let result = result.expect("an outcome");
+    assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
+}
+
+/// Drops with no change to the worktree are no progress: the streak ends at
+/// its bound.
+#[tokio::test]
+async fn transport_drops_without_worktree_progress_stop_at_the_bound() {
+    let worktree = git_worktree();
+    let side = tempfile::tempdir().unwrap();
+    let store = WorkflowV2ResultStore::new(side.path().join("v2"));
+    let dispatch = WritesThenDrops {
+        attempts: AtomicUsize::new(0),
+        drops: usize::MAX,
+        writes: false,
+    };
+    let _ = run_worktree_branch_agent(
+        "implement",
+        None,
+        &dispatch,
+        &store,
+        WorkflowV2AgentAdapter::new(),
+        &branch(worktree.path()),
+        None,
+    )
+    .await;
+    assert_eq!(
+        dispatch.attempts.load(Ordering::SeqCst),
+        crate::v2::transport_retry::MAX_TRANSPORT_RETRIES + 1
     );
-    let state = workflows.load_state(&run_id).unwrap();
-    assert_eq!(state.status, RunStatus::Running);
-    assert_eq!(state.generation, generation + 2);
 }
