@@ -33,10 +33,25 @@ impl WorkflowV2ResultStore {
     }
 
     fn residual_stall_waivers(&self) -> BTreeSet<u64> {
-        std::fs::read(self.root().join(WAIVER_FILE))
+        let mut waived: BTreeSet<u64> = std::fs::read(self.root().join(WAIVER_FILE))
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // The pause's own event names the pass: a waiver whose write failed
+        // after the pause took effect is still honoured on resume.
+        if let Some(run_dir) = self.root().parent() {
+            let events = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap_or_default();
+            for line in events
+                .lines()
+                .filter(|line| line.contains("remediation_stall_pause"))
+            {
+                let pass = serde_json::from_str::<serde_json::Value>(line)
+                    .ok()
+                    .and_then(|event| event["detail"]["evidence"]["pass"].as_u64());
+                waived.extend(pass);
+            }
+        }
+        waived
     }
 
     /// Whether a resumed pause waived the no-progress stop of pass `pass`.

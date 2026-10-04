@@ -273,3 +273,37 @@ fn the_ledger_is_rebuilt_in_recording_order_across_a_resume() {
     }
     assert_eq!(ProgressLedger::load(dir.path(), 3).revisits, 1);
 }
+
+/// Round 6: a record whose order entry is lost is placed by its own write
+/// time, never first: R1{X}, R2{X}, R1#2{Y} (entry lost), R2#2{Y} rebuilds
+/// as X, X, Y, Y -- one revisit in a row.
+#[test]
+fn an_unlogged_record_is_placed_by_its_own_write_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let set = |n: u32, attempt: u32, id: &str| {
+        let mut record = round(n, vec![failed(id, "x")]);
+        record.attempt = attempt;
+        record
+    };
+    for record in [
+        set(1, 1, "AC-X"),
+        set(2, 1, "AC-X"),
+        set(1, 2, "AC-Y"),
+        set(2, 2, "AC-Y"),
+    ] {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        write_round_record(dir.path(), &record).unwrap();
+    }
+    let log = dir
+        .path()
+        .join(ACCEPTANCE_RECORDS_DIR)
+        .join("recording-order.log");
+    let kept: Vec<String> = std::fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.starts_with("1 2 "))
+        .map(str::to_string)
+        .collect();
+    std::fs::write(&log, kept.join("\n") + "\n").unwrap();
+    assert_eq!(ProgressLedger::load(dir.path(), 3).revisits, 1);
+}

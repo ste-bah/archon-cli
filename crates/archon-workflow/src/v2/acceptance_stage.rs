@@ -349,8 +349,10 @@ pub fn write_round_record(
         )));
     }
     let bytes = serde_json::to_vec_pretty(record)?;
-    std::fs::write(&path, bytes).map_err(|source| WorkflowError::io(&path, source))?;
+    // The order entry first, synced: a record never exists without its
+    // place in the recording order unless the log itself failed.
     progress::note_recorded(run_dir, record.round, record.attempt);
+    std::fs::write(&path, bytes).map_err(|source| WorkflowError::io(&path, source))?;
     Ok(path)
 }
 

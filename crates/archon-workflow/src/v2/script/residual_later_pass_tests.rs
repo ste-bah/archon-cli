@@ -73,3 +73,19 @@ fn a_residual_plateau_carries_a_resumable_pause_cause() {
         plan.reported
     );
 }
+
+/// Round 6: a residual stop is waived on resume by the pause's own event
+/// when the waiver file could not be written.
+#[test]
+fn the_pause_event_waives_a_residual_stop_without_the_waiver_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = crate::v2::WorkflowV2ResultStore::new(dir.path().join("v2"));
+    assert!(!store.residual_stall_waived(4));
+    std::fs::write(
+        dir.path().join("events.jsonl"),
+        "{\"seq\":1,\"kind\":\"paused\",\"detail\":{\"event\":\"remediation_stall_pause\",\"evidence\":{\"pass\":4}}}\n",
+    )
+    .unwrap();
+    assert!(store.residual_stall_waived(4));
+    assert!(!store.residual_stall_waived(5));
+}

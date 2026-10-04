@@ -112,7 +112,12 @@
       legacyOutcome(last, done, unit, maxRounds, resolved, unresolved);
     }
     if (stalls.length > 0) {
-      await w.checkpoint(inUnit(`remediation-stall-${stalls.map((s) => `${slug(s.unit)}-${s.part}-${s.cycle}`).join("-")}`), {
+      // A bounded id: a digest (FNV-1a) of the sorted stalled units; the
+      // units themselves travel in the evidence.
+      const units = stalls.map((s) => `${s.unit}#${s.part}@${s.cycle}`).sort().join("|");
+      let digest = 0x811c9dc5;
+      for (let i = 0; i < units.length; i += 1) digest = Math.imul(digest ^ units.charCodeAt(i), 0x01000193) >>> 0;
+      await w.checkpoint(inUnit(`remediation-stall-${stalls.length}-${digest.toString(16).padStart(8, "0")}`), {
         remediationPause: { cause: "no_progress", failing_ids: [...new Set(stalls.flatMap((s) => s.failing_ids))].sort(),
           task_ids: [...new Set(stalls.flatMap((s) => s.task_ids))].sort(), stalls },
       });

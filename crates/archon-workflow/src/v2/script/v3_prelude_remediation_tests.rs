@@ -290,3 +290,40 @@ try {{ await remediateFindings([{{finding_id:'F'}}]); console.log('terminated');
             .contains("saved.patch")
     );
 }
+
+/// Round 6: the combined stall checkpoint id is bounded however many units
+/// stalled; the units stay in the evidence.
+#[test]
+fn the_combined_stall_checkpoint_id_is_bounded() {
+    let source = include_str!("v3_prim_remediate.js");
+    let script = format!(
+        r#"
+const withCompletionBlocked = (_, blocked) => blocked;
+const stringList = (v) => Array.isArray(v) ? v : [];
+const slug = (v) => v;
+const requestRemediationPlan = async () => ({{}});
+const planUnits = (all) => ({{units: Array.from({{length: 20}}, (_, n) => ({{key: `TASK-WITH-A-RATHER-LONG-NAME-${{n}}`, taskIds: [`T${{n}}`], targetFiles: ['a.rs'], own: all}})), unassigned: [], checks: new Set()}});
+const remediationCycle = async () => ({{closed: [], reasons: {{F: 'still failing'}}, verified: false, skippedForNoPatch: 1}});
+const verbatimEvidence = (v) => v;
+const w = {{checkpoint: async (id, opts) => {{ console.log(JSON.stringify({{id, units: opts.remediationPause.stalls.length}})); throw new Error('paused'); }}}};
+{source}
+try {{ await remediateFindings([{{finding_id:'F'}}]); }} catch (e) {{ if (e.message !== 'paused') throw e; }}
+"#
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("test.mjs");
+    std::fs::write(&path, script).unwrap();
+    let out = std::process::Command::new("node")
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let seen: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&out.stdout).trim()).unwrap();
+    assert_eq!(seen["units"], 20, "{seen}");
+    assert!(seen["id"].as_str().unwrap().len() <= 40, "{seen}");
+}

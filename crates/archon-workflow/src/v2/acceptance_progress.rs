@@ -123,25 +123,36 @@ impl ProgressLedger {
 /// loop at round 1, so (round, attempt) is not the order they ran in.
 const RECORDING_ORDER_FILE: &str = "recording-order.log";
 
-/// Appends `round attempt` to the recording order. Best effort: a record the
-/// log misses is still read, ordered after the logged ones.
+/// Appends `round attempt nanos` (the time of the write, since the epoch) to
+/// the recording order and syncs it. Best effort: a record the log misses
+/// is still read, placed by its own file time.
 pub(super) fn note_recorded(run_dir: &Path, round: u32, attempt: u32) {
     use std::io::Write;
-    let path = run_dir
-        .join(ACCEPTANCE_RECORDS_DIR)
-        .join(RECORDING_ORDER_FILE);
-    let appended = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .and_then(|mut file| writeln!(file, "{round} {attempt}"));
+    let dir = run_dir.join(ACCEPTANCE_RECORDS_DIR);
+    let path = dir.join(RECORDING_ORDER_FILE);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |at| at.as_nanos());
+    let appended = std::fs::create_dir_all(&dir)
+        .and_then(|()| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+        })
+        .and_then(|mut file| {
+            writeln!(file, "{round} {attempt} {nanos}")?;
+            file.sync_all()
+        });
     if let Err(error) = appended {
         tracing::warn!(%error, path = %path.display(), "acceptance recording order not appended");
     }
 }
 
-/// Each logged (round, attempt) with its position in the recording order.
-fn recording_order(run_dir: &Path) -> std::collections::BTreeMap<(u32, u32), usize> {
+/// Each logged (round, attempt) with the time it was recorded; the LAST
+/// entry wins, so a write retried after a failed one takes its new place.
+/// An entry whose record never landed matches no record and is ignored.
+fn recording_order(run_dir: &Path) -> std::collections::BTreeMap<(u32, u32), u128> {
     let text = std::fs::read_to_string(
         run_dir
             .join(ACCEPTANCE_RECORDS_DIR)
@@ -149,21 +160,34 @@ fn recording_order(run_dir: &Path) -> std::collections::BTreeMap<(u32, u32), usi
     )
     .unwrap_or_default();
     let mut order = std::collections::BTreeMap::new();
-    for (at, line) in text.lines().enumerate() {
-        let mut parts = line.split_whitespace().map(str::parse::<u32>);
-        if let (Some(Ok(round)), Some(Ok(attempt)), None) =
-            (parts.next(), parts.next(), parts.next())
+    for line in text.lines() {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if let [round, attempt, nanos] = parts[..]
+            && let (Ok(round), Ok(attempt), Ok(nanos)) = (
+                round.parse::<u32>(),
+                attempt.parse::<u32>(),
+                nanos.parse::<u128>(),
+            )
         {
-            order.entry((round, attempt)).or_insert(at);
+            order.insert((round, attempt), nanos);
         }
     }
     order
 }
 
-/// Every readable round record, in the order the records were written.
-/// Records the order log does not name (a run from before it, or a missed
-/// append) come first, by round then attempt. Gaps in numbering and stale
-/// ledgers cannot erase recorded states.
+/// When the record file at `path` was last written, in epoch nanoseconds.
+fn file_time(path: &Path) -> u128 {
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |at| at.as_nanos())
+}
+
+/// Every readable round record, in the order the records were written: by
+/// the time the order log gives it, else (a missed append, or a run from
+/// before the log) by its own file time, never simply first. Gaps in
+/// numbering and stale ledgers cannot erase recorded states.
 fn all_attempts(run_dir: &Path) -> Vec<AcceptanceRoundRecordV1> {
     let mut history = Vec::new();
     if let Ok(rounds) = std::fs::read_dir(run_dir.join(ACCEPTANCE_RECORDS_DIR)) {
@@ -178,22 +202,22 @@ fn all_attempts(run_dir: &Path) -> Vec<AcceptanceRoundRecordV1> {
                                 name.starts_with("attempt-") && name.ends_with(".json")
                             });
                     if is_record
-                        && let Ok(bytes) = std::fs::read(path)
+                        && let Ok(bytes) = std::fs::read(&path)
                         && let Ok(record) =
                             serde_json::from_slice::<AcceptanceRoundRecordV1>(&bytes)
                     {
-                        history.push(record);
+                        history.push((file_time(&path), record));
                     }
                 }
             }
         }
     }
     let order = recording_order(run_dir);
-    history.sort_by_key(|record| {
+    history.sort_by_key(|(written, record)| {
         let at = order.get(&(record.round, record.attempt)).copied();
-        (at.is_some(), at, record.round, record.attempt)
+        (at.unwrap_or(*written), record.round, record.attempt)
     });
-    history
+    history.into_iter().map(|(_, record)| record).collect()
 }
 
 /// Whether `current` reached a failing state none of `history` reached.
