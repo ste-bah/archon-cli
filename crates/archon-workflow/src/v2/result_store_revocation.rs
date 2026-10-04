@@ -68,6 +68,16 @@ impl WorkflowV2ResultStore {
             {
                 continue;
             }
+            // The archive is written only as a real directory; a link there
+            // (an alias of the call directory or a path outside the run) is
+            // corruption, refused before anything moves.
+            let archive = dir.join("superseded");
+            if fs::symlink_metadata(&archive).is_ok_and(|meta| meta.file_type().is_symlink()) {
+                return Err(WorkflowError::io(
+                    &archive,
+                    std::io::Error::other("superseded archive is a link, not a directory"),
+                ));
+            }
             // A FIFO, socket or device can never be read safely here, yet a
             // reader could still take outcome bytes from it later: quarantine
             // it into revoked/ unread.
