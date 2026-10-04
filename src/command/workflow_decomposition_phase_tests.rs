@@ -10,6 +10,14 @@ struct PhaseLlm {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for PhaseLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -190,6 +198,14 @@ struct RetryLlm {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for RetryLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,

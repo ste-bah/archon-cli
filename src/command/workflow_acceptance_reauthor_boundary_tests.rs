@@ -24,6 +24,14 @@ struct Capture(Mutex<Vec<WorkflowAgentCall>>);
 
 #[async_trait]
 impl WorkflowLlmClient for Capture {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn run_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {
         self.0.lock().unwrap().push(call);
         Ok(WorkflowAgentOutcome {

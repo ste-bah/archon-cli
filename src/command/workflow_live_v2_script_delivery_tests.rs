@@ -308,6 +308,14 @@ pub(super) struct TransientBlockedScriptLlm {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for TransientBlockedScriptLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -341,6 +349,14 @@ pub(super) struct CompletionBlockedScriptLlm {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for CompletionBlockedScriptLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -382,6 +398,14 @@ pub(super) struct RepairBlockedScriptLlm {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for RepairBlockedScriptLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,

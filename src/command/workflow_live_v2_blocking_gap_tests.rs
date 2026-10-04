@@ -33,6 +33,14 @@ struct BlockingWaveAgentClient {
 
 #[async_trait::async_trait]
 impl archon_workflow::WorkflowLlmClient for BlockingWaveAgentClient {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,

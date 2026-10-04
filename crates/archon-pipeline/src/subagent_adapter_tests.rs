@@ -436,3 +436,14 @@ fn distinct_pipeline_task_and_message_are_both_preserved() {
             .contains("Parent objective")
     );
 }
+
+/// A client that cannot restore a completed invocation refuses to continue
+/// one instead of answering with a fresh call (#241).
+#[tokio::test]
+async fn a_client_that_cannot_restore_refuses_to_continue() {
+    let error = NoopClient
+        .continue_agent(request(ToolAccessLevel::ReadOnly))
+        .await
+        .expect_err("a stateless client continued with a fresh call");
+    assert!(error.to_string().contains("start a new agent"), "{error}");
+}

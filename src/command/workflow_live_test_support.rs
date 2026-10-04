@@ -84,6 +84,14 @@ pub(crate) struct AlwaysInvalidItemsAgentClient {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for InvalidPlanner {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -108,6 +116,14 @@ export default async function workflow(w) {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for FlakyPlanner {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -136,6 +152,14 @@ export default async function workflow(w) {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for PlannerRepairRetryClient {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -175,6 +199,14 @@ impl WorkflowLlmClient for PlannerRepairRetryClient {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for GuttedImplementationPlanner {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -204,6 +236,14 @@ export default async function workflow(w) {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for FlakyAgentClient {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -236,6 +276,14 @@ impl WorkflowLlmClient for FlakyAgentClient {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for CompletionBlockedAgentClient {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -264,6 +312,14 @@ impl WorkflowLlmClient for CompletionBlockedAgentClient {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for SavedV2TemplateRunClient {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,

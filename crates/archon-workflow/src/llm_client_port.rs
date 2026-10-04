@@ -220,12 +220,18 @@ pub trait WorkflowLlmClient: Send + Sync {
     /// how to complete is still usable everywhere; hosts with a subagent
     /// runtime override it.
     /// Validation feedback for the preceding completed agent invocation.
-    /// Real subagent hosts override this; stateless clients keep compatibility.
+    ///
+    /// Refused by default: a continuation runs exactly the invocation it
+    /// continues or not at all (#241), and a fresh call in its place would
+    /// run under whatever confinement holds now. Only a host that restores the
+    /// completed invocation exactly overrides this.
     async fn continue_agent(
         &self,
-        call: WorkflowAgentCall,
+        _call: WorkflowAgentCall,
     ) -> WorkflowResult<WorkflowAgentOutcome> {
-        self.run_agent(call).await
+        Err(crate::error::WorkflowError::port(std::io::Error::other(
+            "cannot continue agent: this client keeps no completed agent session it can restore exactly; start a new agent",
+        )))
     }
 
     async fn run_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {

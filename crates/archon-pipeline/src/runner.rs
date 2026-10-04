@@ -397,8 +397,14 @@ pub trait LlmClient: Send + Sync {
     }
 
     /// Continue a completed invocation rather than creating a fresh agent.
-    async fn continue_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
-        self.run_agent(request).await
+    ///
+    /// Refused by default: a continuation runs exactly the invocation it
+    /// continues or not at all (#241). Only a client that restores the
+    /// completed invocation exactly overrides this.
+    async fn continue_agent(&self, _request: AgentExecutionRequest) -> Result<LlmResponse> {
+        anyhow::bail!(
+            "cannot continue agent: this client keeps no completed agent session it can restore exactly; start a new agent"
+        )
     }
 
     async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {

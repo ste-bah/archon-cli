@@ -90,6 +90,14 @@ impl WorkflowV2AgentClient for FakeAgentClient {
             .pop_front()
             .expect("response")
     }
+    /// The scripted replies stand for one continued session (#241).
+    async fn continue_agent_request(
+        &self,
+        _: &WorkflowV2AgentRequest,
+        prompt: String,
+    ) -> Result<String, WorkflowV2AgentError> {
+        self.run_agent(prompt).await
+    }
 }
 
 #[test]

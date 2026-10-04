@@ -124,6 +124,14 @@ impl WorkflowV2AgentClient for Scripted {
         self.prompts.lock().unwrap().push(prompt);
         Ok(self.answers.lock().unwrap().pop_front().expect("an answer"))
     }
+    /// The scripted replies stand for one continued session (#241).
+    async fn continue_agent_request(
+        &self,
+        _: &WorkflowV2AgentRequest,
+        prompt: String,
+    ) -> Result<String, WorkflowV2AgentError> {
+        self.run_agent(prompt).await
+    }
 }
 
 /// The live sequence: the host saw all five MCP tools succeed, the report

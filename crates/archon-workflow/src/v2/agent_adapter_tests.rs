@@ -280,22 +280,20 @@ struct SequenceClient {
 
 #[async_trait::async_trait]
 impl WorkflowV2AgentClient for SequenceClient {
-    async fn run_agent_request(
-        &self,
-        _request: &WorkflowV2AgentRequest,
-        _prompt: String,
-    ) -> Result<String, WorkflowV2AgentError> {
+    async fn run_agent(&self, _prompt: String) -> Result<String, WorkflowV2AgentError> {
         let mut outputs = self.outputs.lock().expect("outputs lock");
-        if outputs.is_empty() {
-            return Err(WorkflowV2AgentError::Transport(
-                "test client exhausted".to_string(),
-            ));
-        }
-        Ok(outputs.remove(0))
+        (!outputs.is_empty())
+            .then(|| outputs.remove(0))
+            .ok_or_else(|| WorkflowV2AgentError::Transport("test client exhausted".into()))
     }
 
-    async fn run_agent(&self, _prompt: String) -> Result<String, WorkflowV2AgentError> {
-        unreachable!("tests use run_agent_request")
+    /// The scripted replies stand for one continued session (#241).
+    async fn continue_agent_request(
+        &self,
+        _: &WorkflowV2AgentRequest,
+        prompt: String,
+    ) -> Result<String, WorkflowV2AgentError> {
+        self.run_agent(prompt).await
     }
 }
 
