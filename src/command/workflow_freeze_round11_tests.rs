@@ -243,11 +243,14 @@ fn generated_repairs(exhaustive: bool) {
     ];
     let (mut mutations, mut sequences, mut failures) = (0, 0, Vec::new());
     let (mut duplicate_mutation_count, mut duplicate_repair_count) = (0, 0);
+    // Parent/leaf kinds whose full duplicate-copy walk already ran.
+    let mut kinds = std::collections::HashSet::new();
     for (shape, mut sample) in corpus {
         if !exhaustive {
             compact(&mut sample);
         }
-        let (duplicate_mutations, duplicate_repairs) = duplicates::check(&sample, shape);
+        let (duplicate_mutations, duplicate_repairs) =
+            duplicates::check(&sample, shape, &mut kinds, exhaustive);
         mutations += duplicate_mutations;
         sequences += duplicate_repairs;
         duplicate_mutation_count += duplicate_mutations;

@@ -1,7 +1,7 @@
 //! Generate raw duplicate keys at every object-field pointer. Value cannot
 //! represent these mutations, so serialize them explicitly before prechecking.
 use super::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A field's copies as written: (key, value) pairs.
 type Copies = Vec<(String, Value)>;
@@ -89,12 +89,26 @@ fn invalid_value(sample: &Value, path: &str, shape: &ElementShape) -> Option<Val
 /// Each copy of the field at `path`: (renamed to an ignored key, invalid).
 type State = Vec<(bool, bool)>;
 
-/// Write three copies at `path` in every valid/invalid mix, then delete,
-/// rename (where the parent ignores unknown keys) or repair each copy, down
-/// to one copy. A change that alters the reader's verdict must change the
-/// count; a repair never raises it; where the parent refuses repeats, every
-/// deletion or rename lowers it. Returns (states, transitions) checked.
-fn copy_repairs(sample: &Value, path: &str, shape: &ElementShape) -> (usize, usize) {
+/// Parent/leaf kind of a duplicated field: (refuses repeats, ignores
+/// unknown keys, JSON type of the valid value).
+type Kind = (bool, bool, &'static str);
+
+/// Write three copies at `path`, then delete, rename (where the parent ignores
+/// unknown keys) or repair each copy. A change that alters the reader's
+/// verdict must change the count; a repair never raises it; where the parent
+/// refuses repeats, every deletion or rename lowers it.
+///
+/// The full walk starts from every valid/invalid mix and goes down to one
+/// copy. It runs for the first field of each parent/leaf kind, or for every
+/// field when `exhaustive`. Other fields check each action on each copy of
+/// the mix invalid, valid, invalid. Returns (states, transitions) checked.
+fn copy_repairs(
+    sample: &Value,
+    path: &str,
+    shape: &ElementShape,
+    kinds: &mut HashSet<Kind>,
+    exhaustive: bool,
+) -> (usize, usize) {
     let Some(invalid) = invalid_value(sample, path, shape) else {
         return (0, 0);
     };
@@ -121,17 +135,38 @@ fn copy_repairs(sample: &Value, path: &str, shape: &ElementShape) -> (usize, usi
     let (parent, _) = path.rsplit_once('/').unwrap();
     open.pointer_mut(parent).unwrap()[renamed] = json!(0);
     let open = raw_accepts(&serde_json::to_vec(&open).unwrap(), shape);
-    let refuses_repeats = judge(&vec![(false, false); 2]).1.is_err();
-    let mut seen = HashMap::new();
-    let mut work: Vec<State> = (0..8)
-        .map(|bits| (0..3).map(|i| (false, bits >> i & 1 == 1)).collect())
-        .collect();
+    // Every judged state, including renamed ones: judge each state once.
+    let mut verdicts: HashMap<State, (usize, Result<(), String>)> = HashMap::new();
+    let mut verdict = |state: &State| {
+        verdicts
+            .entry(state.clone())
+            .or_insert_with(|| judge(state))
+            .clone()
+    };
+    let refuses_repeats = verdict(&vec![(false, false); 2]).1.is_err();
+    let leaf = match valid {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    };
+    let full = kinds.insert((refuses_repeats, open, leaf)) || exhaustive;
+    let mut seen = HashSet::new();
+    let mut work: Vec<State> = if full {
+        (0..8)
+            .map(|bits| (0..3).map(|i| (false, bits >> i & 1 == 1)).collect())
+            .collect()
+    } else {
+        vec![vec![(false, true), (false, false), (false, true)]]
+    };
     let mut transitions = 0;
     while let Some(state) = work.pop() {
-        if seen.contains_key(&state) {
+        if !seen.insert(state.clone()) {
             continue;
         }
-        let before = judge(&state);
+        let before = verdict(&state);
         for i in 0..state.len() {
             let mut steps = Vec::new();
             if state.len() > 1 {
@@ -150,7 +185,7 @@ fn copy_repairs(sample: &Value, path: &str, shape: &ElementShape) -> (usize, usi
                 steps.push(("repair", next));
             }
             for (step, next) in steps {
-                let after = seen.get(&next).cloned().unwrap_or_else(|| judge(&next));
+                let after = verdict(&next);
                 let changed = after.1 != before.1;
                 let lowered = after.0 < before.0;
                 let ok = match step {
@@ -166,18 +201,22 @@ fn copy_repairs(sample: &Value, path: &str, shape: &ElementShape) -> (usize, usi
                     before.1,
                     after.1
                 );
-                if step != "rename" {
+                if full && step != "rename" {
                     work.push(next);
                 }
                 transitions += 1;
             }
         }
-        seen.insert(state, before);
     }
     (seen.len(), transitions)
 }
 
-pub(super) fn check(sample: &Value, shape: &ElementShape) -> (usize, usize) {
+pub(super) fn check(
+    sample: &Value,
+    shape: &ElementShape,
+    kinds: &mut HashSet<Kind>,
+    exhaustive: bool,
+) -> (usize, usize) {
     let mut paths = Vec::new();
     pointers(sample, "", &mut paths);
     let mut rejected = Vec::new();
@@ -188,7 +227,7 @@ pub(super) fn check(sample: &Value, shape: &ElementShape) -> (usize, usize) {
         if !sample.pointer(parent).unwrap().is_object() {
             continue;
         }
-        let (mixed, repairs) = copy_repairs(sample, &path, shape);
+        let (mixed, repairs) = copy_repairs(sample, &path, shape, kinds, exhaustive);
         mutations += mixed;
         mixed_repairs += repairs;
         let bytes = encode(sample, "", std::slice::from_ref(&path));
