@@ -40,21 +40,52 @@ impl WorkflowV2ResultStore {
         validate_branch_tree(&self.root.join("branches"))
     }
 
-    /// Everything item revocation will read, read now: the branch store's
-    /// shape, the call directory, and every stored outcome. Restart calls it
-    /// before it touches call records, so a refusal mutates nothing.
-    pub fn preflight_branch_revocation(&self, call_id: &str) -> WorkflowResult<()> {
+    /// The revocation of every stored outcome of `(call_id, item)` for each
+    /// item spelling, planned in one read before anything moves: the branch
+    /// store's shape, the call directory and every stored outcome. Restart
+    /// plans first, so a refusal mutates nothing; each file object moves once.
+    pub fn plan_item_revocation(
+        &self,
+        call_id: &str,
+        items: &[String],
+    ) -> WorkflowResult<Vec<(String, Vec<PathBuf>)>> {
         validate_branch_tree(&self.root.join("branches"))?;
         let dir = self.root.join("branches").join(sanitize_call_id(call_id));
         match fs::symlink_metadata(&dir) {
-            Ok(meta) if meta.is_dir() => stored_outcomes_in(&dir).map(|_| ()),
-            Ok(_) => Err(WorkflowError::io(
-                &dir,
-                std::io::Error::other("branch call path is not a directory"),
-            )),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(WorkflowError::io(&dir, err)),
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => {
+                return Err(WorkflowError::io(
+                    &dir,
+                    std::io::Error::other("branch call path is not a directory"),
+                ));
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(err) => return Err(WorkflowError::io(&dir, err)),
         }
+        let stored = stored_outcomes_in(&dir)?;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut plan = Vec::new();
+        for item in items {
+            let mut files = branch_files_in(&dir, item, &stored)?;
+            files.retain(|path| seen.insert(file_identity(path)));
+            plan.push((item.clone(), files));
+        }
+        Ok(plan)
+    }
+
+    /// Move a plan from [`Self::plan_item_revocation`]; the items that had files.
+    pub fn execute_item_revocation(
+        &self,
+        plan: Vec<(String, Vec<PathBuf>)>,
+    ) -> WorkflowResult<Vec<String>> {
+        let mut revoked = Vec::new();
+        for (item, files) in plan {
+            self.move_revoked(&files)?;
+            if !files.is_empty() {
+                revoked.push(item);
+            }
+        }
+        Ok(revoked)
     }
 
     pub fn revoke_branch_outcome(&self, call_id: &str, item_id: &str) -> WorkflowResult<bool> {

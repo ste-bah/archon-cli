@@ -204,3 +204,28 @@ fn item_restart_and_a_file_at_revoked_are_refused_before_any_mutation() {
         );
     }
 }
+
+/// Two spellings of one branch, linked to each other and from the archive:
+/// item restart plans both before anything moves and revokes every name.
+#[cfg(unix)]
+#[test]
+fn item_restart_plans_every_spelling_before_any_move() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run(&temp, &[CALL]);
+    let v2 = v2_store(&store, &run);
+    landed_then_superseded(&v2, "T-A");
+    let current = v2.branch_outcome_path(CALL, &item("T-A").id);
+    let call = current.parent().unwrap().to_path_buf();
+    let short = call.join("T-A.json");
+    std::os::unix::fs::symlink(current.file_name().unwrap(), &short).unwrap();
+    std::os::unix::fs::symlink("../T-A.json", call.join("superseded/landing.json")).unwrap();
+    invalidate_generated_v2_item(&store, &run, CALL, "T-A").unwrap();
+    for name in [current.clone(), short, call.join("superseded/landing.json")] {
+        assert!(
+            std::fs::symlink_metadata(&name).is_err(),
+            "{} stayed reusable",
+            name.display()
+        );
+    }
+    assert_revoked(&v2, "T-A");
+}
