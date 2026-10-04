@@ -18,10 +18,13 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 use crate::client::McpClient;
+#[cfg(test)]
 use crate::tool_bridge::qualified_tool_name;
 use crate::types::{McpError, ServerConfig, ServerState};
 
 mod connect;
+#[cfg(test)]
+mod regression_tests;
 #[cfg(test)]
 mod tests;
 
@@ -103,7 +106,10 @@ impl McpServerManager {
     /// server's state is set to `Crashed`.
     pub async fn start_all(&self, configs: Vec<ServerConfig>) -> Vec<McpError> {
         let mut errors = Vec::new();
-
+        // Register the whole batch before any server or background task logs.
+        for config in &configs {
+            config.configured_secrets().register();
+        }
         for config in configs {
             if let Err(e) = self.start_server(config).await {
                 errors.push(e);
@@ -115,6 +121,7 @@ impl McpServerManager {
 
     /// Start a single server and register it with the manager.
     async fn start_server(&self, config: ServerConfig) -> Result<(), McpError> {
+        config.configured_secrets().register();
         let name = config.name.clone();
         tracing::info!(server = %name, "starting MCP server");
 
@@ -162,11 +169,11 @@ impl McpServerManager {
             let mut servers = self.servers.write().await;
             let entry = servers
                 .get_mut(name)
-                .ok_or_else(|| McpError::ServerNotFound(name.into()))?;
+                .ok_or_else(|| McpError::ServerNotFound(name.into()).redacted())?;
 
             if entry.restart_count >= MAX_RESTART_ATTEMPTS {
                 entry.state = ServerState::Stopped;
-                return Err(McpError::MaxRestartsExceeded(name.into()));
+                return Err(McpError::MaxRestartsExceeded(name.into()).redacted());
             }
 
             entry.restart_count += 1;
@@ -295,37 +302,40 @@ impl McpServerManager {
     /// List tool names for a single Ready server, as qualified `mcp__server__tool` strings.
     /// Returns an empty vec if the server is not Ready or not found.
     pub async fn list_tools_for(&self, server_name: &str) -> Vec<String> {
-        let servers = self.servers.read().await;
-        let Some(entry) = servers.get(server_name) else {
-            return Vec::new();
-        };
-        if entry.state != ServerState::Ready {
-            return Vec::new();
-        }
-        let Some(ref client) = entry.client else {
-            return Vec::new();
-        };
-        match client.list_tools().await {
-            Ok(tools) => tools
-                .iter()
-                .map(|t| snapshot_tool_name(server_name, &t.name))
-                .collect(),
-            Err(_) => Vec::new(),
-        }
+        self.tools_for(server_name)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .map(|tool| {
+                use archon_tools::tool::Tool;
+                tool.name().to_string()
+            })
+            .collect()
     }
 
     /// The [`crate::tool_bridge::McpTool`]s of one server, failing when the
     /// server is not Ready or its `tools/list` fails instead of logging it.
-    /// No lock is held while the listing is awaited, so a caller may bound it.
+    /// No lock is held while listing; the client enforces an idle deadline.
     pub async fn tools_for(
         &self,
         server_name: &str,
+    ) -> Result<Vec<crate::tool_bridge::McpTool>, McpError> {
+        self.tools_for_with_idle_timeout(server_name, crate::client::DISCOVERY_IDLE_TIMEOUT)
+            .await
+    }
+
+    /// Discover one server's tools with a caller-selected no-progress budget.
+    /// Progress extends this deadline; there is no total discovery time limit.
+    pub async fn tools_for_with_idle_timeout(
+        &self,
+        server_name: &str,
+        idle_timeout: Duration,
     ) -> Result<Vec<crate::tool_bridge::McpTool>, McpError> {
         let (client, policy) = {
             let servers = self.servers.read().await;
             let entry = servers
                 .get(server_name)
-                .ok_or_else(|| McpError::ServerNotFound(server_name.into()))?;
+                .ok_or_else(|| McpError::ServerNotFound(server_name.into()).redacted())?;
             match (&entry.client, entry.state) {
                 (Some(client), ServerState::Ready) => {
                     (Arc::clone(client), entry.config.tool_policy.clone())
@@ -333,12 +343,13 @@ impl McpServerManager {
                 (_, state) => {
                     return Err(McpError::ToolCallFailed(format!(
                         "server '{server_name}' is not ready (state {state:?})"
-                    )));
+                    ))
+                    .redacted());
                 }
             }
         };
         Ok(client
-            .list_tools()
+            .list_tools_with_idle_timeout(idle_timeout)
             .await?
             .into_iter()
             .map(|tool| {
@@ -356,31 +367,20 @@ impl McpServerManager {
     /// Ready servers. Returns a `Vec` ready to be boxed and registered into a
     /// `ToolRegistry`.
     pub async fn build_mcp_tools(&self) -> Vec<crate::tool_bridge::McpTool> {
-        let servers = self.servers.read().await;
+        let names = {
+            let servers = self.servers.read().await;
+            servers
+                .iter()
+                .filter(|(_, entry)| entry.state == ServerState::Ready)
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>()
+        };
         let mut tools = Vec::new();
-        for (server_name, entry) in servers.iter() {
-            if entry.state != ServerState::Ready {
-                continue;
-            }
-            if let Some(ref client) = entry.client {
-                match client.list_tools().await {
-                    Ok(tool_defs) => {
-                        for tool_def in tool_defs {
-                            tools.push(crate::tool_bridge::McpTool::with_policy(
-                                server_name,
-                                tool_def,
-                                Arc::clone(client),
-                                entry.config.tool_policy.clone(),
-                            ));
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            server = %server_name,
-                            error = %e,
-                            "failed to list tools for registry"
-                        );
-                    }
+        for name in names {
+            match self.tools_for(&name).await {
+                Ok(listed) => tools.extend(listed),
+                Err(error) => {
+                    tracing::warn!(server = %name, %error, "failed to list tools for registry")
                 }
             }
         }
@@ -393,30 +393,29 @@ impl McpServerManager {
     /// but do not prevent other servers from shutting down.
     pub async fn shutdown_all(&self) -> Vec<McpError> {
         let mut errors = Vec::new();
-        let mut servers = self.servers.write().await;
-
-        let names: Vec<String> = servers.keys().cloned().collect();
-        for name in names {
-            if let Some(mut entry) = servers.remove(&name) {
-                if let Some(arc_client) = entry.client.take() {
-                    tracing::info!(server = %name, "shutting down MCP server");
-                    match Arc::try_unwrap(arc_client) {
-                        Ok(client) => {
-                            if let Err(e) = client.shutdown().await {
-                                tracing::error!(server = %name, error = %e, "shutdown error");
-                                errors.push(e);
-                            }
-                        }
-                        Err(_arc) => {
-                            tracing::warn!(
-                                server = %name,
-                                "McpClient Arc has other owners; skipping graceful shutdown"
-                            );
+        let entries = {
+            let mut servers = self.servers.write().await;
+            std::mem::take(&mut *servers)
+        };
+        for (name, mut entry) in entries {
+            if let Some(arc_client) = entry.client.take() {
+                tracing::info!(server = %name, "shutting down MCP server");
+                match Arc::try_unwrap(arc_client) {
+                    Ok(client) => {
+                        if let Err(e) = client.shutdown().await {
+                            tracing::error!(server = %name, error = %e, "shutdown error");
+                            errors.push(e);
                         }
                     }
+                    Err(_arc) => {
+                        tracing::warn!(
+                            server = %name,
+                            "McpClient Arc has other owners; skipping graceful shutdown"
+                        );
+                    }
                 }
-                entry.state = ServerState::Stopped;
             }
+            entry.state = ServerState::Stopped;
         }
 
         errors
@@ -429,6 +428,7 @@ impl Default for McpServerManager {
     }
 }
 
+#[cfg(test)]
 fn snapshot_tool_name(server_name: &str, tool_name: &str) -> String {
     qualified_tool_name(server_name, tool_name)
 }

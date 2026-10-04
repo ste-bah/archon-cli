@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 
+use archon_observability::secret_values::SecretValues;
 use archon_workflow::{GateEnvelopeV1, WorkflowError, WorkflowResult};
 
 use super::workflow_host_command_catalog::HostCommandResolutionContext;
@@ -25,10 +26,8 @@ const SECRET_NAME_PARTS: &[&str] = &[
     "CREDENTIAL",
     "PRIVATE",
 ];
-/// Shorter values are not credentials, and replacing them would only garble
-/// ordinary output.
-const MIN_SECRET_LEN: usize = 8;
-pub(crate) const REDACTED: &str = "[REDACTED]";
+#[cfg(test)]
+pub(crate) use archon_observability::secret_values::REDACTED_VALUE as REDACTED;
 
 pub(crate) fn utf8(bytes: Vec<u8>, stream: &str) -> WorkflowResult<String> {
     String::from_utf8(bytes).map_err(|error| {
@@ -36,7 +35,7 @@ pub(crate) fn utf8(bytes: Vec<u8>, stream: &str) -> WorkflowResult<String> {
     })
 }
 
-pub(crate) struct HostSecrets(Vec<String>);
+pub(crate) struct HostSecrets(SecretValues);
 
 impl HostSecrets {
     /// Provider credentials and credential-named allowlisted values the child was given.
@@ -44,7 +43,7 @@ impl HostSecrets {
         context: &HostCommandResolutionContext,
         environment: &BTreeMap<String, OsString>,
     ) -> Self {
-        let mut values = context
+        let values = context
             .acceptance_environment_allowlist
             .iter()
             .filter(|name| {
@@ -58,18 +57,12 @@ impl HostSecrets {
                     .filter(|name| !PROVIDER_SETTINGS.contains(&name.as_str())),
             )
             .filter_map(|name| environment.get(name)?.to_str().map(str::to_string))
-            .filter(|value| value.len() >= MIN_SECRET_LEN)
             .collect::<Vec<_>>();
-        // Longest first, so a value containing another is replaced whole.
-        values.sort_by_key(|value| std::cmp::Reverse(value.len()));
-        values.dedup();
-        Self(values)
+        Self(SecretValues::new(values.iter().map(String::as_str)))
     }
 
     pub(crate) fn text(&self, text: &str) -> String {
-        self.0.iter().fold(text.to_string(), |text, value| {
-            text.replace(value.as_str(), REDACTED)
-        })
+        self.0.text(text)
     }
 
     /// Parse child JSON, redacting diagnostics before they leave this boundary.

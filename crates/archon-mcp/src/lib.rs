@@ -10,6 +10,7 @@ mod http_client;
 pub mod http_transport;
 pub mod lifecycle;
 pub mod oauth_pkce;
+mod secrets;
 pub mod sse_mcp_transport;
 pub mod sse_oauth_transport;
 pub mod sse_reconnect;

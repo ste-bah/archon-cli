@@ -228,10 +228,10 @@ impl Tool for McpTool {
             serde_json::Value::Object(map) => Some(map),
             serde_json::Value::Null => None,
             other => {
-                return ToolResult::error(format!(
+                return ToolResult::error(self.client.redact(&format!(
                     "MCP tool '{}' expects an object input, got: {}",
                     self.qualified_name, other
-                ));
+                )));
             }
         };
 
@@ -239,14 +239,15 @@ impl Tool for McpTool {
             Ok(mcp_result) => {
                 let text = flatten_content(&mcp_result.content);
                 if mcp_result.is_error {
-                    ToolResult::error(text)
+                    ToolResult::error(self.client.redact(&text))
                 } else {
                     ToolResult::success(text)
                 }
             }
-            Err(e) => {
-                ToolResult::error(format!("MCP call to '{}' failed: {e}", self.qualified_name))
-            }
+            Err(e) => ToolResult::error(self.client.redact(&format!(
+                "MCP call to '{}' failed: {e}",
+                self.qualified_name
+            ))),
         }
     }
 
