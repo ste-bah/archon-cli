@@ -465,6 +465,7 @@ async fn repository_audit_open_obligation_blocks_cached_write_credit() {
     let mut runner = reuse_test_runner(&store, &run, &v2, serde_json::Value::Null, None);
     runner.client = runner.client.with_audit(audit);
     let host = WorkflowScriptHost {
+        host_occurrences: Default::default(),
         scaffold_hash: "fixture".into(),
         envelope_shape: ScriptEnvelopeShape::Compat,
         runner,

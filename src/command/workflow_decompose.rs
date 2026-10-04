@@ -27,6 +27,8 @@ pub(crate) const FIXED_SCRIPT_SOURCE: &str = concat!(
     include_str!("workflow_decompose_v1_acceptance.js"),
     "\n",
     include_str!("workflow_decompose_v1_set_gate.js"),
+    "\n",
+    include_str!("workflow_decompose_v1_progress.js"),
 );
 pub(crate) const FIXED_DECOMPOSITION_STATE_PATH: &str = "decomposition/state.json";
 pub(crate) const FIXED_CATALOG_PATH: &str = "decomposition/command-catalog.json";
@@ -478,3 +480,7 @@ use claim::{read_fixed_state, read_run_json};
 #[cfg(test)]
 #[path = "workflow_decompose_repair_tests.rs"]
 mod repair_tests;
+
+#[cfg(test)]
+#[path = "workflow_decompose_progress_tests.rs"]
+pub(crate) mod progress_tests;

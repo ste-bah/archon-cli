@@ -1,7 +1,6 @@
 use super::*;
 
-/// The board this test binary shares, installed exactly as session boot and
-/// `workflow_live_board.rs` install a real one.
+/// The shared board, installed as session boot and `workflow_live_board.rs` do.
 ///
 /// The graph itself lives in `workflow_live_test_support` rather than here, so
 /// that it is genuinely one board per binary: the fixtures in this file are no
@@ -348,6 +347,7 @@ async fn failed_final_report_emits_host_built_fallback() {
         None,
     );
     let host = Arc::new(WorkflowScriptHost {
+        host_occurrences: Default::default(),
         scaffold_hash: workflow_scaffold_hash("# final report fallback fixture"),
         envelope_shape: ScriptEnvelopeShape::Compat,
         runner,

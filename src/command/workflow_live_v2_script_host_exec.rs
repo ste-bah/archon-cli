@@ -57,6 +57,10 @@ impl WorkflowScriptHost {
         if method == crate::command::workflow_live::workflow_script_tools::RUN_TOOL_METHOD {
             return self.run_script_tool(&payload).await;
         }
+        // Issue 261: a pause request is control flow, not a workflow call.
+        if method == archon_workflow::v2::script::SCRIPT_PAUSE_METHOD {
+            return self.request_script_pause(&payload).await;
+        }
         let request: ScriptHostRequest = serde_json::from_str(&payload)?;
         let mut execution = self.execution_from_request(&method, request)?;
         if execution.call.method == WorkflowV2HostMethod::HostCommand {
@@ -76,8 +80,13 @@ impl WorkflowScriptHost {
                 )
             })?;
             let identity = executor.call_identity(request)?;
-            execution.call.id = identity.clone();
-            execution.input["call_id"] = serde_json::Value::String(identity);
+            let occurrence = self.host_occurrences.next(&identity);
+            crate::command::workflow_host_command_occurrence::stamp_occurrence(
+                &mut execution.call,
+                &mut execution.input,
+                &identity,
+                occurrence,
+            );
         }
         if let Some(view) = self.escalation_refused_view(&execution)? {
             return Ok(view);
@@ -108,6 +117,14 @@ impl WorkflowScriptHost {
         // round describes a tree that may no longer exist, so it is never
         // replayed, by any reuse path. Re-running costs one round of checks.
         let reusable_kind = !archon_workflow::v2::script::is_acceptance_stage_call(&execution.call);
+        // Issue 261: what a taken pause covers replays verbatim, first.
+        if reusable_kind
+            && let Some(view) = self
+                .replay_covered_attempt(&execution, &input_hash, execution_generation)
+                .await?
+        {
+            return Ok(view);
+        }
         if reusable_kind
             && let Some(view) = self
                 .replay_superseded_history(&execution, &input_hash, execution_generation)

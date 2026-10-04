@@ -10,7 +10,7 @@ use archon_workflow::{WorkflowLlmClientFactory, WorkflowLlmClientRequest};
 
 use crate::cli_args::WorkflowAction;
 use crate::cli_args::{WorkflowFreezeAcceptanceArgs, WorkflowFreezeSkeletonArgs};
-use crate::command::workflow_freeze_candidate::{candidate_document, candidate_parse_error};
+use crate::command::workflow_freeze_candidate::{candidate_document, candidate_refusal};
 
 #[path = "workflow_freeze_acceptance_cli.rs"]
 mod acceptance;
@@ -160,22 +160,34 @@ async fn stage_acceptance(
         })
         .await
         .context("building the staged acceptance judge client")?;
+    let gate = (
+        "freeze-acceptance",
+        crate::command::workflow_gate::GateId::FreezeAcceptance,
+        "acceptance",
+    );
+    // Every entry's fields first: assembly reads the entries vector whole.
+    let shape = &defects::ENTRY_SHAPE;
+    if let Some(refused) = defects::refuse_element_shapes(cwd, staged, gate, &candidate, shape) {
+        return refused;
+    }
     let candidate =
-        match crate::command::workflow_freeze_candidate::acceptance_candidate(&candidate) {
+        match crate::command::workflow_freeze_candidate::acceptance_candidate_for_validation(
+            &candidate,
+        ) {
             Ok(bytes) => bytes,
             Err(error) => {
-                return refuse_candidate_artifact(
+                return defects::refuse_candidate_error(
                     cwd,
                     staged,
                     "freeze-acceptance",
                     crate::command::workflow_gate::GateId::FreezeAcceptance,
                     "acceptance",
-                    &error.to_string(),
+                    &error,
                 );
             }
         };
-    if let Some(reason) =
-        candidate_parse_error::<archon_workflow::task_set_contract::AcceptanceContract>(&candidate)
+    if let Some((code, reason)) =
+        candidate_refusal::<archon_workflow::task_set_contract::AcceptanceContract>(&candidate)
     {
         return refuse_candidate_artifact(
             cwd,
@@ -183,6 +195,7 @@ async fn stage_acceptance(
             "freeze-acceptance",
             crate::command::workflow_gate::GateId::FreezeAcceptance,
             "acceptance",
+            code,
             &reason,
         );
     }
@@ -199,13 +212,13 @@ async fn stage_acceptance(
     {
         Ok(prepared) => prepared,
         Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
-            return refuse_candidate_artifact(
+            return defects::refuse_candidate_error(
                 cwd,
                 staged,
                 "freeze-acceptance",
                 crate::command::workflow_gate::GateId::FreezeAcceptance,
                 "acceptance",
-                &format!("{error:#}"),
+                &error,
             );
         }
         Err(error) => {
@@ -236,20 +249,26 @@ fn stage_skeleton(
     let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
     let tasks_root = absolute(cwd, tasks);
     let prd_path = absolute(cwd, prd);
-    let marker = serde_json::from_slice::<serde_json::Value>(&candidate_document(&candidate))
-        .ok()
-        .and_then(|value| {
-            crate::command::workflow_freeze_candidate::skeleton_marker_refusal(&value)
-        });
-    if let Some(reason) = marker.or_else(|| {
-        candidate_parse_error::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
-    }) {
+    let gate = (
+        "freeze-skeleton",
+        crate::command::workflow_gate::GateId::FreezeSkeleton,
+        "skeleton",
+    );
+    if let Some(refused) =
+        defects::refuse_element_shapes(cwd, staged, gate, &candidate, &defects::TASK_SHAPE)
+    {
+        return refused;
+    }
+    if let Some((code, reason)) =
+        candidate_refusal::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
+    {
         return refuse_candidate_artifact(
             cwd,
             staged,
             "freeze-skeleton",
             crate::command::workflow_gate::GateId::FreezeSkeleton,
             "skeleton",
+            code,
             &reason,
         );
     }
@@ -262,13 +281,13 @@ fn stage_skeleton(
     ) {
         Ok(prepared) => prepared,
         Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
-            return refuse_candidate_artifact(
+            return defects::refuse_candidate_error(
                 cwd,
                 staged,
                 "freeze-skeleton",
                 crate::command::workflow_gate::GateId::FreezeSkeleton,
                 "skeleton",
-                &format!("{error:#}"),
+                &error,
             );
         }
         Err(error) => return report_operational_failure(cwd, staged, "freeze-skeleton", &error),
@@ -342,14 +361,20 @@ fn exit_incomplete_resumable(
     std::process::exit(crate::command::workflow_host_command_operational::EXIT_INCOMPLETE_RESUMABLE)
 }
 
+#[path = "workflow_freeze_defects.rs"]
+mod defects;
+
 fn refuse_candidate_artifact(
     cwd: &Path,
     staged: StagedArgs<'_>,
     command_id: &str,
     gate_id: crate::command::workflow_gate::GateId,
     subject: &str,
+    code: &str,
     reason: &str,
 ) -> Result<()> {
+    // The caller names the code, so the refusal's stage is the host's own
+    // classification, never a guess from its message.
     let finding = crate::command::workflow_gate::GateFinding::new(
         gate_id,
         format!(
@@ -358,7 +383,12 @@ fn refuse_candidate_artifact(
         subject,
         None,
         archon_workflow::RemediationScope::CandidateArtifact,
-    );
+    )
+    .with_defect(archon_workflow::defect::DeterministicDefect::new(
+        code,
+        subject,
+        "candidate",
+    ));
     write_staged_manifest(
         cwd,
         staged,

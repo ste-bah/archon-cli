@@ -11,6 +11,13 @@ pub const WORKFLOW_CONTROL_CODE: &str = "workflow_control";
 /// carrying the envelope's `kind` ("pause" or "cancel") and `message`.
 pub const WORKFLOW_CONTROL_ENVELOPE_KEY: &str = "__archon_control";
 
+/// The host method behind `w.pause(id, evidence)` (Issue 261): a script asks
+/// the host to pause its run. It is control flow, not a workflow call: it has
+/// no call record and takes part in no reuse. The live host pauses the run the
+/// first time an id is requested and answers `{ resumed: true }` once a
+/// resumed run requests it again; a dry run answers it as resumed.
+pub const SCRIPT_PAUSE_METHOD: &str = "pause";
+
 pub fn script_source(harness_source: &str, script_args: Option<&serde_json::Value>) -> String {
     let normalized = normalize_workflow_export(harness_source);
     let v3_primitives = V3_PRIMITIVES_JS;
@@ -89,6 +96,8 @@ const __archonW = Object.freeze({{
     return __archonCall("runTool", `${{name}}#${{__archonToolSeq}}`, undefined, {{ name, input }});
   }},
   checkpoint: (id, options = {{}}) => __archonCall("checkpoint", id, undefined, options),
+  // Issue 261: pause this run with `evidence`; resolves only on a resumed run.
+  pause: (id, evidence = {{}}) => __archonCall("{SCRIPT_PAUSE_METHOD}", id, undefined, {{ evidence }}),
   saveArtifact: (id, sourceOrOptions = {{}}, options) => __archonMaybeSourceCall("saveArtifact", id, sourceOrOptions, options),
   requireArtifact: (id, sourceOrOptions = {{}}, options) => __archonMaybeSourceCall("requireArtifact", id, sourceOrOptions, options),
   reduce: (id, sourceOrOptions = {{}}, options) => __archonMaybeSourceCall("reduce", id, sourceOrOptions, options),

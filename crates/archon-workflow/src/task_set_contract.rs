@@ -151,6 +151,7 @@ pub struct ResidualGapRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskSetContractError {
     pub message: String,
+    pub defects: Vec<crate::defect::ValidationDefect>,
 }
 
 impl fmt::Display for TaskSetContractError {
@@ -168,129 +169,35 @@ pub fn validate_acceptance_contract(
     expected_acceptance_ids: &BTreeSet<String>,
     require_judgments: bool,
 ) -> ContractResult<()> {
-    validate_acceptance_structure(contract, expected_acceptance_ids, require_judgments)?;
-    if let Some(finding) = acceptance_policy_findings(contract).into_iter().next() {
-        return invalid(finding.message);
+    let mut defects =
+        acceptance_structure_defects(contract, expected_acceptance_ids, require_judgments);
+    defects.extend(
+        acceptance_policy_findings(contract)
+            .into_iter()
+            .enumerate()
+            .map(|(index, finding)| crate::defect::ValidationDefect {
+                identity: finding.identity.unwrap_or_else(|| {
+                    crate::defect::DeterministicDefect::new(
+                        "refuted_check",
+                        "acceptance",
+                        format!("judgment/{index}"),
+                    )
+                }),
+                message: finding.message,
+            }),
+    );
+    if defects.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    Err(TaskSetContractError {
+        message: crate::defect::defect_message(&defects),
+        defects,
+    })
 }
 
-pub fn validate_acceptance_structure(
-    contract: &AcceptanceContract,
-    expected_acceptance_ids: &BTreeSet<String>,
-    require_judgments: bool,
-) -> ContractResult<()> {
-    if contract.schema_version != 1 {
-        return invalid(format!(
-            "acceptance contract schema_version must be 1, found {}",
-            contract.schema_version
-        ));
-    }
-    if contract.acceptance.is_empty() {
-        return invalid("acceptance contract examined zero acceptance checks; this is not a pass");
-    }
-    let unknown_permissions: Vec<_> = contract
-        .gap_policy
-        .permitted_acceptance_ids
-        .difference(expected_acceptance_ids)
-        .cloned()
-        .collect();
-    if !unknown_permissions.is_empty() {
-        return invalid(format!(
-            "gap_policy.permitted_acceptance_ids contains unknown ids {}; remove each unknown id or correct it to one defined by the PRD",
-            unknown_permissions.join(", ")
-        ));
-    }
-    let mut seen = BTreeSet::new();
-    for criterion in &contract.acceptance {
-        if !expected_acceptance_ids.contains(&criterion.id) {
-            return invalid(format!(
-                "acceptance id '{}' is not defined by the PRD; remove it or correct the id",
-                criterion.id
-            ));
-        }
-        if !seen.insert(criterion.id.clone()) {
-            return invalid(format!(
-                "acceptance id '{}' appears more than once; keep exactly one check for this id",
-                criterion.id
-            ));
-        }
-        validate_criterion_structure(criterion, require_judgments)?;
-        if criterion.gap_permitted
-            != contract
-                .gap_policy
-                .permitted_acceptance_ids
-                .contains(&criterion.id)
-        {
-            return invalid(format!(
-                "acceptance id '{}' gap_permitted disagrees with gap_policy; make both declarations match",
-                criterion.id
-            ));
-        }
-    }
-    let missing: Vec<_> = expected_acceptance_ids.difference(&seen).cloned().collect();
-    if !missing.is_empty() {
-        return invalid(format!(
-            "acceptance contract is missing checks for {}; keep every check already present and add one check for each id listed, so every PRD acceptance id has its own check",
-            missing.join(", ")
-        ));
-    }
-    let mut supplementary = BTreeSet::new();
-    for criterion in &contract.supplementary {
-        if !criterion.id.starts_with("SUP-") {
-            return invalid(format!(
-                "supplementary check '{}' must use a distinct SUP-* id",
-                criterion.id
-            ));
-        }
-        if expected_acceptance_ids.contains(&criterion.id)
-            || !supplementary.insert(criterion.id.clone())
-        {
-            return invalid(format!(
-                "supplementary check '{}' collides with an acceptance or supplementary id; choose a distinct SUP-* id",
-                criterion.id
-            ));
-        }
-        if criterion.gap_permitted {
-            return invalid(format!(
-                "supplementary check '{}' cannot be covered by a residual gap; set gap_permitted to false",
-                criterion.id
-            ));
-        }
-        validate_criterion_structure(criterion, require_judgments)?;
-    }
-    Ok(())
-}
-
-fn validate_criterion_structure(
-    criterion: &AcceptanceCriterion,
-    require_judgments: bool,
-) -> ContractResult<()> {
-    if criterion.criterion.trim().is_empty() {
-        return invalid(format!(
-            "check '{}' has empty criterion text; copy the exact criterion text",
-            criterion.id
-        ));
-    }
-    if let AcceptanceCheck::Floor { contract } = &criterion.check {
-        serde_json::to_value(contract).map_err(|error| contract_error(error.to_string()))?;
-    }
-    if require_judgments {
-        for (field, value) in [
-            ("counterexample", criterion.judgment.counterexample.as_str()),
-            ("reason", criterion.judgment.reason.as_str()),
-            ("host_call_id", criterion.judgment.host_call_id.as_str()),
-        ] {
-            if value.trim().is_empty() {
-                return invalid(format!(
-                    "check '{}' judgment field '{field}' is empty; re-run freeze-acceptance so the host judge records it",
-                    criterion.id
-                ));
-            }
-        }
-    }
-    Ok(())
-}
+#[path = "task_set_contract_structure.rs"]
+mod structure;
+pub use structure::{acceptance_structure_defects, validate_acceptance_structure};
 
 pub fn validate_acceptance_bundle(
     tasks_root: &Path,
@@ -483,6 +390,7 @@ fn invalid<T>(message: impl Into<String>) -> ContractResult<T> {
 fn contract_error(message: impl Into<String>) -> TaskSetContractError {
     TaskSetContractError {
         message: message.into(),
+        defects: Vec::new(),
     }
 }
 

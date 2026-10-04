@@ -74,9 +74,20 @@ fn first_json_document(bytes: &[u8]) -> &[u8] {
 /// packaging problem, while one that parses but lacks a field is a shape
 /// problem, and telling an author to remove code fences it did not emit sends
 /// it to repair the wrong thing.
+#[cfg(test)]
 pub(crate) fn candidate_parse_error<T: serde::de::DeserializeOwned>(
     candidate: &[u8],
 ) -> Option<String> {
+    candidate_refusal::<T>(candidate).map(|(_, reason)| reason)
+}
+
+/// Why a candidate cannot be read as `T`, with the host code that stages it:
+/// `invalid_json` when the bytes are not JSON at all (the parse stage), and
+/// `invalid_candidate_shape` when they are JSON of the wrong shape (the shape
+/// stage; serde names one field at a time).
+pub(crate) fn candidate_refusal<T: serde::de::DeserializeOwned>(
+    candidate: &[u8],
+) -> Option<(&'static str, String)> {
     let document = candidate_document(candidate);
     let Err(error) = serde_json::from_slice::<T>(&document) else {
         return None;
@@ -88,10 +99,14 @@ pub(crate) fn candidate_parse_error<T: serde::de::DeserializeOwned>(
             .ok()
             .and_then(archon_workflow::describe_json_fault)
             .unwrap_or_else(|| error.to_string());
-        return Some(format!("the reply is not a JSON document ({described})"));
+        return Some((
+            "invalid_json",
+            format!("the reply is not a JSON document ({described})"),
+        ));
     }
-    Some(format!(
-        "the JSON document does not match the required shape ({error})"
+    Some((
+        "invalid_candidate_shape",
+        format!("the JSON document does not match the required shape ({error})"),
     ))
 }
 
@@ -270,52 +285,14 @@ mod entry_assembly_tests {
 /// host reads verbatim. Prose and host-owned fields (`criterion`, `judgment`,
 /// `covers`) never refuse, so an author mentioning the marker cannot loop.
 /// Each finding uses the `check '<id>': ...` form the author loop re-authors.
-pub(crate) fn redaction_marker_refusal(candidate: &serde_json::Value) -> Option<String> {
-    let mut named = Vec::new();
-    for list in ["entries", "supplementary", "acceptance"] {
-        let entries = candidate.get(list).and_then(serde_json::Value::as_array);
-        for entry in entries.into_iter().flatten() {
-            let id = entry.get("id").and_then(serde_json::Value::as_str);
-            if let (Some(id), Some(field)) = (id, marked_field(entry, &["check"])) {
-                named.push(format!("check '{id}': {}", marker_guidance(&field)));
-            }
-        }
-    }
-    (!named.is_empty()).then(|| named.join("; "))
-}
+#[path = "workflow_freeze_marker_defects.rs"]
+mod markers;
+pub(crate) use markers::marker_defects;
 
-/// [`redaction_marker_refusal`] for a task skeleton: each task's `file_name`,
-/// `depends_on` (consumed artifact paths) and `deliverable_contracts`, which
-/// the host stages and verifies verbatim. Ids and the host-owned
-/// `acceptance_digest` are not inspected.
+#[cfg(test)]
 pub(crate) fn skeleton_marker_refusal(candidate: &serde_json::Value) -> Option<String> {
-    let tasks = candidate.get("tasks").and_then(serde_json::Value::as_array);
-    let named: Vec<String> = tasks
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .filter_map(|(index, task)| {
-            let fields = ["file_name", "depends_on", "deliverable_contracts"];
-            let field = marked_field(task, &fields)?;
-            let id = task.get("task_id").and_then(serde_json::Value::as_str);
-            Some(format!(
-                "task '{}': {}",
-                id.unwrap_or("?"),
-                marker_guidance(&format!("/tasks/{index}{field}"))
-            ))
-        })
-        .collect();
-    (!named.is_empty()).then(|| named.join("; "))
-}
-
-/// The pointer, relative to `object`, of the first of `fields` that holds the
-/// marker as a whole word.
-fn marked_field(object: &serde_json::Value, fields: &[&str]) -> Option<String> {
-    fields.iter().find_map(|field| {
-        let value = object.get(*field)?;
-        let inner = archon_workflow::events::redaction_marker_path(value)?;
-        Some(format!("/{field}{inner}"))
-    })
+    let defects = marker_defects(candidate, true);
+    (!defects.is_empty()).then(|| archon_workflow::defect::defect_message(&defects))
 }
 
 fn marker_guidance(field: &str) -> String {
@@ -327,11 +304,27 @@ fn marker_guidance(field: &str) -> String {
 
 /// Assemble independently authored entries before the existing whole-contract gate.
 /// Legacy complete-contract input remains supported by the same CLI.
+#[cfg(test)]
 pub(crate) fn acceptance_candidate(candidate: &[u8]) -> anyhow::Result<Vec<u8>> {
+    assemble_acceptance(candidate, true)
+}
+
+/// Staged validation collects marker, structure and check defects together.
+pub(crate) fn acceptance_candidate_for_validation(candidate: &[u8]) -> anyhow::Result<Vec<u8>> {
+    assemble_acceptance(candidate, false)
+}
+
+/// The judgment the host stamps over an authored entry's own before judging.
+pub(crate) fn judgment_placeholder() -> serde_json::Value {
+    serde_json::json!({ "verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": "" })
+}
+
+fn assemble_acceptance(candidate: &[u8], refuse_markers: bool) -> anyhow::Result<Vec<u8>> {
     let document = candidate_document(candidate);
     let mut value: serde_json::Value = serde_json::from_slice(&document)?;
-    if let Some(reason) = redaction_marker_refusal(&value) {
-        anyhow::bail!(reason);
+    let defects = marker_defects(&value, false);
+    if refuse_markers && !defects.is_empty() {
+        return Err(crate::command::workflow_task_set_candidate::CandidateDefects(defects).into());
     }
     if let Some(entries) = value.get("entries") {
         // `judgment` is host-owned: the author is told it is a placeholder and
@@ -350,9 +343,7 @@ pub(crate) fn acceptance_candidate(candidate: &[u8]) -> anyhow::Result<Vec<u8>> 
             let mut list = list.clone();
             for entry in list.as_array_mut().into_iter().flatten() {
                 if let Some(object) = entry.as_object_mut() {
-                    object.insert("judgment".to_string(), serde_json::json!({
-                        "verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": ""
-                    }));
+                    object.insert("judgment".to_string(), judgment_placeholder());
                 }
             }
             list

@@ -34,7 +34,13 @@ let lintCalls = 0;
 const traceRounds = globalThis.args.traceRounds || [[]];
 let traceCalls = 0;
 let finalInputs = null;
+const pauses = [];
 const w = {{
+  pause: async (id, evidence) => {{
+    pauses.push({{ id, evidence }});
+    if ((globalThis.args.resumedPauses || []).includes(id)) return {{ resumed: true, pause_id: id }};
+    throw new Error("workflow paused by run control: script requested pause " + id);
+  }},
   agent: async (id, options) => {{
     agentCalls.push(id);
     (prompts[id] = prompts[id] || []).push(options.task);
@@ -64,8 +70,8 @@ const w = {{
   finalReport: async (_id, options) => {{ finalInputs = options.inputs; return {{}}; }},
 }};
 workflow(w).then(
-  () => console.log(JSON.stringify({{ agentCalls, hostCalls, prompts, evidence: finalInputs.length, {tail} }})),
-  (error) => console.log(JSON.stringify({{ agentCalls, hostCalls, error: String(error && error.message) }})),
+  () => console.log(JSON.stringify({{ agentCalls, hostCalls, prompts, pauses, evidence: finalInputs.length, {tail} }})),
+  (error) => console.log(JSON.stringify({{ agentCalls, hostCalls, pauses, error: String(error && error.message) }})),
 );
 "##
     )
@@ -156,22 +162,30 @@ fn a_set_gate_body_finding_re_authors_the_task_it_names_with_the_finding_then_re
     );
 }
 
-/// Batch O: the budget follows progress. A finding that never goes away
-/// re-authors its body until the count plateaus, escalates once to a
-/// skeleton re-author (every body re-authored against it), and only a
-/// plateau after that stops the run -- with the findings listed.
+/// Batch O, under the one progress rule (Issue 261): a finding that never
+/// goes away re-authors its body, escalates once to a skeleton re-author
+/// (every body re-authored against it) after SET_GATE_ESCALATE_AFTER rounds
+/// without progress, and the third such round PAUSES the run with the
+/// findings as evidence. It used to fail the run.
 #[test]
-fn a_plateau_escalates_to_the_skeleton_once_then_stops_with_the_open_findings_listed() {
+fn a_plateau_escalates_to_the_skeleton_once_then_pauses_with_the_open_findings_listed() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
     let out = run(&driver("{}", &format!("[[{finding}]]"), ""));
     let error = out["error"].as_str().expect("the run must stop");
+    assert!(error.contains("workflow paused by run control"), "{error}");
+    assert_eq!(out["pauses"][0]["id"], "pause-set-gates-1", "{out}");
+    let evidence = &out["pauses"][0]["evidence"];
+    assert_eq!(evidence["subject"], "set-gates", "{evidence}");
+    assert_eq!(evidence["reason"], "no_progress", "{evidence}");
+    assert_eq!(evidence["rounds"], 4, "{evidence}");
     assert!(
-        error.contains("made no progress in 5 rounds")
-            && error.contains("the other task waives it"),
-        "{error}"
+        evidence["last_findings"][0]
+            .as_str()
+            .is_some_and(|text| text.contains("the other task waives it")),
+        "{evidence}"
     );
-    assert_eq!(count(&out, "hostCalls", "task-set-lint"), 5);
-    assert_eq!(count(&out, "hostCalls", "requirements-trace"), 5);
+    assert_eq!(count(&out, "hostCalls", "task-set-lint"), 4);
+    assert_eq!(count(&out, "hostCalls", "requirements-trace"), 4);
     assert_eq!(
         count(&out, "hostCalls", "freeze-skeleton"),
         2,
@@ -179,13 +193,30 @@ fn a_plateau_escalates_to_the_skeleton_once_then_stops_with_the_open_findings_li
     );
     assert_eq!(
         count(&out, "hostCalls", "land-task-body"),
-        2 + 1 + 1 + 2 + 1,
+        2 + 1 + 1 + 2,
         "two bodies, one re-author per round, both bodies at the escalation: {out}"
     );
 }
 
-/// Observe mode no longer accepts an exhausted set gate: findings open
-/// stop the run in either mode.
+/// Issue 261: a resumed run passes the set-gate pause and starts a fresh
+/// window that repairs before it judges, never a re-pause on the evidence it
+/// was resumed past.
+#[test]
+fn a_resumed_set_gate_pause_starts_a_fresh_window_and_can_accept() {
+    let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
+    let out = run(&driver(
+        r#"{ resumedPauses: ["pause-set-gates-1"] }"#,
+        &format!("[[{finding}], [{finding}], [{finding}], [{finding}], [{finding}], []]"),
+        "",
+    ));
+    assert!(out.get("error").is_none(), "{out}");
+    assert_eq!(out["pauses"].as_array().unwrap().len(), 1, "{out}");
+    assert_eq!(count(&out, "hostCalls", "freeze-skeleton"), 2, "{out}");
+    assert_eq!(count(&out, "hostCalls", "task-set-lint"), 6);
+}
+
+/// Observe mode no longer accepts a stalled set gate: findings open pause
+/// the run in either mode.
 #[test]
 fn observe_mode_never_accepts_a_set_with_findings_open() {
     let finding = body_finding("TASK-X-020", &format!("\"{TASK_ROOT}/TASK-X-020.md\""));
@@ -195,17 +226,30 @@ fn observe_mode_never_accepts_a_set_with_findings_open() {
         "",
     ));
     let error = out["error"].as_str().expect("observe must not accept it");
-    assert!(error.contains("made no progress"), "{error}");
+    assert!(error.contains("workflow paused by run control"), "{error}");
+    assert_eq!(out["pauses"][0]["id"], "pause-set-gates-1", "{out}");
 }
 
-/// Rounds continue as long as the open count keeps falling, past any fixed
-/// round count.
 #[test]
 fn rounds_continue_while_the_open_findings_keep_shrinking() {
     let f = |task: &str| body_finding(task, &format!("\"{TASK_ROOT}/{task}.md\""));
-    let (a, b) = (f("TASK-X-010"), f("TASK-X-020"));
+    // Guard: five distinct host-owned obligation defects, cleared one per round.
+    let distinct = |task: &str, n: usize| {
+        let finding = f(task);
+        format!(
+            r#"{}, deterministic_defect: {{provenance: "host_validator", code: "unclaimed_obligation", subject: "{task}", location: "obligation/{n}"}}}}"#,
+            finding.trim_end_matches('}')
+        )
+    };
+    let (a, b, c, d, e) = (
+        distinct("TASK-X-010", 1),
+        distinct("TASK-X-020", 2),
+        distinct("TASK-X-010", 3),
+        distinct("TASK-X-020", 4),
+        distinct("TASK-X-010", 5),
+    );
     let rounds = format!(
-        "[[{a}, {b}, {a}, {b}, {a}], [{a}, {b}, {a}, {b}], [{a}, {b}, {a}], [{a}, {b}], [{a}], []]"
+        "[[{a}, {b}, {c}, {d}, {e}], [{a}, {b}, {c}, {d}], [{a}, {b}, {c}], [{a}, {b}], [{a}], []]"
     );
     let out = run(&driver("{}", &rounds, ""));
     assert!(out.get("error").is_none(), "{out}");

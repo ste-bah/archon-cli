@@ -2,6 +2,8 @@ use super::*;
 
 pub(super) struct WorkflowScriptHost {
     pub(super) scaffold_hash: String,
+    pub(super) host_occurrences:
+        crate::command::workflow_host_command_occurrence::HostCommandOccurrences,
     /// Which envelope a host-call result is rendered into for the script:
     /// the deduplicated one for v3 `export const meta` scripts, the compat one
     /// (every nested copy kept) for the decomposed dialect, whose Rust driver
@@ -118,6 +120,10 @@ use workflow_live_v2_script_host_interrupt::control_interruption_reason;
 mod workflow_live_v2_script_host_history;
 #[path = "workflow_live_v2_script_host_inflight.rs"]
 mod workflow_live_v2_script_host_inflight;
+#[path = "workflow_live_v2_script_host_pause.rs"]
+mod workflow_live_v2_script_host_pause;
+#[path = "workflow_live_v2_script_host_pause_credit.rs"]
+mod workflow_live_v2_script_host_pause_credit;
 #[path = "workflow_live_v2_script_host_state.rs"]
 mod workflow_live_v2_script_host_state;
 

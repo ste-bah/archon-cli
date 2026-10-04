@@ -53,7 +53,10 @@ impl FixedHostCommandExecutor {
         let request = record.call.options.host_command.as_ref().ok_or_else(|| {
             WorkflowError::StateCorrupt("persisted HostCommand record has no typed request".into())
         })?;
-        if self.call_identity(request)? != record.call.id {
+        if !crate::command::workflow_host_command_occurrence::record_identity_matches(
+            record,
+            &self.call_identity(request)?,
+        ) {
             return Ok(false);
         }
         let outcome: HostCommandResult = serde_json::from_value(record.result.data.clone())?;

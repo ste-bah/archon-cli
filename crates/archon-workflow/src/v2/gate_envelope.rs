@@ -20,6 +20,8 @@ pub struct GateEnvelopeV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GatePolicyFinding {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deterministic_defect: Option<crate::defect::DeterministicDefect>,
     pub text: String,
     pub subject: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

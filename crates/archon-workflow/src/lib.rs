@@ -28,6 +28,7 @@ mod context_output;
 pub mod control;
 pub mod control_pause;
 pub mod control_race;
+pub mod defect;
 pub(crate) mod durable_io;
 pub mod error;
 pub mod events;

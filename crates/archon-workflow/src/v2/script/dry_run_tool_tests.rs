@@ -112,3 +112,21 @@ async fn a_tool_call_without_a_name_is_refused_by_the_harness() {
 
     assert!(format!("{error}").contains("runTool requires"), "{error}");
 }
+
+/// Issue 261: a rehearsal answers `w.pause` as a resumed pause, so it plans the
+/// calls after it, and the pause itself is control flow, not a planned call.
+#[tokio::test]
+async fn a_pause_request_is_answered_as_resumed_and_is_not_a_planned_call() {
+    let details = dry_run(
+        "export default async function workflow(w) { \
+           const answer = await w.pause('pause-subject-1', { subject: 'subject' }); \
+           if (answer.resumed !== true || answer.dry_run !== true) { throw new Error('unmarked: ' + JSON.stringify(answer)); } \
+           await w.agent('after-pause', {}); \
+         }",
+    )
+    .await
+    .expect("a script that requests a pause still validates");
+
+    assert_eq!(details.calls.len(), 1, "only the agent call is planned");
+    assert_eq!(details.calls[0].id, "after-pause");
+}

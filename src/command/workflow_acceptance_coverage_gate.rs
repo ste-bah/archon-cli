@@ -27,7 +27,8 @@ pub(super) fn acceptance_coverage_findings(
 ) -> Vec<GateFinding> {
     let texts = prd_requirement_texts(prd_text);
     let ids: BTreeSet<String> = texts.keys().cloned().collect();
-    let finding = |text: String, subject: String| {
+    let finding = |text: String, subject: String, code: &str, location: String| {
+        let identity = archon_workflow::defect::DeterministicDefect::new(code, &subject, location);
         GateFinding::new(
             GateId::FreezeAcceptance,
             text,
@@ -35,6 +36,7 @@ pub(super) fn acceptance_coverage_findings(
             Some(contract_path.to_path_buf()),
             archon_workflow::RemediationScope::CandidateArtifact,
         )
+        .with_defect(identity)
     };
     let mut findings: Vec<GateFinding> = uncovered_requirements(&ids, contract)
         .into_iter()
@@ -46,6 +48,7 @@ pub(super) fn acceptance_coverage_findings(
                     texts.get(&requirement).map_or("", String::as_str)
                 ),
                 id,
+                "uncovered_requirement", "covers".into(),
             )
         })
         .collect();
@@ -57,7 +60,9 @@ pub(super) fn acceptance_coverage_findings(
                     format!(
                         "check '{check}': covers names {covered}, which the PRD does not define as a requirement; list only PRD requirement ids the check fails on"
                     ),
-                    check,
+                    check.clone(),
+                    "unknown_covered_requirement", format!("covers/{}", contract.acceptance.iter().chain(&contract.supplementary)
+                        .find(|entry| entry.id == check).and_then(|entry| entry.covers.iter().position(|id| id == &covered)).unwrap_or_default()),
                 )
             }),
     );
@@ -78,6 +83,7 @@ pub(super) fn skeleton_check_findings(
     tasks_without_checks(tasks, contract)
         .into_iter()
         .map(|task| {
+            let slot = skeleton.tasks.iter().position(|entry| entry.task_id == task).unwrap_or_default();
             GateFinding::new(
                 GateId::FreezeSkeleton,
                 format!(
@@ -86,7 +92,7 @@ pub(super) fn skeleton_check_findings(
                 "implements",
                 Some(skeleton_path.to_path_buf()),
                 archon_workflow::RemediationScope::Skeleton,
-            )
+            ).with_defect(archon_workflow::defect::DeterministicDefect::new("task_without_check", format!("tasks/{slot}"), "implements"))
         })
         .collect()
 }
@@ -128,6 +134,8 @@ pub(super) async fn pre_implementation_findings(
     }
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let finding = |id: String, text: String, scope| {
+        let identity =
+            archon_workflow::defect::DeterministicDefect::new("check_not_proven", &id, "check");
         GateFinding::new(
             GateId::FreezeAcceptance,
             text,
@@ -135,6 +143,7 @@ pub(super) async fn pre_implementation_findings(
             Some(contract_path.clone()),
             scope,
         )
+        .with_defect(identity)
     };
     // What the host could not prove is the host's (operational), never the
     // author's: it is not published, and no author is asked to change it.

@@ -62,7 +62,7 @@ fn the_contract_classifies_only_timeouts_and_the_resumable_exit() {
 }
 
 #[test]
-fn retries_are_bounded_and_need_growing_progress() {
+fn retries_need_growing_progress() {
     use NextStep::{Pause, Retry};
     // No marker: exactly one retry.
     assert_eq!(next_step(&[attempt(1, None)]), Retry);
@@ -70,17 +70,13 @@ fn retries_are_bounded_and_need_growing_progress() {
         next_step(&[attempt(1, None), attempt(2, None)]),
         Pause("no_progress_evidence")
     );
-    // Growing progress: retried with no work budget, only the runaway guard.
+    // Growing progress: retried with no total work or time budget.
     assert_eq!(next_step(&[attempt(1, Some(1))]), Retry);
     let growing = |n: u32| -> Vec<OperationalAttempt> {
         (1..=n).map(|i| attempt(i, Some(u64::from(i)))).collect()
     };
     assert_eq!(next_step(&growing(10)), Retry);
-    assert_eq!(next_step(&growing(RUNAWAY_RETRY_GUARD)), Retry);
-    assert_eq!(
-        next_step(&growing(RUNAWAY_RETRY_GUARD + 1)),
-        Pause("runaway_guard")
-    );
+    assert_eq!(next_step(&growing(130)), Retry);
     // Progress that does not grow, or a marker that disappears.
     // No baseline yet: a first marker, even 0, gets the no-marker retry.
     assert_eq!(next_step(&[attempt(1, Some(0))]), Retry);
@@ -472,4 +468,12 @@ async fn a_real_timeout_keeps_the_progress_the_child_reported_before_the_kill() 
     let output = supervised.await.unwrap().unwrap();
     assert_eq!(classify(&output), Some(OperationalKind::TimedOut));
     assert_eq!(reported_progress(&output.stderr), Some(9));
+}
+
+#[test]
+fn round3_growing_operational_progress_has_no_total_attempt_limit() {
+    let mut history: Vec<_> = (1..=130).map(|n| attempt(n, Some(u64::from(n)))).collect();
+    assert_eq!(next_step(&history), NextStep::Retry);
+    history.push(attempt(131, Some(130)));
+    assert_eq!(next_step(&history), NextStep::Pause("no_progress"));
 }

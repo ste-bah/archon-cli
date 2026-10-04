@@ -192,6 +192,9 @@ pub(super) fn record_dry_run_call(
         }))
         .map_err(|err| WorkflowError::SpecInvalid(format!("dry-run tool stand-in failed: {err}")));
     }
+    if method == SCRIPT_PAUSE_METHOD {
+        return dry_run_pause_answer(payload);
+    }
     let call = match dry_run_call_from_payload(method, payload) {
         Ok(call) => call,
         Err(err) => {

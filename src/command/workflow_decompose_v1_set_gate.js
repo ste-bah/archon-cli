@@ -16,12 +16,14 @@
 // the PRD does not define) re-authors the skeleton with the finding -- an
 // owning task's implements gains the id -- re-freezes it, and re-authors the
 // bodies against it; an inherited finding goes to the predecessor body it
-// names, else to the skeleton. The budget follows progress: rounds continue
-// while the open-finding count keeps falling below its best, a plateau of
-// SET_GATE_STALL_ROUNDS escalates to a skeleton re-author with every open
-// finding, and only a plateau after that escalation stops the run, with the
-// findings listed.
-const SET_GATE_STALL_ROUNDS = 2;
+// names, else to the skeleton. Rounds follow the one progress rule every
+// author loop follows (workflow_decompose_v1_progress.js, Issue 261): a round
+// makes progress when its distinct defect count sets a new best, a
+// round of SET_GATE_ESCALATE_AFTER without progress escalates the repair to a
+// skeleton re-author with every open finding, and STALL_ATTEMPTS rounds in a
+// row without progress PAUSE the run with the findings listed. A resumed run
+// starts a fresh window and may escalate again.
+const SET_GATE_ESCALATE_AFTER = 2;
 
 // How many authors run at once: the run's max parallelism, which the host
 // derives from `subagent.max_concurrent` and also writes into the spec as
@@ -118,13 +120,22 @@ async function authorBodies(w, work, bodies) {
 // `chain` is the frozen skeleton this run stands on: `{ outcome, subjects }`,
 // replaced whenever the loop re-freezes the skeleton.
 async function runSetGateLoop(w, chain, bodies) {
-  let best = Infinity;
-  let stalled = 0;
+  const progress = newProgress([]);
   let escalated = false;
   for (let round = 1; ; round += 1) {
     const taskSetLint = await runSetGate(w, "task-set-lint");
     const requirementsTrace = await runSetGate(w, "requirements-trace");
     const gates = [taskSetLint, requirementsTrace];
+    progress.calls = round;
+    const failed = gates.find((gate) => gate.routed.operational);
+    if (failed) {
+      // A gate that could not run judged nothing: a round without progress.
+      const summary = `${failed.capability}: ${failed.routed.operational}`;
+      recordOperational(progress, round, summary);
+      const stall = stallReason(progress);
+      if (stall) await pauseAuthorLoop(w, "set-gates", progress, stall, [`host gate operational failure: ${summary}`], { rounds: round });
+      continue;
+    }
     const open = gates.flatMap((gate) => gate.routed.all);
     if (open.length === 0) {
       return {
@@ -132,13 +143,7 @@ async function runSetGateLoop(w, chain, bodies) {
         requirementsTrace: acceptSetGate(requirementsTrace)
       };
     }
-    if (open.length < best) {
-      best = open.length;
-      stalled = 0;
-      escalated = false;
-    } else {
-      stalled += 1;
-    }
+    if (recordAttempt(progress, round, gates.flatMap((gate) => gate.routed.allFindings))) escalated = false;
     const bodyFindings = gates.flatMap((gate) => gate.routed.retryFindings);
     const skeletonFindings = gates.flatMap((gate) => gate.routed.shadowFindings);
     for (const finding of gates.flatMap((gate) => gate.routed.inheritedFindings)) {
@@ -146,12 +151,14 @@ async function runSetGateLoop(w, chain, bodies) {
       // frozen task is the skeleton's to repair.
       (findSubject(finding, chain.subjects) ? bodyFindings : skeletonFindings).push(finding);
     }
-    if (stalled >= SET_GATE_STALL_ROUNDS) {
-      if (escalated) {
-        throw new Error(`set gates made no progress in ${round} rounds, a skeleton re-author included, with findings still open: ${open.join(" | ")}`);
-      }
+    const stall = stallReason(progress);
+    if (stall) {
+      // Resumed past the pause: a fresh window, which repairs before it judges.
+      await pauseAuthorLoop(w, "set-gates", progress, stall, open, { rounds: round });
+      escalated = false;
+    }
+    if (!escalated && progress.stalled >= SET_GATE_ESCALATE_AFTER) {
       escalated = true;
-      stalled = 0;
       await reauthorSkeleton(w, chain, bodies, gates.flatMap((gate) => gate.routed.allFindings), bodyFindings);
       continue;
     }
@@ -283,12 +290,23 @@ function frozenChain() {
 // A committed outcome for a stage the launcher found frozen: the host
 // re-verifies the artifact in place and reports its subjects as the freeze
 // would have. Any finding here is fatal; there is no candidate to repair.
+// A verification that could not run is retried, and pauses the run when its
+// window closes, like any other attempt without progress.
 async function verifyFrozenStage(w, capability) {
-  const outcome = await w.hostCommand(capability, { stdin: null });
-  const routed = routeFindings(outcome, new Set(), new Set());
-  if (routed.fatal.length > 0) throw new Error(`${capability} stopped: ${routed.fatal.join(" | ")}`);
-  requireCommitted(outcome, capability);
-  return outcome;
+  const progress = newProgress([]);
+  for (let attempt = 1; ; attempt += 1) {
+    const outcome = await w.hostCommand(capability, { stdin: null });
+    const routed = routeFindings(outcome, new Set(), new Set());
+    if (!routed.operational) {
+      if (routed.fatal.length > 0) throw new Error(`${capability} stopped: ${routed.fatal.join(" | ")}`);
+      requireCommitted(outcome, capability);
+      return outcome;
+    }
+    progress.calls = attempt;
+    recordOperational(progress, attempt, routed.operational);
+    const stall = stallReason(progress);
+    if (stall) await pauseAuthorLoop(w, capability, progress, stall, [`host gate operational failure: ${routed.operational}`]);
+  }
 }
 
 // The subjects the host read at verification are the ones the launcher read,

@@ -33,15 +33,45 @@ fn decl(name: &str) -> String {
 
 #[path = "workflow_decompose_body_repair_tests.rs"]
 mod body_repair;
+#[path = "workflow_decompose_refusal_progress_tests.rs"]
+mod refusal_progress;
 #[path = "workflow_decompose_set_gate_tests.rs"]
 mod set_gate;
 
 fn run_js(driver: &str) -> String {
     let mut script = String::new();
     for name in [
-        "OPERATIONAL_ATTEMPTS",
-        "PACKAGING_REFUNDS",
-        "ACCEPTANCE_REFUSAL_REFUNDS",
+        "STALL_ATTEMPTS",
+        "DEFECT_STAGES",
+        "PASSED_STAGE",
+        "STAGE_CODES",
+        "REFUSED_PREFIX",
+        "PAUSE_EVIDENCE_HISTORY",
+        "PAUSE_EVIDENCE_FINDINGS",
+        "PAUSE_EVIDENCE_TEXT",
+        "PACKAGING_TIER",
+        "REFUSED_TIER",
+        "JUDGED_TIER",
+        "progressText",
+        "findingTier",
+        "findingKey",
+        "hostDefect",
+        "isDeterministic",
+        "stageOf",
+        "attemptMeasure",
+        "isBetter",
+        "newProgress",
+        "recordStep",
+        "recordAttempt",
+        "recordAnswered",
+        "recordOperational",
+        "stallReason",
+        "boundText",
+        "boundFindings",
+        "loopEvidence",
+        "PAUSES",
+        "pauseLoop",
+        "pauseAuthorLoop",
         "PACKAGING_REFUSAL",
         "AUTHOR_CALLS",
         "routeFindings",
@@ -132,6 +162,7 @@ const w = {{
     authorCalls += 1;
     return {{ status: "accepted", stopReason: "end_turn", content: "{{}}" }};
   }},
+  pause: async () => {{ throw new Error("paused"); }},
   hostCommand: async () =>
     ({always_dirty} || authorCalls === 1) ? committed({first_findings}) : committed([]),
 }};
@@ -170,29 +201,28 @@ fn a_prd_input_finding_stops_the_phase_in_observe_mode() {
     );
 }
 
-/// Observe mode still never blocks: an exhausted budget falls back to the best
-/// committed artifact rather than failing the run.
+/// Observe mode still never blocks: a loop that stops making progress falls
+/// back to the best committed artifact rather than pausing or failing the run.
+/// Issue 261: one baseline attempt and the stall window, not a fixed budget.
 #[test]
-fn observe_falls_back_to_the_last_committed_artifact_when_the_budget_is_spent() {
+fn observe_falls_back_to_the_last_committed_artifact_when_the_loop_stalls() {
     let out = run_js(&driver(
         r#"[{ "text": "floor is not falsifiable", "remediation_scope": "candidate_artifact" }]"#,
         2,
         true,
     ));
     assert_eq!(
-        out, r#"{"authorCalls":2,"committed":true}"#,
-        "observe must spend its attempts repairing and then return the committed artifact: {out}"
+        out, r#"{"authorCalls":4,"committed":true}"#,
+        "observe must repair until the loop stalls and then return the committed artifact: {out}"
     );
 }
 
-/// An exhausted budget must keep the best artifact, not the most recent one.
-///
-/// Attempts do not improve monotonically. Live run wf-6efe3de7 produced
-/// findings 2, 1, 2, 1, 1 and then a malformed candidate, so keeping the latest
-/// commit froze a vacuous acceptance floor that two earlier attempts had
-/// already fixed — the repair loop found better artifacts and discarded them.
+/// A stalled observe loop returns the LATEST committed artifact (Issue 261
+/// round 8). Every publication replaces the live tree, so an earlier outcome
+/// with fewer findings would hand on a receipt and subjects for a skeleton
+/// the tree no longer holds.
 #[test]
-fn an_exhausted_budget_keeps_the_best_committed_artifact_not_the_latest() {
+fn a_stalled_observe_loop_returns_the_latest_committed_artifact() {
     let driver = r#"
 globalThis.args = { gateMode: "observe" };
 let call = 0;
@@ -204,7 +234,7 @@ const w = {
     call += 1;
     return { status: "accepted", stopReason: "end_turn", content: "{}" };
   },
-  // Two findings, then one, then two: the middle attempt is the best artifact.
+  // Two findings, then one, then two: the live tree holds the last one.
   hostCommand: async () => ({
     publicationReceipt: { id: "commit-" + call },
     postcondition: { satisfied: true },
@@ -225,8 +255,8 @@ authorCandidate(w, policy).then(
 "#;
     assert_eq!(
         run_js(driver),
-        r#"{"kept":"commit-2"}"#,
-        "the phase must freeze the artifact with the fewest findings, not the last one authored"
+        r#"{"kept":"commit-4"}"#,
+        "the phase must return the outcome that describes the live tree"
     );
 }
 
@@ -273,11 +303,11 @@ const w = {
     call += 1;
     return { status: "accepted", stopReason: "end_turn", content: "{}" };
   },
-  // Alternates between two findings, exactly like the live acceptance gate.
+  // Repair succeeds after feedback has included both earlier findings.
   hostCommand: async () => ({
     publicationReceipt: { id: "c" + call },
     postcondition: { satisfied: true },
-    gateEnvelope: { policy_findings: [{
+    gateEnvelope: { policy_findings: call >= 3 ? [] : [{
       text: call % 2 === 1 ? "floor is not falsifiable" : "refuted by the host judge",
       remediation_scope: "candidate_artifact",
     }] },
@@ -299,90 +329,6 @@ authorCandidate(w, policy).then(() => {
         r#"{"sees_both":true}"#,
         "by the third attempt the author must see both findings it has already \
          triggered, or it will keep alternating between them"
-    );
-}
-
-/// A refusal the host could not even parse is packaging: it is refunded
-/// (bounded) rather than charged to the candidate budget, so quote slips
-/// inside embedded commands cannot spend a phase's attempts on nothing.
-#[test]
-fn a_packaging_refusal_is_refunded_and_the_refund_is_bounded() {
-    let driver = r#"
-globalThis.args = { gateMode: "observe" };
-let call = 0;
-const w = {
-  agent: async () => { call += 1; return { status: "accepted", stopReason: "end_turn", content: "{}" }; },
-  hostCommand: async () => ({
-    publicationReceipt: { id: "c" + call },
-    postcondition: { satisfied: true },
-    gateEnvelope: { policy_findings: [{
-      text: "candidate artifact was refused: the reply is not a JSON document (key must be a string at line 1 column 7)",
-      remediation_scope: "candidate_artifact",
-    }] },
-  }),
-};
-const policy = {
-  phase: "acceptance", capability: "freeze-acceptance", attempts: 2,
-  retryScopes: new Set(["candidate_artifact"]), prompt: () => "author",
-};
-authorCandidate(w, policy).then(() => {
-  console.log(JSON.stringify({ calls: call }));
-}, (e) => console.log(JSON.stringify({ calls: call, error: String(e && e.message) })));
-"#;
-    let out = run_js(driver);
-    assert!(
-        out.contains("\"calls\":5"),
-        "2 attempts + 3 refunds = 5 author calls before the budget is spent: {out}"
-    );
-}
-
-#[test]
-fn deterministic_acceptance_refusals_do_not_spend_judged_attempts() {
-    let script = r#"
-globalThis.args = { gateMode: "observe" };
-let calls = 0;
-const prompts = [];
-const reasons = ["unknown field `command_semantics`", "missing checks for AC-X-002", "floor needs typed_verifier_command", "example id is not defined"];
-const w = {
-  agent: async (_, input) => { prompts.push(input.task); calls++; return {status:"accepted",stopReason:"end_turn",content:"{}"}; },
-  hostCommand: async () => calls <= reasons.length
-    ? {gateEnvelope:{policy_findings:[{text:`candidate artifact was refused: ${reasons[calls-1]}`,remediation_scope:"candidate_artifact"}]}}
-    : {publicationReceipt:{id:"r"},postcondition:{satisfied:true},gateEnvelope:{policy_findings:[]}},
-};
-const policy = {phase:"acceptance",capability:"freeze-acceptance",attempts:1,retryScopes:new Set(["candidate_artifact"]),prompt:()=>"author"};
-authorCandidate(w,policy).then(() => {
-  if (!prompts.every(p => p.includes("Logical attempt: 1."))) throw Error("spent a judged attempt");
-  if (!prompts[4].includes("command_semantics")) throw Error("lost repair history");
-  console.log(calls);
-}).catch(e => { console.error(e); process.exitCode=1; });
-"#;
-    assert_eq!(run_js(script), "5");
-}
-
-#[test]
-fn endless_deterministic_refusals_stop_with_the_exact_defect_not_a_dirty_fallback() {
-    let script = r#"
-globalThis.args = {gateMode:"observe"};
-let calls = 0;
-const w = {
-  agent:async()=>{calls++; return {status:"accepted",stopReason:"end_turn",content:"{}"};},
-  hostCommand:async()=>({gateEnvelope:{policy_findings:[{text:"candidate artifact was refused: unknown field `invented`",remediation_scope:"candidate_artifact"}]}}),
-};
-authorCandidate(w,{phase:"acceptance",attempts:1,retryScopes:new Set(["candidate_artifact"]),prompt:()=>"author"}).then(
-  ()=>{throw Error("must stop");},
-  e=>console.log(JSON.stringify({calls,error:e.message})),
-);
-"#;
-    let output: serde_json::Value = serde_json::from_str(&run_js(script)).unwrap();
-    assert_eq!(
-        output["calls"], 12,
-        "the mechanical allowance is flat, not per attempt"
-    );
-    assert!(
-        output["error"]
-            .as_str()
-            .unwrap()
-            .contains("unknown field `invented`")
     );
 }
 

@@ -11,6 +11,13 @@ fn candidate(focused_test: &str) -> String {
 }
 
 fn findings(raw: &str) -> Vec<String> {
+    gate_findings(raw)
+        .into_iter()
+        .map(|finding| finding.text)
+        .collect()
+}
+
+fn gate_findings(raw: &str) -> Vec<crate::command::workflow_gate::GateFinding> {
     let temp = tempfile::tempdir().expect("tempdir");
     let cwd = temp.path();
     let tasks = cwd.join("tasks").join("PRD-WS-001");
@@ -24,9 +31,6 @@ fn findings(raw: &str) -> Vec<String> {
     super::evaluate_task_file_candidate(cwd, &path, raw.as_bytes(), GateMode::Enforce)
         .expect("mechanical checks")
         .findings
-        .into_iter()
-        .map(|finding| finding.text)
-        .collect()
 }
 
 #[test]
@@ -48,6 +52,14 @@ fn a_task_body_holding_the_redaction_marker_is_refused_with_its_line() {
                 && text.contains(&format!("line {line}"))),
         "{texts:?}"
     );
+    // Issue 261: the refusal is a staged host finding, never a judge finding.
+    let marker = gate_findings(&marked)
+        .into_iter()
+        .find(|finding| finding.text.contains("log-redaction marker"))
+        .expect("marker finding");
+    let identity = marker.deterministic_defect.expect("host identity");
+    assert_eq!(identity.code, "redacted_executable_value");
+    assert_eq!(identity.stage, archon_workflow::defect::DefectStage::Shape);
 }
 
 #[test]

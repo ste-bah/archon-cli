@@ -307,7 +307,6 @@ crates/archon-workflow/src/v2/write/partial_work_tests.rs          # rustfmt 475
 crates/archon-workflow/src/write_coordinator/patch_apply.rs        # rustfmt 498 -> 505
 crates/archon-workflow/tests/repository_audit_runtime.rs           # rustfmt 333 -> 1065
 src/command/topology_lint/repository_claims.rs                     # rustfmt 440 -> 539
-src/command/workflow_decompose_repair_tests.rs                     # rustfmt 481 -> 508
 src/command/workflow_live_v2_declared_output_tests.rs              # rustfmt 457 -> 667
 src/command/workflow_live_v2_host_dispatch.rs                      # rustfmt 484 -> 539
 src/command/workflow_run_finalizer_tests.rs                        # rustfmt 443 -> 508

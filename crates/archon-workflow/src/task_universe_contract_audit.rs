@@ -67,6 +67,7 @@ impl ContractFindingKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractFinding {
+    pub identity: Option<crate::defect::DeterministicDefect>,
     pub kind: ContractFindingKind,
     pub task_id: String,
     pub artifact_path: String,
@@ -76,9 +77,14 @@ pub struct ContractFinding {
 /// Audit every declared contract in a task universe.
 pub fn audit_contracts(universe: &WorkflowV2TaskUniverse) -> Vec<ContractFinding> {
     let mut findings = Vec::new();
-    for task in &universe.tasks {
-        for raw in shell_token_paths(&task.source_path) {
+    for (task_slot, task) in universe.tasks.iter().enumerate() {
+        for (index, raw) in shell_token_paths(&task.source_path).into_iter().enumerate() {
             findings.push(ContractFinding {
+                identity: Some(crate::defect::DeterministicDefect::new(
+                    "repaired_shell_path",
+                    crate::task_skeleton::skeleton_subject(&task.canonical_task_id, task_slot),
+                    format!("source/{index}"),
+                )),
                 kind: ContractFindingKind::RepairedAtLoad,
                 task_id: task.canonical_task_id.clone(),
                 artifact_path: raw.clone(),
@@ -90,22 +96,24 @@ pub fn audit_contracts(universe: &WorkflowV2TaskUniverse) -> Vec<ContractFinding
                 ),
             });
         }
-        for contract in &task.deliverable_contracts {
+        for (index, contract) in task.deliverable_contracts.iter().enumerate() {
             let value = match serde_json::to_value(contract) {
                 Ok(value) => value,
                 Err(_) => continue,
             };
-            if let Some(defect) = crate::v2::deliverable_contract::contract_defect(&value) {
+            let before = findings.len();
+            for mut defect in crate::v2::deliverable_contract::contract_defects(&value) {
+                defect.identity.subject =
+                    crate::task_skeleton::skeleton_subject(&task.canonical_task_id, task_slot);
+                defect.identity.location =
+                    format!("deliverable_contracts/{index}/{}", defect.identity.location);
                 findings.push(ContractFinding {
+                    identity: Some(defect.identity),
                     kind: ContractFindingKind::Unsatisfiable,
                     task_id: task.canonical_task_id.clone(),
                     artifact_path: contract.artifact_path.clone(),
-                    message: defect,
+                    message: defect.message,
                 });
-                // One defect per contract: the second is usually the first
-                // restated, and a lint that says the same thing twice gets
-                // skimmed.
-                continue;
             }
             if let Some(defect) = crate::verifier_strength::verifier_strength_defect(
                 contract.typed_verifier_command.as_deref(),
@@ -113,15 +121,22 @@ pub fn audit_contracts(universe: &WorkflowV2TaskUniverse) -> Vec<ContractFinding
                 Some(contract),
             ) {
                 findings.push(ContractFinding {
+                    identity: Some(crate::defect::DeterministicDefect::new(
+                        "invalid_verifier",
+                        crate::task_skeleton::skeleton_subject(&task.canonical_task_id, task_slot),
+                        format!("deliverable_contracts/{index}/typed_verifier_command"),
+                    )),
                     kind: ContractFindingKind::Unsatisfiable,
                     task_id: task.canonical_task_id.clone(),
                     artifact_path: contract.artifact_path.clone(),
                     message: defect.to_string(),
                 });
-                continue;
             }
-            if !instance_producer_is_plausible(task, contract) {
+            // Every certain defect is reported; the heuristic is not added to
+            // a contract already refused: it is usually the defect restated.
+            if findings.len() == before && !instance_producer_is_plausible(task, contract) {
                 findings.push(ContractFinding {
+                    identity: None,
                     kind: ContractFindingKind::Misallocated,
                     task_id: task.canonical_task_id.clone(),
                     artifact_path: contract.artifact_path.clone(),

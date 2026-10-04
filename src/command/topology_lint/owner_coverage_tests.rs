@@ -187,3 +187,22 @@ fn the_set_gate_counts_files_expected_to_change_and_names_the_skeleton() {
         archon_workflow::RemediationScope::Skeleton
     );
 }
+
+/// Issue 261 round 8: ownership checks are deterministic. Each unowned path
+/// is one host identity named by the path itself, so repairing paths one at a
+/// time lowers a measured count instead of looking like judge text.
+#[test]
+fn each_unowned_path_is_a_stable_host_defect() {
+    let (_temp, tasks, _tree) = grounded();
+    let defects = skeleton_defects(&tasks, PRD, &skeleton(&["Cargo.toml"])).unwrap();
+    assert!(defects.len() >= 2, "{defects:?}");
+    for defect in &defects {
+        assert_eq!(defect.identity.code, "unowned_repository_path");
+        assert!(
+            defect.message.contains(&defect.identity.subject),
+            "{defect:?}"
+        );
+    }
+    let fewer = skeleton_defects(&tasks, PRD, &skeleton(&["Cargo.toml", "docs/guide.md"])).unwrap();
+    assert_eq!(fewer.len(), defects.len() - 1, "{fewer:?}");
+}

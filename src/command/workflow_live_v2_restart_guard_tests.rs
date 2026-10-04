@@ -64,6 +64,7 @@ fn session() -> (
     v2.save_call_record(&record(1, T1, true)).unwrap();
     v2.save_call_record(&record(2, T2, false)).unwrap();
     let host = WorkflowScriptHost {
+        host_occurrences: Default::default(),
         scaffold_hash: "fixture".into(),
         envelope_shape: ScriptEnvelopeShape::Compat,
         runner: reuse_test_runner(&store, &run, &v2, serde_json::Value::Null, None),

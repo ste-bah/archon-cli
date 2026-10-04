@@ -85,26 +85,10 @@ const BODY_SHAPE = [
   "```"
 ].join("\n");
 
-// Attempts the provider itself failed to answer. They are not the author's,
-// so they get their own small budget: enough to ride out a blip, few enough
-// that a dead provider stops the run promptly and says why.
-const OPERATIONAL_ATTEMPTS = 3;
 // A candidate the host could not even read is packaging, not authorship: the
-// artifact it carried was never judged. Charging it to the candidate budget
-// spent four of six acceptance attempts on quote slips inside embedded
-// commands, live. Refunded, bounded, so a model that can never package one
-// document still stops.
-const PACKAGING_REFUNDS = 3;
-// A refusal the host decided without a judge (a missing id, an unknown field,
-// a floor with no verifier) names the exact defect, so repairing it is not a
-// judged attempt. Refunded, bounded flat rather than per attempt: twelve
-// consecutive mechanical refusals is a broken prompt, and at minutes per
-// author call a larger allowance turns that into hours before the run says so.
-const ACCEPTANCE_REFUSAL_REFUNDS = 12;
+// artifact it carried was never judged. The progress rule ranks it below every
+// judged or refused candidate (workflow_decompose_v1_progress.js).
 const PACKAGING_REFUSAL = "candidate artifact was refused: the reply is not a JSON document";
-const ACCEPTANCE_ATTEMPTS = 6;
-const SKELETON_ATTEMPTS = 6;
-const BODY_ATTEMPTS = 10;
 
 async function workflow(w) {
   requireFixedArgs();
@@ -116,7 +100,6 @@ async function workflow(w) {
     phase: "acceptance",
     author: authorAcceptanceEntries,
     capability: "freeze-acceptance",
-    attempts: ACCEPTANCE_ATTEMPTS,
     retryScopes: new Set(["candidate_artifact"]),
     prompt: () => [
       "Author exactly one acceptance entry identified below, not the whole contract.",
@@ -186,7 +169,6 @@ function skeletonPolicy(initialFeedback) {
   return {
     phase: "skeleton",
     capability: "freeze-skeleton",
-    attempts: SKELETON_ATTEMPTS,
     retryScopes: new Set(["candidate_artifact", "skeleton"]),
     initialFeedback,
     prompt: () => [
@@ -254,7 +236,6 @@ function bodyPolicy(subject, initialFeedback) {
   return {
     phase: `body-${subject.taskId}`,
     capability: "land-task-body",
-    attempts: BODY_ATTEMPTS,
     retryScopes: new Set(["candidate_artifact", "body"]),
     initialFeedback,
     prompt: () => [
@@ -287,22 +268,34 @@ function bodyPolicy(subject, initialFeedback) {
 // attempts replay as history and a repair never overwrites a recorded call.
 const AUTHOR_CALLS = new Map();
 
+// One subject's author loop, limited by progress (Issue 261): an attempt that
+// makes progress keeps it going; STALL_ATTEMPTS in a row without progress
+// pause the run with evidence, and a resumed run continues from the pause
+// with a fresh window.
 async function authorCandidate(w, policy) {
   let feedback = Array.isArray(policy.initialFeedback) ? policy.initialFeedback.slice() : [];
   // Seeded feedback is attempt 0 of the history: every later prompt in this
   // phase keeps showing the finding the phase was opened to repair.
   const history = feedback.length > 0 ? [{ attempt: 0, findings: feedback.slice() }] : [];
-  let bestCommitted = null;
-  let bestFindings = Infinity;
+  let lastCommitted = null;
   let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
-  let operational = 0;
-  let packagingRefunds = 0;
-  let acceptanceRefusals = 0;
+  let lastFindings = feedback.slice();
+  const progress = newProgress(feedback);
   const authorState = { entries: new Map(), retryIds: null };
-  while (attempt < policy.attempts) {
+  for (;;) {
+    const stall = stallReason(progress);
+    if (stall) {
+      // Observe never blocks on the artifact's quality: a loop that stopped
+      // improving returns the artifact the tree holds now. An outage says
+      // nothing about the artifact, so it pauses in either mode.
+      if (stall !== "operational_no_progress" && args.gateMode === "observe" && lastCommitted) return lastCommitted;
+      await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
+    }
     call += 1;
+    progress.calls += 1;
     AUTHOR_CALLS.set(policy.phase, call);
+    const addedBefore = authorState.added || 0;
     const prompt = authorPrompt(policy.prompt(), attempt + 1, feedback, history);
     const authored = policy.author
       ? await policy.author(w, prompt, call, authorState)
@@ -310,51 +303,54 @@ async function authorCandidate(w, policy) {
           task: prompt, tier: "planner", resultMode: "rawOutcome",
           ...(policy.phase === "skeleton" ? { recordLanding: "skeleton" } : {})
         });
-    // A call the host could not complete says nothing about the artifact: the
-    // provider never answered. Charging it to the candidate budget spends the
-    // author's attempts on an outage and then blames the author for the result.
+    const measuredReplies = policy.author && authorState.roundCalls !== undefined;
+    if (measuredReplies) {
+      progress.calls += authorState.roundCalls - 1;
+      progress.answered += authorState.roundAnswered;
+    }
+    // A round without a candidate can still retain work when a sibling fails:
+    // a previously missing entry lowers the outstanding-entry count. A
+    // rewrite alone clears no defect; every failure shares the same window.
+    const advanced = (authorState.added || 0) > addedBefore;
     if (authored.status === "failed") {
-      operational += 1;
-      if (operational >= OPERATIONAL_ATTEMPTS) {
-        throw new Error(`${policy.phase} author calls failed operationally ${operational} times: ${authored.summary || "no summary"}`);
+      if (authored.malformed) {
+        recordAnswered(progress, call, "entries", advanced, !measuredReplies);
+        lastFindings = [authored.summary || "malformed replies"];
+      } else {
+        recordOperational(progress, call, authored.summary, advanced);
+        lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
       }
       continue;
     }
-    operational = 0;
     attempt += 1;
     if (authored.stopReason !== "end_turn" || typeof authored.content !== "string" || authored.content.length === 0) {
       feedback = [`Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
+      lastFindings = feedback.slice();
+      recordAnswered(progress, call, "incomplete", false, !measuredReplies);
       continue;
     }
 
     const outcome = await w.hostCommand(policy.capability, { stdin: authored.content });
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
+    if (routed.operational) {
+      // The gate never judged the candidate: the attempt makes no progress.
+      if (!measuredReplies) progress.answered += 1;
+      recordOperational(progress, call, routed.operational);
+      lastFindings = [`host gate operational failure: ${routed.operational}`];
+      continue;
+    }
     if (policy.author) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = (outcome.gateEnvelope?.policy_findings || [])
         .filter(finding => policy.retryScopes.has(finding.remediation_scope));
       authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt));
     }
-    // A committed artifact is the best one so far, not the finished one. The
-    // gate publishing in observe mode says the gate did not block; it says
-    // nothing about whether the artifact still carries defects the author can
-    // fix. Returning here discarded the routing computed one line above, so a
-    // task set was published with 19 shadow findings — an acceptance floor the
-    // gate itself reported as not falsifiable among them — and built on for a
-    // week. Repairable findings are fed back below; observe still never blocks,
-    // because an exhausted budget falls back to the best artifact seen.
-    //
-    // Best, not latest. Attempts do not improve monotonically — a live run went
-    // 2 findings, 1, 2, 1, 1 and then produced a malformed candidate, so keeping
-    // the most recent commit froze a worse contract than two earlier attempts
-    // had already produced. Ties keep the earlier artifact: it reached this
-    // quality with fewer author attempts and nothing later improved on it.
-    if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true) {
-      if (routed.all.length < bestFindings) {
-        bestCommitted = outcome;
-        bestFindings = routed.all.length;
-      }
-    }
+    // A committed artifact is not the finished one: repairable findings are
+    // still fed back below in either mode. Every publication replaces the
+    // live tree, so observe's fallback is the LATEST committed outcome: only
+    // its receipt and subjects describe what the tree now holds (an earlier
+    // outcome with fewer findings would name a skeleton that is gone).
+    if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true) lastCommitted = outcome;
     if (routed.fatal.length > 0) {
       throw new Error(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
     }
@@ -364,31 +360,9 @@ async function authorCandidate(w, policy) {
     }
     history.push({ attempt, findings: routed.retry.slice() });
     feedback = routed.retry;
-    // Packaging keeps its own small bound (TD-027): it is a host refusal too,
-    // and letting it into the mechanical allowance below would give a model
-    // that never packages one document twelve calls instead of three.
-    const packaging = routed.retry.every((text) => text.includes(PACKAGING_REFUSAL));
-    if (packaging) {
-      if (packagingRefunds < PACKAGING_REFUNDS) {
-        packagingRefunds += 1;
-        attempt -= 1;
-      }
-      continue;
-    }
-    const deterministicRefusal = policy.phase === "acceptance"
-      && !outcome.publicationReceipt
-      && routed.retry.every((text) => text.startsWith("candidate artifact was refused:"));
-    if (deterministicRefusal) {
-      acceptanceRefusals += 1;
-      if (acceptanceRefusals >= ACCEPTANCE_REFUSAL_REFUNDS) {
-        throw new Error(`acceptance exhausted ${acceptanceRefusals} deterministic repairs: ${routed.retry.join(" | ")}`);
-      }
-      attempt -= 1;
-    }
+    lastFindings = routed.retry.slice();
+    recordAttempt(progress, call, routed.retryFindings, !measuredReplies);
   }
-
-  if (args.gateMode === "observe" && bestCommitted) return bestCommitted;
-  throw new Error(`${policy.phase} exhausted ${policy.attempts} candidate attempts`);
 }
 
 // The set gate's retry scopes. Every body was judged alone against its own
@@ -418,19 +392,23 @@ function acceptSetGate(gate) {
   return gate.outcome;
 }
 
+// A gate operational error (a truncated judge reply, a preparation failure)
+// is returned as `operational`, never thrown: the caller's loop counts it as
+// an attempt without progress and pauses the run when its window closes.
 function routeFindings(outcome, retryScopes, shadowScopes) {
   if (!outcome || typeof outcome !== "object") throw new Error("host command returned no typed outcome");
+  const routed = {
+    retry: [], retryFindings: [], fatal: [], inherited: [], inheritedFindings: [],
+    shadow: [], shadowFindings: [], all: [], allFindings: [], operational: null
+  };
   if (outcome.gateEnvelope?.operational_error) {
-    throw new Error(outcome.gateEnvelope.operational_error.text || "host gate operational failure");
+    routed.operational = String(outcome.gateEnvelope.operational_error.text || "host gate operational failure");
+    return routed;
   }
   const findings = Array.isArray(outcome.gateEnvelope?.policy_findings)
     ? outcome.gateEnvelope.policy_findings
     : [];
   const shadows = shadowScopes || new Set();
-  const routed = {
-    retry: [], retryFindings: [], fatal: [], inherited: [], inheritedFindings: [],
-    shadow: [], shadowFindings: [], all: [], allFindings: []
-  };
   for (const finding of findings) {
     const text = typeof finding.text === "string" ? finding.text : "unnamed policy finding";
     const scope = finding.remediation_scope;

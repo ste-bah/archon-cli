@@ -228,6 +228,7 @@ async fn stale_notification_failure_in_flight_preserves_a_fresh_first_attempt() 
         None,
     );
     let host = WorkflowScriptHost {
+        host_occurrences: Default::default(),
         scaffold_hash: "fixture".into(),
         envelope_shape: ScriptEnvelopeShape::Compat,
         runner: WorkflowV2ScriptRunner::new(

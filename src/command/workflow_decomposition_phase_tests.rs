@@ -272,6 +272,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
         let first = acceptance_attempt == 1;
         let findings = if first {
             vec![archon_workflow::GatePolicyFinding {
+                deterministic_defect: None,
                 text: "exact authoritative correction".into(),
                 subject: "acceptance".into(),
                 source_path: None,

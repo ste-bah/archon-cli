@@ -55,3 +55,13 @@ mod tests {
         )));
     }
 }
+
+/// All deterministic candidate defects, without dropping their stable identities.
+#[derive(Debug)]
+pub(crate) struct CandidateDefects(pub(crate) Vec<archon_workflow::defect::ValidationDefect>);
+impl std::fmt::Display for CandidateDefects {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&archon_workflow::defect::defect_message(&self.0))
+    }
+}
+impl std::error::Error for CandidateDefects {}

@@ -108,6 +108,11 @@ pub(crate) fn candidate_refusal_envelope(command_id: &str, reason: &str) -> Gate
         schema_version: GATE_ENVELOPE_SCHEMA_VERSION,
         report: serde_json::json!(format!("{command_id} refused the candidate before staging")),
         policy_findings: vec![GatePolicyFinding {
+            deterministic_defect: Some(archon_workflow::defect::DeterministicDefect::new(
+                "unbound_candidate",
+                command_id,
+                "candidate",
+            )),
             text: reason.to_string(),
             subject: command_id.to_string(),
             source_path: None,
@@ -144,6 +149,7 @@ mod tests {
             schema_version: archon_workflow::GATE_ENVELOPE_SCHEMA_VERSION,
             report: serde_json::json!("staged"),
             policy_findings: vec![GatePolicyFinding {
+                deterministic_defect: None,
                 text: "floor is not falsifiable".into(),
                 subject: "AC-X-001".into(),
                 source_path: None,

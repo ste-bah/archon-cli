@@ -172,3 +172,99 @@ fn an_incomplete_freeze_exits_by_the_operational_contract() {
         75
     );
 }
+
+#[test]
+fn workflow_host_command_candidate_refusal_has_host_owned_stable_identity() {
+    let dir = tempfile::tempdir().expect("fixture");
+    let mut identities = Vec::new();
+    for ordinal in 1..=3 {
+        let staging = dir.path().join(format!("stage-{ordinal}"));
+        std::fs::create_dir_all(&staging).expect("staging");
+        let envelope = staging.join("envelope.json");
+        refuse_candidate_artifact(
+            dir.path(),
+            StagedArgs {
+                staging_root: &staging,
+                gate_envelope: &envelope,
+                call_id: "call",
+            },
+            "freeze-skeleton",
+            crate::command::workflow_gate::GateId::FreezeSkeleton,
+            "skeleton",
+            "candidate_refused",
+            &format!("invalid submitted filename bad{ordinal}"),
+        )
+        .expect("refusal envelope");
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(envelope).expect("bytes")).expect("envelope");
+        let identity = value["policy_findings"][0]["deterministic_defect"].clone();
+        assert_eq!(identity["provenance"], "host_validator", "{value}");
+        assert!(
+            identity["code"]
+                .as_str()
+                .is_some_and(|code| !code.is_empty()),
+            "{value}"
+        );
+        assert!(
+            !identity.to_string().contains(&format!("bad{ordinal}")),
+            "{identity}"
+        );
+        identities.push(identity);
+    }
+    assert!(identities.windows(2).all(|pair| pair[0] == pair[1]));
+}
+
+#[test]
+fn workflow_host_command_reports_all_marker_fields_in_one_task() {
+    let value = serde_json::json!({"tasks":[{"task_id":"TASK-X-001", "file_name":"<redacted>",
+        "depends_on":[{"consumes":[{"artifact_path":"<redacted>"}]}],
+        "deliverable_contracts":[{"artifact_path":"<redacted>"}]}]});
+    let message = crate::command::workflow_freeze_candidate::skeleton_marker_refusal(&value)
+        .expect("markers");
+    for field in ["file_name", "depends_on", "deliverable_contracts"] {
+        assert!(message.contains(field), "missing {field}: {message}");
+    }
+}
+
+/// Issue 261 round 7: a candidate of the wrong shape was parsed. Its refusal
+/// keeps the shape stage (refused tier), below which only unreadable JSON sits.
+#[test]
+fn workflow_host_command_shape_and_json_refusals_carry_their_own_stage() {
+    #[derive(serde::Deserialize)]
+    #[allow(dead_code)]
+    struct Wanted {
+        tasks: Vec<String>,
+    }
+    let dir = tempfile::tempdir().expect("fixture");
+    for (raw, code, stage) in [
+        (&b"{\"other\":1}"[..], "invalid_candidate_shape", "shape"),
+        (&b"no json here"[..], "invalid_json", "parse"),
+    ] {
+        let (found, reason) =
+            crate::command::workflow_freeze_candidate::candidate_refusal::<Wanted>(raw)
+                .expect("refused");
+        assert_eq!(found, code);
+        let staging = dir.path().join(code);
+        std::fs::create_dir_all(&staging).expect("staging");
+        let envelope = staging.join("envelope.json");
+        refuse_candidate_artifact(
+            dir.path(),
+            StagedArgs {
+                staging_root: &staging,
+                gate_envelope: &envelope,
+                call_id: "call",
+            },
+            "freeze-skeleton",
+            crate::command::workflow_gate::GateId::FreezeSkeleton,
+            "skeleton",
+            found,
+            &reason,
+        )
+        .expect("refusal envelope");
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(envelope).expect("bytes")).expect("envelope");
+        let defect = &value["policy_findings"][0]["deterministic_defect"];
+        assert_eq!(defect["code"], code, "{value}");
+        assert_eq!(defect["stage"], stage, "{value}");
+    }
+}

@@ -1,5 +1,7 @@
 //! Candidate-only validation before any acceptance judge request.
 use super::*;
+use crate::command::workflow_task_set_candidate::CandidateDefects;
+use archon_workflow::defect::ValidationDefect;
 
 pub(super) fn prepare(
     project_root: &Path,
@@ -14,11 +16,10 @@ pub(super) fn prepare(
     // disk. Everything up to the judge inspects that artifact, so a failure
     // here is tagged as the artifact's and fed back to the author.
     let mut contract: AcceptanceContract = CandidateRejected::tag(
-        crate::command::workflow_freeze_candidate::acceptance_candidate(original).and_then(
-            |bytes| {
+        crate::command::workflow_freeze_candidate::acceptance_candidate_for_validation(original)
+            .and_then(|bytes| {
                 serde_json::from_slice(&bytes).context("parsing the candidate acceptance contract")
-            },
-        ),
+            }),
     )?;
     contract.prd.path = project_relative(project_root, prd_path);
     contract.prd.digest = prd_digest.to_string();
@@ -27,21 +28,27 @@ pub(super) fn prepare(
         .iter()
         .map(|field| (*field).to_string())
         .collect();
-    for criterion in &mut contract.acceptance {
-        criterion.criterion =
-            CandidateRejected::tag(exact_criteria.get(&criterion.id).cloned().ok_or_else(|| {
-                anyhow!(
-                    "acceptance id '{}' is not defined by the PRD; remove it or correct the id",
-                    criterion.id
-                )
-            }))?;
+    let marker_value: serde_json::Value = serde_json::from_slice(
+        &crate::command::workflow_freeze_candidate::candidate_document(original),
+    )
+    .context("acceptance marker inspection")?;
+    let mut defects =
+        crate::command::workflow_freeze_candidate::marker_defects(&marker_value, false);
+    for (index, criterion) in contract.acceptance.iter_mut().enumerate() {
+        if let Some(text) = exact_criteria.get(&criterion.id) {
+            criterion.criterion.clone_from(text);
+        } else {
+            // Structure validation below reports every unknown id. Continue
+            // stamping the known siblings so their independent defects are visible.
+            criterion.criterion = format!("unknown acceptance entry {index}");
+        }
     }
     // H4: a supplementary check minted for a requirement no check covered
     // is judged against that requirement's exact text and always covers it;
     // both are the host's, like an acceptance entry's criterion.
     let requirements =
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);
-    for criterion in &mut contract.supplementary {
+    for (index, criterion) in contract.supplementary.iter_mut().enumerate() {
         let Some(requirement) =
             archon_workflow::v2::acceptance_stage::coverage::supplementary_requirement(
                 &criterion.id,
@@ -49,26 +56,26 @@ pub(super) fn prepare(
         else {
             continue;
         };
-        let text = CandidateRejected::tag(requirements.get(requirement).cloned().ok_or_else(
-            || {
-                anyhow!(
-                    "supplementary check '{}' names requirement {requirement}, which the PRD does not define; remove it or correct the id",
-                    criterion.id
-                )
-            },
-        ))?;
+        let Some(text) = requirements.get(requirement).cloned() else {
+            defects.push(ValidationDefect::new("unknown_supplementary_requirement", "acceptance",
+                &format!("supplementary/{index}"), format!(
+                    "supplementary check '{}' names requirement {requirement}, which the PRD does not define; remove it or correct the id", criterion.id)));
+            continue;
+        };
         criterion.criterion = text;
         if !criterion.covers.iter().any(|id| id == requirement) {
             criterion.covers.insert(0, requirement.to_string());
         }
     }
-    CandidateRejected::tag(
-        validate_acceptance_structure(&contract, expected, false).map_err(anyhow::Error::new),
-    )?;
+    defects.extend(
+        archon_workflow::task_set_contract::acceptance_structure_defects(
+            &contract, expected, false,
+        ),
+    );
 
     // Authored verdicts are placeholders. Only check defects, never those
     // placeholder judgments, decide whether the candidate reaches the judge.
-    let defects = acceptance_policy_findings(&contract)
+    let policy_defects = acceptance_policy_findings(&contract)
         .into_iter()
         .filter(|finding| {
             finding.field.ends_with(".check")
@@ -81,10 +88,16 @@ pub(super) fn prepare(
                             && criterion_prescribes_check_shape(&entry.criterion)
                     })
         })
-        .map(|finding| finding.message)
+        .filter_map(|finding| {
+            finding.identity.map(|identity| ValidationDefect {
+                identity,
+                message: finding.message,
+            })
+        })
         .collect::<Vec<_>>();
+    defects.extend(policy_defects);
     if !defects.is_empty() {
-        return CandidateRejected::tag(Err(anyhow!("{}", defects.join("; "))));
+        return CandidateRejected::tag(Err(CandidateDefects(defects).into()));
     }
     Ok(contract)
 }

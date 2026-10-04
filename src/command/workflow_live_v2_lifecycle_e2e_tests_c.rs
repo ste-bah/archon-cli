@@ -266,6 +266,7 @@ pub(super) fn boundary_driver(
         None,
     );
     let host = Arc::new(WorkflowScriptHost {
+        host_occurrences: Default::default(),
         scaffold_hash: workflow_scaffold_hash("# boundary preservation fixture"),
         envelope_shape: ScriptEnvelopeShape::Compat,
         runner,
