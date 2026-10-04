@@ -91,6 +91,27 @@ impl Redactor {
         Self::from_vars(vars, forwarded)
     }
 
+    /// `bytes` with every credential value replaced by its name, whatever
+    /// their encoding (a check's output need not be UTF-8).
+    pub(crate) fn redact_bytes(&self, bytes: &[u8]) -> Vec<u8> {
+        self.secrets
+            .iter()
+            .fold(bytes.to_vec(), |bytes, (name, value)| {
+                let (value, mark) = (value.as_bytes(), format!("[REDACTED:{name}]"));
+                let (mut clean, mut at) = (Vec::with_capacity(bytes.len()), 0);
+                while at < bytes.len() {
+                    if bytes[at..].starts_with(value) {
+                        clean.extend_from_slice(mark.as_bytes());
+                        at += value.len();
+                    } else {
+                        clean.push(bytes[at]);
+                        at += 1;
+                    }
+                }
+                clean
+            })
+    }
+
     pub(crate) fn redact(&self, text: &str) -> String {
         let mut text = text.to_string();
         for (name, value) in &self.secrets {

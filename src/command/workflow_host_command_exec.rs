@@ -33,6 +33,9 @@ use super::workflow_host_command_supervisor::{
     HostCommandControl, HostCommandControlHandle, HostCommandSignal, SupervisedProcessOutput,
     supervise_process_group,
 };
+use super::workflow_host_envelope_seal::{
+    ENVELOPE_FILE, owner_only, rebind_manifest, seal_staged_envelope,
+};
 use super::workflow_host_secrets::{HostSecrets, utf8};
 
 #[async_trait]
@@ -142,61 +145,6 @@ impl FixedHostCommandExecutor {
         resolve_host_command(request, &self.catalog, context, call_id)
     }
 
-    fn destinations(
-        &self,
-        context: &HostCommandResolutionContext,
-        command: &ResolvedHostCommand,
-        call_id: &str,
-    ) -> WorkflowResult<BTreeMap<String, PathBuf>> {
-        let envelope = self
-            .run_root
-            .join("host-command-results")
-            .join(call_id)
-            .join("gate-envelope.json");
-        let mut destinations = BTreeMap::new();
-        for path in &command.declared_write_set {
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| {
-                    WorkflowError::SpecInvalid(format!(
-                        "declared host output {} has no UTF-8 file name",
-                        path.display()
-                    ))
-                })?;
-            let destination = match name {
-                "gate-envelope.json" => envelope.clone(),
-                "acceptance-contract.json"
-                | "acceptance-contract.lock"
-                | "task-skeleton.json"
-                | "task-skeleton.lock" => context.task_root.join(name),
-                "acceptance-pin.json" => super::workflow_task_set::acceptance_pin_path(
-                    &context.project_root,
-                    &context.task_root,
-                ),
-                _ if command.command_id == "land-task-body" => {
-                    context.frozen_task_file.clone().ok_or_else(|| {
-                        WorkflowError::SpecInvalid(
-                            "land-task-body has no host-bound frozen task file".to_string(),
-                        )
-                    })?
-                }
-                _ => {
-                    return Err(WorkflowError::SpecInvalid(format!(
-                        "host command '{}' declared unknown output {name}",
-                        command.command_id
-                    )));
-                }
-            };
-            if destinations.insert(name.to_string(), destination).is_some() {
-                return Err(WorkflowError::SpecInvalid(format!(
-                    "host command '{}' declared duplicate output {name}",
-                    command.command_id
-                )));
-            }
-        }
-        Ok(destinations)
-    }
     async fn execute_process_with_run_control(
         &self,
         request: ResolvedHostCommand,
@@ -251,6 +199,8 @@ impl FixedHostCommandExecutor {
     }
 }
 
+#[path = "workflow_host_command_exec_destinations.rs"]
+mod destinations;
 #[path = "workflow_host_command_exec_live.rs"]
 mod live;
 #[path = "workflow_host_command_exec_retry.rs"]
@@ -350,12 +300,30 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         let sentinels =
             LiveMutationSentinels::capture(&destinations.values().cloned().collect::<Vec<_>>())
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-        // Issue #255: an operational ending is retried or pauses the run.
-        let observed = self
-            .execute_with_operational_retry(&command, &call_id, expected_generation)
-            .await?;
         // What the call records never holds a secret value the child was given.
         let secrets = HostSecrets::of(&context, &command.environment);
+        let staged_envelope = staging.root.join(ENVELOPE_FILE);
+        // Issue #255: an operational ending is retried or pauses the run.
+        let observed = match (self.execute_with_operational_retry(
+            &command,
+            &call_id,
+            expected_generation,
+        ))
+        .await
+        {
+            Ok(observed) => observed,
+            Err(error) => {
+                // A paused or stopped call leaves its staging behind too; the
+                // control error itself must still reach the caller.
+                if let Err(seal) = seal_staged_envelope(&staged_envelope, &secrets) {
+                    tracing::warn!(%seal, "sealing an interrupted call's staged envelope failed");
+                }
+                return Err(error);
+            }
+        };
+        // Issue 277: before any decision, nothing the child staged keeps a
+        // secret in clear, on refused and failed paths as well as published.
+        let sealed = seal_staged_envelope(&staged_envelope, &secrets)?;
         let raw_stdout = utf8(observed.stdout, "stdout")?;
         let (stdout, stderr) = (
             secrets.text(&raw_stdout),
@@ -378,17 +346,19 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 postcondition: None,
             });
         }
-        let prepared: PreparedPublicationV1 = secrets.parse_json(
+        let mut prepared: PreparedPublicationV1 = secrets.parse_json(
             raw_stdout.trim().as_bytes(),
             &format!(
                 "host command '{}' returned malformed prepared manifest",
                 request.command_id
             ),
         )?;
-        let envelope_path = staging.root.join("gate-envelope.json");
+        if let Some(sealed) = &sealed {
+            rebind_manifest(&mut prepared, sealed);
+        }
         let envelope: GateEnvelopeV1 = secrets.parse_json(
-            &std::fs::read(&envelope_path).map_err(|source| WorkflowError::Io {
-                path: envelope_path.clone(),
+            &std::fs::read(&staged_envelope).map_err(|source| WorkflowError::Io {
+                path: staged_envelope.clone(),
                 source,
             })?,
             "host command returned malformed gate envelope",
@@ -461,6 +431,9 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
             let receipt = publish_audited(audited, &destinations)
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+            if let Some(envelope) = destinations.get(ENVELOPE_FILE) {
+                owner_only(envelope)?;
+            }
             // Only now, past every refusal the parent can still make. The
             // staged child cannot write here: a record appended before this
             // point survives a publication the parent rejects.

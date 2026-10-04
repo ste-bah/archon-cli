@@ -387,5 +387,8 @@ pub(crate) mod workflow_audit_control;
 #[path = "workflow_host_command_supervisor_tests.rs"]
 mod workflow_host_command_supervisor_tests;
 
+pub(crate) mod workflow_host_envelope_seal;
 pub(crate) mod workflow_host_environment;
+#[cfg(test)]
+mod workflow_host_envelope_seal_tests;
 pub(crate) mod workflow_host_secrets;

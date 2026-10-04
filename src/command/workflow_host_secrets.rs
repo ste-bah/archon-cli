@@ -72,6 +72,32 @@ impl HostSecrets {
         })
     }
 
+    /// Whether `bytes` hold any secret value in clear.
+    pub(crate) fn holds_secret(&self, bytes: &[u8]) -> bool {
+        self.0.iter().any(|value| {
+            let value = value.as_bytes();
+            bytes.windows(value.len()).any(|window| window == value)
+        })
+    }
+
+    /// `bytes` with every secret value replaced, whatever their encoding.
+    pub(crate) fn bytes(&self, bytes: &[u8]) -> Vec<u8> {
+        self.0.iter().fold(bytes.to_vec(), |bytes, value| {
+            let value = value.as_bytes();
+            let (mut clean, mut at) = (Vec::with_capacity(bytes.len()), 0);
+            while at < bytes.len() {
+                if bytes[at..].starts_with(value) {
+                    clean.extend_from_slice(REDACTED.as_bytes());
+                    at += value.len();
+                } else {
+                    clean.push(bytes[at]);
+                    at += 1;
+                }
+            }
+            clean
+        })
+    }
+
     /// Parse child JSON, redacting diagnostics before they leave this boundary.
     pub(crate) fn parse_json<T: serde::de::DeserializeOwned>(
         &self,
