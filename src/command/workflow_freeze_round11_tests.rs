@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 #[path = "workflow_freeze_shape_fixtures.rs"]
 mod fixtures;
 
+#[path = "workflow_freeze_duplicate_tests.rs"]
+mod duplicates;
+
 fn defects(value: &Value, shape: &ElementShape) -> Vec<String> {
     element_shape_defects(&serde_json::to_vec(value).unwrap(), shape)
         .into_iter()
@@ -163,6 +166,39 @@ fn remove(value: &mut Value, pointer: &str) -> bool {
 
 #[test]
 fn workflow_freeze_round11_generated_repairs_strictly_decrease_and_zero_assembles() {
+    generated_repairs(false);
+}
+
+#[test]
+#[ignore = "full repeated-element corpus for manual runs"]
+fn workflow_freeze_round12_exhaustive_generated_repairs() {
+    generated_repairs(true);
+}
+
+// Identical list members repeat all the same mutations and multiply whole-
+// document validation costs. Keep every distinct member, field and probe.
+fn compact(value: &mut Value) {
+    match value {
+        Value::Array(items) => {
+            if items.first().is_some_and(|v| v.is_object() || v.is_array())
+                && items.iter().all(|v| v == &items[0])
+            {
+                items.truncate(1);
+            }
+            for item in items {
+                compact(item);
+            }
+        }
+        Value::Object(map) => {
+            for child in map.values_mut() {
+                compact(child);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn generated_repairs(exhaustive: bool) {
     assert_eq!(
         serde_json::to_value(fixtures::contract())
             .unwrap()
@@ -172,7 +208,13 @@ fn workflow_freeze_round11_generated_repairs_strictly_decrease_and_zero_assemble
         48
     );
     let mut corpus = vec![(&TASK_SHAPE, fixtures::skeleton(fixtures::task()))];
-    for e in fixtures::entries() {
+    // Fixed representatives cover both cwd values, both verdicts and both
+    // check variants. Their Cartesian product repeats identical field/probe
+    // checks; keep that product in the ignored exhaustive corpus only.
+    for (index, e) in fixtures::entries().into_iter().enumerate() {
+        if !exhaustive && ![0, 3, 4].contains(&index) {
+            continue;
+        }
         corpus.push((
             &ENTRY_SHAPE,
             json!({"entries":[e.clone(), e.clone()],"supplementary":[e.clone(), e.clone()]}),
@@ -200,7 +242,16 @@ fn workflow_freeze_round11_generated_repairs_strictly_decrease_and_zero_assemble
         json!(18446744073709551616.0),
     ];
     let (mut mutations, mut sequences, mut failures) = (0, 0, Vec::new());
-    for (shape, sample) in corpus {
+    let (mut duplicate_mutation_count, mut duplicate_repair_count) = (0, 0);
+    for (shape, mut sample) in corpus {
+        if !exhaustive {
+            compact(&mut sample);
+        }
+        let (duplicate_mutations, duplicate_repairs) = duplicates::check(&sample, shape);
+        mutations += duplicate_mutations;
+        sequences += duplicate_repairs;
+        duplicate_mutation_count += duplicate_mutations;
+        duplicate_repair_count += duplicate_repairs;
         assert!(accepts(&sample, shape));
         assert!(defects(&sample, shape).is_empty());
         let mut paths = vec![String::new()];
@@ -333,25 +384,28 @@ fn workflow_freeze_round11_generated_repairs_strictly_decrease_and_zero_assemble
                 remove(&mut broken, pointer);
             }
         }
+        let broken_count = defects(&broken, shape).len();
         for (pointer, _) in &independent {
             let mut repaired = broken.clone();
             restore(&mut repaired, &sample, pointer);
             sequences += 1;
-            let b = defects(&broken, shape).len();
+            let b = broken_count;
             let a = defects(&repaired, shape).len();
             if a >= b && failures.len() < 12 {
                 failures.push(format!("combined repair {pointer}: {b} -> {a}"));
             }
         }
+        let mut before_count = broken_count;
         for (pointer, _) in independent {
             let mut repaired = broken.clone();
             restore(&mut repaired, &sample, &pointer);
             sequences += 1;
-            let b = defects(&broken, shape).len();
+            let b = before_count;
             let a = defects(&repaired, shape).len();
             if a >= b && failures.len() < 12 {
                 failures.push(format!("sequence {pointer}: {b} -> {a}"));
             }
+            before_count = a;
             broken = repaired;
         }
         assert!(accepts(&broken, shape));
@@ -413,6 +467,11 @@ fn workflow_freeze_round11_generated_repairs_strictly_decrease_and_zero_assemble
             }
         }
     }
-    eprintln!("round11 corpus: {mutations} mutations, {sequences} repair checks");
+    eprintln!(
+        "round12 corpus (exhaustive={exhaustive}): {mutations} mutations, {sequences} repair checks"
+    );
+    eprintln!(
+        "duplicates: {duplicate_mutation_count} mutations, {duplicate_repair_count} repair checks"
+    );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

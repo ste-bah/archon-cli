@@ -7,6 +7,9 @@ use serde_json::{Map, Value};
 #[path = "workflow_freeze_schema.rs"]
 mod schema;
 
+#[path = "workflow_freeze_shape_parse.rs"]
+mod parse;
+
 #[derive(Clone, Copy)]
 enum Shape {
     String,
@@ -214,6 +217,7 @@ fn walk_tagged(
     variants: &[(&str, &ObjectShape)],
     out: &mut Vec<ValidationDefect>,
 ) {
+    let start = out.len();
     let object = value.and_then(Value::as_object);
     let items = value.and_then(Value::as_array);
     let rest = items.map(|items| items.get(1..).unwrap_or_default());
@@ -301,6 +305,19 @@ fn walk_tagged(
             }
         }
     }
+    // Keep the reserved identities/counts until the tag is known, but never
+    // instruct the author to add a different variant's required fields.
+    let choices = variants
+        .iter()
+        .map(|(kind, _)| *kind)
+        .collect::<Vec<_>>()
+        .join(", ");
+    for defect in &mut out[start..] {
+        defect.message = format!(
+            "{}: resolve {tag_at} first (choices: {choices}); requirements depend on the selected variant",
+            defect.identity.subject
+        );
+    }
 }
 
 pub(crate) fn element_shape_defects(
@@ -308,7 +325,12 @@ pub(crate) fn element_shape_defects(
     shape: &ElementShape,
 ) -> Vec<ValidationDefect> {
     let document = candidate_document(candidate);
-    let value = match serde_json::from_slice::<Value>(&document) {
+    let mut out = Vec::new();
+    let parsed = match shape {
+        ElementShape::Tasks => parse::parse(&document, &Shape::Object(&schema::SKELETON), &mut out),
+        ElementShape::Acceptance => serde_json::from_slice::<Value>(&document),
+    };
+    let value = match parsed {
         Ok(value) => value,
         Err(error) => {
             return vec![ValidationDefect::new(
@@ -327,7 +349,6 @@ pub(crate) fn element_shape_defects(
         ElementShape::Acceptance if value.get("entries").is_some() => &schema::AUTHORED,
         ElementShape::Acceptance => &schema::LEGACY,
     };
-    let mut out = Vec::new();
     Shape::Object(root).walk(Some(&value), "", &mut out);
     out.sort_by(|a, b| a.identity.cmp(&b.identity));
     out.dedup_by(|a, b| a.identity == b.identity);
