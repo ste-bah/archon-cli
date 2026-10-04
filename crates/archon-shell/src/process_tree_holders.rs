@@ -12,7 +12,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use super::{canonical_roots, protected, snapshot};
+use super::{canonical_roots, protected, snapshot_until};
 
 /// The bound [`holders`] gives a probe.
 pub const HOLDER_PROBE_DEADLINE: Duration = Duration::from_secs(5);
@@ -44,9 +44,9 @@ pub fn holders_within(roots: &[&Path], deadline: Duration) -> io::Result<Vec<Hol
     if roots.is_empty() {
         return Ok(Vec::new());
     }
-    let table = snapshot()?;
-    let protected = protected(&table);
-    let starts: BTreeMap<u32, u64> = table.iter().map(|p| (p.pid, p.start)).collect();
+    let table = snapshot_until(end)?;
+    let protected = protected(&table.processes);
+    let starts: BTreeMap<u32, u64> = table.processes.iter().map(|p| (p.pid, p.start)).collect();
     let under = |path: &Path| roots.iter().any(|root| path.starts_with(root));
     let mut found: BTreeMap<u32, Holder> = BTreeMap::new();
     for (pid, path, writes) in open_paths(end)? {
@@ -96,7 +96,12 @@ fn open_paths(end: Instant) -> io::Result<Vec<(u32, PathBuf, bool)>> {
         let Ok(fds) = std::fs::read_dir(dir.join("fd")) else {
             continue;
         };
-        for fd in fds.flatten() {
+        // A process can hold a huge number of descriptors: the deadline is
+        // checked inside one process's list too, in batches.
+        for (index, fd) in fds.flatten().enumerate() {
+            if index % 256 == 255 && Instant::now() >= end {
+                return Err(timed_out());
+            }
             let Ok(target) = std::fs::read_link(fd.path()) else {
                 continue;
             };

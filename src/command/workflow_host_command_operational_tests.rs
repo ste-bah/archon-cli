@@ -473,3 +473,7 @@ async fn a_real_timeout_keeps_the_progress_the_child_reported_before_the_kill() 
     assert_eq!(classify(&output), Some(OperationalKind::TimedOut));
     assert_eq!(reported_progress(&output.stderr), Some(9));
 }
+
+#[cfg(unix)]
+#[path = "workflow_host_command_operational_stall_tests.rs"]
+mod stall;

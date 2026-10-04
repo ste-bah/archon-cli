@@ -272,8 +272,14 @@ async fn a_stalled_teardown_keeps_the_resume_record() {
     let result = supervise_process_group(command(program), control, Some(&records)).await;
     let _kill = Kill(read_pid(&pid_file));
     assert!(result.is_ok(), "{result:?}");
-    let kept = std::fs::read_dir(&records).unwrap().count();
-    assert_eq!(kept, 1, "the record of a stalled teardown is kept");
+    let kept: Vec<_> = std::fs::read_dir(&records).unwrap().flatten().collect();
+    assert_eq!(kept.len(), 1, "the record of a stalled teardown is kept");
+    // The pipe holder escaped every scan: its survivors are unknown, and
+    // that is what the record says.
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(kept[0].path()).unwrap()).unwrap();
+    assert_eq!(record["stalled"], true, "{record}");
+    assert_eq!(record["survivors_unknown"], true, "{record}");
 }
 
 #[tokio::test]

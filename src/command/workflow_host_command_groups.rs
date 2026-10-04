@@ -32,10 +32,25 @@ pub(crate) struct HostCommandGroupRecord {
     /// session is named here, and the record runs while any of them lives.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) survivors: Vec<(u32, u64)>,
+    /// Teardown stalled and this record was kept (Issue 270 round 3): the
+    /// run pauses, and no operational retry starts, while it still runs.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) stalled: bool,
+    /// Teardown stalled and its survivors are not known (or could not be
+    /// written down): the record runs until someone verifies the tree.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) survivors_unknown: bool,
     pub(crate) command_id: String,
     pub(crate) host_pid: u32,
     pub(crate) started_at: String,
+    /// Where the record was read from, for a message that names it.
+    #[serde(skip)]
+    pub(crate) file: Option<PathBuf>,
 }
+
+/// The suffix of a record whose survivors could not be written down: it
+/// runs, whatever it says, until someone verifies the tree and removes it.
+const UNKNOWN_SUFFIX: &str = ".unknown.json";
 
 /// Removes its record when the supervisor is done with the group, unless
 /// teardown stalled and the record is kept for a resume to see.
@@ -46,26 +61,48 @@ pub(crate) struct GroupRecordGuard {
 }
 
 impl GroupRecordGuard {
-    /// Keep the record: teardown stalled. `survivors` are added to it so a
-    /// resume refuses while any of them still runs.
-    pub(crate) fn keep(mut self, survivors: &[(u32, u64)]) {
+    /// Keep the record: teardown stalled. `survivors` (pid, start time) are
+    /// written into it so a resume refuses while any of them still runs;
+    /// `None` means they are not known, and the record then runs until the
+    /// tree is verified. If the record cannot be rewritten, it is renamed to
+    /// `<pgid>.unknown.json`, which means the same: never the old contents,
+    /// whose empty survivor list would let a resume go ahead.
+    pub(crate) fn keep(mut self, survivors: Option<&[(u32, u64)]>) {
         self.kept = true;
-        let updated = std::fs::read(&self.path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<HostCommandGroupRecord>(&bytes).ok())
-            .map(|mut record| {
-                record.survivors = survivors.to_vec();
-                record
+        let rewritten = std::fs::read(&self.path)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| {
+                serde_json::from_slice::<HostCommandGroupRecord>(&bytes)
+                    .map_err(|error| error.to_string())
+            })
+            .and_then(|mut record| {
+                record.stalled = true;
+                record.survivors_unknown = survivors.is_none();
+                record.survivors = survivors.map(<[_]>::to_vec).unwrap_or_default();
+                let bytes = serde_json::to_vec(&record).map_err(|error| error.to_string())?;
+                let staged = self.path.with_extension("json.tmp");
+                std::fs::write(&staged, bytes).map_err(|error| error.to_string())?;
+                std::fs::rename(&staged, &self.path).map_err(|error| error.to_string())
             });
-        if let Some(record) = updated
-            && let Ok(bytes) = serde_json::to_vec(&record)
-        {
-            let staged = self.path.with_extension("json.tmp");
-            if std::fs::write(&staged, bytes).is_ok() {
-                let _ = std::fs::rename(&staged, &self.path);
-            }
+        if let Err(error) = rewritten {
+            let unknown = unknown_path(&self.path);
+            let renamed = std::fs::rename(&self.path, &unknown);
+            tracing::error!(
+                %error,
+                renamed = renamed.is_ok(),
+                record = %self.path.display(),
+                "writing the survivors of a stalled host command teardown failed; the record now means unknown survivors"
+            );
         }
     }
+}
+
+fn unknown_path(path: &Path) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    path.with_file_name(format!("{stem}{UNKNOWN_SUFFIX}"))
 }
 
 impl Drop for GroupRecordGuard {
@@ -92,9 +129,12 @@ pub(crate) fn record_group(
         session,
         job: job.map(str::to_string),
         survivors: Vec::new(),
+        stalled: false,
+        survivors_unknown: false,
         command_id: command_id.to_string(),
         host_pid: std::process::id(),
         started_at: chrono::Utc::now().to_rfc3339(),
+        file: None,
     };
     let io = |path: &Path| {
         let path = path.to_path_buf();
@@ -148,6 +188,9 @@ pub(crate) fn group_running(pgid: u32) -> Option<bool> {
 /// where that cannot be probed, which a caller must treat as possibly
 /// running; a failed session probe counts as running.
 pub(crate) fn record_running(record: &HostCommandGroupRecord) -> Option<bool> {
+    if record.survivors_unknown {
+        return None;
+    }
     // A survivor is the same process only while its start time matches.
     #[cfg(unix)]
     if record
@@ -195,13 +238,18 @@ pub(crate) fn left_groups(
         if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
         }
-        let record: HostCommandGroupRecord = serde_json::from_slice(&std::fs::read(&path)?)
+        let mut record: HostCommandGroupRecord = serde_json::from_slice(&std::fs::read(&path)?)
             .map_err(|error| {
                 anyhow::anyhow!(
                     "host command group record {} is unreadable ({error}); check that group by hand, then remove the record",
                     path.display()
                 )
             })?;
+        if path.to_string_lossy().ends_with(UNKNOWN_SUFFIX) {
+            record.stalled = true;
+            record.survivors_unknown = true;
+        }
+        record.file = Some(path.clone());
         if record_running(&record) == Some(false) {
             std::fs::remove_file(&path)?;
             ended.push(record);
@@ -210,6 +258,36 @@ pub(crate) fn left_groups(
         }
     }
     Ok((running, ended))
+}
+
+/// The kept records of stalled teardowns that still run (or whose survivors
+/// are unknown): while any exists, the run must pause and no operational
+/// retry may start (Issue 270 round 3).
+pub(crate) fn stalled_running(run_dir: &Path) -> anyhow::Result<Vec<HostCommandGroupRecord>> {
+    let (running, _) = left_groups(run_dir)?;
+    Ok(running
+        .into_iter()
+        .filter(|record| record.stalled || record.survivors_unknown)
+        .collect())
+}
+
+/// What a stalled record adds to a refusal: who may still run.
+pub(crate) fn stall_note(record: &HostCommandGroupRecord) -> String {
+    if record.survivors_unknown {
+        " (its teardown stalled and its survivors are unknown: verify that none of its processes runs)".to_string()
+    } else if record.stalled {
+        format!(
+            " (its teardown stalled; survivors: {})",
+            record
+                .survivors
+                .iter()
+                .map(|(pid, _)| pid.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    } else {
+        String::new()
+    }
 }
 
 /// Refuses while a group (or a process of its session) that a dead executor
@@ -225,19 +303,27 @@ pub(crate) fn require_no_running_groups(
     };
     let others = running.len() - 1;
     Err(anyhow::anyhow!(
-        "fixed decomposition {run_id} cannot resume: host command '{}' (process group {}, pid {}) that a previous executor started is still running{}; stop that group (kill -TERM -{}) and resume again. If the group is unrelated (its id was reused), remove {}",
+        "fixed decomposition {run_id} cannot resume: host command '{}' (process group {}, pid {}) that a previous executor started is still running{}{}; stop that group (kill -TERM -{}) and resume again. If the group is unrelated (its id was reused), remove {}",
         first.command_id,
         first.pgid,
         first.pid,
+        stall_note(first),
         if others == 0 {
             String::new()
         } else {
             format!(", with {others} other group(s)")
         },
         first.pgid,
-        run_dir
-            .join(GROUP_RECORDS_DIR)
-            .join(format!("{}.json", first.pgid))
+        first
+            .file
+            .clone()
+            .unwrap_or_else(|| run_dir
+                .join(GROUP_RECORDS_DIR)
+                .join(format!("{}.json", first.pgid)))
             .display()
     ))
 }
+
+#[cfg(all(test, unix))]
+#[path = "workflow_host_command_groups_tests.rs"]
+mod tests;

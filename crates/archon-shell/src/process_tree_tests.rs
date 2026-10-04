@@ -58,33 +58,20 @@ fn fdinfo_access_mode_says_whether_a_file_is_written() {
 }
 
 #[test]
-fn scope_reaches_groups_sessions_and_descendants_but_never_this_process() {
+fn a_scope_selects_its_groups_and_sessions_but_never_this_process() {
     let own = std::process::id();
     let table = vec![
         process(own, 1, 900, 900),
-        // A group member, its child that moved to its own group, and that
-        // child's child that left the session too.
-        process(100, own, 100, 900),
-        process(101, 100, 101, 900),
-        process(102, 101, 102, 102),
-        // A member of the session in another group, with no tie by ancestry.
-        process(200, 1, 200, 300),
-        // Unrelated.
+        process(100, 1, 100, 300),
+        process(101, 1, 200, 300),
+        process(102, 1, 100, 400),
         process(400, 1, 400, 400),
     ];
     let scope = Scope {
-        roots: Vec::new(),
         groups: vec![100],
         sessions: vec![300],
     };
-    assert_eq!(scope.members_in(&table), vec![100, 101, 102, 200]);
-    // Naming this process directly reaches nothing of its own.
-    let self_scope = Scope {
-        roots: vec![own],
-        groups: Vec::new(),
-        sessions: Vec::new(),
-    };
-    assert_eq!(self_scope.members_in(&table), vec![100, 101, 102]);
+    assert_eq!(scope.members_in(&table), vec![100, 101, 102]);
 }
 
 #[test]
@@ -92,7 +79,6 @@ fn this_processs_own_group_and_session_are_never_a_scope() {
     // SAFETY: plain integer calls.
     let (group, session) = unsafe { (libc::getpgrp(), libc::getsid(0)) };
     let scope = Scope {
-        roots: Vec::new(),
         groups: vec![group as u32],
         sessions: vec![session as u32],
     };
@@ -104,7 +90,7 @@ fn this_processs_own_group_and_session_are_never_a_scope() {
 }
 
 /// Spawns `sh -c body` as its own group leader; returns the child.
-fn group_leader(body: &str, dir: &Path) -> std::process::Child {
+pub(super) fn group_leader(body: &str, dir: &Path) -> std::process::Child {
     std::process::Command::new("/bin/sh")
         .args(["-c", body])
         .current_dir(dir)
@@ -113,34 +99,12 @@ fn group_leader(body: &str, dir: &Path) -> std::process::Child {
         .unwrap()
 }
 
-fn wait_for(path: &Path) {
+pub(super) fn wait_for(path: &Path) {
     let start = Instant::now();
     while !path.exists() {
         assert!(start.elapsed() < Duration::from_secs(10), "{path:?}");
         std::thread::sleep(Duration::from_millis(10));
     }
-}
-
-#[test]
-fn kill_empties_a_tree_whose_members_left_the_group_and_the_session() {
-    let temp = tempfile::tempdir().unwrap();
-    let ready = temp.path().join("ready");
-    let body = format!(
-        "perl -MPOSIX -e 'POSIX::setsid(); if (fork() == 0) {{ setpgid(0, 0); open(F, \">\", \"{}\"); close F; sleep 30; exit 0 }} sleep 30' & sleep 30",
-        ready.display()
-    );
-    let mut leader = group_leader(&body, temp.path());
-    wait_for(&ready);
-    let scope = Scope {
-        roots: vec![leader.id()],
-        groups: vec![leader.id()],
-        sessions: Vec::new(),
-    };
-    assert!(scope.members().unwrap().len() >= 3, "the tree is visible");
-    let survivors = scope.kill(Duration::from_secs(5)).unwrap();
-    leader.wait().unwrap();
-    assert!(survivors.is_empty(), "survivors: {survivors:?}");
-    assert!(scope.members().unwrap().is_empty());
 }
 
 #[test]
@@ -220,81 +184,6 @@ fn holders_child_with_a_hanging_lsof() {
 }
 
 #[test]
-fn a_pid_whose_identity_changed_is_never_signalled() {
-    // Round 2, rule 1: the same pid with another start time is another
-    // process (the pid was reused). It must not receive the signal.
-    let mut child = std::process::Command::new("sleep")
-        .arg("30")
-        .spawn()
-        .unwrap();
-    let pid = child.id();
-    let start = start_of(pid).expect("a live child has a start time");
-    let reused = Pinned {
-        pid,
-        start: start + 1,
-    };
-    assert!(
-        !deliver(reused, libc::SIGKILL),
-        "a stale identity was signalled"
-    );
-    std::thread::sleep(Duration::from_millis(100));
-    assert!(child.try_wait().unwrap().is_none(), "the child was killed");
-    assert!(deliver(Pinned { pid, start }, libc::SIGKILL));
-    child.wait().unwrap();
-    // A reaped process has no identity left to match.
-    assert!(!deliver(Pinned { pid, start }, libc::SIGKILL));
-}
-
-#[test]
-fn a_tracker_kills_a_member_it_saw_after_its_parent_exited() {
-    // Round 2, rule 2: the descendant leaves the group and the session, and
-    // its parent exits. Only a scan made while the parent lived ties it to
-    // the tree.
-    let temp = tempfile::tempdir().unwrap();
-    let ready = temp.path().join("ready");
-    let body = format!(
-        "perl -MPOSIX -e 'POSIX::setsid(); open(F, \">\", \"{}\"); close F; sleep 30' </dev/null >/dev/null 2>&1 &\nuntil [ -e '{}' ]; do sleep 0.01; done\nsleep 0.3",
-        ready.display(),
-        ready.display()
-    );
-    let mut leader = group_leader(&body, temp.path());
-    wait_for(&ready);
-    let scope = Scope {
-        roots: vec![leader.id()],
-        groups: vec![leader.id()],
-        sessions: Vec::new(),
-    };
-    let mut tracker = Tracker::new(scope.clone());
-    let seen = tracker.refresh().unwrap();
-    assert!(seen.len() >= 2, "the leader and the descendant: {seen:?}");
-    leader.wait().unwrap();
-    tracker.scope_mut().roots.clear();
-    let mut without_roots = scope;
-    without_roots.roots.clear();
-    let unreachable = without_roots.members().unwrap();
-    assert!(
-        unreachable.is_empty(),
-        "no scope reaches it any more: {unreachable:?}"
-    );
-    let daemon = seen
-        .iter()
-        // The one that leads its own session.
-        .find(|p| p.pid != leader.id() && p.sid == Some(p.pid))
-        .map(Process::pinned)
-        .unwrap();
-    assert_eq!(start_of(daemon.pid), Some(daemon.start), "still running");
-    assert!(tracker.kill(Duration::from_secs(5)).unwrap().is_empty());
-    let start = Instant::now();
-    while start_of(daemon.pid) == Some(daemon.start) {
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "seen member survived"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
-}
-
-#[test]
 fn holders_say_which_holder_writes() {
     let temp = tempfile::tempdir().unwrap();
     let file = temp.path().join("held");
@@ -327,3 +216,6 @@ fn holders_say_which_holder_writes() {
     assert_eq!(writes(reader.id()), Some(false), "{found:?}");
     assert_eq!(writes(writer.id()), Some(true), "{found:?}");
 }
+
+#[path = "process_tree_tracker_tests.rs"]
+mod tracker;

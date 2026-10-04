@@ -309,6 +309,48 @@ pub(crate) fn pause_run(
     }
 }
 
+/// Pauses the run because a host command's teardown stalled and its kept
+/// record still runs (Issue 270 round 3): processes it started may still
+/// write, so the call is not retried. `evidence` (the kept records) is
+/// recorded first, then the run is paused as for any operational stop.
+pub(crate) fn pause_for_stall(
+    store: &WorkflowStore,
+    run_root: &Path,
+    expected_generation: u64,
+    report: &OperationalReport,
+    evidence: &str,
+) -> WorkflowError {
+    let detail = serde_json::json!({
+        "event": "host_command_teardown_stalled",
+        "call_id": report.call_id,
+        "command_id": report.command_id,
+        "evidence": evidence,
+    });
+    tracing::warn!(call_id = report.call_id, %evidence, "host command teardown stalled; pausing the run");
+    match emit(
+        store,
+        report.run_id,
+        WorkflowEventKind::StageStalled,
+        detail,
+    ) {
+        Ok(seq) => append_log(
+            run_root,
+            &format!(
+                "event_id={seq} transition=host_command_teardown_stalled call_id={} command_id={} evidence={evidence:?}",
+                report.call_id, report.command_id
+            ),
+        ),
+        Err(error) => tracing::warn!(%error, "host command stall event not recorded"),
+    }
+    pause_run(
+        store,
+        run_root,
+        expected_generation,
+        report,
+        "teardown_stalled",
+    )
+}
+
 fn progress_text(progress: Option<u64>) -> String {
     progress.map_or_else(|| "none".to_string(), |value| value.to_string())
 }

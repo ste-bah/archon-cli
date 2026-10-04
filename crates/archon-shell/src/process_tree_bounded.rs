@@ -5,7 +5,8 @@
 //! filesystem. Past the deadline the child is killed and the call returns
 //! `TimedOut` at once: it neither waits for the kill to take effect nor for
 //! the reader to see end of file, since a child stuck in the kernel may not
-//! die until the operation it is blocked in ends.
+//! die until the operation it is blocked in ends. A detached thread reaps
+//! the child when it does die, so no zombie or handle accumulates.
 
 use std::io::{self, Read};
 use std::process::{Command, Stdio};
@@ -41,6 +42,13 @@ pub(super) fn stdout_within(mut command: Command, deadline: Duration) -> io::Res
         }
         if Instant::now() >= end {
             let _ = child.kill();
+            // Reaped where it cannot hold anyone up: a detached thread waits
+            // for the kill to take effect (a child stuck in the kernel dies
+            // only when its operation ends) and drops the last handle. The
+            // reader thread ends at end of file, when the child is gone.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
             return Err(timed_out(deadline));
         }
         std::thread::sleep(POLL);

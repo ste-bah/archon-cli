@@ -50,10 +50,20 @@ pub(in super::super) fn confine(child: &mut tokio::process::Child) -> WorkflowRe
 
 impl Tree {
     /// The job holds every descendant already; there is nothing to scan.
-    pub(in super::super) async fn refresh(&self) {}
+    pub(in super::super) fn spawn_refresh(&self) -> Option<tokio::task::JoinHandle<()>> {
+        None
+    }
 
     /// A job does not depend on the leader's pid.
     pub(in super::super) fn leader_reaped(&self) {}
+}
+
+/// Resolves when the leader exits. A job does not depend on the leader's
+/// pid, so waiting (which reaps it) is safe here.
+pub(in super::super) async fn leader_exit(
+    child: &mut tokio::process::Child,
+) -> std::io::Result<()> {
+    child.wait().await.map(drop)
 }
 
 /// Terminate the job and wait until it is empty, within [`REAP_DEADLINE`].
@@ -87,7 +97,7 @@ pub(in super::super) async fn terminate_and_reap(
     }
     let teardown = kill_job_off_thread(tree).await;
     match reap(child).await {
-        Ok(()) => teardown,
+        Ok(_) => teardown,
         Err(evidence) => teardown.and_stalled(evidence),
     }
 }
@@ -96,8 +106,9 @@ pub(in super::super) async fn terminate_completed_group(tree: &Tree) -> Teardown
     kill_job_off_thread(tree).await
 }
 
-/// The drop guard's teardown: synchronous, because a drop cannot await, and
-/// still confirmed, within the same bound, before the guard lets go.
+/// The teardown of a supervisor that stopped without settling. Synchronous
+/// and multi-second at worst: the guard runs it on a dedicated thread, never
+/// on the async runtime, and keeps the resume record until it reports.
 pub(in super::super) fn kill_blocking(tree: &Tree, _leader_unreaped: bool) -> Teardown {
     tree.job.as_deref().map_or(Teardown::Confirmed, kill_job)
 }

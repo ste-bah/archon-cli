@@ -42,32 +42,60 @@ impl ProcessGroupGuard {
     /// `None` when the tree is confirmed empty.
     pub(super) fn settle(&mut self, teardown: Teardown) -> Option<String> {
         self.settled = true;
-        let record = self.record.take();
-        match teardown {
-            Teardown::Confirmed => {
-                drop(record);
-                None
+        settle_record(self.record.take(), teardown)
+    }
+}
+
+/// Confirmed: the record goes. Stalled: the record is kept, with the
+/// survivors (or "unknown"), and the evidence is returned.
+fn settle_record(record: Option<GroupRecordGuard>, teardown: Teardown) -> Option<String> {
+    match teardown {
+        Teardown::Confirmed => {
+            drop(record);
+            None
+        }
+        Teardown::Stalled {
+            evidence,
+            survivors,
+        } => {
+            if let Some(record) = record {
+                record.keep(survivors.as_deref());
             }
-            Teardown::Stalled {
-                evidence,
-                survivors,
-            } => {
-                if let Some(record) = record {
-                    record.keep(&survivors);
-                }
-                Some(evidence)
-            }
+            Some(evidence)
         }
     }
 }
 
 impl Drop for ProcessGroupGuard {
+    /// Supervision stopped without settling (the future was dropped, or it
+    /// returned early after confinement). The teardown can take seconds, so
+    /// it runs on a dedicated thread, never on the async runtime, and the
+    /// resume record stays until that teardown reports.
     fn drop(&mut self) {
-        if !self.settled {
-            let teardown = kill_blocking(&self.tree, !self.reaped);
-            if let Some(evidence) = self.settle(teardown) {
-                tracing::warn!(%evidence, "host command teardown stalled after supervision stopped");
+        if self.settled {
+            return;
+        }
+        self.settled = true;
+        let tree = self.tree.clone();
+        // Shared, so a thread that cannot start still leaves the record to
+        // settle here: kept, as "unknown survivors".
+        let record = std::sync::Arc::new(std::sync::Mutex::new(self.record.take()));
+        let held = record.clone();
+        let reaped = self.reaped;
+        let spawned = std::thread::Builder::new()
+            .name("archon-host-command-teardown".into())
+            .spawn(move || {
+                let teardown = kill_blocking(&tree, !reaped);
+                let record = held.lock().ok().and_then(|mut record| record.take());
+                if let Some(evidence) = settle_record(record, teardown) {
+                    tracing::warn!(%evidence, "host command teardown stalled after supervision stopped");
+                }
+            });
+        if let Err(error) = spawned {
+            if let Some(record) = record.lock().ok().and_then(|mut record| record.take()) {
+                record.keep(None);
             }
+            tracing::error!(%error, "host command teardown thread could not start");
         }
     }
 }

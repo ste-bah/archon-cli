@@ -18,7 +18,7 @@ mod guard;
 use guard::{ProcessGroupGuard, stalled_output};
 #[path = "workflow_host_command_termination.rs"]
 mod termination;
-use termination::{confine, terminate_and_reap, terminate_completed_group};
+use termination::{confine, leader_exit, reap, terminate_and_reap, terminate_completed_group};
 
 #[cfg(unix)]
 const CLEANUP_GRACE: Duration = Duration::from_millis(100);
@@ -195,14 +195,16 @@ pub(crate) async fn supervise_process_group(
     drop(event_tx);
 
     enum Outcome {
-        Completed(std::io::Result<std::process::ExitStatus>),
+        Completed(std::io::Result<()>),
         TimedOut,
         Controlled(HostCommandSignal),
         Event(SupervisorEvent),
     }
 
     let outcome = {
-        let wait = child.wait();
+        // The leader's exit, observed without reaping it (Unix): the tree is
+        // torn down while the unreaped leader still holds its pid.
+        let wait = leader_exit(&mut child);
         tokio::pin!(wait);
         let timeout = tokio::time::sleep(Duration::from_secs(request.timeout_secs));
         tokio::pin!(timeout);
@@ -214,6 +216,7 @@ pub(crate) async fn supervise_process_group(
             TREE_SCAN_INTERVAL,
         );
         scan.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut scanning: Option<tokio::task::JoinHandle<()>> = None;
         loop {
             tokio::select! {
                 biased;
@@ -224,18 +227,29 @@ pub(crate) async fn supervise_process_group(
                 // The pattern disables this branch then, leaving the wait.
                 Some(event) = event_rx.recv() => break Outcome::Event(event),
                 _ = &mut timeout => break Outcome::TimedOut,
-                _ = scan.tick() => group_guard.tree.refresh().await,
+                // A scan runs on its own thread; the select keeps watching
+                // the exit, control and the clock meanwhile.
+                _ = scan.tick() => {
+                    if scanning.as_ref().is_none_or(tokio::task::JoinHandle::is_finished) {
+                        scanning = group_guard.tree.spawn_refresh();
+                    }
+                }
             }
         }
     };
 
     match outcome {
-        Outcome::Completed(status) => {
-            group_guard.reaped();
+        Outcome::Completed(exit) => {
+            // Torn down before the leader is reaped, then reaped.
             let mut teardown = terminate_completed_group(&group_guard.tree).await;
-            if let Err(error) = &status {
+            let status = reap(&mut child).await;
+            group_guard.reaped();
+            if let Err(error) = &exit {
                 teardown =
                     teardown.and_stalled(format!("waiting for host command failed: {error}"));
+            }
+            if let Err(evidence) = &status {
+                teardown = teardown.and_stalled(evidence.clone());
             }
             // The exit is polled first, so an overflow or a stdin failure may
             // still be queued, or not yet seen at all, when it wins. Each is

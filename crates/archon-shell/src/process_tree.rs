@@ -2,24 +2,20 @@
 //!
 //! A process group is not a container. A member can move to a group of its
 //! own (a runner that gives each check its own group) or leave the session
-//! as well (`setsid`). A group kill never reaches such a process, and a group
-//! probe then reports the group empty while the process still runs. A
-//! [`Scope`] names a supervised tree by every handle that still reaches it:
-//! its process groups, its session, and ancestry - a live process whose
-//! parent is in scope is in scope.
+//! as well (`setsid`), and its parent can exit, leaving no tie to the child
+//! at all. A [`Tracker`] therefore scans while the child runs and pins every
+//! member it adopts, by pid and start time; teardown kills every pinned
+//! member still alive. The adoption rules, which never take a stranger that
+//! reused a pid for ours, are in `tracker`; the identity and signalling
+//! guarantees, and their documented residuals, are in `identity`.
 //!
-//! Ancestry ends where a parent exits: its children are reparented at once.
-//! A [`Tracker`] therefore scans while the child runs and remembers every
-//! member it ever saw, so a descendant whose parent exited later is still
-//! torn down. Every remembered or scanned process is pinned by its start
-//! time, and its identity is checked again immediately before any signal
-//! (`identity`): a pid that was reused by another process is never signalled.
 //! A process that left the session before any scan saw it is reachable only
 //! through what it holds open, which [`holders`] finds.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 #[path = "process_tree_bounded.rs"]
 mod bounded;
@@ -30,8 +26,11 @@ mod identity;
 #[path = "process_tree_tracker.rs"]
 mod tracker;
 pub use holders_impl::{HOLDER_PROBE_DEADLINE, Holder, holders, holders_within};
-pub use identity::{Pinned, deliver, start_of};
+pub use identity::{Pinned, Table, deliver, exited, snapshot_until, start_of};
 pub use tracker::Tracker;
+
+/// How long [`snapshot`] may take.
+pub const SNAPSHOT_DEADLINE: Duration = Duration::from_secs(5);
 
 /// One process-table entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,43 +57,9 @@ impl Process {
     }
 }
 
-/// The live process table: syscalls and `/proc` only, no subprocess, so a
-/// scan cannot hang on another program.
-pub fn snapshot() -> io::Result<Vec<Process>> {
-    #[cfg(target_os = "linux")]
-    {
-        snapshot_proc()
-    }
-    #[cfg(target_os = "macos")]
-    {
-        identity::snapshot_libproc()
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "process-tree scans are implemented for Linux and macOS only",
-        ))
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn snapshot_proc() -> io::Result<Vec<Process>> {
-    let mut processes = Vec::new();
-    for entry in std::fs::read_dir("/proc")? {
-        let Ok(entry) = entry else { continue };
-        let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse().ok()) else {
-            continue;
-        };
-        // A process that exits between the listing and the read is gone.
-        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
-            continue;
-        };
-        if let Some(process) = parse_proc_stat(pid, &stat) {
-            processes.push(process);
-        }
-    }
-    Ok(processes)
+/// [`snapshot_until`] with [`SNAPSHOT_DEADLINE`].
+pub fn snapshot() -> io::Result<Table> {
+    snapshot_until(Instant::now() + SNAPSHOT_DEADLINE)
 }
 
 /// One `/proc/<pid>/stat` line. The command name is parenthesised and may
@@ -130,94 +95,46 @@ fn protected(processes: &[Process]) -> BTreeSet<u32> {
     protected
 }
 
-/// A supervised tree, named by every handle that can still reach it.
-///
-/// `roots` must be processes the caller has not reaped (its own children,
-/// alive or zombie): a reaped pid can be reused by an unrelated process.
-/// Groups and sessions need no such care, because a process-group or
-/// session id is not reused while any process still carries it.
+/// Process-group and session selectors, for a one-off probe (is anything of
+/// this group or session still running?). Never this process's own group or
+/// session, nor this process or its ancestors.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Scope {
-    pub roots: Vec<u32>,
     pub groups: Vec<u32>,
     pub sessions: Vec<u32>,
 }
 
 impl Scope {
-    /// The live members of the scope in `processes`, plus every live process
-    /// in `seen` whose identity still matches, and their descendants. This
-    /// process's own group and session are never part of a scope, whatever
-    /// was named, and neither are this process and its ancestors.
-    pub fn reach(&self, processes: &[Process], seen: &BTreeMap<u32, u64>) -> Vec<Process> {
+    /// The live members of the scope in `processes`.
+    pub fn members_in(&self, processes: &[Process]) -> Vec<u32> {
         // SAFETY: both calls take plain integers and touch no memory.
         let (own_group, own_session) = unsafe { (libc::getpgrp(), libc::getsid(0)) };
         let own_group = u32::try_from(own_group).ok();
         let own_session = u32::try_from(own_session).ok();
-        let groups: BTreeSet<u32> = (self.groups.iter().copied())
-            .filter(|g| *g > 1 && Some(*g) != own_group)
-            .collect();
-        let sessions: BTreeSet<u32> = (self.sessions.iter().copied())
-            .filter(|s| *s > 1 && Some(*s) != own_session)
-            .collect();
-        let mut children: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
-        for process in processes {
-            children.entry(process.ppid).or_default().push(process.pid);
-        }
-        let mut reached: BTreeSet<u32> = processes
-            .iter()
-            .filter(|p| {
-                self.roots.contains(&p.pid)
-                    || groups.contains(&p.pgid)
-                    || p.sid.is_some_and(|sid| sessions.contains(&sid))
-                    || seen.get(&p.pid) == Some(&p.start)
-            })
-            .map(|p| p.pid)
-            .collect();
-        let mut frontier: Vec<u32> = reached.iter().copied().collect();
-        while let Some(pid) = frontier.pop() {
-            for child in children.get(&pid).into_iter().flatten() {
-                if reached.insert(*child) {
-                    frontier.push(*child);
-                }
-            }
-        }
         let protected = protected(processes);
         processes
             .iter()
-            .filter(|p| reached.contains(&p.pid) && !p.zombie && !protected.contains(&p.pid))
-            .copied()
+            .filter(|p| !p.zombie && !protected.contains(&p.pid))
+            .filter(|p| {
+                (self.groups.contains(&p.pgid) && Some(p.pgid) != own_group && p.pgid > 1)
+                    || p.sid.is_some_and(|sid| {
+                        self.sessions.contains(&sid) && Some(sid) != own_session && sid > 1
+                    })
+            })
+            .map(|p| p.pid)
             .collect()
-    }
-
-    /// The pids of the live members of the scope in `processes`.
-    pub fn members_in(&self, processes: &[Process]) -> Vec<u32> {
-        let members = self.reach(processes, &BTreeMap::new());
-        members.iter().map(|p| p.pid).collect()
     }
 
     /// The live members now.
     pub fn members(&self) -> io::Result<Vec<u32>> {
-        Ok(self.members_in(&snapshot()?))
-    }
-
-    /// Send `signal` to every live member once; returns the members found.
-    pub fn signal(&self, signal: i32) -> io::Result<Vec<u32>> {
-        Tracker::new(self.clone()).signal(signal)
-    }
-
-    /// Kill every member until none is left or `bound` runs out; returns
-    /// the members still alive then (empty: the scope is confirmed empty).
-    pub fn kill(&self, bound: std::time::Duration) -> io::Result<Vec<u32>> {
-        let survivors = Tracker::new(self.clone()).kill(bound)?;
-        Ok(survivors.iter().map(|p| p.pid).collect())
+        Ok(self.members_in(&snapshot()?.processes))
     }
 }
 
 /// Make the calling process the reaper of its orphaned descendants (Linux
-/// `PR_SET_CHILD_SUBREAPER`), so that they stay its descendants, and in
-/// every [`Scope`] rooted at it, after their own parent exits. Async-signal
-/// safe: meant for `pre_exec`, where it survives the exec. A no-op where the
-/// kernel has no such attribute.
+/// `PR_SET_CHILD_SUBREAPER`), so that they stay its descendants after their
+/// own parent exits. Async-signal safe: meant for `pre_exec`, where it
+/// survives the exec. A no-op where the kernel has no such attribute.
 pub fn become_subreaper() -> io::Result<()> {
     #[cfg(target_os = "linux")]
     {

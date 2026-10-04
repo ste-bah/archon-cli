@@ -31,7 +31,7 @@ type RunChild = tokio::process::Child;
 
 #[path = "acceptance_scratch_confine.rs"]
 mod confine;
-use confine::{Confinement, terminate};
+use confine::{Confinement, leader_exit, reap, terminate};
 
 /// Scan the check's tree every this many 25 ms ticks (Issue 270): a
 /// descendant that leaves the group and the session is tied to the check
@@ -226,25 +226,27 @@ pub async fn run_at(
     let mut next_quota = tokio::time::Instant::now() + quota_period;
     let mut stall = None;
     let mut ticks = 0u32;
-    let status = loop {
+    // `None`: the leader exited and is not reaped yet (Unix); `Some`: it was
+    // stopped and reaped, with its status if that is known.
+    let stopped = loop {
         tokio::select! {
-            result=child.wait()=>break match result {
-                Ok(status) => Some(status),
+            result=leader_exit(&mut child)=>break match result {
+                Ok(()) => None,
                 Err(e) => { stall = Some(format!("waiting for the scratch child failed: {e}")); None }
             },
-            _=tokio::time::sleep_until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break terminate(&mut child,&confinement,&mut stall).await;},
+            _=tokio::time::sleep_until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break Some(terminate(&mut child,&confinement,&mut stall).await);},
             _=tokio::time::sleep(Duration::from_millis(25))=>{
-                if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break terminate(&mut child,&confinement,&mut stall).await;}
-                if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break terminate(&mut child,&confinement,&mut stall).await;}
+                if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break Some(terminate(&mut child,&confinement,&mut stall).await);}
+                if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break Some(terminate(&mut child,&confinement,&mut stall).await);}
                 ticks += 1;
-                if ticks.is_multiple_of(SCAN_TICKS) { confinement.refresh().await; }
+                if ticks.is_multiple_of(SCAN_TICKS) { confinement.scan(); }
             }
             _=tokio::time::sleep_until(next_quota)=>{
                 quota_walk_count += 1;
                 if let Some(root) = site.audit_root {
                     match site.audited_size(root) {
-                        Ok(size) if size>site.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break terminate(&mut child,&confinement,&mut stall).await;}
-                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break terminate(&mut child,&confinement,&mut stall).await;}
+                        Ok(size) if size>site.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break Some(terminate(&mut child,&confinement,&mut stall).await);}
+                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break Some(terminate(&mut child,&confinement,&mut stall).await);}
                         _=>{}
                     }
                 }
@@ -253,10 +255,15 @@ pub async fn run_at(
         }
     };
     writer.abort();
-    confinement.leader_reaped();
     // Reap remaining members even if the leader exited successfully: the
-    // whole tree, including every member a scan saw while the check ran.
+    // whole tree, including every member a scan saw while the check ran,
+    // while an exited leader is still unreaped; then reap it.
     let teardown = confinement.kill().await;
+    let status = match stopped {
+        Some(status) => status,
+        None => reap(&mut child, &mut stall).await,
+    };
+    confinement.leader_reaped();
     // Windows: terminate the Job Object and wait on it, so every process the
     // check started is reaped before its output is read (Issue-234).
     #[cfg(windows)]

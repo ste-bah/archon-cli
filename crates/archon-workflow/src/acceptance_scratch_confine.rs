@@ -1,10 +1,12 @@
 //! What confines one check's processes, and its teardown (Issue 270).
 //!
 //! On Unix a check is a process-group leader. A [`Confinement`] tracks its
-//! tree: the group, every descendant by ancestry while the leader is
-//! unreaped, and every member a scan saw while the check ran, pinned by its
-//! start time (`archon_shell::process_tree::Tracker`). Teardown kills all of
-//! them; a pid that now names another process is never signalled. A stall
+//! tree with an `archon_shell::process_tree::Tracker`: the leader is pinned,
+//! its group id selects members while it is unreaped, and scans while the
+//! check runs pin every descendant. The leader's exit is observed without
+//! reaping it, the tree is torn down while the leader still holds its pid,
+//! and only then is the leader reaped. A pid that now names another process
+//! is never signalled. A stall
 //! (a member that will not die, a probe that cannot finish, a leader that
 //! cannot be reaped) is reported as the check's operational error, which is
 //! resumable, never as a runner failure.
@@ -17,9 +19,15 @@ use std::time::Duration;
 /// How long teardown keeps killing before it reports survivors.
 #[cfg(unix)]
 const KILL_BOUND: Duration = Duration::from_secs(3);
-/// How long a dropped runner keeps killing; a drop cannot wait long.
+/// How long a dropped runner's teardown thread keeps killing.
 #[cfg(unix)]
-const DROP_KILL_BOUND: Duration = Duration::from_millis(500);
+const DROP_KILL_BOUND: Duration = Duration::from_secs(3);
+/// How long one background scan may take; a scan past it is dropped whole.
+#[cfg(unix)]
+const SCAN_BUDGET: Duration = Duration::from_secs(2);
+/// How often the leader's exit is polled (without reaping it).
+#[cfg(unix)]
+const EXIT_POLL: Duration = Duration::from_millis(20);
 /// How long the leader's reap may take once it was killed.
 const REAP_BOUND: Duration = Duration::from_secs(3);
 #[cfg(unix)]
@@ -28,6 +36,11 @@ const HOLDER_PROBES: u32 = 10;
 pub(super) struct Confinement {
     #[cfg(unix)]
     tracker: std::sync::Arc<std::sync::Mutex<archon_shell::process_tree::Tracker>>,
+    /// Set once the runner stopped: a scan still running absorbs nothing.
+    #[cfg(unix)]
+    abandoned: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(unix)]
+    scanning: Option<tokio::task::JoinHandle<()>>,
     armed: bool,
 }
 
@@ -37,36 +50,59 @@ impl Confinement {
         Self {
             #[cfg(unix)]
             tracker: std::sync::Arc::new(std::sync::Mutex::new(
-                archon_shell::process_tree::Tracker::new(archon_shell::process_tree::Scope {
-                    roots: vec![leader],
-                    groups: vec![leader],
-                    sessions: Vec::new(),
-                }),
+                archon_shell::process_tree::Tracker::new(
+                    archon_shell::process_tree::Pinned {
+                        pid: leader,
+                        // An already exited leader is still our unreaped
+                        // child; only its start time is unknown.
+                        start: archon_shell::process_tree::start_of(leader).unwrap_or_default(),
+                    },
+                    vec![leader],
+                    Vec::new(),
+                ),
             )),
+            #[cfg(unix)]
+            abandoned: Default::default(),
+            #[cfg(unix)]
+            scanning: None,
             armed: true,
         }
     }
 
-    /// Scan once, remembering every member now alive. A failed scan only
-    /// loses this scan; teardown scans again.
-    pub(super) async fn refresh(&self) {
+    /// Start one scan on a blocking thread unless one is still running, and
+    /// return at once: the runner keeps watching its limits meanwhile. The
+    /// table is read without the tracker lock, within its own budget; only
+    /// a complete table is absorbed.
+    pub(super) fn scan(&mut self) {
         #[cfg(unix)]
+        if self
+            .scanning
+            .as_ref()
+            .is_none_or(tokio::task::JoinHandle::is_finished)
         {
             let tracker = self.tracker.clone();
-            let _ = tokio::task::spawn_blocking(move || {
-                if let Ok(mut tracker) = tracker.lock() {
-                    let _ = tracker.refresh();
+            let abandoned = self.abandoned.clone();
+            self.scanning = Some(tokio::task::spawn_blocking(move || {
+                let deadline = std::time::Instant::now() + SCAN_BUDGET;
+                let Ok(table) = archon_shell::process_tree::snapshot_until(deadline) else {
+                    return;
+                };
+                if abandoned.load(std::sync::atomic::Ordering::SeqCst) {
+                    return;
                 }
-            })
-            .await;
+                if let Ok(mut tracker) = tracker.lock() {
+                    tracker.absorb(&table);
+                }
+            }));
         }
     }
 
-    /// The leader is reaped: its pid may be reused, so ancestry from it ends.
+    /// The leader is reaped: its pid may be reused, so its group id selects
+    /// nothing any more.
     pub(super) fn leader_reaped(&self) {
         #[cfg(unix)]
         if let Ok(mut tracker) = self.tracker.lock() {
-            tracker.scope_mut().roots.clear();
+            tracker.leader_reaped();
         }
     }
 
@@ -177,14 +213,72 @@ impl Confinement {
 }
 
 impl Drop for Confinement {
+    /// The runner stopped before its teardown. The teardown can take
+    /// seconds, so it runs on a dedicated thread, never on the runtime; it
+    /// treats the leader as reaped (the dropped child is about to be), and it
+    /// only tries the tracker lock, within its bound.
     fn drop(&mut self) {
         // On Windows the child's Job Object (`process_wrap`'s `KillOnDrop`)
         // reaps the whole job when the child drops.
         #[cfg(unix)]
-        if self.armed
-            && let Ok(mut tracker) = self.tracker.lock()
-        {
-            let _ = tracker.kill(DROP_KILL_BOUND);
+        if self.armed {
+            self.abandoned
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            let tracker = self.tracker.clone();
+            let _ = std::thread::Builder::new()
+                .name("archon-check-teardown".into())
+                .spawn(move || {
+                    let deadline = std::time::Instant::now() + DROP_KILL_BOUND;
+                    while std::time::Instant::now() < deadline {
+                        if let Ok(mut tracker) = tracker.try_lock() {
+                            tracker.leader_reaped();
+                            let _ = tracker.kill(DROP_KILL_BOUND);
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    tracing::warn!("scratch check teardown abandoned: its tree stayed busy");
+                });
+        }
+    }
+}
+
+/// Resolves when the check's leader exits. On Unix it is not reaped: the
+/// tree is torn down while the unreaped leader holds its pid.
+pub(super) async fn leader_exit(child: &mut super::RunChild) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let Some(pid) = child.id() else {
+            return Ok(());
+        };
+        loop {
+            if archon_shell::process_tree::exited(pid)? {
+                return Ok(());
+            }
+            tokio::time::sleep(EXIT_POLL).await;
+        }
+    }
+    #[cfg(not(unix))]
+    child.wait().await.map(drop)
+}
+
+/// Reap the leader within [`REAP_BOUND`]. A stall is written to `stall` and
+/// the exit status is then unknown.
+pub(super) async fn reap(
+    child: &mut super::RunChild,
+    stall: &mut Option<String>,
+) -> Option<std::process::ExitStatus> {
+    match tokio::time::timeout(REAP_BOUND, child.wait()).await {
+        Ok(Ok(status)) => Some(status),
+        Ok(Err(e)) => {
+            *stall = Some(format!("scratch child could not be reaped: {e}"));
+            None
+        }
+        Err(_) => {
+            *stall = Some(format!(
+                "scratch child was not reaped within {REAP_BOUND:?} after it was killed"
+            ));
+            None
         }
     }
 }
@@ -203,17 +297,7 @@ pub(super) async fn terminate(
     // Windows: terminate the whole Job Object, not just the leader.
     #[cfg(windows)]
     let _ = child.start_kill();
-    match tokio::time::timeout(REAP_BOUND, child.wait()).await {
-        Ok(Ok(status)) => Some(status),
-        Ok(Err(e)) => {
-            *stall = Some(format!("scratch child could not be reaped: {e}"));
-            None
-        }
-        Err(_) => {
-            *stall = Some(format!(
-                "scratch child was not reaped within {REAP_BOUND:?} after it was killed"
-            ));
-            None
-        }
-    }
+    let status = reap(child, stall).await;
+    confinement.leader_reaped();
+    status
 }
