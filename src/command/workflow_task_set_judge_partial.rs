@@ -41,7 +41,12 @@ impl Saved {
     /// Validate credit independently of the redacted reply's length. Each
     /// chunk grew the bounded raw document; redaction can shrink it.
     fn usable(&self, key: &str) -> bool {
+        // The credit is bytes of a capped reply: past the cap it is corrupt,
+        // and every credited chunk added at least one of those bytes.
         let credit_bound = self.credit_bytes.unwrap_or(MAX_PARTIAL_REPLY_BYTES as u64);
+        if credit_bound > MAX_PARTIAL_REPLY_BYTES as u64 {
+            return false;
+        }
         let counted = if self.completed {
             self.reply.is_empty() && self.chunks <= credit_bound
         } else if self.reply.is_empty() {
