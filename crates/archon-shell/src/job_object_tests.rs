@@ -66,17 +66,15 @@ fn a_named_job_runs_while_held_and_is_gone_once_dropped() {
         Job::create(Some(&name)).unwrap_err().kind(),
         io::ErrorKind::AlreadyExists
     );
-    // Closing the only handle kills the job's processes.
+    // ...and refusing it does not end the first owner's processes.
+    assert!(job.active_processes().unwrap() >= 2);
+    // Dropping the job confirms it empty before the handle closes.
     drop(job);
+    assert!(
+        !named_job_running(&name).unwrap(),
+        "the job outlived its confirmed drop"
+    );
     child.wait().unwrap();
-    let start = Instant::now();
-    while named_job_running(&name).unwrap() {
-        assert!(
-            start.elapsed() < Duration::from_secs(10),
-            "job outlived its handle"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
 }
 
 #[test]

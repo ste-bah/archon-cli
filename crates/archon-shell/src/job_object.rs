@@ -80,16 +80,20 @@ impl Job {
         }
         // SAFETY: reads the calling thread's last error, set by the create.
         let existed = name.is_some() && unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
-        let job = Self {
-            handle,
-            name: name.map(str::to_string),
-        };
         if existed {
+            // Another owner's job: close this handle without the drop's
+            // termination, which would end that owner's processes.
+            // SAFETY: the handle was just opened and is closed once.
+            unsafe { CloseHandle(handle) };
             return Err(io::Error::new(
                 io::ErrorKind::AlreadyExists,
                 format!("job object {} already exists", name.unwrap_or_default()),
             ));
         }
+        let job = Self {
+            handle,
+            name: name.map(str::to_string),
+        };
         // SAFETY: an all-zero limit structure is valid; only one flag is set.
         let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -161,8 +165,16 @@ impl Job {
     }
 }
 
+/// How long a dropped job waits for its processes to end.
+const DROP_CONFIRM_BOUND: Duration = Duration::from_secs(5);
+
 impl Drop for Job {
+    /// Terminates the job and waits, within [`DROP_CONFIRM_BOUND`], until no
+    /// process in it is active, before the handle closes: closing alone
+    /// only requests termination, and a process can stay pending on I/O.
+    /// An empty job answers at once.
     fn drop(&mut self) {
+        let _ = self.kill_and_confirm(DROP_CONFIRM_BOUND);
         // SAFETY: the handle is owned and closed exactly once.
         unsafe { CloseHandle(self.handle) };
     }

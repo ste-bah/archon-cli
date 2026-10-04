@@ -80,21 +80,20 @@ fn alive(pid: u32) -> bool {
     String::from_utf8_lossy(&output.stdout).contains(&format!("\"{pid}\""))
 }
 
+/// Supervision confirms the job empty before it returns, so the descendant
+/// must already be gone: no grace period.
 fn assert_gone(pid: u32, cause: &str) {
-    let start = Instant::now();
-    while alive(pid) {
-        if start.elapsed() > Duration::from_secs(5) {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/PID", &pid.to_string()])
-                .output();
-            panic!("detached descendant {pid} outlived {cause}");
-        }
-        std::thread::sleep(Duration::from_millis(100));
+    if alive(pid) {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .output();
+        panic!("detached descendant {pid} outlived {cause}");
     }
 }
 
 #[tokio::test]
 async fn timeout_ends_a_detached_descendant() {
+    // Teardown confirms the job empty before supervision returns.
     let temp = tempfile::tempdir().unwrap();
     let pid_file = temp.path().join("pid");
     let request = command(&pid_file, "Start-Sleep -Seconds 120", 10);
@@ -133,6 +132,12 @@ async fn a_dropped_supervisor_ends_a_detached_descendant() {
     .await
     .unwrap();
     task.abort();
+    // The task's future is dropped before its handle resolves, and the
+    // dropped supervisor confirms the job empty before it lets go: the
+    // descendant is gone now, with no grace period.
     let _ = task.await;
-    assert_gone(pid, "the dropped supervisor");
+    assert!(
+        !alive(pid),
+        "detached descendant {pid} outlived the dropped supervisor's confirmation"
+    );
 }
