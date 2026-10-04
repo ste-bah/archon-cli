@@ -368,49 +368,11 @@ mod workflow_live_v2_script_host_pending;
 mod workflow_live_v2_script_watchdog;
 use workflow_live_v2_script_watchdog::{WORKFLOW_JS_WATCHDOG, WorkflowJsWatchdog};
 
-struct WorkflowScriptAccumulator {
-    status: WorkflowV2Status,
-    completed: usize,
-    executed: usize,
-    reused: usize,
-    calls: Vec<WorkflowV2HostCall>,
-    failed_call: Option<String>,
-    failed_result_path: Option<String>,
-    next_action: Option<String>,
-    terminal_host_stop: bool,
-    /// Issue-285: a JavaScript script drives this host, so a terminal stop is
-    /// sticky and refuses later calls. The native lifecycle driver is host code
-    /// and keeps its own host-built fallback report.
-    script_driven: bool,
-    /// Consecutive calls that failed without ever starting. Run-scoped: the
-    /// bound only means anything across calls.
-    never_started: NeverStartedStreak,
-}
-
-impl Default for WorkflowScriptAccumulator {
-    fn default() -> Self {
-        Self {
-            status: WorkflowV2Status::Accepted,
-            completed: 0,
-            executed: 0,
-            reused: 0,
-            calls: Vec::new(),
-            failed_call: None,
-            failed_result_path: None,
-            next_action: None,
-            terminal_host_stop: false,
-            script_driven: false,
-            never_started: NeverStartedStreak::default(),
-        }
-    }
-}
-
-impl WorkflowScriptAccumulator {
-    /// A trusted terminal stop that a script can no longer change.
-    fn terminal_locked(&self) -> bool {
-        self.terminal_host_stop && self.script_driven
-    }
-}
+// The run-scoped call accumulator lives beside this file to hold the 500-line
+// ceiling.
+#[path = "workflow_live_v2_script_accumulator.rs"]
+mod workflow_live_v2_script_accumulator;
+use workflow_live_v2_script_accumulator::WorkflowScriptAccumulator;
 
 #[path = "workflow_live_v2_script_control.rs"]
 mod workflow_live_v2_script_control;
