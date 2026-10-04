@@ -97,8 +97,9 @@ pub(super) fn skeleton_check_findings(
 /// HEAD: `Baseline::for_task_set`, the same tree the re-authoring freeze
 /// probes), or could not be run there. The probe runs only in a hermetic
 /// copy (`executability`); why it could not run at all is printed as a
-/// diagnostic. Under a staged `resume` whose budget runs out first, the
-/// freeze is [`FreezeIncomplete`](crate::command::workflow_freeze_budget::FreezeIncomplete)
+/// diagnostic. Under a staged `resume` whose budget runs out first, or that
+/// leaves a check unproven, the freeze is
+/// [`FreezeIncomplete`](crate::command::workflow_freeze_budget::FreezeIncomplete)
 /// instead: no finding of a partial probe is final.
 pub(super) async fn pre_implementation_findings(
     project_root: &Path,
@@ -137,7 +138,21 @@ pub(super) async fn pre_implementation_findings(
     };
     // What the host could not prove is the host's (operational), never the
     // author's: it is not published, and no author is asked to change it.
-    let unproven = probe.take_unproven().into_iter().map(|(id, why)| {
+    let unproven = probe.take_unproven();
+    // Issue 263: under a staged freeze it is also no reason to fail the run.
+    // The freeze ends incomplete and resumable, with every verdict saved, so
+    // the executor retries it while progress grows and otherwise pauses.
+    if resume.persist && !unproven.is_empty() {
+        let reason = super::executability::HostUnproven(unproven).to_string();
+        return Err(
+            crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+                reason,
+                &resume.progress,
+            )
+            .into(),
+        );
+    }
+    let unproven = unproven.into_iter().map(|(id, why)| {
         let text = format!(
             "check '{id}': operational: the host could not prove it after repairing its own environment ({why}); it is not published until the host can"
         );

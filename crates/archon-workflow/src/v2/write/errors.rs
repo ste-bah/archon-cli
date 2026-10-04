@@ -298,6 +298,11 @@ pub(super) fn failure_kind_from_write_result(
 /// the other is a silent behaviour change: the branch would stop being
 /// recoverable and nobody would see it in the diff.
 pub(super) const CALL_TIME_BUDGET_EXHAUSTED: &str = "exhausted its total time budget";
+/// Marker of a branch whose provider connection kept dropping with its
+/// worktree unchanged (Issue 263): the no-progress end of the drop streak.
+/// Like a spent budget, the work is unjudged and is kept for remediation.
+pub(super) const TRANSPORT_NO_PROGRESS: &str =
+    "kept losing its provider connection with its worktree unchanged";
 /// The summary phrase of an inactivity cut, read back by `partial_origin`.
 pub(super) const STALL_SUMMARY_MARKER: &str = "stalled: the host cut it after";
 
@@ -321,6 +326,7 @@ pub(super) fn is_recoverable_write_branch_interruption(error: &str) -> bool {
         // worth keeping. Treated as a hard error it would take the wave with it
         // and discard what the branch had learned.
         || lower.contains(CALL_TIME_BUDGET_EXHAUSTED)
+        || lower.contains(TRANSPORT_NO_PROGRESS)
         // The tool guard stopped a session that thrashed past the read wall
         // (Issue-54). The work is unjudged and whatever was written is worth
         // keeping; the retry-once path re-asks over it with the guard's note.

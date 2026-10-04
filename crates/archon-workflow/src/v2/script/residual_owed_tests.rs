@@ -238,7 +238,7 @@ fn every_owed_gap_is_planned_and_what_stands_blocks() {
         let clause = gate.blocking.iter().find(|b| b.contains(id));
         let clause = clause.unwrap_or_else(|| panic!("{id} does not block: {gate:#?}"));
         assert!(
-            clause.contains("did not resolve it") || clause.contains("harness cap exhausted"),
+            clause.contains("did not resolve it") || clause.contains("no_progress"),
             "{id}: {clause}"
         );
     }

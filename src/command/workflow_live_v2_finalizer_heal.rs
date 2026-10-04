@@ -10,11 +10,14 @@
 //! observer both hold to the launch pin through the recorded lineage path),
 //! so a failing check is routed to its owners by the round. The re-entered
 //! round re-decides the outcome and the observation runs again. Re-entry
-//! repeats while the situation the observation judged changes (the masked
-//! failure, the pin, the round's outcome) and stops the first time a failure
-//! recurs on an unchanged situation, or at `REOPEN_LIMIT` re-entries, counted
-//! across pauses. A failure that still stands then blocks the run by name:
-//! `NeedsReview`, naming the observation's reason or failing checks.
+//! repeats while it makes progress. Progress is reaching a failing set (the sorted
+//! failing check ids, never the failure text) the run never reached
+//! (decision A); `REOPEN_STALL_LIMIT` refusals in a row that reach one
+//! already reached are a stall, and a stall PAUSES the run with its
+//! evidence (Issue 262): never a total count that ends the run. A failure no
+//! re-entry can act on (no acceptance stage, or a re-entry that errs) blocks
+//! the run by name: `NeedsReview`, naming the observation's reason or failing
+//! checks.
 //!
 //! An outcome that does not finish the run is not re-entered: nothing passing
 //! can be committed on it, so the failure is recorded beside it.
@@ -62,11 +65,12 @@ fn finishes(status: WorkflowV2Status) -> bool {
     matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
 }
 
-/// The most re-entries one uncommitted outcome gets, counted by
-/// `prior_observer_failures` across pauses (`state::ReopenLedger`). Progress
-/// decides first; this bound is the backstop for a failure that keeps
-/// changing without clearing.
-pub(super) const REOPEN_LIMIT: usize = 3;
+/// Refusals in a row that reach a failing set the run already reached,
+/// after which the run pauses: the no-progress bound (decision A). One: a
+/// re-entry that leaves the run where an earlier one did gives the next
+/// nothing new to act on. A new failing set resets it, whatever its size;
+/// the sets reached are kept in the ledger across pauses.
+pub(super) const REOPEN_STALL_LIMIT: usize = 1;
 
 /// Why an observation does not let a finishing outcome commit.
 struct Refusal {
@@ -90,6 +94,11 @@ pub(super) async fn observe_before_commit(
         "run_end_acceptance_observer_started",
         serde_json::json!({"authority": "observe_only", "before_terminal_commit": true}),
     )?;
+    // Only the generation that started this finalization may pause the run.
+    let generation = match pc.expected_generation {
+        Some(generation) => generation,
+        None => pc.store.load_state(pc.run_id)?.generation,
+    };
     // Re-entries a paused or interrupted finalization already made count.
     let mut ledger = state::ReopenLedger::load(pc.store, pc.run_id)?;
     if !ledger.reopens.is_empty() {
@@ -140,16 +149,30 @@ pub(super) async fn observe_before_commit(
             return Ok(summary);
         }
         let situation = state::situation(pc.store, &snapshot, &reason, &summary, record);
-        let why = if ledger.situations.contains(&situation) {
-            "re-entering acceptance made no progress: the observation failed the same way on the same pin and acceptance outcome".to_string()
-        } else if record.prior_observer_failures.len() >= REOPEN_LIMIT {
-            format!("re-entering acceptance reached its limit of {REOPEN_LIMIT} re-entries")
-        } else if let Some(reopen) = pc.reopen {
+        // Decision A: progress is a failing set the run never reached.
+        if ledger
+            .seen
+            .insert(state::failing_set(pc.store, pc.run_id, record))
+        {
+            ledger.revisits = 0;
+        } else {
+            ledger.revisits = ledger.revisits.saturating_add(1);
+        }
+        if ledger.revisits >= REOPEN_STALL_LIMIT {
+            return Err(pause_reentry(
+                pc,
+                generation,
+                record,
+                (&reason, &situation),
+                "no_progress",
+                "re-entering acceptance made no progress: the run reached a failing set it had already reached",
+            ));
+        }
+        let why = if let Some(reopen) = pc.reopen {
             state::keep_native_evidence(pc.store, pc.run_id, record.prior_observer_failures.len())?;
             // Counted before the stage runs, so a pause inside it keeps it.
             record.reopen_before_commit(reason.clone())?;
             ledger.reopens = record.prior_observer_failures.clone();
-            ledger.situations.push(situation);
             ledger.save(pc.store, pc.run_id, pc.expected_generation)?;
             match reopen.reopen(&summary).await {
                 Ok(Some(reopened)) => {
@@ -178,6 +201,46 @@ pub(super) async fn observe_before_commit(
         };
         block_by_name(pc, &mut summary, record, refusal, &why)?;
         return Ok(summary);
+    }
+}
+
+/// Re-entry stopped making progress (Issue 262): the run is paused with the
+/// evidence, never ended; returns the control error finalization ends with.
+/// The ledger keeps every re-entry, so a resume continues the count.
+fn pause_reentry(
+    pc: &PreCommit<'_>,
+    generation: u64,
+    record: &FinalizationRecordV1,
+    (reason, situation): (&str, &str),
+    cause: &'static str,
+    why: &str,
+) -> WorkflowError {
+    let message = format!(
+        "the run-end acceptance observation failed before the terminal commit and {why}: {reason}; the run is paused, not failed: fix what it names, then archon workflow resume --live --yes {}",
+        pc.run_id
+    );
+    let detail = serde_json::json!({
+        "event": "run_end_acceptance_observer_stall_pause",
+        "cause": cause,
+        "why": why,
+        "reason": reason,
+        "observation": situation,
+        "reopens": record.prior_observer_failures.len(),
+        "prior_observer_failures": record.prior_observer_failures,
+    });
+    // Owned by the generation that started this finalization: an operator
+    // pause and resume meanwhile makes this finalizer obsolete, and it stops.
+    match archon_workflow::control_pause::pause_with_evidence(
+        pc.store, pc.run_id, generation, detail,
+    ) {
+        Ok(event) => {
+            if let Err(error) = event {
+                tracing::warn!(%error, "run-end observer pause event not recorded");
+            }
+            tracing::warn!(run_id = pc.run_id, "{message}");
+            WorkflowError::ControlPaused(message)
+        }
+        Err(error) => error,
     }
 }
 

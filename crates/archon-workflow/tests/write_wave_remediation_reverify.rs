@@ -283,10 +283,8 @@ async fn a_no_patch_escalated_round_on_an_unmoved_tree_keeps_the_refusal() {
         "{:#?}",
         second.answers.borrow()
     );
-    let a = entry(&after, "unresolved", "TASK-A").expect("A stays open");
-    assert_eq!(a["outcome"], "unverified", "{after}");
-    assert!(a["findingId"].is_string(), "{after}");
-    assert_eq!(terminal(&second, &after), WorkflowV2Status::NeedsReview);
+    // Issue 262: A's finding stays open with no progress: the run pauses.
+    harness::assert_stall_paused(&second, &after, "TASK-A");
 }
 
 /// Not only an escalated round: a regular round whose fix lands nothing

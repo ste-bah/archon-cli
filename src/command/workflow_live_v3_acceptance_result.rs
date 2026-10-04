@@ -205,6 +205,55 @@ pub(super) fn result_for(
     result
 }
 
+/// Issue 262: pauses the run because the acceptance loop stalled after
+/// `record` (or hit its runaway guard), and returns the control error the
+/// round ends with. The round's record is the evidence; a resume runs the
+/// round again, as the next attempt, on whatever changed meanwhile. Only
+/// `generation`, the one the round started under, may pause the run.
+pub(super) fn pause_on_stall(
+    store: &archon_workflow::WorkflowStore,
+    run_id: &str,
+    generation: u64,
+    record: &AcceptanceRoundRecordV1,
+    record_path: &str,
+    decision: &LoopDecision,
+    cause: &'static str,
+) -> archon_workflow::WorkflowError {
+    let failing = record.failing_check_ids();
+    let resume = format!("archon workflow resume --live --yes {run_id}");
+    let message = format!(
+        "acceptance round {} (attempt {}) made no progress ({cause}: {} trailing round(s) without progress, {} check(s) still failing: {}); the run is paused, not failed. The evidence is {record_path}; fix what it names, then {resume}",
+        record.round,
+        record.attempt,
+        decision.stalled_rounds,
+        failing.len(),
+        failing.join(", ")
+    );
+    let detail = serde_json::json!({
+        "event": "acceptance_stall_pause",
+        "round": record.round,
+        "attempt": record.attempt,
+        "cause": cause,
+        "stalled_rounds": decision.stalled_rounds,
+        "failing_check_ids": failing,
+        "operational_errors": record.operational_errors,
+        "record_path": record_path,
+        "resume": resume,
+    });
+    // Owned by the generation the round started under: a round an operator
+    // pause and resume made obsolete stops instead of pausing the new owner.
+    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
+        Ok(event) => {
+            if let Err(error) = event {
+                tracing::warn!(%error, "acceptance stall pause event not recorded");
+            }
+            tracing::warn!(run_id, "{message}");
+            archon_workflow::WorkflowError::ControlPaused(message)
+        }
+        Err(error) => error,
+    }
+}
+
 /// A declared entry as a path: its first path-like token, without code
 /// quotes or a leading `./`; never a glob.
 fn declared_file(entry: &str) -> Option<String> {

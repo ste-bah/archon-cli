@@ -208,8 +208,9 @@ async fn a_host_cut_inside_the_retry_stalls_without_a_third_session() {
 }
 
 /// A genuine provider drop inside the retry is still re-asked — that is what
-/// the transport budget is for — but under the retry's own wall clock, not
-/// the first session's.
+/// the transport streak is for — and each re-ask runs under the retry's own
+/// per-dispatch timeout. Issue 263: drops are bounded by no progress (drops
+/// in a row with the worktree unchanged), never by a total wall clock.
 #[tokio::test]
 async fn a_transport_drop_inside_the_retry_re_asks_within_the_retry_budget() {
     let f = Fixture::new();
@@ -223,9 +224,13 @@ async fn a_transport_drop_inside_the_retry_re_asks_within_the_retry_budget() {
         .await;
     assert_ne!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
     let dispatches = dispatch.prompts.lock().unwrap().len();
-    // One cut session, then at least one re-ask after a drop, and never the
-    // full transport budget (1 + 6) the call budget of hours would allow.
-    assert!((3..=5).contains(&dispatches), "dispatches: {dispatches}");
+    // One cut session, the retry, then the drop streak of re-asks with the
+    // worktree unchanged, and no more.
+    assert_eq!(
+        dispatches,
+        2 + archon_workflow::v2::transport_retry::MAX_TRANSPORT_RETRIES,
+        "dispatches: {dispatches}"
+    );
     let overrides = dispatch.timeout_overrides.lock().unwrap();
     assert_eq!(overrides[0], None);
     assert!(
@@ -238,6 +243,14 @@ async fn a_transport_drop_inside_the_retry_re_asks_within_the_retry_budget() {
             .unwrap();
     let result = branch.result.unwrap();
     assert_eq!(result.data["branch_runtime_timeout"], true, "{result:#?}");
+    let patch =
+        std::fs::read_to_string(result.data["partial_work"]["patch_path"].as_str().unwrap())
+            .unwrap();
+    assert!(
+        !patch.contains("implemented by retry"),
+        "the unchanged-tree fixture must leave the same bytes on every dropped dispatch: {patch}"
+    );
+
     assert!(
         result
             .residual_gaps

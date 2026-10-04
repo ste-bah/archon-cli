@@ -471,20 +471,9 @@ fn validate_run_relative_path(path: &Path) -> WorkflowResult<()> {
     Ok(())
 }
 
-fn write_atomic(tmp: &Path, target: &Path, bytes: &[u8]) -> WorkflowResult<()> {
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).map_err(|e| WorkflowError::io(parent, e))?;
-    }
-    {
-        let mut file = File::create(tmp).map_err(|e| WorkflowError::io(tmp, e))?;
-        file.write_all(bytes)
-            .map_err(|e| WorkflowError::io(tmp, e))?;
-        file.sync_all().map_err(|e| WorkflowError::io(tmp, e))?;
-    }
-    crate::durable_io::note_synced(tmp);
-    fs::rename(tmp, target).map_err(|e| WorkflowError::io(target, e))?;
-    Ok(())
-}
+#[path = "store_durable.rs"]
+mod durable;
+pub(crate) use durable::{rename_durable, sync_dir, write_atomic};
 
 #[cfg(test)]
 #[path = "store_tail_tests.rs"]

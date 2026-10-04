@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use super::{
-    AcceptanceRegressionV1, Attribution, CheckObserver, FailingCheck, MAX_OBSERVATIONS,
-    SearchBudget, Verdict, attribute_regressions, failure_signature,
+    AcceptanceRegressionV1, Attribution, CheckObserver, FailingCheck, SearchBudget, Verdict,
+    attribute_regressions, failure_signature,
 };
 use crate::v2::{WorkflowV2DispatchedItem, WorkflowV2ResultStore};
 use crate::write_coordinator::worktree_isolation::run_git;
@@ -224,7 +224,8 @@ async fn a_check_that_held_at_its_owners_landing_is_attributed_to_the_landing_th
             .contains("already fails this way at the run base"),
         "{never:?}"
     );
-    assert!(observer.observations() <= MAX_OBSERVATIONS);
+    // Base, a bisection over six landings, and the owner's landing.
+    assert!(observer.observations() <= 8, "{}", observer.observations());
     // Cached: a second round observes nothing and finds the same.
     let again = FlagObserver::new(&w.repo);
     let second = w.attribute(&failing, &again, SearchBudget::default()).await;

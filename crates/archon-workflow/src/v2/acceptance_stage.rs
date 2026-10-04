@@ -302,9 +302,12 @@ pub fn attempt_file_name(attempt: u32) -> String {
 }
 
 /// The attempt number the next record of `round` takes: one past the highest
-/// already on disk. Records are never overwritten.
+/// already on disk, a quarantined one included. Records are never
+/// overwritten and a number is never reused.
 pub fn next_attempt(run_dir: &Path, round: u32) -> u32 {
-    highest_attempt(&round_dir(run_dir, round)).map_or(1, |attempt| attempt + 1)
+    let dir = round_dir(run_dir, round);
+    (highest_attempt(&dir).max(progress::highest_quarantined_attempt(&dir)))
+        .map_or(1, |attempt| attempt + 1)
 }
 
 fn highest_attempt(dir: &Path) -> Option<u32> {
@@ -334,7 +337,12 @@ fn highest_round(run_dir: &Path) -> Option<u32> {
 }
 
 /// Persist a round record as the next attempt of its round, returning the
-/// path written. Append-only: an existing attempt is never touched.
+/// path written. Append-only: an existing attempt is never touched. The
+/// record lands whole or not at all (staged, synced, renamed), and the
+/// directories that hold it are synced, so a system crash cannot leave a
+/// torn record or lose a written one. Whether the attempt is free is
+/// decided under the recording-order lock, held until the record has
+/// landed: of two writers of one attempt, the second is refused.
 pub fn write_round_record(
     run_dir: &Path,
     record: &AcceptanceRoundRecordV1,
@@ -342,15 +350,43 @@ pub fn write_round_record(
     let dir = round_dir(run_dir, record.round);
     std::fs::create_dir_all(&dir).map_err(|source| WorkflowError::io(&dir, source))?;
     let path = dir.join(attempt_file_name(record.attempt));
-    if path.exists() {
-        return Err(WorkflowError::StateCorrupt(format!(
-            "acceptance record {} already exists; round records are append-only",
-            path.display()
-        )));
-    }
     let bytes = serde_json::to_vec_pretty(record)?;
-    std::fs::write(&path, bytes).map_err(|source| WorkflowError::io(&path, source))?;
+    progress::under_order_lock(run_dir, || {
+        let taken = path
+            .try_exists()
+            .map_err(|source| WorkflowError::io(&path, source))?
+            || progress::quarantined_attempt(&dir, record.attempt)?;
+        if taken {
+            return Err(WorkflowError::StateCorrupt(format!(
+                "acceptance record {} already exists (or was quarantined); round records are append-only",
+                path.display()
+            )));
+        }
+        // The order entry first, synced: a record never exists without its
+        // place in the recording order unless the log itself failed.
+        progress::note_recorded_locked(run_dir, record.round, record.attempt);
+        // The staging name is never an `attempt-*.json`: a crash before the
+        // rename leaves no record.
+        let staging = dir.join(format!(
+            ".{}.{}.tmp",
+            attempt_file_name(record.attempt),
+            uuid::Uuid::new_v4()
+        ));
+        if let Err(error) = crate::store::write_atomic(&staging, &path, &bytes) {
+            let _ = std::fs::remove_file(&staging);
+            return Err(error);
+        }
+        sync_record_dirs(run_dir, &dir)
+    })?;
     Ok(path)
+}
+
+/// Syncs `dir` and each directory above it up to `run_dir`: any of them
+/// `create_dir_all` may just have made, so each new entry survives a crash.
+fn sync_record_dirs(run_dir: &Path, dir: &Path) -> WorkflowResult<()> {
+    (dir.ancestors())
+        .take_while(|ancestor| ancestor.starts_with(run_dir))
+        .try_for_each(crate::store::sync_dir)
 }
 
 /// The most recent record: highest round, highest attempt. `None` when the

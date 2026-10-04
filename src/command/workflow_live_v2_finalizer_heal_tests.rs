@@ -1,5 +1,6 @@
-//! Progress is judged on what changed, never on ids a retry mints; re-entry
-//! is bounded by `REOPEN_LIMIT`, counted across a pause.
+//! Progress is a failing set the run never reached (round 3, decision A);
+//! a revisit pauses the run, never ends it, and the sets reached are kept
+//! across a pause (Issue 262).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -9,12 +10,10 @@ use archon_workflow::{
 };
 
 use super::super::super::workflow_live_v2_script::WorkflowV2ScriptSummary;
-use super::super::super::workflow_run_finalizer_tests::{
-    read_finalization, seed_call, snapshot, spec, summary,
-};
+use super::super::super::workflow_run_finalizer_tests::{seed_call, snapshot, spec, summary};
 use super::super::{RunEndObserverContext, WorkflowRunEndObserver, finalize_summary_with_gate};
-use super::state::{REOPEN_LEDGER_PATH, ReopenLedger, masked};
-use super::{REOPEN_LIMIT, Reopened, RunEndReopen};
+use super::state::masked;
+use super::{Reopened, RunEndReopen};
 
 #[test]
 fn masking_hides_minted_ids_and_counts_but_keeps_the_failure() {
@@ -49,7 +48,7 @@ fn masking_hides_hyphenated_ids_timestamps_and_evidence_paths() {
 }
 
 /// Fails every observation with a reason no earlier one had, so progress
-/// never stops re-entry: only the limit can.
+/// never stops re-entry: only the runaway guard can.
 struct EverNew {
     from: usize,
     calls: AtomicUsize,
@@ -57,22 +56,34 @@ struct EverNew {
 
 impl WorkflowRunEndObserver for EverNew {
     fn observe(&self, _: &RunEndObserverContext<'_>) -> WorkflowResult<RunEndObserverOutcomeV1> {
-        const WORDS: [&str; 12] = [
-            "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india",
-            "juliet", "kilo", "lima",
-        ];
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
-        let word = WORDS
-            .get(self.from + call)
-            .unwrap_or_else(|| panic!("re-entry did not stop after {call} observations"));
-        Err(WorkflowError::StageFailed(format!("probe {word} failed")))
+        assert!(
+            call <= 200,
+            "re-entry did not stop after {call} observations"
+        );
+        Err(WorkflowError::StageFailed(format!(
+            "probe {} failed",
+            word(self.from + call)
+        )))
+    }
+}
+
+/// A distinct word per `n`, letters only: masking hides digits.
+fn word(mut n: usize) -> String {
+    let mut word = String::new();
+    loop {
+        word.push(char::from(b'a' + (n % 26) as u8));
+        n /= 26;
+        if n == 0 {
+            return word;
+        }
     }
 }
 
 /// Re-enters by returning the outcome unchanged; pauses on call `pause_at`.
-struct Reentry {
-    calls: AtomicUsize,
-    pause_at: usize,
+pub(super) struct Reentry {
+    pub(super) calls: AtomicUsize,
+    pub(super) pause_at: usize,
 }
 
 #[async_trait::async_trait]
@@ -97,6 +108,16 @@ async fn finalize(
     observer: &EverNew,
     reentry: &Reentry,
 ) -> WorkflowResult<WorkflowV2ScriptSummary> {
+    finalize_with(store, run_id, root, observer, reentry).await
+}
+
+pub(super) async fn finalize_with(
+    store: &WorkflowStore,
+    run_id: &str,
+    root: &std::path::Path,
+    observer: &dyn WorkflowRunEndObserver,
+    reentry: &dyn RunEndReopen,
+) -> WorkflowResult<WorkflowV2ScriptSummary> {
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
     finalize_summary_with_gate(
         store,
@@ -113,7 +134,7 @@ async fn finalize(
     .await
 }
 
-fn setup() -> (tempfile::TempDir, WorkflowStore, String) {
+pub(super) fn setup() -> (tempfile::TempDir, WorkflowStore, String) {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowStore::project(temp.path());
     let run = store.create_run(spec()).unwrap();
@@ -122,10 +143,12 @@ fn setup() -> (tempfile::TempDir, WorkflowStore, String) {
     (temp, store, run.id)
 }
 
-/// B1: a failure that keeps changing without clearing is re-entered at
-/// most `REOPEN_LIMIT` times, then blocks the run by name.
+/// Round 3 (decision A): progress is a failing set the run never reached,
+/// never the failure's text. Observations that fail with ever-new errors but
+/// no failing check reach the same (empty) failing set again: the first
+/// revisit pauses the run, with the evidence, and never ends it.
 #[tokio::test]
-async fn reentry_stops_at_the_limit_and_blocks_by_name() {
+async fn changing_errors_without_a_new_failing_set_pause_at_the_first_revisit() {
     let (temp, store, run_id) = setup();
     let observer = EverNew {
         from: 0,
@@ -135,29 +158,26 @@ async fn reentry_stops_at_the_limit_and_blocks_by_name() {
         calls: AtomicUsize::new(0),
         pause_at: 0,
     };
-    let finalized = finalize(&store, &run_id, temp.path(), &observer, &reentry)
+    let error = finalize(&store, &run_id, temp.path(), &observer, &reentry)
         .await
-        .expect("finalizes");
-    assert_eq!(finalized.status, WorkflowV2Status::NeedsReview);
-    let next = finalized.next_action.unwrap();
+        .expect_err("a revisit pauses");
+    let WorkflowError::ControlPaused(message) = &error else {
+        panic!("a stopped re-entry pauses, never ends the run: {error:?}");
+    };
+    assert!(message.contains("made no progress"), "{message}");
+    assert_eq!(reentry.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(store.load_state(&run_id).unwrap().status, RunStatus::Paused);
+    let events = std::fs::read_to_string(store.events_path(&run_id)).unwrap();
     assert!(
-        next.contains("limit") && next.contains("probe delta failed"),
-        "{next}"
+        events.contains("run_end_acceptance_observer_stall_pause"),
+        "{events}"
     );
-    assert_eq!(reentry.calls.load(Ordering::SeqCst), REOPEN_LIMIT);
-    assert_eq!(
-        store.load_state(&run_id).unwrap().status,
-        RunStatus::NeedsReview
-    );
-    let record = read_finalization(&store, &run_id);
-    assert_eq!(record.prior_observer_failures.len(), REOPEN_LIMIT);
-    assert!(!store.run_dir(&run_id).join(REOPEN_LEDGER_PATH).exists());
 }
 
-/// B1: re-entries made before a pause count after it; the resumed
-/// finalization gets only what the limit leaves.
+/// The failing sets reached are kept across a pause: a resumed finalization
+/// that reaches one of them again pauses without re-entering.
 #[tokio::test]
-async fn reentries_before_a_pause_count_toward_the_limit_after_it() {
+async fn the_failing_sets_reached_survive_a_pause() {
     let (temp, store, run_id) = setup();
     let first = EverNew {
         from: 0,
@@ -165,29 +185,30 @@ async fn reentries_before_a_pause_count_toward_the_limit_after_it() {
     };
     let paused = Reentry {
         calls: AtomicUsize::new(0),
-        pause_at: 2,
+        pause_at: 1,
     };
     let error = finalize(&store, &run_id, temp.path(), &first, &paused)
         .await
-        .expect_err("the pause stops finalization");
+        .expect_err("the operator pause stops finalization");
     assert!(matches!(error, WorkflowError::ControlPaused(_)), "{error}");
-    let ledger = ReopenLedger::load(&store, &run_id).unwrap();
-    assert_eq!(ledger.reopens.len(), 2, "the paused re-entry counted");
+    let mut run = store.load_state(&run_id).unwrap();
+    run.status = RunStatus::Running;
+    store.save_state(&run).unwrap();
 
     let resumed = EverNew {
-        from: 6,
+        from: 1000,
         calls: AtomicUsize::new(0),
     };
     let reentry = Reentry {
         calls: AtomicUsize::new(0),
         pause_at: 0,
     };
-    let finalized = finalize(&store, &run_id, temp.path(), &resumed, &reentry)
+    let error = finalize(&store, &run_id, temp.path(), &resumed, &reentry)
         .await
-        .expect("finalizes");
-    assert_eq!(finalized.status, WorkflowV2Status::NeedsReview);
-    assert_eq!(reentry.calls.load(Ordering::SeqCst), REOPEN_LIMIT - 2);
-    let record = read_finalization(&store, &run_id);
-    assert_eq!(record.prior_observer_failures.len(), REOPEN_LIMIT);
-    assert!(!store.run_dir(&run_id).join(REOPEN_LEDGER_PATH).exists());
+        .expect_err("the set was reached before the pause");
+    assert!(matches!(error, WorkflowError::ControlPaused(_)), "{error}");
+    assert_eq!(reentry.calls.load(Ordering::SeqCst), 0);
 }
+
+#[path = "workflow_live_v2_finalizer_heal_progress_tests.rs"]
+mod progress_tests;

@@ -42,6 +42,9 @@ pub use paths::{contains_path_text, native, shell_path, toolchain_path};
 pub const DELETE: &str = "\u{0}delete";
 /// An edit's content prefix that runs the rest as a shell command in the worktree.
 pub const RUN: &str = "\u{0}run:";
+/// An edit that makes the session end with the runner's no-progress stop
+/// after its other edits.
+pub const STALL: &str = "\u{0}stall";
 #[path = "write_wave_guarded.rs"]
 mod guarded;
 use guarded::guarded_bash;
@@ -139,7 +142,8 @@ impl WorkflowAgentDispatch for Scripted {
             "dispatch must use item worktree"
         );
         let edits = self.per_branch[&execution.call.id].clone();
-        for (path, content) in &edits.files {
+        let stall = edits.files.iter().any(|(_, content)| *content == STALL);
+        for (path, content) in edits.files.iter().filter(|(_, c)| *c != STALL) {
             let target = guarded::edit_target(&root, path, &execution.input, _store);
             if let Some(content) = content.strip_prefix(guarded::WRITE) {
                 let run_root = _store.unwrap().run_root();
@@ -191,6 +195,11 @@ impl WorkflowAgentDispatch for Scripted {
             .lock()
             .unwrap()
             .push(adapter.build_prompt(&request));
+        if stall {
+            return Err(WorkflowError::port(
+                "subagent failed: no-progress stop: repeated answers with an unchanged tree",
+            ));
+        }
         if self.rejecting.contains(&execution.call.id) {
             return Err(WorkflowError::StageFailed(
                 "schema repair failed: scripted evidence names no command output".into(),

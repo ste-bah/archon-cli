@@ -495,4 +495,4 @@ mod review;
 #[path = "escalation_run.rs"]
 mod run_script;
 #[allow(unused_imports)]
-pub use run_script::{at_head, run};
+pub use run_script::{assert_stall_paused, at_head, run};

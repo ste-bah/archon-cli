@@ -10,7 +10,7 @@
   // of it (`hostReading`) closes the ids it proves. The ids left open go to
   // the next round with the verifier's reasons; a cycle of rounds that closed
   // any id buys another cycle over what is left, so the budget follows
-  // progress, and only a cycle that closes nothing ends the unit. Whatever is
+  // progress, and a cycle that revisits an unresolved state pauses the run. Whatever is
   // still open then is one unresolved entry per id, which holds the run. A
   // fix that changed nothing and asserts its findings are invalid is put to a
   // read-only verifier asking whether that refutation is sound. Findings no
@@ -56,6 +56,10 @@
     const resolved = [];
     const unresolved = [];
     let residualRefused = false;
+    // Units whose cycle revisited an unresolved state. The pause waits until
+    // every unit of the pass had its chance: one unit's stall never stops
+    // another unit that can still make progress.
+    const stalls = [];
     for (const unit of units) {
       const tag = unit.cross ? { taskId: unit.key, taskIds: unit.taskIds, crossTask: true } : { taskId: unit.key };
       // A unit with nothing it may write cannot be dispatched (`agent()`
@@ -73,15 +77,22 @@
       let open = unit.own.slice();
       const closedIds = [];
       let last = null;
+      const state = () => JSON.stringify(open.map((f) => f.finding_id).sort());
+      const seen = new Set([state()]);
       for (let cycle = 1; open.length > 0; cycle += 1) {
         last = await remediationCycle(unit, open, cycle, ctx, last ? last.reasons : null);
         if (last.residualRefused) residualRefused = true;
         const closed = new Set(last.closed);
         closedIds.push(...open.filter((f) => closed.has(f.finding_id)).map((f) => f.finding_id));
         open = open.filter((f) => !closed.has(f.finding_id));
-        // Only per-finding judging can tell a cycle closed something; one
-        // that closed nothing is a plateau, and more rounds buy nothing.
-        if (!perId || closed.size === 0) break;
+        if (!perId) break;
+        const key = state();
+        if (open.length > 0 && seen.has(key)) {
+          stalls.push({ unit: unit.key, part: unit.part || 0, cycle, failing_ids: JSON.parse(key),
+            task_ids: unit.taskIds || [unit.key], reasons: last.reasons, evidence: { fix: last.fix, check: last.check } });
+          break;
+        }
+        seen.add(key);
       }
       const done = last && last.escalation ? { ...tag, escalatedTo: last.escalation.owners } : tag;
       if (perId) {
@@ -99,6 +110,18 @@
         continue;
       }
       legacyOutcome(last, done, unit, maxRounds, resolved, unresolved);
+    }
+    if (stalls.length > 0) {
+      // A bounded id: a digest (FNV-1a) of the sorted stalled units; the
+      // units themselves travel in the evidence.
+      const units = stalls.map((s) => `${s.unit}#${s.part}@${s.cycle}`).sort().join("|");
+      let digest = 0x811c9dc5;
+      for (let i = 0; i < units.length; i += 1) digest = Math.imul(digest ^ units.charCodeAt(i), 0x01000193) >>> 0;
+      await w.checkpoint(inUnit(`remediation-stall-${stalls.length}-${digest.toString(16).padStart(8, "0")}`), {
+        remediationPause: { cause: "no_progress", failing_ids: [...new Set(stalls.flatMap((s) => s.failing_ids))].sort(),
+          task_ids: [...new Set(stalls.flatMap((s) => s.task_ids))].sort(), stalls },
+      });
+      throw new Error("the host returned from a remediation stall without pausing");
     }
     // REM-10: a blocked task this pass finished (every finding standing for
     // it closed) was never reviewed. Both maps run over exactly those tasks,

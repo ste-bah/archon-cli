@@ -17,6 +17,8 @@ use thiserror::Error;
 use super::WriteCoordinatorConfig;
 use super::write_plan::{NormalizedPath, WritePlan};
 
+pub(crate) use support_files::read_regular_bounded;
+
 pub(crate) use git::{check_ignore, run_git, run_git_with_stdin};
 pub use ignored_deps::{MAX_COPY_BYTES, MAX_ENTRIES, MaterializedIgnored, Mechanism, SkipReason};
 

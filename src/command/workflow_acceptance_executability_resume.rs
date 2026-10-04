@@ -12,7 +12,7 @@
 //! - asks the freeze's budget before every check how long it may run, and
 //!   once too little is left runs nothing more and reports the freeze
 //!   [`FreezeIncomplete`] instead of being killed;
-//! - bounds every check by [`super::PROBE_CHECK_CAP_SECS`];
+//! - bounds every check by its site's own limit (`probe_check_cap_secs`);
 //! - keeps the nonce of each input mutation it draws, so a retry builds the
 //!   same mutated check and meets its saved verdict too.
 //!
@@ -185,7 +185,7 @@ impl HostProbe {
         self
     }
 
-    /// Bound every check by `secs` instead of [`super::PROBE_CHECK_CAP_SECS`].
+    /// Bound every check by `secs` instead of its site's own limit.
     #[cfg(test)]
     pub(crate) fn with_check_cap(mut self, secs: u64) -> Self {
         self.check_cap_secs = secs;
@@ -350,3 +350,7 @@ mod tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_resume_round2_tests.rs"]
 mod round2_tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_cap_tests.rs"]
+mod cap_tests;

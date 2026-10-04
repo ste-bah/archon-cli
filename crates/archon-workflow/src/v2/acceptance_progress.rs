@@ -1,31 +1,39 @@
-//! The acceptance loop's budget follows progress, never a round count (A2).
+//! The acceptance loop's budget follows progress, never a round count (A2,
+//! Issue 262).
 //!
-//! A fixed three-round ceiling ended the loop while checks were still
-//! getting fixed one at a time: the run then sat unfinished until a person
-//! resumed it. Here the host decides from its own records whether the loop
-//! ends. A round made progress when it fails fewer checks (plus round-level
-//! errors) than any earlier round did, or when its failing state -- which
-//! checks fail with which status, and how many round errors, never the
-//! output text -- is one no earlier round was in. The first round without
-//! progress escalates (the failing checks go to every owner together); only
-//! a second consecutive one ends the loop, and a round that ends it this way
-//! still blocks completion. Behind that, [`ACCEPTANCE_ROUND_CEILING`] ends
-//! the loop however it moves, still blocking: the states are finite, and so
-//! is the loop.
+//! Progress is reaching a failing state this run never reached, where the
+//! state is the set of failing check ids (never the failure text: output
+//! that differs by a hash or a temp name would read as new every round).
+//! Fewer failures than some earlier round is not the measure: after a
+//! regression, every round that repairs one check more reaches a new state
+//! and is progress, though it fails more than the best round before it.
+//! A round that reaches a state already reached counts toward the stall;
+//! a new state resets the count. The first revisit escalates (the failing
+//! checks go to every owner together); the [`ACCEPTANCE_STALL_LIMIT`]th in
+//! a row PAUSES the run with its evidence: it never ends the loop and never
+//! fails the run. No round count ends or pauses it. The states reached and
+//! the count are kept in [`ProgressLedger`], persisted beside the round
+//! records, so a pause and resume (a round's next attempt) keeps them.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
-// Mounted under `acceptance_stage`: `super` is that module.
-use super::{AcceptanceRoundRecordV1, attempt_file_name, next_attempt, round_dir};
+use serde::{Deserialize, Serialize};
 
-/// Consecutive rounds without progress that end the loop. The first of
-/// them escalates instead.
+// Mounted under `acceptance_stage`: `super` is that module.
+use super::{
+    ACCEPTANCE_RECORDS_DIR, AcceptanceRoundRecordV1, attempt_file_name, next_attempt, round_dir,
+};
+
+/// Revisits in a row that pause the run: the no-progress bound. The first
+/// of them escalates instead.
 pub const ACCEPTANCE_STALL_LIMIT: u32 = 2;
 
-/// Rounds one execution may run however it progresses; reaching it ends
-/// the loop with the gate still blocking, never passing.
-pub const ACCEPTANCE_ROUND_CEILING: usize = 12;
+/// Why the loop pauses the run: no progress for the stall limit.
+pub const PAUSE_NO_PROGRESS: &str = "no_progress";
+
+/// The ledger's file, under the acceptance records directory.
+pub const PROGRESS_LEDGER_FILE: &str = "progress-ledger.json";
 
 /// What the host tells the script about the loop after a round.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,88 +45,181 @@ pub struct LoopDecision {
     pub escalate: bool,
     /// Trailing rounds, this one included, that made no progress.
     pub stalled_rounds: u32,
+    /// The run pauses after this round, for this cause
+    /// ([`PAUSE_NO_PROGRESS`]); the loop is not over.
+    pub pause: Option<&'static str>,
 }
 
-/// A round's failing state: which checks fail and with what status, and
-/// how many round-level errors it had. Deliberately NOT the failure text:
-/// output that differs by a hash, a temp name or an assertion message would
-/// read as a new state every round and fund the loop for ever.
-fn state(record: &AcceptanceRoundRecordV1) -> (BTreeSet<(String, String)>, usize) {
-    let failing = (record.failing_checks().into_iter())
-        .map(|check| (check.check_id.clone(), format!("{:?}", check.status)))
+/// A round's failing state: the sorted set of its failing check ids.
+pub fn state_key(record: &AcceptanceRoundRecordV1) -> Vec<String> {
+    let ids: BTreeSet<String> = (record.failing_checks().into_iter())
+        .map(|check| check.check_id.clone())
         .collect();
-    (failing, record.operational_errors.len())
+    ids.into_iter().collect()
 }
 
-fn failures(record: &AcceptanceRoundRecordV1) -> usize {
-    record.failing_checks().len() + record.operational_errors.len()
+/// The failing states a run reached, and how many rounds in a row
+/// (attempts included) reached one already reached. `observed` is the
+/// state of each record the ledger saw, in order: a second copy of what the
+/// records hold, from which a damaged record's state is rebuilt.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProgressLedger {
+    pub seen: BTreeSet<Vec<String>>,
+    pub revisits: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed: Vec<ObservedState>,
 }
 
-/// Whether `current` made progress over `history` (earlier rounds, oldest
-/// first): fewer failures than any of them, or a failing state none of
-/// them was in. The first round always has.
+/// One record's failing state, as the ledger observed it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservedState {
+    pub round: u32,
+    pub attempt: u32,
+    pub state: Vec<String>,
+}
+
+impl ProgressLedger {
+    /// The ledger `history` (oldest first) leaves.
+    pub fn from_history(history: &[AcceptanceRoundRecordV1]) -> Self {
+        let mut ledger = Self::default();
+        for round in history {
+            ledger.observe(round);
+        }
+        ledger
+    }
+
+    /// The ledger the observed states (oldest first) leave.
+    pub fn from_states(states: impl IntoIterator<Item = ObservedState>) -> Self {
+        let mut ledger = Self::default();
+        for state in states {
+            ledger.observe_state(state);
+        }
+        ledger
+    }
+
+    /// Records `round`; returns the revisits in a row, 0 for a new state.
+    pub fn observe(&mut self, round: &AcceptanceRoundRecordV1) -> u32 {
+        self.observe_state(ObservedState {
+            round: round.round,
+            attempt: round.attempt,
+            state: state_key(round),
+        })
+    }
+
+    fn observe_state(&mut self, observed: ObservedState) -> u32 {
+        if self.seen.insert(observed.state.clone()) {
+            self.revisits = 0;
+        } else {
+            self.revisits = self.revisits.saturating_add(1);
+        }
+        self.observed.push(observed);
+        self.revisits
+    }
+
+    /// The state this ledger observed for (`round`, `attempt`).
+    fn state_of(&self, round: u32, attempt: u32) -> Option<&Vec<String>> {
+        (self.observed.iter().rev())
+            .find(|observed| (observed.round, observed.attempt) == (round, attempt))
+            .map(|observed| &observed.state)
+    }
+
+    fn path(run_dir: &Path) -> std::path::PathBuf {
+        run_dir
+            .join(ACCEPTANCE_RECORDS_DIR)
+            .join(PROGRESS_LEDGER_FILE)
+    }
+
+    /// The ledger as last saved; `None` when absent or unreadable (it is a
+    /// copy: the records are authoritative).
+    fn saved(run_dir: &Path) -> Option<Self> {
+        let bytes = std::fs::read(Self::path(run_dir)).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    /// Records are authoritative: the record is written before the ledger,
+    /// so even a readable ledger may lag after an interrupted write. Replay
+    /// every recorded attempt, including attempts of the resumed round. A
+    /// damaged record is quarantined ([`Self::load_healing`]); an I/O error
+    /// is returned, for the caller to pause on.
+    pub fn load(run_dir: &Path, _round: u32) -> crate::WorkflowResult<Self> {
+        Self::load_healing(run_dir).map(|healed| healed.ledger)
+    }
+
+    /// Saved whole (staged, synced, renamed) and its directory synced: it
+    /// is the copy a damaged record's state is rebuilt from.
+    pub fn save(&self, run_dir: &Path) -> crate::WorkflowResult<()> {
+        let path = Self::path(run_dir);
+        let staging = path.with_extension("json.tmp");
+        crate::store::write_atomic(&staging, &path, &serde_json::to_vec_pretty(self)?)?;
+        match path.parent() {
+            Some(dir) => super::sync_record_dirs(run_dir, dir),
+            None => Ok(()),
+        }
+    }
+}
+
+#[path = "acceptance_progress_heal.rs"]
+mod heal;
+pub use heal::{
+    HealedLedger, QUARANTINE_DIR, QuarantinedRecordV1, acknowledge_quarantined,
+    record_quarantine_events,
+};
+pub(super) use heal::{highest_quarantined_attempt, quarantined_attempt};
+
+#[path = "acceptance_record_order.rs"]
+mod order;
+pub(super) use order::{note_recorded_locked, under_order_lock};
+
+/// Whether `current` reached a failing state none of `history` reached.
 pub fn made_progress(
     history: &[AcceptanceRoundRecordV1],
     current: &AcceptanceRoundRecordV1,
 ) -> bool {
-    let Some(fewest) = history.iter().map(failures).min() else {
-        return true;
-    };
-    if failures(current) < fewest {
-        return true;
-    }
-    let now = state(current);
-    !history.iter().any(|earlier| state(earlier) == now)
+    let now = state_key(current);
+    !history.iter().any(|earlier| state_key(earlier) == now)
 }
 
-/// Trailing rounds, ending with `current`, that made no progress.
+/// Revisits in a row, ending with `current`.
 pub fn stalled_rounds(
     history: &[AcceptanceRoundRecordV1],
     current: &AcceptanceRoundRecordV1,
 ) -> u32 {
-    let mut stalled = 0;
-    let mut end = history.len();
-    let mut round = current;
-    loop {
-        if made_progress(&history[..end], round) {
-            return stalled;
-        }
-        stalled += 1;
-        let Some(previous) = end.checked_sub(1) else {
-            return stalled;
-        };
-        end = previous;
-        round = &history[end];
-    }
+    ProgressLedger::from_history(history).observe(current)
 }
 
 /// Whether the loop ends after `current`, given the earlier rounds.
-///
-/// A clean round ends it. Otherwise it goes on while there is anything to
-/// act on -- a failed check a task is named to fix, or a failure the host
-/// repairs itself (an error, a contract defect, a round-level error) -- and
-/// the rounds keep making progress; the first stalled round escalates and
-/// the [`ACCEPTANCE_STALL_LIMIT`]th consecutive one ends it.
 pub fn decide(
     history: &[AcceptanceRoundRecordV1],
     current: &AcceptanceRoundRecordV1,
 ) -> LoopDecision {
+    decide_with(&mut ProgressLedger::from_history(history), current)
+}
+
+/// Whether the loop ends after `current`, recording it in `ledger`.
+///
+/// A clean round ends it. Otherwise it goes on while there is anything to
+/// act on -- a failed check a task is named to fix, or a failure the host
+/// repairs itself (an error, a contract defect, a round-level error). The
+/// first revisit escalates and the [`ACCEPTANCE_STALL_LIMIT`]th in a row
+/// pauses the run. A round with nothing to act on ends it.
+pub fn decide_with(ledger: &mut ProgressLedger, current: &AcceptanceRoundRecordV1) -> LoopDecision {
     if !current.blocks_completion() {
+        // Observed all the same, so the ledger's copy covers every record.
+        ledger.observe(current);
         return LoopDecision {
             final_round: true,
             escalate: false,
             stalled_rounds: 0,
+            pause: None,
         };
     }
-    let stalled = stalled_rounds(history, current);
+    let stalled = ledger.observe(current);
     let actionable = current.has_remediable_failures() || !current.operational_errors.is_empty();
-    // A hard ceiling behind the progress rule: the loop always ends (the
-    // gate still blocks), however the failing set moves.
-    let ceiling = history.len() + 1 >= ACCEPTANCE_ROUND_CEILING;
     LoopDecision {
-        final_round: !actionable || stalled >= ACCEPTANCE_STALL_LIMIT || ceiling,
+        final_round: !actionable,
         escalate: actionable && (1..ACCEPTANCE_STALL_LIMIT).contains(&stalled),
         stalled_rounds: stalled,
+        pause: (actionable && stalled >= ACCEPTANCE_STALL_LIMIT).then_some(PAUSE_NO_PROGRESS),
     }
 }
 
@@ -136,6 +237,9 @@ pub fn earlier_rounds(run_dir: &Path, round: u32) -> Vec<AcceptanceRoundRecordV1
         .collect()
 }
 
+#[cfg(test)]
+#[path = "acceptance_progress_heal_tests.rs"]
+mod heal_tests;
 #[cfg(test)]
 #[path = "acceptance_progress_tests.rs"]
 mod tests;

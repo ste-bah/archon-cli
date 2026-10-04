@@ -26,8 +26,13 @@ pub(super) const REOPEN_LEDGER_PATH: &str = "v2/run-end-reopens.json";
 pub(super) struct ReopenLedger {
     /// The observation failure each re-entry answered, oldest first.
     pub(super) reopens: Vec<String>,
-    /// Every situation an observation failed in.
-    pub(super) situations: Vec<String>,
+    /// Every failing set (sorted failing check ids) a refused observation
+    /// left the run in: progress is reaching one not in here (decision A).
+    #[serde(default)]
+    pub(super) seen: std::collections::BTreeSet<Vec<String>>,
+    /// Refusals in a row that reached a failing set already reached.
+    #[serde(default)]
+    pub(super) revisits: usize,
 }
 
 impl ReopenLedger {
@@ -68,6 +73,22 @@ pub(in super::super) fn clear_reopen_ledger(
         }
         _ => Ok(()),
     }
+}
+
+/// The run's failing set as a refused observation leaves it: the checks the
+/// observation found failing and those the acceptance gate records, sorted.
+/// Never the failure's text.
+pub(super) fn failing_set(
+    store: &WorkflowStore,
+    run_id: &str,
+    record: &FinalizationRecordV1,
+) -> Vec<String> {
+    let mut ids: std::collections::BTreeSet<String> =
+        shadowed_checks(store, run_id).into_iter().collect();
+    if let Some(gate) = &record.acceptance_gate {
+        ids.extend(gate.failing_check_ids.iter().cloned());
+    }
+    ids.into_iter().collect()
 }
 
 /// What the observation judged: its failure (volatile text masked), the

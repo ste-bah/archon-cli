@@ -40,9 +40,42 @@ pub(super) fn capture_untracked(
             }
             continue;
         }
-        files.insert(path, std::fs::read(abs)?);
+        if let Some(bytes) = read_regular_bounded(&abs, max_file_bytes)? {
+            files.insert(path, bytes);
+        } else if wanted_file {
+            return Err(IsolationError::UnsafeUntrackedFile { path });
+        }
     }
     Ok(files)
+}
+
+/// Read captureable bytes without following a symlink or blocking on a
+/// special file. Recheck the opened file and bound the read if it grows.
+pub(crate) fn read_regular_bounded(
+    path: &Path,
+    max_bytes: u64,
+) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::Read;
+    let meta = std::fs::symlink_metadata(path)?;
+    if !meta.is_file() || meta.len() > max_bytes {
+        return Ok(None);
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() || meta.len() > max_bytes {
+        return Ok(None);
+    }
+    let mut bytes = Vec::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    Ok((bytes.len() as u64 <= max_bytes).then_some(bytes))
 }
 
 /// Sealed assessments cannot use a language-extension allowlist for context.

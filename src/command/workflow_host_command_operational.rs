@@ -37,8 +37,7 @@
 use std::path::Path;
 
 use archon_workflow::{
-    RunStatus, StageStatus, WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowResult,
-    WorkflowStore,
+    RunStatus, WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowResult, WorkflowStore,
 };
 
 use super::workflow_host_command_supervisor::SupervisedProcessOutput;
@@ -248,44 +247,22 @@ pub(crate) fn pause_run(
         report.attempts.len(),
         report.resume_command()
     );
-    let paused = store.with_run_lock(report.run_id, |locked| {
-        require_run_owned(locked, report.run_id, expected_generation)?;
-        let mut run = locked.load_state(report.run_id)?;
-        run.status = RunStatus::Paused;
-        for stage in run.stages.values_mut() {
-            if stage.status == StageStatus::Running {
-                stage.status = StageStatus::Paused;
-                stage.completed_at = None;
-            }
-        }
-        for item in run.items.values_mut() {
-            if item.status == StageStatus::Running {
-                item.status = StageStatus::Paused;
-            }
-        }
-        run.generation = run.generation.saturating_add(1);
-        run.mark_updated();
-        locked.save_state(&run)?;
-        let detail = serde_json::json!({
-            "action": "pause",
-            "event": "host_command_operational_pause",
-            "generation": run.generation,
-            "call_id": report.call_id,
-            "command_id": report.command_id,
-            "reason": reason,
-            "cause": cause,
-            "limit_secs": report.limit_secs,
-            "attempts": report.attempts,
-            "resume": report.resume_command(),
-        });
-        // The run is paused from here whatever happens to the evidence.
-        Ok(emit(
-            locked,
-            report.run_id,
-            WorkflowEventKind::Paused,
-            detail,
-        ))
+    let detail = serde_json::json!({
+        "event": "host_command_operational_pause",
+        "call_id": report.call_id,
+        "command_id": report.command_id,
+        "reason": reason,
+        "cause": cause,
+        "limit_secs": report.limit_secs,
+        "attempts": report.attempts,
+        "resume": report.resume_command(),
     });
+    let paused = archon_workflow::control_pause::pause_with_evidence(
+        store,
+        report.run_id,
+        expected_generation,
+        detail,
+    );
     match paused {
         Ok(event) => {
             tracing::warn!(run_id = report.run_id, "{message}");

@@ -124,18 +124,22 @@ pub(super) async fn run_worktree_branch_agent(
     let mut size_notice: Option<String> = None;
     let mut prompt = base.clone();
     let mut previous_overshoot: Option<u32> = None;
-    // Transport failures are counted separately: a dropped provider connection
-    // is not an answer about the work, so it must not consume the budget that
-    // exists for correcting a rejection.
+    // Re-asks are bounded by no progress, never by a total (Issue 263): a
+    // size re-ask must shrink the overshoot, and transport drops count only
+    // since the worktree last changed (or a size re-ask shrank). Nothing
+    // counts total time: each dispatch carries its own timeout and
+    // inactivity bound. A stall is never a pause of the run here: the
+    // branch reports its outcome, the wave captures its work, and
+    // remediation goes on (round 3, decision B).
     let mut transport_failures = 0usize;
     let mut size_retries = 0usize;
     let started = std::time::Instant::now();
     let time_budget = branch.time_budget.resolve(dispatch);
-    for _ in 0..super::size_retry::MAX_BRANCH_DISPATCHES {
-        if super::size_retry::call_time_budget_exhausted(started, time_budget) {
-            let err = super::size_retry::call_time_budget_error(&branch.id, started, time_budget);
-            return normalize_worktree_agent_result(Err(err), &branch.id, &branch.execution.input);
-        }
+    loop {
+        let before = worktree_progress::fingerprint(
+            &branch.workspace_root,
+            &branch.execution.call.options.target_files,
+        );
         let dispatch_prompt = crate::v2::write_read_set::with_current_preamble(
             &prompt,
             v2_store,
@@ -172,9 +176,25 @@ pub(super) async fn run_worktree_branch_agent(
         if crate::v2::transport_retry::is_transport_failure(&text)
             && !crate::v2::transport_retry::is_content_rejection(&text)
         {
+            // Decision C: a session that changed the worktree before its
+            // connection dropped made progress; the drop streak starts again.
+            if worktree_progress::fingerprint(
+                &branch.workspace_root,
+                &branch.execution.call.options.target_files,
+            ) != before
+            {
+                transport_failures = 0;
+            }
             if transport_failures >= crate::v2::transport_retry::MAX_TRANSPORT_RETRIES {
+                // The no-progress end of the streak: an interruption, never a
+                // verdict, so the wave keeps the branch's work for remediation.
+                let stalled = crate::WorkflowError::port(format!(
+                    "write branch '{}' {TRANSPORT_NO_PROGRESS}: {} dropped connection(s) in a row; the last: {text}",
+                    branch.id,
+                    transport_failures + 1
+                ));
                 return normalize_worktree_agent_result(
-                    result,
+                    Err(stalled),
                     &branch.id,
                     &branch.execution.input,
                 );
@@ -206,13 +226,8 @@ pub(super) async fn run_worktree_branch_agent(
         if !super::size_retry::is_line_cap_rejection(&text) {
             return normalize_worktree_agent_result(result, &branch.id, &branch.execution.input);
         }
-        // Counted here rather than by the loop, so a dropped transport cannot
-        // spend an attempt that exists for correcting a rejection.
-        if size_retries >= super::size_retry::MAX_SIZE_RETRIES {
-            let outcome =
-                normalize_worktree_agent_result(result, &branch.id, &branch.execution.input);
-            return stamp_no_progress(outcome, size_retries);
-        }
+        // Re-asked while each attempt overshoots less than the one before:
+        // a strictly shrinking count ends on its own, so no total is needed.
         let overshoot = super::size_retry::rejected_line_count(&text);
         if !super::size_retry::should_retry(previous_overshoot, overshoot) {
             let outcome =
@@ -220,20 +235,13 @@ pub(super) async fn run_worktree_branch_agent(
             return stamp_no_progress(outcome, size_retries);
         }
         size_retries += 1;
+        // Progress: transport drops count again from here.
+        transport_failures = 0;
         previous_overshoot = overshoot;
         let notice = super::size_retry::retry_notice(&text);
         prompt = format!("{base}\n\n{notice}");
         size_notice = Some(notice);
     }
-    let exhausted = normalize_worktree_agent_result(
-        Err(crate::WorkflowError::port(format!(
-            "write branch '{}' could not fit its patch under the source-file line cap",
-            branch.id
-        ))),
-        &branch.id,
-        &branch.execution.input,
-    );
-    stamp_no_progress(exhausted, size_retries)
 }
 
 /// Gate 1: judge the envelope against the SAME plan capture will use.
@@ -352,3 +360,10 @@ mod read_set_retry_tests;
 #[cfg(test)]
 #[path = "restart_refresh_tests.rs"]
 mod restart_refresh_tests;
+
+#[path = "worktree_progress.rs"]
+mod worktree_progress;
+
+#[cfg(test)]
+#[path = "branch_progress_tests.rs"]
+mod branch_progress_tests;

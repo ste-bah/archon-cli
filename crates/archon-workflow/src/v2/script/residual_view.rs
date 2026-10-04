@@ -334,7 +334,8 @@ pub fn with_residual_plan(
     universe: Option<&WorkflowV2TaskUniverse>,
     root: Option<&Path>,
 ) -> crate::WorkflowResult<Option<WorkflowV2Result>> {
-    let carried = result.data.get(RESIDUAL_GAPS_KEY).is_some()
+    let carried = result.data.get("remediation_pause").is_some()
+        || result.data.get(RESIDUAL_GAPS_KEY).is_some()
         || result.data.get(confirm::RESIDUAL_CONFIRM_KEY).is_some();
     let confirming = record.call.method == WorkflowV2HostMethod::Checkpoint
         && record
@@ -351,6 +352,7 @@ pub fn with_residual_plan(
         viewed.data = json!({});
     }
     if let Some(data) = viewed.data.as_object_mut() {
+        data.remove("remediation_pause");
         data.remove(RESIDUAL_GAPS_KEY);
         data.remove(confirm::RESIDUAL_CONFIRM_KEY);
     }
@@ -359,6 +361,29 @@ pub fn with_residual_plan(
             Value::Array(confirm::confirmation_view(store, universe, root)?);
     }
     if asks_for_plan(record) {
+        let pass = super::slot_pass(&record.call).unwrap_or(1);
+        let records = session_records(store);
+        let refs = records.iter().collect::<Vec<_>>();
+        if let Some(plan) = super::pass_plans(pass, &refs, store, universe, root).pop() {
+            let stalled = plan
+                .reported
+                .iter()
+                .filter(|(_, why)| why.starts_with("no_progress:"))
+                .collect::<Vec<_>>();
+            if !stalled.is_empty() {
+                let ids = stalled
+                    .iter()
+                    .map(|(gap, _)| super::dispositions::bare_id(&gap.id))
+                    .collect::<std::collections::BTreeSet<_>>();
+                viewed.data["remediation_pause"] = json!({
+                    "cause": "no_progress", "pass": pass, "failing_ids": ids,
+                    "evidence": stalled.iter().map(|(gap, why)| json!({
+                        "id": gap.id, "recorded_by": gap.recorded_by,
+                        "description": gap.description, "reason": why
+                    })).collect::<Vec<_>>()
+                });
+            }
+        }
         viewed.data[RESIDUAL_GAPS_KEY] =
             Value::Array(match super::slot_pass(&record.call).unwrap_or(1) {
                 2 => second_pass_view(store, universe, root),

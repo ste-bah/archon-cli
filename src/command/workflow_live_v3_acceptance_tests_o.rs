@@ -22,11 +22,18 @@ async fn an_unfrozen_lost_or_undeclared_contract_never_passes() {
         .unwrap()
         .unwrap();
     assert!(record.blocks_completion());
-    // The same error again is no progress: the loop ends, still blocked.
+    // The same error again is no progress: the run pauses with the
+    // evidence (Issue 262), still blocked; it never passes.
     run(&unfrozen, &execution(2, 3, &[])).await.unwrap();
-    let result = run(&unfrozen, &execution(3, 3, &[])).await.unwrap();
-    assert_eq!(result.status, WorkflowV2Status::NeedsReview);
-    assert_eq!(result.data["final"], true);
+    let error = run(&unfrozen, &execution(3, 3, &[])).await.unwrap_err();
+    assert!(
+        matches!(&error, WorkflowError::ControlPaused(message) if message.contains("no progress")),
+        "{error:?}"
+    );
+    let (record, _) = latest_round_record(&unfrozen.store.run_dir(&unfrozen.run_id))
+        .unwrap()
+        .unwrap();
+    assert!(record.blocks_completion() && !record.final_round);
 
     // A FROZEN contract that is lost cannot pass vacuously. (REM-13: one
     // never frozen -- no lock, no pin -- is authored by the host instead, so

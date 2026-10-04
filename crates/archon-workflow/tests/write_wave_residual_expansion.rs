@@ -71,35 +71,43 @@ async fn a_residual_on_an_unowned_file_is_expanded_fixed_and_resolved() {
 }
 
 #[tokio::test]
-async fn a_refused_expansion_is_reported_blocks_and_is_never_asked_again() {
+async fn a_refused_expansion_pauses_and_a_resume_asks_it_again() {
     let first = host();
     first.verdicts(CROSS, vec![Verdict::AcceptWith(vec![HIGH_GAP])]);
     // Refused over B's file: a regular round would buy the cross-owner
     // escalation; a residual round buys nothing.
     // Batch O: a refused round is planned again, whole, by each later pass;
-    // refused every time, it stands.
+    // refused every time, the passes stop making progress.
     first.verdicts("TASK-A", vec![Verdict::Refuse(vec![B]); 3]);
     let result = run(&script(), NEW_PRELUDE, first.clone()).await;
     assert_eq!(residual_calls(&first).len(), 6, "{:#?}", answers(&first));
-    let (status, why) = terminal(&first, &result);
-    assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");
+    // Issue 262: no progress pauses the run, with the gap as its evidence;
+    // never a terminal `NeedsReview`.
+    assert_eq!(result, json!({"paused": true}), "{result}");
+    let events = std::fs::read_to_string(first.f.store.events_path(&first.f.run)).unwrap();
     assert!(
-        why.contains("gap-store-canonical-instrument") && why.contains("did not resolve it"),
-        "{why}"
+        events.contains("gap-store-canonical-instrument"),
+        "{events}"
     );
-    // A resume: the round is attempted, so nothing is dispatched again and
-    // the gate still reads the refusal from the store.
+    // The resume is the stalled pass's new chance: it asks the refused round
+    // again, and refused again, the run pauses again.
+    LifecycleController::new(first.f.store.clone())
+        .apply(&first.f.run, LifecycleAction::Resume)
+        .unwrap();
     let second = next(first);
+    second.verdicts(CROSS, vec![Verdict::AcceptWith(vec![HIGH_GAP])]);
+    second.verdicts("TASK-A", vec![Verdict::Refuse(vec![B]); 6]);
     let again = run(&script(), NEW_PRELUDE, second.clone()).await;
-    assert!(ran(&second).is_empty(), "{:#?}", answers(&second));
     assert!(
-        residual_calls(&second).is_empty(),
+        ran(&second).iter().any(|id| id.contains("residual-")),
         "{:#?}",
         answers(&second)
     );
-    let (status, why) = terminal(&second, &again);
-    assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");
-    assert!(why.contains("gap-store-canonical-instrument"), "{why}");
+    assert_eq!(again, json!({"paused": true}), "{again}");
+    assert_eq!(
+        second.f.store.load_state(&second.f.run).unwrap().status,
+        RunStatus::Paused
+    );
 }
 
 #[tokio::test]

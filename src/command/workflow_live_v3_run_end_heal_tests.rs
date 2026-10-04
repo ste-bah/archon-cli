@@ -111,6 +111,16 @@ async fn finalize_with(
     observer: &Scripted,
     summary: WorkflowV2ScriptSummary,
 ) -> WorkflowV2ScriptSummary {
+    try_finalize_with(fixture, observer, summary)
+        .await
+        .expect("finalizes")
+}
+
+async fn try_finalize_with(
+    fixture: &Fixture,
+    observer: &Scripted,
+    summary: WorkflowV2ScriptSummary,
+) -> anyhow::Result<WorkflowV2ScriptSummary> {
     finalize_run_observed(
         &fixture.store,
         &fixture.run_id,
@@ -123,7 +133,28 @@ async fn finalize_with(
         None,
     )
     .await
-    .expect("finalizes")
+}
+
+/// Finalization that must stop on a stall: the run is paused with the
+/// evidence (Issue 262), and the message is returned.
+async fn finalize_paused(fixture: &Fixture, observer: &Scripted) -> String {
+    let summary = in_run_round(fixture).await;
+    let error = try_finalize_with(fixture, observer, summary)
+        .await
+        .expect_err("a stall pauses the run, never ends it");
+    match error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<WorkflowError>())
+    {
+        Some(WorkflowError::ControlPaused(message)) => {
+            assert_eq!(
+                fixture.store.load_state(&fixture.run_id).unwrap().status,
+                RunStatus::Paused
+            );
+            message.clone()
+        }
+        _ => panic!("a stall pauses the run, never ends it: {error:#}"),
+    }
 }
 
 fn record(fixture: &Fixture) -> FinalizationRecordV1 {
@@ -228,26 +259,17 @@ async fn run_end_observer_failure_that_reopened_acceptance_clears_heals_to_compl
 }
 
 /// Re-entry follows progress: the re-entered round decides the same outcome
-/// on the same pin and the observation fails the same way, so it stops and
-/// the standing failure blocks the run by name.
+/// on the same pin and the observation fails the same way, so it stops; the
+/// standing failure pauses the run with the evidence (Issue 262), never
+/// `NeedsReview`.
 #[tokio::test]
-async fn run_end_observer_failure_that_makes_no_progress_blocks_by_name() {
+async fn run_end_observer_failure_that_makes_no_progress_pauses_the_run() {
     let fixture = fixture();
     let observer = scripted(&fixture, usize::MAX);
-    let finalized = finalize(&fixture, &observer).await;
-    assert_eq!(finalized.status, WorkflowV2Status::NeedsReview);
-    assert_eq!(
-        finalized.failed_call.as_deref(),
-        Some("run-end-acceptance-observer")
-    );
-    let next = finalized.next_action.expect("names the failure");
+    let message = finalize_paused(&fixture, &observer).await;
     assert!(
-        next.contains(CHAIN_MOVED) && next.contains("made no progress"),
-        "{next}"
-    );
-    assert_eq!(
-        fixture.store.load_state(&fixture.run_id).unwrap().status,
-        RunStatus::NeedsReview
+        message.contains(CHAIN_MOVED) && message.contains("made no progress"),
+        "{message}"
     );
     assert_eq!(
         observer.seen.lock().unwrap().len(),
@@ -265,18 +287,12 @@ async fn run_end_observer_failure_that_makes_no_progress_blocks_by_name() {
             .join("v2/acceptance/round-01/attempt-03.json")
             .exists()
     );
-    let record = record(&fixture);
-    assert_eq!(record.terminal_status, RunStatus::NeedsReview);
-    assert_eq!(
-        record.observer_state,
-        Some(RunEndObserverStateV1::Failed {
-            reason: chain_moved()
-        })
-    );
-    let labels = labels(&fixture);
     assert!(
-        position(&labels, "run_end_acceptance_observer_blocked")
-            < position(&labels, "terminal_status")
+        labels(&fixture)
+            .iter()
+            .any(|label| label == "run_end_acceptance_observer_stall_pause"),
+        "{:?}",
+        labels(&fixture)
     );
 }
 
@@ -374,25 +390,19 @@ async fn run_end_observation_findings_reopen_acceptance_and_heal_when_cleared() 
     );
 }
 
-/// B2: findings that still stand once re-entry stops block the run by name,
-/// naming the failing check; the observation is kept as completed.
+/// B2 / Issue 262: findings that still stand once re-entry stops making
+/// progress never commit `Accepted`: the run is paused, naming the check.
 #[tokio::test]
-async fn run_end_observation_findings_never_commit_accepted_and_block_naming_the_check() {
+async fn run_end_observation_findings_never_commit_accepted_and_pause_naming_the_check() {
     let fixture = fixture();
     let observer = Scripted {
         findings: true,
         ..scripted(&fixture, usize::MAX)
     };
-    let finalized = finalize(&fixture, &observer).await;
-    assert_eq!(finalized.status, WorkflowV2Status::NeedsReview);
-    let next = finalized.next_action.expect("names the failing check");
+    let message = finalize_paused(&fixture, &observer).await;
     assert!(
-        next.contains("failing frozen check") && next.contains("REQ-1"),
-        "{next}"
-    );
-    assert_eq!(
-        fixture.store.load_state(&fixture.run_id).unwrap().status,
-        RunStatus::NeedsReview
+        message.contains("failing frozen check") && message.contains("REQ-1"),
+        "{message}"
     );
     let run_dir = fixture.store.run_dir(&fixture.run_id);
     assert!(
@@ -400,8 +410,7 @@ async fn run_end_observation_findings_never_commit_accepted_and_block_naming_the
             .join("v2/acceptance/round-01/attempt-02.json")
             .is_file()
     );
-    assert!(matches!(
-        record(&fixture).observer_state,
-        Some(RunEndObserverStateV1::Completed { outcome }) if outcome.policy_finding_count == 1
-    ));
 }
+
+#[path = "workflow_live_v3_run_end_record_heal_tests.rs"]
+mod record_heal;

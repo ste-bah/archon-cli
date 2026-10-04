@@ -88,6 +88,13 @@ impl WorkflowScriptHost {
             self.runner.runtime.target_repository_root.as_deref(),
         );
         let execution_generation = self.fixed_execution_generation()?;
+        // A stall belongs to the generation at entry, including a non-fixed
+        // script. Never re-sample ownership after an awaited dispatch.
+        let view_generation = self
+            .runner
+            .workflow_store
+            .load_state(&self.runner.run_id)?
+            .generation;
         let input_hash = input_hash_with_source_fingerprint(
             &execution.input,
             source_metadata.source_fingerprint.as_deref(),
@@ -149,7 +156,7 @@ impl WorkflowScriptHost {
             {
                 self.restore_reused_record(&record, from_history, execution_generation)?;
                 self.mark_reused(&record, execution_generation).await?;
-                return self.result_view(&record);
+                return self.result_view_in_generation(&record, view_generation);
             }
             let source_metadata_reusable = !source_metadata.source_metadata_required
                 || source_metadata.source_fingerprint.is_some();
@@ -197,7 +204,7 @@ impl WorkflowScriptHost {
                 }
                 self.restore_reused_record(&record, from_history, execution_generation)?;
                 self.mark_reused(&record, execution_generation).await?;
-                return self.result_view(&record);
+                return self.result_view_in_generation(&record, view_generation);
             }
         }
 
@@ -213,7 +220,7 @@ impl WorkflowScriptHost {
             && self.refresh_audit_for_cache(&record).await?
         {
             self.mark_reused(&record, execution_generation).await?;
-            return self.result_view(&record);
+            return self.result_view_in_generation(&record, view_generation);
         }
         // Review remediation under a shifted ordinal, or a round a later round
         // superseded: replayed by content (`remediation_replay`). A write is
@@ -223,7 +230,7 @@ impl WorkflowScriptHost {
             && self.refresh_audit_for_cache(&record).await?
         {
             self.mark_reused(&record, execution_generation).await?;
-            return self.result_view(&record);
+            return self.result_view_in_generation(&record, view_generation);
         }
         self.note_fix_runs(&execution);
 
@@ -292,6 +299,14 @@ impl WorkflowScriptHost {
             return Err(err);
         }
         let call_id = execution.call.id.clone();
+        // The generation this dispatch runs under (Issue 263): only it may
+        // pause the run for a never-started streak.
+        let dispatch_generation = execution_generation.or_else(|| {
+            (self.runner.workflow_store)
+                .load_state(&self.runner.run_id)
+                .ok()
+                .map(|run| run.generation)
+        });
         let dispatched = self
             .refreshing_inflight(
                 &execution,
@@ -326,6 +341,11 @@ impl WorkflowScriptHost {
                 self.result_for_failed_dispatch(&call_id, err).await?
             }
             Err(err) => {
+                // Issue 263: a streak of never-started dispatches pauses the
+                // run, recorded below like any other pause.
+                let err = self
+                    .pause_on_never_started_streak(&call_id, dispatch_generation, err)
+                    .await;
                 let control = control_interruption_reason(&err);
                 if control.is_some() {
                     // Issue-134: the run's call trees end before any record.
@@ -433,6 +453,6 @@ impl WorkflowScriptHost {
                 record.call.id, record.status
             )));
         }
-        self.result_view(&record)
+        self.result_view_in_generation(&record, view_generation)
     }
 }

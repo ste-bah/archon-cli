@@ -404,7 +404,7 @@ async fn ask(
     let checks: Vec<&serde_json::Value> =
         pending.iter().map(|candidate| &candidate.shown).collect();
     let task = format!("{INSTRUCTION} Checks: {}", serde_json::to_string(&checks)?);
-    let call = judge_prompted(client, subset, &task, model, require_judged_prose);
+    let call = judge_prompted(client, subset, &task, model, require_judged_prose, None);
     let judged = match left {
         Some(left) => tokio::time::timeout(Duration::from_secs(left), call)
             .await

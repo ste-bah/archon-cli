@@ -67,7 +67,17 @@ pub struct ResidualVerdict {
     pub notes: Vec<String>,
     /// Review remediation keys a resolved review round completed.
     pub discharged: BTreeSet<String>,
+    /// The blockers that stand only because the residual passes stopped
+    /// making progress. A stall is never a terminal verdict: the host pauses
+    /// the run on these (resumable, with evidence) instead of ending it
+    /// `NeedsReview`. Also in `blocking`, so nothing reading only that ever
+    /// passes a stalled run.
+    pub stalled: Vec<String>,
 }
+
+/// Marks a residual gate reason that stands only because the residual
+/// passes stopped making progress (`ResidualVerdict::stalled`).
+pub const RESIDUAL_NO_PROGRESS: &str = "no_progress:";
 
 /// The verdict over `calls`, the executed plan in script order.
 pub fn residual_verdict(
@@ -215,7 +225,7 @@ pub fn residual_verdict(
         .map(|(residual, why, unjudged)| {
             (
                 residual,
-                format!("{why}; harness cap exhausted: no residual pass remains to plan it again"),
+                format!("{why}; {RESIDUAL_NO_PROGRESS} no later residual pass planned it again"),
                 unjudged,
             )
         })
@@ -239,7 +249,7 @@ pub fn residual_verdict(
     };
     let too_late =
         "it was recorded after the second residual pass, where no round can be planned for it";
-    let final_late = "harness cap exhausted: it was recorded after the last residual pass (the one that made no progress), where no round can be planned for it";
+    let final_late = "no_progress: it was recorded after the last residual pass, which made no progress, so no round was planned for it";
     // Batch O: a gap some round resolved, recorded again word for word
     // against the same tasks by a verifier the resolving round's own
     // recurrence check did not see as reopening it, is that resolved gap.
@@ -327,7 +337,7 @@ pub fn residual_verdict(
             .join(", ");
         let why = if third_slot.is_some() {
             format!(
-                "{owner} declares its file and answers for it; harness cap exhausted: no residual pass remains to plan a round of {owner}'s"
+                "{owner} declares its file and answers for it; {RESIDUAL_NO_PROGRESS} no later residual pass planned a round of {owner}'s"
             )
         } else {
             format!(
@@ -350,6 +360,10 @@ pub fn residual_verdict(
         };
         verdict.weigh_at_tip(&residual, why, &tip, true);
     }
+    verdict.stalled = (verdict.blocking.iter())
+        .filter(|why| why.contains(RESIDUAL_NO_PROGRESS))
+        .cloned()
+        .collect();
     verdict
 }
 

@@ -150,6 +150,25 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
 /// [`prepare_acceptance_freeze_from_candidate`] under `resume` (Issue 255):
 /// judge verdicts and probe verdicts saved for a retry, and a budget that
 /// ends the freeze `FreezeIncomplete` rather than at the host's kill.
+/// Issue 260: under a staged freeze, a judge that could not complete is an
+/// incomplete, resumable freeze (the executor retries it while progress
+/// grows, then pauses the run), never an operational failure that ends it.
+fn resumable(
+    error: anyhow::Error,
+    resume: &crate::command::workflow_freeze_budget::FreezeResume,
+) -> anyhow::Error {
+    match judge::JudgeIncomplete::caused(&error) {
+        Some(incomplete) if resume.persist => {
+            crate::command::workflow_freeze_budget::FreezeIncomplete::stalled(
+                incomplete.to_string(),
+                &resume.progress,
+            )
+            .into()
+        }
+        _ => error,
+    }
+}
+
 pub(crate) async fn prepare_acceptance_freeze_resumable(
     project_root: &Path,
     tasks_root: &Path,
@@ -185,7 +204,8 @@ pub(crate) async fn prepare_acceptance_freeze_resumable(
         &expected,
         judged.as_ref(),
     )
-    .await?;
+    .await
+    .map_err(|error| resumable(error, resume))?;
 
     // A4: a check that crashes, or passes before any implementation, is
     // never published; it goes back to its author.

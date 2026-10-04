@@ -22,8 +22,7 @@ use archon_workflow::task_set_contract::AcceptanceCriterion;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::acceptance_stage::{
     ACCEPTANCE_MAX_ROUNDS, ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION, ACCEPTANCE_STAGE_TOOL,
-    AcceptanceRoundRecordV1, next_attempt, progress, relative_record_path, round_dir,
-    write_round_record,
+    AcceptanceRoundRecordV1, next_attempt, relative_record_path, round_dir,
 };
 use archon_workflow::{
     WorkflowError, WorkflowResult, WorkflowStore, WorkflowV2CallExecution, WorkflowV2Result,
@@ -43,6 +42,8 @@ mod drift;
 mod env;
 #[path = "workflow_live_v3_acceptance_exec.rs"]
 mod exec;
+#[path = "workflow_live_v3_acceptance_ledger.rs"]
+mod ledger;
 #[path = "workflow_live_v3_acceptance_output.rs"]
 mod output;
 #[path = "workflow_live_v3_acceptance_regression.rs"]
@@ -115,6 +116,8 @@ pub(super) async fn run_acceptance_stage(
     let request = parse_request(execution)?;
     let call_id = execution.call.id.clone();
     let run_dir = store.run_dir(run_id);
+    // The generation this round runs under: only it may pause the run.
+    let generation = store.load_state(run_id)?.generation;
     let attempt = next_attempt(&run_dir, request.round);
     let mut record = AcceptanceRoundRecordV1 {
         schema_version: ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION,
@@ -163,11 +166,27 @@ pub(super) async fn run_acceptance_stage(
     let violation = violation.map(|v| v.message());
     record.operational_errors.extend(violation);
     record.operational_errors.extend(refused.findings);
-    // A2: the loop ends on a clean round, or on no progress; never on a
+    // A2: the loop ends on a clean round or on nothing to act on; never on a
     // round count, an error the host can retry, or a check it can reassign.
-    let decision = progress::decide(&progress::earlier_rounds(&run_dir, request.round), &record);
-    record.final_round = decision.final_round;
-    let path = write_round_record(&run_dir, &record)?;
+    // Decision A: the failing states this run reached and the revisits in a
+    // row, kept across attempts and resumes.
+    // Issue 262 (round 8): damaged history heals or pauses, never fails.
+    let ledger::Decided { decision, path } =
+        ledger::record_and_decide(store, run_id, generation, &run_dir, &mut record)?;
+    // Issue 262: a stall (or the runaway guard) pauses the run with the
+    // round's record as evidence; it never ends the loop or fails the run.
+    if let Some(cause) = decision.pause {
+        let record_path = relative_record_path(&run_dir, &path);
+        return Err(result::pause_on_stall(
+            store,
+            run_id,
+            generation,
+            &record,
+            &record_path,
+            &decision,
+            cause,
+        ));
+    }
     let mut result = result_for(&record, &relative_record_path(&run_dir, &path), &decision);
     result::with_task_scope(&mut result, task_universe, &record);
     Ok(with_frozen_identity(&record, frozen.as_ref(), result))

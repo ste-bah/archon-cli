@@ -343,28 +343,51 @@ impl WorkflowScriptHost {
         acc.calls.push(record.call.clone());
     }
 
-    /// The typed result for a dispatch that raised `error`, or the error
-    /// itself when the run must stop here.
-    ///
-    /// A call that never started produced no verdict about the work, so it is
-    /// marked as such rather than charged to the task whose stage it was. The
-    /// second consecutive one ends the run: such a failure returns in
-    /// microseconds, so a generated script's bounded retry loop would
-    /// otherwise complete its whole budget before a second had passed and then
-    /// do the same to every task after it.
+    /// Counts a dispatch that never started and, at the streak's limit,
+    /// pauses the run (Issue 263): `error` comes back as the pause, or
+    /// unchanged. A never-ran failure returns in microseconds, so a script's
+    /// retry loop handed one after another would spend every task's budget
+    /// on nothing; pausing ends that without failing the run, and a resume
+    /// re-runs the call once the operator has repaired the host's state.
+    /// When the pause cannot be recorded either, the error stops the run as
+    /// before, carrying its reason.
+    pub(super) async fn pause_on_never_started_streak(
+        &self,
+        call_id: &str,
+        generation: Option<u64>,
+        error: WorkflowError,
+    ) -> WorkflowError {
+        if !is_never_started_fault(&error) {
+            return error;
+        }
+        let mut acc = self.accumulator.lock().await;
+        let stop = acc.never_started.record_never_started();
+        let consecutive = acc.never_started.consecutive();
+        drop(acc);
+        // No generation known (the run state itself is unreadable): nothing
+        // can be paused, and the error stops the run with its reason.
+        let Some(generation) = generation.filter(|_| stop) else {
+            return error;
+        };
+        pause_never_started(
+            &self.runner.workflow_store,
+            &self.runner.run_id,
+            generation,
+            call_id,
+            &error,
+            consecutive,
+        )
+        .unwrap_or(error)
+    }
+
+    /// The typed result for a dispatch that raised `error`. A call that
+    /// never started produced no verdict about the work, so it is marked as
+    /// such rather than charged to the task whose stage it was.
     pub(super) async fn result_for_failed_dispatch(
         &self,
         call_id: &str,
         error: WorkflowError,
     ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
-        if is_never_started_fault(&error) {
-            let mut acc = self.accumulator.lock().await;
-            let stop = acc.never_started.record_never_started();
-            drop(acc);
-            if stop {
-                return Err(error);
-            }
-        }
         Ok(v2_result_for_call_error(call_id, &error))
     }
 
@@ -419,3 +442,50 @@ impl WorkflowScriptHost {
         self.summary().await
     }
 }
+
+/// Pauses `run_id`, owned by `generation`, because `consecutive` dispatches
+/// in a row never started, the last one (`call_id`) with `error`, and
+/// returns the pause (or, when `generation` no longer owns the run, the
+/// run's own control decision); `None` when nothing could be recorded.
+pub(super) fn pause_never_started(
+    store: &archon_workflow::WorkflowStore,
+    run_id: &str,
+    generation: u64,
+    call_id: &str,
+    error: &WorkflowError,
+    consecutive: usize,
+) -> Option<WorkflowError> {
+    let resume = format!("archon workflow resume --live --yes {run_id}");
+    let message = format!(
+        "{consecutive} consecutive dispatches never started (the host could not use its own run state): {error}; the run is paused, not failed: repair what it names, then {resume}"
+    );
+    let detail = serde_json::json!({
+        "event": "never_started_pause",
+        "call_id": call_id,
+        "consecutive": consecutive,
+        "error": error.to_string(),
+        "resume": resume,
+    });
+    // Owned by the generation the dispatch ran under: an obsolete executor
+    // never pauses the run a newer generation owns.
+    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
+        Ok(event) => {
+            if let Err(error) = event {
+                tracing::warn!(%error, "never-started pause event not recorded");
+            }
+            tracing::warn!(run_id, "{message}");
+            Some(WorkflowError::ControlPaused(message))
+        }
+        Err(paused @ (WorkflowError::ControlPaused(_) | WorkflowError::ControlCancelled(_))) => {
+            Some(paused)
+        }
+        Err(failure) => {
+            tracing::warn!(%failure, "the never-started pause could not be recorded");
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "workflow_live_v2_never_started_pause_tests.rs"]
+mod never_started_tests;

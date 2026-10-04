@@ -219,7 +219,9 @@ pub async fn run_at(
         stdin.write_all(b"\n").await?;
         stdin.shutdown().await
     });
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(site.timeout_secs);
+    // A limit past the clock's range is no deadline at all (Issue 263),
+    // never an overflow that panics the host.
+    let deadline = tokio::time::Instant::now().checked_add(Duration::from_secs(site.timeout_secs));
     let mut error = None;
     let mut quota_walk_count = 0;
     // A site with no audit root never walks a quota; the branch below stays
@@ -233,7 +235,7 @@ pub async fn run_at(
     let status = loop {
         tokio::select! {
             result=child.wait()=>break result.map_err(|e|WorkflowError::io(cwd,e))?,
-            _=tokio::time::sleep_until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break terminate(&mut child,group.0).await?;},
+            _=until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break terminate(&mut child,group.0).await?;},
             _=tokio::time::sleep(Duration::from_millis(25))=>{
                 if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break terminate(&mut child,group.0).await?;}
                 if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break terminate(&mut child,group.0).await?;}
@@ -341,4 +343,12 @@ async fn terminate(child: &mut RunChild, group: i32) -> WorkflowResult<std::proc
         .await
         .map_err(|_| invalid("scratch child reap deadline exceeded"))?
         .map_err(|e| invalid(format!("scratch child reap failed: {e}")))
+}
+
+/// Resolves at `deadline`, or never when there is none.
+async fn until(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
 }

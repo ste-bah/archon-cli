@@ -46,3 +46,6 @@ mod workflow_live_v2_script_tests_f;
 // Issue #162 — the events.jsonl / v2-results agreement invariant.
 #[path = "workflow_live_v2_blocking_gap_tests.rs"]
 mod workflow_live_v2_blocking_gap_tests;
+
+#[path = "workflow_live_v2_script_remediation_pause_tests.rs"]
+mod remediation_pause_tests;

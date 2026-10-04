@@ -112,3 +112,14 @@ fn the_incomplete_outcome_is_recognisable_and_says_what_was_saved() {
     assert!(FreezeIncomplete::caused(&error).is_some());
     assert!(FreezeIncomplete::caused(&anyhow::anyhow!("other")).is_none());
 }
+
+/// Round 3 (decision D): the progress total saturates; counters imported
+/// from disk can never overflow it.
+#[test]
+fn the_progress_total_saturates() {
+    let progress = FreezeProgress::default();
+    progress.reused_judged(u64::MAX);
+    progress.saved(false);
+    progress.reused(false);
+    assert_eq!(progress.total(), u64::MAX);
+}

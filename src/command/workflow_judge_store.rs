@@ -10,7 +10,7 @@
 //! reply that passed validation is saved; an unreadable or mismatched file
 //! is ignored.
 
-use super::judge::{batched_judge_prompt, judge_contract};
+use super::judge::{PartialReply, batched_judge_prompt, judge_contract_resumable};
 use super::*;
 use crate::command::workflow_freeze_budget::{FREEZE_CACHE_DIR, FreezeProgress};
 
@@ -33,6 +33,11 @@ impl JudgeStore {
     /// probed input and the call's staging directory, counted in `progress`.
     pub(super) fn for_project(project_root: &Path, progress: Arc<FreezeProgress>) -> Self {
         let dir = project_root.join(FREEZE_CACHE_DIR).join("judge");
+        Self { dir, progress }
+    }
+
+    #[cfg(test)]
+    pub(super) fn at_with_progress(dir: PathBuf, progress: Arc<FreezeProgress>) -> Self {
         Self { dir, progress }
     }
 
@@ -82,8 +87,11 @@ impl JudgeStore {
         let path = self.dir.join(format!("{key}.json"));
         let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
         let written = std::fs::create_dir_all(&self.dir).is_ok()
-            && serde_json::to_vec(&saved)
-                .is_ok_and(|bytes| std::fs::write(&staging, bytes).is_ok())
+            && serde_json::to_vec(&saved).is_ok_and(|bytes| {
+                use std::io::Write;
+                std::fs::File::create(&staging)
+                    .is_ok_and(|mut file| file.write_all(&bytes).is_ok() && file.sync_all().is_ok())
+            })
             && std::fs::rename(&staging, &path).is_ok();
         if !written {
             let _ = std::fs::remove_file(&staging);
@@ -95,7 +103,7 @@ impl JudgeStore {
         written
     }
 
-    /// [`judge_contract`], answered from a saved identical batch when one
+    /// The judge, answered from a saved identical batch when one
     /// exists, and saved otherwise.
     pub(super) async fn judge(
         &self,
@@ -104,15 +112,26 @@ impl JudgeStore {
         expected: &BTreeSet<String>,
     ) -> Result<AcceptanceContract> {
         let key = Self::key(client, &subset, expected)?;
-        if let Some(judged) = self.load(&key, &subset) {
+        // Issue 260: a partial reply an earlier attempt saved is continued,
+        // and the chunks it holds count as progress again, so the count the
+        // executor reads never goes back.
+        let partial = PartialReply::new(&self.dir, &key, &self.progress);
+        let saved = self.load(&key, &subset);
+        partial.count_saved(saved.is_some());
+        if let Some(judged) = saved {
+            // Repair a crash after verdict persistence but before marking
+            // the partial complete. The verdict is already durable here.
+            partial.completed();
             eprintln!(
                 "acceptance judge: reused the saved verdicts of an identical batch ({key}); no provider call made"
             );
             self.progress.reused(true);
             return Ok(judged);
         }
-        let judged = judge_contract(client, subset, expected).await?;
+        let judged = judge_contract_resumable(client, subset, expected, Some(&partial)).await?;
         if self.save(&key, &judged) {
+            // Never destroy the continuation before the verdict is on disk.
+            partial.completed();
             self.progress.saved(true);
         }
         Ok(judged)

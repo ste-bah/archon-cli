@@ -176,7 +176,8 @@ pub async fn run_reviewing(script: &str, reviewer: Rc<Reviewer>) -> Value {
     let runtime = AsyncRuntime::new().unwrap();
     runtime.set_max_stack_size(8 * 1024 * 1024).await;
     let context = AsyncContext::full(&runtime).await.unwrap();
-    let out: String = context
+    let observed = reviewer.clone();
+    let out = context
         .async_with(async move |ctx| {
             ctx.globals()
                 .set(
@@ -185,7 +186,18 @@ pub async fn run_reviewing(script: &str, reviewer: Rc<Reviewer>) -> Value {
                         let reviewer = reviewer.clone();
                         async move {
                             let payload: Value = serde_json::from_str(&payload).unwrap();
+                            let host = &reviewer.host;
+                            let generation = host.f.store.load_state(&host.f.run).unwrap().generation;
+                            let pause = payload["options"].get("remediationPause").cloned();
                             let view = reviewer.answer(&method, payload).await;
+                            // As the live host: a remediation stall pauses the run.
+                            if let Some(evidence) = pause {
+                                archon_workflow::control_pause::pause_with_evidence(
+                                    &host.f.store, &host.f.run, generation,
+                                    serde_json::json!({"event":"remediation_stall_pause","evidence":evidence}),
+                                ).unwrap().unwrap();
+                                return Err(rquickjs::Error::Unknown);
+                            }
                             Ok::<_, rquickjs::Error>(view.to_string())
                         }
                     })),
@@ -201,9 +213,23 @@ pub async fn run_reviewing(script: &str, reviewer: Rc<Reviewer>) -> Value {
                 .catch(&ctx)
                 .map_err(|e| e.to_string())
         })
-        .await
-        .expect("script completes");
-    serde_json::from_str(&out).unwrap()
+        .await;
+    match out {
+        Ok(out) => serde_json::from_str(&out).unwrap(),
+        Err(_)
+            if observed
+                .host
+                .f
+                .store
+                .load_state(&observed.host.f.run)
+                .unwrap()
+                .status
+                == archon_workflow::RunStatus::Paused =>
+        {
+            serde_json::json!({"paused": true})
+        }
+        Err(error) => panic!("script failed without pausing: {error}"),
+    }
 }
 
 /// Append verdicts to `key`'s queue (the harness answers from the first

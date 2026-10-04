@@ -258,48 +258,16 @@ async fn a_completion_no_verifier_accepts_holds_the_run_by_name() {
     let host = host(fixture());
     host.verdicts("TASK-B", vec![Verdict::Refuse(vec![B]); 12]);
     let result = run(SCRIPT, NEW_PRELUDE, host.clone()).await;
-    assert_eq!(result["accepted"], json!(["TASK-A"]), "{result}");
-    let blocked = &result["blocked"][0];
-    assert_eq!(blocked["taskId"], json!("TASK-B"), "{result}");
-    assert!(
-        blocked["reason"]
-            .as_str()
-            .unwrap()
-            .contains("completion unit"),
-        "{result}"
-    );
     // Not reviewed as if done: only TASK-A's work was.
     assert_eq!(
         reviewed(&host, "adversarial-review"),
         ["TASK-A".to_string()].into()
     );
-    // Handed to review remediation as a blocked task, which failed too.
+    // Handed to review remediation as a blocked task, which made no
+    // progress either: the run pauses on it, naming it (Issue 262), never a
+    // terminal `NeedsReview`.
     assert!(remediation_fixes(&host, "TASK-B") > 0, "{result}");
-    let outcome = terminal(&host, &result);
-    assert_eq!(
-        outcome.status,
-        WorkflowV2Status::NeedsReview,
-        "{}",
-        outcome.explanation()
-    );
-    assert!(
-        outcome
-            .blocking
-            .iter()
-            .any(|clause| clause.contains("TASK-B")),
-        "{}",
-        outcome.explanation()
-    );
-    // And the script's own accounting, which never names it, holds it too.
-    let mut own = result.clone();
-    own["blocked"] = json!([]);
-    let outcome = terminal(&host, &own);
-    assert!(
-        outcome.blocking.iter().any(|clause| clause
-            .contains("task TASK-B of the task universe reached no accepted outcome")),
-        "{}",
-        outcome.explanation()
-    );
+    harness::assert_stall_paused(&host, &result, "TASK-B");
 }
 
 /// Review-remediation fixes the host dispatched for `task`'s unit.

@@ -6,22 +6,15 @@
 //! closed; its sibling, closed in round 1, is never sent again. A finding
 //! every verifier leaves open is still open when its cycle closes nothing,
 //! is reported open by its own id, and holds the run.
-#[path = "support/acceptance_ran.rs"]
-mod acceptance_ran;
 #[path = "support/escalation_harness.rs"]
 mod harness;
 #[path = "support/write_wave_fixture.rs"]
 mod support;
 
-use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 use archon_workflow::v2::review_finding_ids::finding_id_of;
-use archon_workflow::v2::script::{
-    AuthoredRunFacts, AuthoredRunOutcome, authored_call_facts, authored_run_terminal_status_with,
-    writable_task_ids,
-};
 use archon_workflow::*;
 use harness::{Answer, Host, NEW_PRELUDE, Verdict, run};
 use serde_json::{Value, json};
@@ -94,37 +87,8 @@ fn writes(key: &str, round: u64, _escalated: bool) -> Edits {
     }
 }
 
-fn terminal(host: &Host, result: &Value) -> AuthoredRunOutcome {
-    let calls = host.calls.borrow().clone();
-    // REM-13: the prelude ran the acceptance stage after the script; the
-    // rule is judged on the round it recorded.
-    let ran = acceptance_ran::AcceptanceRan::of(&host.store);
-    let facts = authored_call_facts(&calls, |id| host.store.load_call_record(id)).unwrap();
-    let accounting = json!({"accepted": [], "blocked": [], "adversarial_findings": findings(),
-        "uncovered_requirements": [], "review_remediation": result["review"]})
-    .to_string();
-    let universe = host.f.universe.as_ref().unwrap();
-    let universe_tasks: BTreeSet<String> = universe
-        .tasks
-        .iter()
-        .map(|t| t.canonical_task_id.clone())
-        .collect();
-    authored_run_terminal_status_with(
-        &AuthoredRunFacts {
-            accumulated_status: WorkflowV2Status::NeedsReview,
-            host_terminal_failure: None,
-            script_result: Some(&accounting),
-            acceptance_gate: ran.fact(&facts),
-            calls: &facts,
-            writable_tasks: &writable_task_ids(Some(universe)),
-            universe_tasks: &universe_tasks,
-        },
-        &BTreeSet::new(),
-    )
-}
-
 #[tokio::test]
-async fn a_refused_finding_closes_in_round_two_and_an_open_one_holds_the_run() {
+async fn a_refused_finding_closes_in_round_two_and_a_repeated_open_one_pauses_the_run() {
     let f = fixture();
     let store = WorkflowV2ResultStore::new(f.v2.root().to_path_buf());
     let host = Rc::new(Host::new(f, store, Box::new(writes)));
@@ -149,21 +113,17 @@ async fn a_refused_finding_closes_in_round_two_and_an_open_one_holds_the_run() {
     let script = SCRIPT.replace("FINDINGS", &Value::from(findings()).to_string());
     let result = run(&script, NEW_PRELUDE, host.clone()).await;
 
-    // The host planned every finding, by the id every later rule reads.
-    let review = &result["review"];
-    let resolved: Vec<&Value> = review["resolved"].as_array().unwrap().iter().collect();
-    assert_eq!(resolved.len(), 1, "{review}");
-    assert_eq!(resolved[0]["taskId"], json!("TASK-A"));
-    let mut closed: Vec<String> =
-        serde_json::from_value(resolved[0]["findingIds"].clone()).unwrap();
-    closed.sort();
-    let mut want = vec![retry.clone(), error.clone()];
-    want.sort();
-    assert_eq!(closed, want);
-    let unresolved = review["unresolved"].as_array().unwrap();
-    assert_eq!(unresolved.len(), 1, "{review}");
-    assert_eq!(unresolved[0]["findingId"], json!(bounds));
-    assert_eq!(unresolved[0]["outcome"], json!("unverified"));
+    assert_eq!(
+        result["paused"],
+        json!(true),
+        "the repeated open finding pauses"
+    );
+    assert_eq!(
+        host.f.store.load_state(&host.f.run).unwrap().status,
+        RunStatus::Paused
+    );
+    let pause_evidence = std::fs::read_to_string(host.f.store.events_path(&host.f.run)).unwrap();
+    assert!(pause_evidence.contains(&bounds), "{pause_evidence}");
 
     // Round 2 of TASK-A carried only the finding round 1 left open.
     let calls = host.calls.borrow().clone();
@@ -179,7 +139,7 @@ async fn a_refused_finding_closes_in_round_two_and_an_open_one_holds_the_run() {
         a_fixes[1].options.extra["remediationContract"]["findingIds"],
         json!([retry])
     );
-    // TASK-B: a cycle that closed nothing ends the unit (two rounds, no more).
+    // TASK-B: two unsuccessful rounds pause with their evidence.
     let b_fixes = calls
         .iter()
         .filter(|call| {
@@ -196,16 +156,28 @@ async fn a_refused_finding_closes_in_round_two_and_an_open_one_holds_the_run() {
         "nothing refused at dispatch"
     );
 
-    // The terminal rule, from the host's records alone.
-    let outcome = terminal(&host, &result);
-    assert_ne!(
-        outcome.status,
-        WorkflowV2Status::Accepted,
-        "{}",
-        outcome.explanation()
+    // No terminal NeedsReview accounting is reached on a stall. The
+    // successful earlier unit's two patches and verifier records survive.
+    assert!(
+        host.store
+            .load_call_records()
+            .unwrap()
+            .iter()
+            .any(|record| record
+                .call
+                .options
+                .extra
+                .get("remediationContract")
+                .and_then(|contract| contract.get("taskId"))
+                .and_then(Value::as_str)
+                == Some("TASK-A")
+                && record.status == WorkflowV2Status::Accepted)
     );
-    let held_on = |id: &str| outcome.blocking.iter().any(|clause| clause.contains(id));
-    assert!(held_on(&bounds), "{}", outcome.explanation());
-    assert!(!held_on(&retry), "{}", outcome.explanation());
-    assert!(!held_on(&error), "{}", outcome.explanation());
+    archon_workflow::LifecycleController::new(host.f.store.clone())
+        .apply(&host.f.run, archon_workflow::LifecycleAction::Resume)
+        .unwrap();
+    assert_eq!(
+        host.f.store.load_state(&host.f.run).unwrap().status,
+        RunStatus::Running
+    );
 }

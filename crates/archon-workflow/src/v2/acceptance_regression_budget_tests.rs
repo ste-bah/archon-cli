@@ -20,6 +20,7 @@ async fn a_spent_budget_leaves_every_check_with_a_note() {
     let budget = SearchBudget {
         observations: 1,
         time: Duration::from_secs(600),
+        ..SearchBudget::default()
     };
     let found = w.attribute(&failing, &observer, budget).await;
     assert_eq!(observer.observations(), 1);
@@ -39,6 +40,7 @@ async fn a_spent_budget_leaves_every_check_with_a_note() {
     let none = SearchBudget {
         observations: 8,
         time: Duration::ZERO,
+        ..SearchBudget::default()
     };
     let fresh = World::new(&[("a", "ok")]);
     fresh.step("flags/a", "bad", "review-remediate-y-1", "TASK-Y");
@@ -84,6 +86,7 @@ async fn a_shared_landing_is_confirmed_before_a_sweep_spends_the_budget() {
     let budget = SearchBudget {
         observations: 7,
         time: Duration::from_secs(600),
+        ..SearchBudget::default()
     };
     let found = w.attribute(&failing, &observer, budget).await;
     assert_eq!(

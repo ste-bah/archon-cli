@@ -42,13 +42,28 @@ impl WorkflowScriptHost {
         &self,
         record: &WorkflowV2CallRecord,
     ) -> archon_workflow::WorkflowResult<String> {
-        archon_workflow::v2::script::remediation_escalation::script_view_in(
+        let generation = self
+            .runner
+            .workflow_store
+            .load_state(&self.runner.run_id)?
+            .generation;
+        self.result_view_in_generation(record, generation)
+    }
+
+    pub(super) fn result_view_in_generation(
+        &self,
+        record: &WorkflowV2CallRecord,
+        generation: u64,
+    ) -> archon_workflow::WorkflowResult<String> {
+        let view = archon_workflow::v2::script::remediation_escalation::script_view_in(
             record,
             &self.runner.v2_store,
             self.runner.task_universe.as_ref(),
             self.repository_root(),
             self.envelope_shape,
-        )
+        )?;
+        self.pause_on_remediation_stall(record, &view, generation)?;
+        Ok(view)
     }
 
     /// Run one `runTool` host call.
@@ -108,3 +123,6 @@ mod workflow_live_v2_script_host_state;
 
 #[path = "workflow_live_v2_script_host_audit.rs"]
 mod workflow_live_v2_script_host_audit;
+
+#[path = "workflow_live_v2_script_host_remediation_pause.rs"]
+mod remediation_pause;

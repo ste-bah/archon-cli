@@ -18,13 +18,11 @@
 
 use anyhow::Result;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
-use archon_workflow::v2::acceptance_stage::{
-    AcceptanceRoundRecordV1, latest_round_record, relative_record_path,
-};
+use archon_workflow::v2::acceptance_stage::AcceptanceRoundRecordV1;
 use archon_workflow::v2::script::residual_plan::residual_verdict;
 use archon_workflow::v2::script::{
     AuthoredAcceptanceGateFact, AuthoredCallRole, AuthoredRunFacts, authored_call_facts,
-    authored_run_terminal_status_with, is_acceptance_stage_call, writable_task_ids,
+    authored_run_terminal_status_with, writable_task_ids,
 };
 use archon_workflow::{
     AuthoredAcceptanceGateV1, RunEndAcceptanceObserverSnapshotV1, WorkflowEventKind,
@@ -34,6 +32,9 @@ use archon_workflow::{
 
 use super::workflow_live_v2_script::WorkflowV2ScriptSummary;
 
+#[path = "workflow_live_v3_run_end_gate.rs"]
+mod gate;
+use gate::{GateRecord, gate_of, read_acceptance_gate};
 #[path = "workflow_live_v3_run_end_reopen.rs"]
 mod reopen;
 #[path = "workflow_live_v3_run_end_stop.rs"]
@@ -236,83 +237,6 @@ fn hold_to_round(
     (summary, Some(gate))
 }
 
-/// The acceptance round the gate is judged on, and whether it is BOUND to a
-/// call this run executed or replayed.
-struct GateRecord {
-    gate: AuthoredAcceptanceGateV1,
-    record: AcceptanceRoundRecordV1,
-    path: std::path::PathBuf,
-    bound: bool,
-}
-
-/// The round record named by the last acceptance call in `calls` (its own
-/// record's `data.record_path`), so a record an earlier process left for a
-/// round this run never reached can neither pass nor pin the gate. A run
-/// with no acceptance call (an older script) falls back to the newest record
-/// on disk, unbound.
-fn read_acceptance_gate(
-    store: &WorkflowStore,
-    run_id: &str,
-    v2_store: &WorkflowV2ResultStore,
-    calls: &[archon_workflow::WorkflowV2HostCall],
-) -> WorkflowResult<Option<GateRecord>> {
-    let run_dir = store.run_dir(run_id);
-    let found = match calls
-        .iter()
-        .rev()
-        .find(|call| is_acceptance_stage_call(call))
-    {
-        Some(call) => {
-            let named = v2_store.load_call_record(&call.id)?.and_then(|record| {
-                record
-                    .result
-                    .data
-                    .get("record_path")
-                    .and_then(serde_json::Value::as_str)
-                    .map(|path| run_dir.join(path))
-            });
-            match named.filter(|path| path.is_file()) {
-                Some(path) => {
-                    let bytes = std::fs::read(&path).map_err(|source| {
-                        archon_workflow::WorkflowError::Io {
-                            path: path.clone(),
-                            source,
-                        }
-                    })?;
-                    Some((serde_json::from_slice(&bytes)?, path, true))
-                }
-                None => None,
-            }
-        }
-        None => latest_round_record(&run_dir)?.map(|(record, path)| (record, path, false)),
-    };
-    Ok(found.map(
-        |(record, path, bound): (AcceptanceRoundRecordV1, _, bool)| GateRecord {
-            gate: gate_of(&run_dir, &record, &path),
-            record,
-            path,
-            bound,
-        },
-    ))
-}
-
-/// The gate a round record at `path` gives.
-fn gate_of(
-    run_dir: &std::path::Path,
-    record: &AcceptanceRoundRecordV1,
-    path: &std::path::Path,
-) -> AuthoredAcceptanceGateV1 {
-    AuthoredAcceptanceGateV1 {
-        final_round: record.round,
-        attempt: record.attempt,
-        record_path: relative_record_path(run_dir, path),
-        contract_present: record.contract_present,
-        failing_check_ids: record.failing_check_ids(),
-        unowned_failing_check_ids: record.unowned_failing_check_ids(),
-        operational_errors: record.operational_errors.clone(),
-    }
-}
-
 /// Replace the accumulator's worst-call status with the verdict the host's
 /// own records give (`authored_run_terminal_status`), and record why in
 /// `events.jsonl`. Hard stops keep their status; see the rule's module doc.
@@ -340,6 +264,34 @@ pub(super) fn apply_authored_run_outcome(
         summary,
         archon_workflow::v2::verification::regression_gate::RegressionVerdict::default(),
     )
+}
+
+/// Pauses `run_id`, owned by its current generation, because the final gate
+/// found residual gaps that stand only for want of progress.
+fn pause_on_residual_stall(
+    store: &WorkflowStore,
+    run_id: &str,
+    stalled: &[String],
+) -> archon_workflow::WorkflowError {
+    let generation = match store.load_state(run_id) {
+        Ok(run) => run.generation,
+        Err(error) => return error,
+    };
+    let detail = serde_json::json!({
+        "event": "residual_gate_stall_pause", "cause": "no_progress", "stalled": stalled,
+    });
+    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
+        Ok(event) => {
+            if let Err(error) = event {
+                tracing::warn!(%error, "residual gate pause event not recorded");
+            }
+            archon_workflow::WorkflowError::ControlPaused(format!(
+                "the residual passes made no progress on {} gap(s); run {run_id} is paused, not failed: fix what they name, then workflow resume {run_id}",
+                stalled.len()
+            ))
+        }
+        Err(error) => error,
+    }
 }
 
 /// [`apply_authored_run_outcome`], with the final gate's regression check
@@ -391,6 +343,12 @@ pub(super) fn apply_authored_run_outcome_with(
     // Issue-117: the residual gaps accepted verifiers recorded, and the
     // review units a host-planned round completed.
     let residual = residual_verdict(&summary.calls, v2_store, universe, repository_root);
+    // A stall is never terminal: gaps that stand only because the residual
+    // passes stopped making progress pause the run, with the evidence, and
+    // the resume plans the stalled pass again (rule A).
+    if !residual.stalled.is_empty() && summary.failed_call.is_none() {
+        return Err(pause_on_residual_stall(store, run_id, &residual.stalled));
+    }
     let outcome = authored_run_terminal_status_with(
         &AuthoredRunFacts {
             accumulated_status: summary.status,

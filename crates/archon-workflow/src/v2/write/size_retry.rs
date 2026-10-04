@@ -18,69 +18,10 @@
 //! Reads only the rejection text and a line count, so it holds for any task,
 //! language or PRD.
 
-/// Ceiling on re-asks, far above what convergence needs. It exists so a
-/// pathological branch cannot loop indefinitely; the progress test below is
-/// what normally ends the loop.
-pub(super) const MAX_SIZE_RETRIES: usize = 12;
-
-/// The most provider dispatches one write branch can make.
-///
-/// DERIVED, not chosen. A branch re-asks for exactly two reasons and each has
-/// its own budget: the patch was rejected by the size policy
-/// ([`MAX_SIZE_RETRIES`]), or the transport dropped the call
-/// ([`crate::v2::transport_retry::MAX_TRANSPORT_RETRIES`]). The total is the
-/// first attempt plus both, so the ceiling cannot drift away from the budgets
-/// it is made of — raising one raises this, visibly, in the same diff.
-///
-/// Writing it down matters because the ceiling was previously a product of
-/// separate counters that no one had multiplied out. The loop bound also has to
-/// be the SUM rather than either budget alone: bounding it by
-/// `MAX_SIZE_RETRIES` made a transport blip consume an attempt reserved for
-/// correcting a rejection, which is the opposite of what the loop's own comment
-/// promised. Every attempt is still counted; none of them counts time, which is
-/// what `call_time_budget_exhausted` is for.
-pub(super) const MAX_BRANCH_DISPATCHES: usize =
-    1 + MAX_SIZE_RETRIES + crate::v2::transport_retry::MAX_TRANSPORT_RETRIES;
-
-/// Has this call spent the wall clock it was given, across every re-dispatch?
-///
-/// Needed because every budget in the branch loop counts ATTEMPTS and none of
-/// them counts time. A branch could therefore re-dispatch far past any timeout
-/// set for it: observed as one task still running at 6h20m under a two-hour
-/// timeout, because the timeout bounded one attempt and nothing bounded the
-/// call.
-///
-/// Separated from the loop so it can be exercised without a clock: a test that
-/// sleeps to prove a timeout is the kind this repository has been deleting for
-/// timing the machine rather than the behaviour.
-///
-/// `None` is unbounded, which is the honest reading for a dispatcher with no
-/// configured timeout to derive a budget from.
-pub(super) fn call_time_budget_exhausted(
-    started: std::time::Instant,
-    budget: Option<std::time::Duration>,
-) -> bool {
-    budget.is_some_and(|budget| started.elapsed() >= budget)
-}
-
-/// Why a call stopped when its total budget ran out.
-///
-/// Built here rather than at the loop so the wording sits beside the predicate
-/// that decides it, and so the shared marker naming a recoverable outcome
-/// cannot drift away from the check that produces it.
-pub(super) fn call_time_budget_error(
-    branch_id: &str,
-    started: std::time::Instant,
-    budget: Option<std::time::Duration>,
-) -> crate::WorkflowError {
-    crate::WorkflowError::port(format!(
-        "write branch '{branch_id}' {} of {}s after {}s across re-dispatches; \
-         the per-attempt timeout bounds one attempt, this bounds the call",
-        super::errors::CALL_TIME_BUDGET_EXHAUSTED,
-        budget.unwrap_or_default().as_secs(),
-        started.elapsed().as_secs(),
-    ))
-}
+// Issue 263: no ceiling on re-asks and no total wall clock. The loop
+// re-asks while the overshoot strictly shrinks (`should_retry`), which ends
+// on its own, and a stall pauses the run instead of ending the branch
+// (`branch_stall`). Each dispatch keeps its own timeout and inactivity bound.
 
 /// Is this the wholesale size-policy rejection?
 pub(super) fn is_line_cap_rejection(error: &str) -> bool {
