@@ -34,7 +34,7 @@ use super::workflow_host_command_supervisor::{
     supervise_process_group,
 };
 use super::workflow_host_envelope_seal::{
-    ENVELOPE_FILE, owner_only, rebind_manifest, seal_staged_envelope,
+    ENVELOPE_FILE, EnvelopeCleanup, owner_only, seal_staged_envelope,
 };
 use super::workflow_host_secrets::{HostSecrets, utf8};
 
@@ -303,28 +303,28 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         // What the call records never holds a secret value the child was given.
         let secrets = HostSecrets::of(&context, &command.environment);
         let staged_envelope = staging.root.join(ENVELOPE_FILE);
-        // Issue #255: an operational ending is retried or pauses the run.
-        let observed = match (self.execute_with_operational_retry(
-            &command,
-            &call_id,
-            expected_generation,
-        ))
-        .await
-        {
-            Ok(observed) => observed,
-            Err(error) => {
-                // A paused or stopped call leaves its staging behind too; the
-                // control error itself must still reach the caller.
-                if let Err(seal) = seal_staged_envelope(&staged_envelope, &secrets) {
-                    tracing::warn!(%seal, "sealing an interrupted call's staged envelope failed");
-                }
-                return Err(error);
-            }
+        let _cleanup = EnvelopeCleanup {
+            path: &staged_envelope,
+            secrets: &secrets,
         };
-        // Issue 277: before any decision, nothing the child staged keeps a
-        // secret in clear, on refused and failed paths as well as published.
-        let sealed = seal_staged_envelope(&staged_envelope, &secrets)?;
+        // Issue #255: an operational ending is retried or pauses the run.
+        let observed = self
+            .execute_with_operational_retry(&command, &call_id, expected_generation)
+            .await?;
         let raw_stdout = utf8(observed.stdout, "stdout")?;
+        let mut prepared: Option<PreparedPublicationV1> = if observed.exit_code == Some(0) {
+            Some(secrets.parse_json(
+                raw_stdout.trim().as_bytes(),
+                &format!(
+                    "host command '{}' returned malformed prepared manifest",
+                    request.command_id,
+                ),
+            )?)
+        } else {
+            None
+        };
+        // Verify the manifest against raw bytes before any identity is sealed.
+        seal_staged_envelope(&staged_envelope, &secrets, prepared.as_mut())?;
         let (stdout, stderr) = (
             secrets.text(&raw_stdout),
             secrets.text(&utf8(observed.stderr, "stderr")?),
@@ -346,16 +346,11 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 postcondition: None,
             });
         }
-        let mut prepared: PreparedPublicationV1 = secrets.parse_json(
-            raw_stdout.trim().as_bytes(),
-            &format!(
-                "host command '{}' returned malformed prepared manifest",
-                request.command_id
-            ),
-        )?;
-        if let Some(sealed) = &sealed {
-            rebind_manifest(&mut prepared, sealed);
-        }
+        let Some(prepared) = prepared else {
+            return Err(WorkflowError::StateCorrupt(
+                "successful host call has no manifest".into(),
+            ));
+        };
         let envelope: GateEnvelopeV1 = secrets.parse_json(
             &std::fs::read(&staged_envelope).map_err(|source| WorkflowError::Io {
                 path: staged_envelope.clone(),

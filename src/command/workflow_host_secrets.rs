@@ -80,22 +80,19 @@ impl HostSecrets {
         })
     }
 
-    /// `bytes` with every secret value replaced, whatever their encoding.
-    pub(crate) fn bytes(&self, bytes: &[u8]) -> Vec<u8> {
-        self.0.iter().fold(bytes.to_vec(), |bytes, value| {
-            let value = value.as_bytes();
-            let (mut clean, mut at) = (Vec::with_capacity(bytes.len()), 0);
-            while at < bytes.len() {
-                if bytes[at..].starts_with(value) {
-                    clean.extend_from_slice(REDACTED.as_bytes());
-                    at += value.len();
-                } else {
-                    clean.push(bytes[at]);
-                    at += 1;
-                }
-            }
-            clean
-        })
+    /// Verify serialized evidence in raw and JSON-escaped secret spellings.
+    pub(crate) fn holds_serialized_secret(&self, bytes: &[u8]) -> bool {
+        self.holds_secret(bytes)
+            || self.0.iter().any(|value| {
+                serde_json::to_string(value).map_or(true, |encoded| {
+                    let Some(body) = encoded.get(1..encoded.len().saturating_sub(1)) else {
+                        return true;
+                    };
+                    bytes
+                        .windows(body.len())
+                        .any(|window| window == body.as_bytes())
+                })
+            })
     }
 
     /// Parse child JSON, redacting diagnostics before they leave this boundary.
@@ -123,12 +120,16 @@ impl HostSecrets {
         envelope
     }
 
-    fn strings(&self, value: &mut serde_json::Value) {
+    pub(crate) fn strings(&self, value: &mut serde_json::Value) {
         match value {
             serde_json::Value::String(text) => *text = self.text(text),
             serde_json::Value::Array(items) => items.iter_mut().for_each(|item| self.strings(item)),
             serde_json::Value::Object(fields) => {
-                fields.values_mut().for_each(|field| self.strings(field))
+                let original = std::mem::take(fields);
+                for (key, mut field) in original {
+                    self.strings(&mut field);
+                    fields.insert(self.text(&key), field);
+                }
             }
             _ => {}
         }
@@ -296,10 +297,12 @@ mod tests {
                     .iter()
                     .find(|path| path.file_name().unwrap() == "gate-envelope.json")
                     .unwrap();
-                std::fs::write(path, malformed).unwrap();
+                std::fs::write(path, &malformed).unwrap();
                 serde_json::to_vec(&serde_json::json!({
                     "schema_version": 1, "call_id": "test", "command_id": request.command_id,
-                    "entries": []
+                    "entries": [{"relative_path": "gate-envelope.json",
+                        "byte_len": malformed.len(),
+                        "blake3": archon_workflow::task_set_contract::content_digest(&malformed)}]
                 }))
                 .unwrap()
             } else {

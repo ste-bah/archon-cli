@@ -320,6 +320,7 @@ pub(super) fn warm_target(parent: &Path, repository: &Path) -> PathBuf {
 
 fn deferred(id: &str) -> CheckResult {
     CheckResult {
+        classification: None,
         acceptance_id: id.to_string(),
         exit_code: None,
         quota_walk_count: 0,

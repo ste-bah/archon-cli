@@ -123,6 +123,7 @@ pub(crate) fn sh(dir: &Path, script: &str) -> CheckResult {
         .unwrap();
     let out = child.wait_with_output().unwrap();
     CheckResult {
+        classification: None,
         acceptance_id: "AC".into(),
         exit_code: out.status.code(),
         quota_walk_count: 0,

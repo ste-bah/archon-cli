@@ -145,9 +145,6 @@ fn data_names_are_accepted() {
         "CARGOWISE_TOKEN",
         "NODEJS_SERVICE_URL",
         "DATABASE_URL",
-        "HTTPS_PROXY",
-        "SSL_CERT_FILE",
-        "RUST_LOG",
         "COREDATA_ENDPOINT",
         "ACCESS_TOKEN",
     ] {
@@ -178,4 +175,68 @@ fn reason_names_the_family() {
     assert!(cargo.contains("Cargo"), "{cargo}");
     let git = check_data_variable("GIT_CONFIG_COUNT").unwrap_err();
     assert!(git.contains("git"), "{git}");
+}
+
+#[test]
+fn round2_controls_and_unknown_names_are_refused() {
+    for name in [
+        "LUA_INIT",
+        "LUA_INIT_5_4",
+        "LUA_PATH",
+        "LUA_CPATH",
+        "R_PROFILE_USER",
+        "R_ENVIRON",
+        "R_ENVIRON_USER",
+        "PHPRC",
+        "PHP_INI_SCAN_DIR",
+        "CL",
+        "_CL_",
+        "LINK",
+        "_LINK_",
+        "CXXSTDLIB",
+        "MallocNanoZone",
+        "mallocStackLogging",
+        "LUA_INIT_TOKEN",
+        "R_PROFILE_URL",
+        "MallocCustom_KEY",
+        "UNKNOWN_CONTROL",
+        "HTTPS_PROXY",
+        "SSL_CERT_FILE",
+        "RUST_LOG",
+    ] {
+        assert!(check_data_variable(name).is_err(), "{name} accepted");
+    }
+}
+
+#[test]
+fn round2_application_data_names_are_accepted() {
+    for name in [
+        "POLYGON_API_KEY",
+        "OPENBB_API_URL",
+        "ANTHROPIC_API_KEY",
+        "PYTHON_API_KEY",
+        "NODE_API_URL",
+        "GIT_SERVICE_TOKEN",
+        "JULIA_API_KEY",
+        "DOCKER_API_URL",
+    ] {
+        assert_eq!(check_data_variable(name), Ok(()), "{name}");
+    }
+}
+
+#[test]
+fn round2_data_shaped_runtime_controls_are_refused() {
+    let accepted: Vec<_> = [
+        "JULIA_PROJECT",
+        "R_MAKEVARS_USER",
+        "DOCKER_HOST",
+        "CONTAINER_HOST",
+    ]
+    .into_iter()
+    .filter(|name| check_data_variable(name).is_ok())
+    .collect();
+    assert!(
+        accepted.is_empty(),
+        "execution controls accepted: {accepted:?}"
+    );
 }

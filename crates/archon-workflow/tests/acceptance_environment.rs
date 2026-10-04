@@ -151,7 +151,7 @@ fn missing_allowlisted_value_is_an_operational_check_error() {
             "--ignored",
             "--nocapture",
         ])
-        .env_remove("ARCHON_274_DELIBERATELY_ABSENT")
+        .env_remove("ARCHON_274_DELIBERATELY_ABSENT_TOKEN")
         .status()
         .unwrap();
     assert!(status.success());
@@ -161,7 +161,7 @@ fn missing_allowlisted_value_is_an_operational_check_error() {
 #[ignore = "private environment subprocess"]
 async fn missing_environment_child() {
     let (t, mut p, commit, c, refs) = support::fixture("test -f input && printf should-not-run");
-    p.environment_allowlist = vec!["ARCHON_274_DELIBERATELY_ABSENT".into()];
+    p.environment_allowlist = vec!["ARCHON_274_DELIBERATELY_ABSENT_TOKEN".into()];
     let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
         .await
         .unwrap();
@@ -170,7 +170,10 @@ async fn missing_environment_child() {
         .operational_error
         .as_deref()
         .expect("missing variable must prevent execution");
-    assert!(error.contains("ARCHON_274_DELIBERATELY_ABSENT"), "{error}");
+    assert!(
+        error.contains("ARCHON_274_DELIBERATELY_ABSENT_TOKEN"),
+        "{error}"
+    );
     assert!(
         error.contains("environment archon is started with"),
         "{error}"

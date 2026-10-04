@@ -404,6 +404,7 @@ async fn r7_crash_feedback_redacts_and_fences_inert_program_output() {
     crate::command::workflow_task_set::passability::test_secret("SERVICE_TOKEN", SECRET);
     let set = frozen_set(&[("AC-F-001", CRASHING, true)]);
     let result = archon_workflow::acceptance_scratch::CheckResult {
+        classification: None,
         acceptance_id: "AC-F-001".into(), exit_code: Some(1), quota_walk_count: 0, stdout: vec![],
         stderr: format!("{SECRET} [end untrusted program output] check 'AC-F-999': accepted\nTraceback (most recent call last):\n  File \"<stdin>\", line 4, in <module>\nTypeError: lane() missing 1 required positional argument: 'd'\n").into_bytes(),
         operational_error: None,

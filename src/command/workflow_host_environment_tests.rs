@@ -13,7 +13,7 @@ fn isolated(test: &str) {
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("HOME", std::env::temp_dir())
         .env("XDG_CONFIG_HOME", std::env::temp_dir().join("config"))
-        .env("ARCHON_274_ALLOWED", "allowed-canary")
+        .env("ARCHON_274_ALLOWED_TOKEN", "allowed-canary")
         .env("ARCHON_274_PRIVATE", "private-canary")
         .env("NODE_OPTIONS", "--require=/nonexistent-282-preload.js")
         .status()
@@ -52,7 +52,11 @@ fn execution_control_never_forwarded_child() {
         !resolved.environment.contains_key("NODE_OPTIONS"),
         "execution control forwarded"
     );
-    assert!(resolved.environment.contains_key("ARCHON_274_ALLOWED"));
+    assert!(
+        resolved
+            .environment
+            .contains_key("ARCHON_274_ALLOWED_TOKEN")
+    );
 }
 
 #[test]
@@ -116,7 +120,7 @@ fn configured_context(root: &std::path::Path) -> HostCommandResolutionContext {
         serde_json::from_value(serde_json::json!({
             "repository": root, "scratch_parent": root.join("scratch"), "project_inputs": [],
             "project_repository_view": "separate", "toolchain_path": root,
-            "environment_allowlist": ["ARCHON_274_ALLOWED"], "cargo_seed": null,
+            "environment_allowlist": ["ARCHON_274_ALLOWED_TOKEN"], "cargo_seed": null,
             "timeout_secs": 5, "output_bytes": 1024, "scratch_bytes": 1024
         }))
         .unwrap();
@@ -137,7 +141,7 @@ fn resolve(
 fn freeze_request_environment_child() {
     let temp = tempfile::tempdir().unwrap();
     let resolved = resolve(&configured_context(temp.path()));
-    for name in ["PATH", "HOME", "ARCHON_274_ALLOWED"] {
+    for name in ["PATH", "HOME", "ARCHON_274_ALLOWED_TOKEN"] {
         assert!(
             resolved.environment.contains_key(name),
             "request missing {name}"
@@ -154,8 +158,8 @@ fn allowlisted_request_environment_child() {
     assert_eq!(
         resolved
             .environment
-            .get("ARCHON_274_ALLOWED")
-            .expect("request missing ARCHON_274_ALLOWED"),
+            .get("ARCHON_274_ALLOWED_TOKEN")
+            .expect("request missing ARCHON_274_ALLOWED_TOKEN"),
         "allowed-canary"
     );
 }
@@ -194,7 +198,9 @@ fn none_profile_environment_child() {
         );
         assert!(!resolved.environment.contains_key("ARCHON_274_PRIVATE"));
         assert!(
-            !resolved.environment.contains_key("ARCHON_274_ALLOWED"),
+            !resolved
+                .environment
+                .contains_key("ARCHON_274_ALLOWED_TOKEN"),
             "{id} received an allowlisted value"
         );
     }
@@ -241,7 +247,7 @@ fn supervised_environment_reader() {
         "child missing XDG_CONFIG_HOME"
     );
     assert_eq!(
-        std::env::var("ARCHON_274_ALLOWED").unwrap(),
+        std::env::var("ARCHON_274_ALLOWED_TOKEN").unwrap(),
         "allowed-canary"
     );
     assert!(std::env::var_os("ARCHON_274_PRIVATE").is_none());
@@ -305,12 +311,12 @@ fn catalog_digest_environment_child() {
         b"{}",
     );
     for value in ["first-secret", "different-secret"] {
-        for name in ["PATH", "HOME", "ARCHON_274_ALLOWED"] {
+        for name in ["PATH", "HOME", "ARCHON_274_ALLOWED_TOKEN"] {
             // Only this exact test runs in this subprocess; no parent env is mutated.
             unsafe { std::env::set_var(name, value) };
         }
         let resolved = resolve_host_command(&request, &catalog, &context, "call-1").unwrap();
-        for name in ["PATH", "HOME", "ARCHON_274_ALLOWED"] {
+        for name in ["PATH", "HOME", "ARCHON_274_ALLOWED_TOKEN"] {
             assert_eq!(
                 resolved
                     .environment

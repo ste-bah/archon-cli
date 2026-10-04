@@ -333,6 +333,7 @@ fn redacted(roots: &ScratchRoots, check: &CheckResult) -> CheckResult {
 }
 fn operational(id: &str, error: String) -> CheckResult {
     CheckResult {
+        classification: None,
         acceptance_id: id.into(),
         exit_code: None,
         quota_walk_count: 0,
@@ -407,6 +408,7 @@ pub async fn execute_check_at(
                 crate::DeclarativeFloorEvaluation::Passed => {}
                 crate::DeclarativeFloorEvaluation::Failed { findings } => {
                     return Ok(CheckResult {
+                        classification: None,
                         acceptance_id: reference.acceptance_id.clone(),
                         exit_code: Some(1),
                         quota_walk_count: 0,

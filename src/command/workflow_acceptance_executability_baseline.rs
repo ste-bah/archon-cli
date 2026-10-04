@@ -186,6 +186,9 @@ pub(crate) fn originals<'a>(
 
 /// A pass the acceptance stage would count: exit 0 with real work.
 pub(super) fn passed(result: &CheckResult) -> bool {
+    if let Some(classification) = &result.classification {
+        return result.operational_error.is_none() && classification.passed;
+    }
     let stdout = String::from_utf8_lossy(&result.stdout);
     let stderr = String::from_utf8_lossy(&result.stderr);
     result.operational_error.is_none()

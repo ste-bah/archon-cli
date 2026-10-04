@@ -1,28 +1,6 @@
-//! The gate envelope a host-command child stages is persisted only redacted
-//! (Issue 277).
-//!
-//! The child writes `gate-envelope.json` into its run-owned staging tree and
-//! names its exact bytes in the prepared manifest. Those bytes reach the run
-//! directory twice: the staged file stays behind when the parent refuses or
-//! the child fails, and an accepted call publishes it to
-//! `host-command-results/<call>/gate-envelope.json` with a receipt bound to
-//! the published bytes. A child that printed a provider credential or a
-//! credential-named allowlisted value into its report left it there in clear.
-//!
-//! So the parent seals the staged envelope as soon as the child has exited,
-//! before any decision or persistence: an envelope holding a secret value is
-//! replaced by the redacted envelope the call returns
-//! ([`HostSecrets::envelope`]), or, when it is not a valid envelope, by its
-//! bytes with every value replaced. The manifest entry is rebound to the
-//! sealed bytes only when it described the child's raw bytes exactly, so a
-//! child whose manifest misstates what it wrote is still refused by the
-//! audit, and the receipt then binds the sealed bytes that are on disk.
-//!
-//! Boundary: the envelope's typed fields (enums, task ids, paths, error
-//! kinds) keep their values, as the returned envelope does, because changing
-//! them changes what the envelope means. The other staged outputs (frozen
-//! contracts, locks, task bodies) are authoritative artifacts whose exact
-//! bytes the locks, pins and verdicts bind; they are never rewritten here.
+//! Decode, redact and verify staged host envelopes before publication (#277).
+//! A manifest must describe the child's raw bytes; only an honest entry can
+//! be rebound to the sealed bytes. Temporary envelopes are removed on exit.
 use std::path::Path;
 
 use archon_workflow::task_set_contract::content_digest;
@@ -32,57 +10,145 @@ use super::workflow_host_secrets::HostSecrets;
 
 pub(crate) const ENVELOPE_FILE: &str = "gate-envelope.json";
 
-/// The staged envelope's raw and sealed identity, when sealing changed it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SealedEnvelope {
-    raw: (u64, String),
-    sealed: (u64, String),
+/// Covers early returns and cancellation of the executor's future too.
+pub(crate) struct EnvelopeCleanup<'a> {
+    pub(crate) path: &'a Path,
+    pub(crate) secrets: &'a HostSecrets,
 }
 
-/// Seal the envelope staged at `path`: no secret value stays in clear and
-/// the file is readable by its owner only. `None` when nothing changed.
+impl Drop for EnvelopeCleanup<'_> {
+    fn drop(&mut self) {
+        if let Err(error) = seal_staged_envelope(self.path, self.secrets, None) {
+            let _ = std::fs::remove_file(self.path);
+            tracing::warn!(%error, "sealing an exiting call's staged envelope failed");
+        }
+    }
+}
+
 pub(crate) fn seal_staged_envelope(
     path: &Path,
     secrets: &HostSecrets,
-) -> WorkflowResult<Option<SealedEnvelope>> {
+    mut prepared: Option<&mut PreparedPublicationV1>,
+) -> WorkflowResult<()> {
     let io = |source| WorkflowError::Io {
         path: path.to_path_buf(),
         source,
     };
-    // A missing or non-regular envelope is the audit's to refuse; never
-    // write through a link the child left.
+    if let Some(parent) = path.parent() {
+        remove_temporary_envelopes(parent)?;
+    }
+    // Never follow a link the child left. The publication audit refuses it.
     match std::fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return Ok(None),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(io(error)),
     }
     let raw = std::fs::read(path).map_err(io)?;
-    if !secrets.holds_secret(&raw) {
+    let raw_identity = identity(&raw);
+    // Check before sealing, but still scrub a dishonest child's staging.
+    let mismatch = prepared.as_ref().is_some_and(|manifest| {
+        let entries: Vec<_> = manifest
+            .entries
+            .iter()
+            .filter(|entry| entry.relative_path == ENVELOPE_FILE)
+            .collect();
+        entries.len() != 1
+            || entries.iter().any(|entry| {
+                (entry.byte_len, entry.blake3.as_str()) != (raw_identity.0, raw_identity.1.as_str())
+            })
+    });
+    let sealed = seal_bytes(&raw, secrets)?;
+    if sealed != raw {
+        write_owner_only(path, &sealed)?;
+    } else {
         owner_only(path)?;
-        return Ok(None);
     }
-    let sealed = match serde_json::from_slice::<GateEnvelopeV1>(&raw) {
-        Ok(envelope) => serde_json::to_vec_pretty(&secrets.envelope(envelope))?,
-        Err(_) => secrets.bytes(&raw),
-    };
-    write_owner_only(path, &sealed)?;
-    Ok(Some(SealedEnvelope {
-        raw: identity(&raw),
-        sealed: identity(&sealed),
-    }))
-}
-
-/// Point the manifest's envelope entry at the sealed bytes, only when it
-/// named the child's raw bytes exactly.
-pub(crate) fn rebind_manifest(prepared: &mut PreparedPublicationV1, sealed: &SealedEnvelope) {
-    for entry in &mut prepared.entries {
-        if entry.relative_path == ENVELOPE_FILE
-            && (entry.byte_len, entry.blake3.as_str()) == (sealed.raw.0, sealed.raw.1.as_str())
-        {
-            (entry.byte_len, entry.blake3) = sealed.sealed.clone();
+    if mismatch {
+        return Err(WorkflowError::ArtifactInvalid(
+            "staged output gate-envelope.json raw manifest identity mismatch; return the length and digest of the bytes actually staged".into(),
+        ));
+    }
+    if let Some(manifest) = prepared.as_mut() {
+        for entry in &mut manifest.entries {
+            if entry.relative_path == ENVELOPE_FILE {
+                (entry.byte_len, entry.blake3) = identity(&sealed);
+            }
         }
     }
+    Ok(())
+}
+
+fn seal_bytes(raw: &[u8], secrets: &HostSecrets) -> WorkflowResult<Vec<u8>> {
+    // A malformed document cannot be safely traversed: discard the whole field.
+    let Ok(decoded) = serde_json::from_slice::<serde_json::Value>(raw) else {
+        return Ok(b"null".to_vec());
+    };
+    let mut clean = decoded.clone();
+    secrets.strings(&mut clean);
+    let changed = clean != decoded;
+    let mut value = if changed {
+        match serde_json::from_value::<GateEnvelopeV1>(decoded) {
+            Ok(envelope) => serde_json::to_value(secrets.envelope(envelope))?,
+            Err(_) => clean,
+        }
+    } else {
+        clean
+    };
+    // A residual secret invalidates the envelope. Dropping an optional error
+    // field must never erase a failure and permit publication.
+    let mut refused = false;
+    if let serde_json::Value::Object(fields) = &mut value {
+        for field in fields.values_mut() {
+            if secrets.holds_serialized_secret(&serde_json::to_vec(field)?) {
+                *field = serde_json::Value::Null;
+                refused = true;
+            }
+        }
+    }
+    let mut sealed = if refused {
+        b"null".to_vec()
+    } else {
+        serde_json::to_vec_pretty(&value)?
+    };
+    // Verification is on the final serialized output, in both plaintext and
+    // JSON-escaped spelling. No raw-byte search can bypass JSON decoding.
+    if secrets.holds_serialized_secret(&sealed) {
+        sealed = b"null".to_vec();
+    }
+    Ok(sealed)
+}
+
+fn remove_temporary_envelopes(root: &Path) -> WorkflowResult<()> {
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(WorkflowError::Io {
+                path: root.into(),
+                source,
+            });
+        }
+    };
+    for entry in entries {
+        let entry = entry.map_err(|source| WorkflowError::Io {
+            path: root.into(),
+            source,
+        })?;
+        let path = entry.path();
+        let kind = entry.file_type().map_err(|source| WorkflowError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !kind.is_dir() && name.starts_with("gate-envelope.") && name.ends_with(".tmp") {
+            std::fs::remove_file(&path).map_err(|source| WorkflowError::Io { path, source })?;
+        } else if kind.is_dir() {
+            remove_temporary_envelopes(&path)?;
+        }
+    }
+    Ok(())
 }
 
 /// Restrict a published child-output file to its owner.
@@ -108,7 +174,6 @@ fn write_owner_only(path: &Path, bytes: &[u8]) -> WorkflowResult<()> {
         path: path.to_path_buf(),
         source,
     };
-    // Restrict first, so the sealed bytes are never readable by others.
     owner_only(path)?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)

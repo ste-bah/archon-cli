@@ -356,6 +356,7 @@ fn a_placeholder_original_is_never_a_verdict_to_hold_a_repair_to() {
     let mut contract = frozen_set(&[]).contract();
     contract.acceptance = vec![placeholder, authored];
     let failed = |id: &str| archon_workflow::acceptance_scratch::CheckResult {
+        classification: None,
         acceptance_id: id.into(),
         exit_code: Some(1),
         quota_walk_count: 0,
