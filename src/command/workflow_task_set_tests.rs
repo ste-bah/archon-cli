@@ -257,7 +257,6 @@ struct FinishReasonJudge {
 
 #[async_trait]
 impl WorkflowLlmClient for FinishReasonJudge {
-    /// Scripted replies stand for one continued session (#241).
     async fn continue_agent(
         &self,
         call: archon_workflow::WorkflowAgentCall,
