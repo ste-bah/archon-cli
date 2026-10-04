@@ -226,3 +226,112 @@ fn distinct_recovery_launch_still_requires_consistent_contract_preimages() {
     let refusal = verify(&run, "z-second-run", &second).unwrap_err();
     assert!(refusal.contains("criterion_changed"), "{refusal}");
 }
+
+#[test]
+fn attack_anchor_flips_when_contract_digest_is_unbound() {
+    let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
+    let mut second = run.set.pin().identity();
+    second.skeleton_digest = None;
+    let mut contract = run.set.contract();
+    contract.acceptance[0].criterion = "older launch obligation".into();
+    let older = serde_json::to_vec_pretty(&contract).unwrap();
+    let mut first = second.clone();
+    first.freeze_event_id = "older-launch-freeze".into();
+    first.acceptance_digest = archon_workflow::task_set_contract::content_digest(&older);
+    metadata(&run, "a-first-run", &first);
+    metadata(&run, "z-second-run", &second);
+    std::fs::remove_file(run.set.pin_path()).unwrap();
+    // The interrupted publish left a contract and skeleton no launch names.
+    let history = archon_workflow::task_set_lineage::ChainHistory::for_pin(&run.set.pin_path());
+    let live = run.set.tasks.join(ACCEPTANCE_CONTRACT_FILE);
+    let mut bytes = std::fs::read(&live).unwrap();
+    history.put(&bytes).unwrap();
+    bytes.push(b'\n');
+    std::fs::write(&live, bytes).unwrap();
+    for name in [
+        archon_workflow::task_set_contract::TASK_SKELETON_FILE,
+        archon_workflow::task_set_contract::TASK_SKELETON_LOCK_FILE,
+    ] {
+        std::fs::remove_file(run.set.tasks.join(name)).unwrap();
+    }
+    let receipt = recover(&run);
+    assert!(receipt[0]["prior"].is_null());
+    assert!(receipt[0]["contract_digest"].is_null());
+    assert!(receipt[0]["skeleton"].is_null());
+    refreeze(&run);
+    verify(&run, "z-second-run", &second).expect("z adopts before the import");
+    history.put(&older).unwrap();
+    let after = verify(&run, "z-second-run", &second);
+    assert!(
+        after.is_ok(),
+        "ATTACK: z refused after a later preimage import: {after:?}"
+    );
+    let refusal = verify(&run, "a-first-run", &first).unwrap_err();
+    assert!(refusal.contains("criterion_changed"), "{refusal}");
+}
+
+#[test]
+fn readable_snapshot_without_launch_identity_cannot_acquire_recovery_authority() {
+    let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
+    let launch = run.set.pin().identity();
+    metadata(&run, "captured-run", &launch);
+    let id = "run-without-launch";
+    let path = metadata(&run, id, &launch);
+    let mut snapshot: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    snapshot["observer_snapshot"]["portable_acceptance_identity"] = serde_json::Value::Null;
+    std::fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    let receipt = recover(&run);
+    assert!(receipt[0]["runs"].get(id).is_none());
+    assert!(
+        !receipt[0]["skipped_runs"]
+            .as_array()
+            .is_some_and(|runs| runs.contains(&serde_json::json!(id))),
+        "a readable snapshot without a launch identity must not be skipped: {:?}",
+        receipt[0]["skipped_runs"]
+    );
+    metadata(&run, id, &launch);
+    refreeze(&run);
+    verify(&run, "captured-run", &launch).expect("the captured launch must still adopt");
+    assert!(
+        verify(&run, id, &launch).is_err(),
+        "adding an identity after unfreeze cannot grant launch authority"
+    );
+}
+
+#[test]
+fn recovery_completion_source_must_bind_the_captured_authority() {
+    for has_prior in [false, true] {
+        let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
+        let launch = run.set.pin().identity();
+        metadata(&run, "captured-run", &launch);
+        let mut other = launch.clone();
+        other.freeze_event_id = "different-source-freeze".into();
+        if has_prior {
+            // Even another captured launch cannot replace an existing prior pin.
+            metadata(&run, "other-captured-run", &other);
+        } else {
+            std::fs::remove_file(run.set.pin_path()).unwrap();
+        }
+        let receipt = recover(&run);
+        assert_eq!(!receipt[0]["prior"].is_null(), has_prior);
+        refreeze(&run);
+        verify(&run, "captured-run", &launch).expect("the original completion must adopt");
+
+        // Make the pin and completion agree on an unauthorized source, keeping
+        // the destination, named ids and trigger otherwise unchanged.
+        let mut pin = run.set.pin();
+        pin.lineage.last_mut().unwrap().from = other;
+        std::fs::write(run.set.pin_path(), serde_json::to_vec(&pin).unwrap()).unwrap();
+        let path = crate::command::workflow_task_set::recovery_lineage::path(&run.set.pin_path());
+        let mut receipt: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        receipt[0]["completed"]["lineage"] = serde_json::to_value(&pin.lineage).unwrap();
+        std::fs::write(path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+        let refusal = verify(&run, "captured-run", &launch).unwrap_err();
+        assert!(
+            refusal.contains("recovery completion does not bind its prior anchor"),
+            "{refusal}"
+        );
+    }
+}

@@ -122,12 +122,9 @@ pub(crate) fn record_unfreeze(pin: &Path, tasks: &Path, transaction: &str) -> Re
                     .ok()
                     .as_ref()
                     == Some(&task_root)
+                    && let Some(identity) = snapshot.portable_acceptance_identity
                 {
-                    if let Some(identity) = snapshot.portable_acceptance_identity {
-                        runs.insert(id, identity);
-                    } else {
-                        skipped_runs.insert(id);
-                    }
+                    runs.insert(id, identity);
                 }
             }
         }
@@ -346,8 +343,7 @@ pub(crate) fn verify(
         if !anchors::authorized(record, pin_path, run, launch, launch_lineage)? {
             continue;
         }
-        let from = anchors::anchor(record, pin_path)?
-            .ok_or_else(|| anyhow!("recovery has no prior anchor"))?;
+        let from = anchors::completed_anchor(record)?;
         let mut expected = record
             .prior
             .as_ref()
@@ -367,7 +363,7 @@ pub(crate) fn verify(
         }
         super::publish::verify_recovered_chain(pin_path, tasks)
             .map_err(|reason| anyhow!(reason))?;
-        let proof = anchors::proof(record, launch, launch_lineage, pin, pin_path, tasks, &from)?;
+        let proof = anchors::proof(record, launch, launch_lineage, pin, pin_path, tasks, from)?;
         return Ok(Some(proof));
     }
     Err(anyhow!(

@@ -11,7 +11,8 @@ pub(super) fn store(pin: &Path) -> Result<WorkflowStore> {
 
 /// Use the surviving, archived contract rather than directory ordering to
 /// select a no-prior-pin template. Older receipts can use their captured
-/// skeleton or a surviving launch preimage instead.
+/// skeleton or a surviving launch preimage instead. Select only before
+/// completion; verification must use the source the completion recorded.
 pub(super) fn anchor(
     record: &Recovery,
     pin: &Path,
@@ -48,6 +49,27 @@ pub(super) fn anchor(
         return Ok(Some(launch.clone()));
     }
     Ok(None)
+}
+
+/// Bind the completed hop to the captured authority without reselecting
+/// its source from history that later preimage imports can extend.
+pub(super) fn completed_anchor(record: &Recovery) -> Result<&PortableAcceptanceIdentityV1> {
+    let from = &record
+        .completed
+        .as_ref()
+        .and_then(|done| done.lineage.last())
+        .ok_or_else(|| anyhow!("recovery completion has no prior anchor"))?
+        .from;
+    let captured = match &record.prior {
+        Some(prior) => prior.identity() == *from,
+        None => record.runs.values().any(|launch| launch == from),
+    };
+    if !captured {
+        return Err(anyhow!(
+            "recovery completion does not bind its prior anchor"
+        ));
+    }
+    Ok(from)
 }
 
 /// An unreadable snapshot does not permanently disqualify a discovered run.
