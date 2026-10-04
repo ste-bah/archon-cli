@@ -240,3 +240,27 @@ fn round2_data_shaped_runtime_controls_are_refused() {
         "execution controls accepted: {accepted:?}"
     );
 }
+
+#[test]
+fn cluster_bindings_and_download_sources_are_refused() {
+    for name in [
+        "NODE_UNIQUE_ID",
+        "NODE_CHANNEL_FD",
+        "node_channel_serialization_mode",
+        "BUILDKIT_HOST",
+        "PLAYWRIGHT_DOWNLOAD_HOST",
+        "PUPPETEER_DOWNLOAD_BASE_URL",
+        "POETRY_REPOSITORIES_PRIVATE_URL",
+        "PDM_PYPI_URL",
+    ] {
+        assert!(check_data_variable(name).is_err(), "{name} was accepted");
+    }
+    for name in [
+        "NODE_AUTH_TOKEN",
+        "POLYGON_API_KEY",
+        "OPENBB_API_URL",
+        "SERVICE_HOST",
+    ] {
+        assert!(check_data_variable(name).is_ok(), "{name} was refused");
+    }
+}
