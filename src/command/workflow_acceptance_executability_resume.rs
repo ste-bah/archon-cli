@@ -28,6 +28,7 @@ use super::*;
 use crate::command::workflow_freeze_budget::{
     FREEZE_CACHE_DIR, FreezeBudget, FreezeIncomplete, FreezeResume,
 };
+use crate::command::workflow_task_set::passability::evidence::Redactor;
 
 const SCHEMA: u32 = 2;
 
@@ -39,12 +40,28 @@ struct Saved {
 }
 
 /// Saved verdicts, one file per memo key.
+///
+/// Issue 277: a saved verdict is persisted outside the run and outlives it,
+/// so what its check printed is redacted first, of every credential value
+/// the check's site could hold (credential-named host values, the engine's
+/// own credentials, and the names its policy forwards), and the file is
+/// readable by its owner only. Only the output streams change; the exit
+/// status, timeout and acceptance id that make the verdict are kept, so a
+/// verdict read back is the verdict reached.
 #[derive(Clone)]
 pub(super) struct ResultStore {
     dir: PathBuf,
+    redactor: Arc<Redactor>,
 }
 
 impl ResultStore {
+    pub(super) fn new(dir: PathBuf, redactor: Redactor) -> Self {
+        Self {
+            dir,
+            redactor: Arc::new(redactor),
+        }
+    }
+
     fn path(&self, key: &str) -> Option<PathBuf> {
         (key.len() == 64 && key.bytes().all(|b| b.is_ascii_hexdigit()))
             .then(|| self.dir.join(format!("{key}.json")))
@@ -66,16 +83,18 @@ impl ResultStore {
         if result.operational_error.is_some() {
             return false;
         }
+        let mut result = result.clone();
+        result.stdout = self.redactor.redact_bytes(&result.stdout);
+        result.stderr = self.redactor.redact_bytes(&result.stderr);
         let saved = Saved {
             schema: SCHEMA,
             key: key.to_string(),
-            result: result.clone(),
+            result,
         };
         let path = path.with_extension("provisional");
         let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
         let written = std::fs::create_dir_all(&self.dir).is_ok()
-            && serde_json::to_vec(&saved)
-                .is_ok_and(|bytes| std::fs::write(&staging, bytes).is_ok())
+            && serde_json::to_vec(&saved).is_ok_and(|bytes| write_owner_only(&staging, &bytes))
             && std::fs::rename(&staging, &path).is_ok();
         if !written {
             let _ = std::fs::remove_file(&staging);
@@ -105,6 +124,32 @@ impl ResultStore {
             let _ = std::fs::remove_file(path.with_extension("provisional"));
         }
     }
+}
+
+/// Write `bytes` to `path`, readable by its owner only (a stale file left
+/// at `path` by an earlier process keeps no wider mode).
+fn write_owner_only(path: &std::path::Path, bytes: &[u8]) -> bool {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let restrict = |file: &std::fs::File| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = file;
+            Ok(())
+        }
+    };
+    options
+        .open(path)
+        .and_then(|mut file| restrict(&file).and_then(|()| file.write_all(bytes)))
+        .is_ok()
 }
 
 impl HostProbe {
@@ -156,7 +201,11 @@ impl HostProbe {
             Site::Hermetic => self.project.join(FREEZE_CACHE_DIR).join("probe-results"),
             Site::Direct | Site::Unavailable(_) => return None,
         };
-        Some(ResultStore { dir })
+        let (environment, forwarded) = sites::site_environment(self);
+        Some(ResultStore::new(
+            dir,
+            Redactor::for_environment(environment, &forwarded),
+        ))
     }
 
     /// The markers for mutating check `id` on `tree`. Their nonce is part

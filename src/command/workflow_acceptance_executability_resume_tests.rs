@@ -292,9 +292,13 @@ async fn a_saved_mutation_verdict_is_reused_by_a_retry() {
 #[test]
 fn a_crash_before_validation_leaves_no_reusable_verdict() {
     let dir = tempfile::tempdir().unwrap();
-    let store = super::ResultStore {
-        dir: dir.path().to_path_buf(),
-    };
+    let store = super::ResultStore::new(
+        dir.path().to_path_buf(),
+        crate::command::workflow_task_set::passability::evidence::Redactor::from_vars(
+            Vec::new(),
+            &[],
+        ),
+    );
     let key = "a".repeat(64);
     let result: archon_workflow::acceptance_scratch::CheckResult =
         serde_json::from_value(serde_json::json!({
@@ -342,4 +346,65 @@ async fn a_retry_reuses_verdicts_after_the_decompose_log_grows() {
         .script_defects(&trees.contract(), &trees.ids())
         .await;
     assert_eq!(runs_of(runs.path(), "AC-L-001"), 4);
+}
+
+/// Issue 277: a saved verdict never holds a credential its check printed in
+/// clear. The saved output is redacted and owner-only, and the verdict a
+/// retry reads back is the one the first attempt reached.
+#[tokio::test]
+async fn saved_verdicts_hold_no_credential_their_check_printed() {
+    const CANARY: &str = "sk-ant-277-probe-canary-9a1d";
+    crate::command::workflow_task_set::passability::test_secret("SERVICE_TOKEN", CANARY);
+    // The check text spells the value in two halves, so only the check's
+    // output can carry it whole.
+    let check = "printf 'token=sk-ant-%s\\n' 277-probe-canary-9a1d; \
+                 printf 'auth sk-ant-%s\\n' 277-probe-canary-9a1d >&2; test -f feature.txt";
+    let trees = trees(&[("AC-K-001", check, REPO)]);
+    let copies = tempfile::tempdir().unwrap();
+    let resume = saving(FreezeBudget::unlimited());
+    let first = freeze(&trees, copies.path(), &resume);
+    let findings = first.script_defects(&trees.contract(), &trees.ids()).await;
+    let results = trees
+        .set
+        .project
+        .path()
+        .join(crate::command::workflow_freeze_budget::FREEZE_CACHE_DIR)
+        .join("probe-results");
+    let saved: Vec<_> = std::fs::read_dir(&results)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    assert_eq!(saved.len(), 2, "HEAD and the base were saved");
+    for path in &saved {
+        // The output streams are saved as byte arrays, so a plain text
+        // search would never see the value: decode them first.
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        for stream in ["stdout", "stderr"] {
+            let bytes: Vec<u8> = serde_json::from_value(saved["result"][stream].clone()).unwrap();
+            let text = String::from_utf8_lossy(&bytes);
+            assert!(
+                !text.contains(CANARY),
+                "{} {stream}: {text}",
+                path.display()
+            );
+            assert!(
+                text.contains("REDACTED"),
+                "{} {stream}: {text}",
+                path.display()
+            );
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "{}", path.display());
+        }
+    }
+    let retry = freeze(&trees, copies.path(), &resume);
+    let again = retry.script_defects(&trees.contract(), &trees.ids()).await;
+    assert_eq!(again, findings, "the saved verdict is the one reached");
+    assert_eq!(retry.copies_made.load(SeqCst), 0, "read back, not re-run");
 }
