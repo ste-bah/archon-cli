@@ -199,13 +199,18 @@ pub trait WorkflowV2AgentClient {
     }
 
     /// Continue the same completed invocation with validation feedback.
-    /// Stateless test clients retain their existing behavior by default.
+    ///
+    /// Refused by default: a continuation runs exactly the invocation it
+    /// continues or not at all (#241). Only a client that restores the
+    /// completed invocation exactly overrides this.
     async fn continue_agent_request(
         &self,
-        request: &WorkflowV2AgentRequest,
-        prompt: String,
+        _request: &WorkflowV2AgentRequest,
+        _prompt: String,
     ) -> Result<String, WorkflowV2AgentError> {
-        self.run_agent_request(request, prompt).await
+        Err(WorkflowV2AgentError::Transport(
+            "cannot continue agent: this client keeps no completed agent session it can restore exactly; start a new agent".into(),
+        ))
     }
 
     async fn run_agent(&self, prompt: String) -> Result<String, WorkflowV2AgentError>;

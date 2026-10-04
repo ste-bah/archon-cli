@@ -5,6 +5,14 @@ struct BatchLlm {
 }
 #[async_trait::async_trait]
 impl WorkflowLlmClient for BatchLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _: Vec<serde_json::Value>,
@@ -138,6 +146,14 @@ impl WindowLlm {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for WindowLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _: Vec<serde_json::Value>,

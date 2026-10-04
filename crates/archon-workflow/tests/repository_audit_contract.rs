@@ -74,6 +74,14 @@ impl WorkflowV2AgentClient for Scripted {
             valid()
         }))
     }
+    /// The scripted replies stand for one continued session (#241).
+    async fn continue_agent_request(
+        &self,
+        request: &WorkflowV2AgentRequest,
+        prompt: String,
+    ) -> Result<String, WorkflowV2AgentError> {
+        self.run_agent_request(request, prompt).await
+    }
 }
 #[tokio::test]
 async fn malformed_audit_earns_existing_bounded_repair() {
@@ -102,6 +110,15 @@ async fn filesystem_inconsistent_audit_earns_bounded_repair() {
                 json!([{"declared_path":"src/new.txt","verdict":"absent","equivalents":[],"required_action":"deliver","reason":"sealed file is absent"}])
             };
             Ok(envelope(records))
+        }
+
+        /// The scripted replies stand for one continued session (#241).
+        async fn continue_agent_request(
+            &self,
+            _: &WorkflowV2AgentRequest,
+            prompt: String,
+        ) -> Result<String, WorkflowV2AgentError> {
+            self.run_agent(prompt).await
         }
     }
     let temp = tempfile::tempdir().unwrap();

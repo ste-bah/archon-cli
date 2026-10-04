@@ -71,3 +71,28 @@ fn request(disable_auto_background: bool) -> WorkflowAgentCall {
         provider_env: None,
     }
 }
+
+/// A port client that cannot restore a completed invocation refuses to
+/// continue one instead of answering with a fresh call (#241).
+#[tokio::test]
+async fn a_port_client_that_cannot_restore_refuses_to_continue() {
+    struct Stateless;
+    #[async_trait::async_trait]
+    impl crate::llm_client_port::WorkflowLlmClient for Stateless {
+        async fn send_message(
+            &self,
+            _: Vec<serde_json::Value>,
+            _: Vec<serde_json::Value>,
+            _: Vec<serde_json::Value>,
+            _: &str,
+        ) -> crate::error::WorkflowResult<crate::llm_client_port::WorkflowAgentOutcome> {
+            panic!("a continuation was answered with a fresh call")
+        }
+    }
+    use crate::llm_client_port::WorkflowLlmClient;
+    let error = Stateless
+        .continue_agent(request(true))
+        .await
+        .expect_err("a stateless client continued");
+    assert!(error.to_string().contains("start a new agent"), "{error}");
+}

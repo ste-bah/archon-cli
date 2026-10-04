@@ -82,6 +82,14 @@ mod tests {
 
     #[async_trait::async_trait]
     impl WorkflowLlmClient for ProbeClient {
+        /// Scripted replies stand for one continued session (#241).
+        async fn continue_agent(
+            &self,
+            call: archon_workflow::WorkflowAgentCall,
+        ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+            self.run_agent(call).await
+        }
+
         fn probe_agent_read(&self, _path: &Path) -> Option<Result<(), String>> {
             self.0.clone()
         }

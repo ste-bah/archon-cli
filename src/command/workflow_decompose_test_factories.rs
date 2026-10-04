@@ -176,6 +176,14 @@ pub(super) struct FailingReadyLlm;
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for FailingReadyLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -223,6 +231,14 @@ pub(super) struct CancelDuringWorkLlm {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for CancelDuringWorkLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,

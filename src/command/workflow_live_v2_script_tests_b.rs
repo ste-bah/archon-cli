@@ -175,6 +175,14 @@ pub(super) struct PanicLlm;
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for PanicLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -192,6 +200,14 @@ pub(super) struct AlwaysInvalidLlm {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for AlwaysInvalidLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -216,6 +232,14 @@ pub(super) struct SlowAcceptedLlm {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for SlowAcceptedLlm {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,

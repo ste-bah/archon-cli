@@ -2,6 +2,14 @@ use super::*;
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for GeneratedV2RunClient {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
@@ -53,6 +61,14 @@ export default async function workflow(w) {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for GeneratedV2FanoutRunClient {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         messages: Vec<serde_json::Value>,
@@ -155,6 +171,14 @@ export default async function workflow(w) {
 
 #[async_trait::async_trait]
 impl WorkflowLlmClient for GeneratedV2SlowFanoutRunClient {
+    /// Scripted replies stand for one continued session (#241).
+    async fn continue_agent(
+        &self,
+        call: archon_workflow::WorkflowAgentCall,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        self.run_agent(call).await
+    }
+
     async fn send_message(
         &self,
         _messages: Vec<serde_json::Value>,
