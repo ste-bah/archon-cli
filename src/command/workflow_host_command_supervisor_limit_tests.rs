@@ -2,10 +2,11 @@
 //! the child's exit and the supervisor's events are ordered.
 //!
 //! Each fixture sleeps, then breaks its limit and exits at once, while the
-//! test holds the runtime's only thread. When the thread is released the
-//! exit and the event are both ready, and the select polls the exit first:
-//! the order that used to publish an overflowing call.
-use std::time::Duration;
+//! test holds the runtime's only thread. The test releases the thread only
+//! once it has seen the child exit, so the exit and the event are both ready
+//! and the select polls the exit first: the order that used to publish an
+//! overflowing call.
+use std::time::{Duration, Instant};
 
 use archon_workflow::{WorkflowError, WorkflowResult};
 
@@ -18,12 +19,35 @@ use super::{command, script};
 async fn exit_seen_before_events(
     request: ResolvedHostCommand,
 ) -> WorkflowResult<SupervisedProcessOutput> {
+    // The fixture records its pid first, so the test can see it exit.
+    let fixture = std::path::PathBuf::from(&request.args[0]);
+    let pid_file = fixture.with_extension("pid");
+    let body = std::fs::read_to_string(&fixture).unwrap().replacen(
+        "set -eu\n",
+        &format!("set -eu\nprintf '%s' \"$$\" > '{}'\n", pid_file.display()),
+        1,
+    );
+    std::fs::write(&fixture, body).unwrap();
     let (control, _handle) = HostCommandControl::new();
     let task = tokio::spawn(supervise_process_group(request, control, None));
     // Let the supervisor spawn the child and reach its select.
     tokio::time::sleep(Duration::from_millis(250)).await;
-    // The child breaks its limit and exits while nothing else can run.
-    std::thread::sleep(Duration::from_millis(1500));
+    // The child breaks its limit and exits while nothing else can run: hold
+    // the thread until it has exited (a zombie or gone, never running).
+    let start = Instant::now();
+    loop {
+        let pid = std::fs::read_to_string(&pid_file)
+            .ok()
+            .and_then(|text| text.trim().parse::<u32>().ok());
+        if pid.is_some_and(|pid| archon_shell::process_tree::start_of(pid).is_none()) {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the fixture never exited"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
     task.await.unwrap()
 }
 
