@@ -2,10 +2,14 @@
 //! decision C): the measure of progress for a session whose provider
 //! connection dropped before it could report.
 //!
-//! The fingerprint covers what a later capture would keep: staged and
-//! unstaged changes to tracked files, captureable regular untracked files
-//! and declared ignored deliverables, under the capture file-size cap. `None` when the worktree cannot be read as a git checkout, so two
-//! unreadable states never look like a change.
+//! The fingerprint covers the unstaged and staged diffs of tracked files
+//! (`git diff`, `git diff --cached`), and the bytes of every untracked,
+//! non-ignored file and of every declared target path (tracked, untracked
+//! or ignored). A path adds bytes only when it is a regular file no larger
+//! than the capture cap (`max_file_bytes`): a symlink, special file,
+//! missing path or larger file adds nothing, so a change to it alone is not
+//! progress. `None` when git cannot read the worktree, so two unreadable
+//! states never look like a change.
 
 use std::{collections::BTreeSet, path::Path};
 
