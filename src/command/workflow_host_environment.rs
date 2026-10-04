@@ -76,8 +76,13 @@ pub(crate) fn resolve(
     match profile {
         EnvironmentProfileId::None => {}
         EnvironmentProfileId::FreezeProvider => {
+            // Config load refuses an execution-control name (Issue 282); a
+            // context built any other way still never forwards one.
             for name in &context.acceptance_environment_allowlist {
-                copy(&mut environment, name);
+                match archon_shell::data_environment::check_data_variable(name) {
+                    Ok(()) => copy(&mut environment, name),
+                    Err(reason) => tracing::error!("not forwarded to the host command: {reason}"),
+                }
             }
             environment.extend(
                 context

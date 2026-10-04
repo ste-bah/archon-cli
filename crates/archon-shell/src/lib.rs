@@ -245,6 +245,11 @@ pub mod write_boundary;
 // Issue-234: one plain spelling for a canonical path (no Windows `\\?\` prefix).
 pub mod paths;
 
+// Issue-282: which host variables may be forwarded to a child as data only.
+// Here, in the leaf, because config load (archon-core), the scratch policy
+// (archon-workflow) and the host-command environment (the bin) all apply it.
+pub mod data_environment;
+
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;

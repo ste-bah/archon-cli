@@ -67,6 +67,33 @@ fn allowlist_rejects_case_aliases_of_protected_bindings() {
         assert!(p.validate().is_err(), "case alias accepted: {name}");
     }
 }
+/// Issue 282: names that change what runs or how it is built are refused by
+/// name, whatever their case, while provider data names still pass.
+#[test]
+fn allowlist_rejects_loader_toolchain_interpreter_and_vcs_controls() {
+    let (_t, mut p, _, _, _) = support::fixture("test -f input");
+    for name in [
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "DYLD_LIBRARY_PATH",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_BUILD_RUSTC_WRAPPER",
+        "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER",
+        "PYTHONPATH",
+        "NODE_OPTIONS",
+        "GIT_CONFIG_COUNT",
+        "DOTNET_STARTUP_HOOKS",
+        "ld_preload",
+        "Node_Options",
+    ] {
+        p.environment_allowlist = vec![name.into()];
+        let error = p.validate().expect_err(name).to_string();
+        assert!(error.contains(&format!("'{name}'")), "{name}: {error}");
+    }
+    p.environment_allowlist = vec!["POLYGON_API_KEY".into(), "OPENBB_API_URL".into()];
+    p.validate().expect("provider data names stay allowed");
+}
 #[test]
 fn redaction_preserves_complete_output_and_masks_only_truncated_streams() {
     let status = std::process::Command::new(std::env::current_exe().unwrap())

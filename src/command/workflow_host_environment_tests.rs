@@ -15,6 +15,7 @@ fn isolated(test: &str) {
         .env("XDG_CONFIG_HOME", std::env::temp_dir().join("config"))
         .env("ARCHON_274_ALLOWED", "allowed-canary")
         .env("ARCHON_274_PRIVATE", "private-canary")
+        .env("NODE_OPTIONS", "--require=/nonexistent-282-preload.js")
         .status()
         .unwrap();
     assert!(status.success(), "isolated {test} failed");
@@ -28,6 +29,30 @@ fn freeze_request_environment_regression() {
 #[test]
 fn allowlisted_request_environment_regression() {
     isolated("allowlisted_request_environment_child");
+}
+
+#[test]
+fn execution_control_never_forwarded_regression() {
+    isolated("execution_control_never_forwarded_child");
+}
+
+/// Issue 282: a context that names an execution-control variable (config
+/// load refuses one, but a context is built in more than one place) still
+/// never hands its value to a child; data names next to it still pass.
+#[test]
+#[ignore = "isolated process environment"]
+fn execution_control_never_forwarded_child() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut context = configured_context(temp.path());
+    context
+        .acceptance_environment_allowlist
+        .push("NODE_OPTIONS".into());
+    let resolved = resolve(&context);
+    assert!(
+        !resolved.environment.contains_key("NODE_OPTIONS"),
+        "execution control forwarded"
+    );
+    assert!(resolved.environment.contains_key("ARCHON_274_ALLOWED"));
 }
 
 #[test]

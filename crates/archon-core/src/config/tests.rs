@@ -308,3 +308,49 @@ fn max_residual_passes_is_validated_to_one_through_fifty() {
     cfg.workflow.generated.max_residual_passes = 1;
     assert!(validate(&cfg).is_ok());
 }
+
+/// Issue 282: an allowlisted acceptance variable may only carry data. A name a
+/// loader, toolchain, interpreter, shell or git reads to change what runs is
+/// refused when the configuration is loaded, by name and with the reason.
+fn acceptance_allowlist(names: &[&str]) -> String {
+    format!(
+        "[workflow.acceptance_execution]\nrepository=\"/repo\"\nscratch_parent=\"/scratch\"\n\
+         project_inputs=[]\nproject_repository_view=\"separate\"\ntoolchain_path=\"/usr/bin\"\n\
+         environment_allowlist={names:?}\ntimeout_secs=60\noutput_bytes=8192\nscratch_bytes=1024\n"
+    )
+}
+
+#[test]
+fn acceptance_allowlist_refuses_execution_controls_at_load() {
+    for name in [
+        "LD_PRELOAD",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER",
+        "PYTHONSTARTUP",
+        "NODE_OPTIONS",
+        "BASH_ENV",
+        "GIT_SSH_COMMAND",
+        "ld_preload",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, acceptance_allowlist(&[name])).unwrap();
+        let error = load_config_if_exists(path).expect_err(name).to_string();
+        assert!(
+            error.contains("workflow.acceptance_execution.environment_allowlist"),
+            "{name}: {error}"
+        );
+        assert!(error.contains(&format!("'{name}'")), "{name}: {error}");
+    }
+}
+
+#[test]
+fn acceptance_allowlist_accepts_provider_data_names() {
+    let cfg: ArchonConfig = toml::from_str(&acceptance_allowlist(&[
+        "POLYGON_API_KEY",
+        "OPENBB_API_URL",
+    ]))
+    .unwrap();
+    validate(&cfg).expect("provider data names are allowed");
+}
