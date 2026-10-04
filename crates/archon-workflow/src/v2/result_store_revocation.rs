@@ -110,8 +110,11 @@ impl WorkflowV2ResultStore {
 
     fn execute_revocation(
         &self,
-        plan: RevocationPlan,
+        mut plan: RevocationPlan,
     ) -> WorkflowResult<Vec<WorkflowV2DeletedBranchOutcome>> {
+        // A quarantined current slot can also be a branch's own file: move once.
+        let mut seen = std::collections::BTreeSet::new();
+        plan.moves.retain(|path| seen.insert(path.clone()));
         self.move_revoked(&plan.moves)?;
         Ok(plan.revoked)
     }
@@ -207,8 +210,18 @@ fn special_files_in(dir: &Path, archived: bool) -> WorkflowResult<Vec<PathBuf>> 
         let entry = entry.map_err(|err| WorkflowError::io(dir, err))?;
         let path = entry.path();
         let named = archived || path.extension().and_then(|value| value.to_str()) == Some("json");
-        let special = fs::metadata(&path).is_ok_and(|target| !target.is_file() && !target.is_dir());
-        if named && special {
+        if !named {
+            continue;
+        }
+        // A link that cannot be resolved is left for the outcome scan, which
+        // fails the plan on it; any other classification error fails here,
+        // before anything moves.
+        let target = match fs::metadata(&path) {
+            Ok(target) => target,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(WorkflowError::io(&path, err)),
+        };
+        if !target.is_file() && !target.is_dir() {
             files.push(path);
         }
     }

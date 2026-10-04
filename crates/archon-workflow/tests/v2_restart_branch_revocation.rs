@@ -359,3 +359,27 @@ fn a_fifo_in_the_archive_never_blocks_restart() {
     }));
     assert_revoked(&v2, "T-A");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_fifo_current_slot_is_quarantined_once_with_its_branch_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run(&temp, &[CALL]);
+    let v2 = v2_store(&store, &run);
+    landed_then_superseded(&v2, "T-A");
+    let current = v2.branch_outcome_path(CALL, &item("T-A").id);
+    std::fs::remove_file(&current).unwrap();
+    let path = std::ffi::CString::new(current.as_os_str().as_encoded_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+    let (done, wait) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(
+            restart_generated_v2_task(&store, &run, "T-A").map_err(|error| error.to_string()),
+        );
+    });
+    wait.recv_timeout(std::time::Duration::from_secs(20))
+        .expect("restart blocked on a FIFO current slot")
+        .unwrap();
+    assert!(std::fs::symlink_metadata(&current).is_err());
+    assert_revoked(&v2, "T-A");
+}
