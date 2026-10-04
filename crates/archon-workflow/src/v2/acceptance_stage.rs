@@ -334,7 +334,10 @@ fn highest_round(run_dir: &Path) -> Option<u32> {
 }
 
 /// Persist a round record as the next attempt of its round, returning the
-/// path written. Append-only: an existing attempt is never touched.
+/// path written. Append-only: an existing attempt is never touched. The
+/// record lands whole or not at all (staged, synced, renamed), and the
+/// directories that hold it are synced, so a system crash cannot leave a
+/// torn record or lose a written one.
 pub fn write_round_record(
     run_dir: &Path,
     record: &AcceptanceRoundRecordV1,
@@ -352,8 +355,27 @@ pub fn write_round_record(
     // The order entry first, synced: a record never exists without its
     // place in the recording order unless the log itself failed.
     progress::note_recorded(run_dir, record.round, record.attempt);
-    std::fs::write(&path, bytes).map_err(|source| WorkflowError::io(&path, source))?;
+    // The staging name is never an `attempt-*.json`: a crash before the
+    // rename leaves no record.
+    let staging = dir.join(format!(
+        ".{}.{}.tmp",
+        attempt_file_name(record.attempt),
+        uuid::Uuid::new_v4()
+    ));
+    if let Err(error) = crate::store::write_atomic(&staging, &path, &bytes) {
+        let _ = std::fs::remove_file(&staging);
+        return Err(error);
+    }
+    sync_record_dirs(run_dir, &dir)?;
     Ok(path)
+}
+
+/// Syncs `dir` and each directory above it up to `run_dir`: any of them
+/// `create_dir_all` may just have made, so each new entry survives a crash.
+fn sync_record_dirs(run_dir: &Path, dir: &Path) -> WorkflowResult<()> {
+    (dir.ancestors())
+        .take_while(|ancestor| ancestor.starts_with(run_dir))
+        .try_for_each(crate::store::sync_dir)
 }
 
 /// The most recent record: highest round, highest attempt. `None` when the

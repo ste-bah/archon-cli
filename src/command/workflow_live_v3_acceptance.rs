@@ -169,7 +169,7 @@ pub(super) async fn run_acceptance_stage(
     // round count, an error the host can retry, or a check it can reassign.
     // Decision A: the failing states this run reached and the revisits in a
     // row, kept across attempts and resumes.
-    let mut ledger = progress::ProgressLedger::load(&run_dir, request.round);
+    let mut ledger = progress::ProgressLedger::load(&run_dir, request.round)?;
     let decision = progress::decide_with(&mut ledger, &record);
     record.final_round = decision.final_round;
     let path = write_round_record(&run_dir, &record)?;

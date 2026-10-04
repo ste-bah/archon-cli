@@ -217,7 +217,7 @@ fn the_ledger_is_persisted_and_rebuilt_from_records_when_absent() {
     let b = round(2, vec![failed("AC-2", "x")]);
     write_round_record(dir.path(), &a).unwrap();
     write_round_record(dir.path(), &b).unwrap();
-    let rebuilt = ProgressLedger::load(dir.path(), 3);
+    let rebuilt = ProgressLedger::load(dir.path(), 3).unwrap();
     assert_eq!(
         rebuilt,
         ProgressLedger::from_history(&[a.clone(), b.clone()])
@@ -226,7 +226,7 @@ fn the_ledger_is_persisted_and_rebuilt_from_records_when_absent() {
     assert_eq!(ledger.observe(&round(3, vec![failed("AC-1", "y")])), 1);
     write_round_record(dir.path(), &round(3, vec![failed("AC-1", "y")])).unwrap();
     ledger.save(dir.path()).unwrap();
-    let resumed = ProgressLedger::load(dir.path(), 3);
+    let resumed = ProgressLedger::load(dir.path(), 3).unwrap();
     assert_eq!(resumed.revisits, 1);
     assert_eq!(resumed.seen.len(), 2);
 }
@@ -242,9 +242,9 @@ fn rebuild_keeps_all_attempts_including_the_resumed_round_and_records_win() {
         write_round_record(dir.path(), record).unwrap();
     }
     let expected = ProgressLedger::from_history(&[a.clone(), b, c.clone()]);
-    assert_eq!(ProgressLedger::load(dir.path(), 2), expected);
+    assert_eq!(ProgressLedger::load(dir.path(), 2).unwrap(), expected);
     ProgressLedger::from_history(&[a]).save(dir.path()).unwrap();
-    let mut ledger = ProgressLedger::load(dir.path(), 2);
+    let mut ledger = ProgressLedger::load(dir.path(), 2).unwrap();
     assert_eq!(
         ledger, expected,
         "a readable stale ledger cannot hide records"
@@ -271,7 +271,7 @@ fn the_ledger_is_rebuilt_in_recording_order_across_a_resume() {
     for record in [x(1, 1), x(2, 1), y(1, 2), y(2, 2)] {
         write_round_record(dir.path(), &record).unwrap();
     }
-    assert_eq!(ProgressLedger::load(dir.path(), 3).revisits, 1);
+    assert_eq!(ProgressLedger::load(dir.path(), 3).unwrap().revisits, 1);
 }
 
 /// Round 6: a record whose order entry is lost is placed by its own write
@@ -301,9 +301,169 @@ fn an_unlogged_record_is_placed_by_its_own_write_time() {
     let kept: Vec<String> = std::fs::read_to_string(&log)
         .unwrap()
         .lines()
-        .filter(|line| !line.starts_with("1 2 "))
+        .filter(|line| !names_entry(line, 1, 2))
         .map(str::to_string)
         .collect();
     std::fs::write(&log, kept.join("\n") + "\n").unwrap();
-    assert_eq!(ProgressLedger::load(dir.path(), 3).revisits, 1);
+    assert_eq!(ProgressLedger::load(dir.path(), 3).unwrap().revisits, 1);
+}
+
+/// Whether a recording-order line is the entry of (`round`, `attempt`), in
+/// any format a writer of the log used: `round attempt`, `round attempt
+/// nanos`, or a sequenced `seq=<n> round attempt`.
+fn names_entry(line: &str, round: u32, attempt: u32) -> bool {
+    let fields: Vec<&str> = (line.split_whitespace())
+        .filter(|field| !field.starts_with("seq="))
+        .collect();
+    fields.get(..2) == Some(&[round.to_string().as_str(), attempt.to_string().as_str()][..])
+}
+
+fn set(n: u32, attempt: u32, id: &str) -> AcceptanceRoundRecordV1 {
+    let mut record = round(n, vec![failed(id, "x")]);
+    record.attempt = attempt;
+    record
+}
+
+fn order_log(run_dir: &Path) -> std::path::PathBuf {
+    run_dir
+        .join(ACCEPTANCE_RECORDS_DIR)
+        .join("recording-order.log")
+}
+
+/// Gives the record of (`round`, `attempt`) the file time `secs` after the
+/// epoch.
+fn set_file_time(run_dir: &Path, round: u32, attempt: u32, secs: u64) {
+    let path = round_dir(run_dir, round).join(attempt_file_name(attempt));
+    let file = std::fs::File::options().write(true).open(path).unwrap();
+    let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+    file.set_modified(at).unwrap();
+}
+
+/// R1{X}, R2{X}, then after a resume R1#2{Y}, written by the real writer
+/// with file times `secs`; `log`, when given, replaces the order log.
+fn x_x_y(secs: [u64; 3], log: Option<&str>) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let records = [set(1, 1, "AC-X"), set(2, 1, "AC-X"), set(1, 2, "AC-Y")];
+    for (record, secs) in records.iter().zip(secs) {
+        write_round_record(dir.path(), record).unwrap();
+        set_file_time(dir.path(), record.round, record.attempt, secs);
+    }
+    if let Some(log) = log {
+        std::fs::write(order_log(dir.path()), log).unwrap();
+    }
+    dir
+}
+
+/// X, X, Y ends on a new state (no revisit), so the next Y is the first
+/// revisit: it escalates and never pauses.
+fn assert_replayed_x_x_y(run_dir: &Path) {
+    let mut ledger = ProgressLedger::load(run_dir, 2).unwrap();
+    assert_eq!(ledger.revisits, 0, "X, X, Y ends on a state never reached");
+    let decision = decide_with(&mut ledger, &set(2, 2, "AC-Y"));
+    assert_eq!(
+        (decision.stalled_rounds, decision.escalate, decision.pause),
+        (1, true, None),
+        "the next Y is the first revisit"
+    );
+}
+
+/// Round 7: the log's own order is authoritative. A clock stepped back
+/// between the writes (later entries carry earlier times, and so do the
+/// record files) never reorders X, X, Y as Y, X, X.
+#[test]
+fn a_clock_stepped_back_never_reorders_logged_records() {
+    let log = "1 1 3000000000000\n2 1 2000000000000\n1 2 1000000000000\n";
+    assert_replayed_x_x_y(x_x_y([3000, 2000, 1000], Some(log)).path());
+}
+
+/// Round 7: records the writer itself logged keep the log's order whatever
+/// their file times say.
+#[test]
+fn logged_records_keep_the_log_order_over_backward_file_times() {
+    assert_replayed_x_x_y(x_x_y([3000, 2000, 1000], None).path());
+}
+
+/// Round 7: equal times (a coarse clock, or a 2 s FAT write time) are no
+/// tie to break by (round, attempt): the log's order decides.
+#[test]
+fn equal_timestamps_replay_in_log_order() {
+    let log = "1 1 5000000000000\n2 1 5000000000000\n1 2 5000000000000\n";
+    assert_replayed_x_x_y(x_x_y([5000; 3], Some(log)).path());
+}
+
+/// Round 7: a log written in the earlier two-column format (`round
+/// attempt`, no time) is read in its own order, never ignored.
+#[test]
+fn legacy_two_column_entries_replay_in_log_order() {
+    let log = "1 1\n2 1\n1 2\n";
+    assert_replayed_x_x_y(x_x_y([3000, 2000, 1000], Some(log)).path());
+}
+
+/// Round 7: a run whose log began in an earlier format and goes on in this
+/// one keeps one order: the new entries follow the old ones. A torn last
+/// line never swallows the entry appended after it.
+#[test]
+fn a_legacy_or_torn_log_continued_by_this_writer_keeps_its_order() {
+    for legacy in ["1 1\n2 1 7000\n", "1 1\n2 1"] {
+        let dir = tempfile::tempdir().unwrap();
+        for (record, secs) in [(set(1, 1, "AC-X"), 3000), (set(2, 1, "AC-X"), 2000)] {
+            write_round_record(dir.path(), &record).unwrap();
+            set_file_time(dir.path(), record.round, record.attempt, secs);
+        }
+        std::fs::write(order_log(dir.path()), legacy).unwrap();
+        write_round_record(dir.path(), &set(1, 2, "AC-Y")).unwrap();
+        set_file_time(dir.path(), 1, 2, 1000);
+        assert_replayed_x_x_y(dir.path());
+    }
+}
+
+/// Round 7: a record replay cannot read is reported as corrupt state naming
+/// the file, never skipped: skipping it would silently change the states
+/// reached and the revisit count.
+#[test]
+fn an_unreadable_record_is_reported_never_skipped() {
+    for broken in [
+        "{\"schema_version\": 1, \"round\":",
+        "{\"schema_version\": 1, \"run_id\": \"r\", \"call_id\": \"c\", \"round\": \"one\", \"attempt\": 1, \"max_rounds\": 3, \"contract_present\": true, \"final_round\": false}",
+    ] {
+        let dir = x_x_y([1000, 2000, 3000], None);
+        let path = round_dir(dir.path(), 2).join(attempt_file_name(1));
+        std::fs::write(&path, broken).unwrap();
+        let error = ProgressLedger::load(dir.path(), 2).expect_err("a corrupt record is reported");
+        assert!(
+            matches!(&error, crate::WorkflowError::StateCorrupt(detail)
+                if detail.contains(&path.display().to_string())),
+            "{error:?}"
+        );
+    }
+}
+
+/// Round 7: a record lands whole or not at all. The write leaves nothing
+/// but the record, and a staging file a crash left behind is no record:
+/// replay, the next attempt number and the latest record all ignore it.
+#[test]
+fn a_record_lands_whole_and_a_crashed_staging_file_is_no_record() {
+    let dir = tempfile::tempdir().unwrap();
+    write_round_record(dir.path(), &set(1, 1, "AC-X")).unwrap();
+    let round_one = round_dir(dir.path(), 1);
+    let names = |dir: &Path| -> Vec<String> {
+        let mut names: Vec<String> = (std::fs::read_dir(dir).unwrap())
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    assert_eq!(names(&round_one), vec![attempt_file_name(1)]);
+    std::fs::write(
+        round_one.join(".attempt-02.json.crashed.tmp"),
+        "{\"round\":",
+    )
+    .unwrap();
+    assert_eq!(next_attempt(dir.path(), 1), 2);
+    let ledger = ProgressLedger::load(dir.path(), 2).unwrap();
+    assert_eq!(ledger.seen.len(), 1);
+    let (latest, _) = super::super::latest_round_record(dir.path())
+        .unwrap()
+        .unwrap();
+    assert_eq!((latest.round, latest.attempt), (1, 1));
 }

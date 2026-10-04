@@ -94,16 +94,17 @@ impl ProgressLedger {
 
     /// Records are authoritative: the record is written before the ledger,
     /// so even a readable ledger may lag after an interrupted write. Replay
-    /// every recorded attempt, including attempts of the resumed round.
-    pub fn load(run_dir: &Path, _round: u32) -> Self {
-        let history = all_attempts(run_dir);
+    /// every recorded attempt, including attempts of the resumed round. A
+    /// record that cannot be read is an error naming it, never skipped.
+    pub fn load(run_dir: &Path, _round: u32) -> crate::WorkflowResult<Self> {
+        let history = all_attempts(run_dir)?;
         if !history.is_empty() {
-            return Self::from_history(&history);
+            return Ok(Self::from_history(&history));
         }
-        std::fs::read(Self::path(run_dir))
+        Ok(std::fs::read(Self::path(run_dir))
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
 
     pub fn save(&self, run_dir: &Path) -> crate::WorkflowResult<()> {
@@ -118,62 +119,9 @@ impl ProgressLedger {
     }
 }
 
-/// The order round records were written in, one `round attempt` line per
-/// record, under the acceptance records directory. A resume restarts the
-/// loop at round 1, so (round, attempt) is not the order they ran in.
-const RECORDING_ORDER_FILE: &str = "recording-order.log";
-
-/// Appends `round attempt nanos` (the time of the write, since the epoch) to
-/// the recording order and syncs it. Best effort: a record the log misses
-/// is still read, placed by its own file time.
-pub(super) fn note_recorded(run_dir: &Path, round: u32, attempt: u32) {
-    use std::io::Write;
-    let dir = run_dir.join(ACCEPTANCE_RECORDS_DIR);
-    let path = dir.join(RECORDING_ORDER_FILE);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |at| at.as_nanos());
-    let appended = std::fs::create_dir_all(&dir)
-        .and_then(|()| {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-        })
-        .and_then(|mut file| {
-            writeln!(file, "{round} {attempt} {nanos}")?;
-            file.sync_all()
-        });
-    if let Err(error) = appended {
-        tracing::warn!(%error, path = %path.display(), "acceptance recording order not appended");
-    }
-}
-
-/// Each logged (round, attempt) with the time it was recorded; the LAST
-/// entry wins, so a write retried after a failed one takes its new place.
-/// An entry whose record never landed matches no record and is ignored.
-fn recording_order(run_dir: &Path) -> std::collections::BTreeMap<(u32, u32), u128> {
-    let text = std::fs::read_to_string(
-        run_dir
-            .join(ACCEPTANCE_RECORDS_DIR)
-            .join(RECORDING_ORDER_FILE),
-    )
-    .unwrap_or_default();
-    let mut order = std::collections::BTreeMap::new();
-    for line in text.lines() {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if let [round, attempt, nanos] = parts[..]
-            && let (Ok(round), Ok(attempt), Ok(nanos)) = (
-                round.parse::<u32>(),
-                attempt.parse::<u32>(),
-                nanos.parse::<u128>(),
-            )
-        {
-            order.insert((round, attempt), nanos);
-        }
-    }
-    order
-}
+#[path = "acceptance_record_order.rs"]
+mod order;
+pub(super) use order::note_recorded;
 
 /// When the record file at `path` was last written, in epoch nanoseconds.
 fn file_time(path: &Path) -> u128 {
@@ -184,40 +132,55 @@ fn file_time(path: &Path) -> u128 {
         .map_or(0, |at| at.as_nanos())
 }
 
-/// Every readable round record, in the order the records were written: by
-/// the time the order log gives it, else (a missed append, or a run from
-/// before the log) by its own file time, never simply first. Gaps in
-/// numbering and stale ledgers cannot erase recorded states.
-fn all_attempts(run_dir: &Path) -> Vec<AcceptanceRoundRecordV1> {
+/// Every round record, in the order the records were written (`order`: the
+/// log's order, else the record's own file time, never simply first). Gaps
+/// in numbering and stale ledgers cannot erase recorded states, and neither
+/// can a record that will not read or parse: as for the latest record, that
+/// is an error naming the file. Records land whole (staged and renamed), so
+/// such a file is damage, never a write in progress.
+fn all_attempts(run_dir: &Path) -> crate::WorkflowResult<Vec<AcceptanceRoundRecordV1>> {
     let mut history = Vec::new();
-    if let Ok(rounds) = std::fs::read_dir(run_dir.join(ACCEPTANCE_RECORDS_DIR)) {
-        for round in rounds.flatten() {
-            if let Ok(attempts) = std::fs::read_dir(round.path()) {
-                for attempt in attempts.flatten() {
-                    let path = attempt.path();
-                    let is_record =
-                        path.file_name()
-                            .and_then(|name| name.to_str())
-                            .is_some_and(|name| {
-                                name.starts_with("attempt-") && name.ends_with(".json")
-                            });
-                    if is_record
-                        && let Ok(bytes) = std::fs::read(&path)
-                        && let Ok(record) =
-                            serde_json::from_slice::<AcceptanceRoundRecordV1>(&bytes)
-                    {
-                        history.push((file_time(&path), record));
-                    }
-                }
-            }
+    for round in entries_named(&run_dir.join(ACCEPTANCE_RECORDS_DIR), |name| {
+        name.starts_with("round-")
+    })? {
+        if !round.is_dir() {
+            continue;
+        }
+        let is_record = |name: &str| name.starts_with("attempt-") && name.ends_with(".json");
+        for path in entries_named(&round, is_record)? {
+            let bytes = std::fs::read(&path).map_err(|e| crate::WorkflowError::io(&path, e))?;
+            let record =
+                serde_json::from_slice::<AcceptanceRoundRecordV1>(&bytes).map_err(|e| {
+                    crate::WorkflowError::StateCorrupt(format!(
+                        "acceptance record {} will not parse: {e}",
+                        path.display()
+                    ))
+                })?;
+            history.push((file_time(&path), record));
         }
     }
-    let order = recording_order(run_dir);
-    history.sort_by_key(|(written, record)| {
-        let at = order.get(&(record.round, record.attempt)).copied();
-        (at.unwrap_or(*written), record.round, record.attempt)
-    });
-    history.into_iter().map(|(_, record)| record).collect()
+    order::in_recorded_order(run_dir, history)
+}
+
+/// The paths in `dir` whose file names `keep` accepts; none when `dir` does
+/// not exist (no round recorded yet).
+fn entries_named(
+    dir: &Path,
+    keep: impl Fn(&str) -> bool,
+) -> crate::WorkflowResult<Vec<std::path::PathBuf>> {
+    let listing = match std::fs::read_dir(dir) {
+        Ok(listing) => listing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(crate::WorkflowError::io(dir, error)),
+    };
+    let mut paths = Vec::new();
+    for entry in listing {
+        let entry = entry.map_err(|e| crate::WorkflowError::io(dir, e))?;
+        if entry.file_name().to_str().is_some_and(&keep) {
+            paths.push(entry.path());
+        }
+    }
+    Ok(paths)
 }
 
 /// Whether `current` reached a failing state none of `history` reached.

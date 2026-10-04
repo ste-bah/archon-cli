@@ -448,7 +448,10 @@ fn validate_run_relative_path(path: &Path) -> WorkflowResult<()> {
     Ok(())
 }
 
-fn write_atomic(tmp: &Path, target: &Path, bytes: &[u8]) -> WorkflowResult<()> {
+/// Writes `bytes` to `target` whole or not at all: staged in `tmp`, synced,
+/// then renamed over it. The new directory entry is not synced: a caller
+/// that needs it to survive a system crash also calls [`sync_dir`].
+pub(crate) fn write_atomic(tmp: &Path, target: &Path, bytes: &[u8]) -> WorkflowResult<()> {
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|e| WorkflowError::io(parent, e))?;
     }
@@ -459,6 +462,33 @@ fn write_atomic(tmp: &Path, target: &Path, bytes: &[u8]) -> WorkflowResult<()> {
         file.sync_all().map_err(|e| WorkflowError::io(tmp, e))?;
     }
     fs::rename(tmp, target).map_err(|e| WorkflowError::io(target, e))?;
+    Ok(())
+}
+
+/// Syncs the directory `dir`, so the entries created, renamed or removed in
+/// it survive a system crash. On Unix the directory is opened and synced; a
+/// file system that cannot sync a directory (`EINVAL`, `ENOTSUP`) has
+/// nothing more to give, and that is no error. Elsewhere it is a no-op, so
+/// a durable write there is what [`write_atomic`] alone gives: `File::open`
+/// does not open a directory on Windows.
+pub(crate) fn sync_dir(dir: &Path) -> WorkflowResult<()> {
+    #[cfg(unix)]
+    {
+        let handle = File::open(dir).map_err(|e| WorkflowError::io(dir, e))?;
+        match handle.sync_all() {
+            Err(e)
+                if !matches!(
+                    e.kind(),
+                    std::io::ErrorKind::InvalidInput | std::io::ErrorKind::Unsupported
+                ) =>
+            {
+                return Err(WorkflowError::io(dir, e));
+            }
+            _ => {}
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
     Ok(())
 }
 
