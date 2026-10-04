@@ -321,8 +321,15 @@ const FAMILIES: &[Family] = &[
             "CONTAINER_HOST",
             "CONTAINER_CONNECTION",
             "CONTAINER_SSHKEY",
+            "BUILDKIT_HOST",
         ],
         prefixes: &[],
+    },
+    Family {
+        reason: "package managers and browser installers read these bindings to choose \
+                 where they download the code or binaries a check then runs",
+        names: &["PLAYWRIGHT_DOWNLOAD_HOST", "PDM_PYPI_URL"],
+        prefixes: &["PUPPETEER_", "POETRY_REPOSITORIES_", "POETRY_SOURCE"],
     },
     Family {
         reason: ".NET, PowerShell or Windows reads it to load a profiler, startup-hook \
@@ -375,6 +382,10 @@ pub fn execution_control(name: &str) -> Option<&'static str> {
                             "NODE_DISABLE",
                             "NODE_COMPILE",
                             "NODE_USE_",
+                            // cluster and IPC bindings: they turn a process into a
+                            // worker of a parent it does not have
+                            "NODE_UNIQUE_ID",
+                            "NODE_CHANNEL",
                         ]
                         .iter()
                         .any(|p| upper.starts_with(p))
