@@ -332,6 +332,14 @@ impl WorkflowScriptHost {
                     .await;
             }
         };
+        let dispatched = match dispatched {
+            // Issue 263: a streak of never-started dispatches pauses the run,
+            // recorded below like any other pause.
+            Err(err) => Err(self
+                .pause_on_never_started_streak(&call_id, dispatch_generation, err)
+                .await),
+            ok => ok,
+        };
         let result = match dispatched {
             Ok(result) => result,
             Err(err)
@@ -341,11 +349,6 @@ impl WorkflowScriptHost {
                 self.result_for_failed_dispatch(&call_id, err).await?
             }
             Err(err) => {
-                // Issue 263: a streak of never-started dispatches pauses the
-                // run, recorded below like any other pause.
-                let err = self
-                    .pause_on_never_started_streak(&call_id, dispatch_generation, err)
-                    .await;
                 let control = control_interruption_reason(&err);
                 if control.is_some() {
                     // Issue-134: the run's call trees end before any record.

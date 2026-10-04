@@ -228,7 +228,8 @@ pub(crate) async fn prepare_acceptance_freeze_resumable(
         probed,
         resume,
     )
-    .await?;
+    .await
+    .map_err(|error| resumable(error, resume))?;
     findings::finish_acceptance(
         project_root,
         tasks_root,
