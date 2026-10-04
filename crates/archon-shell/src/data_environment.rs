@@ -328,8 +328,17 @@ const FAMILIES: &[Family] = &[
     Family {
         reason: "package managers and browser installers read these bindings to choose \
                  where they download the code or binaries a check then runs",
-        names: &["PLAYWRIGHT_DOWNLOAD_HOST", "PDM_PYPI_URL"],
-        prefixes: &["PUPPETEER_", "POETRY_REPOSITORIES_", "POETRY_SOURCE"],
+        names: &["PDM_PYPI_URL"],
+        // Playwright, Puppeteer, Selenium Manager and sharp read every binding
+        // in their namespace as install/runtime configuration (download hosts,
+        // per-browser mirrors, executable paths).
+        prefixes: &[
+            "PLAYWRIGHT_",
+            "PUPPETEER_",
+            "SE_",
+            "SHARP_",
+            "POETRY_REPOSITORIES_",
+        ],
     },
     Family {
         reason: ".NET, PowerShell or Windows reads it to load a profiler, startup-hook \
@@ -368,27 +377,27 @@ pub fn execution_control(name: &str) -> Option<&'static str> {
                             .iter()
                             .any(|p| upper.starts_with(p))
                     } else if *p == "NODE_" {
-                        [
-                            "NODE_OPTIONS",
-                            "NODE_PATH",
-                            "NODE_REPL",
-                            "NODE_EXTRA_CA_CERTS",
-                            "NODE_ICU_DATA",
-                            "NODE_V8",
-                            "NODE_REDIRECT",
-                            "NODE_TLS",
-                            "NODE_PENDING",
-                            "NODE_NO_",
-                            "NODE_DISABLE",
-                            "NODE_COMPILE",
-                            "NODE_USE_",
-                            // cluster and IPC bindings: they turn a process into a
-                            // worker of a parent it does not have
-                            "NODE_UNIQUE_ID",
-                            "NODE_CHANNEL",
-                        ]
-                        .iter()
-                        .any(|p| upper.starts_with(p))
+                        upper == "NODE_UNIQUE_ID"
+                            || [
+                                "NODE_OPTIONS",
+                                "NODE_PATH",
+                                "NODE_REPL",
+                                "NODE_EXTRA_CA_CERTS",
+                                "NODE_ICU_DATA",
+                                "NODE_V8",
+                                "NODE_REDIRECT",
+                                "NODE_TLS",
+                                "NODE_PENDING",
+                                "NODE_NO_",
+                                "NODE_DISABLE",
+                                "NODE_COMPILE",
+                                "NODE_USE_",
+                                // cluster and IPC bindings: they turn a process into a
+                                // worker of a parent it does not have
+                                "NODE_CHANNEL_",
+                            ]
+                            .iter()
+                            .any(|p| upper.starts_with(p))
                     } else {
                         upper.starts_with(p)
                     }

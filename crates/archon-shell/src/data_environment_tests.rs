@@ -252,6 +252,11 @@ fn cluster_bindings_and_download_sources_are_refused() {
         "PUPPETEER_DOWNLOAD_BASE_URL",
         "POETRY_REPOSITORIES_PRIVATE_URL",
         "PDM_PYPI_URL",
+        "PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST",
+        "PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST",
+        "SE_DRIVER_MIRROR_URL",
+        "SE_CHROMEDRIVER_MIRROR_URL",
+        "SHARP_DIST_BASE_URL",
     ] {
         assert!(check_data_variable(name).is_err(), "{name} was accepted");
     }
