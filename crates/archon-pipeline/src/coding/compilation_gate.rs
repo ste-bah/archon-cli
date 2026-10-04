@@ -332,11 +332,22 @@ fn job_outcome(confirmed: Result<io::Result<u32>, tokio::task::JoinError>) -> Tr
 const CHILD_REAP_BOUND: Duration = Duration::from_secs(5);
 
 /// Wait for the child within [`CHILD_REAP_BOUND`]: whether it was reaped.
+/// One deadline, measured from entry in real time; nothing is left running
+/// once this returns.
 async fn bounded_wait(child: &mut Box<dyn ChildWrapper>) -> bool {
-    let bound = tokio::task::spawn_blocking(|| std::thread::sleep(CHILD_REAP_BOUND));
+    let deadline = std::time::Instant::now() + CHILD_REAP_BOUND;
+    let expired = async {
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return;
+            }
+            tokio::time::sleep(left.min(Duration::from_millis(10))).await;
+        }
+    };
     tokio::select! {
         reaped = child.wait() => reaped.is_ok(),
-        _ = bound => false,
+        () = expired => false,
     }
 }
 

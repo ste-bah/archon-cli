@@ -37,7 +37,7 @@ impl ChildWrapper for NeverReaped {
     }
 }
 
-#[tokio::test(flavor = "current_thread", start_paused = true)]
+#[tokio::test]
 async fn the_reap_of_a_child_whose_termination_never_completes_is_bounded() {
     let real = tokio::process::Command::new("sleep")
         .arg("30")
@@ -45,9 +45,16 @@ async fn the_reap_of_a_child_whose_termination_never_completes_is_bounded() {
         .spawn()
         .unwrap();
     let mut child: Box<dyn ChildWrapper> = Box::new(NeverReaped(real));
-    let outcome = tokio::time::timeout(Duration::from_secs(600), cleanup_child(&mut child))
+    let entered = std::time::Instant::now();
+    let outcome = tokio::time::timeout(Duration::from_secs(60), cleanup_child(&mut child))
         .await
         .expect("cleanup must end within its own bound");
+    // One deadline from entry: about the bound, never far past it.
+    let took = entered.elapsed();
+    assert!(
+        took >= Duration::from_secs(4) && took < Duration::from_secs(8),
+        "{took:?}"
+    );
     assert_eq!(
         outcome,
         CleanupOutcome::TerminationRequestAccepted {
