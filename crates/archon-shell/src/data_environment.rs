@@ -328,7 +328,7 @@ const FAMILIES: &[Family] = &[
     Family {
         reason: "package managers and browser installers read these bindings to choose \
                  where they download the code or binaries a check then runs",
-        names: &["PDM_PYPI_URL"],
+        names: &["PDM_PYPI_URL", "DOWNLOAD_HOST"],
         // Playwright, Puppeteer, Selenium Manager and sharp read every binding
         // in their namespace as install/runtime configuration (download hosts,
         // per-browser mirrors, executable paths).
@@ -338,6 +338,7 @@ const FAMILIES: &[Family] = &[
             "SE_",
             "SHARP_",
             "POETRY_REPOSITORIES_",
+            "MONGOMS_",
         ],
     },
     Family {
