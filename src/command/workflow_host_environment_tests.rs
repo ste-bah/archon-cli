@@ -3,7 +3,8 @@ use super::*;
 const PREFIX: &str = "command::workflow_host_command_tests::environment_tests::";
 
 fn isolated(test: &str) {
-    let status = std::process::Command::new(std::env::current_exe().unwrap())
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command
         .args([
             "--ignored",
             "--exact",
@@ -15,9 +16,13 @@ fn isolated(test: &str) {
         .env("XDG_CONFIG_HOME", std::env::temp_dir().join("config"))
         .env("ARCHON_274_ALLOWED_TOKEN", "allowed-canary")
         .env("ARCHON_274_PRIVATE", "private-canary")
-        .env("NODE_OPTIONS", "--require=/nonexistent-282-preload.js")
-        .status()
-        .unwrap();
+        .env("NODE_OPTIONS", "--require=/nonexistent-282-preload.js");
+    #[cfg(windows)]
+    command.env(
+        "PSModuleAnalysisCachePath",
+        std::env::temp_dir().join("archon-273-module-analysis-cache"),
+    );
+    let status = command.status().unwrap();
     assert!(status.success(), "isolated {test} failed");
 }
 
@@ -259,6 +264,7 @@ fn supervised_environment_reader() {
         "TEMP",
         "TMP",
         "COMSPEC",
+        "PSModuleAnalysisCachePath",
     ] {
         assert!(
             std::env::var_os(name).is_some(),

@@ -220,3 +220,9 @@ async fn stdin_environment_child() {
     assert!(stdout.ends_with("opaque;$(printf not-executed)"));
     assert!(!stdout.contains("must-not-leak"));
 }
+
+#[path = "workflow_host_command_supervisor_tree_tests.rs"]
+mod tree;
+
+#[path = "workflow_host_command_supervisor_limit_tests.rs"]
+mod limit;

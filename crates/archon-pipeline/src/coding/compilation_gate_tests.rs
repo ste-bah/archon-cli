@@ -341,7 +341,7 @@ async fn compilation_timeout_terminates_descendant_processes() {
 
     assert!(!result.gate_passed);
     assert!(descendant_marker.exists(), "descendant must have started");
-    #[cfg(unix)]
+    // Both platforms confirm the tree empty (Windows: issue #242).
     assert!(
         result
             .evidence
@@ -470,6 +470,10 @@ mod support;
 #[cfg(unix)]
 #[path = "compilation_gate_tests/tree.rs"]
 mod tree;
+
+#[cfg(unix)]
+#[path = "compilation_gate_tests/reap.rs"]
+mod reap;
 
 use support::{
     await_process_exit, controlled_child_spec, fire_deadline, hold_until_exited, hold_until_started,

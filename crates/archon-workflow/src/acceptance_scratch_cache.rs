@@ -426,12 +426,31 @@ fn set_mtime(path: &Path, stamp: Stamp) -> WorkflowResult<Stamp> {
 
 /// lsof includes cwd references and open files, including detached descendants.
 /// Exit 1 with no diagnostics means no matches; any scan failure is unsafe.
+/// The guardian runs this under the policy's toolchain PATH, which need not
+/// name the directory `lsof` is in, so the shared lookup finds it.
+#[cfg(unix)]
 fn target_idle(target: &Path) -> bool {
-    std::process::Command::new("lsof")
+    let program = archon_shell::process_tree::lsof_program();
+    match std::process::Command::new(&program)
         .args(["-nP", "-t", "+D"])
         .arg(target)
         .output()
-        .is_ok_and(|out| {
-            out.status.code() == Some(1) && out.stdout.is_empty() && out.stderr.is_empty()
-        })
+    {
+        Ok(out) => out.status.code() == Some(1) && out.stdout.is_empty() && out.stderr.is_empty(),
+        Err(error) => {
+            eprintln!(
+                "acceptance cache idle check could not run {}: {error}; {} counts as busy",
+                program.display(),
+                target.display()
+            );
+            false
+        }
+    }
+}
+
+/// Off Unix there is no holder probe, so no target is proved idle (and a
+/// shared cache is refused before any slot is checked; see `try_lock`).
+#[cfg(not(unix))]
+fn target_idle(_target: &Path) -> bool {
+    false
 }

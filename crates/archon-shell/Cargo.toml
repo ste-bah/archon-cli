@@ -17,6 +17,17 @@ which.workspace = true
 libc.workspace = true
 tracing.workspace = true
 
+# Issues 242/273: a Job Object the caller owns, so it can terminate the job
+# and confirm it is empty (`job_object`); process-wrap keeps its own private.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 [dev-dependencies]
 # Builds fake Git-for-Windows install trees so shell discovery precedence is
 # testable on any platform, including from a Linux CI runner.

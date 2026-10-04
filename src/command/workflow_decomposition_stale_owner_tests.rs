@@ -107,6 +107,7 @@ fn hold_executor_lease_until_killed() {
         crate::command::workflow_host_command_groups::record_in(
             Some(&records),
             Some(group.id()),
+            None,
             "test-host-command",
         )
         .unwrap()
@@ -346,9 +347,15 @@ fn left_group(store: &WorkflowStore, run_id: &str) -> serde_json::Value {
     let dir = store
         .run_dir(run_id)
         .join(crate::command::workflow_host_command_groups::GROUP_RECORDS_DIR);
-    let mut records: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().collect();
-    assert_eq!(records.len(), 1);
-    read_json(&records.pop().unwrap().path())
+    // The record itself; its marker (`.pending`) sits beside it.
+    let mut records: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    assert_eq!(records.len(), 1, "{records:?}");
+    read_json(&records.pop().unwrap())
 }
 
 #[cfg(unix)]

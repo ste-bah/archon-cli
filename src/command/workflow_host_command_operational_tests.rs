@@ -477,3 +477,7 @@ fn round3_growing_operational_progress_has_no_total_attempt_limit() {
     history.push(attempt(131, Some(130)));
     assert_eq!(next_step(&history), NextStep::Pause("no_progress"));
 }
+
+#[cfg(unix)]
+#[path = "workflow_host_command_operational_stall_tests.rs"]
+mod stall;

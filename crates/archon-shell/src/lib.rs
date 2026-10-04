@@ -250,6 +250,18 @@ pub mod paths;
 // (archon-workflow) and the host-command environment (the bin) all apply it.
 pub mod data_environment;
 
+// Issue-270: every process a supervised child started, past its first
+// process group: here, in the leaf, because the host-command supervisor and
+// archon-workflow's check runner both confine their children with it.
+#[cfg(unix)]
+pub mod process_tree;
+
+// Issues 242/273: the Windows counterpart, a Job Object the caller owns, so a
+// timeout can terminate every process a child started and confirm the job
+// is empty before it returns.
+#[cfg(windows)]
+pub mod job_object;
+
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;

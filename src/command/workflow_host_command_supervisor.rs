@@ -7,47 +7,28 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use archon_workflow::{WorkflowError, WorkflowResult};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 
 use super::workflow_host_command_catalog::ResolvedHostCommand;
+#[path = "workflow_host_command_supervisor_io.rs"]
+mod io;
+use io::{SupervisorEvent, abort_stdin, drain_pipe, finish_pipe_tasks, spawn_stdin};
+#[path = "workflow_host_command_supervisor_guard.rs"]
+mod guard;
+use guard::{ProcessGroupGuard, stalled_output};
 #[path = "workflow_host_command_termination.rs"]
 mod termination;
-use termination::{terminate_and_reap, terminate_completed_group};
+#[cfg(all(test, unix))]
+pub(crate) use termination::SCANS_PAUSED;
+use termination::{confine, leader_exit, reap, terminate_and_reap, terminate_completed_group};
 
 #[cfg(unix)]
 const CLEANUP_GRACE: Duration = Duration::from_millis(100);
 const REAP_DEADLINE: Duration = Duration::from_secs(2);
-// A killed member stays visible as a zombie until its parent is reaped and it
-// is reparented, so the window has to outlast that on a loaded machine rather
-// than fail a call that terminated correctly.
-#[cfg(unix)]
-const DESCENDANT_AUDIT_ATTEMPTS: u32 = 25;
-#[cfg(unix)]
-const DESCENDANT_AUDIT_INTERVAL: Duration = Duration::from_millis(40);
-
-#[cfg(unix)]
-const SIGKILL_VALUE: i32 = libc::SIGKILL;
-#[cfg(not(unix))]
-const SIGKILL_VALUE: i32 = 0;
-
-/// True when no process remains in the group.
-#[cfg(unix)]
-fn group_is_empty(pgid: u32) -> WorkflowResult<bool> {
-    // Signal 0 performs error checking without delivering anything.
-    if unsafe { libc::kill(-(pgid as libc::pid_t), 0) } == 0 {
-        return Ok(false);
-    }
-    let error = std::io::Error::last_os_error();
-    match error.raw_os_error() {
-        Some(libc::ESRCH) => Ok(true),
-        // The group exists but is not ours to signal. That is still a survivor.
-        Some(libc::EPERM) => Ok(false),
-        _ => Err(WorkflowError::StageFailed(format!(
-            "auditing host command process group {pgid} failed: {error}"
-        ))),
-    }
-}
+/// How often the tree is scanned while the command runs (Issue 270 round
+/// 2): a descendant that leaves the group and the session is tied to the
+/// command only while its parent lives, so it has to be seen meanwhile.
+const TREE_SCAN_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HostCommandSignal {
@@ -115,22 +96,23 @@ pub(crate) struct SupervisedProcessOutput {
     pub(crate) stderr_bytes: u64,
 }
 
-#[derive(Debug)]
-enum SupervisorEvent {
-    OutputLimit { stream: &'static str, limit: u64 },
-    StdinFailure(String),
-}
-
-#[derive(Debug)]
-struct CapturedPipe {
-    bytes: Vec<u8>,
-    total: u64,
+impl SupervisedProcessOutput {
+    /// Whether the child wrote more (stdout, stderr) than was kept, from the
+    /// byte counts. A call whose output overflowed fails in the supervisor,
+    /// so a returned output is not expected to be truncated; a record reports
+    /// these counts rather than assuming that.
+    pub(crate) fn truncation(&self) -> (bool, bool) {
+        (
+            self.stdout_bytes > self.stdout.len() as u64,
+            self.stderr_bytes > self.stderr.len() as u64,
+        )
+    }
 }
 
 /// `group_records`, when given, keeps a record of the group while it is
 /// owned, so a resume after a parent kill can see it (Issue 251).
 pub(crate) async fn supervise_process_group(
-    request: ResolvedHostCommand,
+    mut request: ResolvedHostCommand,
     control: HostCommandControl,
     group_records: Option<&std::path::Path>,
 ) -> WorkflowResult<SupervisedProcessOutput> {
@@ -147,24 +129,52 @@ pub(crate) async fn supervise_process_group(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Its own session, not only its own group: a nested runner gives each of
+    // its checks a group of its own, and the session still holds those
+    // (Issue 270). On Linux it also becomes the reaper of its orphans, so a
+    // descendant that leaves the session as well stays its descendant.
     #[cfg(unix)]
-    command.process_group(0);
+    // SAFETY: setsid and prctl are async-signal-safe syscalls.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            archon_shell::process_tree::become_subreaper()
+        });
+    }
+    // Suspended until it is in the job `confine` makes (Issue 273), so that
+    // nothing it starts can be outside the job.
+    #[cfg(windows)]
+    command.creation_flags(archon_shell::job_object::CREATE_SUSPENDED_FLAG);
+    // A second guard behind the tree guard: the direct child dies with its
+    // handle even if confinement never got as far as a tree.
+    command.kill_on_drop(true);
 
     let mut child = command.spawn().map_err(|source| WorkflowError::Io {
         path: request.program.clone(),
         source,
     })?;
-    let process_group = child.id();
     // The select below observes timeout, control and completion. It cannot
     // observe this future being dropped - task cancellation, a panic, or an
     // early return on a path that never reaches termination - and a dropped
     // supervisor used to leave the whole process group running.
-    let mut group_guard = ProcessGroupGuard(process_group);
-    let _record = super::workflow_host_command_groups::record_in(
+    let tree = confine(&mut child)?;
+    #[cfg(unix)]
+    let mut group_guard = ProcessGroupGuard::new(tree, child);
+    #[cfg(not(unix))]
+    let mut group_guard = ProcessGroupGuard::new(tree);
+    group_guard.hold_record(super::workflow_host_command_groups::record_in(
         group_records,
-        process_group,
+        group_guard.tree.leader(),
+        group_guard.tree.job_name(),
         &request.command_id,
-    )?;
+    )?);
+    #[cfg(unix)]
+    let child = &mut *group_guard.child;
+    // Borrowed on every platform, as the Unix guard hands it out.
+    #[cfg(not(unix))]
+    let child = &mut child;
     let stdout = child.stdout.take().ok_or_else(|| {
         WorkflowError::StageFailed("host command stdout pipe was not created".to_string())
     })?;
@@ -184,86 +194,160 @@ pub(crate) async fn supervise_process_group(
         "stderr",
         event_tx.clone(),
     ));
-    let stdin_task = request.stdin.map(|bytes| {
-        let mut stdin = child.stdin.take().expect("piped stdin exists");
-        let tx = event_tx.clone();
-        tokio::spawn(async move {
-            let result = async {
-                stdin.write_all(&bytes).await?;
-                stdin.shutdown().await
-            }
-            .await;
-            if let Err(error) = result {
-                let _ = tx.send(SupervisorEvent::StdinFailure(error.to_string()));
-            }
-        })
-    });
+    let stdin_task = match request.stdin.take() {
+        Some(bytes) => {
+            let stdin = child.stdin.take().ok_or_else(|| {
+                WorkflowError::StageFailed("host command stdin pipe was not created".to_string())
+            })?;
+            Some(spawn_stdin(stdin, bytes, event_tx.clone()))
+        }
+        None => None,
+    };
     drop(event_tx);
 
     enum Outcome {
-        Completed(std::io::Result<std::process::ExitStatus>),
+        Completed(std::io::Result<()>),
         TimedOut,
         Controlled(HostCommandSignal),
         Event(SupervisorEvent),
     }
 
     let outcome = {
-        let wait = child.wait();
+        // The leader's exit, observed without reaping it (Unix): the tree is
+        // torn down while the unreaped leader still holds its pid.
+        let wait = leader_exit(child);
         tokio::pin!(wait);
         let timeout = tokio::time::sleep(Duration::from_secs(request.timeout_secs));
         tokio::pin!(timeout);
         let control = control.wait();
         tokio::pin!(control);
-        tokio::select! {
-            biased;
-            status = &mut wait => Outcome::Completed(status),
-            signal = &mut control => Outcome::Controlled(signal),
-            // A closed channel only means the drain tasks are done, which
-            // happens whenever the child closes its pipes before it exits.
-            // The pattern disables this branch then, leaving the wait.
-            Some(event) = event_rx.recv() => Outcome::Event(event),
-            _ = &mut timeout => Outcome::TimedOut,
+        // The first scan waits one interval: at spawn the tree is the leader.
+        let mut scan = tokio::time::interval_at(
+            tokio::time::Instant::now() + TREE_SCAN_INTERVAL,
+            TREE_SCAN_INTERVAL,
+        );
+        scan.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut scanning: Option<tokio::task::JoinHandle<()>> = None;
+        loop {
+            tokio::select! {
+                biased;
+                status = &mut wait => break Outcome::Completed(status),
+                signal = &mut control => break Outcome::Controlled(signal),
+                // A closed channel only means the drain tasks are done, which
+                // happens whenever the child closes its pipes before it exits.
+                // The pattern disables this branch then, leaving the wait.
+                Some(event) = event_rx.recv() => break Outcome::Event(event),
+                _ = &mut timeout => break Outcome::TimedOut,
+                // A scan runs on its own thread; the select keeps watching
+                // the exit, control and the clock meanwhile.
+                _ = scan.tick() => {
+                    if scanning.as_ref().is_none_or(tokio::task::JoinHandle::is_finished) {
+                        scanning = group_guard.tree.spawn_refresh();
+                    }
+                }
+            }
         }
     };
 
-    let status = match outcome {
-        Outcome::Completed(status) => {
-            let status = status.map_err(|error| {
-                WorkflowError::StageFailed(format!("waiting for host command failed: {error}"))
-            })?;
-            terminate_completed_group(process_group).await?;
-            group_guard.disarm();
-            status
+    match outcome {
+        Outcome::Completed(exit) => {
+            // Torn down before the leader is reaped, then reaped.
+            let mut teardown = terminate_completed_group(&group_guard.tree).await;
+            let status = reap(child).await;
+            group_guard.reaped();
+            if let Err(error) = &exit {
+                teardown =
+                    teardown.and_stalled(format!("waiting for host command failed: {error}"));
+            }
+            if let Err(evidence) = &status {
+                teardown = teardown.and_stalled(evidence.clone());
+            }
+            // The exit is polled first, so an overflow or a stdin failure may
+            // still be queued, or not yet seen at all, when it wins. Each is
+            // decided again here from what the pipes and the stdin writer
+            // actually report, with the outcome the event path gives (Issue
+            // 272). Pipes or a writer that do not finish once the tree is
+            // gone are held from outside it: part of the stall, settled with
+            // it, before the resume record may go.
+            let stdin = io::finish_stdin(stdin_task).await;
+            let pipes = finish_pipe_tasks(stdout_task, stderr_task).await;
+            for evidence in [stdin.as_ref().err(), pipes.as_ref().err()]
+                .into_iter()
+                .flatten()
+            {
+                teardown = teardown.and_stalled(evidence.clone());
+            }
+            if let Some(evidence) = group_guard.settle(teardown) {
+                return Ok(stalled_output(&evidence, pipes.ok(), false));
+            }
+            // Every error above is part of a stall that was settled; this arm
+            // only gives the compiler the values.
+            let (Ok(stdin), Ok((stdout, stderr)), Ok(status)) = (stdin, pipes, status) else {
+                return Ok(stalled_output(
+                    "host command teardown evidence lost",
+                    None,
+                    false,
+                ));
+            };
+            if let Some(error) = io::completion_failure(&request, &stdout, &stderr, stdin) {
+                return Err(error);
+            }
+            Ok(SupervisedProcessOutput {
+                exit_code: status.code(),
+                timed_out: false,
+                stdout: stdout.bytes,
+                stderr: stderr.bytes,
+                stdout_bytes: stdout.total,
+                stderr_bytes: stderr.total,
+            })
         }
         Outcome::TimedOut => {
-            terminate_and_reap(&mut child, process_group).await?;
-            audit_no_descendants(process_group).await?;
+            let teardown = terminate_and_reap(child, &group_guard.tree).await;
+            group_guard.reaped();
             abort_stdin(stdin_task);
             // Issue #255: returned, not raised. The output the child wrote
             // before the kill is the evidence (its progress marker) the
             // executor's retry-or-pause decision reads.
-            let (stdout, stderr) = finish_pipe_tasks(stdout_task, stderr_task).await?;
-            return Ok(SupervisedProcessOutput {
+            let pipes = finish_pipe_tasks(stdout_task, stderr_task).await;
+            let teardown = match &pipes {
+                Ok(_) => teardown,
+                Err(evidence) => teardown.and_stalled(evidence.clone()),
+            };
+            if let Some(evidence) = group_guard.settle(teardown) {
+                return Ok(stalled_output(&evidence, pipes.ok(), true));
+            }
+            let (stdout, stderr) = pipes.map_err(WorkflowError::StageFailed)?;
+            // An overflow the drain had not reported when the clock ran out is
+            // still an overflow: the outcome must not depend on that order.
+            if let Some(error) = io::overflow(&request, &stdout, &stderr) {
+                return Err(error);
+            }
+            Ok(SupervisedProcessOutput {
                 exit_code: None,
                 timed_out: true,
                 stdout: stdout.bytes,
                 stderr: stderr.bytes,
                 stdout_bytes: stdout.total,
                 stderr_bytes: stderr.total,
-            });
+            })
         }
         Outcome::Controlled(signal) => {
-            terminate_and_reap(&mut child, process_group).await?;
-            // Audited, but never allowed to replace the control signal. A pause
-            // or cancel that comes back as `StageFailed` is not recognised as an
-            // interruption, so no interrupted-call record is written and a clean
-            // user cancel is recorded as a run failure.
-            if let Err(error) = audit_no_descendants(process_group).await {
-                tracing::warn!(%error, "surviving process group member after control interruption");
-            }
+            let teardown = terminate_and_reap(child, &group_guard.tree).await;
+            group_guard.reaped();
             abort_stdin(stdin_task);
-            finish_pipe_tasks(stdout_task, stderr_task).await?;
-            return Err(match signal {
+            let pipes = finish_pipe_tasks(stdout_task, stderr_task).await;
+            // Recorded as evidence, but never allowed to replace the control
+            // signal: a pause or cancel that comes back as anything else is
+            // not recognised as an interruption, so no interrupted-call
+            // record is written and a clean user cancel becomes a failure.
+            let teardown = match pipes {
+                Ok(_) => teardown,
+                Err(evidence) => teardown.and_stalled(evidence),
+            };
+            if let Some(evidence) = group_guard.settle(teardown) {
+                tracing::warn!(%evidence, "host command teardown stalled after a control interruption");
+            }
+            Err(match signal {
                 HostCommandSignal::Paused => WorkflowError::ControlPaused(format!(
                     "host command '{}' paused while in flight",
                     request.command_id
@@ -272,235 +356,30 @@ pub(crate) async fn supervise_process_group(
                     "host command '{}' cancelled while in flight",
                     request.command_id
                 )),
-            });
+            })
         }
-        Outcome::Event(SupervisorEvent::OutputLimit { stream, limit }) => {
-            terminate_and_reap(&mut child, process_group).await?;
-            audit_no_descendants(process_group).await?;
+        Outcome::Event(event) => {
+            let teardown = terminate_and_reap(child, &group_guard.tree).await;
+            group_guard.reaped();
             abort_stdin(stdin_task);
-            finish_pipe_tasks(stdout_task, stderr_task).await?;
-            return Err(WorkflowError::StageFailed(format!(
-                "host command '{}' {stream} output exceeded {limit} bytes",
-                request.command_id
-            )));
-        }
-        Outcome::Event(SupervisorEvent::StdinFailure(error)) => {
-            terminate_and_reap(&mut child, process_group).await?;
-            abort_stdin(stdin_task);
-            finish_pipe_tasks(stdout_task, stderr_task).await?;
-            return Err(WorkflowError::StageFailed(format!(
-                "host command '{}' stdin delivery failed: {error}",
-                request.command_id
-            )));
-        }
-    };
-
-    if let Some(task) = stdin_task {
-        task.await.map_err(|error| {
-            WorkflowError::StageFailed(format!("host command stdin task failed: {error}"))
-        })?;
-    }
-    let (stdout, stderr) = finish_pipe_tasks(stdout_task, stderr_task).await?;
-    Ok(SupervisedProcessOutput {
-        exit_code: status.code(),
-        timed_out: false,
-        stdout: stdout.bytes,
-        stderr: stderr.bytes,
-        stdout_bytes: stdout.total,
-        stderr_bytes: stderr.total,
-    })
-}
-
-async fn drain_pipe(
-    mut pipe: impl AsyncRead + Unpin,
-    limit: u64,
-    stream: &'static str,
-    events: mpsc::UnboundedSender<SupervisorEvent>,
-) -> CapturedPipe {
-    let mut retained = Vec::new();
-    let mut total = 0u64;
-    let mut reported = false;
-    let mut chunk = [0u8; 8192];
-    loop {
-        match pipe.read(&mut chunk).await {
-            Ok(0) => break,
-            Ok(read) => {
-                total = total.saturating_add(read as u64);
-                if retained.len() < limit as usize {
-                    let remaining = limit as usize - retained.len();
-                    retained.extend_from_slice(&chunk[..read.min(remaining)]);
+            let error = match event {
+                SupervisorEvent::OutputLimit { stream, limit } => {
+                    io::over_limit(&request, stream, limit)
                 }
-                if total > limit && !reported {
-                    let _ = events.send(SupervisorEvent::OutputLimit { stream, limit });
-                    reported = true;
-                }
+                SupervisorEvent::Failed(detail) => io::failed(&request, &detail),
+            };
+            let pipes = finish_pipe_tasks(stdout_task, stderr_task).await;
+            let teardown = match &pipes {
+                Ok(_) => teardown,
+                Err(evidence) => teardown.and_stalled(evidence.clone()),
+            };
+            // A stall outranks the failure: the tree is not gone, and only a
+            // resumable outcome keeps the run from ending on it.
+            if let Some(evidence) = group_guard.settle(teardown) {
+                let evidence = format!("{error}; {evidence}");
+                return Ok(stalled_output(&evidence, pipes.ok(), false));
             }
-            Err(error) => {
-                let _ = events.send(SupervisorEvent::StdinFailure(format!(
-                    "reading {stream}: {error}"
-                )));
-                break;
-            }
+            Err(error)
         }
     }
-    CapturedPipe {
-        bytes: retained,
-        total,
-    }
-}
-
-async fn finish_pipe_tasks(
-    stdout: tokio::task::JoinHandle<CapturedPipe>,
-    stderr: tokio::task::JoinHandle<CapturedPipe>,
-) -> WorkflowResult<(CapturedPipe, CapturedPipe)> {
-    tokio::time::timeout(REAP_DEADLINE, async {
-        let stdout = stdout.await.map_err(|error| {
-            WorkflowError::StageFailed(format!("host command stdout task failed: {error}"))
-        })?;
-        let stderr = stderr.await.map_err(|error| {
-            WorkflowError::StageFailed(format!("host command stderr task failed: {error}"))
-        })?;
-        Ok((stdout, stderr))
-    })
-    .await
-    .map_err(|_| {
-        WorkflowError::StageFailed("host command pipe drain exceeded cleanup deadline".to_string())
-    })?
-}
-
-fn abort_stdin(task: Option<tokio::task::JoinHandle<()>>) {
-    if let Some(task) = task {
-        task.abort();
-    }
-}
-
-/// Kills the process group if the supervisor stops running for a reason the
-/// select cannot see. Disarmed state is unnecessary: on the ordinary paths the
-/// group is already gone, so the signal is a no-op.
-struct ProcessGroupGuard(Option<u32>);
-
-impl ProcessGroupGuard {
-    /// Stops the guard signalling. Called once the group is confirmed empty:
-    /// the pid is free from that moment, so a later blind `SIGKILL` to the same
-    /// group id could reach an unrelated process that has since claimed it.
-    fn disarm(&mut self) {
-        self.0 = None;
-    }
-}
-
-impl Drop for ProcessGroupGuard {
-    fn drop(&mut self) {
-        let _ = signal_group(self.0, SIGKILL_VALUE);
-    }
-}
-
-/// Confirms no member of the group survived termination.
-///
-/// Killing a group and verifying nothing survived it are different obligations.
-/// A child that called `setsid` left the group and never received either
-/// signal, so reaping the direct child says nothing about it. Every capability
-/// declares `detaches: false`, which makes a survivor here a broken invariant
-/// rather than an expected case.
-///
-/// The retry exists because a just-killed member can still be a zombie in the
-/// process table for a moment; only a member that outlives the whole window is
-/// reported.
-#[cfg(unix)]
-async fn audit_no_descendants(process_group: Option<u32>) -> WorkflowResult<()> {
-    let Some(pid) = process_group else {
-        return Ok(());
-    };
-    for attempt in 0..DESCENDANT_AUDIT_ATTEMPTS {
-        if group_is_empty(pid)? {
-            return Ok(());
-        }
-        if attempt + 1 < DESCENDANT_AUDIT_ATTEMPTS {
-            tokio::time::sleep(DESCENDANT_AUDIT_INTERVAL).await;
-        }
-    }
-    Err(WorkflowError::StageFailed(format!(
-        "host command process group {pid} still has live members after termination"
-    )))
-}
-
-#[cfg(unix)]
-fn signal_group(process_group: Option<u32>, signal: i32) -> WorkflowResult<()> {
-    let Some(pid) = process_group else {
-        return Ok(());
-    };
-    let result = unsafe { libc::kill(-(pid as libc::pid_t), signal) };
-    if result == 0 {
-        return Ok(());
-    }
-    let error = std::io::Error::last_os_error();
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(());
-    }
-    signal_group_members(pid, signal, &error.to_string())
-}
-
-#[cfg(unix)]
-fn signal_group_members(pgid: u32, signal: i32, aggregate: &str) -> WorkflowResult<()> {
-    let members = process_group_members(pgid);
-    if members.is_empty() {
-        return Ok(());
-    }
-    for pid in &members {
-        let _ = unsafe { libc::kill(*pid as libc::pid_t, libc::SIGSTOP) };
-    }
-    for pid in members.iter().rev() {
-        let result = unsafe { libc::kill(*pid as libc::pid_t, signal) };
-        if result == -1 {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::ESRCH) {
-                tracing::debug!(pid, %error, "host command member signal failed");
-            }
-        }
-    }
-    let survivors = process_group_members(pgid);
-    if survivors.is_empty() {
-        Ok(())
-    } else {
-        Err(WorkflowError::StageFailed(format!(
-            "signalling host command process group {pgid} failed: {aggregate} (still alive: {})",
-            survivors
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        )))
-    }
-}
-
-#[cfg(unix)]
-fn process_group_members(pgid: u32) -> Vec<u32> {
-    let Ok(output) = std::process::Command::new("ps")
-        .args(["-axo", "pid=,pgid=,stat="])
-        .output()
-    else {
-        return Vec::new();
-    };
-    let own = std::process::id();
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let pid: u32 = fields.next()?.parse().ok()?;
-            let group: u32 = fields.next()?.parse().ok()?;
-            let zombie = fields.next().is_some_and(|state| state.starts_with('Z'));
-            (group == pgid && pid != own && pid > 1 && !zombie).then_some(pid)
-        })
-        .collect()
-}
-
-#[cfg(not(unix))]
-fn signal_group(_process_group: Option<u32>, _signal: i32) -> WorkflowResult<()> {
-    Ok(())
-}
-
-/// Without process groups there are no descendants to audit; the child handle
-/// termination in `workflow_host_command_termination` is the whole cleanup.
-#[cfg(not(unix))]
-async fn audit_no_descendants(_process_group: Option<u32>) -> WorkflowResult<()> {
-    Ok(())
 }
