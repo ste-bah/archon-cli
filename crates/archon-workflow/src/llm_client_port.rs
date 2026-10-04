@@ -246,9 +246,9 @@ pub trait WorkflowLlmClient: Send + Sync {
         &self,
         _call: WorkflowAgentCall,
     ) -> WorkflowResult<WorkflowAgentOutcome> {
-        Err(crate::error::WorkflowError::port(std::io::Error::other(
-            "cannot continue agent: this client keeps no completed agent session it can restore exactly; start a new agent",
-        )))
+        Err(crate::error::WorkflowError::port(
+            archon_tools::subagent_session::ContinuationRefused::no_session_kept(),
+        ))
     }
 
     async fn run_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {

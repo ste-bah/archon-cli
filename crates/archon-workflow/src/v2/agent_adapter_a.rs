@@ -208,10 +208,9 @@ pub trait WorkflowV2AgentClient {
         _request: &WorkflowV2AgentRequest,
         _prompt: String,
     ) -> Result<String, WorkflowV2AgentError> {
-        Err(WorkflowV2AgentError::ContinuationRefused(format!(
-            "{}: this client keeps no completed agent session it can restore exactly; start a new agent",
-            super::continuation::CONTINUATION_REFUSED
-        )))
+        Err(WorkflowV2AgentError::ContinuationRefused(
+            archon_tools::subagent_session::ContinuationRefused::no_session_kept().0,
+        ))
     }
 
     async fn run_agent(&self, prompt: String) -> Result<String, WorkflowV2AgentError>;

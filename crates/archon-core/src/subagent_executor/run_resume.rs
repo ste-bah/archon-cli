@@ -25,9 +25,7 @@ impl AgentSubagentExecutor {
         let context = manager
             .get_status(id)
             .and_then(|info| info.effective_context.clone())
-            .ok_or_else(|| {
-                ExecutorError::Internal(crate::agents::transcript::resume::unknown_context(id))
-            })?;
+            .ok_or_else(|| refused(id, crate::agents::transcript::resume::unknown_context(id)))?;
         context
             .usable(id)
             .and_then(|()| {
@@ -37,7 +35,7 @@ impl AgentSubagentExecutor {
                     self.agent_config.subagent_isolation_max_tier,
                 )
             })
-            .map_err(ExecutorError::Internal)?;
+            .map_err(|why| refused(id, why))?;
         Ok(Some(context))
     }
 
@@ -59,7 +57,7 @@ impl AgentSubagentExecutor {
     ) -> Result<super::run_runner::BuiltRunner, ExecutorError> {
         let mut runner = context
             .runner(&ids.manager_id, cancel, caller)
-            .map_err(ExecutorError::Internal)?;
+            .map_err(|why| refused(&ids.manager_id, why))?;
         let tool_cancellation = runner.tool_cancellation();
         if let Some(worktree) = &context.worktree {
             self.worktree_cache
@@ -82,8 +80,12 @@ impl AgentSubagentExecutor {
                 .and_then(|message| message["role"].as_str())
                 != Some("assistant")
         {
-            return Err(ExecutorError::Internal(
-                "validation repair has no completed assistant history".into(),
+            return Err(refused(
+                &ids.manager_id,
+                format!(
+                    "cannot continue agent '{}': its call left no completed answer to continue; start a new agent",
+                    ids.manager_id
+                ),
             ));
         }
         Ok(super::run_runner::BuiltRunner {
@@ -92,6 +94,15 @@ impl AgentSubagentExecutor {
             tool_cancellation,
         })
     }
+}
+
+/// Refuse to continue `id`, recording the refusal on its session so the host
+/// that owns the session can tell it from a failure (#241).
+fn refused(id: &str, why: String) -> ExecutorError {
+    if let Some(session) = archon_tools::subagent_session::current_for(id) {
+        session.history.refuse(&why);
+    }
+    ExecutorError::Internal(why)
 }
 
 /// Pin to the stored rung. A current cap can refuse it, never lower it.

@@ -416,6 +416,9 @@ impl LiveV2AgentClient {
                 if notification_delivery {
                     return Err(WorkflowV2AgentError::NotificationDelivery(err.to_string()));
                 }
+                if let Some(refused) = err.continuation_refusal() {
+                    return Err(WorkflowV2AgentError::ContinuationRefused(refused));
+                }
                 return Err(WorkflowV2AgentError::Transport(err.to_string()));
             }
         };

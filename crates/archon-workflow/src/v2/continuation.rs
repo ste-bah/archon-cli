@@ -7,19 +7,12 @@
 //! the old one continuing.
 use super::agent_adapter::{WorkflowV2AgentClient, WorkflowV2AgentError, WorkflowV2AgentRequest};
 
-/// How every refusal to continue begins, wherever it is raised: the executor,
-/// the pipeline session cache, or a client that keeps no sessions.
-pub const CONTINUATION_REFUSED: &str = "cannot continue agent";
-
 impl WorkflowV2AgentError {
-    /// Whether this is a refusal to continue, however the client carried it.
+    /// Whether this is a refusal to continue. Only the typed refusal counts:
+    /// its words inside any other error (a model value quoted into a
+    /// validation error, say) are not one.
     pub fn is_continuation_refusal(&self) -> bool {
-        let marker = CONTINUATION_REFUSED;
-        match self {
-            Self::ContinuationRefused(_) => true,
-            Self::Transport(text) => text.contains(marker),
-            _ => false,
-        }
+        matches!(self, Self::ContinuationRefused(_))
     }
 }
 
@@ -39,13 +32,9 @@ where
         .await
     {
         Err(error) if error.is_continuation_refusal() => {
-            super::repair_session::forget_author();
-            let session = uuid::Uuid::new_v4().to_string();
-            super::repair_session::scope_id(
-                session,
-                client.run_agent_request(request, fresh_prompt),
-            )
-            .await
+            // The new agent's session is the call's session from now on.
+            super::repair_session::replace_current(uuid::Uuid::new_v4().to_string());
+            client.run_agent_request(request, fresh_prompt).await
         }
         other => other,
     }
@@ -74,15 +63,4 @@ pub fn new_agent_prompt(original: &str, repair: &str) -> String {
          That agent cannot be continued, so you are a new agent on this call. Its \
          rejected output and what was wrong with it follow; produce a correct answer.\n\n{repair}"
     )
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn the_marker_is_the_one_the_executor_and_pipeline_raise() {
-        assert_eq!(
-            super::CONTINUATION_REFUSED,
-            archon_tools::subagent_session::CONTINUATION_REFUSED
-        );
-    }
 }

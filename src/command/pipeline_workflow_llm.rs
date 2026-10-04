@@ -180,7 +180,13 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
             .continue_agent(execution_request(call)?)
             .await
             .map(outcome_from_response)
-            .map_err(WorkflowError::port)
+            // Typed across the port, so the workflow can tell a refusal (#241).
+            .map_err(|error| {
+                match error.downcast::<archon_tools::subagent_session::ContinuationRefused>() {
+                    Ok(refused) => WorkflowError::port(refused),
+                    Err(other) => WorkflowError::port(other),
+                }
+            })
     }
 
     async fn run_agent(&self, call: WorkflowAgentCall) -> WorkflowResult<WorkflowAgentOutcome> {

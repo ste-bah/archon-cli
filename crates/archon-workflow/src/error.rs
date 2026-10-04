@@ -190,6 +190,17 @@ impl WorkflowError {
         Self::Port(source.into())
     }
 
+    /// The refusal to continue this carries, when it is one (#241). Only the
+    /// typed refusal counts; its words in any other error do not.
+    pub fn continuation_refusal(&self) -> Option<String> {
+        match self {
+            Self::Port(source) => source
+                .downcast_ref::<archon_tools::subagent_session::ContinuationRefused>()
+                .map(|refused| refused.0.clone()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
         Self::Io {
             path: path.into(),

@@ -29,6 +29,13 @@ struct SessionLease {
     read_guard: ReadGuard,
 }
 
+/// A typed refusal to continue (#241): the workflow starts a new agent.
+pub(super) fn refused(why: &str) -> anyhow::Error {
+    anyhow::Error::new(archon_tools::subagent_session::ContinuationRefused(
+        format!("cannot continue agent: {why}; start a new agent"),
+    ))
+}
+
 fn session_key(request: &AgentExecutionRequest) -> Result<String> {
     Ok(serde_json::to_string(&(
         &request.session_id,
@@ -101,16 +108,12 @@ impl SessionLease {
         }
         let data = if continuing {
             let Some(SessionState::Complete(previous)) = sessions.get(&key) else {
-                anyhow::bail!(
-                    "{}: no completed agent session for validation repair; start a new agent",
-                    archon_tools::subagent_session::CONTINUATION_REFUSED
-                );
+                return Err(refused("no completed agent session for validation repair"));
             };
             if policy(&previous.request) != policy(request) {
-                anyhow::bail!(
-                    "{}: validation repair changed agent identity or execution policy; start a new agent",
-                    archon_tools::subagent_session::CONTINUATION_REFUSED
-                );
+                return Err(refused(
+                    "validation repair changed agent identity or execution policy",
+                ));
             }
             let Some(SessionState::Complete(data)) = sessions.remove(&key) else {
                 unreachable!()
@@ -317,6 +320,12 @@ impl SubagentPipelineClient {
             return Err(error);
         }
         let timed_out = cut == Some(super::host_cuts::HostCut::WallClock);
+        // Only the executor records a refusal, so no output can forge one.
+        if let Some(why) = lease.history.take_refusal() {
+            return Err(anyhow::Error::new(
+                archon_tools::subagent_session::ContinuationRefused(why),
+            ));
+        }
 
         let response = llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)?;
         lease.complete()?;

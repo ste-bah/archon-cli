@@ -174,3 +174,52 @@ async fn a_replaced_supplied_plain_workspace_refuses_the_repair() {
     let workspace = dir(&root, "workspace");
     replaced_supplied_workspace(&root, &workspace).await;
 }
+
+/// A repair whose call left no assistant answer (an empty reply) cannot be
+/// continued. It is refused as a typed continuation refusal the workflow can
+/// act on, recorded on the call's session, not as an ordinary failure.
+#[tokio::test]
+async fn a_repair_without_an_assistant_answer_is_a_recorded_refusal() {
+    let (_t, root) = temp();
+    let workspace = dir(&root, "workspace");
+    let id = "run-1-0-coder-empty";
+    let host = Host::new(&root, "workflow-empty", vec![STOP, STOP]);
+    host.spawn(id, request(&workspace, None, vec![]), parent(&root, &[]))
+        .await
+        .unwrap();
+    let history = host.histories.lock().unwrap()[id].clone();
+    history.append(&serde_json::json!({"role":"user","content":"the reply was empty"}));
+    host.repair(id, request(&workspace, None, vec![]), parent(&root, &[]))
+        .await
+        .expect_err("a repair ran without a completed answer");
+    let refusal = history
+        .take_refusal()
+        .expect("the refusal was not recorded on the call's session");
+    assert!(
+        refusal.contains(id) && refusal.contains("start a new agent"),
+        "{refusal}"
+    );
+}
+
+/// A refusal for a context this process does not hold (a restart) is
+/// recorded on the call's session too.
+#[tokio::test]
+async fn a_repair_after_a_restart_is_a_recorded_refusal() {
+    let (_t, root) = temp();
+    let workspace = dir(&root, "workspace");
+    let id = "run-1-0-coder-recorded";
+    let host = Host::new(&root, "workflow-recorded", vec![STOP]);
+    let history = archon_tools::subagent_session::CompletedHistory::default();
+    history.append(&serde_json::json!({"role":"assistant","content":"done"}));
+    host.histories
+        .lock()
+        .unwrap()
+        .insert(id.into(), history.clone());
+    host.repair(id, request(&workspace, None, vec![]), parent(&root, &[]))
+        .await
+        .expect_err("a repair ran without its stored context");
+    let refusal = history
+        .take_refusal()
+        .expect("the refusal was not recorded");
+    assert!(refusal.contains(&unknown(id)), "{refusal}");
+}

@@ -94,5 +94,8 @@ async fn a_port_client_that_cannot_restore_refuses_to_continue() {
         .continue_agent(request(true))
         .await
         .expect_err("a stateless client continued");
-    assert!(error.to_string().contains("start a new agent"), "{error}");
+    assert!(
+        error.continuation_refusal().is_some(),
+        "not a typed refusal: {error}"
+    );
 }
