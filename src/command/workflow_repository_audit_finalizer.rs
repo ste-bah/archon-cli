@@ -31,7 +31,11 @@ pub(super) fn gate(
                 path: path.clone(),
                 source: e,
             })?)?;
-        if state.schema_version != 1 || state.generation != store.load_state(run_id)?.generation {
+        if state.schema_version != 1
+            || !store
+                .load_state(run_id)?
+                .execution_owned_at(state.generation)
+        {
             return Err(WorkflowError::StateCorrupt(
                 "repository audit identity changed before finalization".into(),
             ));

@@ -100,6 +100,15 @@ impl WorkflowScriptHost {
         method: String,
         payload: String,
     ) -> archon_workflow::WorkflowResult<String> {
+        {
+            let acc = self.accumulator.lock().await;
+            if acc.terminal_host_stop {
+                return Err(WorkflowError::TerminalHostCall(format!(
+                    "run {} has already stopped with {:?}",
+                    self.runner.run_id, acc.status
+                )));
+            }
+        }
         // #189 Phase 4. Intercepted before the call is turned into a
         // `WorkflowV2CallExecution`: a tool call is not a workflow call. It
         // produces no stored record, takes part in no reuse, and has nothing to
@@ -451,8 +460,8 @@ impl WorkflowScriptHost {
                     "next_action": next_action,
                 }),
             );
-            return Err(WorkflowError::StageFailed(format!(
-                "{TERMINAL_HOST_CALL_MARKER} {} ended with {:?}",
+            return Err(WorkflowError::TerminalHostCall(format!(
+                "{} ended with {:?}",
                 record.call.id, record.status
             )));
         }

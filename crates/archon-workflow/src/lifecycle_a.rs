@@ -23,7 +23,9 @@ pub fn classify_resume(
     let mut out = ResumeClassification::default();
     for item in item_ids {
         match resume_status(item, run_root, stage_id) {
-            ApplyResumeStatus::Applied | ApplyResumeStatus::IdempotentNoop | ApplyResumeStatus::SkippedIgnored => {
+            ApplyResumeStatus::Applied
+            | ApplyResumeStatus::IdempotentNoop
+            | ApplyResumeStatus::SkippedIgnored => {
                 out.skip.push(item.clone());
             }
             ApplyResumeStatus::Failed(_) | ApplyResumeStatus::PendingApply => {
@@ -78,8 +80,17 @@ impl LifecycleController {
             };
             let archive = restart_archive_plan(&run, &action);
             let forced_record = forced_accept_record(&action);
+            let replaces_executor = matches!(action, LifecycleAction::Resume)
+                || (prior.status != RunStatus::Running
+                    && matches!(action, LifecycleAction::RestartStage(_)
+                        | LifecycleAction::RestartItem { .. }
+                        | LifecycleAction::ForceAcceptStage { .. }));
+            run.executor_generation.get_or_insert(run.generation);
             let mut event = apply_action(&mut run, action)?;
             run.generation = run.generation.saturating_add(1);
+            if replaces_executor {
+                run.executor_generation = Some(run.generation);
+            }
             event.1["generation"] = serde_json::json!(run.generation);
             if let Some(archive) = archive {
                 let archived = archive_restart_evidence(store, &run.id, &archive)?;

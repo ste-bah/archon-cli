@@ -7,24 +7,14 @@ pub(super) fn finalize_generated_control(
     status: RunStatus,
     message: &str,
 ) -> archon_workflow::WorkflowResult<()> {
-    // Lifecycle stops already persist their own generation. A resumed owner
-    // must never be stopped again by the executor that is still unwinding.
-    if store.load_state(&run.id)?.generation != run.generation {
-        return Ok(());
-    }
-    match super::super::workflow_live_v2_finalizer::finalize_run_status(
+    super::super::workflow_live_v3_run_end::stop(
         store,
         &run.id,
         run_kind,
         status,
         message,
         Some(run.generation),
-    ) {
-        // The owner may have changed after the read above; the finalizer
-        // checks again under the lifecycle lock before any terminal write.
-        Err(WorkflowError::ControlCancelled(_)) => Ok(()),
-        result => result,
-    }
+    )
 }
 
 #[cfg(test)]
@@ -60,5 +50,57 @@ mod tests {
             assert_eq!(std::fs::read(store.events_path(&run.id)).unwrap(), events);
             assert!(!store.run_dir(&run.id).join("v2/finalization.json").exists());
         }
+    }
+    fn assert_control_evidence(action: LifecycleAction, status: RunStatus) {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::project(temp.path());
+        let run = store
+            .create_run(super::super::super::workflow_run_finalizer_tests::spec())
+            .unwrap();
+        LifecycleController::new(store.clone())
+            .apply(&run.id, action)
+            .unwrap();
+        finalize_generated_control(
+            &store,
+            &run,
+            archon_workflow::WorkflowRunKind::FixedOrSavedScript,
+            status.clone(),
+            "legitimate control stop",
+        )
+        .unwrap();
+        let path = store.run_dir(&run.id).join("v2/finalization.json");
+        assert!(
+            path.exists(),
+            "control finalization is missing for {status:?}"
+        );
+        let record: archon_workflow::FinalizationRecordV1 =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(record.terminal_status, status);
+        assert!(record.terminal_event_committed);
+        assert_eq!(store.load_state(&run.id).unwrap().status, status);
+        let events = std::fs::read_to_string(store.events_path(&run.id)).unwrap();
+        assert_eq!(events.matches("terminal_status").count(), 1);
+        finalize_generated_control(
+            &store,
+            &run,
+            archon_workflow::WorkflowRunKind::FixedOrSavedScript,
+            status,
+            "legitimate control stop",
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(store.events_path(&run.id)).unwrap(),
+            events
+        );
+    }
+
+    #[test]
+    fn round4_legitimate_pause_writes_control_evidence() {
+        assert_control_evidence(LifecycleAction::Pause, RunStatus::Paused);
+    }
+
+    #[test]
+    fn round4_legitimate_cancel_writes_control_evidence() {
+        assert_control_evidence(LifecycleAction::Cancel, RunStatus::Cancelled);
     }
 }

@@ -130,6 +130,7 @@ impl WorkflowStore {
                 RunStatus::Paused | RunStatus::Cancelled => {
                     writable.status = current.status;
                     writable.generation = current.generation;
+                    writable.executor_generation = current.executor_generation;
                     writable.updated_at = current.updated_at;
                     for (stage_id, current_stage) in current.stages {
                         if let Some(stage) = writable.stages.get_mut(&stage_id)

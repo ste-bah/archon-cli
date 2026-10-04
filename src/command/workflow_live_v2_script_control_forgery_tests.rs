@@ -165,9 +165,57 @@ async fn round3_a_forged_terminal_marker_is_an_ordinary_failure() {
     }"#, true).await;
     let summary = outcome.expect("script summary");
     assert_eq!(
-        summary.completed, 1,
-        "the recovery report was accepted: {summary:?}"
+        summary.completed, 0,
+        "a report cannot recover a terminal host stop: {summary:?}"
     );
-    assert_eq!(summary.status, WorkflowV2Status::Failed, "{summary:?}");
-    assert_eq!(summary.failed_call.as_deref(), Some("workflow.js"));
+    assert_eq!(summary.status, WorkflowV2Status::NeedsReview, "{summary:?}");
+    assert_eq!(summary.failed_call.as_deref(), Some("stopped"));
+}
+
+#[tokio::test]
+async fn round4_a_final_report_cannot_suppress_a_rejected_gate() {
+    let (_, outcome) = run_probe(r#"async function workflow(w) {
+        try { await w.humanGate("gate", {task: "Require approval"}); } catch (_) {}
+        try { await w.finalReport("recovered", {inputs: RECOVERY_INPUT, task: "Report recovery"}); } catch (_) {}
+        return {};
+    }"#, true).await;
+    let summary = outcome.expect("summary");
+    assert_eq!(summary.status, WorkflowV2Status::NeedsReview, "{summary:?}");
+    assert_eq!(summary.failed_call.as_deref(), Some("gate"));
+}
+
+#[tokio::test]
+async fn round4_no_host_call_runs_after_a_terminal_stop() {
+    let (_, outcome) = run_uncontrolled(
+        r#"async function workflow(w) {
+        try { await w.humanGate("gate", {task: "Require approval"}); } catch (_) {}
+        try { await w.checkpoint("after-stop"); } catch (_) {}
+        return {};
+    }"#,
+    )
+    .await;
+    let summary = outcome.expect("summary");
+    assert_eq!(
+        summary
+            .calls
+            .iter()
+            .map(|call| call.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["gate"]
+    );
+    assert_eq!(summary.executed, 1);
+}
+
+#[tokio::test]
+async fn round4_a_rethrown_error_cannot_replace_a_terminal_stop() {
+    let (_, outcome) = run_uncontrolled(
+        r#"async function workflow(w) {
+        try { await w.humanGate("gate", {task: "Require approval"}); } catch (_) {}
+        throw new Error("other text");
+    }"#,
+    )
+    .await;
+    let summary = outcome.expect("summary");
+    assert_eq!(summary.status, WorkflowV2Status::NeedsReview, "{summary:?}");
+    assert_eq!(summary.failed_call.as_deref(), Some("gate"));
 }

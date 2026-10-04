@@ -10,7 +10,9 @@
 //! - Identity is a fact about CONTROL. Every lifecycle action a run takes —
 //!   pause, resume, restart, force-accept — bumps the run's generation, and
 //!   the audit state is stamped with the generation it was established at. A
-//!   difference says the run moved on, which is a reason to stop and be
+//!   difference only invalidates the audit when control stopped the run or
+//!   replaced its executor. Edits on a running run keep ownership and the
+//!   audit snapshot. A superseded execution is a reason to stop and be
 //!   re-dispatched, not a reason to declare the state broken and fail the
 //!   stage that happened to ask.
 //!
@@ -19,10 +21,10 @@
 //! outlives any number of lifecycle actions, so a snapshot goes stale for
 //! ordinary reasons; a stale snapshot is not evidence of anything being
 //! wrong. The finalizer already compares the state against the run's current
-//! generation this way.
+//! executor ownership this way.
 
 use super::runtime::{AuditState, STATE_PATH};
-use crate::{WorkflowError, WorkflowResult, WorkflowStore};
+use crate::{RunStatus, WorkflowError, WorkflowResult, WorkflowStore};
 
 /// The audit state as written, with every way it can be unreadable reported
 /// as corruption — including a parse failure, which used to surface as a bare
@@ -52,7 +54,11 @@ pub(super) fn require_current_generation(
     run_id: &str,
     state: &AuditState,
 ) -> WorkflowResult<()> {
-    if state.generation != store.load_state(run_id)?.generation {
+    let run = store.load_state(run_id)?;
+    if state.generation != run.generation
+        && (matches!(run.status, RunStatus::Paused | RunStatus::Cancelled)
+            || !run.execution_owned_at(state.generation))
+    {
         return Err(WorkflowError::ControlPaused(
             "repository audit generation superseded".into(),
         ));

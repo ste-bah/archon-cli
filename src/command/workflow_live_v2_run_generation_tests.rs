@@ -80,3 +80,121 @@ async fn round3_obsolete_generated_executor_cannot_finalize_resumed_run() {
         assert!(!events.contains("terminal_status"), "{events}");
     }
 }
+
+struct ActionBeforeReply {
+    store: WorkflowStore,
+    run_id: String,
+    action: LifecycleAction,
+}
+
+#[async_trait::async_trait]
+impl WorkflowLlmClient for ActionBeforeReply {
+    async fn send_message(
+        &self,
+        _: Vec<serde_json::Value>,
+        _: Vec<serde_json::Value>,
+        _: Vec<serde_json::Value>,
+        _: &str,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        LifecycleController::new(self.store.clone()).apply(&self.run_id, self.action.clone())?;
+        let result = WorkflowV2Result {
+            status: WorkflowV2Status::Accepted,
+            summary: "inspection completed".into(),
+            evidence: vec![WorkflowV2Evidence::new(
+                WorkflowV2EvidenceKind::Inspection,
+                "read the requested area",
+            )],
+            ..WorkflowV2Result::default()
+        };
+        Ok(archon_workflow::WorkflowAgentOutcome {
+            content: serde_json::to_string(&result)?,
+            tool_uses: Vec::new(),
+            tokens_in: 1,
+            tokens_out: 1,
+            stop_reason: None,
+        })
+    }
+}
+
+async fn assert_running_action_finalizes(action: LifecycleAction) {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let mut spec = super::super::workflow_run_finalizer_tests::spec();
+    let mut second = spec.stages[0].clone();
+    second.id = "call-2".into();
+    spec.stages.push(second);
+    let mut run = store.create_run(spec).unwrap();
+    run.status = RunStatus::Running;
+    run.items.insert(
+        "item-1".into(),
+        archon_workflow::run::ItemState {
+            id: "item-1".into(),
+            stage_id: "call-1".into(),
+            status: archon_workflow::StageStatus::Pending,
+            artifact: None,
+            error: None,
+        },
+    );
+    store.save_state(&run).unwrap();
+    let script = r#"async function workflow(w) {
+        await w.agent("inspect-one", {role: "analysis", task: "Inspect the area and report."});
+        return {};
+    }"#;
+    let plan = WorkflowScriptPlan::from_template(run.spec.clone(), script, Vec::new());
+    save_generated_v2_metadata(&store, &run.id, &plan, false).unwrap();
+    let llm = Arc::new(ActionBeforeReply {
+        store: store.clone(),
+        run_id: run.id.clone(),
+        action,
+    });
+    let (ui, _receiver) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let result = execute_generated_v2_run(
+        &store,
+        run.clone(),
+        plan,
+        "test".into(),
+        llm,
+        ui,
+        Vec::new(),
+        true,
+        false,
+    )
+    .await;
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(
+        store.load_state(&run.id).unwrap().status,
+        RunStatus::Completed,
+        "{result:?}"
+    );
+    assert!(store.run_dir(&run.id).join("v2/finalization.json").exists());
+    assert!(
+        std::fs::read_to_string(store.events_path(&run.id))
+            .unwrap()
+            .contains("terminal_status")
+    );
+}
+
+#[tokio::test]
+async fn round4_restart_stage_keeps_the_running_executor_owner() {
+    assert_running_action_finalizes(LifecycleAction::RestartStage("call-1".into())).await;
+}
+
+#[tokio::test]
+async fn round4_restart_item_keeps_the_running_executor_owner() {
+    assert_running_action_finalizes(LifecycleAction::RestartItem {
+        stage_id: "call-1".into(),
+        item_id: "item-1".into(),
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn round4_force_accept_stage_keeps_the_running_executor_owner() {
+    assert_running_action_finalizes(LifecycleAction::ForceAcceptStage {
+        stage_id: "call-1".into(),
+        forced_by: "operator".into(),
+        rationale: "reviewed".into(),
+        source: "test".into(),
+    })
+    .await;
+}

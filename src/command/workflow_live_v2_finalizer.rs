@@ -160,6 +160,7 @@ pub(super) async fn finalize_summary_with_gate(
         let summary = &gated;
         store.with_run_lock(run_id, |locked| {
             require_generation_owner(locked, run_id, expected_generation)?;
+            archon_workflow::poll_v2_run_control(locked, run_id, "finalization")?;
             let checked = audit_finalizer::gate(locked, run_id, summary)?;
             if checked.status != summary.status {
                 return Err(WorkflowError::StateCorrupt(
@@ -185,6 +186,7 @@ pub(super) async fn finalize_summary_with_gate(
 
     store.with_run_lock(run_id, |locked| {
         require_generation_owner(locked, run_id, expected_generation)?;
+        archon_workflow::poll_v2_run_control(locked, run_id, "finalization")?;
         archon_workflow::v2::run_state_sync::sync_v2_summary_to_run(
             locked,
             run_id,
@@ -313,7 +315,7 @@ fn require_generation_owner(
         return Ok(());
     };
     let current = store.load_state(run_id)?;
-    if current.generation != expected {
+    if !current.execution_owned_at(expected) {
         return Err(WorkflowError::ControlCancelled(format!(
             "executor generation {expected} no longer owns run {run_id}; current generation is {}",
             current.generation

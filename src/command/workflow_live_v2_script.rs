@@ -29,9 +29,7 @@ use archon_workflow::v2::source_graph::{
     complete_source_task_graph, dynamic_wave_source_metadata, input_hash_with_source_fingerprint,
 };
 
-// The terminal-call marker is part of the lifecycle host port's contract: the
-// host writes it, the driver routes on it. One definition, in the crate that
-// owns the port.
+// The native lifecycle still consumes the port marker through this module.
 use archon_workflow::TERMINAL_HOST_CALL_MARKER;
 #[cfg(not(test))]
 const WORKFLOW_JS_WATCHDOG: Duration = Duration::from_secs(60);
@@ -287,6 +285,11 @@ impl WorkflowV2ScriptRunner {
         ) {
             return Err(control);
         }
+        // Host evidence decides the outcome even if the script returns, catches
+        // the rejection, or throws unrelated text. No later audit can replace it.
+        if host.accumulator.lock().await.terminal_host_stop {
+            return Ok(host.summary().await);
+        }
         match outcome {
             Ok(result) => {
                 let mut summary = host.summary().await;
@@ -294,12 +297,6 @@ impl WorkflowV2ScriptRunner {
                 host.runner.finalize_repository_audit(summary).await
             }
             Err(error) => {
-                if error.contains(TERMINAL_HOST_CALL_MARKER)
-                    && host.accumulator.lock().await.terminal_host_stop
-                {
-                    let summary = host.summary().await;
-                    return host.runner.finalize_repository_audit(summary).await;
-                }
                 let recorded = notification_failure
                     .lock()
                     .ok()

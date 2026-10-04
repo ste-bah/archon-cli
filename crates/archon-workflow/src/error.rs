@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::lifecycle_host_port::TERMINAL_HOST_CALL_MARKER;
+
 pub type WorkflowResult<T> = Result<T, WorkflowError>;
 
 /// The prefix every [`WorkflowError::HostCallTimeout`] renders with, so a
@@ -126,6 +128,9 @@ pub enum WorkflowError {
     StageBlocked(String),
     #[error("workflow stage failed: {0}")]
     StageFailed(String),
+    /// A trusted host terminal stop; JavaScript text cannot create this evidence.
+    #[error("{TERMINAL_HOST_CALL_MARKER} {0}")]
+    TerminalHostCall(String),
     /// The host's own per-dispatch timer ended an agent call.
     ///
     /// Typed apart from [`Self::StageFailed`] because the two are answered

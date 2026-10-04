@@ -36,7 +36,10 @@ use super::workflow_live_v2_script::WorkflowV2ScriptSummary;
 
 #[path = "workflow_live_v3_run_end_reopen.rs"]
 mod reopen;
+#[path = "workflow_live_v3_run_end_stop.rs"]
+mod stop_control;
 pub(super) use reopen::AcceptanceReentry;
+pub(super) use stop_control::stop;
 
 /// Finalize a generated run. The authored kind passes through the acceptance
 /// gate first; every other kind finalizes exactly as before. Returns the
@@ -154,31 +157,6 @@ pub(super) async fn finalize_run_observed(
         }
         Err(error) => Err(error.into()),
     }
-}
-
-fn stop(
-    store: &WorkflowStore,
-    run_id: &str,
-    run_kind: WorkflowRunKind,
-    status: archon_workflow::RunStatus,
-    message: &str,
-    expected_generation: Option<u64>,
-) -> WorkflowResult<()> {
-    if expected_generation.is_some_and(|expected| {
-        store
-            .load_state(run_id)
-            .is_ok_and(|run| run.generation != expected)
-    }) {
-        return Ok(());
-    }
-    super::workflow_live_v2_finalizer::finalize_run_status(
-        store,
-        run_id,
-        run_kind,
-        status,
-        message,
-        expected_generation,
-    )
 }
 
 /// Read the last acceptance round and hold the summary to it.

@@ -108,10 +108,10 @@ pub async fn until_run_stops_from_generation<T>(
     }
 }
 
-/// Whether the operator stopped this run or advanced its lifecycle while the
+/// Whether the operator stopped this run or replaced its executor while the
 /// call was in flight. A pause followed by a fast resume still invalidates the
 /// old executor: it may unwind, but it can no longer publish after generation
-/// authority moved on. Read-only.
+/// ownership moved on. Edits on a running run preserve ownership. Read-only.
 fn run_has_stopped_or_changed(
     store: &WorkflowStore,
     run_id: &str,
@@ -119,7 +119,7 @@ fn run_has_stopped_or_changed(
 ) -> bool {
     store.load_state(run_id).is_ok_and(|run| {
         matches!(run.status, RunStatus::Paused | RunStatus::Cancelled)
-            || starting_generation.is_some_and(|generation| run.generation != generation)
+            || starting_generation.is_some_and(|generation| !run.execution_owned_at(generation))
     })
 }
 

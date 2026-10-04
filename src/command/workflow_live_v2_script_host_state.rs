@@ -238,10 +238,12 @@ impl WorkflowScriptHost {
         let mut acc = self.accumulator.lock().await;
         // Counted as the execution that recorded it was: a replayed review
         // map or superseded round is not a completed call.
-        acc.status = merge_v2_status(
-            acc.status,
-            run_terminal_status_contribution(record, record.status),
-        );
+        if !acc.terminal_host_stop {
+            acc.status = merge_v2_status(
+                acc.status,
+                run_terminal_status_contribution(record, record.status),
+            );
+        }
         acc.reused += 1;
         if is_reusable_status(record.status) {
             acc.completed += 1;
@@ -269,13 +271,15 @@ impl WorkflowScriptHost {
         let mut acc = self.accumulator.lock().await;
         // A final report is the script speaking for the whole run: its status
         // overrides accumulated call severities so script-recovered failures
-        // do not doom an otherwise accepted run.
-        if record.call.method == WorkflowV2HostMethod::FinalReport {
-            acc.status = status;
-            acc.terminal_host_stop = false;
-        } else {
-            acc.status =
-                merge_v2_status(acc.status, run_terminal_status_contribution(record, status));
+        // do not doom an otherwise accepted run. A trusted terminal stop is
+        // sticky, including while previously dispatched calls finish.
+        if !acc.terminal_host_stop {
+            if record.call.method == WorkflowV2HostMethod::FinalReport {
+                acc.status = status;
+            } else {
+                acc.status =
+                    merge_v2_status(acc.status, run_terminal_status_contribution(record, status));
+            }
         }
         acc.executed += 1;
         if is_reusable_status(status) {
@@ -322,6 +326,9 @@ impl WorkflowScriptHost {
         next_action: String,
     ) {
         let mut acc = self.accumulator.lock().await;
+        if acc.terminal_host_stop {
+            return;
+        }
         acc.terminal_host_stop = true;
         if record.call.method == WorkflowV2HostMethod::FinalReport {
             acc.status = record.status;
@@ -340,6 +347,10 @@ impl WorkflowScriptHost {
         let next_action =
             "fix the workflow.js/runtime error, then resume or start a fresh workflow".to_string();
         let mut acc = self.accumulator.lock().await;
+        if acc.terminal_host_stop {
+            drop(acc);
+            return self.summary().await;
+        }
         acc.status = merge_v2_status(acc.status, WorkflowV2Status::Failed);
         acc.failed_call = Some("workflow.js".to_string());
         acc.failed_result_path = None;
