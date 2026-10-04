@@ -232,8 +232,8 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":%s,"capabilities":{"tools":{}},"serverInfo":{"name":"fixture","version":"0"}}}\n' "$id" "$(field "$line" protocolVersion)" ;;
     *'"method":"tools/list"'*)
       token=$(field "$line" progressToken)
-      for step in 1 2 3 4; do
-        sleep 0.1
+      for step in 1 2 3 4 5 6; do
+        sleep 0.5
         printf '{"jsonrpc":"2.0","method":"notifications/progress","params":{"progressToken":%s,"progress":%s}}\n' "$token" "$step"
       done
       printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}\n' "$id" ;;
@@ -245,7 +245,10 @@ done
     }))
     .unwrap();
     let manager = archon_mcp::lifecycle::McpServerManager::new();
-    let result = start_servers(&manager, vec![(config, true)], Duration::from_millis(300)).await;
+    // Each gap (0.5 s plus the fixture's own process starts) stays far below
+    // the 2 s idle limit on a loaded runner, while the whole listing (3 s)
+    // runs past it: only a total-time limit could refuse this discovery.
+    let result = start_servers(&manager, vec![(config, true)], Duration::from_secs(2)).await;
     let _ = manager.shutdown_all().await;
     assert!(
         result.is_ok(),
