@@ -68,13 +68,24 @@ fn a_named_job_runs_while_held_and_is_gone_once_dropped() {
     );
     // ...and refusing it does not end the first owner's processes.
     assert!(job.active_processes().unwrap() >= 2);
-    // Dropping the job confirms it empty before the handle closes.
+    // A caller that needs the answer confirms first, on its own thread.
+    assert_eq!(job.kill_and_confirm(Duration::from_secs(5)).unwrap(), 0);
+    child.wait().unwrap();
+    // Dropping the job returns at once (the close runs on its own thread)
+    // and the job is gone soon after.
+    let dropped = Instant::now();
     drop(job);
     assert!(
-        !named_job_running(&name).unwrap(),
-        "the job outlived its confirmed drop"
+        dropped.elapsed() < Duration::from_millis(500),
+        "drop blocked"
     );
-    child.wait().unwrap();
+    while named_job_running(&name).unwrap() {
+        assert!(
+            dropped.elapsed() < Duration::from_secs(10),
+            "the job outlived its handle"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]

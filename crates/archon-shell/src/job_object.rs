@@ -151,32 +151,59 @@ impl Job {
     /// Terminate the job and wait, within `bound`, until no process in it is
     /// active. Returns how many still were when the bound ran out: zero means
     /// the job is confirmed empty. Each round terminates again, so a process
-    /// started while the last one landed is ended too.
+    /// started while the last one landed is ended too. Blocking: call it on
+    /// a thread that may wait, never on an async runtime thread.
     pub fn kill_and_confirm(&self, bound: Duration) -> io::Result<u32> {
-        let deadline = Instant::now() + bound;
-        loop {
-            self.terminate()?;
-            let active = self.active_processes()?;
-            if active == 0 || Instant::now() >= deadline {
-                return Ok(active);
-            }
-            std::thread::sleep(CONFIRM_POLL);
+        kill_and_confirm(self.handle, bound)
+    }
+}
+
+fn kill_and_confirm(handle: HANDLE, bound: Duration) -> io::Result<u32> {
+    let deadline = Instant::now() + bound;
+    loop {
+        // SAFETY: the handle is valid while its owner holds it.
+        if unsafe { TerminateJobObject(handle, 1) } == 0 {
+            return Err(io::Error::last_os_error());
         }
+        let active = active_processes(handle)?;
+        if active == 0 || Instant::now() >= deadline {
+            return Ok(active);
+        }
+        std::thread::sleep(CONFIRM_POLL);
     }
 }
 
 /// How long a dropped job waits for its processes to end.
 const DROP_CONFIRM_BOUND: Duration = Duration::from_secs(5);
 
+/// A job handle on its way to being closed by a dedicated thread.
+struct Closing(HANDLE);
+
+// SAFETY: a job handle is a kernel object handle, usable from any thread.
+unsafe impl Send for Closing {}
+
 impl Drop for Job {
     /// Terminates the job and waits, within [`DROP_CONFIRM_BOUND`], until no
-    /// process in it is active, before the handle closes: closing alone
-    /// only requests termination, and a process can stay pending on I/O.
-    /// An empty job answers at once.
+    /// process in it is active, before the handle closes: closing alone only
+    /// requests termination, and a process can stay pending on I/O. The wait
+    /// runs on a dedicated thread, because a drop may run on an async
+    /// runtime thread that must not block; a caller that needs the answer
+    /// calls [`Job::kill_and_confirm`] itself first.
     fn drop(&mut self) {
-        let _ = self.kill_and_confirm(DROP_CONFIRM_BOUND);
-        // SAFETY: the handle is owned and closed exactly once.
-        unsafe { CloseHandle(self.handle) };
+        let closing = Closing(self.handle);
+        let spawned = std::thread::Builder::new()
+            .name("archon-job-close".into())
+            .spawn(move || {
+                let closing = closing;
+                let _ = kill_and_confirm(closing.0, DROP_CONFIRM_BOUND);
+                // SAFETY: the handle is owned and closed exactly once.
+                unsafe { CloseHandle(closing.0) };
+            });
+        if spawned.is_err() {
+            // No thread: close now. Kill-on-close still ends every process.
+            // SAFETY: the handle is owned and closed exactly once.
+            unsafe { CloseHandle(self.handle) };
+        }
     }
 }
 
