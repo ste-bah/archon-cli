@@ -49,6 +49,7 @@ fn direct_site(context: &StageContext) -> DirectSite {
 
 fn operational(id: &str, error: String) -> CheckResult {
     CheckResult {
+        classification: None,
         acceptance_id: id.into(),
         exit_code: None,
         quota_walk_count: 0,

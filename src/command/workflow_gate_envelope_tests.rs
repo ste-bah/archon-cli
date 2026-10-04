@@ -148,3 +148,24 @@ fn every_staged_gate_records_its_finding_text() {
         log.display()
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn round2_staged_envelope_is_created_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let envelope = temp.path().join("gate-envelope.json");
+    stage_gate_evaluation(
+        temp.path(),
+        &envelope,
+        "call-mode",
+        "lint",
+        GateEvaluation::new("private report", Vec::new()),
+        Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::metadata(&envelope).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+}

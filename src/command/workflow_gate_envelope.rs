@@ -98,7 +98,15 @@ fn write_staged_atomic(root: &Path, output: &StagedGateOutput) -> Result<()> {
             .with_context(|| format!("creating staged output directory {}", parent.display()))?;
     }
     let temporary = target.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
-    let mut file = std::fs::File::create(&temporary)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&temporary)
         .with_context(|| format!("creating staged output {}", temporary.display()))?;
     file.write_all(&output.bytes)
         .with_context(|| format!("writing staged output {}", temporary.display()))?;

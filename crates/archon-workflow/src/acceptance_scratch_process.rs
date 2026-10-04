@@ -20,6 +20,9 @@ pub struct CheckResult {
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
     pub operational_error: Option<String>,
+    /// Classification of raw output, never recomputed from redacted evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classification: Option<crate::acceptance_check_crash::CheckClassification>,
 }
 /// The spawned check: a Unix process-group leader, or, on Windows, a child
 /// confined to a Job Object so its descendants can be reaped and teardown
@@ -309,14 +312,19 @@ pub async fn run_at(
             _ => {}
         }
     }
-    Ok(CheckResult {
+    let mut result = CheckResult {
+        classification: None,
         acceptance_id: id.into(),
         exit_code: status.code(),
         quota_walk_count,
-        stdout: site.redact(&pipes.0.0, pipes.0.1),
-        stderr: site.redact(&pipes.1.0, pipes.1.1),
+        stdout: pipes.0.0,
+        stderr: pipes.1.0,
         operational_error: error,
-    })
+    };
+    result.classify_raw(&String::from_utf8_lossy(command.bytes()));
+    result.stdout = site.redact(&result.stdout, pipes.0.1);
+    result.stderr = site.redact(&result.stderr, pipes.1.1);
+    Ok(result)
 }
 async fn terminate(child: &mut RunChild, group: i32) -> WorkflowResult<std::process::ExitStatus> {
     #[cfg(unix)]

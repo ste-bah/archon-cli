@@ -30,7 +30,7 @@ use crate::command::workflow_freeze_budget::{
 };
 use crate::command::workflow_task_set::passability::evidence::Redactor;
 
-const SCHEMA: u32 = 2;
+const SCHEMA: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct Saved {
@@ -45,9 +45,9 @@ struct Saved {
 /// so what its check printed is redacted first, of every credential value
 /// the check's site could hold (credential-named host values, the engine's
 /// own credentials, and the names its policy forwards), and the file is
-/// readable by its owner only. Only the output streams change; the exit
-/// status, timeout and acceptance id that make the verdict are kept, so a
-/// verdict read back is the verdict reached.
+/// readable by its owner only. The host computes classification from raw
+/// streams before redaction and persists it alongside the evidence. Reuse
+/// never reclassifies redacted output. Older raw-stream caches are discarded.
 #[derive(Clone)]
 pub(super) struct ResultStore {
     dir: PathBuf,
@@ -70,9 +70,24 @@ impl ResultStore {
     /// The verdict saved under `key`; anything unreadable is no verdict.
     pub(super) fn load(&self, key: &str) -> Option<CheckResult> {
         let _ = std::fs::remove_file(self.path(key)?.with_extension("provisional"));
-        let saved: Saved = serde_json::from_slice(&std::fs::read(self.path(key)?).ok()?).ok()?;
-        (saved.schema == SCHEMA && saved.key == key && saved.result.operational_error.is_none())
-            .then_some(saved.result)
+        let path = self.path(key)?;
+        let saved = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok());
+        match saved {
+            Some(saved)
+                if saved.schema == SCHEMA
+                    && saved.key == key
+                    && saved.result.operational_error.is_none()
+                    && saved.result.classification.is_some() =>
+            {
+                Some(saved.result)
+            }
+            _ => {
+                let _ = std::fs::remove_file(path);
+                None
+            }
+        }
     }
 
     /// Save `result` under `key`, atomically; false when it was not saved.
@@ -84,6 +99,17 @@ impl ResultStore {
             return false;
         }
         let mut result = result.clone();
+        // Native command results are already classified at capture. Declarative
+        // results have no command and cannot be a script crash.
+        result.classify_raw("");
+        if let Some(classification) = &mut result.classification
+            && let CheckRunClass::ScriptDefect(defect) = &mut classification.crash
+        {
+            defect.signal = "see the fenced stderr below".into();
+            defect.rule =
+                String::from_utf8_lossy(&self.redactor.redact_bytes(defect.rule.as_bytes()))
+                    .into_owned();
+        }
         result.stdout = self.redactor.redact_bytes(&result.stdout);
         result.stderr = self.redactor.redact_bytes(&result.stderr);
         let saved = Saved {
@@ -320,3 +346,7 @@ impl HostProbe {
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_resume_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_resume_round2_tests.rs"]
+mod round2_tests;

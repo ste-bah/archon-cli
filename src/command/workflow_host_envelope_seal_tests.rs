@@ -33,6 +33,14 @@ enum Child {
     Malformed,
     /// A manifest that misstates the envelope's bytes.
     Lying,
+    SealedIdentity,
+    CanonicalIdentity,
+    SecretKey,
+    Interrupted,
+    Paused,
+    Cancelled,
+    TypedSecret,
+    OperationalTypedSecret,
 }
 
 struct SecretPrintingProcess(Child);
@@ -40,6 +48,12 @@ struct SecretPrintingProcess(Child);
 fn envelope(child: Child, secret: &str) -> Vec<u8> {
     let value = match child {
         Child::Malformed => return format!("not an envelope {secret}").into_bytes(),
+        Child::OperationalTypedSecret => serde_json::json!({
+            "schema_version": 1, "report": "probe", "operational_error": {"kind": secret, "text": "failure"}
+        }),
+        Child::TypedSecret => serde_json::json!({"schema_version": 1, "report": "failure",
+            "policy_findings": [{"text":"failure", "subject":secret, "remediation_scope":"body"}]}),
+        Child::SecretKey => serde_json::json!({"schema_version": 1, "report": {secret: "failure"}}),
         Child::Clean => serde_json::json!({"schema_version": 1, "report": "body accepted"}),
         Child::Operational => serde_json::json!({
             "schema_version": 1, "report": "probe",
@@ -75,16 +89,41 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
             } else {
                 CANDIDATE.as_bytes().to_vec()
             };
+            if matches!(
+                self.0,
+                Child::Interrupted | Child::Paused | Child::Cancelled
+            ) && name == "gate-envelope.json"
+            {
+                std::fs::write(path.with_extension("interrupted.tmp"), &bytes).unwrap();
+                return Err(match self.0 {
+                    Child::Paused => archon_workflow::WorkflowError::ControlPaused("paused".into()),
+                    Child::Cancelled => {
+                        archon_workflow::WorkflowError::ControlCancelled("cancelled".into())
+                    }
+                    _ => archon_workflow::WorkflowError::StageFailed("interrupted".into()),
+                });
+            }
             std::fs::write(path, &bytes).unwrap();
             let digest = if self.0 == Child::Lying && name == "gate-envelope.json" {
                 content_digest(b"something else")
             } else {
                 content_digest(&bytes)
             };
+            let claimed = if matches!(self.0, Child::SealedIdentity | Child::CanonicalIdentity)
+                && name == "gate-envelope.json"
+            {
+                claimed_envelope(self.0)
+            } else {
+                bytes.clone()
+            };
             entries.push(PreparedPublicationEntry {
                 relative_path: name,
-                byte_len: bytes.len() as u64,
-                blake3: digest,
+                byte_len: claimed.len() as u64,
+                blake3: if matches!(self.0, Child::SealedIdentity | Child::CanonicalIdentity) {
+                    content_digest(&claimed)
+                } else {
+                    digest
+                },
             });
         }
         entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
@@ -111,16 +150,31 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
     }
 }
 
+fn claimed_envelope(child: Child) -> Vec<u8> {
+    let envelope: archon_workflow::GateEnvelopeV1 =
+        serde_json::from_slice(&envelope(Child::Published, "[REDACTED]")).unwrap();
+    if child == Child::CanonicalIdentity {
+        serde_json::to_vec_pretty(&serde_json::to_value(envelope).unwrap()).unwrap()
+    } else {
+        serde_json::to_vec_pretty(&envelope).unwrap()
+    }
+}
+
 struct Ran {
     temp: tempfile::TempDir,
     result: WorkflowResult<HostCommandResult>,
     envelope: PathBuf,
+    staged: PathBuf,
 }
 
 async fn run(child: Child) -> Ran {
+    run_secret(child, CANARY).await
+}
+
+async fn run_secret(child: Child, secret: &str) -> Ran {
     let temp = tempfile::tempdir().unwrap();
     let mut context = context(temp.path());
-    context.freeze_provider_environment = [("ANTHROPIC_API_KEY".into(), CANARY.into())].into();
+    context.freeze_provider_environment = [("ANTHROPIC_API_KEY".into(), secret.into())].into();
     let task_file = context.task_root.join("TASK-X-010.md");
     std::fs::write(&task_file, b"live-before").unwrap();
     seed_frozen_chain(&context, &task_file);
@@ -148,12 +202,17 @@ async fn run(child: Child) -> Ran {
     );
     let request = HostCommandRequest::new("land-task-body", Some(CANDIDATE.into())).unwrap();
     let call_id = executor.call_identity(&request).unwrap();
+    let staged = run_root
+        .join("host-command-staging")
+        .join(&call_id)
+        .join("gate-envelope.json");
     let result = executor.execute(request, Some(run.generation)).await;
     let envelope = (run_root.join("host-command-results").join(call_id)).join("gate-envelope.json");
     Ran {
         temp,
         result,
         envelope,
+        staged,
     }
 }
 
@@ -259,4 +318,71 @@ async fn a_manifest_that_misstates_the_envelope_is_still_refused() {
     );
     assert!(!ran.envelope.exists(), "nothing published");
     assert_no_clear_copy(&ran);
+}
+
+#[tokio::test]
+async fn round2_json_escaped_credentials_are_sealed() {
+    for secret in [
+        "credential-quote\"-canary",
+        "credential-backslash\\-canary",
+        "credential-newline\n-canary",
+    ] {
+        let ran = run_secret(Child::Published, secret).await;
+        ran.result.as_ref().unwrap();
+        let escaped = serde_json::to_string(secret).unwrap();
+        for needle in [secret.as_bytes(), &escaped.as_bytes()[1..escaped.len() - 1]] {
+            assert!(
+                clear_copies(ran.temp.path(), needle).is_empty(),
+                "{secret:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn round2_object_keys_are_sealed() {
+    let ran = run(Child::SecretKey).await;
+    ran.result.as_ref().unwrap();
+    assert_no_clear_copy(&ran);
+    let value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&ran.envelope).unwrap()).unwrap();
+    assert_eq!(value["report"]["[REDACTED]"], "failure");
+}
+
+#[tokio::test]
+async fn round2_interrupted_temporary_envelopes_are_removed() {
+    for child in [Child::Interrupted, Child::Paused, Child::Cancelled] {
+        let ran = run(child).await;
+        assert!(ran.result.is_err());
+        assert_no_clear_copy(&ran);
+    }
+}
+
+#[tokio::test]
+async fn round2_manifest_claiming_sealed_identity_is_refused() {
+    for child in [Child::SealedIdentity, Child::CanonicalIdentity] {
+        let ran = run(child).await;
+        assert!(ran.result.is_err(), "raw mismatch accepted");
+        assert!(!ran.envelope.exists());
+        assert_no_clear_copy(&ran);
+        if child == Child::CanonicalIdentity {
+            assert_eq!(
+                std::fs::read(&ran.staged).unwrap(),
+                claimed_envelope(child),
+                "the dishonest manifest names exactly the current sealed bytes"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn round2_residual_typed_field_is_sealed_fail_closed() {
+    for child in [Child::TypedSecret, Child::OperationalTypedSecret] {
+        let ran = run(child).await;
+        assert!(
+            ran.result.is_err(),
+            "redaction must not erase a typed failure field"
+        );
+        assert_no_clear_copy(&ran);
+    }
 }

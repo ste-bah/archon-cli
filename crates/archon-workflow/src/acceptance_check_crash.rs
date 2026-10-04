@@ -57,6 +57,7 @@
 //!   check calls — a missing product binary or system tool is not the check's
 //!   own helper.
 
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::sync::LazyLock;
 
@@ -65,7 +66,7 @@ use regex::Regex;
 use crate::acceptance_scratch::CheckResult;
 
 /// How a check's execution ended, as far as its own code is concerned.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CheckRunClass {
     Passed,
     /// Failed, errored, or could not be classified: the check's verdict.
@@ -74,12 +75,12 @@ pub enum CheckRunClass {
     ScriptDefect(ScriptDefect),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScriptDefect {
     /// `python` or `shell`.
-    pub interpreter: &'static str,
+    pub interpreter: String,
     /// The rule that matched, in words.
-    pub rule: &'static str,
+    pub rule: String,
     /// The error line the interpreter printed.
     pub signal: String,
 }
@@ -100,6 +101,9 @@ pub fn classify_check_run(command: &str, result: &CheckResult) -> CheckRunClass 
     if result.operational_error.is_some() {
         return CheckRunClass::Failed;
     }
+    if let Some(classification) = &result.classification {
+        return classification.crash.clone();
+    }
     match result.exit_code {
         Some(0) => return CheckRunClass::Passed,
         None => return CheckRunClass::Failed,
@@ -111,6 +115,37 @@ pub fn classify_check_run(command: &str, result: &CheckResult) -> CheckRunClass 
     python_defect(command, code, &lines)
         .or_else(|| shell_defect(command, code, &lines))
         .map_or(CheckRunClass::Failed, CheckRunClass::ScriptDefect)
+}
+
+/// Host-computed verdict from raw streams, preserved across redaction/reuse.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckClassification {
+    pub passed: bool,
+    pub zero_work: bool,
+    pub crash: CheckRunClass,
+}
+
+impl CheckResult {
+    /// Call before changing any captured stream. The command is host-authorized.
+    pub fn classify_raw(&mut self, command: &str) {
+        if self.classification.is_some() {
+            return;
+        }
+        let zero_work = crate::acceptance::output_reports_zero_work(
+            &String::from_utf8_lossy(&self.stdout),
+            &String::from_utf8_lossy(&self.stderr),
+        );
+        let mut crash = classify_check_run(command, self);
+        if let CheckRunClass::ScriptDefect(defect) = &mut crash {
+            // Raw diagnostic text belongs only in the redacted evidence.
+            defect.signal = "see the fenced stderr below".into();
+        }
+        self.classification = Some(CheckClassification {
+            passed: self.operational_error.is_none() && self.exit_code == Some(0) && !zero_work,
+            zero_work,
+            crash,
+        });
+    }
 }
 
 fn re(pattern: &str) -> Regex {
@@ -311,8 +346,8 @@ fn python_defect(command: &str, code: i32, lines: &[&str]) -> Option<ScriptDefec
         _ => return None,
     };
     Some(ScriptDefect {
-        interpreter: "python",
-        rule,
+        interpreter: "python".into(),
+        rule: rule.into(),
         signal: last.trim().to_string(),
     })
 }
@@ -391,8 +426,8 @@ fn shell_defect(command: &str, code: i32, lines: &[&str]) -> Option<ScriptDefect
                 return None;
             }
             Some(ScriptDefect {
-                interpreter: "shell",
-                rule: "syntax error in the check's shell script",
+                interpreter: "shell".into(),
+                rule: "syntax error in the check's shell script".into(),
                 signal: lines[at].trim().to_string(),
             })
         }
@@ -412,8 +447,8 @@ fn shell_defect(command: &str, code: i32, lines: &[&str]) -> Option<ScriptDefect
                 .nth(number.checked_sub(1)?)
                 .is_some_and(|line| matches(&word(name), line));
             (defined && called).then(|| ScriptDefect {
-                interpreter: "shell",
-                rule: "call of a shell helper the check defines but never made available",
+                interpreter: "shell".into(),
+                rule: "call of a shell helper the check defines but never made available".into(),
                 signal: last.trim().to_string(),
             })
         }
