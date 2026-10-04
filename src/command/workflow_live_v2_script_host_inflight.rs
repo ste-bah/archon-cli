@@ -197,6 +197,7 @@ impl WorkflowScriptHost {
     }
 
     pub(super) fn clear_inflight(&self, call_id: &str) {
+        self.forget_pending_call(call_id);
         let _ = std::fs::remove_file(self.inflight_dir().join(marker_name(call_id)));
     }
 

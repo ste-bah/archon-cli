@@ -334,13 +334,21 @@ impl WorkflowScriptHost {
                 .await;
         }
         self.require_fixed_generation_owned(execution_generation)?;
+        // Track before the started projection's asynchronous UI delivery:
+        // a sibling stop must close that projection even while delivery waits.
+        let dispatched_at = std::time::Instant::now();
+        let call_generation = Some(self.call_generation()?);
+        self.track_pending_call(
+            &execution,
+            attempt,
+            &input_hash,
+            source_metadata.source_fingerprint.clone(),
+            call_generation,
+            dispatched_at,
+        )?;
         self.persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
             .await?;
         let call_id = execution.call.id.clone();
-        // Issue-213 C5: a host killed from here on is recorded at next start,
-        // with what the call's sessions had been doing.
-        let dispatched_at = std::time::Instant::now();
-        let call_generation = self.call_generation();
         let dispatched = self
             .refreshing_inflight(
                 &execution,
@@ -385,7 +393,7 @@ impl WorkflowScriptHost {
                         source_metadata.source_fingerprint.clone(),
                         execution_generation,
                     )
-                    .await;
+                    .await?;
                     return Err(err);
                 }
                 if matches!(&err, WorkflowError::NotificationDelivery(_)) {
@@ -401,13 +409,12 @@ impl WorkflowScriptHost {
                         source_metadata.source_fingerprint.clone(),
                         execution_generation,
                     )
-                    .await;
+                    .await?;
                     return Err(err);
                 }
                 self.result_for_failed_dispatch(&call_id, err).await?
             }
         };
-        self.require_fixed_generation_owned(execution_generation)?;
         let mut result = normalize_and_attach_review_findings(
             &execution,
             result,
@@ -432,7 +439,7 @@ impl WorkflowScriptHost {
             attempt,
             input_hash,
             result,
-            execution.depends_on,
+            execution.depends_on.clone(),
         )
         .with_source_metadata(
             source_metadata.source_fingerprint.clone(),
@@ -443,12 +450,14 @@ impl WorkflowScriptHost {
         .with_evidence_snapshot_hash(evidence_snapshot_hash)
         .with_dispatched_items(dispatched_items)
         .with_agent_sessions(self.take_call_sessions(&call_id));
-        self.persist_generation_owned_call_and_emit(
-            &record,
-            crate::command::workflow_decompose_state::FixedCallProjectionKind::Executed,
-            execution_generation,
-        )
-        .await?;
+        if !self
+            .publish_dispatched_call(&record, call_generation)
+            .await?
+        {
+            return self
+                .redispatch_superseded(&execution, retry.0, retry.1)
+                .await;
+        }
         self.clear_inflight(&call_id);
         self.mark_tasks_reexecuted(&record);
         self.mark_executed(&record, status).await;

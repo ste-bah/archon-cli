@@ -104,6 +104,20 @@ async fn run_probe(
         None,
     );
     let outcome = runner.run(&script).await;
+    if let Ok(summary) = &outcome {
+        super::super::workflow_live_v2_finalizer::finalize_summary(
+            &store,
+            &run.id,
+            archon_workflow::WorkflowRunKind::FixedOrSavedScript,
+            None,
+            summary,
+            &WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2")),
+            None,
+            Some(run.generation),
+        )
+        .await
+        .expect("composition finalization");
+    }
     (store.load_state(&run.id).expect("state").status, outcome)
 }
 
@@ -252,24 +266,26 @@ fn assert_gate_stop_stands(
 
 #[test]
 fn round5_a_refused_call_loop_after_a_terminal_stop_still_ends_the_run() {
-    let (_, outcome) = run_bounded(
+    let (stored, outcome) = run_bounded(
         r#"async function workflow(w) {
         try { await w.humanGate("gate", {task: "Require approval"}); } catch (_) {}
         while (true) { try { await w.checkpoint("again"); } catch (_) {} }
     }"#,
     );
     assert_gate_stop_stands(outcome);
+    assert_eq!(stored, archon_workflow::RunStatus::NeedsReview);
 }
 
 #[test]
 fn round5_a_script_that_never_settles_after_a_terminal_stop_still_ends_the_run() {
-    let (_, outcome) = run_bounded(
+    let (stored, outcome) = run_bounded(
         r#"async function workflow(w) {
         try { await w.humanGate("gate", {task: "Require approval"}); } catch (_) {}
         await new Promise(() => {});
     }"#,
     );
     assert_gate_stop_stands(outcome);
+    assert_eq!(stored, archon_workflow::RunStatus::NeedsReview);
 }
 
 #[tokio::test]

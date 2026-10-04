@@ -149,6 +149,42 @@ impl WorkflowScriptHost {
         Ok(true)
     }
 
+    /// False means the owning executor must rerun this call after an edit.
+    pub(super) async fn publish_dispatched_call(
+        &self,
+        record: &WorkflowV2CallRecord,
+        generation: Option<u64>,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        use crate::command::workflow_live::workflow_live_v2::workflow_live_v2_fixed_persistence::{
+            CallPublication, persist_dispatched_call,
+        };
+        match persist_dispatched_call(
+            &self.runner.workflow_store,
+            &self.runner.run_id,
+            &self.runner.v2_store,
+            record,
+            generation,
+        )? {
+            CallPublication::Superseded => Ok(false),
+            CallPublication::Published(event) => {
+                self.clear_inflight(&record.call.id);
+                if let Some(event) = event {
+                    self.runner
+                        .client
+                        .ui_sink
+                        .emit(event)
+                        .await
+                        .map_err(|error| {
+                            WorkflowError::NotificationDelivery(format!(
+                                "workflow progress delivery failed after durable log flush: {error}"
+                            ))
+                        })?;
+                }
+                Ok(true)
+            }
+        }
+    }
+
     pub(super) async fn persist_fixed_call_started(
         &self,
         execution: &WorkflowV2CallExecution,

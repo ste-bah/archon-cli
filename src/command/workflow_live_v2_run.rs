@@ -11,6 +11,14 @@ use run_control::finalize_generated_control;
 #[path = "workflow_live_v2_run_generation_tests.rs"]
 mod generation_tests;
 
+#[cfg(test)]
+#[path = "workflow_live_v2_round6_publication_tests.rs"]
+mod round6_publication_tests;
+
+#[cfg(test)]
+#[path = "workflow_live_v2_round6_terminal_tests.rs"]
+mod round6_terminal_tests;
+
 pub(crate) async fn run_generated_v2_workflow(
     cwd: &Path,
     store: &WorkflowStore,

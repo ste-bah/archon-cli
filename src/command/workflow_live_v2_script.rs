@@ -81,6 +81,7 @@ pub(super) struct WorkflowV2ScriptRunner {
     /// bootstrap and the authored run it hands off to are one logical run, and
     /// taint must not be laundered by the clone.
     reexecuted_task_closure: Arc<StdMutex<std::collections::BTreeSet<String>>>,
+    pending_calls: workflow_live_v2_script_host_pending::PendingCalls,
 }
 
 impl WorkflowV2ScriptRunner {
@@ -112,6 +113,7 @@ impl WorkflowV2ScriptRunner {
             host_command_executor: None,
             raw_outcomes_allowed: false,
             reexecuted_task_closure: Arc::new(StdMutex::new(Default::default())),
+            pending_calls: Arc::default(),
         }
     }
 
@@ -202,6 +204,7 @@ impl WorkflowV2ScriptRunner {
             .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs context failed: {err}")))?;
         let source = script_source(harness_source, script_args.as_ref());
         let host_for_js = host.clone();
+        let host_for_deadline = host.clone();
         let watchdog_for_js = watchdog.clone();
         let watchdog_for_deadline = watchdog.clone();
         // A notification failure the HOST raised, recorded here so the
@@ -274,6 +277,9 @@ impl WorkflowV2ScriptRunner {
                     biased;
                     settled = promise.into_future::<String>() => settled,
                     () = watchdog_for_deadline.terminal_budget_spent() => {
+                        host_for_deadline.interrupt_terminal_calls().await.map_err(|error| {
+                            rquickjs::Error::new_from_js_message("workflow host", "interruption record", error.to_string())
+                        })?;
                         return Ok(Err(format!(
                             "workflow.js did not settle within {WORKFLOW_JS_WATCHDOG:?} of the host's terminal stop"
                         )));
@@ -290,6 +296,11 @@ impl WorkflowV2ScriptRunner {
                 })
             })
             .await;
+        // Also covers CPU interruption and scripts that return while siblings
+        // are pending. The JS runtime still owns their suspended futures here.
+        if host.accumulator.lock().await.terminal_host_stop {
+            host.interrupt_terminal_calls().await?;
+        }
         let outcome = js_result.unwrap_or_else(|err| Err(err.to_string()));
         // A host stop survives a concurrent resume while this script unwinds.
         let observed = host_control.lock().ok().and_then(|slot| slot.clone());
@@ -330,6 +341,9 @@ impl WorkflowV2ScriptRunner {
         }
     }
 }
+
+#[path = "workflow_live_v2_script_host_pending.rs"]
+mod workflow_live_v2_script_host_pending;
 
 #[path = "workflow_live_v2_script_watchdog.rs"]
 mod workflow_live_v2_script_watchdog;

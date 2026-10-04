@@ -76,9 +76,12 @@ impl WorkflowScriptHost {
     }
 
     /// The run generation a call is dispatched under, read just before it.
-    pub(super) fn call_generation(&self) -> Option<u64> {
-        let run = self.runner.workflow_store.load_state(&self.runner.run_id);
-        run.ok().map(|run| run.generation)
+    pub(super) fn call_generation(&self) -> archon_workflow::WorkflowResult<u64> {
+        Ok(self
+            .runner
+            .workflow_store
+            .load_state(&self.runner.run_id)?
+            .generation)
     }
 
     /// Issue-253 round 5: a restart, item restart or force-accept on the

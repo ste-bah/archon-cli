@@ -32,7 +32,7 @@ impl WorkflowScriptHost {
     /// is that it did not complete and a human must decide. That status is
     /// outside `is_reusable_status`, so this can never be replayed as a success,
     /// and it takes no `residual_gaps` — an interrupted call establishes no gap.
-    pub(super) async fn save_interrupted_call_record(
+    pub(in super::super) async fn save_interrupted_call_record(
         &self,
         execution: &WorkflowV2CallExecution,
         reason: &str,
@@ -42,7 +42,7 @@ impl WorkflowScriptHost {
         input_hash: &str,
         source_fingerprint: Option<String>,
         dispatch_generation: Option<u64>,
-    ) {
+    ) -> archon_workflow::WorkflowResult<()> {
         let call_id = &execution.call.id;
         let elapsed_seconds = elapsed.as_secs();
         let detail = err.to_string();
@@ -86,7 +86,7 @@ impl WorkflowScriptHost {
         .with_source_metadata(source_fingerprint, None)
         .with_scaffold_hash(Some(self.scaffold_hash.clone()))
         .with_agent_sessions(sessions);
-        let control_reason = reason != NOTIFICATION_DELIVERY_REASON;
+        let control_reason = matches!(reason, "paused" | "cancelled");
         let persisted = self.runner.workflow_store.with_run_lock(
             &self.runner.run_id,
             |locked| {
@@ -122,23 +122,28 @@ impl WorkflowScriptHost {
                     &record,
                     crate::command::workflow_decompose_state::FixedCallProjectionKind::Interrupted,
                 )?;
+                self.update_checkpoint(&record)?;
                 self.emit_call_finished_event(&record);
                 Ok(event)
             },
         );
-        self.clear_inflight(call_id);
         let event = match persisted {
             Ok(event) => event,
             Err(err) => {
                 tracing::warn!(%call_id, reason, %err, "interrupted call evidence not saved");
-                return;
+                return Err(err);
             }
         };
+        self.clear_inflight(call_id);
+        if reason == "terminal_host_stop" {
+            self.mark_executed(&record, record.status).await;
+        }
         if let Some(event) = event
             && let Err(err) = self.runner.client.ui_sink.emit(event).await
         {
             tracing::warn!(%call_id, reason, %err, "interrupted call UI event not delivered");
         }
+        Ok(())
     }
 }
 
