@@ -254,3 +254,47 @@ fn lsof_is_found_on_path_then_at_a_standard_location() {
         "nothing found keeps a bare name so the spawn error names lsof"
     );
 }
+
+const CONFINED_PATH_ENV: &str = "ARCHON_TEST_CONFINED_PATH_HOLDERS";
+
+/// Issues 270/311: a run-end guardian runs with its environment cleared and
+/// PATH set to the policy's toolchain path (for example `/usr/bin:/bin`),
+/// where an sbin-installed `lsof` is not on PATH. The probe must still find
+/// a holder there. Run in a child test process with exactly that environment.
+#[test]
+fn holders_find_a_holder_under_a_confined_path() {
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "process_tree::tests::holders_child_under_a_confined_path",
+            "--nocapture",
+        ])
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env(CONFINED_PATH_ENV, "1")
+        .status()
+        .unwrap();
+    assert!(status.success(), "the confined-PATH child failed: {status}");
+}
+
+#[test]
+#[ignore = "child process of holders_find_a_holder_under_a_confined_path"]
+fn holders_child_under_a_confined_path() {
+    if std::env::var_os(CONFINED_PATH_ENV).is_none() {
+        return;
+    }
+    assert_eq!(std::env::var("PATH").unwrap(), "/usr/bin:/bin");
+    let temp = tempfile::tempdir().unwrap();
+    let mut child = std::process::Command::new("/bin/sh")
+        .args(["-c", ": > ready; exec sleep 30"])
+        .current_dir(temp.path())
+        .spawn()
+        .unwrap();
+    wait_for(&temp.path().join("ready"));
+    let found = holders(&[temp.path()]);
+    let _ = child.kill();
+    let _ = child.wait();
+    let found = found.expect("the probe ran under a confined PATH");
+    assert!(found.iter().any(|h| h.pid == child.id()), "{found:?}");
+}

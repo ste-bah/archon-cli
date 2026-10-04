@@ -182,3 +182,43 @@ fn detached_writer_prevents_warm_reuse_until_it_exits() {
         assert_eq!(lease.generation, u64::from(alive));
     }
 }
+
+const CONFINED_PATH_ENV: &str = "ARCHON_TEST_CONFINED_PATH_CACHE";
+
+/// Issue 311: the guardian runs with its environment cleared and PATH set to
+/// the policy's toolchain path (for example `/usr/bin:/bin`), where an
+/// sbin-installed `lsof` is not on PATH. The idle check must still find it,
+/// or every slot left behind looks busy and the warm target is discarded.
+/// Run in a child test process with exactly that environment.
+#[test]
+fn a_left_slot_keeps_the_warm_target_under_a_confined_path() {
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "acceptance_scratch::cache::tests::confined_path_child_keeps_the_warm_target",
+            "--nocapture",
+        ])
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env(CONFINED_PATH_ENV, "1")
+        .status()
+        .unwrap();
+    assert!(status.success(), "the confined-PATH child failed: {status}");
+}
+
+#[test]
+#[ignore = "child process of a_left_slot_keeps_the_warm_target_under_a_confined_path"]
+fn confined_path_child_keeps_the_warm_target() {
+    if std::env::var_os(CONFINED_PATH_ENV).is_none() {
+        return;
+    }
+    assert_eq!(std::env::var("PATH").unwrap(), "/usr/bin:/bin");
+    let cache = tempfile::tempdir().unwrap();
+    killed_holder(cache.path(), &[None, Some(dead_group())]);
+    let lease = reacquired(cache.path());
+    assert_eq!(lease.generation, 0, "the cache was forgotten");
+    assert!(lease.target().join("warm-artifact").exists());
+    let idle = tempfile::tempdir().unwrap();
+    assert!(target_idle(idle.path()), "an idle target read as busy");
+}

@@ -67,11 +67,27 @@ pub fn holders_within(roots: &[&Path], deadline: Duration) -> io::Result<Vec<Hol
     Ok(found.into_values().collect())
 }
 
+#[cfg(target_os = "linux")]
 fn timed_out() -> io::Error {
     io::Error::new(
         io::ErrorKind::TimedOut,
         "holder probe did not finish in time",
     )
+}
+
+/// A bounded probe's error as the holder probe reports it. A timeout keeps
+/// its cause: a slow `lsof` and probe slots that stayed full are different
+/// faults for the operator.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(super) fn probe_failed(error: io::Error) -> io::Error {
+    if error.kind() == io::ErrorKind::TimedOut {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("holder probe did not finish in time: {error}"),
+        )
+    } else {
+        error
+    }
 }
 
 /// Every (pid, path, held for writing) this user's processes hold.
@@ -139,13 +155,7 @@ fn open_paths(end: Instant) -> io::Result<Vec<(u32, PathBuf, bool)>> {
         .args(["-nP", "-w", "-Fpan", "-u"])
         .arg(uid.to_string());
     let left = end.saturating_duration_since(Instant::now());
-    let stdout = super::bounded::stdout_within(command, left).map_err(|error| {
-        if error.kind() == io::ErrorKind::TimedOut {
-            timed_out()
-        } else {
-            error
-        }
-    })?;
+    let stdout = super::bounded::stdout_within(command, left).map_err(probe_failed)?;
     // lsof exits 1 when any process could not be fully listed; the listing
     // is still complete for those it could read. An empty one is a failure:
     // this process at least holds files.
@@ -155,11 +165,12 @@ fn open_paths(end: Instant) -> io::Result<Vec<(u32, PathBuf, bool)>> {
     Ok(parse_lsof_fields(&String::from_utf8_lossy(&stdout)))
 }
 
-/// PATH wins when it names an `lsof`. The probe often runs under a
-/// confined PATH (for example `/usr/bin:/bin`) while `lsof` sits in an
-/// sbin directory, so the standard install locations come next.
-#[cfg(not(target_os = "linux"))]
-fn lsof_program() -> PathBuf {
+/// The `lsof` every caller spawns. PATH wins when it names an `lsof`. A
+/// probe often runs under a confined PATH (for example `/usr/bin:/bin`)
+/// while `lsof` sits in an sbin directory, so the standard install
+/// locations come next. Linux holder probes read `/proc`, but other callers
+/// (a build cache's idle check) spawn `lsof` there too.
+pub fn lsof_program() -> PathBuf {
     let path = std::env::var_os("PATH").unwrap_or_default();
     lsof_program_from(
         std::env::split_paths(&path).map(|dir| dir.join("lsof")),
@@ -174,7 +185,6 @@ fn lsof_program() -> PathBuf {
 
 /// The first executable file among the PATH entries, then the standard
 /// locations; a bare `lsof` when none exists, so the spawn error names it.
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn lsof_program_from(
     on_path: impl Iterator<Item = PathBuf>,
     standard: &[&str],

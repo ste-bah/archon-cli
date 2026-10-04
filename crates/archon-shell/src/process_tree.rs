@@ -26,7 +26,7 @@ mod holders_impl;
 mod identity;
 #[path = "process_tree_tracker.rs"]
 mod tracker;
-pub use holders_impl::{HOLDER_PROBE_DEADLINE, Holder, holders, holders_within};
+pub use holders_impl::{HOLDER_PROBE_DEADLINE, Holder, holders, holders_within, lsof_program};
 pub use identity::{Pinned, Table, deliver, exited, identity_of, snapshot_until, start_of};
 pub use tracker::{ReapToken, Tracker};
 #[path = "process_tree_cleanup.rs"]
