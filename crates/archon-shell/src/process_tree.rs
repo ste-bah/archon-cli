@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 #[path = "process_tree_bounded.rs"]
 mod bounded;
+pub use bounded::drain_probes;
 #[path = "process_tree_holders.rs"]
 mod holders_impl;
 #[path = "process_tree_identity.rs"]
@@ -26,8 +27,11 @@ mod identity;
 #[path = "process_tree_tracker.rs"]
 mod tracker;
 pub use holders_impl::{HOLDER_PROBE_DEADLINE, Holder, holders, holders_within};
-pub use identity::{Pinned, Table, deliver, exited, snapshot_until, start_of};
-pub use tracker::Tracker;
+pub use identity::{Pinned, Table, deliver, exited, identity_of, snapshot_until, start_of};
+pub use tracker::{ReapToken, Tracker};
+#[path = "process_tree_cleanup.rs"]
+mod cleanup;
+pub use cleanup::{drain_cleanup, lock_until, register_cleanup};
 
 /// How long [`snapshot`] may take.
 pub const SNAPSHOT_DEADLINE: Duration = Duration::from_secs(5);

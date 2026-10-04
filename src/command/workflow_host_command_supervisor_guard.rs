@@ -12,6 +12,8 @@ use super::termination::{Teardown, Tree, kill_blocking};
 
 pub(super) struct ProcessGroupGuard {
     pub(super) tree: Tree,
+    #[cfg(unix)]
+    pub(super) child: std::mem::ManuallyDrop<tokio::process::Child>,
     record: Option<GroupRecordGuard>,
     settled: bool,
     /// Once the leader is reaped its pid may be reused, so the tree is no
@@ -20,9 +22,11 @@ pub(super) struct ProcessGroupGuard {
 }
 
 impl ProcessGroupGuard {
-    pub(super) fn new(tree: Tree) -> Self {
+    pub(super) fn new(tree: Tree, #[cfg(unix)] child: tokio::process::Child) -> Self {
         Self {
             tree,
+            #[cfg(unix)]
+            child: std::mem::ManuallyDrop::new(child),
             record: None,
             settled: false,
             reaped: false,
@@ -59,7 +63,9 @@ fn settle_record(record: Option<GroupRecordGuard>, teardown: Teardown) -> Option
             survivors,
         } => {
             if let Some(record) = record {
-                record.keep(survivors.as_deref());
+                if let Some(error) = record.keep(survivors.as_deref()) {
+                    return Some(format!("{evidence}; {error}"));
+                }
             }
             Some(evidence)
         }
@@ -72,6 +78,10 @@ impl Drop for ProcessGroupGuard {
     /// it runs on a dedicated thread, never on the async runtime, and the
     /// resume record stays until that teardown reports.
     fn drop(&mut self) {
+        #[cfg(unix)]
+        // SAFETY: this Drop is the only take; the field is not dropped again.
+        // It keeps the leader unreaped until the worker has scanned its scope.
+        let mut child = unsafe { std::mem::ManuallyDrop::take(&mut self.child) };
         if self.settled {
             return;
         }
@@ -86,16 +96,34 @@ impl Drop for ProcessGroupGuard {
             .name("archon-host-command-teardown".into())
             .spawn(move || {
                 let teardown = kill_blocking(&tree, !reaped);
+                #[cfg(unix)]
+                let teardown = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                    Ok(runtime) => match runtime.block_on(super::termination::reap(&mut child)) {
+                        Ok(_) => teardown,
+                        Err(evidence) => teardown.and_stalled(evidence),
+                    },
+                    Err(error) => teardown.and_stalled(format!("drop reap runtime unavailable: {error}")),
+                };
+                #[cfg(unix)]
+                tree.leader_reaped();
                 let record = held.lock().ok().and_then(|mut record| record.take());
                 if let Some(evidence) = settle_record(record, teardown) {
                     tracing::warn!(%evidence, "host command teardown stalled after supervision stopped");
                 }
             });
-        if let Err(error) = spawned {
-            if let Some(record) = record.lock().ok().and_then(|mut record| record.take()) {
-                record.keep(None);
+        match spawned {
+            Ok(handle) => {
+                #[cfg(unix)]
+                archon_shell::process_tree::register_cleanup(handle);
+                #[cfg(not(unix))]
+                drop(handle);
             }
-            tracing::error!(%error, "host command teardown thread could not start");
+            Err(error) => {
+                if let Some(record) = record.lock().ok().and_then(|mut record| record.take()) {
+                    record.keep(None);
+                }
+                tracing::error!(%error, "host command teardown thread could not start; survivors unknown");
+            }
         }
     }
 }

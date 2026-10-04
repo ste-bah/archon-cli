@@ -89,3 +89,38 @@ fn a_survivor_list_that_cannot_be_written_never_leaves_the_old_empty_list() {
     assert!(refusal.to_string().contains("unknown"), "{refusal}");
     assert!(dir.join(format!("{pgid}.unknown.json")).exists());
 }
+
+#[test]
+fn both_survivor_rewrite_and_fallback_rename_failure_block_resume() {
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    let pgid = ended_group();
+    let guard = record_group(&dir, pgid, pgid, Some(pgid), None, "cmd").unwrap();
+    std::fs::create_dir(dir.join(format!("{pgid}.json.tmp"))).unwrap();
+    std::fs::create_dir(dir.join(format!("{pgid}.unknown.json"))).unwrap();
+    guard.keep(None);
+    // Restore both paths: a transient failure must leave persistent evidence.
+    std::fs::remove_dir(dir.join(format!("{pgid}.json.tmp"))).unwrap();
+    std::fs::remove_dir(dir.join(format!("{pgid}.unknown.json"))).unwrap();
+    assert!(
+        require_no_running_groups(run.path(), "run").is_err(),
+        "resume forgot the unknown survivor"
+    );
+    assert_eq!(stalled_running(run.path()).unwrap().len(), 1);
+}
+
+#[test]
+fn an_unreadable_retained_survivor_cannot_be_treated_as_dead() {
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    let pgid = ended_group();
+    record_group(&dir, pgid, pgid, None, None, "cmd")
+        .unwrap()
+        .keep(Some(&[(42, 7)]));
+    let record = read(&dir.join(format!("{pgid}.json")));
+    let state = survivors_running(
+        &record,
+        |_| Err(std::io::ErrorKind::PermissionDenied.into()),
+    );
+    assert_eq!(state, None, "resume must refuse an unreadable identity");
+}

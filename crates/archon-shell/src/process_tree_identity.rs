@@ -32,11 +32,26 @@ pub struct Pinned {
 /// One scan of the process table.
 #[derive(Debug, Clone, Default)]
 pub struct Table {
+    /// Generation allocated before listing the table.
+    pub generation: u64,
     /// Every process the scan could read.
     pub processes: Vec<Process>,
     /// Every pid the kernel listed, read or not: a listed pid that could not
     /// be read may still be alive, so it is never taken for gone.
     pub listed: BTreeSet<u32>,
+}
+
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+impl Table {
+    pub fn next_generation() -> u64 {
+        GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(super) fn pidfd_failure_allows_fallback(errno: i32) -> bool {
+    errno == libc::ENOSYS
 }
 
 fn timed_out() -> io::Error {
@@ -70,7 +85,10 @@ pub fn snapshot_until(deadline: Instant) -> io::Result<Table> {
 
 #[cfg(target_os = "linux")]
 fn snapshot_proc(deadline: Instant) -> io::Result<Table> {
-    let mut table = Table::default();
+    let mut table = Table {
+        generation: Table::next_generation(),
+        ..Table::default()
+    };
     for entry in std::fs::read_dir("/proc")? {
         if Instant::now() >= deadline {
             return Err(timed_out());
@@ -111,6 +129,36 @@ pub fn start_of(pid: u32) -> Option<u64> {
     }
 }
 
+/// A live identity, a proven exit, or an unreadable identity. Unlike
+/// `start_of`, this preserves uncertainty for durable survivor records.
+pub fn identity_of(pid: u32) -> io::Result<Option<u64>> {
+    #[cfg(target_os = "linux")]
+    {
+        let stat = match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Ok(stat) => stat,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let process = super::parse_proc_stat(pid, &stat)
+            .ok_or_else(|| io::Error::other("unreadable process identity"))?;
+        Ok((!process.zombie).then_some(process.start))
+    }
+    #[cfg(target_os = "macos")]
+    if let Ok(id) = libc::pid_t::try_from(pid) {
+        if let Some(info) = bsd_info(id) {
+            return Ok((info.pbi_status != libc::SZOMB).then(|| start_of_info(&info)));
+        }
+        // SAFETY: signal zero probes existence without delivering a signal.
+        if unsafe { libc::kill(id, 0) } < 0
+            && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+        {
+            return Ok(None);
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err(io::Error::other("process identity is unknown"))
+}
+
 /// Send `signal` to `pinned` only if it is still the same process (see the
 /// module docs for each platform's guarantee). For a tracked member, the
 /// tracker signals through the pidfd it opened at adoption instead.
@@ -122,8 +170,10 @@ pub fn deliver(pinned: Pinned, signal: i32) -> bool {
         return false;
     }
     #[cfg(target_os = "linux")]
-    if let Some(fd) = pidfd::open(pinned) {
-        return pidfd::send(&fd, signal);
+    match pidfd::open(pinned) {
+        Ok(Some(fd)) => return pidfd::send(&fd, signal),
+        Ok(None) => {} // ENOSYS only: the documented old-kernel fallback.
+        Err(_) => return false,
     }
     // macOS (and a Linux kernel without pidfds): the read and the signal
     // are adjacent; the window between them is the accepted residual.
@@ -167,18 +217,34 @@ pub(super) mod pidfd {
 
     use super::{Pinned, start_of};
 
-    /// A pidfd for `pinned`, if it is still that process: the pidfd is opened
-    /// first and the start time read after, so the descriptor names the
-    /// process whose start time matched. `None` also on a kernel without
-    /// pidfds, where the caller falls back to verify-then-kill.
-    pub(crate) fn open(pinned: Pinned) -> Option<OwnedFd> {
-        let pid = libc::pid_t::try_from(pinned.pid).ok()?;
+    /// `Ok(None)` only when the kernel has no pidfds (ENOSYS). Every other
+    /// failure is unknown: callers must retain the member without signalling
+    /// its numeric pid.
+    pub(crate) fn open(pinned: Pinned) -> std::io::Result<Option<OwnedFd>> {
+        let pid = libc::pid_t::try_from(pinned.pid)
+            .map_err(|_| std::io::Error::other("invalid process id"))?;
         // SAFETY: pidfd_open takes integers; ownership of the result is taken.
-        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
-        let fd = libc::c_int::try_from(fd).ok().filter(|fd| *fd >= 0)?;
-        // SAFETY: the descriptor was just returned to this process.
-        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-        (start_of(pinned.pid) == Some(pinned.start)).then_some(fd)
+        let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+        if raw < 0 {
+            let error = std::io::Error::last_os_error();
+            return if error
+                .raw_os_error()
+                .is_some_and(super::pidfd_failure_allows_fallback)
+            {
+                Ok(None)
+            } else {
+                Err(error)
+            };
+        }
+        let raw = libc::c_int::try_from(raw).map_err(|_| std::io::Error::other("invalid pidfd"))?;
+        // SAFETY: this descriptor was just returned to this process.
+        let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+        if start_of(pinned.pid) != Some(pinned.start) {
+            return Err(std::io::Error::other(
+                "process identity could not be verified",
+            ));
+        }
+        Ok(Some(fd))
     }
 
     /// Signal the process `fd` names; false once it has exited.
@@ -257,8 +323,11 @@ fn list_pids() -> io::Result<Vec<libc::pid_t>> {
 /// The process table from libproc: one `proc_pidinfo` per pid, no `ps`.
 #[cfg(target_os = "macos")]
 fn snapshot_libproc(deadline: Instant) -> io::Result<Table> {
+    let mut table = Table {
+        generation: Table::next_generation(),
+        ..Table::default()
+    };
     let pids = list_pids()?;
-    let mut table = Table::default();
     for pid in pids.into_iter().filter(|pid| *pid > 0) {
         if Instant::now() >= deadline {
             return Err(timed_out());

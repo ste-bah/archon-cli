@@ -157,13 +157,19 @@ pub(crate) async fn supervise_process_group(
     // observe this future being dropped - task cancellation, a panic, or an
     // early return on a path that never reaches termination - and a dropped
     // supervisor used to leave the whole process group running.
-    let mut group_guard = ProcessGroupGuard::new(confine(&mut child)?);
+    let tree = confine(&mut child)?;
+    #[cfg(unix)]
+    let mut group_guard = ProcessGroupGuard::new(tree, child);
+    #[cfg(not(unix))]
+    let mut group_guard = ProcessGroupGuard::new(tree);
     group_guard.hold_record(super::workflow_host_command_groups::record_in(
         group_records,
         group_guard.tree.leader(),
         group_guard.tree.job_name(),
         &request.command_id,
     )?);
+    #[cfg(unix)]
+    let mut child = &mut *group_guard.child;
     let stdout = child.stdout.take().ok_or_else(|| {
         WorkflowError::StageFailed("host command stdout pipe was not created".to_string())
     })?;

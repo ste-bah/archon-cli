@@ -22,6 +22,7 @@ fn pin(child: &std::process::Child) -> Pinned {
 /// A table listing `processes`, as a complete scan would.
 fn table(processes: Vec<Process>) -> Table {
     Table {
+        generation: Table::next_generation(),
         listed: processes.iter().map(|p| p.pid).collect(),
         processes,
     }
@@ -123,6 +124,7 @@ fn an_incomplete_or_failed_scan_forgets_nobody() {
     assert!(tracker.refresh(expired).is_err());
     // A listed pid that could not be read is not taken for gone.
     tracker.absorb(&Table {
+        generation: Table::next_generation(),
         processes: Vec::new(),
         listed: [root_pin.pid].into(),
     });
@@ -189,4 +191,119 @@ fn kill_reaches_members_that_left_the_group_and_the_session_and_whose_parent_exi
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+#[test]
+fn unreadable_pins_are_returned_as_possible_survivors() {
+    let mut root = sleeper();
+    let pinned = pin(&root);
+    let mut tracker = Tracker::new(pinned, Vec::new(), Vec::new());
+    let live = tracker.absorb(&Table {
+        generation: Table::next_generation(),
+        listed: [pinned.pid].into(),
+        processes: Vec::new(),
+    });
+    let _ = root.kill();
+    let _ = root.wait();
+    assert_eq!(live, vec![pinned], "unreadable is unknown, never empty");
+}
+
+#[test]
+fn a_timed_out_scan_with_no_pins_is_unknown_not_empty() {
+    let mut tracker = Tracker::default();
+    assert!(
+        tracker.kill(Duration::ZERO).is_err(),
+        "unknown descendants cannot mean confirmed empty"
+    );
+}
+
+#[test]
+fn an_older_snapshot_cannot_erase_a_newer_pin() {
+    let mut root = sleeper();
+    let mut child = sleeper();
+    let (root_pin, pinned) = (pin(&root), pin(&child));
+    let mut tracker = Tracker::new(root_pin, vec![root_pin.pid], Vec::new());
+    let older = table(vec![entry(root_pin, 1, root_pin.pid)]);
+    let newer = table(vec![
+        entry(root_pin, 1, root_pin.pid),
+        entry(pinned, 1, root_pin.pid),
+    ]);
+    tracker.absorb(&newer);
+    tracker.leader_reaped(); // Now only the new pin reaches the escaped member.
+    let returned = tracker.absorb(&older);
+    let kept = tracker.has_seen(pinned.pid, pinned.start);
+    for member in [&mut root, &mut child] {
+        let _ = member.kill();
+        let _ = member.wait();
+    }
+    assert!(
+        kept && returned.contains(&pinned),
+        "an out-of-order table forgot a pin"
+    );
+}
+
+#[test]
+fn adoption_honours_an_expired_deadline() {
+    let mut tracker = Tracker::default();
+    let expired = Instant::now() - Duration::from_millis(1);
+    assert!(tracker.absorb_until(&table(Vec::new()), expired).is_err());
+}
+
+#[test]
+fn pidfd_permission_failure_never_allows_numeric_signalling() {
+    assert!(!super::super::identity::pidfd_failure_allows_fallback(
+        libc::EPERM
+    ));
+    assert!(!super::super::identity::pidfd_failure_allows_fallback(
+        libc::EMFILE
+    ));
+    assert!(super::super::identity::pidfd_failure_allows_fallback(
+        libc::ENOSYS
+    ));
+}
+
+#[test]
+fn a_large_adoption_batch_cannot_outlive_its_budget() {
+    let processes = (100_000..150_000)
+        .map(|pid| Process {
+            pid,
+            ppid: 1,
+            pgid: 1,
+            sid: Some(1),
+            start: 1,
+            zombie: false,
+        })
+        .collect();
+    let table = table(processes);
+    let mut tracker = Tracker::default();
+    let begin = Instant::now();
+    let result = tracker.absorb_until(&table, begin + Duration::from_millis(1));
+    assert!(
+        result.is_err(),
+        "the entire absorption must share the deadline"
+    );
+    assert!(begin.elapsed() < Duration::from_millis(150));
+}
+
+#[test]
+fn an_unreadable_but_proven_exited_leader_does_not_stall() {
+    let mut root = std::process::Command::new("true").spawn().unwrap();
+    while !exited(root.id()).unwrap() {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let pinned = Pinned {
+        pid: root.id(),
+        start: 0,
+    };
+    let mut tracker = Tracker::new(pinned, vec![pinned.pid], Vec::new());
+    let live = tracker.absorb(&Table {
+        generation: Table::next_generation(),
+        listed: [pinned.pid].into(),
+        processes: Vec::new(),
+    });
+    root.wait().unwrap();
+    assert!(
+        live.is_empty(),
+        "waitid proved the unreadable leader exited: {live:?}"
+    );
 }

@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
-use archon_shell::process_tree::{Pinned, Tracker};
+use archon_shell::process_tree::{Pinned, ReapToken, Tracker, lock_until};
 #[cfg(unix)]
 use archon_workflow::WorkflowResult;
 
@@ -82,6 +82,8 @@ pub(super) struct Tree {
     leader: Option<u32>,
     #[cfg(unix)]
     tracker: Arc<Mutex<Tracker>>,
+    #[cfg(unix)]
+    reaped: ReapToken,
     /// Set once supervision stopped: a background scan still running then
     /// absorbs nothing.
     #[cfg(unix)]
@@ -132,6 +134,7 @@ pub(super) fn confine(child: &mut tokio::process::Child) -> WorkflowResult<Tree>
     });
     Ok(Tree {
         leader,
+        reaped: tracker.reap_token(),
         tracker: Arc::new(Mutex::new(tracker)),
         abandoned: Arc::new(AtomicBool::new(false)),
     })
@@ -168,8 +171,10 @@ impl Tree {
             if abandoned.load(Ordering::SeqCst) {
                 return;
             }
-            if let Ok(mut tracker) = tracker.lock() {
-                tracker.absorb(&table);
+            if let Ok(mut tracker) = lock_until(&tracker, deadline)
+                && !abandoned.load(Ordering::SeqCst)
+            {
+                let _ = tracker.absorb_until(&table, deadline);
             }
         }))
     }
@@ -177,19 +182,32 @@ impl Tree {
     /// The leader is reaped: its pid may be reused, so its group and session
     /// ids select nothing any more.
     pub(super) fn leader_reaped(&self) {
-        if let Ok(mut tracker) = self.tracker.lock() {
-            tracker.leader_reaped();
-        }
+        self.reaped.mark_reaped();
     }
 
-    async fn run(&self, work: impl FnOnce(&mut Tracker) -> Teardown + Send + 'static) -> Teardown {
+    async fn run(
+        &self,
+        bound: Duration,
+        work: impl FnOnce(&mut Tracker, Instant) -> Teardown + Send + 'static,
+    ) -> Teardown {
+        // Disable before the first termination scan, including the TERM
+        // grace. Outstanding scanners recheck this after acquiring the lock.
+        self.abandoned.store(true, Ordering::SeqCst);
         let tracker = self.tracker.clone();
-        tokio::task::spawn_blocking(move || match tracker.lock() {
-            Ok(mut tracker) => work(&mut tracker),
-            Err(_) => Teardown::stalled("host command tree tracker is poisoned"),
-        })
-        .await
-        .unwrap_or_else(|error| Teardown::stalled(format!("teardown task failed: {error}")))
+        let deadline = Instant::now() + bound;
+        let task = tokio::task::spawn_blocking(move || match lock_until(&tracker, deadline) {
+            Ok(mut tracker) => work(&mut tracker, deadline),
+            Err(error) => {
+                Teardown::stalled(format!("host command tree tracker unavailable: {error}"))
+            }
+        });
+        match tokio::time::timeout(bound, task).await {
+            Ok(Ok(teardown)) => teardown,
+            Ok(Err(error)) => Teardown::stalled(format!("teardown task failed: {error}")),
+            Err(_) => {
+                Teardown::stalled("host command teardown deadline exceeded; survivors unknown")
+            }
+        }
     }
 }
 
@@ -219,14 +237,16 @@ fn kill_tracked(tracker: &mut Tracker, bound: Duration) -> Teardown {
 #[cfg(unix)]
 pub(super) async fn terminate_and_reap(child: &mut tokio::process::Child, tree: &Tree) -> Teardown {
     let _ = tree
-        .run(|tracker| {
-            let _ = tracker.signal(libc::SIGTERM, Instant::now() + SCAN_BUDGET);
+        .run(SCAN_BUDGET, |tracker, deadline| {
+            let _ = tracker.signal(libc::SIGTERM, deadline);
             Teardown::Confirmed
         })
         .await;
     tokio::time::sleep(CLEANUP_GRACE).await;
     let teardown = tree
-        .run(|tracker| kill_tracked(tracker, REAP_DEADLINE))
+        .run(REAP_DEADLINE, |tracker, deadline| {
+            kill_tracked(tracker, deadline.saturating_duration_since(Instant::now()))
+        })
         .await;
     match reap(child).await {
         Ok(_) => teardown,
@@ -238,35 +258,32 @@ pub(super) async fn terminate_and_reap(child: &mut tokio::process::Child, tree: 
 /// it left behind, including members that escaped its group and session.
 #[cfg(unix)]
 pub(super) async fn terminate_completed_group(tree: &Tree) -> Teardown {
-    tree.run(|tracker| kill_tracked(tracker, REAP_DEADLINE))
-        .await
+    tree.run(REAP_DEADLINE, |tracker, deadline| {
+        kill_tracked(tracker, deadline.saturating_duration_since(Instant::now()))
+    })
+    .await
 }
 
 /// The teardown of a supervisor that stopped without settling (dropped or
 /// returned early). Runs on a dedicated thread, never on the runtime. The
-/// leader is treated as reaped: the dropped child is about to be. The
-/// tracker lock is only tried, within the bound; if a scan still holds it,
+/// child handle remains owned by the cleanup thread, so the original
+/// selectors stay valid until scan/kill finishes. The tracker lock is only tried, within the bound; if a scan still holds it,
 /// the survivors are unknown.
 #[cfg(unix)]
-pub(super) fn kill_blocking(tree: &Tree, _leader_unreaped: bool) -> Teardown {
+pub(super) fn kill_blocking(tree: &Tree, leader_unreaped: bool) -> Teardown {
     tree.abandoned.store(true, Ordering::SeqCst);
+    if !leader_unreaped {
+        tree.leader_reaped();
+    }
     let deadline = Instant::now() + REAP_DEADLINE;
-    loop {
-        match tree.tracker.try_lock() {
-            Ok(mut tracker) => {
-                tracker.leader_reaped();
-                return kill_tracked(&mut tracker, REAP_DEADLINE);
-            }
-            Err(std::sync::TryLockError::Poisoned(_)) => {
-                return Teardown::stalled("host command tree tracker is poisoned");
-            }
-            Err(std::sync::TryLockError::WouldBlock) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            Err(std::sync::TryLockError::WouldBlock) => {
-                return Teardown::stalled("the tree was busy when supervision stopped");
-            }
-        }
+    match lock_until(&tree.tracker, deadline) {
+        Ok(mut tracker) => kill_tracked(
+            &mut tracker,
+            deadline.saturating_duration_since(Instant::now()),
+        ),
+        Err(error) => Teardown::stalled(format!(
+            "the tree was unavailable when supervision stopped: {error}"
+        )),
     }
 }
 

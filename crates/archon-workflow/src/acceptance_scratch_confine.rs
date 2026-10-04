@@ -36,6 +36,8 @@ const HOLDER_PROBES: u32 = 10;
 pub(super) struct Confinement {
     #[cfg(unix)]
     tracker: std::sync::Arc<std::sync::Mutex<archon_shell::process_tree::Tracker>>,
+    #[cfg(unix)]
+    reaped: archon_shell::process_tree::ReapToken,
     /// Set once the runner stopped: a scan still running absorbs nothing.
     #[cfg(unix)]
     abandoned: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -47,20 +49,20 @@ pub(super) struct Confinement {
 impl Confinement {
     #[cfg_attr(windows, allow(unused_variables))]
     pub(super) fn new(leader: u32) -> Self {
+        #[cfg(unix)]
+        let tracker = archon_shell::process_tree::Tracker::new(
+            archon_shell::process_tree::Pinned {
+                pid: leader,
+                start: archon_shell::process_tree::start_of(leader).unwrap_or_default(),
+            },
+            vec![leader],
+            Vec::new(),
+        );
         Self {
             #[cfg(unix)]
-            tracker: std::sync::Arc::new(std::sync::Mutex::new(
-                archon_shell::process_tree::Tracker::new(
-                    archon_shell::process_tree::Pinned {
-                        pid: leader,
-                        // An already exited leader is still our unreaped
-                        // child; only its start time is unknown.
-                        start: archon_shell::process_tree::start_of(leader).unwrap_or_default(),
-                    },
-                    vec![leader],
-                    Vec::new(),
-                ),
-            )),
+            reaped: tracker.reap_token(),
+            #[cfg(unix)]
+            tracker: std::sync::Arc::new(std::sync::Mutex::new(tracker)),
             #[cfg(unix)]
             abandoned: Default::default(),
             #[cfg(unix)]
@@ -90,8 +92,10 @@ impl Confinement {
                 if abandoned.load(std::sync::atomic::Ordering::SeqCst) {
                     return;
                 }
-                if let Ok(mut tracker) = tracker.lock() {
-                    tracker.absorb(&table);
+                if let Ok(mut tracker) = archon_shell::process_tree::lock_until(&tracker, deadline)
+                    && !abandoned.load(std::sync::atomic::Ordering::SeqCst)
+                {
+                    let _ = tracker.absorb_until(&table, deadline);
                 }
             }));
         }
@@ -101,9 +105,7 @@ impl Confinement {
     /// nothing any more.
     pub(super) fn leader_reaped(&self) {
         #[cfg(unix)]
-        if let Ok(mut tracker) = self.tracker.lock() {
-            tracker.leader_reaped();
-        }
+        self.reaped.mark_reaped();
     }
 
     /// Kill the whole tree; `Err` is the evidence of a stall (survivors, or
@@ -111,13 +113,23 @@ impl Confinement {
     pub(super) async fn kill(&self) -> Result<(), String> {
         #[cfg(unix)]
         {
+            self.abandoned
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             let tracker = self.tracker.clone();
-            let killed = tokio::task::spawn_blocking(move || {
-                let mut tracker = tracker.lock().map_err(|e| e.to_string())?;
-                tracker.kill(KILL_BOUND).map_err(|e| e.to_string())
-            })
-            .await
-            .map_err(|e| format!("scratch teardown task failed: {e}"))?;
+            let deadline = std::time::Instant::now() + KILL_BOUND;
+            let work = tokio::task::spawn_blocking(move || {
+                let mut tracker = archon_shell::process_tree::lock_until(&tracker, deadline)
+                    .map_err(|e| e.to_string())?;
+                tracker
+                    .kill(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .map_err(|e| e.to_string())
+            });
+            let killed = tokio::time::timeout(KILL_BOUND, work)
+                .await
+                .map_err(|_| {
+                    "scratch teardown exceeded its deadline; survivors unknown".to_string()
+                })?
+                .map_err(|e| format!("scratch teardown task failed: {e}"))?;
             match killed {
                 Ok(survivors) if survivors.is_empty() => Ok(()),
                 Ok(survivors) => Err(format!(
@@ -176,7 +188,9 @@ impl Confinement {
             };
             // In a block of its own, so no lock guard lives across an await.
             last = {
-                let tracker = self.tracker.lock().ok()?;
+                let Ok(tracker) = self.tracker.try_lock() else {
+                    return Some("scratch holder identities are unknown: tracker busy".into());
+                };
                 found
                     .into_iter()
                     .filter(|h| {
@@ -212,33 +226,75 @@ impl Confinement {
     }
 }
 
-impl Drop for Confinement {
-    /// The runner stopped before its teardown. The teardown can take
-    /// seconds, so it runs on a dedicated thread, never on the runtime; it
-    /// treats the leader as reaped (the dropped child is about to be), and it
-    /// only tries the tracker lock, within its bound.
+/// Own the unreaped child through cancellation as well as normal teardown.
+/// Keeping its handle prevents PID/session reuse while the drop worker scans.
+#[cfg(unix)]
+pub(super) struct OwnedCheck {
+    pub(super) child: std::mem::ManuallyDrop<super::RunChild>,
+    pub(super) confinement: Confinement,
+}
+#[cfg(unix)]
+impl OwnedCheck {
+    pub(super) fn new(leader: u32, child: super::RunChild) -> Self {
+        Self {
+            child: std::mem::ManuallyDrop::new(child),
+            confinement: Confinement::new(leader),
+        }
+    }
+}
+#[cfg(unix)]
+impl Drop for OwnedCheck {
     fn drop(&mut self) {
-        // On Windows the child's Job Object (`process_wrap`'s `KillOnDrop`)
-        // reaps the whole job when the child drops.
-        #[cfg(unix)]
-        if self.armed {
-            self.abandoned
-                .store(true, std::sync::atomic::Ordering::SeqCst);
-            let tracker = self.tracker.clone();
-            let _ = std::thread::Builder::new()
-                .name("archon-check-teardown".into())
-                .spawn(move || {
-                    let deadline = std::time::Instant::now() + DROP_KILL_BOUND;
-                    while std::time::Instant::now() < deadline {
-                        if let Ok(mut tracker) = tracker.try_lock() {
-                            tracker.leader_reaped();
-                            let _ = tracker.kill(DROP_KILL_BOUND);
-                            return;
+        // SAFETY: this is the only take; the ManuallyDrop field is not dropped
+        // again. The child stays owned by the worker until its final reap.
+        let mut child = unsafe { std::mem::ManuallyDrop::take(&mut self.child) };
+        if !self.confinement.armed {
+            drop(child);
+            return;
+        }
+        self.confinement
+            .abandoned
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let tracker = self.confinement.tracker.clone();
+        let reaped = self.confinement.reaped.clone();
+        match std::thread::Builder::new()
+            .name("archon-check-teardown".into())
+            .spawn(move || {
+                let deadline = std::time::Instant::now() + DROP_KILL_BOUND;
+                let killed = archon_shell::process_tree::lock_until(&tracker, deadline).and_then(
+                    |mut tracker| {
+                        tracker.kill(deadline.saturating_duration_since(std::time::Instant::now()))
+                    },
+                );
+                if !matches!(killed, Ok(ref survivors) if survivors.is_empty()) {
+                    tracing::warn!(
+                        ?killed,
+                        "scratch drop teardown survivors are unknown or still alive"
+                    );
+                }
+                // The leader remained unreaped during the scan/kill. Reap on a
+                // private runtime so cleanup survives the caller's runtime exit.
+                match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => {
+                        let mut stall = None;
+                        runtime.block_on(reap(&mut child, &mut stall));
+                        if let Some(evidence) = stall {
+                            tracing::warn!(%evidence, "scratch drop reap stalled");
                         }
-                        std::thread::sleep(Duration::from_millis(5));
                     }
-                    tracing::warn!("scratch check teardown abandoned: its tree stayed busy");
-                });
+                    Err(error) => {
+                        tracing::warn!(%error, "scratch drop could not start reap runtime")
+                    }
+                }
+                reaped.mark_reaped();
+            }) {
+            Ok(handle) => archon_shell::process_tree::register_cleanup(handle),
+            Err(error) => {
+                tracing::warn!(%error, "scratch check teardown thread could not start; survivors unknown")
+            }
         }
     }
 }

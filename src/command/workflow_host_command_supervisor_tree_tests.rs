@@ -293,3 +293,34 @@ async fn a_confirmed_teardown_removes_the_resume_record() {
         .unwrap();
     assert_eq!(std::fs::read_dir(&records).unwrap().count(), 0);
 }
+
+#[tokio::test]
+async fn abort_before_first_scan_kills_an_original_session_descendant() {
+    let temp = tempfile::tempdir().unwrap();
+    let pid_file = temp.path().join("unscanned-child");
+    let body = format!(
+        "perl -e 'open(F, \">\", $ARGV[0]); print F $$; close F; sleep 30' '{}' </dev/null >/dev/null 2>&1 &\nsleep 30",
+        pid_file.display()
+    );
+    let records = temp.path().join("records");
+    let request = command(script(temp.path(), "abort-unscanned", &body));
+    let (control, _handle) = HostCommandControl::new();
+    let task =
+        tokio::spawn(
+            async move { supervise_process_group(request, control, Some(&records)).await },
+        );
+    let start = std::time::Instant::now();
+    while std::fs::metadata(&pid_file).map_or(true, |m| m.len() == 0) {
+        assert!(start.elapsed() < Duration::from_secs(5));
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    assert!(
+        start.elapsed() < Duration::from_millis(500),
+        "test missed pre-scan window"
+    );
+    let pid = read_pid(&pid_file);
+    let _kill = Kill(pid);
+    task.abort();
+    let _ = task.await;
+    assert_gone(pid, "abort before first scan").await;
+}

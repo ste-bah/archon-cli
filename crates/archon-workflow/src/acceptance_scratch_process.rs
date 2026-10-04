@@ -31,7 +31,9 @@ type RunChild = tokio::process::Child;
 
 #[path = "acceptance_scratch_confine.rs"]
 mod confine;
-use confine::{Confinement, leader_exit, reap, terminate};
+#[cfg(not(unix))]
+use confine::Confinement;
+use confine::{leader_exit, reap, terminate};
 
 /// Scan the check's tree every this many 25 ms ticks (Issue 270): a
 /// descendant that leaves the group and the session is tied to the check
@@ -194,11 +196,18 @@ pub async fn run_at(
     if let Some(root) = site.audit_root {
         super::cache::record_group(root, None)?;
     }
-    let mut child = spawn_confined(process, cwd)?;
+    let child = spawn_confined(process, cwd)?;
     let leader = child
         .id()
         .ok_or_else(|| invalid("scratch child has no process id"))?;
+    #[cfg(unix)]
+    let mut owned = confine::OwnedCheck::new(leader, child);
+    #[cfg(unix)]
+    let (mut child, confinement) = (&mut *owned.child, &mut owned.confinement);
+    #[cfg(not(unix))]
     let mut confinement = Confinement::new(leader);
+    #[cfg(not(unix))]
+    let mut child = child;
     if let Some(root) = site.audit_root {
         super::cache::record_group(root, Some(leader as i32))?;
     }

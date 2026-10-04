@@ -248,3 +248,35 @@ async fn a_never_seen_writer_left_in_the_scratch_is_an_operational_error() {
         "{result:?}"
     );
 }
+
+#[tokio::test]
+async fn abort_before_first_scan_kills_an_original_group_descendant() {
+    let temp = tempfile::tempdir().unwrap();
+    let escaper = Escaper::new(temp.path());
+    let text = format!("{}\nsleep 30", escaper.start_quiet("", 30));
+    let root = temp.path().to_path_buf();
+    let task = tokio::spawn(async move {
+        let command = AuthorizedCommand::for_test(&text, TrustedCwd::ProjectRoot);
+        run_at(
+            &site(&root, false, 30),
+            "AC-1",
+            &command,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+    });
+    let start = std::time::Instant::now();
+    while std::fs::metadata(&escaper.pid).map_or(true, |m| m.len() == 0) {
+        assert!(start.elapsed() < Duration::from_secs(5));
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    assert!(
+        start.elapsed() < Duration::from_millis(200),
+        "test missed pre-scan window"
+    );
+    let pid = escaper.pid();
+    let _kill = Kill(pid);
+    task.abort();
+    let _ = task.await;
+    assert_gone(pid, "abort before first scan").await;
+}

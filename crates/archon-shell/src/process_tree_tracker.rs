@@ -18,11 +18,14 @@
 //! Each member keeps the identity it was adopted with (on Linux, its pidfd)
 //! and every signal goes to that identity only.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
-use super::Process;
 use super::identity::{Pinned, Table, snapshot_until, start_of};
 
 /// Rounds of stop-and-rescan before a kill. Each round adopts one more
@@ -36,27 +39,26 @@ struct Member {
     start: u64,
     #[cfg(target_os = "linux")]
     pidfd: Option<std::os::fd::OwnedFd>,
+    #[cfg(target_os = "linux")]
+    numeric: bool,
 }
 
 impl Member {
-    fn adopt(pinned: Pinned) -> Option<Self> {
+    /// Keep failed pidfd acquisitions as unknown, non-signallable pins.
+    fn adopt(pinned: Pinned) -> Self {
         #[cfg(target_os = "linux")]
         {
-            let pidfd = super::identity::pidfd::open(pinned);
-            // A kernel without pidfds still adopts, with verify-then-kill.
-            if pidfd.is_none() && start_of(pinned.pid) != Some(pinned.start) {
-                return None;
-            }
-            Some(Self {
+            let opened = super::identity::pidfd::open(pinned);
+            let numeric = matches!(&opened, Ok(None));
+            Self {
                 start: pinned.start,
-                pidfd,
-            })
+                pidfd: opened.ok().flatten(),
+                numeric,
+            }
         }
         #[cfg(not(target_os = "linux"))]
-        {
-            (start_of(pinned.pid) == Some(pinned.start)).then_some(Self {
-                start: pinned.start,
-            })
+        Self {
+            start: pinned.start,
         }
     }
 
@@ -64,6 +66,10 @@ impl Member {
         #[cfg(target_os = "linux")]
         if let Some(fd) = &self.pidfd {
             return super::identity::pidfd::send(fd, signal);
+        }
+        #[cfg(target_os = "linux")]
+        if !self.numeric {
+            return false;
         }
         super::identity::deliver(
             Pinned {
@@ -75,10 +81,33 @@ impl Member {
     }
 }
 
+/// Reaping can invalidate selectors without acquiring the tracker mutex.
+#[derive(Debug, Clone, Default)]
+pub struct ReapToken(Arc<AtomicBool>);
+impl ReapToken {
+    pub fn mark_reaped(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+fn check_deadline(deadline: Instant) -> io::Result<()> {
+    if Instant::now() >= deadline {
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "process tree operation ran out of time",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Tracker {
     /// The leader, while it is unreaped.
     root: Option<Pinned>,
+    root_exited: bool,
+    reaped: ReapToken,
+    generation: Option<u64>,
     groups: Vec<u32>,
     sessions: Vec<u32>,
     members: BTreeMap<u32, Member>,
@@ -91,22 +120,25 @@ impl Tracker {
     pub fn new(root: Pinned, groups: Vec<u32>, sessions: Vec<u32>) -> Self {
         let mut tracker = Self {
             root: Some(root),
+            root_exited: false,
+            reaped: ReapToken::default(),
+            generation: None,
             groups,
             sessions,
             members: BTreeMap::new(),
         };
-        if let Some(member) = Member::adopt(root) {
-            tracker.members.insert(root.pid, member);
-        }
+        tracker.members.insert(root.pid, Member::adopt(root));
         tracker
     }
 
     /// A tracker for a child that is no longer known to be unreaped: no root
     /// and no selectors, only the members already pinned.
-    pub fn leader_reaped(&mut self) {
-        self.root = None;
-        self.groups.clear();
-        self.sessions.clear();
+    pub fn leader_reaped(&self) {
+        self.reaped.mark_reaped();
+    }
+
+    pub fn reap_token(&self) -> ReapToken {
+        self.reaped.clone()
     }
 
     /// Whether `pid` with `start` is a member this tracker pinned.
@@ -124,25 +156,77 @@ impl Tracker {
             .collect()
     }
 
+    fn pinned_until(&self, deadline: Instant) -> io::Result<Vec<Pinned>> {
+        let mut pins = Vec::new();
+        for (pid, member) in &self.members {
+            check_deadline(deadline)?;
+            pins.push(Pinned {
+                pid: *pid,
+                start: member.start,
+            });
+        }
+        Ok(pins)
+    }
+
     /// Absorb one complete scan: forget members the listing proves gone,
     /// adopt new members by the rules in the module docs, and return the
     /// live members.
     pub fn absorb(&mut self, table: &Table) -> Vec<Pinned> {
-        let read: BTreeMap<u32, &Process> = table.processes.iter().map(|p| (p.pid, p)).collect();
-        self.members.retain(|pid, member| {
-            table.listed.contains(pid) && read.get(pid).is_none_or(|p| p.start == member.start)
-        });
-        let protected = super::protected(&table.processes);
-        let selectors = self.root.is_some();
-        let mut adopted: Vec<Pinned> = Vec::new();
+        self.absorb_until(table, Instant::now() + super::SNAPSHOT_DEADLINE)
+            .unwrap_or_else(|_| self.pinned())
+    }
+
+    /// Absorption, adoption and identity rechecks share the scan's deadline.
+    /// Older snapshots cannot erase pins adopted by a newer snapshot.
+    pub fn absorb_until(&mut self, table: &Table, deadline: Instant) -> io::Result<Vec<Pinned>> {
+        check_deadline(deadline)?;
+        if self.generation.is_some_and(|last| table.generation <= last) {
+            return self.pinned_until(deadline);
+        }
+        // Record the generation even if adoption runs out of time: an older
+        // table must never erase the pins this scan did manage to adopt.
+        self.generation = Some(table.generation);
+        let mut read = BTreeMap::new();
+        let mut parents = BTreeMap::new();
         for process in &table.processes {
+            check_deadline(deadline)?;
+            read.insert(process.pid, process);
+            parents.insert(process.pid, process.ppid);
+        }
+        let mut protected = BTreeSet::from([0, 1]);
+        let mut current = std::process::id();
+        while protected.insert(current) {
+            check_deadline(deadline)?;
+            match parents.get(&current) {
+                Some(parent) => current = *parent,
+                None => break,
+            }
+        }
+        let mut gone = Vec::new();
+        for (pid, member) in &self.members {
+            check_deadline(deadline)?;
+            if !table.listed.contains(pid) || read.get(pid).is_some_and(|p| p.start != member.start)
+            {
+                gone.push(*pid);
+            }
+        }
+        for pid in gone {
+            check_deadline(deadline)?;
+            self.members.remove(&pid);
+        }
+        // One ancestry generation per scan: adopting a child cannot make its
+        // parent an eligible identity recheck for another child in this table.
+        let mut adopted = Vec::new();
+        for process in &table.processes {
+            check_deadline(deadline)?;
             if process.zombie
                 || protected.contains(&process.pid)
                 || self.has_seen(process.pid, process.start)
             {
                 continue;
             }
-            let selected = selectors
+            let selected = self.root.is_some()
+                && !self.reaped.0.load(Ordering::SeqCst)
                 && (self.groups.contains(&process.pgid)
                     || process.sid.is_some_and(|sid| self.sessions.contains(&sid)));
             let parent = self
@@ -150,33 +234,44 @@ impl Tracker {
                 .get(&process.ppid)
                 .map(|m| m.start)
                 .filter(|start| process.start >= *start)
-                // The parent read now is the parent the child was read with.
                 .filter(|start| start_of(process.ppid) == Some(*start));
+            check_deadline(deadline)?;
             if selected || parent.is_some() {
                 adopted.push(process.pinned());
             }
         }
         for pinned in adopted {
-            if let Some(member) = Member::adopt(pinned) {
-                self.members.insert(pinned.pid, member);
+            check_deadline(deadline)?;
+            self.members.insert(pinned.pid, Member::adopt(pinned));
+        }
+        check_deadline(deadline)?;
+        if !self.reaped.0.load(Ordering::SeqCst) && !self.root_exited {
+            self.root_exited = self
+                .root
+                .is_some_and(|root| super::exited(root.pid).unwrap_or(false));
+        }
+        let mut live = Vec::new();
+        for (pid, member) in &self.members {
+            check_deadline(deadline)?;
+            // A listed but unreadable pinned member may still be alive.
+            let exited_leader = self.root_exited
+                && !self.reaped.0.load(Ordering::SeqCst)
+                && self.root.is_some_and(|root| root.pid == *pid);
+            if !exited_leader && read.get(pid).is_none_or(|p| !p.zombie) {
+                live.push(Pinned {
+                    pid: *pid,
+                    start: member.start,
+                });
             }
         }
-        self.live(table)
-    }
-
-    /// The members a table shows alive (not zombies).
-    fn live(&self, table: &Table) -> Vec<Pinned> {
-        (table.processes.iter())
-            .filter(|p| !p.zombie && self.has_seen(p.pid, p.start))
-            .map(Process::pinned)
-            .collect()
+        Ok(live)
     }
 
     /// Scan once within `deadline` and absorb it; a failed scan changes
     /// nothing.
     pub fn refresh(&mut self, deadline: Instant) -> io::Result<Vec<Pinned>> {
         let table = snapshot_until(deadline)?;
-        Ok(self.absorb(&table))
+        self.absorb_until(&table, deadline)
     }
 
     fn send(&self, pinned: Pinned, signal: i32) -> bool {
@@ -189,6 +284,7 @@ impl Tracker {
     pub fn signal(&mut self, signal: i32, deadline: Instant) -> io::Result<Vec<Pinned>> {
         let members = self.refresh(deadline)?;
         for member in &members {
+            check_deadline(deadline)?;
             self.send(*member, signal);
         }
         Ok(members)
@@ -202,28 +298,26 @@ impl Tracker {
     pub fn kill(&mut self, bound: Duration) -> io::Result<Vec<Pinned>> {
         let deadline = Instant::now() + bound;
         loop {
-            let mut members = match self.refresh(deadline) {
-                Ok(members) => members,
-                // Out of time mid-scan: every member not proven gone may
-                // still be alive.
-                Err(error) if error.kind() == io::ErrorKind::TimedOut => return Ok(self.pinned()),
-                Err(error) => return Err(error),
-            };
+            let mut members = self.refresh(deadline)?;
             if members.is_empty() || Instant::now() >= deadline {
                 return Ok(members);
             }
-            let mut stopped: Vec<Pinned> = Vec::new();
+            let mut stopped = BTreeSet::new();
             for _ in 0..FREEZE_ROUNDS {
-                let fresh: Vec<Pinned> = members
-                    .into_iter()
-                    .filter(|p| !stopped.contains(p))
-                    .collect();
+                let mut fresh = Vec::new();
+                for pinned in members {
+                    check_deadline(deadline)?;
+                    if !stopped.contains(&pinned) {
+                        fresh.push(pinned);
+                    }
+                }
                 if fresh.is_empty() || Instant::now() >= deadline {
                     break;
                 }
                 for pinned in fresh {
+                    check_deadline(deadline)?;
                     self.send(pinned, libc::SIGSTOP);
-                    stopped.push(pinned);
+                    stopped.insert(pinned);
                 }
                 match self.refresh(deadline) {
                     Ok(next) => members = next,
@@ -231,6 +325,7 @@ impl Tracker {
                 }
             }
             for pinned in &stopped {
+                check_deadline(deadline)?;
                 self.send(*pinned, libc::SIGKILL);
             }
             std::thread::sleep(KILL_POLL.min(deadline.saturating_duration_since(Instant::now())));
