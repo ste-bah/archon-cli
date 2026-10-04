@@ -42,9 +42,10 @@ fn run_js(driver: &str) -> String {
     let mut script = String::new();
     for name in [
         "STALL_ATTEMPTS",
-        "NO_NEW_BEST_ATTEMPTS",
-        "ADVANCE_NONE",
-        "ADVANCE_BEST",
+        "DEFECT_STAGES",
+        "PASSED_STAGE",
+        "STAGE_CODES",
+        "REFUSED_PREFIX",
         "PAUSE_EVIDENCE_HISTORY",
         "PAUSE_EVIDENCE_FINDINGS",
         "PAUSE_EVIDENCE_TEXT",
@@ -54,7 +55,11 @@ fn run_js(driver: &str) -> String {
         "progressText",
         "findingTier",
         "findingKey",
-        "findingCount",
+        "hostDefect",
+        "isDeterministic",
+        "stageOf",
+        "attemptMeasure",
+        "isBetter",
         "newProgress",
         "recordStep",
         "recordAttempt",
@@ -196,29 +201,30 @@ fn a_prd_input_finding_stops_the_phase_in_observe_mode() {
     );
 }
 
-/// Observe mode pauses when the author makes no progress, preserving resume.
+/// Observe mode still never blocks: a loop that stops making progress falls
+/// back to the best committed artifact rather than pausing or failing the run.
 /// Issue 261: one baseline attempt and the stall window, not a fixed budget.
 #[test]
-fn observe_pauses_when_the_loop_stalls_with_a_committed_artifact() {
+fn observe_falls_back_to_the_last_committed_artifact_when_the_loop_stalls() {
     let out = run_js(&driver(
         r#"[{ "text": "floor is not falsifiable", "remediation_scope": "candidate_artifact" }]"#,
         2,
         true,
     ));
     assert_eq!(
-        out, r#"{"authorCalls":4,"error":"paused"}"#,
-        "observe must repair until the loop stalls and then pause: {out}"
+        out, r#"{"authorCalls":4,"committed":true}"#,
+        "observe must repair until the loop stalls and then return the committed artifact: {out}"
     );
 }
 
-/// A stalled loop pauses even when an earlier artifact had fewer findings.
+/// A stalled loop must keep the best artifact, not the most recent one.
 ///
 /// Attempts do not improve monotonically. Live run wf-6efe3de7 produced
 /// findings 2, 1, 2, 1, 1 and then a malformed candidate, so keeping the latest
 /// commit froze a vacuous acceptance floor that two earlier attempts had
 /// already fixed — the repair loop found better artifacts and discarded them.
 #[test]
-fn a_stalled_loop_with_an_earlier_better_commit_still_pauses() {
+fn a_stalled_loop_keeps_the_best_committed_artifact_not_the_latest() {
     let driver = r#"
 globalThis.args = { gateMode: "observe" };
 let call = 0;
@@ -230,8 +236,7 @@ const w = {
     call += 1;
     return { status: "accepted", stopReason: "end_turn", content: "{}" };
   },
-  pause: async () => { throw new Error("paused"); },
-  // Two findings, then one, then two: only the first two make progress.
+  // Two findings, then one, then two: the middle attempt is the best artifact.
   hostCommand: async () => ({
     publicationReceipt: { id: "commit-" + call },
     postcondition: { satisfied: true },
@@ -252,8 +257,8 @@ authorCandidate(w, policy).then(
 "#;
     assert_eq!(
         run_js(driver),
-        r#"{"error":"paused"}"#,
-        "a published artifact cannot turn a no-progress stall into success"
+        r#"{"kept":"commit-2"}"#,
+        "the phase must freeze the artifact with the fewest findings, not the last one authored"
     );
 }
 

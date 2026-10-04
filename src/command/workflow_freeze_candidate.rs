@@ -74,9 +74,20 @@ fn first_json_document(bytes: &[u8]) -> &[u8] {
 /// packaging problem, while one that parses but lacks a field is a shape
 /// problem, and telling an author to remove code fences it did not emit sends
 /// it to repair the wrong thing.
+#[cfg(test)]
 pub(crate) fn candidate_parse_error<T: serde::de::DeserializeOwned>(
     candidate: &[u8],
 ) -> Option<String> {
+    candidate_refusal::<T>(candidate).map(|(_, reason)| reason)
+}
+
+/// Why a candidate cannot be read as `T`, with the host code that stages it:
+/// `invalid_json` when the bytes are not JSON at all (the parse stage), and
+/// `invalid_candidate_shape` when they are JSON of the wrong shape (the shape
+/// stage; serde names one field at a time).
+pub(crate) fn candidate_refusal<T: serde::de::DeserializeOwned>(
+    candidate: &[u8],
+) -> Option<(&'static str, String)> {
     let document = candidate_document(candidate);
     let Err(error) = serde_json::from_slice::<T>(&document) else {
         return None;
@@ -88,10 +99,14 @@ pub(crate) fn candidate_parse_error<T: serde::de::DeserializeOwned>(
             .ok()
             .and_then(archon_workflow::describe_json_fault)
             .unwrap_or_else(|| error.to_string());
-        return Some(format!("the reply is not a JSON document ({described})"));
+        return Some((
+            "invalid_json",
+            format!("the reply is not a JSON document ({described})"),
+        ));
     }
-    Some(format!(
-        "the JSON document does not match the required shape ({error})"
+    Some((
+        "invalid_candidate_shape",
+        format!("the JSON document does not match the required shape ({error})"),
     ))
 }
 
@@ -275,12 +290,6 @@ mod markers;
 pub(crate) use markers::marker_defects;
 
 #[cfg(test)]
-pub(crate) fn redaction_marker_refusal(candidate: &serde_json::Value) -> Option<String> {
-    let defects = marker_defects(candidate, false);
-    (!defects.is_empty()).then(|| archon_workflow::defect::defect_message(&defects))
-}
-
-#[cfg(test)]
 pub(crate) fn skeleton_marker_refusal(candidate: &serde_json::Value) -> Option<String> {
     let defects = marker_defects(candidate, true);
     (!defects.is_empty()).then(|| archon_workflow::defect::defect_message(&defects))
@@ -295,6 +304,7 @@ fn marker_guidance(field: &str) -> String {
 
 /// Assemble independently authored entries before the existing whole-contract gate.
 /// Legacy complete-contract input remains supported by the same CLI.
+#[cfg(test)]
 pub(crate) fn acceptance_candidate(candidate: &[u8]) -> anyhow::Result<Vec<u8>> {
     assemble_acceptance(candidate, true)
 }

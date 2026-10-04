@@ -111,7 +111,7 @@ fn a_candidate_carrying_the_redaction_marker_is_refused_naming_check_and_field()
         .expect_err("a redacted check is never frozen")
         .to_string();
     assert!(
-        error.starts_with("check 'AC-X-002': field '/check/command' contains the log-redaction marker `<redacted>` as a standalone word; restore the original value"),
+        error.starts_with("check 'AC-X-002': field '/entries/1/check/command' contains the log-redaction marker `<redacted>` as a standalone word; restore the original value"),
         "{error}"
     );
     assert!(

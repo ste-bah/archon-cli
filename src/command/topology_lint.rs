@@ -284,6 +284,7 @@ pub(crate) fn evaluate_lint(
     };
     let subject = describe(source);
     let mut deterministic = std::collections::BTreeMap::new();
+    let mut contract_defects = Vec::new();
     let (base_findings, inherited_findings) = match source {
         LintSource::TaskFile(path) => {
             let lint = task_file::inspect(cwd, path, mode);
@@ -295,7 +296,9 @@ pub(crate) fn evaluate_lint(
                 LintSource::Tasks(path) => Some(absolute(cwd, path)),
                 LintSource::Spec(_) | LintSource::Graph(_) | LintSource::TaskFile(_) => None,
             };
-            let mut blockers = contracts::blocking_findings(root.as_deref());
+            // Kept with their identities, never re-derived from message text.
+            contract_defects = contracts::blocking_defects(root.as_deref());
+            let mut blockers = Vec::new();
             let mut inherited = std::collections::BTreeSet::new();
             if let Some(root) = root.as_deref() {
                 let lint = task_set::inspect(cwd, root, mode)?;
@@ -338,6 +341,9 @@ pub(crate) fn evaluate_lint(
             finding
         })
         .collect::<Vec<_>>();
+    let path = source_path.as_deref();
+    let gate = (gate_id, subject.as_str(), path, default_scope);
+    findings.extend(contracts::gate_findings(contract_defects, gate));
     let coverage_root = match source {
         LintSource::TaskFile(_) => None,
         LintSource::Tasks(path) => Some(absolute(cwd, path)),
@@ -387,9 +393,6 @@ pub(crate) fn evaluate_lint(
                 )
             }),
     );
-    if let Some(root) = coverage_root.as_deref() {
-        contracts::attach_identities(root, &mut findings);
-    }
     let evaluation = crate::command::workflow_gate::GateEvaluation::new(report, findings);
     let operational = match (graph_error, repository_error) {
         (Some(graph), Some(repository)) => Some(format!("{graph}; {repository}")),

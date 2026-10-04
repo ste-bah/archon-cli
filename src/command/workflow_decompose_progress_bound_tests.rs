@@ -22,13 +22,11 @@ fn a_judge_rewording_one_defect_pauses_when_no_attempt_sets_a_new_best() {
     assert_eq!(pause_ids(&out), ["pause-body-TASK-X-010-1"], "{out}");
     let evidence = evidence(&out, 0);
     assert_eq!(evidence["reason"], "no_progress", "{evidence}");
-    assert_eq!(evidence["no_new_best_window"], 64, "{evidence}");
-    assert_eq!(evidence["attempts_since_best"], 3, "{evidence}");
     assert_eq!(progress_flags(evidence), [true, false, false, false]);
 }
 
 #[test]
-fn a_resume_past_a_no_new_best_pause_gets_one_fresh_bound() {
+fn a_resume_past_a_no_progress_pause_gets_one_fresh_window() {
     let out = run(
         "enforce",
         &format!(
@@ -53,7 +51,7 @@ fn a_resume_past_a_no_new_best_pause_gets_one_fresh_bound() {
 #[test]
 fn a_subject_clearing_distinct_defects_is_not_stopped_by_the_short_window() {
     let out = body(
-        r##"{ findings: (n) => Array.from({length: Math.max(41 - n, 0)}, (_, i) => "defect " + i) }"##,
+        r##"{ findings: (n) => Array.from({length: Math.max(41 - n, 0)}, (_, i) => "candidate artifact was refused: defect " + i) }"##,
     );
     assert_eq!(out["accepted"], true, "{out}");
     assert_eq!(out["calls"], 41, "{out}");
@@ -111,7 +109,6 @@ fn an_acceptance_entry_the_judge_rejects_after_every_rewrite_pauses() {
     assert_eq!(pause_ids(&out), ["pause-acceptance-1"], "{out}");
     let evidence = evidence(&out, 0);
     assert_eq!(evidence["reason"], "no_progress", "{evidence}");
-    assert_eq!(evidence["attempts_since_best"], 3, "{evidence}");
 }
 
 /// The round-3 regression suite runs under cargo like the other node suites.

@@ -101,6 +101,7 @@ pub fn audit_contracts(universe: &WorkflowV2TaskUniverse) -> Vec<ContractFinding
                 Ok(value) => value,
                 Err(_) => continue,
             };
+            let before = findings.len();
             for mut defect in crate::v2::deliverable_contract::contract_defects(&value) {
                 defect.identity.subject =
                     crate::task_skeleton::skeleton_subject(&task.canonical_task_id, task_slot);
@@ -131,7 +132,9 @@ pub fn audit_contracts(universe: &WorkflowV2TaskUniverse) -> Vec<ContractFinding
                     message: defect.to_string(),
                 });
             }
-            if !instance_producer_is_plausible(task, contract) {
+            // Every certain defect is reported; the heuristic is not added to
+            // a contract already refused: it is usually the defect restated.
+            if findings.len() == before && !instance_producer_is_plausible(task, contract) {
                 findings.push(ContractFinding {
                     identity: None,
                     kind: ContractFindingKind::Misallocated,

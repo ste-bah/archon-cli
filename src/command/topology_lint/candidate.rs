@@ -55,15 +55,24 @@ pub(crate) fn evaluate_task_file_candidate(
                 if claims.is_empty() {
                     report.push_str("  no backticked repository path is said to exist or not exist against the recorded repository\n");
                 }
-                for text in claims {
+                for (index, text) in claims.into_iter().enumerate() {
                     report.push_str(&format!("  BLOCKING {text}\n"));
-                    findings.push(crate::command::workflow_gate::GateFinding::new(
-                        crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
-                        text,
-                        task_id.clone(),
-                        Some(path.clone()),
-                        archon_workflow::RemediationScope::Body,
-                    ));
+                    // Deterministic: checked against the recorded repository.
+                    let identity = archon_workflow::defect::DeterministicDefect::new(
+                        "repository_claim",
+                        &task_id,
+                        format!("claims/{index}"),
+                    );
+                    findings.push(
+                        crate::command::workflow_gate::GateFinding::new(
+                            crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
+                            text,
+                            task_id.clone(),
+                            Some(path.clone()),
+                            archon_workflow::RemediationScope::Body,
+                        )
+                        .with_defect(identity),
+                    );
                 }
             }
             Err(error) => {
@@ -157,6 +166,54 @@ mod tests {
             "{envelope:?}"
         );
     }
+    /// Issue 261 round 7: every deterministic body-lint finding carries a
+    /// host identity with its stage, so none is mistaken for a judge finding.
+    #[test]
+    fn workflow_host_command_every_body_lint_finding_carries_a_staged_identity() {
+        let temp = tempfile::tempdir().expect("fixture");
+        let root = temp.path().join("tasks");
+        std::fs::create_dir(&root).expect("tasks");
+        let path = root.join("TASK-X-001.md");
+        let stages = |raw: &str| -> Vec<(String, String)> {
+            let envelope = super::evaluate_task_file_candidate(
+                temp.path(),
+                &path,
+                raw.as_bytes(),
+                archon_core::config::GateMode::Enforce,
+            )
+            .expect("lint")
+            .into_envelope()
+            .expect("envelope");
+            assert!(!envelope.policy_findings.is_empty(), "{envelope:?}");
+            envelope
+                .policy_findings
+                .iter()
+                .map(|finding| {
+                    let defect = finding
+                        .deterministic_defect
+                        .as_ref()
+                        .unwrap_or_else(|| panic!("no identity: {}", finding.text));
+                    let stage = serde_json::to_value(defect).expect("json")["stage"].clone();
+                    (
+                        defect.code.clone(),
+                        stage.as_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(
+            stages("broken task"),
+            [("unparseable_task_file".to_string(), "parse".to_string())]
+        );
+        let shaped = RAW
+            .replace("## Focused Tests\n- `sh -c 'exit 1'`\n", "")
+            .replace("required_tools: [sh]", "required_tools: [sh, mcp__nope__x]");
+        let found = stages(&shaped);
+        for stage in ["shape", "tools", "contracts"] {
+            assert!(found.iter().any(|(_, s)| s == stage), "{stage}: {found:?}");
+        }
+    }
+
     #[test]
     fn workflow_host_command_unparseable_task_does_not_hide_other_contract_defects() {
         let temp = tempfile::tempdir().expect("fixture");

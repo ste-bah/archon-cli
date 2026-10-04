@@ -56,7 +56,7 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
         out.push_str("attempts:\n");
         for (subject, attempt) in state.attempts {
             out.push_str(&format!(
-                "- {subject} attempt={} limit=no_progress:{AUTHOR_STALL_ATTEMPTS},no_new_best:{AUTHOR_NO_NEW_BEST_ATTEMPTS} interrupted={} last_error={}\n",
+                "- {subject} attempt={} limit=no_progress:{AUTHOR_STALL_ATTEMPTS} interrupted={} last_error={}\n",
                 attempt.logical_attempt,
                 attempt.interrupted,
                 attempt.last_error.as_deref().unwrap_or("none")
@@ -87,17 +87,15 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
     Ok(Some(out))
 }
 
-/// The author loop's limits, mirrored from the fixed script (Issue 261). There
-/// is no attempt budget. A loop pauses the run after `AUTHOR_STALL_ATTEMPTS`
-/// consecutive attempts without progress (here an all-new finding set counts
-/// as progress), or after `AUTHOR_NO_NEW_BEST_ATTEMPTS` consecutive attempts
-/// without a new best (here it does not). A loop whose best keeps improving
-/// meets neither.
+/// The author loop's limit, mirrored from the fixed script (Issue 261). There
+/// is no attempt budget: a loop pauses the run after this many consecutive
+/// attempts without progress, where progress is a better (tier, first
+/// failing deterministic stage, defects at that stage) measure than any
+/// earlier attempt. Progressing attempts are never stopped by a count.
 ///
 /// `fixed_script_limits_match_the_mirror` fails if the script's constants ever
 /// diverge from these.
 pub(crate) const AUTHOR_STALL_ATTEMPTS: u32 = 3;
-pub(crate) const AUTHOR_NO_NEW_BEST_ATTEMPTS: u32 = 64;
 
 fn elapsed_secs(from: &str, to: Option<&str>) -> Option<i64> {
     let start = chrono::DateTime::parse_from_rfc3339(from).ok()?;
@@ -269,7 +267,7 @@ fn one_line(value: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{AUTHOR_NO_NEW_BEST_ATTEMPTS, AUTHOR_STALL_ATTEMPTS};
+    use super::AUTHOR_STALL_ATTEMPTS;
 
     /// Status reports the author loop's limits by mirroring constants the
     /// fixed script owns. A mirror that drifts silently reports wrong limits,
@@ -277,34 +275,73 @@ mod tests {
     #[test]
     fn fixed_script_limits_match_the_mirror() {
         let source = crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE;
-        for (constant, mirrored) in [
-            ("STALL_ATTEMPTS", AUTHOR_STALL_ATTEMPTS),
-            ("NO_NEW_BEST_ATTEMPTS", AUTHOR_NO_NEW_BEST_ATTEMPTS),
-        ] {
-            let needle = format!("const {constant} = ");
-            let start = source
-                .find(&needle)
-                .unwrap_or_else(|| panic!("{constant} is declared in the fixed script"))
-                + needle.len();
-            let value: u32 = source[start..]
-                .chars()
-                .take_while(char::is_ascii_digit)
-                .collect::<String>()
-                .parse()
-                .unwrap_or_else(|error| panic!("{constant} is numeric: {error}"));
-            assert_eq!(value, mirrored, "{constant} drifted from the status mirror");
-        }
+        let needle = "const STALL_ATTEMPTS = ";
+        let start = source
+            .find(needle)
+            .unwrap_or_else(|| panic!("STALL_ATTEMPTS is declared in the fixed script"))
+            + needle.len();
+        let value: u32 = source[start..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .unwrap_or_else(|error| panic!("STALL_ATTEMPTS is numeric: {error}"));
+        assert_eq!(
+            value, AUTHOR_STALL_ATTEMPTS,
+            "STALL_ATTEMPTS drifted from the status mirror"
+        );
         for retired in [
             "ACCEPTANCE_ATTEMPTS",
             "SKELETON_ATTEMPTS",
             "BODY_ATTEMPTS",
             "OPERATIONAL_ATTEMPTS",
             "RUNAWAY_NOVELTY_GUARD",
+            "NO_NEW_BEST_ATTEMPTS",
         ] {
             assert!(
                 !source.contains(&format!("const {retired} = ")),
                 "{retired} is a fixed attempt budget; the loops are limited by progress"
             );
         }
+    }
+
+    /// The script stages defects with the host's stage names and, for an
+    /// envelope written before defects carried a stage, the host's own
+    /// code-to-stage table. Either drifting misorders progress.
+    #[test]
+    fn fixed_script_defect_stages_match_the_host() {
+        use archon_workflow::defect::{DefectStage, STAGED_CODES};
+        let source = crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE;
+        let body = |needle: &str, end: &str| -> String {
+            let start = source.find(needle).unwrap_or_else(|| panic!("{needle}")) + needle.len();
+            let rest = &source[start..];
+            rest[..rest.find(end).unwrap_or_else(|| panic!("{end}"))].to_string()
+        };
+        let quoted = |text: &str| -> Vec<String> {
+            text.split('"')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_string)
+                .collect()
+        };
+        let stages = quoted(&body("const DEFECT_STAGES = [", "];"));
+        let host: Vec<_> = DefectStage::ALL.iter().map(|stage| stage.name()).collect();
+        assert_eq!(stages, host);
+        let mut script = Vec::new();
+        for line in body("const STAGE_CODES = {", "};").lines() {
+            let Some((stage, codes)) = line.trim().split_once(':') else {
+                continue;
+            };
+            for code in quoted(codes) {
+                script.push((code, stage.trim().to_string()));
+            }
+        }
+        let mut host: Vec<_> = STAGED_CODES
+            .iter()
+            .map(|(code, stage)| (code.to_string(), stage.name().to_string()))
+            .collect();
+        script.sort();
+        host.sort();
+        assert_eq!(script, host);
     }
 }

@@ -42,10 +42,11 @@ fn changing_the_subject_at_the_same_defect_count_does_not_progress() {
 // --- a converging loop is never stopped by a count --------------------------
 
 #[test]
-fn a_best_that_keeps_improving_is_never_stopped_by_the_no_new_best_bound() {
-    // 69 findings, one fewer every attempt: 70 calls, past the bound of 64.
+fn a_best_that_keeps_improving_is_never_stopped_by_a_count() {
+    // 69 host defects, one fewer every attempt: 70 calls, past the old
+    // bound of 64.
     let out = body(
-        r#"{ findings: (n) => n <= 69 ? Array.from({ length: 70 - n }, (_, i) => "defect " + i) : [] }"#,
+        r#"{ findings: (n) => n <= 69 ? Array.from({ length: 70 - n }, (_, i) => "candidate artifact was refused: defect " + i) : [] }"#,
     );
     assert_eq!(out["accepted"], true, "{out}");
     assert_eq!(out["calls"], 70, "{out}");

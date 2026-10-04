@@ -10,7 +10,7 @@ use archon_workflow::{WorkflowLlmClientFactory, WorkflowLlmClientRequest};
 
 use crate::cli_args::WorkflowAction;
 use crate::cli_args::{WorkflowFreezeAcceptanceArgs, WorkflowFreezeSkeletonArgs};
-use crate::command::workflow_freeze_candidate::{candidate_document, candidate_parse_error};
+use crate::command::workflow_freeze_candidate::{candidate_document, candidate_refusal};
 
 #[path = "workflow_freeze_acceptance_cli.rs"]
 mod acceptance;
@@ -176,8 +176,8 @@ async fn stage_acceptance(
                 );
             }
         };
-    if let Some(reason) =
-        candidate_parse_error::<archon_workflow::task_set_contract::AcceptanceContract>(&candidate)
+    if let Some((code, reason)) =
+        candidate_refusal::<archon_workflow::task_set_contract::AcceptanceContract>(&candidate)
     {
         return refuse_candidate_artifact(
             cwd,
@@ -185,6 +185,7 @@ async fn stage_acceptance(
             "freeze-acceptance",
             crate::command::workflow_gate::GateId::FreezeAcceptance,
             "acceptance",
+            code,
             &reason,
         );
     }
@@ -238,8 +239,8 @@ fn stage_skeleton(
     let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
     let tasks_root = absolute(cwd, tasks);
     let prd_path = absolute(cwd, prd);
-    if let Some(reason) =
-        candidate_parse_error::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
+    if let Some((code, reason)) =
+        candidate_refusal::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
     {
         return refuse_candidate_artifact(
             cwd,
@@ -247,6 +248,7 @@ fn stage_skeleton(
             "freeze-skeleton",
             crate::command::workflow_gate::GateId::FreezeSkeleton,
             "skeleton",
+            code,
             &reason,
         );
     }
@@ -332,8 +334,11 @@ fn refuse_candidate_artifact(
     command_id: &str,
     gate_id: crate::command::workflow_gate::GateId,
     subject: &str,
+    code: &str,
     reason: &str,
 ) -> Result<()> {
+    // The caller names the code, so the refusal's stage is the host's own
+    // classification, never a guess from its message.
     let finding = crate::command::workflow_gate::GateFinding::new(
         gate_id,
         format!(
@@ -342,9 +347,11 @@ fn refuse_candidate_artifact(
         subject,
         None,
         archon_workflow::RemediationScope::CandidateArtifact,
-    ).with_defect(archon_workflow::defect::DeterministicDefect::new(
-        if reason.contains("the reply is not a JSON document") { "invalid_json" } else { "invalid_candidate_shape" },
-        subject, "candidate",
+    )
+    .with_defect(archon_workflow::defect::DeterministicDefect::new(
+        code,
+        subject,
+        "candidate",
     ));
     write_staged_manifest(
         cwd,

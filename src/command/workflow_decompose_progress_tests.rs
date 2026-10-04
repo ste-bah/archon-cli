@@ -123,10 +123,10 @@ pub(super) fn assert_paused(out: &serde_json::Value) {
 
 #[test]
 fn a_subject_that_keeps_reducing_its_findings_is_retried_past_the_old_body_budget() {
-    // Twelve judged attempts, each with one finding fewer: the old budget
-    // (BODY_ATTEMPTS = 10) failed the run on the tenth.
+    // Twelve refused attempts, each with one host defect fewer: the old
+    // budget (BODY_ATTEMPTS = 10) failed the run on the tenth.
     let out = body(
-        r#"{ findings: (n) => n <= 12 ? Array.from({ length: 13 - n }, (_, i) => "defect " + String.fromCharCode(97 + i)) : [] }"#,
+        r#"{ findings: (n) => n <= 12 ? Array.from({ length: 13 - n }, (_, i) => "candidate artifact was refused: defect " + String.fromCharCode(97 + i)) : [] }"#,
     );
     assert_eq!(out["accepted"], true, "{out}");
     assert_eq!(out["calls"], 13, "{out}");
@@ -152,7 +152,7 @@ fn a_new_minimum_between_regressions_keeps_the_window_open() {
     // 5, 6, 4, 5, 3, 4, 2, 3, 1, 2, then clean: attempts do not improve
     // monotonically, but every second one sets a new minimum.
     let out = body(
-        r#"{ findings: (n) => { const counts = [5, 6, 4, 5, 3, 4, 2, 3, 1, 2]; return n <= counts.length ? ["a", "b", "c", "d", "e", "f"].slice(0, counts[n - 1]).map((x) => "defect " + x) : []; } }"#,
+        r#"{ findings: (n) => { const counts = [5, 6, 4, 5, 3, 4, 2, 3, 1, 2]; return n <= counts.length ? ["a", "b", "c", "d", "e", "f"].slice(0, counts[n - 1]).map((x) => "candidate artifact was refused: defect " + x) : []; } }"#,
     );
     assert_eq!(out["accepted"], true, "{out}");
     assert_eq!(out["calls"], 11, "{out}");
@@ -175,9 +175,9 @@ fn repeating_the_same_findings_pauses_the_run_with_evidence() {
     assert_eq!(evidence["reason"], "no_progress", "{evidence}");
     assert_eq!(evidence["author_calls"], 4, "{evidence}");
     assert_eq!(evidence["stall_window"], 3, "{evidence}");
-    assert_eq!(evidence["no_new_best_window"], 64, "{evidence}");
     assert_eq!(progress_flags(evidence), [true, false, false, false]);
-    assert_eq!(evidence["progress_history"][3]["findings"], 1, "{evidence}");
+    // A judge finding is not measured: no host defect is outstanding.
+    assert_eq!(evidence["progress_history"][3]["findings"], 0, "{evidence}");
     assert_eq!(evidence["last_findings"][0], "defect alpha", "{evidence}");
     assert!(
         evidence["recovery"]
@@ -243,11 +243,11 @@ fn incomplete_provider_outcomes_pause_without_a_baseline() {
 }
 
 #[test]
-fn observe_mode_pauses_on_a_stall_even_with_a_committed_artifact() {
+fn observe_mode_returns_the_best_committed_artifact_on_a_stall_instead_of_pausing() {
     let out = run("observe", r#"{ findings: () => ["defect alpha"] }"#, BODY);
-    assert_paused(&out);
+    assert_eq!(out["accepted"], true, "{out}");
     assert_eq!(out["calls"], 4, "{out}");
-    assert_eq!(pause_ids(&out), ["pause-body-TASK-X-010-1"]);
+    assert!(pause_ids(&out).is_empty(), "{out}");
 }
 
 // --- resume -----------------------------------------------------------------
@@ -342,3 +342,6 @@ mod rule;
 
 #[path = "workflow_decompose_progress_bound_tests.rs"]
 mod bound;
+
+#[path = "workflow_decompose_progress_stage_tests.rs"]
+mod stage;

@@ -27,6 +27,7 @@ pub(super) fn refuse_candidate_error(
             command_id,
             gate_id,
             subject,
+            "candidate_refused",
             &format!("{error:#}"),
         );
     };
@@ -37,6 +38,7 @@ pub(super) fn refuse_candidate_error(
             command_id,
             gate_id,
             subject,
+            "candidate_refused",
             &format!("{error:#}"),
         );
     }

@@ -269,14 +269,16 @@ function bodyPolicy(subject, initialFeedback) {
 const AUTHOR_CALLS = new Map();
 
 // One subject's author loop, limited by progress (Issue 261): an attempt that
-// makes progress keeps it going; STALL_ATTEMPTS in a row without progress, or
-// NO_NEW_BEST_ATTEMPTS without a new best, pause the run with evidence, and a
-// resumed run continues from the pause with a fresh window.
+// makes progress keeps it going; STALL_ATTEMPTS in a row without progress
+// pause the run with evidence, and a resumed run continues from the pause
+// with a fresh window.
 async function authorCandidate(w, policy) {
   let feedback = Array.isArray(policy.initialFeedback) ? policy.initialFeedback.slice() : [];
   // Seeded feedback is attempt 0 of the history: every later prompt in this
   // phase keeps showing the finding the phase was opened to repair.
   const history = feedback.length > 0 ? [{ attempt: 0, findings: feedback.slice() }] : [];
+  let bestCommitted = null;
+  let bestFindings = Infinity;
   let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
   let lastFindings = feedback.slice();
@@ -285,6 +287,10 @@ async function authorCandidate(w, policy) {
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
+      // Observe never blocks on the artifact's quality: a loop that stopped
+      // improving falls back to the best artifact it saw. An outage says
+      // nothing about the artifact, so it pauses in either mode.
+      if (stall !== "operational_no_progress" && args.gateMode === "observe" && bestCommitted) return bestCommitted;
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
     }
     call += 1;
@@ -306,7 +312,7 @@ async function authorCandidate(w, policy) {
     // A round without a candidate can still retain work when a sibling fails:
     // a previously missing entry lowers the outstanding-entry count. A
     // rewrite alone clears no defect; every failure shares the same window.
-    const advanced = (authorState.added || 0) > addedBefore ? ADVANCE_BEST : ADVANCE_NONE;
+    const advanced = (authorState.added || 0) > addedBefore;
     if (authored.status === "failed") {
       if (authored.malformed) {
         recordAnswered(progress, call, "entries", advanced, !measuredReplies);
@@ -321,7 +327,7 @@ async function authorCandidate(w, policy) {
     if (authored.stopReason !== "end_turn" || typeof authored.content !== "string" || authored.content.length === 0) {
       feedback = [`Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
       lastFindings = feedback.slice();
-      recordAnswered(progress, call, "incomplete", ADVANCE_NONE, !measuredReplies);
+      recordAnswered(progress, call, "incomplete", false, !measuredReplies);
       continue;
     }
 
@@ -340,8 +346,15 @@ async function authorCandidate(w, policy) {
         .filter(finding => policy.retryScopes.has(finding.remediation_scope));
       authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt));
     }
-    // Publication and progress are separate: open repairable findings keep
-    // this loop running in either mode, and a stalled loop always pauses.
+    // A committed artifact is the best one so far, not the finished one:
+    // repairable findings are still fed back below in either mode. Best, not
+    // latest -- attempts do not improve monotonically (a live run went 2, 1,
+    // 2, 1, 1 findings), so observe's fallback is the committed artifact with
+    // the fewest findings; ties keep the earlier one.
+    if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true && routed.all.length < bestFindings) {
+      bestCommitted = outcome;
+      bestFindings = routed.all.length;
+    }
     if (routed.fatal.length > 0) {
       throw new Error(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
     }

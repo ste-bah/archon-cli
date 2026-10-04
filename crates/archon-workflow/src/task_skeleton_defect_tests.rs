@@ -162,3 +162,87 @@ fn contract_audit_reports_all_path_and_verifier_defects_together() {
         "three bad paths and the independently invalid verifier: {findings:?}"
     );
 }
+
+fn graph_task(n: u32, depends_on: &[u32], blocks: &[u32]) -> FrozenTask {
+    let id = |n: &u32| format!("TASK-X-{n:03}");
+    FrozenTask {
+        task_id: id(&n),
+        file_name: format!("{}.md", id(&n)),
+        depends_on: depends_on
+            .iter()
+            .map(|n| FrozenDependency {
+                task_id: id(n),
+                consumes: vec![],
+                ordering_only: true,
+            })
+            .collect(),
+        blocks: blocks.iter().map(id).collect(),
+        implements: vec![],
+        deliverable_contracts: vec![],
+    }
+}
+
+fn graph_codes(tasks: Vec<FrozenTask>) -> Vec<(String, String)> {
+    let skeleton = TaskSkeleton {
+        schema_version: 1,
+        acceptance_digest: "d".into(),
+        tasks,
+    };
+    graph::graph_shape_findings(&skeleton)
+        .into_iter()
+        .map(|finding| (finding.identity.code, finding.message))
+        .collect()
+}
+
+/// Issue 261 round 7: a contradiction is the authoring mistake; the
+/// two-cycle it manufactures is not reported beside it.
+#[test]
+fn a_contradictory_pair_is_named_alone_without_its_manufactured_cycle() {
+    let found = graph_codes(vec![graph_task(1, &[2], &[2]), graph_task(2, &[], &[])]);
+    let codes: Vec<_> = found.iter().map(|(code, _)| code.as_str()).collect();
+    assert_eq!(codes, ["contradictory_edge"], "{found:?}");
+    let found = graph_codes(vec![graph_task(1, &[], &[2]), graph_task(2, &[], &[1])]);
+    let codes: Vec<_> = found.iter().map(|(code, _)| code.as_str()).collect();
+    assert_eq!(codes, ["mutual_blocks"], "one finding per pair: {found:?}");
+}
+
+#[test]
+fn a_cycle_finding_names_the_cycle_path() {
+    let found = graph_codes(vec![
+        graph_task(1, &[2], &[]),
+        graph_task(2, &[3], &[]),
+        graph_task(3, &[1], &[]),
+    ]);
+    assert_eq!(
+        found.len(),
+        3,
+        "one defect per task on the cycle: {found:?}"
+    );
+    for (code, message) in &found {
+        assert_eq!(code, "dependency_cycle");
+        for id in ["TASK-X-001", "TASK-X-002", "TASK-X-003"] {
+            assert!(message.contains(id), "{message}");
+        }
+        assert!(message.contains(" -> "), "{message}");
+    }
+}
+#[test]
+fn dependency_declaration_identities_use_the_callers_subject() {
+    let deps = vec![
+        FrozenDependency {
+            task_id: "TASK-X-002".into(),
+            consumes: vec![],
+            ordering_only: false,
+        };
+        2
+    ];
+    let findings =
+        crate::task_set_edges::validate_dependency_declarations("TASK-X-001", "tasks/7", &deps);
+    assert!(!findings.is_empty());
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.identity.subject == "tasks/7"),
+        "{findings:?}"
+    );
+}

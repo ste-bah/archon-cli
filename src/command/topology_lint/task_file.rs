@@ -13,6 +13,48 @@ use archon_workflow::task_universe::parsing::parse_task_file;
 use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 use archon_workflow::task_universe_contract_audit::{ContractFindingKind, audit_contracts};
 
+use archon_workflow::defect::{DefectStage, DeterministicDefect, ValidationDefect};
+
+/// Identities for the blockers, keyed by blocker text in report order.
+type Identities = BTreeMap<String, VecDeque<DeterministicDefect>>;
+
+/// Records a deterministic blocker with its host identity (Issue 261: no
+/// body-lint finding may reach the author loop looking like a judge's).
+fn block(
+    blockers: &mut Vec<String>,
+    identities: &mut Identities,
+    text: String,
+    defect: DeterministicDefect,
+) {
+    identities
+        .entry(text.clone())
+        .or_default()
+        .push_back(defect);
+    blockers.push(text);
+}
+
+/// A predecessor validator's own defects, every one of them, seen from this
+/// lint: each keeps its identity and is reported at the freeze stage.
+fn block_predecessor(
+    blockers: &mut Vec<String>,
+    identities: &mut Identities,
+    defects: &[ValidationDefect],
+    fallback: (&str, String),
+) {
+    if defects.is_empty() {
+        block(
+            blockers,
+            identities,
+            fallback.1,
+            DeterministicDefect::new(fallback.0, "task_file", "predecessor"),
+        );
+    }
+    for defect in defects {
+        let identity = defect.identity.clone().at_stage(DefectStage::Freeze);
+        block(blockers, identities, defect.message.clone(), identity);
+    }
+}
+
 pub(super) struct TaskFileLint {
     pub(super) report: String,
     pub(super) blockers: Vec<String>,
@@ -31,12 +73,18 @@ pub(super) fn inspect(
         Ok(raw) => inspect_raw(cwd, &path, &raw, mode),
         Err(error) => {
             let report = format!("# topology lint — task file {}\n", path.display());
-            let blockers = vec![format!(
-                "{}: unreadable: {error}; restore the TASK file and re-run `workflow lint --task-file {}`",
-                path.display(),
-                path.display()
-            )];
-            finish(report, blockers, BTreeSet::new())
+            let (mut blockers, mut identities) = (Vec::new(), Identities::new());
+            block(
+                &mut blockers,
+                &mut identities,
+                format!(
+                    "{}: unreadable: {error}; restore the TASK file and re-run `workflow lint --task-file {}`",
+                    path.display(),
+                    path.display()
+                ),
+                DeterministicDefect::new("unreadable_task_file", "task_file", "file"),
+            );
+            finish(report, blockers, BTreeSet::new(), identities)
         }
     }
 }
@@ -55,23 +103,37 @@ pub(super) fn inspect_raw(
     let task = match parse_task_file(&path, raw) {
         Ok(task) => task,
         Err(error) => {
-            blockers.push(format!(
-                "{}: {error}; make the exact parser-required edit and re-run `workflow lint --task-file {}`",
-                path.display(),
-                path.display()
-            ));
-            return finish(report, blockers, inherited_blockers);
+            // The parser stops at its first error: one parse-stage defect.
+            block(
+                &mut blockers,
+                &mut deterministic,
+                format!(
+                    "{}: {error}; make the exact parser-required edit and re-run `workflow lint --task-file {}`",
+                    path.display(),
+                    path.display()
+                ),
+                DeterministicDefect::new("unparseable_task_file", "task_file", "parse"),
+            );
+            return finish(report, blockers, inherited_blockers, deterministic);
         }
     };
+    let id = task.canonical_task_id.clone();
     report.push_str(&format!(
         "\n## parser\n  {} parsed with runtime parse_task_file as {}\n",
         path.display(),
         task.canonical_task_id
     ));
-    validate_declared_shape(&task, raw, &mut report, &mut blockers);
-    blockers.extend(super::tool_obligations::inspect(cwd, &task, raw));
+    validate_declared_shape(&task, raw, &mut report, &mut blockers, &mut deterministic);
+    for (index, text) in super::tool_obligations::inspect(cwd, &task, raw)
+        .into_iter()
+        .enumerate()
+    {
+        let defect = DeterministicDefect::new("tool_obligation", &id, format!("tools/{index}"));
+        block(&mut blockers, &mut deterministic, text, defect);
+    }
     blockers.extend(
         archon_workflow::task_set_edges::validate_dependency_declarations(
+            &task.canonical_task_id,
             &task.canonical_task_id,
             &task.dependencies,
         )
@@ -90,11 +152,16 @@ pub(super) fn inspect_raw(
     );
 
     let Some(tasks_root) = path.parent() else {
-        blockers.push(format!(
-            "{} has no parent task directory; move it under a task directory and re-run --task-file",
-            path.display()
-        ));
-        return finish(report, blockers, inherited_blockers);
+        block(
+            &mut blockers,
+            &mut deterministic,
+            format!(
+                "{} has no parent task directory; move it under a task directory and re-run --task-file",
+                path.display()
+            ),
+            DeterministicDefect::new("task_file_without_directory", &id, "path"),
+        );
+        return finish(report, blockers, inherited_blockers, deterministic);
     };
     if super::task_set::freeze_chain_is_absent(cwd, tasks_root) {
         report.push_str(
@@ -105,8 +172,10 @@ pub(super) fn inspect_raw(
         let pin: AcceptancePin = match read_json(&pin_path, "acceptance pin", "freeze-acceptance") {
             Ok(pin) => pin,
             Err(finding) => {
-                blockers.push(finding);
-                return finish(report, blockers, inherited_blockers);
+                let defect =
+                    DeterministicDefect::new("unreadable_acceptance_pin", &id, "acceptance_pin");
+                block(&mut blockers, &mut deterministic, finding, defect);
+                return finish(report, blockers, inherited_blockers, deterministic);
             }
         };
         append_predecessor_finding(
@@ -115,17 +184,20 @@ pub(super) fn inspect_raw(
             pin.acceptance_gate.finding_count,
             &mut blockers,
             &mut inherited_blockers,
+            &mut deterministic,
         );
         let expected_ids = match validate_prd_identity(cwd, tasks_root) {
             Ok(ids) => ids,
             Err(finding) => {
-                blockers.push(finding);
-                return finish(report, blockers, inherited_blockers);
+                let defect = DeterministicDefect::new("prd_identity_mismatch", &id, "prd");
+                block(&mut blockers, &mut deterministic, finding, defect);
+                return finish(report, blockers, inherited_blockers, deterministic);
             }
         };
         if let Err(error) = validate_acceptance_bundle(tasks_root, Some(&pin), &expected_ids) {
-            blockers.push(error.to_string());
-            return finish(report, blockers, inherited_blockers);
+            let fallback = ("invalid_acceptance_bundle", error.to_string());
+            block_predecessor(&mut blockers, &mut deterministic, &error.defects, fallback);
+            return finish(report, blockers, inherited_blockers, deterministic);
         }
         report.push_str(
             "\n## acceptance freeze\n  acceptance contract, lock, PRD digest, and host pin match\n",
@@ -149,6 +221,7 @@ pub(super) fn inspect_raw(
                             stamp.finding_count,
                             &mut blockers,
                             &mut inherited_blockers,
+                            &mut deterministic,
                         );
                     }
                     let Some(frozen) = skeleton
@@ -156,12 +229,12 @@ pub(super) fn inspect_raw(
                         .iter()
                         .find(|frozen| frozen.task_id == task.canonical_task_id)
                     else {
-                        blockers.push(format!(
+                        block(&mut blockers, &mut deterministic, format!(
                             "{} is absent from {}; add its entry and re-run `workflow freeze-skeleton` before body writing",
                             task.canonical_task_id,
                             skeleton_path.display()
-                        ));
-                        return finish(report, blockers, inherited_blockers);
+                        ), DeterministicDefect::new("task_absent_from_skeleton", &id, "skeleton"));
+                        return finish(report, blockers, inherited_blockers, deterministic);
                     };
                     let findings = compare_frozen_task(&task, frozen);
                     if findings.is_empty() {
@@ -174,12 +247,15 @@ pub(super) fn inspect_raw(
                         }));
                     }
                 }
-                Err(error) => blockers.push(error.to_string()),
+                Err(error) => {
+                    let fallback = ("invalid_skeleton_chain", error.to_string());
+                    block_predecessor(&mut blockers, &mut deterministic, &error.defects, fallback);
+                }
             },
-            _ => blockers.push(format!(
+            _ => block(&mut blockers, &mut deterministic, format!(
                 "partial skeleton freeze beside {}: file={}, lock={}, pin={}; restore all three matching artifacts or re-run `workflow freeze-skeleton`",
                 path.display(), skeleton_present, lock_present, skeleton_pin_present
-            )),
+            ), DeterministicDefect::new("partial_skeleton_freeze", &id, "skeleton")),
         }
     }
 
@@ -221,9 +297,7 @@ pub(super) fn inspect_raw(
             ));
         }
     }
-    let mut result = finish(report, blockers, inherited_blockers);
-    result.deterministic = deterministic;
-    result
+    finish(report, blockers, inherited_blockers, deterministic)
 }
 
 fn validate_declared_shape(
@@ -231,23 +305,34 @@ fn validate_declared_shape(
     raw: &str,
     report: &mut String,
     blockers: &mut Vec<String>,
+    identities: &mut Identities,
 ) {
-    for issue in &task.section_heading_issues {
-        blockers.push(format!(
-            "{}: heading issue '{issue}'; rename the heading to the exact required TASK section name",
-            task.canonical_task_id
-        ));
+    // Every shape defect of the task, each with its own identity.
+    let id = task.canonical_task_id.as_str();
+    for (index, issue) in task.section_heading_issues.iter().enumerate() {
+        let text = format!(
+            "{id}: heading issue '{issue}'; rename the heading to the exact required TASK section name"
+        );
+        let defect = DeterministicDefect::new("section_heading", id, format!("headings/{index}"));
+        block(blockers, identities, text, defect);
     }
     if let Err(error) =
         archon_workflow::task_universe::validate_declared_statuses(std::slice::from_ref(task))
     {
-        blockers.push(error.to_string());
+        let defect = DeterministicDefect::new("invalid_declared_status", id, "status");
+        block(blockers, identities, error.to_string(), defect);
     }
-    blockers.extend(super::scope_declarations::inspect(task));
+    for (index, text) in super::scope_declarations::inspect(task)
+        .into_iter()
+        .enumerate()
+    {
+        let defect = DeterministicDefect::new("scope_declaration", id, format!("scope/{index}"));
+        block(blockers, identities, text, defect);
+    }
     if !super::declarations::task_has_runnable_test(raw) {
-        blockers.push(super::declarations::missing_runnable_test_finding(
-            &task.canonical_task_id,
-        ));
+        let text = super::declarations::missing_runnable_test_finding(id);
+        let defect = DeterministicDefect::new("missing_runnable_test", id, "focused_tests");
+        block(blockers, identities, text, defect);
     }
     if blockers.is_empty() {
         report.push_str(
@@ -291,6 +376,7 @@ fn append_predecessor_finding(
     finding_count: usize,
     blockers: &mut Vec<String>,
     inherited_blockers: &mut BTreeSet<String>,
+    identities: &mut Identities,
 ) {
     if finding_count == 0 || mode == archon_core::config::GateMode::Off {
         return;
@@ -299,7 +385,8 @@ fn append_predecessor_finding(
         "predecessor {label} freeze carries {finding_count} policy finding(s); re-freeze under enforce and resolve every named finding before continuing"
     );
     inherited_blockers.insert(text.clone());
-    blockers.push(text);
+    let defect = DeterministicDefect::new("predecessor_findings", label, "freeze");
+    block(blockers, identities, text, defect);
 }
 
 fn read_json<T: for<'de> serde::Deserialize<'de>>(
@@ -325,6 +412,7 @@ fn finish(
     mut report: String,
     blockers: Vec<String>,
     inherited_blockers: BTreeSet<String>,
+    deterministic: Identities,
 ) -> TaskFileLint {
     report.push_str("\n## set-level checks\n  coverage: NOT ANALYSED for --task-file\n  edges: NOT ANALYSED for --task-file\n");
     if blockers.is_empty() {
@@ -339,7 +427,7 @@ fn finish(
         report,
         blockers,
         inherited_blockers,
-        deterministic: BTreeMap::new(),
+        deterministic,
     }
 }
 

@@ -37,6 +37,7 @@ use archon_workflow::task_universe_contract_audit::{ContractFindingKind, audit_c
 /// Only the certain half. The ownership heuristic is deliberately excluded: a
 /// guess that blocks a decomposition is a guess the author cannot argue with,
 /// and the first time it is wrong the whole gate gets switched off.
+#[cfg(test)]
 pub(crate) fn blocking_findings(tasks_root: Option<&Path>) -> Vec<String> {
     blocking_defects(tasks_root)
         .into_iter()
@@ -44,12 +45,16 @@ pub(crate) fn blocking_findings(tasks_root: Option<&Path>) -> Vec<String> {
         .collect()
 }
 
-fn blocking_defects(tasks_root: Option<&Path>) -> Vec<archon_workflow::defect::ValidationDefect> {
+/// Every certain contract defect and every unparseable spec under `root`,
+/// each with its host identity, from one read of the task directory.
+pub(super) fn blocking_defects(
+    tasks_root: Option<&Path>,
+) -> Vec<archon_workflow::defect::ValidationDefect> {
     use archon_workflow::defect::ValidationDefect;
     let Some(root) = tasks_root else {
         return Vec::new();
     };
-    let Some(universe) = load_universe(root) else {
+    let Ok(paths) = task_files_under(root) else {
         return vec![ValidationDefect::new(
             "unreadable_task_directory",
             "tasks",
@@ -59,30 +64,37 @@ fn blocking_defects(tasks_root: Option<&Path>) -> Vec<archon_workflow::defect::V
     };
     // An unreadable spec is one defect, never permission to hide defects in
     // every other readable spec. Structural slots exclude rejected filenames.
+    let mut universe = WorkflowV2TaskUniverse {
+        schema_version: String::new(),
+        source_roots: vec![root.display().to_string()],
+        tasks: Vec::new(),
+    };
     let mut findings = Vec::new();
-    if let Ok(paths) = task_files_under(root) {
-        for (index, path) in paths.iter().enumerate() {
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("<unnamed>");
-            let problem = match std::fs::read_to_string(path) {
-                Ok(raw) => parse_task_file(path, &raw)
-                    .err()
-                    .map(|error| ("invalid_task_spec", format!("{name}: {error}"))),
-                Err(error) => Some((
-                    "unreadable_task_spec",
-                    format!("{name}: unreadable: {error}"),
-                )),
-            };
-            if let Some((code, message)) = problem {
-                findings.push(ValidationDefect::new(
-                    code,
-                    &format!("tasks/{index}"),
-                    "spec",
-                    message,
-                ));
-            }
+    for (index, path) in paths.iter().enumerate() {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("<unnamed>");
+        let problem = match std::fs::read_to_string(path) {
+            Ok(raw) => match parse_task_file(path, &raw) {
+                Ok(task) => {
+                    universe.tasks.push(task);
+                    None
+                }
+                Err(error) => Some(("invalid_task_spec", format!("{name}: {error}"))),
+            },
+            Err(error) => Some((
+                "unreadable_task_spec",
+                format!("{name}: unreadable: {error}"),
+            )),
+        };
+        if let Some((code, message)) = problem {
+            findings.push(ValidationDefect::new(
+                code,
+                &format!("tasks/{index}"),
+                "spec",
+                message,
+            ));
         }
     }
     findings.extend(
@@ -99,26 +111,26 @@ fn blocking_defects(tasks_root: Option<&Path>) -> Vec<archon_workflow::defect::V
     findings
 }
 
-pub(super) fn attach_identities(
-    root: &Path,
-    findings: &mut [crate::command::workflow_gate::GateFinding],
-) {
-    let mut by_message: std::collections::BTreeMap<_, std::collections::VecDeque<_>> =
-        std::collections::BTreeMap::new();
-    for defect in blocking_defects(Some(root)) {
-        by_message
-            .entry(defect.message)
-            .or_default()
-            .push_back(defect.identity);
-    }
-    for finding in findings {
-        if let Some(identity) = by_message
-            .get_mut(&finding.text)
-            .and_then(|identities| identities.pop_front())
-        {
-            finding.deterministic_defect = Some(identity);
-        }
-    }
+/// Gate findings for `defects`, each carrying its own identity.
+pub(super) fn gate_findings(
+    defects: Vec<archon_workflow::defect::ValidationDefect>,
+    (gate_id, subject, source_path, scope): (
+        crate::command::workflow_gate::GateId,
+        &str,
+        Option<&Path>,
+        archon_workflow::RemediationScope,
+    ),
+) -> Vec<crate::command::workflow_gate::GateFinding> {
+    use crate::command::workflow_gate::{GateFinding, finding_subject};
+    let path = source_path.map(Path::to_path_buf);
+    defects
+        .into_iter()
+        .map(|defect| {
+            let named = finding_subject(&defect.message, subject);
+            GateFinding::new(gate_id, defect.message, named, path.clone(), scope)
+                .with_defect(defect.identity)
+        })
+        .collect()
 }
 
 /// Parse every task file under `root`, skipping the ones that will not parse.
