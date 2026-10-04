@@ -35,8 +35,11 @@ impl WorkflowV2ResultStore {
     /// Revoke every stored outcome of `(call_id, item_id)`, current and
     /// superseded. `true` when anything was revoked.
     pub fn revoke_branch_outcome(&self, call_id: &str, item_id: &str) -> WorkflowResult<bool> {
+        validate_branch_tree(&self.root.join("branches"))?;
         let dir = self.root.join("branches").join(sanitize_call_id(call_id));
-        let files = branch_files_in(&dir, item_id, &stored_outcomes_in(&dir)?)?;
+        let mut files = branch_files_in(&dir, item_id, &stored_outcomes_in(&dir)?)?;
+        let mut seen = std::collections::BTreeSet::new();
+        files.retain(|path| seen.insert(path.clone()));
         self.move_revoked(&files)?;
         Ok(!files.is_empty())
     }
@@ -53,6 +56,7 @@ impl WorkflowV2ResultStore {
             revoked: Vec::new(),
         };
         let root = self.root.join("branches");
+        validate_branch_tree(&root)?;
         let calls = match fs::read_dir(&root) {
             Ok(calls) => calls,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(plan),
@@ -67,16 +71,6 @@ impl WorkflowV2ResultStore {
                 .is_dir()
             {
                 continue;
-            }
-            // The archive is written only as a real directory; a link there
-            // (an alias of the call directory or a path outside the run) is
-            // corruption, refused before anything moves.
-            let archive = dir.join("superseded");
-            if fs::symlink_metadata(&archive).is_ok_and(|meta| meta.file_type().is_symlink()) {
-                return Err(WorkflowError::io(
-                    &archive,
-                    std::io::Error::other("superseded archive is a link, not a directory"),
-                ));
             }
             // A FIFO, socket or device can never be read safely here, yet a
             // reader could still take outcome bytes from it later: quarantine
@@ -205,6 +199,36 @@ fn outcome_files_in(dir: &Path, archived: bool) -> WorkflowResult<Vec<PathBuf>> 
         }
     }
     Ok(files)
+}
+
+/// The branch store is written only as real directories: `branches/`, each
+/// call directory, and its `superseded/` and `revoked/`. A link at any of
+/// those levels aliases another directory (inside or outside the run), so
+/// revocation could miss records, move another run's files, or move records
+/// back into a reusable archive. It is corruption, refused before any move.
+fn validate_branch_tree(root: &Path) -> WorkflowResult<()> {
+    fn real_dir_or_absent(path: &Path) -> WorkflowResult<bool> {
+        match fs::symlink_metadata(path) {
+            Ok(meta) if meta.file_type().is_symlink() => Err(WorkflowError::io(
+                path,
+                std::io::Error::other("branch store directory is a link, not a directory"),
+            )),
+            Ok(meta) => Ok(meta.is_dir()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(WorkflowError::io(path, err)),
+        }
+    }
+    if !real_dir_or_absent(root)? {
+        return Ok(());
+    }
+    for entry in fs::read_dir(root).map_err(|err| WorkflowError::io(root, err))? {
+        let call = entry.map_err(|err| WorkflowError::io(root, err))?.path();
+        if real_dir_or_absent(&call)? {
+            real_dir_or_absent(&call.join("superseded"))?;
+            real_dir_or_absent(&call.join("revoked"))?;
+        }
+    }
+    Ok(())
 }
 
 /// Entries reuse could name but this scan cannot read without blocking: a

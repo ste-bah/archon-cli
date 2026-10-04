@@ -404,3 +404,66 @@ fn a_linked_superseded_archive_is_refused_before_any_move() {
     assert!(!call_dir.join("revoked").exists());
     assert_eq!(v2.restart_epoch().unwrap(), 0);
 }
+
+/// Each directory level of the branch store aliased by a link: refused
+/// before any move, for task restart and for item revocation.
+#[cfg(unix)]
+#[test]
+fn every_linked_branch_store_level_is_refused_before_any_move() {
+    let cases: [(&str, fn(&std::path::Path, &std::path::Path)); 3] = [
+        ("call", |branches, call| {
+            let away = branches.parent().unwrap().join("call-away");
+            std::fs::rename(call, &away).unwrap();
+            std::os::unix::fs::symlink(&away, call).unwrap();
+        }),
+        ("branches", |branches, _| {
+            let away = branches.parent().unwrap().join("branches-away");
+            std::fs::rename(branches, &away).unwrap();
+            std::os::unix::fs::symlink(&away, branches).unwrap();
+        }),
+        ("revoked", |_, call| {
+            std::os::unix::fs::symlink("superseded", call.join("revoked")).unwrap();
+        }),
+    ];
+    for (name, alias) in cases {
+        let temp = tempfile::tempdir().unwrap();
+        let (store, run) = generated_run(&temp, &[CALL]);
+        let v2 = v2_store(&store, &run);
+        landed_then_superseded(&v2, "T-A");
+        let current = v2.branch_outcome_path(CALL, &item("T-A").id);
+        let call = current.parent().unwrap().to_path_buf();
+        alias(call.parent().unwrap(), &call);
+        let before = std::fs::read(&current).unwrap();
+        let superseded = std::fs::read_dir(call.join("superseded")).unwrap().count();
+        assert!(
+            restart_generated_v2_task(&store, &run, "T-A").is_err(),
+            "{name}"
+        );
+        assert!(
+            v2.revoke_branch_outcome(CALL, &item("T-A").id).is_err(),
+            "{name}"
+        );
+        assert_eq!(std::fs::read(&current).unwrap(), before, "{name}");
+        let after = std::fs::read_dir(call.join("superseded")).unwrap().count();
+        assert_eq!(after, superseded, "{name}: the archive changed");
+        assert_eq!(v2.restart_epoch().unwrap(), 0, "{name}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn item_revocation_refuses_a_linked_archive_before_any_move() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run(&temp, &[CALL]);
+    let v2 = v2_store(&store, &run);
+    landed_then_superseded(&v2, "T-A");
+    let current = v2.branch_outcome_path(CALL, &item("T-A").id);
+    let call = current.parent().unwrap().to_path_buf();
+    std::fs::rename(call.join("superseded"), call.join("moved-away")).unwrap();
+    std::os::unix::fs::symlink(".", call.join("superseded")).unwrap();
+    let before = std::fs::read(&current).unwrap();
+    assert!(v2.revoke_branch_outcome(CALL, &item("T-A").id).is_err());
+    assert_eq!(std::fs::read(&current).unwrap(), before);
+    assert!(!call.join("revoked").exists());
+    let _ = store;
+}
