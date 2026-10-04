@@ -62,7 +62,13 @@ pub(super) fn completed_anchor(record: &Recovery) -> Result<&PortableAcceptanceI
         .from;
     let captured = match &record.prior {
         Some(prior) => prior.identity() == *from,
-        None => record.runs.values().any(|launch| launch == from),
+        None => {
+            record.runs.values().any(|launch| launch == from)
+                && record
+                    .contract_digest
+                    .as_ref()
+                    .is_none_or(|digest| digest == &from.acceptance_digest)
+        }
     };
     if !captured {
         return Err(anyhow!(
@@ -106,10 +112,10 @@ pub(super) fn authorized(
     )
 }
 
-/// Authenticate the actual shared lineage first. When it does not start at
-/// this run's anchor, derive a run-specific recovery hop using the logged
-/// transaction and its named checks, then apply the ordinary contract,
-/// skeleton and subsequent-hop checks to that proof view.
+/// Prove adoption from this run's launch, never from another run's contract.
+/// The caller authenticates the shared completion against durable authority.
+/// When the lineage does not start at this launch, derive its recovery hop
+/// from that authority, retaining ordinary contract and skeleton checks.
 pub(super) fn proof(
     record: &Recovery,
     launch: &PortableAcceptanceIdentityV1,
@@ -117,10 +123,8 @@ pub(super) fn proof(
     pin: &AcceptancePin,
     pin_path: &Path,
     tasks: &Path,
-    from: &PortableAcceptanceIdentityV1,
 ) -> Result<ChainProof> {
     let history = ChainHistory::for_pin(pin_path);
-    verify_reached_from(from, LaunchLineage::Recorded, pin, tasks, &history)?;
     if pin.lineage.iter().any(|link| link.from == *launch) {
         return Ok(verify_reached_from(
             launch,
@@ -134,6 +138,18 @@ pub(super) fn proof(
         .completed
         .as_ref()
         .ok_or_else(|| anyhow!("recovery has no completion"))?;
+    // Validate the original later links before rehashing them for this run.
+    // Rebuilding the proof must not repair a corrupt digest or a chain gap.
+    for links in pin.lineage[done.lineage.len() - 1..].windows(2) {
+        let (before, link) = (&links[0], &links[1]);
+        if link.prior_link_digest.as_deref() != Some(before.digest().as_str())
+            || link.from != before.to
+        {
+            return Err(anyhow!(
+                "chain check lineage_broken failed: recovery followup does not bind its preceding link"
+            ));
+        }
+    }
     let mut view = pin.clone();
     view.lineage = vec![PinTransition::extending(
         &[],

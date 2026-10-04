@@ -169,13 +169,18 @@ fn no_prior_pin_recovery_adopts_both_distinct_run_launches() {
     let proof =
         verify(&run, "z-second-run", &second).expect("later recorded hops must remain adoptable");
     assert_eq!(proof.recorded_hops, Some(2));
-    pin.lineage.last_mut().unwrap().prior_link_digest = Some("broken link".into());
-    std::fs::write(run.set.pin_path(), serde_json::to_vec(&pin).unwrap()).unwrap();
-    assert!(
-        verify(&run, "z-second-run", &second)
-            .unwrap_err()
-            .contains("lineage_broken")
-    );
+    for broken in ["digest", "source", "destination"] {
+        let mut broken_pin = pin.clone();
+        let link = broken_pin.lineage.last_mut().unwrap();
+        match broken {
+            "digest" => link.prior_link_digest = Some("broken link".into()),
+            "source" => link.from.freeze_event_id = "chain gap".into(),
+            _ => link.to.freeze_event_id = "wrong destination".into(),
+        }
+        std::fs::write(run.set.pin_path(), serde_json::to_vec(&broken_pin).unwrap()).unwrap();
+        let refusal = verify(&run, "z-second-run", &second).unwrap_err();
+        assert!(refusal.contains("lineage_broken"), "{broken}: {refusal}");
+    }
 }
 
 #[test]
@@ -229,6 +234,15 @@ fn distinct_recovery_launch_still_requires_consistent_contract_preimages() {
 
 #[test]
 fn attack_anchor_flips_when_contract_digest_is_unbound() {
+    anchor_import_with_unbound_contract(false);
+}
+
+#[test]
+fn recovery_import_before_completion_cannot_block_a_valid_launch() {
+    anchor_import_with_unbound_contract(true);
+}
+
+fn anchor_import_with_unbound_contract(import_before: bool) {
     let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
     let mut second = run.set.pin().identity();
     second.skeleton_digest = None;
@@ -258,8 +272,24 @@ fn attack_anchor_flips_when_contract_digest_is_unbound() {
     assert!(receipt[0]["prior"].is_null());
     assert!(receipt[0]["contract_digest"].is_null());
     assert!(receipt[0]["skeleton"].is_null());
+    if import_before {
+        history.put(&older).unwrap();
+    }
     refreeze(&run);
-    verify(&run, "z-second-run", &second).expect("z adopts before the import");
+    if import_before {
+        assert_eq!(run.set.pin().lineage.last().unwrap().from, first);
+    }
+    let before = verify(&run, "z-second-run", &second);
+    assert!(
+        before.is_ok(),
+        "z must adopt regardless of import timing (import_before={import_before}): {before:?}"
+    );
+    assert!(
+        verify(&run, "uncaptured-run", &second)
+            .unwrap_err()
+            .contains("no matching durable launch authorization"),
+        "a valid launch proof cannot authorize an uncaptured run"
+    );
     history.put(&older).unwrap();
     let after = verify(&run, "z-second-run", &second);
     assert!(
@@ -268,6 +298,14 @@ fn attack_anchor_flips_when_contract_digest_is_unbound() {
     );
     let refusal = verify(&run, "a-first-run", &first).unwrap_err();
     assert!(refusal.contains("criterion_changed"), "{refusal}");
+    // A captured run with compatible fields still needs its own authentic bytes.
+    let preimage = history.path(&second.acceptance_digest);
+    let original = std::fs::read(&preimage).unwrap();
+    std::fs::write(&preimage, b"corrupt own launch contract").unwrap();
+    let refusal = verify(&run, "z-second-run", &second).unwrap_err();
+    assert!(refusal.contains("preimage_corrupt"), "{refusal}");
+    std::fs::write(&preimage, original).unwrap();
+    verify(&run, "z-second-run", &second).expect("restoring its own preimage permits adoption");
 }
 
 #[test]
@@ -301,16 +339,16 @@ fn readable_snapshot_without_launch_identity_cannot_acquire_recovery_authority()
 
 #[test]
 fn recovery_completion_source_must_bind_the_captured_authority() {
-    for has_prior in [false, true] {
+    for (has_prior, capture_other) in [(false, false), (false, true), (true, true)] {
         let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
         let launch = run.set.pin().identity();
         metadata(&run, "captured-run", &launch);
         let mut other = launch.clone();
         other.freeze_event_id = "different-source-freeze".into();
-        if has_prior {
-            // Even another captured launch cannot replace an existing prior pin.
+        if capture_other {
             metadata(&run, "other-captured-run", &other);
-        } else {
+        }
+        if !has_prior {
             std::fs::remove_file(run.set.pin_path()).unwrap();
         }
         let receipt = recover(&run);
@@ -318,20 +356,55 @@ fn recovery_completion_source_must_bind_the_captured_authority() {
         refreeze(&run);
         verify(&run, "captured-run", &launch).expect("the original completion must adopt");
 
-        // Make the pin and completion agree on an unauthorized source, keeping
-        // the destination, named ids and trigger otherwise unchanged.
-        let mut pin = run.set.pin();
-        pin.lineage.last_mut().unwrap().from = other;
-        std::fs::write(run.set.pin_path(), serde_json::to_vec(&pin).unwrap()).unwrap();
-        let path = crate::command::workflow_task_set::recovery_lineage::path(&run.set.pin_path());
-        let mut receipt: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        receipt[0]["completed"]["lineage"] = serde_json::to_value(&pin.lineage).unwrap();
-        std::fs::write(path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+        replace_completion_source(&run, other.clone());
+        if !has_prior && capture_other {
+            // Without a prior pin, either captured source for the bound contract
+            // is authorized; each requesting run must still pass its own proof.
+            verify(&run, "captured-run", &launch).expect("another captured source is authorized");
+            verify(&run, "other-captured-run", &other).expect("the other run also proves adoption");
+            continue;
+        }
         let refusal = verify(&run, "captured-run", &launch).unwrap_err();
         assert!(
             refusal.contains("recovery completion does not bind its prior anchor"),
             "{refusal}"
         );
     }
+}
+
+fn replace_completion_source(run: &Run, from: PortableAcceptanceIdentityV1) {
+    // Keep the pin and receipt consistent, changing only their claimed source.
+    let mut pin = run.set.pin();
+    pin.lineage.last_mut().unwrap().from = from;
+    std::fs::write(run.set.pin_path(), serde_json::to_vec(&pin).unwrap()).unwrap();
+    let path = crate::command::workflow_task_set::recovery_lineage::path(&run.set.pin_path());
+    let mut receipt: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    receipt[0]["completed"]["lineage"] = serde_json::to_value(&pin.lineage).unwrap();
+    std::fs::write(path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+}
+
+#[test]
+fn no_prior_completion_source_must_match_the_captured_contract_digest() {
+    let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
+    let launch = run.set.pin().identity();
+    let mut older_contract = run.set.contract();
+    older_contract.acceptance[0].criterion = "older obligation".into();
+    let bytes = serde_json::to_vec_pretty(&older_contract).unwrap();
+    let mut other = launch.clone();
+    other.freeze_event_id = "older-source-freeze".into();
+    other.acceptance_digest = archon_workflow::task_set_contract::content_digest(&bytes);
+    metadata(&run, "captured-run", &launch);
+    metadata(&run, "other-captured-run", &other);
+    std::fs::remove_file(run.set.pin_path()).unwrap();
+    let receipt = recover(&run);
+    assert_eq!(receipt[0]["contract_digest"], launch.acceptance_digest);
+    refreeze(&run);
+    verify(&run, "captured-run", &launch).unwrap();
+    replace_completion_source(&run, other);
+    let refusal = verify(&run, "captured-run", &launch).unwrap_err();
+    assert!(
+        refusal.contains("recovery completion does not bind its prior anchor"),
+        "{refusal}"
+    );
 }

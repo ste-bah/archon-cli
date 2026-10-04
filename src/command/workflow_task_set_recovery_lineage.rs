@@ -363,7 +363,7 @@ pub(crate) fn verify(
         }
         super::publish::verify_recovered_chain(pin_path, tasks)
             .map_err(|reason| anyhow!(reason))?;
-        let proof = anchors::proof(record, launch, launch_lineage, pin, pin_path, tasks, from)?;
+        let proof = anchors::proof(record, launch, launch_lineage, pin, pin_path, tasks)?;
         return Ok(Some(proof));
     }
     Err(anyhow!(
