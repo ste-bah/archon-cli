@@ -18,6 +18,8 @@ mod guard;
 use guard::{ProcessGroupGuard, stalled_output};
 #[path = "workflow_host_command_termination.rs"]
 mod termination;
+#[cfg(all(test, unix))]
+pub(crate) use termination::SCANS_PAUSED;
 use termination::{confine, leader_exit, reap, terminate_and_reap, terminate_completed_group};
 
 #[cfg(unix)]
@@ -169,7 +171,10 @@ pub(crate) async fn supervise_process_group(
         &request.command_id,
     )?);
     #[cfg(unix)]
-    let mut child = &mut *group_guard.child;
+    let child = &mut *group_guard.child;
+    // Borrowed on every platform, as the Unix guard hands it out.
+    #[cfg(not(unix))]
+    let child = &mut child;
     let stdout = child.stdout.take().ok_or_else(|| {
         WorkflowError::StageFailed("host command stdout pipe was not created".to_string())
     })?;
@@ -210,7 +215,7 @@ pub(crate) async fn supervise_process_group(
     let outcome = {
         // The leader's exit, observed without reaping it (Unix): the tree is
         // torn down while the unreaped leader still holds its pid.
-        let wait = leader_exit(&mut child);
+        let wait = leader_exit(child);
         tokio::pin!(wait);
         let timeout = tokio::time::sleep(Duration::from_secs(request.timeout_secs));
         tokio::pin!(timeout);
@@ -248,7 +253,7 @@ pub(crate) async fn supervise_process_group(
         Outcome::Completed(exit) => {
             // Torn down before the leader is reaped, then reaped.
             let mut teardown = terminate_completed_group(&group_guard.tree).await;
-            let status = reap(&mut child).await;
+            let status = reap(child).await;
             group_guard.reaped();
             if let Err(error) = &exit {
                 teardown =
@@ -297,7 +302,7 @@ pub(crate) async fn supervise_process_group(
             })
         }
         Outcome::TimedOut => {
-            let teardown = terminate_and_reap(&mut child, &group_guard.tree).await;
+            let teardown = terminate_and_reap(child, &group_guard.tree).await;
             group_guard.reaped();
             abort_stdin(stdin_task);
             // Issue #255: returned, not raised. The output the child wrote
@@ -327,7 +332,7 @@ pub(crate) async fn supervise_process_group(
             })
         }
         Outcome::Controlled(signal) => {
-            let teardown = terminate_and_reap(&mut child, &group_guard.tree).await;
+            let teardown = terminate_and_reap(child, &group_guard.tree).await;
             group_guard.reaped();
             abort_stdin(stdin_task);
             let pipes = finish_pipe_tasks(stdout_task, stderr_task).await;
@@ -354,7 +359,7 @@ pub(crate) async fn supervise_process_group(
             })
         }
         Outcome::Event(event) => {
-            let teardown = terminate_and_reap(&mut child, &group_guard.tree).await;
+            let teardown = terminate_and_reap(child, &group_guard.tree).await;
             group_guard.reaped();
             abort_stdin(stdin_task);
             let error = match event {

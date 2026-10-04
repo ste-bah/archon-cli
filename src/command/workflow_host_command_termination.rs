@@ -161,6 +161,10 @@ impl Tree {
     /// The scan reads the table without the tracker lock, within its own
     /// budget, and takes the lock only to absorb a complete table.
     pub(super) fn spawn_refresh(&self) -> Option<tokio::task::JoinHandle<()>> {
+        #[cfg(test)]
+        if SCANS_PAUSED.with(std::cell::Cell::get) {
+            return None;
+        }
         let tracker = self.tracker.clone();
         let abandoned = self.abandoned.clone();
         Some(tokio::task::spawn_blocking(move || {
@@ -209,6 +213,14 @@ impl Tree {
             }
         }
     }
+}
+
+#[cfg(all(test, unix))]
+thread_local! {
+    /// Test seam: while set on the thread that drives a supervisor, its
+    /// periodic scans do not run, so a test can act before any scan without
+    /// racing the scan interval.
+    pub(crate) static SCANS_PAUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Kill every member of the tree within `bound`.

@@ -8,8 +8,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use super::super::workflow_host_command_groups::{GROUP_RECORDS_DIR, left_groups};
-use super::super::workflow_host_command_supervisor::{HostCommandControl, supervise_process_group};
+use super::super::workflow_host_command_groups::{GROUP_RECORDS_DIR, left_groups, stalled_running};
+use super::super::workflow_host_command_supervisor::{
+    HostCommandControl, HostCommandSignal, supervise_process_group,
+};
 use super::{command, script};
 
 /// A descendant that leaves the command's process group (`how` is the Perl
@@ -296,6 +298,9 @@ async fn a_confirmed_teardown_removes_the_resume_record() {
 
 #[tokio::test]
 async fn abort_before_first_scan_kills_an_original_session_descendant() {
+    // No periodic scan runs in this test (the supervisor is driven on this
+    // thread), so the abort is before the first scan by construction.
+    super::super::workflow_host_command_supervisor::SCANS_PAUSED.with(|paused| paused.set(true));
     let temp = tempfile::tempdir().unwrap();
     let pid_file = temp.path().join("unscanned-child");
     let body = format!(
@@ -314,13 +319,64 @@ async fn abort_before_first_scan_kills_an_original_session_descendant() {
         assert!(start.elapsed() < Duration::from_secs(5));
         tokio::time::sleep(Duration::from_millis(2)).await;
     }
-    assert!(
-        start.elapsed() < Duration::from_millis(500),
-        "test missed pre-scan window"
-    );
     let pid = read_pid(&pid_file);
     let _kill = Kill(pid);
     task.abort();
     let _ = task.await;
     assert_gone(pid, "abort before first scan").await;
+}
+
+#[tokio::test]
+async fn overlapping_commands_are_running_siblings_not_stalled_teardowns() {
+    // Round 5: a script may await several host commands at once
+    // (`Promise.all`), so commands of one run overlap. Each live command
+    // holds a record; the retry path read every such record as a stalled
+    // teardown and paused the run beside a sibling that was only running.
+    let temp = tempfile::tempdir().unwrap();
+    let run_dir = temp.path().join("run");
+    let records = run_dir.join(GROUP_RECORDS_DIR);
+    let mut tasks = Vec::new();
+    let mut handles = Vec::new();
+    for name in ["sibling-a", "sibling-b"] {
+        let request = command(script(temp.path(), name, "sleep 30"));
+        let (control, handle) = HostCommandControl::new();
+        let records = records.clone();
+        tasks.push(tokio::spawn(async move {
+            supervise_process_group(request, control, Some(&records)).await
+        }));
+        handles.push(handle);
+    }
+    let start = std::time::Instant::now();
+    let count = || {
+        std::fs::read_dir(&records).map_or(0, |entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+                .count()
+        })
+    };
+    while count() < 2 {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "records never written"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let stalled = stalled_running(&run_dir).unwrap();
+    let (running, _) = left_groups(&run_dir).unwrap();
+    for handle in &handles {
+        handle.signal(HostCommandSignal::Cancelled).unwrap();
+    }
+    for task in tasks {
+        let _ = task.await;
+    }
+    assert!(
+        stalled.is_empty(),
+        "a running sibling read as a stalled teardown: {stalled:?}"
+    );
+    assert_eq!(
+        running.len(),
+        2,
+        "both live commands still count as running"
+    );
 }

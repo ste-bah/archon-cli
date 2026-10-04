@@ -251,6 +251,9 @@ async fn a_never_seen_writer_left_in_the_scratch_is_an_operational_error() {
 
 #[tokio::test]
 async fn abort_before_first_scan_kills_an_original_group_descendant() {
+    // No periodic scan runs in this test (the check is driven on this
+    // thread), so the abort is before the first scan by construction.
+    confine::SCANS_PAUSED.with(|paused| paused.set(true));
     let temp = tempfile::tempdir().unwrap();
     let escaper = Escaper::new(temp.path());
     let text = format!("{}\nsleep 30", escaper.start_quiet("", 30));
@@ -270,10 +273,6 @@ async fn abort_before_first_scan_kills_an_original_group_descendant() {
         assert!(start.elapsed() < Duration::from_secs(5));
         tokio::time::sleep(Duration::from_millis(2)).await;
     }
-    assert!(
-        start.elapsed() < Duration::from_millis(200),
-        "test missed pre-scan window"
-    );
     let pid = escaper.pid();
     let _kill = Kill(pid);
     task.abort();

@@ -296,39 +296,68 @@ impl Tracker {
     /// rounds. A scan that cannot finish is an error: what is alive is then
     /// unknown, and the caller must not take the tree for empty.
     pub fn kill(&mut self, bound: Duration) -> io::Result<Vec<Pinned>> {
+        self.kill_observed(bound, &mut || {})
+    }
+
+    /// [`Self::kill`], calling `after_stop` once each freeze round has sent
+    /// its stops (a test seam: it lets a test run the clock out there).
+    pub(super) fn kill_observed(
+        &mut self,
+        bound: Duration,
+        after_stop: &mut dyn FnMut(),
+    ) -> io::Result<Vec<Pinned>> {
         let deadline = Instant::now() + bound;
         loop {
-            let mut members = self.refresh(deadline)?;
+            let members = self.refresh(deadline)?;
             if members.is_empty() || Instant::now() >= deadline {
                 return Ok(members);
             }
             let mut stopped = BTreeSet::new();
-            for _ in 0..FREEZE_ROUNDS {
-                let mut fresh = Vec::new();
-                for pinned in members {
-                    check_deadline(deadline)?;
-                    if !stopped.contains(&pinned) {
-                        fresh.push(pinned);
-                    }
-                }
-                if fresh.is_empty() || Instant::now() >= deadline {
-                    break;
-                }
-                for pinned in fresh {
-                    check_deadline(deadline)?;
-                    self.send(pinned, libc::SIGSTOP);
-                    stopped.insert(pinned);
-                }
-                match self.refresh(deadline) {
-                    Ok(next) => members = next,
-                    Err(_) => break,
-                }
-            }
+            let frozen = self.freeze(members, &mut stopped, deadline, after_stop);
+            // Whatever ended the freeze, the deadline included: a stopped
+            // member is neither running nor dead, so every one is killed
+            // before anything returns. The set is finite and each kill is
+            // one signal, so this needs no deadline of its own.
             for pinned in &stopped {
-                check_deadline(deadline)?;
                 self.send(*pinned, libc::SIGKILL);
             }
+            frozen?;
             std::thread::sleep(KILL_POLL.min(deadline.saturating_duration_since(Instant::now())));
         }
+    }
+
+    /// Stop-and-rescan rounds: stop every member not stopped yet, recording
+    /// it in `stopped` as soon as the stop is sent, then rescan. Ends when a
+    /// rescan finds nobody new, a rescan fails, or the deadline passes.
+    fn freeze(
+        &mut self,
+        mut members: Vec<Pinned>,
+        stopped: &mut BTreeSet<Pinned>,
+        deadline: Instant,
+        after_stop: &mut dyn FnMut(),
+    ) -> io::Result<()> {
+        for _ in 0..FREEZE_ROUNDS {
+            let mut fresh = Vec::new();
+            for pinned in members {
+                check_deadline(deadline)?;
+                if !stopped.contains(&pinned) {
+                    fresh.push(pinned);
+                }
+            }
+            if fresh.is_empty() || Instant::now() >= deadline {
+                return Ok(());
+            }
+            for pinned in fresh {
+                check_deadline(deadline)?;
+                self.send(pinned, libc::SIGSTOP);
+                stopped.insert(pinned);
+            }
+            after_stop();
+            match self.refresh(deadline) {
+                Ok(next) => members = next,
+                Err(_) => return Ok(()),
+            }
+        }
+        Ok(())
     }
 }

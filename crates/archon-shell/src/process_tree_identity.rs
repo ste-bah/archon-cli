@@ -208,7 +208,13 @@ pub fn exited(pid: u32) -> io::Result<bool> {
     let reported = unsafe { info.si_pid() };
     #[cfg(not(target_os = "linux"))]
     let reported = info.si_pid;
-    Ok(reported != 0)
+    // macOS reports a stop (or a continue) here although only WEXITED was
+    // asked for; a stopped child has not exited, whatever the platform.
+    Ok(reported != 0
+        && matches!(
+            info.si_code,
+            libc::CLD_EXITED | libc::CLD_KILLED | libc::CLD_DUMPED
+        ))
 }
 
 #[cfg(target_os = "linux")]

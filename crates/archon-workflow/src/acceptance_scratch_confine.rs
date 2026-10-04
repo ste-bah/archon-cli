@@ -33,6 +33,14 @@ const REAP_BOUND: Duration = Duration::from_secs(3);
 #[cfg(unix)]
 const HOLDER_PROBES: u32 = 10;
 
+#[cfg(test)]
+thread_local! {
+    /// Test seam: while set on the thread that runs a check, its periodic
+    /// scans do not run, so a test can act before any scan without racing
+    /// the scan interval.
+    pub(super) static SCANS_PAUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 pub(super) struct Confinement {
     #[cfg(unix)]
     tracker: std::sync::Arc<std::sync::Mutex<archon_shell::process_tree::Tracker>>,
@@ -76,6 +84,10 @@ impl Confinement {
     /// table is read without the tracker lock, within its own budget; only
     /// a complete table is absorbed.
     pub(super) fn scan(&mut self) {
+        #[cfg(test)]
+        if SCANS_PAUSED.with(std::cell::Cell::get) {
+            return;
+        }
         #[cfg(unix)]
         if self
             .scanning

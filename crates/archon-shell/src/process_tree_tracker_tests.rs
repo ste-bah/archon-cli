@@ -307,3 +307,107 @@ fn an_unreadable_but_proven_exited_leader_does_not_stall() {
         "waitid proved the unreadable leader exited: {live:?}"
     );
 }
+
+#[test]
+fn a_deadline_that_expires_mid_freeze_still_kills_every_stopped_member() {
+    // Round 5: a member SIGSTOPped by a freeze round is neither running nor
+    // dead. When the clock ran out before the SIGKILL, it was left stopped.
+    let temp = tempfile::tempdir().unwrap();
+    let ready = temp.path().join("child");
+    let body = format!(
+        "sleep 30 & echo $! > '{ready}.tmp' && mv '{ready}.tmp' '{ready}'\nsleep 30",
+        ready = ready.display()
+    );
+    let mut leader = group_leader(&body, temp.path());
+    wait_for(&ready);
+    let child: u32 = std::fs::read_to_string(&ready)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let child_start = start_of(child).expect("the backgrounded sleep runs");
+    let leader_start = start_of(leader.id()).expect("the leader runs");
+    let members = [leader.id() as i32, child as i32];
+    // Whatever happens below, nothing this test started is left behind.
+    struct Reap([i32; 2]);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            for pid in self.0 {
+                // SAFETY: these are the processes this test started.
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                    libc::kill(pid, libc::SIGCONT);
+                }
+            }
+        }
+    }
+    let _reap = Reap(members);
+    let mut tracker = Tracker::new(pin(&leader), vec![leader.id()], Vec::new());
+    let bound = Duration::from_secs(2);
+    let expired = Instant::now() + bound + Duration::from_millis(50);
+    let mut rounds = 0;
+    // The first freeze round has stopped both members; the clock then runs
+    // out before the rescan, so teardown ends on its deadline.
+    let _ = tracker.kill_observed(bound, &mut || {
+        rounds += 1;
+        while Instant::now() < expired {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+    assert_eq!(rounds, 1, "the freeze ran one round before the deadline");
+    let start = Instant::now();
+    // Dead is gone or a zombie, never merely stopped (start_of reads
+    // neither a zombie nor a reused pid as the pinned process).
+    let leader_dead = loop {
+        if start_of(leader.id()) != Some(leader_start) {
+            break true;
+        }
+        if start.elapsed() > Duration::from_secs(5) {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let child_dead = loop {
+        if start_of(child) != Some(child_start) {
+            break true;
+        }
+        if start.elapsed() > Duration::from_secs(5) {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    drop(_reap);
+    let _ = leader.wait();
+    assert!(
+        leader_dead && child_dead,
+        "a stopped member was left stopped: leader dead {leader_dead}, child dead {child_dead}"
+    );
+}
+
+#[test]
+fn a_stopped_child_has_not_exited() {
+    // macOS waitid reports a stop although only WEXITED was asked for: a
+    // leader frozen by teardown (or by job control) read as exited.
+    let mut child = sleeper();
+    // SAFETY: signals only the child this test started.
+    unsafe { libc::kill(child.id() as i32, libc::SIGSTOP) };
+    // Block until the stop has happened, so the probe below sees it.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    // SAFETY: `info` is valid output space; WSTOPPED|WNOWAIT only queries.
+    let waited = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            libc::id_t::from(child.id()),
+            &mut info,
+            libc::WSTOPPED | libc::WNOWAIT,
+        )
+    };
+    let stopped_exited = exited(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+    assert_eq!(waited, 0, "the stop was never observed");
+    assert!(
+        !stopped_exited.unwrap(),
+        "a stopped child was reported as exited"
+    );
+}

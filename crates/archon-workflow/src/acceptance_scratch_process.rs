@@ -203,15 +203,20 @@ pub async fn run_at(
     #[cfg(unix)]
     let mut owned = confine::OwnedCheck::new(leader, child);
     #[cfg(unix)]
-    let (mut child, confinement) = (&mut *owned.child, &mut owned.confinement);
+    let (child, confinement) = (&mut *owned.child, &mut owned.confinement);
+    // Borrowed on every platform, as the Unix owner hands them out.
     #[cfg(not(unix))]
     let mut confinement = Confinement::new(leader);
     #[cfg(not(unix))]
+    let confinement = &mut confinement;
+    #[cfg(not(unix))]
     let mut child = child;
+    #[cfg(not(unix))]
+    let child = &mut child;
     if let Some(root) = site.audit_root {
         super::cache::record_group(root, Some(leader as i32))?;
     }
-    let (stdout_pipe, stderr_pipe, stdin_pipe) = take_pipes(&mut child);
+    let (stdout_pipe, stderr_pipe, stdin_pipe) = take_pipes(child);
     let overflow = Arc::new(AtomicBool::new(false));
     let mut stdout = tokio::spawn(drain(stdout_pipe, site.output_bytes, overflow.clone()));
     let mut stderr = tokio::spawn(drain(stderr_pipe, site.output_bytes, overflow.clone()));
@@ -239,14 +244,14 @@ pub async fn run_at(
     // stopped and reaped, with its status if that is known.
     let stopped = loop {
         tokio::select! {
-            result=leader_exit(&mut child)=>break match result {
+            result=leader_exit(child)=>break match result {
                 Ok(()) => None,
                 Err(e) => { stall = Some(format!("waiting for the scratch child failed: {e}")); None }
             },
-            _=tokio::time::sleep_until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break Some(terminate(&mut child,&confinement,&mut stall).await);},
+            _=tokio::time::sleep_until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break Some(terminate(child,confinement,&mut stall).await);},
             _=tokio::time::sleep(Duration::from_millis(25))=>{
-                if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break Some(terminate(&mut child,&confinement,&mut stall).await);}
-                if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break Some(terminate(&mut child,&confinement,&mut stall).await);}
+                if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break Some(terminate(child,confinement,&mut stall).await);}
+                if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break Some(terminate(child,confinement,&mut stall).await);}
                 ticks += 1;
                 if ticks.is_multiple_of(SCAN_TICKS) { confinement.scan(); }
             }
@@ -254,8 +259,8 @@ pub async fn run_at(
                 quota_walk_count += 1;
                 if let Some(root) = site.audit_root {
                     match site.audited_size(root) {
-                        Ok(size) if size>site.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break Some(terminate(&mut child,&confinement,&mut stall).await);}
-                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break Some(terminate(&mut child,&confinement,&mut stall).await);}
+                        Ok(size) if size>site.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break Some(terminate(child,confinement,&mut stall).await);}
+                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break Some(terminate(child,confinement,&mut stall).await);}
                         _=>{}
                     }
                 }
@@ -270,7 +275,7 @@ pub async fn run_at(
     let teardown = confinement.kill().await;
     let status = match stopped {
         Some(status) => status,
-        None => reap(&mut child, &mut stall).await,
+        None => reap(child, &mut stall).await,
     };
     confinement.leader_reaped();
     // Windows: terminate the Job Object and wait on it, so every process the

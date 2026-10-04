@@ -62,10 +62,10 @@ fn settle_record(record: Option<GroupRecordGuard>, teardown: Teardown) -> Option
             evidence,
             survivors,
         } => {
-            if let Some(record) = record {
-                if let Some(error) = record.keep(survivors.as_deref()) {
-                    return Some(format!("{evidence}; {error}"));
-                }
+            if let Some(record) = record
+                && let Some(error) = record.keep(survivors.as_deref())
+            {
+                return Some(format!("{evidence}; {error}"));
             }
             Some(evidence)
         }
