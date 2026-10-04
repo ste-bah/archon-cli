@@ -1,8 +1,9 @@
 //! Issue 271: a task-set publish is all-or-nothing across a kill at any step.
 //!
 //! Each crash test re-runs this test binary as a child that publishes a fixed
-//! set and aborts (no destructors, no cleanup — what SIGKILL or a power cut
-//! leaves) at one named step. The parent then runs a recovery entry point and
+//! set and aborts (SIGKILL: no destructors or cleanup) at a named step.
+//! Kernel/device cache loss is not simulated; sync ordering is checked separately.
+//! The parent then runs a recovery entry point and
 //! requires the complete old set or the complete new set, with no debris.
 
 use std::path::{Path, PathBuf};
@@ -165,15 +166,19 @@ fn publish_crash_child() {
     .zip(NEW)
     .map(|(path, bytes)| (path, bytes.unwrap().to_vec()))
     .collect::<Vec<_>>();
-    publish(&pin, &files).expect("child publish");
+    if std::env::var_os("ARCHON_TEST_RECOVER_CHILD").is_some() {
+        recover_interrupted_publish(&pin, &tasks).unwrap();
+    } else {
+        publish(&pin, &files).expect("child publish");
+    }
 }
 
 fn publish(pin: &Path, files: &[(PathBuf, Vec<u8>)]) -> Result<()> {
-    publish_files_atomically(pin, files, "test")
+    publish_files_atomically(pin, files[0].0.parent().unwrap(), files, "test")
 }
 
 fn begin(pin: &Path, files: &[(PathBuf, Vec<u8>)]) -> Result<PublishTransaction> {
-    begin_publish(pin, files, "test", &[])
+    begin_publish(pin, files[0].0.parent().unwrap(), files, "test", &[])
 }
 
 fn acquire_chain_lock(pin: &Path, tasks: &Path) -> Result<ChainLock> {
@@ -226,7 +231,9 @@ fn a_kill_before_the_commit_point_rolls_back_at_launch() {
 fn a_kill_after_the_commit_point_rolls_forward_at_resume() {
     use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
     let scenario = Scenario::new();
-    assert!(scenario.publish_killed_at("committed"));
+    // Recovery must actually move staged bytes, not just clean backups.
+    round_two::fixture(&scenario, JournalState::Committed, false);
+    assert!(!scenario.is(NEW));
     let store = archon_workflow::WorkflowStore::project(scenario.root());
     let universe = WorkflowV2TaskUniverse {
         schema_version: "workflow-v2-task-universe-v1".into(),
@@ -262,10 +269,10 @@ fn a_kill_mid_publish_is_recovered_when_the_next_publisher_takes_the_lock() {
 
 /// What the publisher before the journal left when killed between renames:
 /// `a` replaced (backup kept), `b` backed up but not yet replaced, `c` and the
-/// pin still only staged. All staging finished before its first rename, so
-/// the staged bytes are whole and the set is rolled forward.
+/// pin still only staged. This evidence cannot prove membership or durability
+/// of the whole new set, so recovery must preserve it and refuse.
 #[test]
-fn debris_from_an_older_binary_is_rolled_forward() {
+fn debris_from_an_older_binary_without_a_manifest_is_refused() {
     let scenario = Scenario::new();
     let [a, b, c, pin] = scenario.targets();
     let txn = "0123456789abcdef0123456789abcdef";
@@ -279,18 +286,18 @@ fn debris_from_an_older_binary_is_rolled_forward() {
     std::fs::write(sibling(&b, "new"), b"new-b").unwrap();
     std::fs::write(sibling(&c, "new"), b"new-c").unwrap();
     std::fs::write(sibling(&pin, "new"), b"new-pin").unwrap();
-    let report = recover_interrupted_publish(&scenario.pin(), &scenario.tasks()).unwrap();
-    assert!(scenario.is(NEW), "{:?}", scenario.state());
-    assert!(scenario.debris().is_empty(), "{:?}", scenario.debris());
-    assert_eq!(report.events.len(), 1, "{:?}", report.events);
-    assert_eq!(report.events[0].source, "legacy");
-    assert_eq!(report.events[0].outcome, RecoveryOutcome::RolledForward);
+    let before = scenario.state();
+    let debris = scenario.debris();
+    let error = recover_interrupted_publish(&scenario.pin(), &scenario.tasks()).unwrap_err();
+    assert!(error.to_string().contains(txn), "{error}");
+    assert_eq!(scenario.state(), before);
+    assert_eq!(scenario.debris(), debris);
 }
 
-/// An older binary killed while staging replaced nothing through a backup:
-/// its staged files are discarded and the live set is left as it was.
+/// A surviving staged file cannot distinguish interrupted staging from a
+/// publish that already created an absent target. Keep the evidence.
 #[test]
-fn staging_debris_from_an_older_binary_is_discarded() {
+fn staging_debris_from_an_older_binary_without_a_manifest_is_refused() {
     let scenario = Scenario::new();
     let [a, ..] = scenario.targets();
     let stale = a.with_file_name(".a.json.fedcba9876543210fedcba9876543210.new");
@@ -299,12 +306,15 @@ fn staging_debris_from_an_older_binary_is_discarded() {
     let pin_dir = scenario.pin().parent().unwrap().to_path_buf();
     let foreign = pin_dir.join(".other.json.fedcba9876543210fedcba9876543210.new");
     std::fs::write(&foreign, b"theirs").unwrap();
-    let report = recover_interrupted_publish(&scenario.pin(), &scenario.tasks()).unwrap();
+    let error = recover_interrupted_publish(&scenario.pin(), &scenario.tasks()).unwrap_err();
+    assert!(
+        error.to_string().contains(&stale.display().to_string()),
+        "{error}"
+    );
+    assert!(!error.to_string().contains("other.json"), "{error}");
     assert!(scenario.is(OLD), "{:?}", scenario.state());
-    assert!(!stale.exists());
+    assert!(stale.exists());
     assert!(foreign.exists(), "another set's staging must be left alone");
-    assert_eq!(report.events.len(), 1, "{:?}", report.events);
-    assert_eq!(report.events[0].outcome, RecoveryOutcome::RolledBack);
 }
 
 #[test]
@@ -379,3 +389,6 @@ fn a_kill_mid_publish_is_recovered_before_decomposition_reads_the_chain() {
     assert!(scenario.is(OLD), "{:?}", scenario.state());
     assert!(scenario.debris().is_empty(), "{:?}", scenario.debris());
 }
+
+#[path = "workflow_task_set_publish_round_two_tests.rs"]
+mod round_two;

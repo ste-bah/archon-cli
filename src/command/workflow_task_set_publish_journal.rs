@@ -41,6 +41,8 @@ pub(super) fn crash_point(step: &str) {
         }
         std::process::abort();
     }
+    #[cfg(test)]
+    test_hooks::step(step);
     let _ = step;
 }
 
@@ -81,7 +83,7 @@ impl PublishLock {
     /// and verifies one transaction.
     pub(super) fn acquire(paths: &JournalPaths) -> Result<Self> {
         if let Some(parent) = paths.lock.parent() {
-            std::fs::create_dir_all(parent)?;
+            create_dir_all_durably(parent)?;
         }
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -141,12 +143,24 @@ impl Journal {
             .with_context(|| format!("writing publish journal {}", temp.display()))?;
         std::fs::rename(&temp, &paths.journal)
             .with_context(|| format!("recording publish journal {}", paths.journal.display()))?;
-        sync_parent(&paths.journal)
+        crash_point(&format!("journal-replaced-{:?}", self.state));
+        #[cfg(test)]
+        if std::env::var("ARCHON_TEST_COMMIT_FLUSH_ERROR").is_ok()
+            && self.state == JournalState::Committed
+        {
+            return Err(anyhow!("injected commit directory flush failure"));
+        }
+        sync_parent(&paths.journal)?;
+        crash_point(&format!("journal-flushed-{:?}", self.state));
+        Ok(())
     }
 
     /// The journal left on disk, if any, validated before any path in it is
     /// trusted: it is data read back from disk.
-    pub(super) fn load(paths: &JournalPaths) -> Result<Option<Self>> {
+    pub(super) fn load(
+        paths: &JournalPaths,
+        scopes: &super::scope::Scopes,
+    ) -> Result<Option<Self>> {
         let bytes = match std::fs::read(&paths.journal) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -162,11 +176,15 @@ impl Journal {
                 paths.journal.display()
             )
         })?;
-        journal.validate(paths)?;
+        journal.validate(paths, scopes)?;
         Ok(Some(journal))
     }
 
-    fn validate(&self, paths: &JournalPaths) -> Result<()> {
+    pub(super) fn validate(
+        &self,
+        paths: &JournalPaths,
+        scopes: &super::scope::Scopes,
+    ) -> Result<()> {
         if self.schema_version != JOURNAL_SCHEMA_VERSION || !is_transaction_id(&self.transaction) {
             return Err(anyhow!(
                 "publish journal {} has schema {} / transaction {:?}, which this binary does not write; inspect it, then remove it",
@@ -175,6 +193,7 @@ impl Journal {
                 self.transaction
             ));
         }
+        let mut targets = std::collections::BTreeSet::new();
         for entry in &self.entries {
             let expected = [
                 Some((&entry.staged, "new")),
@@ -190,6 +209,32 @@ impl Journal {
                     ));
                 }
             }
+            let target = super::scope::validate_destination(&entry.target, scopes)?;
+            let reserved = [
+                paths.lock.clone(),
+                paths.lock.with_extension("chain.lock"),
+                paths.journal.clone(),
+                paths.log.clone(),
+                paths.journal_temp(),
+            ]
+            .iter()
+            .any(|path| {
+                path.parent()
+                    .and_then(|parent| parent.canonicalize().ok())
+                    .as_deref()
+                    == target.parent()
+                    && path.file_name() == target.file_name()
+            });
+            if reserved || !targets.insert(target) {
+                return Err(anyhow!(
+                    "publish journal has duplicate or reserved target {}",
+                    entry.target.display()
+                ));
+            }
+            super::scope::validate_destination(&entry.staged, &transaction_scopes(&entry.target))?;
+            if let Some(backup) = &entry.backup {
+                super::scope::validate_destination(backup, &transaction_scopes(&entry.target))?;
+            }
         }
         Ok(())
     }
@@ -202,6 +247,13 @@ impl Journal {
                 .with_context(|| format!("removing publish journal {}", paths.journal.display())),
         }
     }
+}
+
+fn transaction_scopes(target: &Path) -> Vec<(PathBuf, Option<String>)> {
+    target
+        .parent()
+        .map(|parent| vec![(parent.to_path_buf(), None)])
+        .unwrap_or_default()
 }
 
 /// What recovering one journal did, for the recovery log.
@@ -220,18 +272,24 @@ pub(super) fn recover_journal(journal: &Journal, paths: &JournalPaths) -> Result
         JournalState::Applying => roll_back_entries(&journal.entries)?,
         JournalState::Committed => roll_forward_entries(&journal.entries)?,
     };
-    for entry in &journal.entries {
+    // Settle target renames durably before consuming any remaining backups.
+    sync_parents(journal.entries.iter().map(|entry| entry.target.as_path()))?;
+    for (index, entry) in journal.entries.iter().enumerate() {
         remove_if_present(&entry.staged)?;
         if let Some(backup) = &entry.backup {
             remove_if_present(backup)?;
         }
+        crash_point(&format!("backup-cleaned-{index}"));
     }
     sync_parents(journal.entries.iter().map(|entry| entry.target.as_path()))?;
-    Journal::remove(paths)?;
-    Ok(Recovered {
+    let recovered = Recovered {
         rolled_forward: journal.state == JournalState::Committed,
         files,
-    })
+    };
+    super::recover::record_journal(paths, journal, &recovered)?;
+    crash_point("before-journal-removal");
+    Journal::remove(paths)?;
+    Ok(recovered)
 }
 
 /// Undo this transaction's replacements, newest first. A target that does
@@ -240,17 +298,25 @@ pub(super) fn recover_journal(journal: &Journal, paths: &JournalPaths) -> Result
 /// Returns the targets restored or removed.
 pub(super) fn roll_back_entries(entries: &[JournalEntry]) -> Result<Vec<PathBuf>> {
     let mut undone = Vec::new();
-    for entry in entries.iter().rev() {
+    for (index, entry) in entries.iter().rev().enumerate() {
         let current = digest_of(&entry.target)?;
         let ours = current.as_deref() == Some(entry.written.as_str());
         let backup = entry.backup.as_ref().filter(|backup| backup.exists());
         match (ours, backup) {
             (true, Some(backup)) => rename(backup, &entry.target)?,
+            (true, None) if entry.backup.is_some() => continue,
             (true, None) => std::fs::remove_file(&entry.target)
                 .with_context(|| format!("removing {}", entry.target.display()))?,
             (false, Some(backup)) if current.is_none() => rename(backup, &entry.target)?,
+            (false, None) if entry.backup.is_some() && current.is_none() => {
+                return Err(anyhow!(
+                    "missing target and prior backup for {}",
+                    entry.target.display()
+                ));
+            }
             (false, _) => continue,
         }
+        crash_point(&format!("restored-{index}"));
         undone.push(entry.target.clone());
     }
     Ok(undone)
@@ -258,12 +324,23 @@ pub(super) fn roll_back_entries(entries: &[JournalEntry]) -> Result<Vec<PathBuf>
 
 /// Finish replacing every target the transaction had not reached yet.
 fn roll_forward_entries(entries: &[JournalEntry]) -> Result<Vec<PathBuf>> {
-    let mut finished = Vec::new();
+    // Prove the entire new set is available before changing any target.
     for entry in entries {
         if digest_of(&entry.target)?.as_deref() != Some(entry.written.as_str())
-            && entry.staged.exists()
+            && digest_of(&entry.staged)?.as_deref() != Some(entry.written.as_str())
         {
+            return Err(anyhow!(
+                "committed publication is incomplete: {} and {} do not hold the recorded bytes; journal and backups kept",
+                entry.target.display(),
+                entry.staged.display()
+            ));
+        }
+    }
+    let mut finished = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        if digest_of(&entry.target)?.as_deref() != Some(entry.written.as_str()) {
             rename(&entry.staged, &entry.target)?;
+            crash_point(&format!("forwarded-{index}"));
         }
         finished.push(entry.target.clone());
     }
@@ -293,14 +370,26 @@ pub(super) fn remove_if_present(path: &Path) -> Result<()> {
 
 /// Write `bytes` to a new file and flush them to stable storage through the
 /// same write handle (Windows' FlushFileBuffers requires write access).
-pub(super) fn write_durably(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_durably(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut file = std::fs::File::create(path)?;
     file.write_all(bytes)?;
     file.sync_all()
 }
 
+/// Connect every created directory durably to its parent. Existing ancestors
+/// are flushed too: a caller may just have created them without flushing them.
+pub(crate) fn create_dir_all_durably(dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
+    for ancestor in dir.ancestors().filter(|path| !path.as_os_str().is_empty()) {
+        sync_dir(ancestor)?;
+    }
+    Ok(())
+}
+
 /// Flush a directory's entries, so a rename or unlink in it is durable.
 pub(super) fn sync_dir(dir: &Path) -> Result<()> {
+    #[cfg(test)]
+    test_hooks::synced(dir);
     open_dir_for_sync(dir)
         .and_then(|handle| handle.sync_all())
         .with_context(|| format!("flushing directory {}", dir.display()))
@@ -323,7 +412,7 @@ fn open_dir_for_sync(dir: &Path) -> std::io::Result<std::fs::File> {
         .open(dir)
 }
 
-pub(super) fn sync_parent(path: &Path) -> Result<()> {
+pub(crate) fn sync_parent(path: &Path) -> Result<()> {
     match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => sync_dir(parent),
         _ => sync_dir(Path::new(".")),
@@ -331,7 +420,7 @@ pub(super) fn sync_parent(path: &Path) -> Result<()> {
 }
 
 /// Flush each distinct parent directory of `paths` once.
-pub(super) fn sync_parents<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<()> {
+pub(crate) fn sync_parents<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<()> {
     let mut seen = std::collections::BTreeSet::new();
     for path in paths {
         if seen.insert(path.parent().map(Path::to_path_buf)) {
@@ -355,3 +444,7 @@ pub(super) fn is_transaction_id(value: &str) -> bool {
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
+
+#[cfg(test)]
+#[path = "workflow_task_set_publish_test_hooks.rs"]
+pub(super) mod test_hooks;

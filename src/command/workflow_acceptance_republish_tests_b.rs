@@ -149,6 +149,7 @@ fn a_rolled_back_publish_restores_every_prior_file_and_leaves_no_debris() {
     let anchor = tempfile::tempdir().unwrap();
     let transaction = begin_publish(
         &anchor.path().join("pin.json"),
+        temp.path(),
         &[
             (existing.clone(), b"new".to_vec()),
             (created.clone(), b"fresh".to_vec()),
@@ -320,6 +321,7 @@ fn a_target_that_moved_since_verification_is_never_replaced() {
     let anchor = tempfile::tempdir().unwrap();
     let error = begin_publish(
         &anchor.path().join("pin.json"),
+        temp.path(),
         &[(target.clone(), b"ours".to_vec())],
         "test",
         &[(target.clone(), Some(content_digest(b"what we verified")))],
@@ -344,6 +346,7 @@ fn rollback_never_restores_over_a_target_another_writer_replaced() {
     let anchor = tempfile::tempdir().unwrap();
     let transaction = begin_publish(
         &anchor.path().join("pin.json"),
+        temp.path(),
         &[(target.clone(), b"ours".to_vec())],
         "test",
         &[],

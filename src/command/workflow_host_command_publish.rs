@@ -1,5 +1,12 @@
 //! Parent-only audit and publication of trusted child staging output.
 
+#[path = "workflow_host_command_publication_authority.rs"]
+mod authority;
+use authority::authorize_receipt;
+#[cfg(test)]
+pub(crate) use authority::authorize_receipt as authority_for_test;
+pub(crate) use authority::receipt_scopes;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
@@ -196,7 +203,9 @@ pub(crate) fn publish_audited(
     audited: AuditedPublication,
     destinations: &BTreeMap<String, PathBuf>,
     journal_pin: &Path,
+    tasks_root: &Path,
 ) -> Result<PublicationReceiptV1> {
+    let _chain_lock = super::workflow_task_set::ChainLock::acquire(journal_pin, tasks_root)?;
     audited.sentinels.verify()?;
     let expected = audited
         .entries
@@ -219,10 +228,14 @@ pub(crate) fn publish_audited(
         prior.insert(entry.relative_path.clone(), path_digest(destination)?);
         files.push((destination.clone(), entry.bytes.clone()));
     }
+    for (target, _) in &files {
+        authorize_receipt(journal_pin, tasks_root, target)?;
+    }
     // Reuse the freeze publisher's tested rollback behaviour. The child never
     // calls this; parent-only audit is complete before this point.
     super::workflow_task_set::publish_files_atomically(
         journal_pin,
+        tasks_root,
         &files,
         "restart the host command phase after inspecting publication state",
     )?;

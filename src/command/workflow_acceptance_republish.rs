@@ -256,6 +256,7 @@ fn publish_chain(
     }
     let transaction = begin_publish(
         &verified.pin_path,
+        tasks_root,
         &files,
         "workflow freeze-acceptance --reauthor",
         verified.prior(),
@@ -321,7 +322,10 @@ pub(crate) fn reauthor_command(
 /// set a crash interrupted is first settled to one whole version (Issue 271).
 /// A task set with no contract and no lock launches.
 pub(crate) fn refuse_unaccepted_launch(project_root: &Path, tasks_root: &Path) -> Result<()> {
-    recover_interrupted_publish(&acceptance_pin_path(project_root, tasks_root), tasks_root)?;
+    let (_publish_lock, _) =
+        super::lock_and_recover(&acceptance_pin_path(project_root, tasks_root), tasks_root)?;
+    #[cfg(test)]
+    super::publish::reader_test_step("launch-read");
     let path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let locked = tasks_root.join(ACCEPTANCE_LOCK_FILE).exists();
     if !path.exists() && !locked {

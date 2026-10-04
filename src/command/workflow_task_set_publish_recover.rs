@@ -9,11 +9,11 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 
 use super::journal::{
-    Journal, JournalPaths, PublishLock, is_transaction_id, recover_journal, remove_if_present,
-    rename, sync_parents,
+    Journal, JournalPaths, PublishLock, Recovered, crash_point, is_transaction_id, recover_journal,
+    remove_if_present, sync_parent,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,9 +61,30 @@ pub(crate) fn recover_interrupted_publish(
     pin_path: &Path,
     tasks_root: &Path,
 ) -> Result<RecoveryReport> {
+    let (_lock, report) = lock_and_recover(pin_path, tasks_root)?;
+    Ok(report)
+}
+
+/// Keep the same publish lock through the caller's complete read.
+pub(crate) fn lock_and_recover(
+    pin_path: &Path,
+    tasks_root: &Path,
+) -> Result<(PublishLock, RecoveryReport)> {
     let paths = JournalPaths::for_pin(pin_path);
-    let _lock = PublishLock::acquire(&paths)?;
-    recover_locked(&paths, &legacy_scopes(pin_path, tasks_root))
+    let lock = PublishLock::acquire(&paths)?;
+    let report = recover_locked(&paths, &publication_scopes(pin_path, tasks_root)?)?;
+    Ok((lock, report))
+}
+
+pub(super) fn publication_scopes(
+    pin_path: &Path,
+    tasks_root: &Path,
+) -> Result<Vec<(PathBuf, Option<String>)>> {
+    let mut scopes = legacy_scopes(pin_path, tasks_root);
+    scopes.extend(
+        super::super::super::workflow_host_command_publish::receipt_scopes(pin_path, tasks_root)?,
+    );
+    Ok(scopes)
 }
 
 /// The places a journal-less publish of this set left transaction files: the
@@ -80,21 +101,14 @@ fn legacy_scopes(pin_path: &Path, tasks_root: &Path) -> Vec<(PathBuf, Option<Str
     scopes
 }
 
-/// Recovery for a publisher about to write `targets`, already holding the
-/// publish lock: the journal, then legacy files beside exactly those targets.
+/// Recovery under the publish lock uses the complete trusted task-set scope,
+/// including files an earlier publisher wrote outside this caller's subset.
 pub(super) fn recover_before_publish(
     paths: &JournalPaths,
-    targets: &[PathBuf],
+    pin_path: &Path,
+    tasks_root: &Path,
 ) -> Result<RecoveryReport> {
-    let scopes = targets
-        .iter()
-        .filter_map(|target| {
-            let dir = target.parent()?.to_path_buf();
-            let name = target.file_name()?.to_string_lossy().into_owned();
-            Some((dir, Some(name)))
-        })
-        .collect::<Vec<_>>();
-    recover_locked(paths, &scopes)
+    recover_locked(paths, &publication_scopes(pin_path, tasks_root)?)
 }
 
 fn recover_locked(
@@ -102,7 +116,7 @@ fn recover_locked(
     scopes: &[(PathBuf, Option<String>)],
 ) -> Result<RecoveryReport> {
     let mut report = RecoveryReport::default();
-    if let Some(journal) = Journal::load(paths)? {
+    if let Some(journal) = Journal::load(paths, scopes)? {
         let recovered = recover_journal(&journal, paths).with_context(|| {
             format!(
                 "recovering the interrupted publish recorded in {}",
@@ -122,11 +136,24 @@ fn recover_locked(
     }
     // A crash while a journal state was being written leaves only its temp;
     // the journal it was replacing (if any) was authoritative and is settled.
-    remove_if_present(&paths.journal_temp())?;
-    report.events.extend(recover_legacy(scopes)?);
-    for event in &report.events {
-        record(paths, event);
+    let temp = paths.journal_temp();
+    match std::fs::read(&temp) {
+        Ok(bytes) => {
+            let event = RecoveryEvent {
+                transaction: archon_workflow::task_set_contract::content_digest(&bytes),
+                source: "journal_temp",
+                outcome: RecoveryOutcome::RolledBack,
+                files: vec![temp.clone()],
+            };
+            record(paths, &event)?;
+            remove_if_present(&temp)?;
+            sync_parent(&temp)?;
+            report.events.push(event);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).with_context(|| format!("reading {}", temp.display())),
     }
+    report.events.extend(recover_legacy(scopes)?);
     Ok(report)
 }
 
@@ -137,11 +164,9 @@ struct LegacyTransaction {
     backups: Vec<PathBuf>,
 }
 
-/// A binary without the journal staged and fsynced every file of a publish
-/// before its first rename, and backed each prior version up immediately
-/// before replacing it. So a transaction with any backup had finished
-/// staging: its staged files are whole and it is rolled forward. One with no
-/// backup had replaced nothing that existed: its staged files are discarded.
+/// Without a durable manifest neither a backup nor surviving staging proves
+/// the transaction's full membership, original absences, or new contents.
+/// Preserve every ambiguous legacy transaction as corruption, naming its files.
 fn recover_legacy(scopes: &[(PathBuf, Option<String>)]) -> Result<Vec<RecoveryEvent>> {
     let mut transactions = BTreeMap::<String, LegacyTransaction>::new();
     for (dir, only) in scopes {
@@ -168,36 +193,26 @@ fn recover_legacy(scopes: &[(PathBuf, Option<String>)]) -> Result<Vec<RecoveryEv
             }
         }
     }
-    let mut events = Vec::new();
-    for (transaction, found) in transactions {
-        let forward = !found.backups.is_empty();
-        let mut files = Vec::new();
-        for (staged, target) in &found.staged {
-            if forward {
-                rename(staged, target)?;
-                files.push(target.clone());
-            } else {
-                remove_if_present(staged)?;
-                files.push(staged.clone());
-            }
-        }
-        for backup in &found.backups {
-            remove_if_present(backup)?;
-        }
-        let touched = found.staged.iter().map(|(staged, _)| staged.as_path());
-        sync_parents(touched.chain(found.backups.iter().map(PathBuf::as_path)))?;
-        events.push(RecoveryEvent {
-            transaction,
-            source: "legacy",
-            outcome: if forward {
-                RecoveryOutcome::RolledForward
-            } else {
-                RecoveryOutcome::RolledBack
-            },
-            files,
-        });
+    if transactions.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(events)
+    let evidence = transactions
+        .into_iter()
+        .map(|(transaction, found)| {
+            let files = found
+                .staged
+                .iter()
+                .map(|(path, _)| path)
+                .chain(found.backups.iter())
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>();
+            format!("{transaction}: {}", files.join(", "))
+        })
+        .collect::<Vec<_>>();
+    Err(anyhow!(
+        "ambiguous legacy publication debris: {}; no durable manifest proves a complete old or new set; files kept for inspection",
+        evidence.join("; ")
+    ))
 }
 
 /// `.<target>.<32-hex transaction>.<new|old>` → (target, transaction, role).
@@ -209,10 +224,30 @@ fn parse_transaction_file(file_name: &str) -> Option<(&str, &str, &str)> {
         .then_some((target, transaction, role))
 }
 
-/// Log the recovery and append it to the durable recovery log. The set is
-/// already settled here, so a log that cannot be appended to is reported as
-/// an error in the trace rather than failing the caller.
-fn record(paths: &JournalPaths, event: &RecoveryEvent) {
+pub(super) fn record_journal(
+    paths: &JournalPaths,
+    journal: &Journal,
+    recovered: &Recovered,
+) -> Result<()> {
+    record(
+        paths,
+        &RecoveryEvent {
+            transaction: journal.transaction.clone(),
+            source: "journal",
+            outcome: if recovered.rolled_forward {
+                RecoveryOutcome::RolledForward
+            } else {
+                RecoveryOutcome::RolledBack
+            },
+            files: recovered.files.clone(),
+        },
+    )
+}
+
+/// A durable record precedes journal removal. Failure retains the decision so
+/// the next acquisition retries; a crash may produce duplicate events.
+fn record(paths: &JournalPaths, event: &RecoveryEvent) -> Result<()> {
+    super::journal::crash_point("before-recovery-log");
     let files = event
         .files
         .iter()
@@ -233,16 +268,30 @@ fn record(paths: &JournalPaths, event: &RecoveryEvent) {
         "outcome": event.outcome.as_str(),
         "files": files,
     });
-    let appended = std::fs::OpenOptions::new()
+    // A delimiter also keeps a retry's event readable after a torn append.
+    super::scope::validate_destination(
+        &paths.log,
+        &[(
+            paths
+                .log
+                .parent()
+                .ok_or_else(|| anyhow!("recovery log has no parent"))?
+                .to_path_buf(),
+            None,
+        )],
+    )?;
+    std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&paths.log)
-        .and_then(|mut log| writeln!(log, "{line}").and_then(|()| log.sync_all()));
-    if let Err(error) = appended {
-        tracing::error!(
-            log = %paths.log.display(),
-            %error,
-            "could not append the task-set publish recovery to its log"
-        );
-    }
+        .and_then(|mut log| writeln!(log, "\n{line}").and_then(|()| log.sync_all()))
+        .with_context(|| {
+            format!(
+                "recording recovery in {}; journal kept for retry",
+                paths.log.display()
+            )
+        })?;
+    sync_parent(&paths.log)?;
+    crash_point("after-recovery-log");
+    Ok(())
 }

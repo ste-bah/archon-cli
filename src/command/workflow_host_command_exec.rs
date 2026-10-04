@@ -460,11 +460,9 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             )?;
             let audited = audit_prepared_publication(&staging, &prepared, &command, sentinels)
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-            let receipt = publish_audited(audited, &destinations, &pin)
+            let receipt = publish_audited(audited, &destinations, &pin, &context.task_root)
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-            // Only now, past every refusal the parent can still make. The
-            // staged child cannot write here: a record appended before this
-            // point survives a publication the parent rejects.
+            // Parent-only recording follows every publication refusal.
             // Never fatal here. The publication is already committed to the
             // live tree; failing the call now would lose the receipt the script
             // needs while leaving the commit in place - the partial state this
