@@ -45,26 +45,39 @@ const WINDOWS_PROCESS_ENVIRONMENT: &[&str] = &[
     "PROGRAMFILES(X86)",
     "PROGRAMW6432",
     "PROGRAMDATA",
+    // A set module analysis cache moves where Windows PowerShell reads the
+    // cache that maps commands to modules. A child without it rebuilds that
+    // cache on every start: on a host with many modules installed, over 20
+    // seconds before the first command ran (Issue 273).
+    "PSModuleAnalysisCachePath",
 ];
 
-pub(crate) fn resolve(
-    profile: &EnvironmentProfileId,
-    context: &HostCommandResolutionContext,
-) -> BTreeMap<String, OsString> {
+fn copy(environment: &mut BTreeMap<String, OsString>, name: &str) {
+    if let Some(value) = std::env::var_os(name) {
+        environment.insert(name.to_string(), value);
+    }
+}
+
+/// The invoking process's own environment that every host command keeps,
+/// whatever its profile.
+pub(crate) fn process_environment() -> BTreeMap<String, OsString> {
     let mut environment = BTreeMap::new();
     let names = PROCESS_ENVIRONMENT.iter().copied();
     #[cfg(unix)]
     let names = names.chain(UNIX_PROCESS_ENVIRONMENT.iter().copied());
     #[cfg(windows)]
     let names = names.chain(WINDOWS_PROCESS_ENVIRONMENT.iter().copied());
-    let copy = |environment: &mut BTreeMap<_, _>, name: &str| {
-        if let Some(value) = std::env::var_os(name) {
-            environment.insert(name.to_string(), value);
-        }
-    };
     for name in names {
         copy(&mut environment, name);
     }
+    environment
+}
+
+pub(crate) fn resolve(
+    profile: &EnvironmentProfileId,
+    context: &HostCommandResolutionContext,
+) -> BTreeMap<String, OsString> {
+    let mut environment = process_environment();
     // None: the skeleton freeze, requirements trace (git only; its argv never
     // passes --falsify, so no verifier runs) and frozen-chain verification run
     // no project code, so they get the process essentials and nothing else.

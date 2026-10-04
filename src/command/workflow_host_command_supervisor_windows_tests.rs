@@ -35,17 +35,9 @@ fn command(pid_file: &Path, rest: &str, timeout_secs: u64) -> ResolvedHostComman
             script,
         ],
         cwd: std::env::temp_dir(),
-        environment: [
-            "PATH",
-            "SystemRoot",
-            "ComSpec",
-            "TEMP",
-            "TMP",
-            "USERPROFILE",
-        ]
-        .into_iter()
-        .filter_map(|name| std::env::var_os(name).map(|value| (name.to_string(), value)))
-        .collect(),
+        // What a real host command gets, so the fixture's PowerShell starts
+        // as one would (Issue 273).
+        environment: super::workflow_host_environment::process_environment(),
         stdin: None,
         timeout_secs,
         max_stdout_bytes: 1024 * 1024,
