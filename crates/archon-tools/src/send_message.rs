@@ -392,9 +392,11 @@ impl Tool for SendMessageTool {
     }
 
     fn description(&self) -> &str {
-        "Send a message to a running or stopped background agent. The message \
-         is delivered at the agent's next tool round boundary. If the agent is \
-         stopped, it is automatically resumed when supported. Use message_type=result to retrieve its status and full saved output without resuming it."
+        "Send a message to a running background agent. The message is \
+         delivered at the agent's next tool round boundary. A stopped agent is \
+         never resumed by message: the send is refused, so start a new agent \
+         instead. Use message_type=result to retrieve a stopped agent's status \
+         and full saved output."
     }
 
     fn input_schema(&self) -> serde_json::Value {
