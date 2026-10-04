@@ -68,6 +68,12 @@ impl WorkflowV2ResultStore {
             {
                 continue;
             }
+            // A FIFO, socket or device can never be read safely here, yet a
+            // reader could still take outcome bytes from it later: quarantine
+            // it into revoked/ unread.
+            plan.moves.extend(special_files_in(&dir, false)?);
+            plan.moves
+                .extend(special_files_in(&dir.join("superseded"), true)?);
             let stored = stored_outcomes_in(&dir)?;
             // One entry per branch: the task ids of all its stored outcomes.
             let mut branches: BTreeMap<String, (String, BTreeSet<String>)> = BTreeMap::new();
@@ -182,6 +188,27 @@ fn outcome_files_in(dir: &Path, archived: bool) -> WorkflowResult<Vec<PathBuf>> 
         if readable
             && (archived || path.extension().and_then(|value| value.to_str()) == Some("json"))
         {
+            files.push(path);
+        }
+    }
+    Ok(files)
+}
+
+/// Entries reuse could name but this scan cannot read without blocking: a
+/// FIFO, socket or device, or a link resolving to one.
+fn special_files_in(dir: &Path, archived: bool) -> WorkflowResult<Vec<PathBuf>> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) => return Err(WorkflowError::io(dir, err)),
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| WorkflowError::io(dir, err))?;
+        let path = entry.path();
+        let named = archived || path.extension().and_then(|value| value.to_str()) == Some("json");
+        let special = fs::metadata(&path).is_ok_and(|target| !target.is_file() && !target.is_dir());
+        if named && special {
             files.push(path);
         }
     }
