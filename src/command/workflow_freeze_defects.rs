@@ -103,6 +103,10 @@ mod round11_tests;
 mod round12_tests;
 
 #[cfg(test)]
+#[path = "workflow_freeze_round13_tests.rs"]
+mod round13_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

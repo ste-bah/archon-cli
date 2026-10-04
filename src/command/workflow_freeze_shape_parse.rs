@@ -5,7 +5,9 @@ use archon_workflow::defect::ValidationDefect;
 use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use std::fmt;
+use std::ops::Range;
 
 pub(super) fn parse(
     bytes: &[u8],
@@ -90,36 +92,73 @@ impl<'de> Visitor<'de> for Seed<'_> {
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
         let mut fields = Map::new();
+        // Per key: copies read so far, and the defects the latest copy added.
+        let mut copies: HashMap<String, (usize, Range<usize>)> = HashMap::new();
         while let Some(key) = map.next_key::<String>()? {
-            let shape = match self.shape {
-                Some(Shape::Object(object)) => object
-                    .fields
-                    .iter()
-                    .find(|field| field.name == key)
-                    .map(|field| &field.shape),
-                Some(Shape::Map(inner)) => Some(*inner),
-                _ => None,
+            let (shape, closed) = match self.shape {
+                Some(Shape::Object(object)) => (
+                    object
+                        .fields
+                        .iter()
+                        .find(|field| field.name == key)
+                        .map(|field| &field.shape),
+                    true,
+                ),
+                Some(Shape::Map(inner)) => (Some(*inner), false),
+                _ => (None, false),
             };
             let at = pointer(&self.at, &key);
+            let start = self.defects.len();
             let value = map.next_value_seed(Seed {
                 shape,
                 at: at.clone(),
                 defects: self.defects,
             })?;
-            if let Some(previous) = fields.insert(key, value)
-                && let Some(shape) = shape
-            {
-                // Invalid overwritten values still fail a streaming reader.
-                // Keep their leaf identities so removing either copy cannot
-                // reveal defects hidden by Value's last-key-wins behavior.
+            let added = start..self.defects.len();
+            let previous = fields.insert(key.clone(), value);
+            let (count, latest) = copies.entry(key).or_insert((0, 0..0));
+            *count += 1;
+            let earlier = std::mem::replace(latest, added);
+            let Some(previous) = previous else {
+                continue;
+            };
+            // The streaming reader reads every copy, so an overwritten copy
+            // keeps all of its defects. They get the copy's own identity:
+            // repairing one copy must not be hidden by an equal defect in
+            // another copy of the same field.
+            let walked = self.defects.len();
+            if let Some(shape) = shape {
                 shape.walk(Some(&previous), &at, self.defects);
-                if matches!(self.shape, Some(Shape::Object(_))) {
-                    let mut defect = shape_defect(&at, "is a duplicate field; keep one valid copy");
-                    defect.identity.location = "shape/duplicate".into();
-                    self.defects.push(defect);
-                }
+            }
+            let copy = *count - 1;
+            for index in earlier.chain(walked..self.defects.len()) {
+                overwritten(&mut self.defects[index], &at, copy);
+            }
+            // Closed structs refuse a repeated field, known or forbidden.
+            if closed && (shape.is_some() || denies_unknown(self.shape)) {
+                let mut defect = shape_defect(&at, "is a duplicate field; keep one valid copy");
+                defect.identity.location = "shape/duplicate".into();
+                self.defects.push(defect);
             }
         }
         Ok(Value::Object(fields))
     }
+}
+
+fn denies_unknown(shape: Option<&Shape>) -> bool {
+    matches!(shape, Some(Shape::Object(object)) if object.deny_unknown)
+}
+
+/// Mark a defect as belonging to copy `copy` of the duplicated field at `at`.
+/// The field's depth names which enclosing field was duplicated (it is a
+/// prefix of the subject), so nested duplicated copies stay distinct without
+/// putting submitted keys into the location.
+fn overwritten(defect: &mut ValidationDefect, at: &str, copy: usize) {
+    let depth = at.split('/').count();
+    let identity = &mut defect.identity;
+    identity.location = format!("shape/overwritten/{depth}/{copy}/{}", identity.location);
+    defect.message = format!(
+        "{} (in copy {copy} of duplicated field {at}; the reader checks every copy)",
+        defect.message
+    );
 }
