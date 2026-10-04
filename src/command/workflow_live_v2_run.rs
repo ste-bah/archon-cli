@@ -19,6 +19,12 @@ mod round6_terminal_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_round7_terminal_tests.rs"]
 mod round7_terminal_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_round8_terminal_tests.rs"]
+mod round8_terminal_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_terminal_test_support.rs"]
+pub(super) mod terminal_test_support;
 
 pub(crate) async fn run_generated_v2_workflow(
     cwd: &Path,
@@ -361,12 +367,7 @@ async fn execute_generated_v2_run(
     // Decomposed-PRD runs default to the Rust lifecycle. v3 script mode
     // (ARCHON_SCRIPT_LIFECYCLE=1) instead AUTHORS a workflow.js from the
     // task universe and executes it — composition as code, no reducer relay.
-    // A CONTINUED run MUST use the lifecycle it was created with (persisted in
-    // metadata): re-reading the env var here silently switches a v3 run to
-    // decomposed when the flag is absent, and the decomposed engine cannot
-    // reuse the v3 run's records — it re-does everything under a different
-    // engine. Persisted choice wins; the env var is only the fallback for a
-    // run that predates this field.
+    // Preserve the persisted engine/cache choice; only legacy runs read the environment.
     let script_lifecycle = load_generated_v2_metadata(store, &run.id)
         .ok()
         .flatten()

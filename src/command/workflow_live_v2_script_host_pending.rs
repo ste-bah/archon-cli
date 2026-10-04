@@ -53,11 +53,31 @@ impl WorkflowScriptHost {
         }
     }
 
+    /// A started record can survive a projection or UI error. Keep its
+    /// ownership until terminal cleanup closes it; an unreadable record also
+    /// retains ownership so a storage error cannot silently orphan work.
+    pub(super) fn forget_unwritten_pending_call(&self, id: &str) {
+        if self
+            .runner
+            .v2_store
+            .load_call_record(id)
+            .is_ok_and(|record| {
+                record.is_none_or(|record| record.status != WorkflowV2Status::Running)
+            })
+        {
+            self.forget_pending_call(id);
+        }
+    }
+
     /// Round 7 (#285): never fails. The terminal stop happened first, so a
     /// later operator edit cannot turn it into a control outcome; a record
     /// that cannot be saved is logged as evidence and the stop still ends
     /// the run.
     pub(super) async fn interrupt_terminal_calls(&self) {
+        #[cfg(test)]
+        super::super::workflow_live_v2_run::terminal_test_support::unwind(
+            self.runner.workflow_store.run_dir(&self.runner.run_id),
+        );
         let pending = match self.runner.pending_calls.lock() {
             Ok(calls) => calls.values().cloned().collect::<Vec<_>>(),
             Err(poisoned) => poisoned.into_inner().values().cloned().collect(),

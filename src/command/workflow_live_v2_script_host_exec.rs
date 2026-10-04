@@ -350,7 +350,7 @@ impl WorkflowScriptHost {
             .persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
             .await
         {
-            self.forget_pending_call(&execution.call.id);
+            self.forget_unwritten_pending_call(&execution.call.id);
             return Err(err);
         }
         let call_id = execution.call.id.clone();

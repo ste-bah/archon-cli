@@ -2,44 +2,7 @@
 //! the stop into a control outcome and never loses a pending call's record.
 use super::*;
 
-struct EditingSlowReply {
-    store: WorkflowStore,
-    run_id: String,
-    edit: std::sync::Mutex<Option<LifecycleAction>>,
-}
-#[async_trait::async_trait]
-impl WorkflowLlmClient for EditingSlowReply {
-    async fn send_message(
-        &self,
-        _: Vec<serde_json::Value>,
-        _: Vec<serde_json::Value>,
-        _: Vec<serde_json::Value>,
-        _: &str,
-    ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
-        // The sibling gate's terminal stop lands first; the edit follows
-        // while this call is still pending.
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        let edit = self.edit.lock().ok().and_then(|mut slot| slot.take());
-        if let Some(edit) = edit {
-            LifecycleController::new(self.store.clone()).apply(&self.run_id, edit)?;
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let mut result = WorkflowV2Result::accepted("slow sibling finished");
-        result.evidence.push(WorkflowV2Evidence::new(
-            WorkflowV2EvidenceKind::Inspection,
-            "read the requested area",
-        ));
-        Ok(archon_workflow::WorkflowAgentOutcome {
-            content: serde_json::to_string(&result)?,
-            tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
-            stop_reason: None,
-        })
-    }
-}
-
-struct NoHostCommands;
+pub(super) struct NoHostCommands;
 #[async_trait::async_trait]
 impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for NoHostCommands {
     fn call_identity(
@@ -78,6 +41,16 @@ async fn edit_during_unwind_in(edit: LifecycleAction, expected: RunStatus, fixed
         .expect("run");
     run.status = RunStatus::Running;
     store.save_state(&run).expect("state");
+    if fixed {
+        super::terminal_test_support::seed_fixed(&store, &run.id, temp.path());
+        assert!(
+            store
+                .run_dir(&run.id)
+                .join(crate::command::workflow_decompose_state::FIXED_STATE_PATH)
+                .exists(),
+            "fixed terminal fixture must contain decomposition/state.json"
+        );
+    }
     let script = r#"async function workflow(w) {
         await Promise.allSettled([
             w.agent("slow", {role: "analysis", task: "Inspect the area."}),
@@ -86,12 +59,31 @@ async fn edit_during_unwind_in(edit: LifecycleAction, expected: RunStatus, fixed
         await new Promise(() => {});
     }"#;
     let plan = WorkflowScriptPlan::from_template(run.spec.clone(), script, Vec::new());
-    save_generated_v2_metadata(&store, &run.id, &plan, false).expect("metadata");
-    let llm = Arc::new(EditingSlowReply {
-        store: store.clone(),
-        run_id: run.id.clone(),
-        edit: std::sync::Mutex::new(Some(edit)),
-    });
+    if fixed {
+        super::terminal_test_support::save_fixed_metadata(&store, &run.id, &plan);
+    } else {
+        save_generated_v2_metadata(&store, &run.id, &plan, false).expect("metadata");
+    }
+    let edited = Arc::new(std::sync::Mutex::new(None));
+    let observed = edited.clone();
+    let edit_store = store.clone();
+    let edit_id = run.id.clone();
+    let initial_generation = run.generation;
+    super::terminal_test_support::on_unwind(
+        store.run_dir(&run.id),
+        Box::new(move || {
+            LifecycleController::new(edit_store.clone())
+                .apply(&edit_id, edit)
+                .expect("operator edit");
+            let state = edit_store.load_state(&edit_id).unwrap();
+            assert!(
+                state.generation > initial_generation,
+                "operator generation changed during unwind"
+            );
+            *observed.lock().unwrap() = Some((state.generation, state.status));
+        }),
+    );
+    let llm = Arc::new(super::terminal_test_support::PendingReply);
     let (ui, _receiver) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let ten = std::time::Duration::from_secs(10);
     let report = if fixed {
@@ -126,8 +118,26 @@ async fn edit_during_unwind_in(edit: LifecycleAction, expected: RunStatus, fixed
         assert!(result.is_ok(), "{result:?}");
         format!("{result:?}")
     };
+    let observed = edited
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("operator edit must land during terminal unwind");
+    assert!(observed.0 > initial_generation);
+    assert_eq!(
+        observed.1,
+        if expected == RunStatus::Paused {
+            RunStatus::Paused
+        } else {
+            RunStatus::Running
+        }
+    );
     assert!(!report.contains("cancelled"), "{report}");
     let state = store.load_state(&run.id).expect("durable status");
+    assert_eq!(
+        state.generation, observed.0,
+        "operator edit remains durable"
+    );
     assert_eq!(state.status, expected, "{report}");
     if expected == RunStatus::NeedsReview {
         assert!(store.run_dir(&run.id).join("v2/finalization.json").exists());
@@ -139,6 +149,35 @@ async fn edit_during_unwind_in(edit: LifecycleAction, expected: RunStatus, fixed
         .expect("pending call recorded");
     assert_eq!(record.status, WorkflowV2Status::NeedsReview);
     assert_eq!(record.result.data["interrupted"], "terminal_host_stop");
+    if fixed {
+        let projection: archon_workflow::FixedDecompositionStateV1 = serde_json::from_slice(
+            &std::fs::read(
+                store
+                    .run_dir(&run.id)
+                    .join(crate::command::workflow_decompose_state::FIXED_STATE_PATH),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(projection.attempts["slow"].interrupted);
+        assert_eq!(
+            projection.dispositions["slow"],
+            archon_workflow::SubjectDisposition::Interrupted
+        );
+        let log = std::fs::read_to_string(&projection.log_path).unwrap();
+        assert!(log.contains("disposition=interrupted"), "{log}");
+        if expected == RunStatus::NeedsReview {
+            let finalization: archon_workflow::FinalizationRecordV1 = serde_json::from_slice(
+                &std::fs::read(store.run_dir(&run.id).join("v2/finalization.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                finalization.run_kind,
+                archon_workflow::WorkflowRunKind::FixedDecompositionV1
+            );
+            assert!(finalization.terminal_event_committed);
+        }
+    }
     assert!(
         std::fs::read_dir(v2.root().join("inflight"))
             .map(|mut entries| entries.next().is_none())
@@ -172,4 +211,14 @@ async fn round7_force_accept_during_terminal_unwind_ends_needs_review() {
 #[tokio::test]
 async fn round7_pause_during_terminal_unwind_keeps_pause_and_records_call() {
     edit_during_unwind(|| LifecycleAction::Pause, RunStatus::Paused).await;
+}
+
+#[tokio::test]
+async fn round8_fixed_terminal_fixture_is_realistic() {
+    edit_during_unwind_in(
+        LifecycleAction::RestartStage("call-1".into()),
+        RunStatus::NeedsReview,
+        true,
+    )
+    .await;
 }
