@@ -34,12 +34,18 @@ struct RevocationPlan {
 impl WorkflowV2ResultStore {
     /// Revoke every stored outcome of `(call_id, item_id)`, current and
     /// superseded. `true` when anything was revoked.
+    /// Refuse a branch store that is not made of real directories (see
+    /// [`validate_branch_tree`]); restart calls it before any mutation.
+    pub fn validate_branch_store(&self) -> WorkflowResult<()> {
+        validate_branch_tree(&self.root.join("branches"))
+    }
+
     pub fn revoke_branch_outcome(&self, call_id: &str, item_id: &str) -> WorkflowResult<bool> {
         validate_branch_tree(&self.root.join("branches"))?;
         let dir = self.root.join("branches").join(sanitize_call_id(call_id));
         let mut files = branch_files_in(&dir, item_id, &stored_outcomes_in(&dir)?)?;
         let mut seen = std::collections::BTreeSet::new();
-        files.retain(|path| seen.insert(path.clone()));
+        files.retain(|path| seen.insert(file_identity(path)));
         self.move_revoked(&files)?;
         Ok(!files.is_empty())
     }
@@ -118,7 +124,7 @@ impl WorkflowV2ResultStore {
     ) -> WorkflowResult<Vec<WorkflowV2DeletedBranchOutcome>> {
         // A quarantined current slot can also be a branch's own file: move once.
         let mut seen = std::collections::BTreeSet::new();
-        plan.moves.retain(|path| seen.insert(path.clone()));
+        plan.moves.retain(|path| seen.insert(file_identity(path)));
         self.move_revoked(&plan.moves)?;
         Ok(plan.revoked)
     }
@@ -213,7 +219,11 @@ fn validate_branch_tree(root: &Path) -> WorkflowResult<()> {
                 path,
                 std::io::Error::other("branch store directory is a link, not a directory"),
             )),
-            Ok(meta) => Ok(meta.is_dir()),
+            Ok(meta) if meta.is_dir() => Ok(true),
+            Ok(_) => Err(WorkflowError::io(
+                path,
+                std::io::Error::other("branch store path is not a directory"),
+            )),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(err) => Err(WorkflowError::io(path, err)),
         }
@@ -222,13 +232,36 @@ fn validate_branch_tree(root: &Path) -> WorkflowResult<()> {
         return Ok(());
     }
     for entry in fs::read_dir(root).map_err(|err| WorkflowError::io(root, err))? {
-        let call = entry.map_err(|err| WorkflowError::io(root, err))?.path();
-        if real_dir_or_absent(&call)? {
+        let entry = entry.map_err(|err| WorkflowError::io(root, err))?;
+        let call = entry.path();
+        let kind = entry
+            .file_type()
+            .map_err(|err| WorkflowError::io(&call, err))?;
+        if kind.is_symlink() {
+            real_dir_or_absent(&call)?;
+        } else if kind.is_dir() {
             real_dir_or_absent(&call.join("superseded"))?;
             real_dir_or_absent(&call.join("revoked"))?;
         }
     }
     Ok(())
+}
+
+/// One identity per file object, so two spellings of one file (a
+/// case-insensitive filesystem) are moved once: device and inode on Unix,
+/// the canonical path elsewhere, the path itself if neither resolves.
+fn file_identity(path: &Path) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let Ok(meta) = fs::symlink_metadata(path) {
+            return format!("{}:{}", meta.dev(), meta.ino());
+        }
+    }
+    fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Entries reuse could name but this scan cannot read without blocking: a
