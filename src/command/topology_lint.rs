@@ -58,7 +58,7 @@ pub(crate) use candidate::evaluate_task_file_candidate;
 pub(crate) use fences::unwrap_outer_fence;
 pub(crate) use fidelity::{audit_task_file_candidate, evaluate_lint_with_fidelity};
 pub(crate) use fidelity_waivers::{record_waivers, recorded_waivers, waivers_from_flags};
-pub(crate) use owner_coverage::skeleton_findings as skeleton_owner_findings;
+pub(crate) use owner_coverage::skeleton_defects as skeleton_owner_defects;
 
 /// Which graph to lint.
 #[derive(Debug, Clone, PartialEq, Eq)]

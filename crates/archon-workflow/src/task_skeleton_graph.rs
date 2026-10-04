@@ -4,9 +4,10 @@
 //! depends_on, or two tasks each blocking the other -- is the authoring
 //! mistake. Folding it into the graph manufactures a cycle that names a graph
 //! shape instead of the mistake, so, as the runtime's
-//! `reconcile_blocks_into_dependencies` intends, contradictions are named
-//! alone: once each, and without the cycles they manufacture. Without one,
-//! every task on a cycle is one stable defect whose message names the cycle.
+//! `reconcile_blocks_into_dependencies` intends, a contradiction is named
+//! alone for its pair: once, and without the cycle its own edges manufacture.
+//! Every other cycle in the graph is still reported: each task on one is a
+//! stable defect whose message names the cycle.
 use crate::defect::DeterministicDefect;
 use crate::task_skeleton::{TaskSetFinding, TaskSkeleton};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -19,15 +20,15 @@ pub(super) fn graph_shape_findings(skeleton: &TaskSkeleton) -> Vec<TaskSetFindin
         .iter()
         .map(|task| (task.task_id.as_str(), task))
         .collect();
-    let contradictions = contradiction_findings(skeleton, &tasks);
-    if !contradictions.is_empty() {
-        return contradictions;
-    }
+    let (mut findings, pairs) = contradiction_findings(skeleton, &tasks);
+    let contradictory = |a: &str, b: &str| pairs.contains(&ordered(a, b));
     let mut graph: BTreeMap<&str, BTreeSet<&str>> =
         tasks.keys().map(|id| (*id, BTreeSet::new())).collect();
     for task in &skeleton.tasks {
         for dependency in &task.depends_on {
-            if tasks.contains_key(dependency.task_id.as_str()) {
+            if tasks.contains_key(dependency.task_id.as_str())
+                && !contradictory(&task.task_id, &dependency.task_id)
+            {
                 graph
                     .entry(&task.task_id)
                     .or_default()
@@ -35,12 +36,11 @@ pub(super) fn graph_shape_findings(skeleton: &TaskSkeleton) -> Vec<TaskSetFindin
             }
         }
         for blocked in &task.blocks {
-            if tasks.contains_key(blocked.as_str()) {
+            if tasks.contains_key(blocked.as_str()) && !contradictory(&task.task_id, blocked) {
                 graph.entry(blocked).or_default().insert(&task.task_id);
             }
         }
     }
-    let mut findings = Vec::new();
     for start in graph.keys() {
         let Some(path) = cycle_through(&graph, start) else {
             continue;
@@ -73,11 +73,17 @@ pub(super) fn graph_shape_findings(skeleton: &TaskSkeleton) -> Vec<TaskSetFindin
     findings
 }
 
-fn contradiction_findings(
-    skeleton: &TaskSkeleton,
+fn ordered<'a>(a: &'a str, b: &'a str) -> (&'a str, &'a str) {
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+/// The contradictions, and the unordered pairs whose edges they involve.
+fn contradiction_findings<'a>(
+    skeleton: &'a TaskSkeleton,
     tasks: &BTreeMap<&str, &crate::task_skeleton::FrozenTask>,
-) -> Vec<TaskSetFinding> {
+) -> (Vec<TaskSetFinding>, BTreeSet<(&'a str, &'a str)>) {
     let mut findings = Vec::new();
+    let mut pairs = BTreeSet::new();
     for (slot, task) in skeleton.tasks.iter().enumerate() {
         for (index, blocked) in task.blocks.iter().enumerate() {
             let Some(other) = tasks.get(blocked.as_str()) else {
@@ -113,6 +119,7 @@ fn contradiction_findings(
                 None
             };
             if let Some((code, message)) = defect {
+                pairs.insert(ordered(id, blocked));
                 findings.push(TaskSetFinding {
                     identity: DeterministicDefect::new(
                         code,
@@ -125,7 +132,7 @@ fn contradiction_findings(
             }
         }
     }
-    findings
+    (findings, pairs)
 }
 
 /// The shortest cycle from `start` back to itself, as task ids beginning and

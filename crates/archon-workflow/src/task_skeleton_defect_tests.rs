@@ -246,3 +246,22 @@ fn dependency_declaration_identities_use_the_callers_subject() {
         "{findings:?}"
     );
 }
+
+/// Issue 261 round 8: a contradiction is named alone only for its own pair;
+/// a cycle elsewhere in the graph is still reported beside it.
+#[test]
+fn a_contradiction_does_not_hide_an_independent_cycle() {
+    let found = graph_codes(vec![
+        graph_task(1, &[2], &[2]),
+        graph_task(2, &[], &[]),
+        graph_task(3, &[4], &[]),
+        graph_task(4, &[3], &[]),
+    ]);
+    let codes: Vec<_> = found.iter().map(|(code, _)| code.as_str()).collect();
+    assert_eq!(
+        codes,
+        ["contradictory_edge", "dependency_cycle", "dependency_cycle"],
+        "{found:?}"
+    );
+    assert!(found[1].1.contains("TASK-X-003") && found[1].1.contains("TASK-X-004"));
+}

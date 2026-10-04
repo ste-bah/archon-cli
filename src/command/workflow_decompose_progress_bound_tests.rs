@@ -111,6 +111,24 @@ fn an_acceptance_entry_the_judge_rejects_after_every_rewrite_pauses() {
     assert_eq!(evidence["reason"], "no_progress", "{evidence}");
 }
 
+/// The round-8 measure and observe-fallback suite runs under cargo.
+#[test]
+fn round8_regression_suite_passes() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/command/workflow_decompose_round8_test.cjs"
+        ))
+        .output()
+        .expect("node must be available");
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 /// The round-3 regression suite runs under cargo like the other node suites.
 #[test]
 fn round3_regression_suite_passes() {

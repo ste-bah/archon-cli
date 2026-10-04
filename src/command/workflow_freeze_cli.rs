@@ -176,6 +176,18 @@ async fn stage_acceptance(
                 );
             }
         };
+    let gate = (
+        "freeze-acceptance",
+        crate::command::workflow_gate::GateId::FreezeAcceptance,
+        "acceptance",
+    );
+    let lists = ["acceptance", "supplementary"];
+    type Entry = archon_workflow::task_set_contract::AcceptanceCriterion;
+    if let Some(refused) =
+        defects::refuse_element_shapes::<Entry>(cwd, staged, gate, &candidate, &lists)
+    {
+        return refused;
+    }
     if let Some((code, reason)) =
         candidate_refusal::<archon_workflow::task_set_contract::AcceptanceContract>(&candidate)
     {
@@ -239,6 +251,17 @@ fn stage_skeleton(
     let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
     let tasks_root = absolute(cwd, tasks);
     let prd_path = absolute(cwd, prd);
+    let gate = (
+        "freeze-skeleton",
+        crate::command::workflow_gate::GateId::FreezeSkeleton,
+        "skeleton",
+    );
+    type Task = archon_workflow::task_skeleton::FrozenTask;
+    if let Some(refused) =
+        defects::refuse_element_shapes::<Task>(cwd, staged, gate, &candidate, &["tasks"])
+    {
+        return refused;
+    }
     if let Some((code, reason)) =
         candidate_refusal::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
     {

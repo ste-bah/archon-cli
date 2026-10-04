@@ -67,9 +67,86 @@ pub(super) fn refuse_candidate_error(
     )
 }
 
+/// Every element of `lists` that does not read as `E`, each its own shape
+/// defect (Issue 261): serde stops at the first error of a whole document, so
+/// four tasks each missing a field would otherwise surface one per attempt.
+pub(crate) fn element_shape_defects<E: serde::de::DeserializeOwned>(
+    candidate: &[u8],
+    lists: &[&str],
+) -> Vec<archon_workflow::defect::ValidationDefect> {
+    let document = candidate_document(candidate);
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&document) else {
+        return Vec::new();
+    };
+    let mut defects = Vec::new();
+    for list in lists {
+        let items = value.get(*list).and_then(serde_json::Value::as_array);
+        for (index, item) in items.into_iter().flatten().enumerate() {
+            if let Err(error) = serde_json::from_value::<E>(item.clone()) {
+                let slot = format!("{list}/{index}");
+                let message = format!("{slot} does not match the required shape ({error})");
+                defects.push(archon_workflow::defect::ValidationDefect::new(
+                    "invalid_candidate_shape",
+                    &slot,
+                    "shape",
+                    message,
+                ));
+            }
+        }
+    }
+    defects
+}
+
+/// Refuses the candidate with every element shape defect, or `None` when
+/// every element reads as `E`.
+pub(super) fn refuse_element_shapes<E: serde::de::DeserializeOwned>(
+    cwd: &Path,
+    staged: StagedArgs<'_>,
+    (command_id, gate_id, subject): (&str, crate::command::workflow_gate::GateId, &str),
+    candidate: &[u8],
+    lists: &[&str],
+) -> Option<Result<()>> {
+    let defects = element_shape_defects::<E>(candidate, lists);
+    if defects.is_empty() {
+        return None;
+    }
+    let error = anyhow::Error::new(CandidateDefects(defects));
+    Some(refuse_candidate_error(
+        cwd, staged, command_id, gate_id, subject, &error,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Issue 261 round 8: four tasks each missing `file_name` are four shape
+    /// defects at once, not one serde error per attempt.
+    #[test]
+    fn workflow_host_command_every_misshapen_task_is_its_own_shape_defect() {
+        let task = |n: usize, named: bool| {
+            let mut task = serde_json::json!({"task_id": format!("TASK-X-{n:03}"), "depends_on": [],
+                "blocks": [], "implements": [], "deliverable_contracts": []});
+            if named {
+                task["file_name"] = serde_json::json!(format!("TASK-X-{n:03}.md"));
+            }
+            task
+        };
+        for fixed in 0..=4 {
+            let tasks: Vec<_> = (0..4).map(|n| task(n, n < fixed)).collect();
+            let candidate =
+                serde_json::json!({"schema_version": 1, "acceptance_digest": "d", "tasks": tasks});
+            let defects = element_shape_defects::<archon_workflow::task_skeleton::FrozenTask>(
+                &serde_json::to_vec(&candidate).expect("json"),
+                &["tasks"],
+            );
+            assert_eq!(defects.len(), 4 - fixed, "{defects:?}");
+            for defect in &defects {
+                assert_eq!(defect.identity.code, "invalid_candidate_shape");
+                assert!(defect.message.contains("file_name"), "{}", defect.message);
+            }
+        }
+    }
 
     // Guard for the new wire contract: the validator completeness regression
     // and author-loop 70->0 regression each fail independently on the old code.

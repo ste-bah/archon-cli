@@ -155,11 +155,28 @@ fn finding_text(path: &str, tree: &RepositoryTree, is_dir: bool) -> String {
 
 /// The skeleton gate's findings: each PRD-named repository path no task's
 /// deliverable contracts own. Empty for a task set without a record.
+const OWNER_CODE: &str = "unowned_repository_path";
+
+#[cfg(test)]
 pub(crate) fn skeleton_findings(
     tasks_root: &Path,
     prd: &str,
     skeleton: &TaskSkeleton,
 ) -> Result<Vec<String>> {
+    Ok(skeleton_defects(tasks_root, prd, skeleton)?
+        .into_iter()
+        .map(|defect| defect.message)
+        .collect())
+}
+
+/// One deterministic defect per PRD-named repository path no task owns. The
+/// path comes from the PRD and the recorded tree, never from the author, so
+/// it is a stable identity (Issue 261).
+pub(crate) fn skeleton_defects(
+    tasks_root: &Path,
+    prd: &str,
+    skeleton: &TaskSkeleton,
+) -> Result<Vec<archon_workflow::defect::ValidationDefect>> {
     let Some(record) = read_repository_record(tasks_root)? else {
         return Ok(Vec::new());
     };
@@ -173,7 +190,8 @@ pub(crate) fn skeleton_findings(
         .into_iter()
         .map(|path| {
             let is_dir = tree.is_dir_at_base(&path);
-            finding_text(&path, &tree, is_dir)
+            let text = finding_text(&path, &tree, is_dir);
+            archon_workflow::defect::ValidationDefect::new(OWNER_CODE, &path, "owner", text)
         })
         .collect())
 }
@@ -207,6 +225,8 @@ pub(crate) fn set_findings(root: &Path) -> Result<Vec<GateFinding>> {
             .into_iter()
             .map(|path| {
                 let is_dir = tree.is_dir_at_base(&path);
+                let identity =
+                    archon_workflow::defect::DeterministicDefect::new(OWNER_CODE, &path, "owner");
                 GateFinding::new(
                     GateId::WorkflowLintTaskSet,
                     finding_text(&path, &tree, is_dir),
@@ -214,6 +234,7 @@ pub(crate) fn set_findings(root: &Path) -> Result<Vec<GateFinding>> {
                     Some(source.clone()),
                     archon_workflow::RemediationScope::Skeleton,
                 )
+                .with_defect(identity)
             })
             .collect(),
     )

@@ -217,14 +217,12 @@ fn observe_falls_back_to_the_last_committed_artifact_when_the_loop_stalls() {
     );
 }
 
-/// A stalled loop must keep the best artifact, not the most recent one.
-///
-/// Attempts do not improve monotonically. Live run wf-6efe3de7 produced
-/// findings 2, 1, 2, 1, 1 and then a malformed candidate, so keeping the latest
-/// commit froze a vacuous acceptance floor that two earlier attempts had
-/// already fixed — the repair loop found better artifacts and discarded them.
+/// A stalled observe loop returns the LATEST committed artifact (Issue 261
+/// round 8). Every publication replaces the live tree, so an earlier outcome
+/// with fewer findings would hand on a receipt and subjects for a skeleton
+/// the tree no longer holds.
 #[test]
-fn a_stalled_loop_keeps_the_best_committed_artifact_not_the_latest() {
+fn a_stalled_observe_loop_returns_the_latest_committed_artifact() {
     let driver = r#"
 globalThis.args = { gateMode: "observe" };
 let call = 0;
@@ -236,7 +234,7 @@ const w = {
     call += 1;
     return { status: "accepted", stopReason: "end_turn", content: "{}" };
   },
-  // Two findings, then one, then two: the middle attempt is the best artifact.
+  // Two findings, then one, then two: the live tree holds the last one.
   hostCommand: async () => ({
     publicationReceipt: { id: "commit-" + call },
     postcondition: { satisfied: true },
@@ -257,8 +255,8 @@ authorCandidate(w, policy).then(
 "#;
     assert_eq!(
         run_js(driver),
-        r#"{"kept":"commit-2"}"#,
-        "the phase must freeze the artifact with the fewest findings, not the last one authored"
+        r#"{"kept":"commit-4"}"#,
+        "the phase must return the outcome that describes the live tree"
     );
 }
 

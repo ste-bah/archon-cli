@@ -225,16 +225,17 @@ pub(super) fn skeleton_findings(
     // Issue-55: every repository file the PRD names must have an owning
     // task; the skeleton author assigns it on the retry this finding drives.
     findings.extend(
-        crate::command::topology_lint::skeleton_owner_findings(tasks_root, prd_text, skeleton)?
+        crate::command::topology_lint::skeleton_owner_defects(tasks_root, prd_text, skeleton)?
             .into_iter()
-            .map(|text| {
+            .map(|defect| {
                 GateFinding::new(
                     GateId::FreezeSkeleton,
-                    text,
+                    defect.message,
                     "deliverable_contracts",
                     Some(skeleton_path.clone()),
                     archon_workflow::RemediationScope::Skeleton,
                 )
+                .with_defect(defect.identity)
             }),
     );
     Ok(findings)

@@ -277,8 +277,7 @@ async function authorCandidate(w, policy) {
   // Seeded feedback is attempt 0 of the history: every later prompt in this
   // phase keeps showing the finding the phase was opened to repair.
   const history = feedback.length > 0 ? [{ attempt: 0, findings: feedback.slice() }] : [];
-  let bestCommitted = null;
-  let bestFindings = Infinity;
+  let lastCommitted = null;
   let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
   let lastFindings = feedback.slice();
@@ -288,9 +287,9 @@ async function authorCandidate(w, policy) {
     const stall = stallReason(progress);
     if (stall) {
       // Observe never blocks on the artifact's quality: a loop that stopped
-      // improving falls back to the best artifact it saw. An outage says
+      // improving returns the artifact the tree holds now. An outage says
       // nothing about the artifact, so it pauses in either mode.
-      if (stall !== "operational_no_progress" && args.gateMode === "observe" && bestCommitted) return bestCommitted;
+      if (stall !== "operational_no_progress" && args.gateMode === "observe" && lastCommitted) return lastCommitted;
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
     }
     call += 1;
@@ -346,15 +345,12 @@ async function authorCandidate(w, policy) {
         .filter(finding => policy.retryScopes.has(finding.remediation_scope));
       authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt));
     }
-    // A committed artifact is the best one so far, not the finished one:
-    // repairable findings are still fed back below in either mode. Best, not
-    // latest -- attempts do not improve monotonically (a live run went 2, 1,
-    // 2, 1, 1 findings), so observe's fallback is the committed artifact with
-    // the fewest findings; ties keep the earlier one.
-    if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true && routed.all.length < bestFindings) {
-      bestCommitted = outcome;
-      bestFindings = routed.all.length;
-    }
+    // A committed artifact is not the finished one: repairable findings are
+    // still fed back below in either mode. Every publication replaces the
+    // live tree, so observe's fallback is the LATEST committed outcome: only
+    // its receipt and subjects describe what the tree now holds (an earlier
+    // outcome with fewer findings would name a skeleton that is gone).
+    if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true) lastCommitted = outcome;
     if (routed.fatal.length > 0) {
       throw new Error(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
     }

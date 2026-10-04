@@ -3,12 +3,13 @@
 // here is hoisted into the same scope as `workflow`.
 //
 // A loop is limited by attempts that make NO progress, never by its total.
-// An attempt is measured, lexicographically, as (tier, first failing
-// deterministic stage, distinct deterministic defects at that stage), and it
-// makes progress only when that measure beats every earlier attempt: a higher
-// tier, a later stage (fixing a stage lets the next one run, and it may
-// report more defects than the last did), or fewer defects at the same
-// stage. Deterministic validators own the identities and stages; their
+// An attempt is measured as (tier, first failing deterministic stage,
+// distinct deterministic defects across ALL stages), and it makes progress
+// only when that measure beats every earlier attempt: a higher tier, a later
+// first failing stage (fixing a stage lets the next one run, and it may
+// report more defects than the last did), or, at the same first failing
+// stage, fewer defects in total -- a repair at a later stage while an earlier
+// defect remains is a real, independent repair. Deterministic validators own the identities and stages; their
 // diagnostics and submitted values cannot reset a window. The judge's
 // free-text findings are not measured at all: they neither credit nor block.
 // A stall PAUSES the run and resume opens a fresh window while preserving the
@@ -96,8 +97,7 @@ function attemptMeasure(findings) {
   const tier = findingTier(findings);
   const deterministic = findings.filter(isDeterministic);
   const stage = deterministic.reduce((first, finding) => Math.min(first, stageOf(finding)), PASSED_STAGE);
-  const keys = deterministic.filter((finding) => stageOf(finding) === stage).map(findingKey);
-  return { tier, stage, count: new Set(keys).size };
+  return { tier, stage, count: new Set(deterministic.map(findingKey)).size };
 }
 
 function isBetter(measure, best) {
