@@ -43,7 +43,9 @@ fn status_label(kind: &WorkflowEventKind) -> &'static str {
         WorkflowEventKind::Cancelled => "cancelled",
         WorkflowEventKind::LearningRecorded => "learning",
         WorkflowEventKind::BinaryRevisionDrift => "drift",
-        WorkflowEventKind::StaleOwnerRecovered => "recovered",
+        WorkflowEventKind::StaleOwnerRecovered | WorkflowEventKind::AcceptanceRecordQuarantined => {
+            "recovered"
+        }
         WorkflowEventKind::Unknown => "unknown",
         _ => "write_coordination",
     }

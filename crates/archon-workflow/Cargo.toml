@@ -70,6 +70,10 @@ uuid.workspace = true
 # by waiting on the job. Same wrapper archon-core and archon-tools already use.
 [target.'cfg(windows)'.dependencies]
 process-wrap = { workspace = true }
+# Issue 262: a durable rename (MoveFileExW with MOVEFILE_WRITE_THROUGH) and a
+# directory flush, which std does not offer. The version archon-session and
+# fd-lock already pull in, so no new crate enters the lock file.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 # The workflow-live JSON fixture corpus. `include_str!` resolves relative to the

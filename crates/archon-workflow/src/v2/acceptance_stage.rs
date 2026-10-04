@@ -302,9 +302,12 @@ pub fn attempt_file_name(attempt: u32) -> String {
 }
 
 /// The attempt number the next record of `round` takes: one past the highest
-/// already on disk. Records are never overwritten.
+/// already on disk, a quarantined one included. Records are never
+/// overwritten and a number is never reused.
 pub fn next_attempt(run_dir: &Path, round: u32) -> u32 {
-    highest_attempt(&round_dir(run_dir, round)).map_or(1, |attempt| attempt + 1)
+    let dir = round_dir(run_dir, round);
+    (highest_attempt(&dir).max(progress::highest_quarantined_attempt(&dir)))
+        .map_or(1, |attempt| attempt + 1)
 }
 
 fn highest_attempt(dir: &Path) -> Option<u32> {

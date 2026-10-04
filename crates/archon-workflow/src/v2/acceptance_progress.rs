@@ -59,11 +59,23 @@ pub fn state_key(record: &AcceptanceRoundRecordV1) -> Vec<String> {
 }
 
 /// The failing states a run reached, and how many rounds in a row
-/// (attempts included) reached one already reached.
+/// (attempts included) reached one already reached. `observed` is the
+/// state of each record the ledger saw, in order: a second copy of what the
+/// records hold, from which a damaged record's state is rebuilt.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProgressLedger {
     pub seen: BTreeSet<Vec<String>>,
     pub revisits: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed: Vec<ObservedState>,
+}
+
+/// One record's failing state, as the ledger observed it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservedState {
+    pub round: u32,
+    pub attempt: u32,
+    pub state: Vec<String>,
 }
 
 impl ProgressLedger {
@@ -76,14 +88,39 @@ impl ProgressLedger {
         ledger
     }
 
+    /// The ledger the observed states (oldest first) leave.
+    pub fn from_states(states: impl IntoIterator<Item = ObservedState>) -> Self {
+        let mut ledger = Self::default();
+        for state in states {
+            ledger.observe_state(state);
+        }
+        ledger
+    }
+
     /// Records `round`; returns the revisits in a row, 0 for a new state.
     pub fn observe(&mut self, round: &AcceptanceRoundRecordV1) -> u32 {
-        if self.seen.insert(state_key(round)) {
+        self.observe_state(ObservedState {
+            round: round.round,
+            attempt: round.attempt,
+            state: state_key(round),
+        })
+    }
+
+    fn observe_state(&mut self, observed: ObservedState) -> u32 {
+        if self.seen.insert(observed.state.clone()) {
             self.revisits = 0;
         } else {
             self.revisits = self.revisits.saturating_add(1);
         }
+        self.observed.push(observed);
         self.revisits
+    }
+
+    /// The state this ledger observed for (`round`, `attempt`).
+    fn state_of(&self, round: u32, attempt: u32) -> Option<&Vec<String>> {
+        (self.observed.iter().rev())
+            .find(|observed| (observed.round, observed.attempt) == (round, attempt))
+            .map(|observed| &observed.state)
     }
 
     fn path(run_dir: &Path) -> std::path::PathBuf {
@@ -92,96 +129,43 @@ impl ProgressLedger {
             .join(PROGRESS_LEDGER_FILE)
     }
 
+    /// The ledger as last saved; `None` when absent or unreadable (it is a
+    /// copy: the records are authoritative).
+    fn saved(run_dir: &Path) -> Option<Self> {
+        let bytes = std::fs::read(Self::path(run_dir)).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
     /// Records are authoritative: the record is written before the ledger,
     /// so even a readable ledger may lag after an interrupted write. Replay
     /// every recorded attempt, including attempts of the resumed round. A
-    /// record that cannot be read is an error naming it, never skipped.
+    /// damaged record is quarantined ([`Self::load_healing`]); an I/O error
+    /// is returned, for the caller to pause on.
     pub fn load(run_dir: &Path, _round: u32) -> crate::WorkflowResult<Self> {
-        let history = all_attempts(run_dir)?;
-        if !history.is_empty() {
-            return Ok(Self::from_history(&history));
-        }
-        Ok(std::fs::read(Self::path(run_dir))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default())
+        Self::load_healing(run_dir).map(|healed| healed.ledger)
     }
 
+    /// Saved whole (staged, synced, renamed) and its directory synced: it
+    /// is the copy a damaged record's state is rebuilt from.
     pub fn save(&self, run_dir: &Path) -> crate::WorkflowResult<()> {
         let path = Self::path(run_dir);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| crate::WorkflowError::io(parent, e))?;
-        }
         let staging = path.with_extension("json.tmp");
-        std::fs::write(&staging, serde_json::to_vec_pretty(self)?)
-            .map_err(|e| crate::WorkflowError::io(&staging, e))?;
-        std::fs::rename(&staging, &path).map_err(|e| crate::WorkflowError::io(&path, e))
+        crate::store::write_atomic(&staging, &path, &serde_json::to_vec_pretty(self)?)?;
+        match path.parent() {
+            Some(dir) => super::sync_record_dirs(run_dir, dir),
+            None => Ok(()),
+        }
     }
 }
+
+#[path = "acceptance_progress_heal.rs"]
+mod heal;
+pub(super) use heal::highest_quarantined_attempt;
+pub use heal::{HealedLedger, QUARANTINE_DIR, QuarantinedRecordV1, record_quarantine_events};
 
 #[path = "acceptance_record_order.rs"]
 mod order;
 pub(super) use order::note_recorded;
-
-/// When the record file at `path` was last written, in epoch nanoseconds.
-fn file_time(path: &Path) -> u128 {
-    std::fs::metadata(path)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0, |at| at.as_nanos())
-}
-
-/// Every round record, in the order the records were written (`order`: the
-/// log's order, else the record's own file time, never simply first). Gaps
-/// in numbering and stale ledgers cannot erase recorded states, and neither
-/// can a record that will not read or parse: as for the latest record, that
-/// is an error naming the file. Records land whole (staged and renamed), so
-/// such a file is damage, never a write in progress.
-fn all_attempts(run_dir: &Path) -> crate::WorkflowResult<Vec<AcceptanceRoundRecordV1>> {
-    let mut history = Vec::new();
-    for round in entries_named(&run_dir.join(ACCEPTANCE_RECORDS_DIR), |name| {
-        name.starts_with("round-")
-    })? {
-        if !round.is_dir() {
-            continue;
-        }
-        let is_record = |name: &str| name.starts_with("attempt-") && name.ends_with(".json");
-        for path in entries_named(&round, is_record)? {
-            let bytes = std::fs::read(&path).map_err(|e| crate::WorkflowError::io(&path, e))?;
-            let record =
-                serde_json::from_slice::<AcceptanceRoundRecordV1>(&bytes).map_err(|e| {
-                    crate::WorkflowError::StateCorrupt(format!(
-                        "acceptance record {} will not parse: {e}",
-                        path.display()
-                    ))
-                })?;
-            history.push((file_time(&path), record));
-        }
-    }
-    order::in_recorded_order(run_dir, history)
-}
-
-/// The paths in `dir` whose file names `keep` accepts; none when `dir` does
-/// not exist (no round recorded yet).
-fn entries_named(
-    dir: &Path,
-    keep: impl Fn(&str) -> bool,
-) -> crate::WorkflowResult<Vec<std::path::PathBuf>> {
-    let listing = match std::fs::read_dir(dir) {
-        Ok(listing) => listing,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(crate::WorkflowError::io(dir, error)),
-    };
-    let mut paths = Vec::new();
-    for entry in listing {
-        let entry = entry.map_err(|e| crate::WorkflowError::io(dir, e))?;
-        if entry.file_name().to_str().is_some_and(&keep) {
-            paths.push(entry.path());
-        }
-    }
-    Ok(paths)
-}
 
 /// Whether `current` reached a failing state none of `history` reached.
 pub fn made_progress(
@@ -217,6 +201,8 @@ pub fn decide(
 /// pauses the run. A round with nothing to act on ends it.
 pub fn decide_with(ledger: &mut ProgressLedger, current: &AcceptanceRoundRecordV1) -> LoopDecision {
     if !current.blocks_completion() {
+        // Observed all the same, so the ledger's copy covers every record.
+        ledger.observe(current);
         return LoopDecision {
             final_round: true,
             escalate: false,
@@ -248,6 +234,9 @@ pub fn earlier_rounds(run_dir: &Path, round: u32) -> Vec<AcceptanceRoundRecordV1
         .collect()
 }
 
+#[cfg(test)]
+#[path = "acceptance_progress_heal_tests.rs"]
+mod heal_tests;
 #[cfg(test)]
 #[path = "acceptance_progress_tests.rs"]
 mod tests;

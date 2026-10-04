@@ -339,6 +339,8 @@ async fn a_first_round_records_every_check_with_its_owning_tasks() {
     );
 }
 
+#[path = "workflow_live_v3_acceptance_heal_tests.rs"]
+mod heal_tests;
 #[path = "workflow_live_v3_acceptance_stall_tests.rs"]
 mod stall_tests;
 

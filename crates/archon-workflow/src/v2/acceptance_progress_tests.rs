@@ -318,13 +318,13 @@ fn names_entry(line: &str, round: u32, attempt: u32) -> bool {
     fields.get(..2) == Some(&[round.to_string().as_str(), attempt.to_string().as_str()][..])
 }
 
-fn set(n: u32, attempt: u32, id: &str) -> AcceptanceRoundRecordV1 {
+pub(super) fn set(n: u32, attempt: u32, id: &str) -> AcceptanceRoundRecordV1 {
     let mut record = round(n, vec![failed(id, "x")]);
     record.attempt = attempt;
     record
 }
 
-fn order_log(run_dir: &Path) -> std::path::PathBuf {
+pub(super) fn order_log(run_dir: &Path) -> std::path::PathBuf {
     run_dir
         .join(ACCEPTANCE_RECORDS_DIR)
         .join("recording-order.log")
@@ -341,7 +341,7 @@ fn set_file_time(run_dir: &Path, round: u32, attempt: u32, secs: u64) {
 
 /// R1{X}, R2{X}, then after a resume R1#2{Y}, written by the real writer
 /// with file times `secs`; `log`, when given, replaces the order log.
-fn x_x_y(secs: [u64; 3], log: Option<&str>) -> tempfile::TempDir {
+pub(super) fn x_x_y(secs: [u64; 3], log: Option<&str>) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let records = [set(1, 1, "AC-X"), set(2, 1, "AC-X"), set(1, 2, "AC-Y")];
     for (record, secs) in records.iter().zip(secs) {
@@ -356,7 +356,7 @@ fn x_x_y(secs: [u64; 3], log: Option<&str>) -> tempfile::TempDir {
 
 /// X, X, Y ends on a new state (no revisit), so the next Y is the first
 /// revisit: it escalates and never pauses.
-fn assert_replayed_x_x_y(run_dir: &Path) {
+pub(super) fn assert_replayed_x_x_y(run_dir: &Path) {
     let mut ledger = ProgressLedger::load(run_dir, 2).unwrap();
     assert_eq!(ledger.revisits, 0, "X, X, Y ends on a state never reached");
     let decision = decide_with(&mut ledger, &set(2, 2, "AC-Y"));
@@ -417,11 +417,11 @@ fn a_legacy_or_torn_log_continued_by_this_writer_keeps_its_order() {
     }
 }
 
-/// Round 7: a record replay cannot read is reported as corrupt state naming
-/// the file, never skipped: skipping it would silently change the states
-/// reached and the revisit count.
+/// Round 7, healed in round 8: a record replay cannot parse is never
+/// skipped silently. It is quarantined and reported by name (here with no
+/// ledger copy, so its state is unknown and the caller pauses).
 #[test]
-fn an_unreadable_record_is_reported_never_skipped() {
+fn an_unparsable_record_is_quarantined_and_reported_never_skipped() {
     for broken in [
         "{\"schema_version\": 1, \"round\":",
         "{\"schema_version\": 1, \"run_id\": \"r\", \"call_id\": \"c\", \"round\": \"one\", \"attempt\": 1, \"max_rounds\": 3, \"contract_present\": true, \"final_round\": false}",
@@ -429,12 +429,16 @@ fn an_unreadable_record_is_reported_never_skipped() {
         let dir = x_x_y([1000, 2000, 3000], None);
         let path = round_dir(dir.path(), 2).join(attempt_file_name(1));
         std::fs::write(&path, broken).unwrap();
-        let error = ProgressLedger::load(dir.path(), 2).expect_err("a corrupt record is reported");
+        let healed = ProgressLedger::load_healing(dir.path()).unwrap();
+        let [reported] = &healed.unknown()[..] else {
+            panic!("reported once: {:?}", healed.quarantined);
+        };
+        assert_eq!((reported.round, reported.attempt), (2, 1));
         assert!(
-            matches!(&error, crate::WorkflowError::StateCorrupt(detail)
-                if detail.contains(&path.display().to_string())),
-            "{error:?}"
+            reported.original.ends_with("round-02/attempt-01.json"),
+            "{reported:?}"
         );
+        assert!(!path.exists());
     }
 }
 

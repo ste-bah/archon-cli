@@ -22,8 +22,7 @@ use archon_workflow::task_set_contract::AcceptanceCriterion;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::acceptance_stage::{
     ACCEPTANCE_MAX_ROUNDS, ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION, ACCEPTANCE_STAGE_TOOL,
-    AcceptanceRoundRecordV1, next_attempt, progress, relative_record_path, round_dir,
-    write_round_record,
+    AcceptanceRoundRecordV1, next_attempt, relative_record_path, round_dir,
 };
 use archon_workflow::{
     WorkflowError, WorkflowResult, WorkflowStore, WorkflowV2CallExecution, WorkflowV2Result,
@@ -43,6 +42,8 @@ mod drift;
 mod env;
 #[path = "workflow_live_v3_acceptance_exec.rs"]
 mod exec;
+#[path = "workflow_live_v3_acceptance_ledger.rs"]
+mod ledger;
 #[path = "workflow_live_v3_acceptance_output.rs"]
 mod output;
 #[path = "workflow_live_v3_acceptance_regression.rs"]
@@ -169,11 +170,9 @@ pub(super) async fn run_acceptance_stage(
     // round count, an error the host can retry, or a check it can reassign.
     // Decision A: the failing states this run reached and the revisits in a
     // row, kept across attempts and resumes.
-    let mut ledger = progress::ProgressLedger::load(&run_dir, request.round)?;
-    let decision = progress::decide_with(&mut ledger, &record);
-    record.final_round = decision.final_round;
-    let path = write_round_record(&run_dir, &record)?;
-    ledger.save(&run_dir)?;
+    // Issue 262 (round 8): damaged history heals or pauses, never fails.
+    let ledger::Decided { decision, path } =
+        ledger::record_and_decide(store, run_id, generation, &run_dir, &mut record)?;
     // Issue 262: a stall (or the runaway guard) pauses the run with the
     // round's record as evidence; it never ends the loop or fails the run.
     if let Some(cause) = decision.pause {
