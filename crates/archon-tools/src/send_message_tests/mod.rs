@@ -23,3 +23,15 @@ fn make_subagent_ctx() -> ToolContext {
 mod cases_a;
 mod cases_b;
 mod cases_lead;
+
+/// A stopped agent is never resumed by message (#241); the guidance must not
+/// promise it.
+#[test]
+fn the_tool_guidance_says_a_stopped_agent_is_refused_not_resumed() {
+    let description = SendMessageTool.description();
+    assert!(
+        !description.contains("automatically resumed"),
+        "{description}"
+    );
+    assert!(description.contains("start a new agent"), "{description}");
+}
