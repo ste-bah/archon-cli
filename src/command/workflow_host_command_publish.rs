@@ -205,7 +205,8 @@ pub(crate) fn publish_audited(
     journal_pin: &Path,
     tasks_root: &Path,
 ) -> Result<PublicationReceiptV1> {
-    let _chain_lock = super::workflow_task_set::ChainLock::acquire(journal_pin, tasks_root)?;
+    let _chain_lock =
+        super::workflow_task_set::ChainLock::acquire_waiting(journal_pin, tasks_root)?;
     audited.sentinels.verify()?;
     let expected = audited
         .entries

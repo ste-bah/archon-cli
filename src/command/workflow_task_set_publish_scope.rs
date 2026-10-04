@@ -7,7 +7,8 @@ pub(crate) type Scopes = [(PathBuf, Option<String>)];
 
 /// A directory without a name authorizes its own subtree; a named scope
 /// authorizes exactly that file. Resolve the trusted root and refuse traversal
-/// and symlinks below it, including a symlink at the destination itself.
+/// and any link below it — the destination itself included — that resolves
+/// outside it.
 pub(crate) fn validate_destination(path: &Path, scopes: &Scopes) -> Result<PathBuf> {
     if path
         .components()
@@ -59,10 +60,14 @@ pub(crate) fn validate_destination(path: &Path, scopes: &Scopes) -> Result<PathB
     ))
 }
 
+/// Resolve `root` once and require every existing component of `target`
+/// below it to resolve inside that canonical root. A symlinked project, run or
+/// task root is a legitimate setup and is followed; only a link inside the
+/// store that leads out of it (or dangles) is refused.
 pub(crate) fn validate_existing_parents(target: &Path, root: &Path) -> Result<()> {
-    if std::fs::symlink_metadata(root)?.file_type().is_symlink() {
-        return Err(anyhow!("publication root {} is a symlink", root.display()));
-    }
+    let canonical_root = root
+        .canonicalize()
+        .with_context(|| format!("resolving publication root {}", root.display()))?;
     let relative = target.strip_prefix(root)?;
     let mut cursor = root.to_path_buf();
     for component in relative.components() {
@@ -70,13 +75,30 @@ pub(crate) fn validate_existing_parents(target: &Path, root: &Path) -> Result<()
             return Err(anyhow!("publication path contains traversal"));
         }
         cursor.push(component);
-        match std::fs::symlink_metadata(&cursor) {
-            Ok(meta) if meta.file_type().is_symlink() => {
-                return Err(anyhow!("publication path has symlink {}", cursor.display()));
+        match cursor.canonicalize() {
+            Ok(resolved) if resolved.starts_with(&canonical_root) => {}
+            Ok(resolved) => {
+                return Err(anyhow!(
+                    "publication path {} resolves to {}, outside {}",
+                    cursor.display(),
+                    resolved.display(),
+                    canonical_root.display()
+                ));
             }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // Absent, or a link whose destination is absent: only the
+                // former may be created below the root.
+                if std::fs::symlink_metadata(&cursor).is_ok() {
+                    return Err(anyhow!(
+                        "publication path has dangling link {}",
+                        cursor.display()
+                    ));
+                }
+                return Ok(());
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("resolving {}", cursor.display()));
+            }
         }
     }
     Ok(())

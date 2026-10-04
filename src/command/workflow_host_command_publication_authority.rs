@@ -75,7 +75,8 @@ pub(crate) fn authorize_receipt(pin: &Path, tasks: &Path, target: &Path) -> Resu
 
 /// Only call directories bound to this task set authorize their receipt file.
 /// Existing decomposition state provides the binding for journals from HEAD
-/// before the explicit call binding was introduced. No directory symlink is followed.
+/// before the explicit call binding was introduced. A symlinked project, store
+/// or run root is resolved; a link that leads out of the store is refused.
 pub(crate) fn receipt_scopes(pin: &Path, tasks: &Path) -> Result<Vec<(PathBuf, Option<String>)>> {
     let Some(project) = project_for_pin(pin) else {
         return Ok(Vec::new());
@@ -144,7 +145,9 @@ fn root_digest(tasks: &Path) -> Result<String> {
 }
 
 fn directories(root: &Path) -> Result<Vec<PathBuf>> {
-    match std::fs::symlink_metadata(root) {
+    // The root itself may be a link (a symlinked `.archon` or store); entries
+    // below are listed without following links (`DirEntry::file_type`).
+    match std::fs::metadata(root) {
         Ok(metadata) if metadata.is_dir() => {}
         Ok(_) => return Ok(Vec::new()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),

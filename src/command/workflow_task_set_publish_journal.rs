@@ -34,11 +34,17 @@ pub(crate) const CRASH_ENV: &str = "ARCHON_TEST_PUBLISH_CRASH_AT";
 pub(super) fn crash_point(step: &str) {
     #[cfg(test)]
     if std::env::var(CRASH_ENV).ok().as_deref() == Some(step) {
+        // SIGKILL to ourselves can return before the kernel ends the process,
+        // so wait for it rather than racing it with a SIGABRT.
         #[cfg(unix)]
-        // SAFETY: signalling our own pid has no memory-safety preconditions.
-        unsafe {
-            libc::kill(libc::getpid(), libc::SIGKILL);
+        loop {
+            // SAFETY: signalling our own pid has no memory-safety preconditions.
+            unsafe {
+                libc::kill(libc::getpid(), libc::SIGKILL);
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
         }
+        #[cfg(not(unix))]
         std::process::abort();
     }
     #[cfg(test)]
@@ -51,6 +57,8 @@ pub(super) fn crash_point(step: &str) {
 #[derive(Debug, Clone)]
 pub(crate) struct JournalPaths {
     pub(super) lock: PathBuf,
+    /// The chain lock `ChainLock` holds beside the pin: reserved too.
+    pub(super) chain_lock: PathBuf,
     pub(super) journal: PathBuf,
     pub(super) log: PathBuf,
 }
@@ -59,6 +67,7 @@ impl JournalPaths {
     pub(crate) fn for_pin(pin_path: &Path) -> Self {
         Self {
             lock: pin_path.with_extension("publish.lock"),
+            chain_lock: pin_path.with_extension("chain.lock"),
             journal: pin_path.with_extension("publish-journal"),
             log: pin_path.with_extension("publish-recovery.log"),
         }
@@ -212,7 +221,7 @@ impl Journal {
             let target = super::scope::validate_destination(&entry.target, scopes)?;
             let reserved = [
                 paths.lock.clone(),
-                paths.lock.with_extension("chain.lock"),
+                paths.chain_lock.clone(),
                 paths.journal.clone(),
                 paths.log.clone(),
                 paths.journal_temp(),
@@ -376,12 +385,28 @@ pub(crate) fn write_durably(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     file.sync_all()
 }
 
-/// Connect every created directory durably to its parent. Existing ancestors
-/// are flushed too: a caller may just have created them without flushing them.
+/// Create `dir` and connect every directory this call created durably to its
+/// parent: flush each created directory and the first one that already
+/// existed, nothing above it. Ancestors further up are neither changed nor
+/// flushed — a standard Windows user cannot open `C:\` or `C:\Users` for
+/// write, which flushing a directory requires there.
 pub(crate) fn create_dir_all_durably(dir: &Path) -> Result<()> {
-    std::fs::create_dir_all(dir)?;
-    for ancestor in dir.ancestors().filter(|path| !path.as_os_str().is_empty()) {
-        sync_dir(ancestor)?;
+    let mut created = dir
+        .ancestors()
+        .filter(|path| !path.as_os_str().is_empty())
+        .take_while(|path| !path.exists())
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
+    let first_existing = dir
+        .ancestors()
+        .filter(|path| !path.as_os_str().is_empty())
+        .find(|path| path.exists())
+        .map(Path::to_path_buf);
+    std::fs::create_dir_all(dir)
+        .with_context(|| format!("creating directory {}", dir.display()))?;
+    created.reverse();
+    for directory in created.iter().chain(first_existing.iter()) {
+        sync_dir(directory)?;
     }
     Ok(())
 }

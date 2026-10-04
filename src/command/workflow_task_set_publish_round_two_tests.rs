@@ -36,7 +36,7 @@ pub(super) fn fixture(s: &Scenario, state: JournalState, identical: bool) -> Jou
 }
 
 fn recover_child(s: &Scenario, point: &str) -> bool {
-    !Command::new(std::env::current_exe().unwrap())
+    let status = Command::new(std::env::current_exe().unwrap())
         .args([&child_test_name(), "--exact", "--test-threads=1"])
         .env(CHILD_ROOT_ENV, s.root())
         .env("ARCHON_TEST_RECOVER_CHILD", "1")
@@ -44,8 +44,8 @@ fn recover_child(s: &Scenario, point: &str) -> bool {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .unwrap()
-        .success()
+        .unwrap();
+    killed_at_crash_point(status, point)
 }
 
 #[test]
@@ -123,7 +123,14 @@ fn commit_flush_error_never_starts_rollback_against_committed_journal() {
         .stderr(std::process::Stdio::null())
         .status()
         .unwrap();
-    assert!(!status.success());
+    // The commit record reached disk, so the child must report the flush
+    // error without ever starting a rollback (it is never killed there).
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), None, "rollback started: {status}");
+    }
+    assert!(!status.success(), "the flush error must be reported");
     recover_interrupted_publish(&s.pin(), &s.tasks()).unwrap();
     assert!(s.is(NEW), "{:?}", s.state());
 }
@@ -159,26 +166,33 @@ fn committed_missing_staging_must_refuse_instead_of_accepting_mixed_set() {
     assert!(j.entries[0].backup.as_ref().unwrap().exists());
 }
 
+/// Debris an older binary leaves on non-crash paths too — a target created
+/// before a crash, or a backup a failed rollback left — is rolled forward and
+/// logged, never refused (Issue 271 round 3).
 #[test]
-fn legacy_absent_target_and_interrupted_rollback_are_preserved_as_corruption() {
+fn legacy_absent_target_and_interrupted_rollback_self_heal() {
     for rollback in [false, true] {
         let s = Scenario::new();
         let [a, b, c, _] = s.targets();
+        let mut expected = OLD;
         if rollback {
             std::fs::rename(&b, sibling_transaction_path(&b, TXN, "old")).unwrap();
             std::fs::write(&b, b"new-b").unwrap();
-            // a was already restored; all remaining staging was discarded.
+            expected[1] = NEW[1];
         } else {
             std::fs::write(&c, b"new-c").unwrap();
             std::fs::write(sibling_transaction_path(&a, TXN, "new"), b"new-a").unwrap();
+            expected[0] = NEW[0];
+            expected[2] = NEW[2];
         }
-        let before = s.state();
-        let debris = s.debris();
-        let error =
-            recover_interrupted_publish(&s.pin(), &s.tasks()).expect_err("ambiguous legacy set");
-        assert!(error.to_string().contains(TXN), "{error}");
-        assert_eq!(s.state(), before);
-        assert_eq!(s.debris(), debris);
+        let report = recover_interrupted_publish(&s.pin(), &s.tasks()).unwrap();
+        assert!(s.is(expected), "rollback={rollback}: {:?}", s.state());
+        assert!(s.debris().is_empty(), "{:?}", s.debris());
+        assert!(
+            report.events.iter().any(|event| event.transaction == TXN),
+            "{:?}",
+            report.events
+        );
     }
 }
 
@@ -243,7 +257,10 @@ fn first_publish_flushes_every_new_directory_parent() {
     publish(&s.pin(), &s.new_files()).unwrap();
     let synced = journal::test_hooks::SYNCS.with(|p| p.borrow().clone());
     assert!(synced.contains(&s.root().join(".archon")), "{synced:?}");
-    assert!(synced.contains(&s.root().to_path_buf()), "{synced:?}");
+    assert!(
+        synced.contains(&s.pin().parent().unwrap().to_path_buf()),
+        "{synced:?}"
+    );
 }
 
 #[test]

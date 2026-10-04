@@ -132,12 +132,30 @@ impl Scenario {
             .status()
             .unwrap();
         assert!(marker.exists(), "the child publisher never ran");
-        !status.success()
+        killed_at_crash_point(status, step)
     }
 
     fn recovery_log(&self) -> String {
         std::fs::read_to_string(recovery_log_path(&self.pin())).unwrap_or_default()
     }
+}
+
+/// True only when the child died at the crash point (SIGKILL on Unix). A
+/// panic or failed assertion in the child exits normally with status 101 and
+/// is reported as such, never mistaken for an interruption.
+fn killed_at_crash_point(status: std::process::ExitStatus, step: &str) -> bool {
+    #[cfg(unix)]
+    let killed = {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal() == Some(libc::SIGKILL)
+    };
+    #[cfg(not(unix))]
+    let killed = !status.success();
+    assert!(
+        killed || status.success(),
+        "child failed at {step} without being killed there: {status}"
+    );
+    killed
 }
 
 fn child_test_name() -> String {
@@ -269,10 +287,10 @@ fn a_kill_mid_publish_is_recovered_when_the_next_publisher_takes_the_lock() {
 
 /// What the publisher before the journal left when killed between renames:
 /// `a` replaced (backup kept), `b` backed up but not yet replaced, `c` and the
-/// pin still only staged. This evidence cannot prove membership or durability
-/// of the whole new set, so recovery must preserve it and refuse.
+/// pin still only staged. That binary staged and fsynced every file before its
+/// first rename, so the debris is rolled forward and logged, never refused.
 #[test]
-fn debris_from_an_older_binary_without_a_manifest_is_refused() {
+fn debris_from_an_older_binary_without_a_manifest_is_rolled_forward() {
     let scenario = Scenario::new();
     let [a, b, c, pin] = scenario.targets();
     let txn = "0123456789abcdef0123456789abcdef";
@@ -286,35 +304,46 @@ fn debris_from_an_older_binary_without_a_manifest_is_refused() {
     std::fs::write(sibling(&b, "new"), b"new-b").unwrap();
     std::fs::write(sibling(&c, "new"), b"new-c").unwrap();
     std::fs::write(sibling(&pin, "new"), b"new-pin").unwrap();
-    let before = scenario.state();
-    let debris = scenario.debris();
-    let error = recover_interrupted_publish(&scenario.pin(), &scenario.tasks()).unwrap_err();
-    assert!(error.to_string().contains(txn), "{error}");
-    assert_eq!(scenario.state(), before);
-    assert_eq!(scenario.debris(), debris);
+    let report = recover_interrupted_publish(&scenario.pin(), &scenario.tasks()).unwrap();
+    assert!(scenario.is(NEW), "{:?}", scenario.state());
+    assert!(scenario.debris().is_empty(), "{:?}", scenario.debris());
+    assert!(
+        report
+            .events
+            .iter()
+            .any(|event| event.source == "legacy" && event.transaction == txn),
+        "{:?}",
+        report.events
+    );
+    assert!(
+        scenario.recovery_log().contains(txn),
+        "{}",
+        scenario.recovery_log()
+    );
 }
 
-/// A surviving staged file cannot distinguish interrupted staging from a
-/// publish that already created an absent target. Keep the evidence.
+/// Staging an older binary left with no backup is rolled forward too; another
+/// task set's transaction in the shared pin store is never touched.
 #[test]
-fn staging_debris_from_an_older_binary_without_a_manifest_is_refused() {
+fn staging_debris_from_an_older_binary_without_a_manifest_is_rolled_forward() {
     let scenario = Scenario::new();
     let [a, ..] = scenario.targets();
     let stale = a.with_file_name(".a.json.fedcba9876543210fedcba9876543210.new");
-    std::fs::write(&stale, b"new-").unwrap();
-    // Another task set's transaction in the shared pin store is not ours.
+    std::fs::write(&stale, b"new-a").unwrap();
     let pin_dir = scenario.pin().parent().unwrap().to_path_buf();
     let foreign = pin_dir.join(".other.json.fedcba9876543210fedcba9876543210.new");
     std::fs::write(&foreign, b"theirs").unwrap();
-    let error = recover_interrupted_publish(&scenario.pin(), &scenario.tasks()).unwrap_err();
-    assert!(
-        error.to_string().contains(&stale.display().to_string()),
-        "{error}"
-    );
-    assert!(!error.to_string().contains("other.json"), "{error}");
-    assert!(scenario.is(OLD), "{:?}", scenario.state());
-    assert!(stale.exists());
+    recover_interrupted_publish(&scenario.pin(), &scenario.tasks()).unwrap();
+    let mut expected = OLD;
+    expected[0] = NEW[0];
+    assert!(scenario.is(expected), "{:?}", scenario.state());
+    assert!(!stale.exists());
     assert!(foreign.exists(), "another set's staging must be left alone");
+    assert!(
+        scenario.recovery_log().contains("legacy"),
+        "{}",
+        scenario.recovery_log()
+    );
 }
 
 #[test]
@@ -390,5 +419,8 @@ fn a_kill_mid_publish_is_recovered_before_decomposition_reads_the_chain() {
     assert!(scenario.debris().is_empty(), "{:?}", scenario.debris());
 }
 
+#[cfg(test)]
+#[path = "workflow_task_set_publish_round_three_tests.rs"]
+mod round_three;
 #[path = "workflow_task_set_publish_round_two_tests.rs"]
 mod round_two;

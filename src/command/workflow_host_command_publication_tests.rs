@@ -179,15 +179,17 @@ fn staged_symlink_is_refused() {
     assert!(error.to_string().contains("symlink"), "{error}");
 }
 
+/// Issue 271 round 3: a per-check repair may hold the chain lock across model
+/// calls; the parent publication waits for it instead of failing the stage.
 #[test]
-fn parent_publication_respects_the_frozen_chain_lock() {
+fn parent_publication_waits_for_the_frozen_chain_lock() {
     let temp = tempfile::tempdir().unwrap();
     let tasks = temp.path().join("live");
     std::fs::create_dir(&tasks).unwrap();
     let live = tasks.join("one.txt");
     std::fs::write(&live, b"old bytes").unwrap();
     let pin = crate::command::workflow_task_set::acceptance_pin_path(temp.path(), &tasks);
-    let _chain = crate::command::workflow_task_set::ChainLock::acquire(&pin, &tasks).unwrap();
+    let chain = crate::command::workflow_task_set::ChainLock::acquire(&pin, &tasks).unwrap();
     let staging = prepare_staging(temp.path(), "call-chain").unwrap();
     std::fs::write(staging.root.join("one.txt"), b"new bytes").unwrap();
     let audited = audit_prepared_publication(
@@ -197,16 +199,27 @@ fn parent_publication_respects_the_frozen_chain_lock() {
         LiveMutationSentinels::capture(&[]).unwrap(),
     )
     .unwrap();
-    let error = publish_audited(
-        audited,
-        &BTreeMap::from([("one.txt".to_string(), live.clone())]),
-        &pin,
-        &tasks,
-    )
-    .unwrap_err();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let destinations = BTreeMap::from([("one.txt".to_string(), live.clone())]);
+    let (pin_for_publish, tasks_for_publish) = (pin.clone(), tasks.clone());
+    let publisher = std::thread::spawn(move || {
+        let result = publish_audited(audited, &destinations, &pin_for_publish, &tasks_for_publish)
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        let _ = sender.send(result);
+    });
     assert!(
-        error.to_string().contains("another freeze or repair"),
-        "{error}"
+        receiver
+            .recv_timeout(std::time::Duration::from_millis(400))
+            .is_err(),
+        "publication must wait while a repair holds the chain lock"
     );
     assert_eq!(std::fs::read(&live).unwrap(), b"old bytes");
+    drop(chain);
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("publication proceeds once the lock is released")
+        .unwrap();
+    publisher.join().unwrap();
+    assert_eq!(std::fs::read(&live).unwrap(), b"new bytes");
 }

@@ -18,6 +18,8 @@ use archon_workflow::task_skeleton::TaskSkeletonLock;
 
 #[path = "workflow_task_set_publish_journal.rs"]
 mod journal;
+#[path = "workflow_task_set_publish_legacy.rs"]
+mod legacy;
 #[path = "workflow_task_set_publish_recover.rs"]
 mod recover;
 #[path = "workflow_task_set_publish_scope.rs"]
@@ -47,17 +49,9 @@ pub(crate) struct ChainLock {
 }
 
 impl ChainLock {
+    /// Take the lock now or fail: an operator command reports the holder.
     pub(crate) fn acquire(pin_path: &Path, tasks_root: &Path) -> Result<Self> {
-        let path = pin_path.with_extension("chain.lock");
-        if let Some(parent) = path.parent() {
-            create_dir_all_durably(parent)?;
-        }
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&path)
-            .with_context(|| format!("opening chain lock {}", path.display()))?;
+        let (file, path) = Self::open(pin_path)?;
         file.try_lock().map_err(|error| {
             anyhow!(
                 "another freeze or repair of this task set holds {} ({error}); wait for it to finish",
@@ -67,7 +61,57 @@ impl ChainLock {
         recover_interrupted_publish(pin_path, tasks_root)?;
         Ok(Self { _file: file })
     }
+
+    /// Wait for the lock: a run's own publication outlasts a per-check repair
+    /// that holds it across model calls instead of failing its stage. The OS
+    /// releases a dead holder's lock, so the wait ends when the holder does;
+    /// it is logged when it starts and every minute it continues.
+    pub(crate) fn acquire_waiting(pin_path: &Path, tasks_root: &Path) -> Result<Self> {
+        let (file, path) = Self::open(pin_path)?;
+        let started = std::time::Instant::now();
+        let mut reported: Option<std::time::Duration> = None;
+        loop {
+            match file.try_lock() {
+                Ok(()) => break,
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    let waited = started.elapsed();
+                    if reported.is_none_or(|last| waited - last >= CHAIN_LOCK_REPORT_EVERY) {
+                        tracing::info!(
+                            lock = %path.display(),
+                            waited_secs = waited.as_secs(),
+                            "waiting for another freeze or repair of this task set to finish"
+                        );
+                        reported = Some(waited);
+                    }
+                    std::thread::sleep(CHAIN_LOCK_POLL);
+                }
+                Err(std::fs::TryLockError::Error(error)) => {
+                    return Err(error)
+                        .with_context(|| format!("locking chain lock {}", path.display()));
+                }
+            }
+        }
+        recover_interrupted_publish(pin_path, tasks_root)?;
+        Ok(Self { _file: file })
+    }
+
+    fn open(pin_path: &Path) -> Result<(std::fs::File, PathBuf)> {
+        let path = JournalPaths::for_pin(pin_path).chain_lock;
+        if let Some(parent) = path.parent() {
+            create_dir_all_durably(parent)?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("opening chain lock {}", path.display()))?;
+        Ok((file, path))
+    }
 }
+
+const CHAIN_LOCK_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+const CHAIN_LOCK_REPORT_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// The bytes a target must still hold when the transaction replaces it:
 /// `Some(Some(digest))`, `Some(None)` for absent; unlisted targets are not
@@ -185,10 +229,12 @@ impl PublishTransaction {
         let mut warnings = cleanup_committed_backups(&backups, |path| {
             remove_if_present(path).map_err(std::io::Error::other)
         });
-        if warnings.is_empty() {
-            if let Err(error) = sync_parents(backups.iter().map(|(_, backup)| backup.as_path())) {
-                warnings.push(format!("committed backup cleanup could not be flushed ({error:#}); journal kept for recovery"));
-            }
+        if warnings.is_empty()
+            && let Err(error) = sync_parents(backups.iter().map(|(_, backup)| backup.as_path()))
+        {
+            warnings.push(format!(
+                "committed backup cleanup could not be flushed ({error:#}); journal kept for recovery"
+            ));
         }
         if warnings.is_empty() {
             crash_point("commit-before-journal-removal");
