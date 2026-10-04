@@ -134,7 +134,7 @@ pub fn fdinfo_writes(text: &str) -> Option<bool> {
 fn open_paths(end: Instant) -> io::Result<Vec<(u32, PathBuf, bool)>> {
     // SAFETY: getuid cannot fail and touches no memory.
     let uid = unsafe { libc::getuid() };
-    let mut command = std::process::Command::new("lsof");
+    let mut command = std::process::Command::new(lsof_program());
     command
         .args(["-nP", "-w", "-Fpan", "-u"])
         .arg(uid.to_string());
@@ -153,6 +153,40 @@ fn open_paths(end: Instant) -> io::Result<Vec<(u32, PathBuf, bool)>> {
         return Err(io::Error::other("lsof listed no open files"));
     }
     Ok(parse_lsof_fields(&String::from_utf8_lossy(&stdout)))
+}
+
+/// PATH wins when it names an `lsof`. The probe often runs under a
+/// confined PATH (for example `/usr/bin:/bin`) while `lsof` sits in an
+/// sbin directory, so the standard install locations come next.
+#[cfg(not(target_os = "linux"))]
+fn lsof_program() -> PathBuf {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    lsof_program_from(
+        std::env::split_paths(&path).map(|dir| dir.join("lsof")),
+        &[
+            "/usr/sbin/lsof",
+            "/usr/bin/lsof",
+            "/usr/local/sbin/lsof",
+            "/usr/local/bin/lsof",
+        ],
+    )
+}
+
+/// The first executable file among the PATH entries, then the standard
+/// locations; a bare `lsof` when none exists, so the spawn error names it.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) fn lsof_program_from(
+    on_path: impl Iterator<Item = PathBuf>,
+    standard: &[&str],
+) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    on_path
+        .chain(standard.iter().map(PathBuf::from))
+        .find(|path| {
+            std::fs::metadata(path)
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        })
+        .unwrap_or_else(|| PathBuf::from("lsof"))
 }
 
 /// `lsof -F pan` output as (pid, path, held for writing): `p` starts a

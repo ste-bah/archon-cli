@@ -2,7 +2,7 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use super::holders_impl::{fdinfo_writes, parse_lsof_fields};
+use super::holders_impl::{fdinfo_writes, lsof_program_from, parse_lsof_fields};
 use super::*;
 
 fn process(pid: u32, ppid: u32, pgid: u32, sid: u32) -> Process {
@@ -219,3 +219,38 @@ fn holders_say_which_holder_writes() {
 
 #[path = "process_tree_tracker_tests.rs"]
 mod tracker;
+
+#[test]
+fn lsof_is_found_on_path_then_at_a_standard_location() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let make = |name: &str, mode: u32| {
+        let p = dir.path().join(name);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+        p
+    };
+    let on_path = make("path/lsof", 0o755);
+    let standard = make("sbin/lsof", 0o755);
+    let not_executable = make("plain/lsof", 0o644);
+    let s = standard.to_str().unwrap();
+    let pick =
+        |path: Vec<std::path::PathBuf>, std_: &[&str]| lsof_program_from(path.into_iter(), std_);
+    assert_eq!(pick(vec![on_path.clone()], &[s]), on_path, "PATH wins");
+    assert_eq!(
+        pick(vec![dir.path().join("missing/lsof")], &[s]),
+        standard,
+        "a confined PATH without lsof uses the standard location"
+    );
+    assert_eq!(
+        pick(vec![not_executable], &[s]),
+        standard,
+        "a file without an execute bit is not a program"
+    );
+    assert_eq!(
+        pick(vec![dir.path().join("path")], &[]),
+        std::path::PathBuf::from("lsof"),
+        "nothing found keeps a bare name so the spawn error names lsof"
+    );
+}
