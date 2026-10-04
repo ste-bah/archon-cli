@@ -9,6 +9,8 @@
 //! (an I/O fault), the run PAUSES with the reason and the resume command:
 //! never a failed call over a run left Running. Like an operator pause, a
 //! history pause leaves no record of the round; the resume runs it again.
+//! A loss of unknown state is reported by every execution until the pause
+//! that reports it is recorded and acknowledges it (round 9).
 
 use std::path::{Path, PathBuf};
 
@@ -55,7 +57,16 @@ pub(super) fn record_and_decide(
             "acceptance record(s) {} would not parse and were quarantined; no copy of their failing state survives, so the rounds without progress cannot be counted exactly",
             names.join(", ")
         );
-        return Err(pause(record, reason, &healed.quarantined));
+        let lost: Vec<QuarantinedRecordV1> = unknown.into_iter().cloned().collect();
+        let paused = pause(record, reason, &lost);
+        // Round 9: acknowledged only once the pause is recorded, so a death
+        // before it leaves the next execution to pause on the loss again.
+        if matches!(paused, WorkflowError::ControlPaused(_))
+            && let Err(error) = progress::acknowledge_quarantined(run_dir, &lost)
+        {
+            tracing::warn!(%error, run_id, "the reported loss of quarantined acceptance records was not acknowledged; the next resume pauses on it again");
+        }
+        return Err(paused);
     }
     let mut ledger = healed.ledger;
     let decision = progress::decide_with(&mut ledger, record);

@@ -124,3 +124,104 @@ fn an_unreadable_record_is_an_io_error_and_stays_in_place() {
     assert!(record.exists());
     assert!(!round_dir(dir.path(), 2).join("quarantine").exists());
 }
+
+/// Round 9 (P2): a record quarantined with no copy of its state is a loss
+/// the caller must pause on. A process that dies after the move and before
+/// the pause must not leave the next load silent: the loss is reported
+/// again on every load until a pause acknowledges it, and only then.
+#[test]
+fn an_unacknowledged_unknown_loss_is_reported_again_after_a_crash() {
+    let dir = x_x_y_without_ledger();
+    std::fs::write(
+        round_dir(dir.path(), 2).join(attempt_file_name(1)),
+        "{\"round\":",
+    )
+    .unwrap();
+    let first = ProgressLedger::load_healing(dir.path()).unwrap();
+    assert_eq!(first.unknown().len(), 1);
+
+    // The process died here, before it paused.
+    let again = ProgressLedger::load_healing(dir.path()).unwrap();
+
+    assert!(again.quarantined.is_empty(), "the event is reported once");
+    let [lost] = &again.unknown()[..] else {
+        panic!("the unacknowledged loss is reported again: {again:?}");
+    };
+    assert_eq!((lost.round, lost.attempt), (2, 1));
+    acknowledge_quarantined(dir.path(), &[(*lost).clone()]).unwrap();
+    let acknowledged = ProgressLedger::load_healing(dir.path()).unwrap();
+    assert!(acknowledged.unknown().is_empty(), "{acknowledged:?}");
+    assert_eq!(acknowledged.ledger, again.ledger);
+}
+
+/// Round 9 (P2): a legacy ledger (no `observed` copy) is the history of a
+/// run from before the records. Once every record is quarantined it must
+/// not come back: its revisit count is the very state that was lost.
+#[test]
+fn a_legacy_ledger_never_returns_once_every_record_is_quarantined() {
+    let dir = tempfile::tempdir().unwrap();
+    for record in [set(1, 1, "AC-X"), set(2, 1, "AC-X")] {
+        write_round_record(dir.path(), &record).unwrap();
+    }
+    let legacy = dir
+        .path()
+        .join(ACCEPTANCE_RECORDS_DIR)
+        .join(PROGRESS_LEDGER_FILE);
+    std::fs::write(&legacy, r#"{"seen":[["AC-X"]],"revisits":1}"#).unwrap();
+    for round in [1, 2] {
+        std::fs::write(round_dir(dir.path(), round).join(attempt_file_name(1)), "{").unwrap();
+    }
+    let first = ProgressLedger::load_healing(dir.path()).unwrap();
+    assert_eq!(first.ledger, ProgressLedger::default(), "{first:?}");
+
+    let again = ProgressLedger::load_healing(dir.path()).unwrap();
+
+    assert_eq!(
+        again.ledger,
+        ProgressLedger::default(),
+        "the lost revisit count never returns from the legacy ledger"
+    );
+}
+
+/// Round 9 (P1): two writers of one attempt never both succeed. Both are
+/// made to wait on the order lock after deciding which attempt to write;
+/// the existence check happens under the lock, so the second one finds the
+/// first one's record and is refused, and the record on disk is the one
+/// whose writer succeeded.
+#[test]
+fn two_writers_of_one_attempt_never_both_succeed() {
+    let dir = tempfile::tempdir().unwrap();
+    let records = dir.path().join(ACCEPTANCE_RECORDS_DIR);
+    std::fs::create_dir_all(&records).unwrap();
+    let lock_file = (std::fs::OpenOptions::new())
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(records.join("recording-order.lock"))
+        .unwrap();
+    let mut lock = fd_lock::RwLock::new(lock_file);
+    let held = lock.write().unwrap();
+    let writers: Vec<_> = ["AC-A", "AC-B"]
+        .into_iter()
+        .map(|id| {
+            let run_dir = dir.path().to_path_buf();
+            std::thread::spawn(move || (id, write_round_record(&run_dir, &set(1, 1, id))))
+        })
+        .collect();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    drop(held);
+    let outcomes: Vec<_> = writers.into_iter().map(|w| w.join().unwrap()).collect();
+
+    let won: Vec<&str> = (outcomes.iter())
+        .filter(|(_, outcome)| outcome.is_ok())
+        .map(|(id, _)| *id)
+        .collect();
+    let [winner] = won[..] else {
+        panic!("exactly one writer of an attempt succeeds: {outcomes:?}");
+    };
+    let path = round_dir(dir.path(), 1).join(attempt_file_name(1));
+    let on_disk: AcceptanceRoundRecordV1 =
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(state_key(&on_disk), vec![winner.to_string()]);
+}

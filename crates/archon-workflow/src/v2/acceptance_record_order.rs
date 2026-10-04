@@ -11,8 +11,9 @@
 //!
 //! Writers append under an advisory lock on a sibling lock file (several
 //! processes can record at once: a round of an obsolete generation still
-//! finishing beside the resumed owner's), read the log only while they hold
-//! it, give the entry a number past every number already in the log, and
+//! finishing beside the resumed owner's), held from the check that their
+//! attempt is free until their record has landed (round 9), read the log
+//! only while they hold it, give the entry a number past every number already in the log, and
 //! write it with ONE write of the whole line. A last line with no newline
 //! was cut short by a crash: it is never an entry, in any format, and the
 //! next append marks it torn before writing its own line.
@@ -97,11 +98,41 @@ fn log_path(run_dir: &Path) -> std::path::PathBuf {
         .join(RECORDING_ORDER_FILE)
 }
 
+/// Runs `act` holding the recording-order lock: the writer of a record
+/// decides whether its attempt is free, appends its entry and lands the
+/// record under it, so two writers of one attempt can never both succeed.
+/// A lock that cannot be taken is an error, never a write without it.
+pub(in crate::v2::acceptance_stage) fn under_order_lock<T>(
+    run_dir: &Path,
+    act: impl FnOnce() -> crate::WorkflowResult<T>,
+) -> crate::WorkflowResult<T> {
+    let path = log_path(run_dir);
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let lock_path = dir.join(RECORDING_ORDER_LOCK);
+    let io = |error| crate::WorkflowError::io(&lock_path, error);
+    std::fs::create_dir_all(dir).map_err(|e| crate::WorkflowError::io(dir, e))?;
+    let lock_file = (std::fs::OpenOptions::new())
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(io)?;
+    let mut lock = fd_lock::RwLock::new(lock_file);
+    let _held = lock.write().map_err(io)?;
+    act()
+}
+
 /// Appends the entry of (`round`, `attempt`) to the log and syncs it and
 /// the directories above it (the log, or the records directory, may be
-/// new). Best effort: a record the log misses is still read, placed by its
-/// own file time.
-pub(in crate::v2::acceptance_stage) fn note_recorded(run_dir: &Path, round: u32, attempt: u32) {
+/// new). The caller holds the order lock ([`under_order_lock`]). Best
+/// effort: a record the log misses is still read, placed by its own file
+/// time.
+pub(in crate::v2::acceptance_stage) fn note_recorded_locked(
+    run_dir: &Path,
+    round: u32,
+    attempt: u32,
+) {
     let path = log_path(run_dir);
     let appended = append(&path, round, attempt).map_err(|e| crate::WorkflowError::io(&path, e));
     let synced = appended.and_then(|()| match path.parent() {
@@ -113,18 +144,19 @@ pub(in crate::v2::acceptance_stage) fn note_recorded(run_dir: &Path, round: u32,
     }
 }
 
+/// [`note_recorded_locked`], taking the order lock itself.
+#[cfg(test)]
+pub(in crate::v2::acceptance_stage) fn note_recorded(run_dir: &Path, round: u32, attempt: u32) {
+    let noted = under_order_lock(run_dir, || {
+        note_recorded_locked(run_dir, round, attempt);
+        Ok(())
+    });
+    noted.expect("the order lock is taken");
+}
+
+/// One whole line appended; the caller holds the order lock.
 fn append(path: &Path, round: u32, attempt: u32) -> std::io::Result<()> {
     use std::io::{Read, Write};
-    let dir = path.parent().unwrap_or(Path::new("."));
-    std::fs::create_dir_all(dir)?;
-    let lock_file = (std::fs::OpenOptions::new())
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(dir.join(RECORDING_ORDER_LOCK))?;
-    let mut lock = fd_lock::RwLock::new(lock_file);
-    let _held = lock.write()?;
     let mut file = (std::fs::OpenOptions::new())
         .create(true)
         .read(true)

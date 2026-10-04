@@ -65,6 +65,10 @@ pub enum WorkflowEventKind {
     /// and the progress ledger rebuilt without it (Issue 262). Carries the
     /// record, where its bytes went, why, and whether its state was known.
     AcceptanceRecordQuarantined,
+    /// The acceptance record the final gate is bound to was damaged or
+    /// gone, and the gate was rebuilt from the acceptance call's own result
+    /// (Issue 262, round 9). Carries the record, why, and the call.
+    AcceptanceGateRebuilt,
     RunEndAcceptanceObserverStarted,
     RunEndAcceptanceShadowObserved,
     RunEndAcceptanceObserverFailed,

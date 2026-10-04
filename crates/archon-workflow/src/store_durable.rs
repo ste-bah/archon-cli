@@ -10,12 +10,16 @@
 //! rename is `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`,
 //! which returns only once the move is flushed, and [`sync_dir`] opens the
 //! directory with `FILE_FLAG_BACKUP_SEMANTICS` and flushes it
-//! (`FlushFileBuffers`). A file system that refuses to flush a directory
-//! has nothing more to give, and that is no error. Where the write-through
-//! call refuses a rename std still makes (access denied, which std retries
-//! with a POSIX-semantics rename; a path past `MAX_PATH`), the rename is
-//! std's and the directory is flushed after it. This is built from the
-//! Win32 contract, not proven by a crash test on Windows.
+//! (`FlushFileBuffers`). A volume with no directory flush (an invalid
+//! function or parameter, not supported) has nothing more to give, and that
+//! is no error; a directory that will not open, or a denied flush, is an
+//! error (round 9: durability not obtained is never claimed). Where the
+//! write-through call refuses a rename std still makes (access denied,
+//! which std retries with a POSIX-semantics rename; a path past
+//! `MAX_PATH`), the rename is std's and the directory is flushed after it;
+//! a flush that fails there is an error saying the rename may not be
+//! durable. This is built from the Win32 contract, not proven by a crash
+//! test on Windows.
 
 use std::fs::{self, File};
 use std::io::Write;
@@ -52,9 +56,9 @@ pub(crate) fn rename_durable(from: &Path, to: &Path) -> WorkflowResult<()> {
 
 /// Syncs the directory `dir`, so the entries created, renamed or removed in
 /// it survive a system crash. A file system that cannot sync a directory
-/// (`EINVAL` or `ENOTSUP` on Unix; access denied, an invalid function or
-/// parameter, or not supported on Windows) has nothing more to give, and
-/// that is no error.
+/// (`EINVAL` or `ENOTSUP` on Unix; an invalid function or parameter, or not
+/// supported, on Windows) has nothing more to give, and that is no error.
+/// A directory that will not open, or a denied flush, is an error.
 pub(crate) fn sync_dir(dir: &Path) -> WorkflowResult<()> {
     #[cfg(unix)]
     let synced = File::open(dir).and_then(|handle| match handle.sync_all() {
@@ -81,6 +85,10 @@ pub(crate) fn sync_dir(dir: &Path) -> WorkflowResult<()> {
 #[cfg(windows)]
 #[path = "store_durable_windows.rs"]
 mod windows;
+
+#[cfg(any(windows, test))]
+#[path = "store_durable_flush.rs"]
+mod flush;
 
 #[cfg(test)]
 #[path = "store_durable_tests.rs"]

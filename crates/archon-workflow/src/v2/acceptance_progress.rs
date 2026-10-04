@@ -160,12 +160,15 @@ impl ProgressLedger {
 
 #[path = "acceptance_progress_heal.rs"]
 mod heal;
-pub(super) use heal::highest_quarantined_attempt;
-pub use heal::{HealedLedger, QUARANTINE_DIR, QuarantinedRecordV1, record_quarantine_events};
+pub use heal::{
+    HealedLedger, QUARANTINE_DIR, QuarantinedRecordV1, acknowledge_quarantined,
+    record_quarantine_events,
+};
+pub(super) use heal::{highest_quarantined_attempt, quarantined_attempt};
 
 #[path = "acceptance_record_order.rs"]
 mod order;
-pub(super) use order::note_recorded;
+pub(super) use order::{note_recorded_locked, under_order_lock};
 
 /// Whether `current` reached a failing state none of `history` reached.
 pub fn made_progress(

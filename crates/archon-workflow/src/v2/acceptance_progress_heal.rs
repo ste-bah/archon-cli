@@ -16,6 +16,15 @@
 //! remaining records: the gap is then a known, reported loss, bounded to
 //! the one record.
 //!
+//! Round 9: the loss stays reported until a pause acknowledges it. Every
+//! load reports every quarantined record of unknown state whose evidence
+//! carries no acknowledgement ([`acknowledge_quarantined`], written only
+//! once the pause is recorded), so a process that dies between the move and
+//! the pause leaves the next load to pause instead of going on silently.
+//! The saved ledger stands in for the records only when the run never had
+//! one: once any record exists or was quarantined, a legacy ledger (no
+//! `observed` copy) would bring back the very count that was lost.
+//!
 //! A record or log the file system will not hand over is no damage: that
 //! I/O error is returned for the caller to pause on, and nothing moves.
 
@@ -53,23 +62,29 @@ pub struct QuarantinedRecordV1 {
     /// log has no entry for it.
     pub written_nanos: u64,
     pub quarantined_at: String,
+    /// When a pause acknowledged the loss of a record of unknown state;
+    /// until then every load reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acknowledged_at: Option<String>,
 }
 
 /// The ledger a load rebuilt, and the records it quarantined doing so.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HealedLedger {
     pub ledger: ProgressLedger,
-    /// Quarantined by this load (reported once, at discovery).
+    /// Quarantined by this load (its event is reported once, at discovery).
     pub quarantined: Vec<QuarantinedRecordV1>,
+    /// Every quarantined record, by this load or an earlier one, with no
+    /// copy of its state and no pause acknowledging the loss.
+    pub unacknowledged: Vec<QuarantinedRecordV1>,
 }
 
 impl HealedLedger {
-    /// The records quarantined with no copy of their state: the rebuild
-    /// cannot be exact, and the caller pauses.
+    /// The records quarantined with no copy of their state whose loss no
+    /// pause has acknowledged: the rebuild cannot be exact, and the caller
+    /// pauses, then calls [`acknowledge_quarantined`].
     pub fn unknown(&self) -> Vec<&QuarantinedRecordV1> {
-        (self.quarantined.iter())
-            .filter(|record| record.state.is_none())
-            .collect()
+        self.unacknowledged.iter().collect()
     }
 }
 
@@ -85,8 +100,9 @@ struct Damaged {
 impl ProgressLedger {
     /// The ledger the round records leave, healing what is damaged: every
     /// readable record, plus each quarantined one whose state is known, in
-    /// recording order. No record at all leaves the saved ledger (a run
-    /// from before the records). An I/O error is returned, never healed.
+    /// recording order. A run that never had a record, readable or
+    /// quarantined, keeps the saved ledger (a run from before the records).
+    /// An I/O error is returned, never healed.
     pub fn load_healing(run_dir: &Path) -> crate::WorkflowResult<HealedLedger> {
         let saved = Self::saved(run_dir);
         let (mut history, damaged) = scan(run_dir)?;
@@ -97,16 +113,17 @@ impl ProgressLedger {
                 .and_then(|s| s.state_of(record.round, record.attempt));
             quarantined.extend(quarantine(run_dir, record, state.cloned())?);
         }
-        history.extend(quarantined_states(run_dir, saved.as_ref())?);
-        if history.is_empty() && quarantined.is_empty() {
-            return Ok(HealedLedger {
-                ledger: saved.unwrap_or_default(),
-                quarantined,
-            });
-        }
+        let found = read_quarantine(run_dir, saved.as_ref())?;
+        history.extend(found.known);
+        let ledger = if history.is_empty() && !found.any {
+            saved.unwrap_or_default()
+        } else {
+            Self::from_states(in_recorded_order(run_dir, history)?)
+        };
         Ok(HealedLedger {
-            ledger: Self::from_states(in_recorded_order(run_dir, history)?),
+            ledger,
             quarantined,
+            unacknowledged: found.unknown,
         })
     }
 }
@@ -238,6 +255,7 @@ fn quarantine(
         state,
         written_nanos: u64::try_from(record.written).unwrap_or(u64::MAX),
         quarantined_at: chrono::Utc::now().to_rfc3339(),
+        acknowledged_at: None,
     };
     let evidence_path = dir.join(format!("{stem}{EVIDENCE_SUFFIX}"));
     let staging = dir.join(format!(".{stem}.tmp"));
@@ -265,13 +283,27 @@ fn quarantine(
     Ok(Some(evidence))
 }
 
-/// Every quarantined record whose state is known (its evidence, else the
-/// saved ledger's copy) and whose bytes did move, once per record.
-fn quarantined_states(
+/// What the round quarantines hold.
+struct Quarantine {
+    /// Each record whose state is known (its evidence, else the saved
+    /// ledger's copy), once per record.
+    known: Vec<Recorded<ObservedState>>,
+    /// Each record of unknown state whose loss no pause acknowledged.
+    unknown: Vec<QuarantinedRecordV1>,
+    /// Whether any record was ever quarantined.
+    any: bool,
+}
+
+/// Every quarantined record whose bytes did move, by what is known of it.
+fn read_quarantine(
     run_dir: &Path,
     saved: Option<&ProgressLedger>,
-) -> crate::WorkflowResult<Vec<Recorded<ObservedState>>> {
-    let mut states = Vec::new();
+) -> crate::WorkflowResult<Quarantine> {
+    let mut found = Quarantine {
+        known: Vec::new(),
+        unknown: Vec::new(),
+        any: false,
+    };
     let mut seen = std::collections::BTreeSet::new();
     for round in round_dirs(run_dir)? {
         let dir = round.join(QUARANTINE_DIR);
@@ -284,27 +316,75 @@ fn quarantined_states(
                 continue;
             };
             let key = (evidence.round, evidence.attempt);
+            if !run_dir.join(&evidence.quarantined).is_file() || !seen.insert(key) {
+                continue;
+            }
+            found.any = true;
             let state = (evidence.state.clone())
                 .or_else(|| saved.and_then(|s| s.state_of(key.0, key.1).cloned()));
-            let moved = run_dir.join(&evidence.quarantined).is_file();
-            if let (Some(state), true) = (state, moved)
-                && seen.insert(key)
-            {
-                let place = u128::from(evidence.written_nanos);
-                let (round, attempt) = key;
-                states.push((
-                    place,
+            match state {
+                Some(state) => found.known.push((
+                    u128::from(evidence.written_nanos),
                     key,
                     ObservedState {
-                        round,
-                        attempt,
+                        round: key.0,
+                        attempt: key.1,
                         state,
                     },
-                ));
+                )),
+                None if evidence.acknowledged_at.is_none() => found.unknown.push(evidence),
+                None => {}
             }
         }
     }
-    Ok(states)
+    Ok(found)
+}
+
+/// Marks the loss of each record in `lost` acknowledged, in its evidence
+/// file (written whole, its directory synced). Called once the pause that
+/// reports the loss is recorded: a crash before it leaves the loss to be
+/// reported, and paused on, again.
+pub fn acknowledge_quarantined(
+    run_dir: &Path,
+    lost: &[QuarantinedRecordV1],
+) -> crate::WorkflowResult<()> {
+    let at = chrono::Utc::now().to_rfc3339();
+    for record in lost {
+        let moved = run_dir.join(&record.quarantined);
+        let name = (moved.file_name().and_then(|name| name.to_str()))
+            .and_then(|name| name.strip_suffix(DAMAGED_SUFFIX))
+            .ok_or_else(|| {
+                crate::WorkflowError::StateCorrupt(format!(
+                    "quarantined record {} has no evidence name",
+                    record.quarantined
+                ))
+            })?;
+        let dir = moved.parent().unwrap_or(run_dir).to_path_buf();
+        let evidence_path = dir.join(format!("{name}{EVIDENCE_SUFFIX}"));
+        let acknowledged = QuarantinedRecordV1 {
+            acknowledged_at: Some(at.clone()),
+            ..record.clone()
+        };
+        crate::store::write_atomic(
+            &dir.join(format!(".{name}.ack.tmp")),
+            &evidence_path,
+            &serde_json::to_vec_pretty(&acknowledged)?,
+        )?;
+        super::super::sync_record_dirs(run_dir, &dir)?;
+    }
+    Ok(())
+}
+
+/// Whether `attempt` of the round directory `dir` was quarantined: its
+/// number is taken, and no new record may reuse it. A quarantine that
+/// cannot be listed is an error, never "not taken".
+pub(in crate::v2::acceptance_stage) fn quarantined_attempt(
+    dir: &Path,
+    attempt: u32,
+) -> crate::WorkflowResult<bool> {
+    let quarantine = dir.join(QUARANTINE_DIR);
+    let names = entries_named(&quarantine, |name| attempt_of(name) == Some(attempt))?;
+    Ok(!names.is_empty())
 }
 
 /// The highest attempt quarantined in the round directory `dir`: a number

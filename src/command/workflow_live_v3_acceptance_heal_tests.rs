@@ -205,3 +205,27 @@ async fn the_script_host_pauses_on_corrupt_history() {
     );
     assert_eq!(status(&fixture), RunStatus::Paused);
 }
+
+/// Round 9 (P2): the process died after quarantining a record of unknown
+/// state and before it paused. The next execution still pauses on the
+/// loss (never goes on silently), and the resume after that goes on.
+#[tokio::test]
+async fn a_loss_quarantined_before_a_crash_still_pauses_the_next_execution() {
+    use archon_workflow::v2::acceptance_stage::progress::ProgressLedger;
+    let fixture = fixture_with(true, "test -f missing");
+    run(&fixture, &execution(1, 3, &[])).await.unwrap();
+    std::fs::remove_file(run_dir(&fixture).join("v2/acceptance/progress-ledger.json")).unwrap();
+    std::fs::write(first_record(&fixture), "{\"round\":").unwrap();
+    // Moved to quarantine; the process dies before it pauses.
+    let healed = ProgressLedger::load_healing(&run_dir(&fixture)).unwrap();
+    assert_eq!(healed.unknown().len(), 1, "{healed:?}");
+
+    let second = run(&fixture, &execution(2, 3, &[])).await;
+
+    let message = assert_paused(&fixture, &second);
+    assert!(message.contains("quarantine"), "{message}");
+    resume(&fixture);
+    run(&fixture, &execution(2, 3, &[]))
+        .await
+        .expect("acknowledged by the pause: a resume goes on");
+}

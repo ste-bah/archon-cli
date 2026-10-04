@@ -18,13 +18,11 @@
 
 use anyhow::Result;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
-use archon_workflow::v2::acceptance_stage::{
-    AcceptanceRoundRecordV1, latest_round_record, relative_record_path,
-};
+use archon_workflow::v2::acceptance_stage::AcceptanceRoundRecordV1;
 use archon_workflow::v2::script::residual_plan::residual_verdict;
 use archon_workflow::v2::script::{
     AuthoredAcceptanceGateFact, AuthoredCallRole, AuthoredRunFacts, authored_call_facts,
-    authored_run_terminal_status_with, is_acceptance_stage_call, writable_task_ids,
+    authored_run_terminal_status_with, writable_task_ids,
 };
 use archon_workflow::{
     AuthoredAcceptanceGateV1, RunEndAcceptanceObserverSnapshotV1, WorkflowEventKind,
@@ -34,6 +32,9 @@ use archon_workflow::{
 
 use super::workflow_live_v2_script::WorkflowV2ScriptSummary;
 
+#[path = "workflow_live_v3_run_end_gate.rs"]
+mod gate;
+use gate::{GateRecord, gate_of, read_acceptance_gate};
 #[path = "workflow_live_v3_run_end_reopen.rs"]
 mod reopen;
 pub(super) use reopen::AcceptanceReentry;
@@ -237,83 +238,6 @@ fn hold_to_round(
         ));
     }
     (summary, Some(gate))
-}
-
-/// The acceptance round the gate is judged on, and whether it is BOUND to a
-/// call this run executed or replayed.
-struct GateRecord {
-    gate: AuthoredAcceptanceGateV1,
-    record: AcceptanceRoundRecordV1,
-    path: std::path::PathBuf,
-    bound: bool,
-}
-
-/// The round record named by the last acceptance call in `calls` (its own
-/// record's `data.record_path`), so a record an earlier process left for a
-/// round this run never reached can neither pass nor pin the gate. A run
-/// with no acceptance call (an older script) falls back to the newest record
-/// on disk, unbound.
-fn read_acceptance_gate(
-    store: &WorkflowStore,
-    run_id: &str,
-    v2_store: &WorkflowV2ResultStore,
-    calls: &[archon_workflow::WorkflowV2HostCall],
-) -> WorkflowResult<Option<GateRecord>> {
-    let run_dir = store.run_dir(run_id);
-    let found = match calls
-        .iter()
-        .rev()
-        .find(|call| is_acceptance_stage_call(call))
-    {
-        Some(call) => {
-            let named = v2_store.load_call_record(&call.id)?.and_then(|record| {
-                record
-                    .result
-                    .data
-                    .get("record_path")
-                    .and_then(serde_json::Value::as_str)
-                    .map(|path| run_dir.join(path))
-            });
-            match named.filter(|path| path.is_file()) {
-                Some(path) => {
-                    let bytes = std::fs::read(&path).map_err(|source| {
-                        archon_workflow::WorkflowError::Io {
-                            path: path.clone(),
-                            source,
-                        }
-                    })?;
-                    Some((serde_json::from_slice(&bytes)?, path, true))
-                }
-                None => None,
-            }
-        }
-        None => latest_round_record(&run_dir)?.map(|(record, path)| (record, path, false)),
-    };
-    Ok(found.map(
-        |(record, path, bound): (AcceptanceRoundRecordV1, _, bool)| GateRecord {
-            gate: gate_of(&run_dir, &record, &path),
-            record,
-            path,
-            bound,
-        },
-    ))
-}
-
-/// The gate a round record at `path` gives.
-fn gate_of(
-    run_dir: &std::path::Path,
-    record: &AcceptanceRoundRecordV1,
-    path: &std::path::Path,
-) -> AuthoredAcceptanceGateV1 {
-    AuthoredAcceptanceGateV1 {
-        final_round: record.round,
-        attempt: record.attempt,
-        record_path: relative_record_path(run_dir, path),
-        contract_present: record.contract_present,
-        failing_check_ids: record.failing_check_ids(),
-        unowned_failing_check_ids: record.unowned_failing_check_ids(),
-        operational_errors: record.operational_errors.clone(),
-    }
 }
 
 /// Replace the accumulator's worst-call status with the verdict the host's
