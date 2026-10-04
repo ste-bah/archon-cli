@@ -65,3 +65,14 @@ fn sequence_count_survives_split_utf8_tail() {
     fs::write(store.events_path("run"), b"{}\n{\"detail\":\"\xc3").unwrap();
     assert_eq!(store.next_event_seq("run").unwrap(), 3);
 }
+
+/// Issue 318: secret-bearing records publish through `rename_durable`, like
+/// every other durable write. A plain rename may return on Windows before
+/// the move is on disk; on Unix the two are the same call, so this guards
+/// the source rather than a crash.
+#[test]
+fn private_records_publish_through_the_durable_rename() {
+    let source = include_str!("store_private.rs");
+    assert!(!source.contains("fs::rename("), "{source}");
+    assert!(source.contains("rename_durable(&tmp, &target)"), "{source}");
+}
