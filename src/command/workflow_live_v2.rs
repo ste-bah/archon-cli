@@ -114,7 +114,7 @@ mod workflow_run_end_observer;
 #[path = "workflow_run_end_observer_tests.rs"]
 mod workflow_run_end_observer_tests;
 #[path = "workflow_run_end_snapshot.rs"]
-mod workflow_run_end_snapshot;
+pub(super) mod workflow_run_end_snapshot;
 #[cfg(test)]
 #[path = "workflow_run_end_snapshot_tests.rs"]
 mod workflow_run_end_snapshot_tests;

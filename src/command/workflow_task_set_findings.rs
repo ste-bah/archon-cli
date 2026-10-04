@@ -137,6 +137,7 @@ pub(super) fn finish_acceptance(
             freeze_event_id: pin.freeze_event_id.clone(),
         },
         contract_bytes,
+        recovery: None,
         lock,
         pin,
         findings,

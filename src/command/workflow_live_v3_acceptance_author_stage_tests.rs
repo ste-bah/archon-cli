@@ -381,3 +381,6 @@ async fn r7_resumed_unstamped_entry_clears_evidence_before_fresh_publication() {
 async fn r7_resumed_unstamped_entry_clears_evidence_before_extension_publication() {
     resumed_unstamped_entry(true).await;
 }
+
+#[path = "workflow_live_v3_acceptance_recovery_tests.rs"]
+mod recovery_tests;

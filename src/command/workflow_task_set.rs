@@ -60,6 +60,7 @@ pub(crate) struct PreparedAcceptanceFreeze {
     contract_bytes: Vec<u8>,
     lock: AcceptanceLock,
     pin: AcceptancePin,
+    recovery: Option<recovery_lineage::Publication>,
     /// Checks the judge did not accept. Never published: such a check can
     /// never run, so a freeze carrying one is refused at publication.
     non_accepted: BTreeSet<String>,
@@ -77,6 +78,9 @@ pub(crate) struct PreparedSkeletonFreeze {
     pub(crate) findings: Vec<GateFinding>,
     pub(crate) result: FreezeSkeletonResult,
 }
+
+#[path = "workflow_task_set_recovery_lineage.rs"]
+pub(crate) mod recovery_lineage;
 
 #[path = "workflow_task_set_enforce.rs"]
 mod enforce;
@@ -236,12 +240,13 @@ pub(crate) fn publish_acceptance_freeze(
         ));
     }
     prepared.require_all_accepted()?;
-    publish_acceptance_files(
+    publish_acceptance_files_with_recovery(
         &prepared.tasks_root,
         &prepared.project_root,
         &prepared.contract_bytes,
         &prepared.lock,
         &prepared.pin,
+        prepared.recovery.as_ref(),
     )?;
     Ok(prepared.result)
 }
@@ -438,8 +443,12 @@ pub(crate) use findings::{
 };
 #[cfg(test)]
 use publish::cleanup_committed_backups;
-pub(crate) use publish::{ChainLock, begin_publish, publish_files_atomically};
-use publish::{publish_acceptance_files, publish_skeleton_files};
+pub(crate) use publish::{
+    ChainLock, begin_publish, create_dir_all_durably, lock_and_recover, publish_files_atomically,
+    recover_interrupted_publish, sync_parent, validate_destination, validate_existing_parents,
+    write_durably,
+};
+use publish::{publish_acceptance_files_with_recovery, publish_skeleton_files};
 
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_passability_tests.rs"]
@@ -450,3 +459,6 @@ pub(crate) mod passability_tests_support;
 #[cfg(test)]
 #[path = "workflow_task_set_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+pub(crate) use publish::reader_test_step;

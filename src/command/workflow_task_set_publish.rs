@@ -1,4 +1,11 @@
-//! Atomic all-or-nothing publication for prepared task-set freezes.
+//! Crash-atomic all-or-nothing publication for prepared task-set freezes.
+//!
+//! The commit point of a publish is one atomic rename: the publish journal
+//! (`journal` module) moving to `committed`. A kill at any instant leaves the
+//! journal in the state that decides the outcome, and recovery
+//! (`recover` module) — run by every publisher under the set's publish lock,
+//! by the chain lock's acquisition, and at run launch and resume — rolls the
+//! set back to the complete old version or forward to the complete new one.
 
 use std::path::{Path, PathBuf};
 
@@ -9,20 +16,95 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_skeleton::TaskSkeletonLock;
 
+#[path = "workflow_task_set_publish_journal.rs"]
+mod journal;
+#[path = "workflow_task_set_publish_legacy.rs"]
+mod legacy;
+#[path = "workflow_task_set_publish_verification.rs"]
+mod verification;
+pub(crate) fn valid_recovery_transaction(value: &str) -> bool {
+    journal::is_transaction_id(value)
+}
+pub(crate) use legacy::verify_chain as verify_recovered_chain;
+#[path = "workflow_task_set_publish_recover.rs"]
+mod recover;
+#[path = "workflow_task_set_publish_scope.rs"]
+mod scope;
+
+#[cfg(test)]
+pub(crate) use journal::CRASH_ENV;
+use journal::{
+    Journal, JournalEntry, JournalPaths, JournalState, PublishLock, crash_point, digest_of,
+    recover_journal, remove_if_present, rename, sibling_transaction_path, sync_parents,
+};
+pub(crate) use journal::{create_dir_all_durably, sync_parent, write_durably};
+use recover::recover_before_publish;
+#[cfg(test)]
+pub(crate) use recover::recovery_log_path;
+pub(crate) use recover::{lock_and_recover, recover_interrupted_publish};
+pub(crate) use scope::{validate_destination, validate_existing_parents};
+
 /// An exclusive advisory lock on one task set's frozen chain, keyed by its
 /// pin. Every host publisher of that chain — the whole-set acceptance freeze,
 /// the skeleton freeze and the per-check repair — holds it while it writes, so
 /// two of them never interleave. The OS releases it when the process ends, so
-/// a crash never leaves a stale lock behind.
+/// a crash never leaves a stale lock behind. Acquiring it first settles any
+/// publish of the set a crash interrupted.
 pub(crate) struct ChainLock {
     _file: std::fs::File,
 }
 
 impl ChainLock {
-    pub(crate) fn acquire(pin_path: &Path) -> Result<Self> {
-        let path = pin_path.with_extension("chain.lock");
+    /// Take the lock now or fail: an operator command reports the holder.
+    pub(crate) fn acquire(pin_path: &Path, tasks_root: &Path) -> Result<Self> {
+        let (file, path) = Self::open(pin_path)?;
+        file.try_lock().map_err(|error| {
+            anyhow!(
+                "another freeze or repair of this task set holds {} ({error}); wait for it to finish",
+                path.display()
+            )
+        })?;
+        recover_interrupted_publish(pin_path, tasks_root)?;
+        Ok(Self { _file: file })
+    }
+
+    /// Wait for the lock: a run's own publication outlasts a per-check repair
+    /// that holds it across model calls instead of failing its stage. The OS
+    /// releases a dead holder's lock, so the wait ends when the holder does;
+    /// it is logged when it starts and every minute it continues.
+    pub(crate) fn acquire_waiting(pin_path: &Path, tasks_root: &Path) -> Result<Self> {
+        let (file, path) = Self::open(pin_path)?;
+        let started = std::time::Instant::now();
+        let mut reported: Option<std::time::Duration> = None;
+        loop {
+            match file.try_lock() {
+                Ok(()) => break,
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    let waited = started.elapsed();
+                    if reported.is_none_or(|last| waited - last >= CHAIN_LOCK_REPORT_EVERY) {
+                        tracing::info!(
+                            lock = %path.display(),
+                            waited_secs = waited.as_secs(),
+                            "waiting for another freeze or repair of this task set to finish"
+                        );
+                        reported = Some(waited);
+                    }
+                    std::thread::sleep(CHAIN_LOCK_POLL);
+                }
+                Err(std::fs::TryLockError::Error(error)) => {
+                    return Err(error)
+                        .with_context(|| format!("locking chain lock {}", path.display()));
+                }
+            }
+        }
+        recover_interrupted_publish(pin_path, tasks_root)?;
+        Ok(Self { _file: file })
+    }
+
+    fn open(pin_path: &Path) -> Result<(std::fs::File, PathBuf)> {
+        let path = JournalPaths::for_pin(pin_path).chain_lock;
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+            create_dir_all_durably(parent)?;
         }
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -30,15 +112,12 @@ impl ChainLock {
             .write(true)
             .open(&path)
             .with_context(|| format!("opening chain lock {}", path.display()))?;
-        file.try_lock().map_err(|error| {
-            anyhow!(
-                "another freeze or repair of this task set holds {} ({error}); wait for it to finish",
-                path.display()
-            )
-        })?;
-        Ok(Self { _file: file })
+        Ok((file, path))
     }
 }
+
+const CHAIN_LOCK_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+const CHAIN_LOCK_REPORT_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// The bytes a target must still hold when the transaction replaces it:
 /// `Some(Some(digest))`, `Some(None)` for absent; unlisted targets are not
@@ -52,8 +131,10 @@ pub(super) fn publish_skeleton_files(
     lock: &TaskSkeletonLock,
     pin: &AcceptancePin,
 ) -> Result<()> {
-    let _lock = ChainLock::acquire(pin_path)?;
+    let _lock = ChainLock::acquire(pin_path, tasks_root)?;
     publish_files_atomically(
+        pin_path,
+        tasks_root,
         &[
             (tasks_root.join(TASK_SKELETON_FILE), skeleton_bytes.to_vec()),
             (
@@ -66,117 +147,159 @@ pub(super) fn publish_skeleton_files(
     )
 }
 
-pub(super) fn publish_acceptance_files(
-    tasks_root: &Path,
-    project_root: &Path,
-    contract_bytes: &[u8],
-    lock: &AcceptanceLock,
-    pin: &AcceptancePin,
-) -> Result<()> {
-    let pin_path = super::acceptance_pin_path(project_root, tasks_root);
-    if let Some(parent) = pin_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let _lock = ChainLock::acquire(&pin_path)?;
-    // PLAN-11: the sources each check runs are pinned with the chain.
-    let sidecar =
-        super::check_sources::frozen_sidecar(project_root, tasks_root, contract_bytes, None)?;
-    let mut pin = pin.clone();
-    pin.check_sources_digest = Some(content_digest(&sidecar.1));
-    publish_files_atomically(
-        &[
-            (
-                tasks_root.join(ACCEPTANCE_CONTRACT_FILE),
-                contract_bytes.to_vec(),
-            ),
-            (
-                tasks_root.join(ACCEPTANCE_LOCK_FILE),
-                serde_json::to_vec_pretty(lock)?,
-            ),
-            sidecar,
-            (pin_path, serde_json::to_vec_pretty(&pin)?),
-        ],
-        "workflow freeze-acceptance",
-    )
-}
+#[path = "workflow_task_set_publish_acceptance.rs"]
+mod acceptance;
+#[cfg(test)]
+pub(super) use acceptance::publish_acceptance_files;
+pub(super) use acceptance::publish_acceptance_files_with_recovery;
 
-pub(crate) fn publish_files_atomically(files: &[(PathBuf, Vec<u8>)], remedy: &str) -> Result<()> {
-    let transaction = begin_publish(files, remedy, &[])?;
-    for warning in transaction.commit() {
+/// Publish `files` as one crash-atomic transaction journaled beside the task
+/// set's acceptance pin at `pin_path`.
+pub(crate) fn publish_files_atomically(
+    pin_path: &Path,
+    tasks_root: &Path,
+    files: &[(PathBuf, Vec<u8>)],
+    remedy: &str,
+) -> Result<()> {
+    let transaction = begin_publish(pin_path, tasks_root, files, remedy, &[])?;
+    for warning in transaction.commit()? {
+        tracing::warn!("{warning}");
         eprintln!("warning: {warning}");
     }
     Ok(())
 }
 
 /// A published but not yet committed freeze: every target already holds its
-/// new bytes, and a hard-link backup of each prior version is kept until the
-/// caller commits (drops the backups) or rolls back (restores them).
-///
-/// Crash safety: each target is replaced by one `rename` of a fully written
-/// sibling, which POSIX makes atomic, so at every instant a target holds its
-/// complete old or complete new bytes and is never missing. A crash before
-/// commit leaves the `.<name>.<txn>.old` backups beside the targets.
+/// new bytes, a hard-link backup of each prior version is kept, and the
+/// journal says `applying`, so a crash now restores the prior set. The caller
+/// commits (the journal's atomic move to `committed`, then cleanup) or rolls
+/// back. Dropped without either — a panic — the journal stays `applying` and
+/// the next recovery of the set rolls it back.
 #[must_use = "a publish transaction must be committed or rolled back"]
 pub(crate) struct PublishTransaction {
-    /// (target, backup of its prior bytes or None when it did not exist,
-    /// digest of the bytes this transaction wrote there).
-    replaced: Vec<Replaced>,
+    _lock: PublishLock,
+    paths: JournalPaths,
+    journal: Journal,
 }
 
-type Replaced = (PathBuf, Option<PathBuf>, String);
-
 impl PublishTransaction {
-    /// Keep the new bytes and drop the backups.
-    pub(crate) fn commit(self) -> Vec<String> {
-        let backups = self
-            .replaced
+    /// Pass the commit point, then durably clean up. A journal-store error
+    /// leaves its on-disk decision authoritative: it may have been renamed
+    /// before the directory flush failed, so never start an opposing rollback.
+    pub(crate) fn commit(self) -> Result<Vec<String>> {
+        let mut journal = self.journal.clone();
+        journal.state = JournalState::Committed;
+        journal.store(&self.paths).with_context(|| format!(
+            "recording commit failed; decision in {} is kept for automatic recovery on the next acquisition",
+            self.paths.journal.display()
+        ))?;
+        crash_point("committed");
+        let backups = journal
+            .entries
             .iter()
-            .filter_map(|(target, backup, _)| backup.clone().map(|backup| (target.clone(), backup)))
+            .filter_map(|entry| {
+                let backup = entry.backup.clone()?;
+                Some((entry.target.clone(), backup))
+            })
             .collect::<Vec<_>>();
-        cleanup_committed_backups(&backups, |path| std::fs::remove_file(path))
+        let mut warnings = cleanup_committed_backups(&backups, |path| {
+            remove_if_present(path).map_err(std::io::Error::other)
+        });
+        if warnings.is_empty()
+            && let Err(error) = sync_parents(backups.iter().map(|(_, backup)| backup.as_path()))
+        {
+            warnings.push(format!(
+                "committed backup cleanup could not be flushed ({error:#}); journal kept for recovery"
+            ));
+        }
+        if warnings.is_empty() {
+            crash_point("commit-before-journal-removal");
+            if let Err(error) = Journal::remove(&self.paths) {
+                warnings.push(format!(
+                    "freeze is committed, but its journal could not be removed ({error:#}); the next publish, launch or resume of this task set removes it"
+                ));
+            }
+        } else {
+            warnings.push(format!(
+                "the committed journal {} is kept so the next publish, launch or resume of this task set finishes the cleanup",
+                self.paths.journal.display()
+            ));
+        }
+        crash_point("cleaned");
+        Ok(warnings)
     }
 
     /// Restore every prior version (removing targets that did not exist).
+    /// A target another writer replaced after this publish is theirs now and
+    /// is left as it is: restoring over it would be the very lost update the
+    /// chain lock exists to prevent.
     pub(crate) fn roll_back(self) -> Result<()> {
-        roll_back(&self.replaced)
+        let mut foreign = Vec::new();
+        for entry in &self.journal.entries {
+            match digest_of(&entry.target) {
+                Ok(current) if current.as_deref() == Some(entry.written.as_str()) => {}
+                Ok(_) => foreign.push(format!(
+                    "{}: changed after this publish, left as it is",
+                    entry.target.display()
+                )),
+                Err(error) => foreign.push(format!("{error:#}")),
+            }
+        }
+        recover_journal(&self.journal, &self.paths).map_err(|error| {
+            anyhow!(
+                "freeze rollback failed ({error:#}); the publish journal {} is kept and the next publish, launch or resume of this task set finishes the rollback",
+                self.paths.journal.display()
+            )
+        })?;
+        if foreign.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!("freeze rollback skipped {}", foreign.join("; ")))
+        }
     }
 }
 
-fn roll_back(replaced: &[Replaced]) -> Result<()> {
-    let mut failures = Vec::new();
-    for (target, backup, written) in replaced.iter().rev() {
-        // Only undo our own write: a target someone replaced after this
-        // transaction published is theirs now, and restoring over it would
-        // be the very lost update the chain lock exists to prevent.
-        let current = std::fs::read(target)
-            .ok()
-            .map(|bytes| content_digest(&bytes));
-        if current.as_deref() != Some(written.as_str()) {
-            failures.push(format!(
-                "{}: changed after this publish, left as it is",
-                target.display()
-            ));
-            continue;
-        }
-        let restored = match backup {
-            Some(backup) => std::fs::rename(backup, target),
-            None => std::fs::remove_file(target),
-        };
-        if let Err(error) = restored {
-            failures.push(format!("{}: {error}", target.display()));
-        }
+/// Roll an `applying` transaction back in-process after `error`.
+fn undo(journal: &Journal, paths: &JournalPaths, error: anyhow::Error) -> anyhow::Error {
+    let mut applying = journal.clone();
+    applying.state = JournalState::Applying;
+    match recover_journal(&applying, paths) {
+        Ok(_) => error.context("the prior chain was restored"),
+        Err(rollback) => error.context(format!(
+            "rollback failed ({rollback:#}); the publish journal {} is kept and the next publish, launch or resume of this task set finishes the rollback",
+            paths.journal.display()
+        )),
     }
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "freeze rollback failed for {}; the prior versions are the .old backups beside each target",
-            failures.join("; ")
-        ))
+}
+
+/// Abandon a transaction that replaced nothing: remove the transaction files
+/// it created, then its journal. A file that cannot be removed keeps the
+/// journal, so recovery retries.
+fn abandon(paths: &JournalPaths, created: &[PathBuf], error: anyhow::Error) -> anyhow::Error {
+    let failures = created
+        .iter()
+        .filter_map(|path| remove_if_present(path).err())
+        .map(|failure| format!("{failure:#}"))
+        .collect::<Vec<_>>();
+    if !failures.is_empty() {
+        return error.context(format!(
+            "cleanup failed ({}); the publish journal {} is kept for the next recovery",
+            failures.join("; "),
+            paths.journal.display()
+        ));
+    }
+    if let Err(cleanup) = sync_parents(created.iter().map(PathBuf::as_path)) {
+        return error.context(format!("abandoned transaction cleanup could not be flushed ({cleanup:#}); journal kept for recovery"));
+    }
+    match Journal::remove(paths) {
+        Ok(()) => error,
+        Err(cleanup) => error.context(format!("{cleanup:#}")),
     }
 }
 
 pub(crate) fn begin_publish(
+    pin_path: &Path,
+    tasks_root: &Path,
     files: &[(PathBuf, Vec<u8>)],
     remedy: &str,
     expected_prior: &ExpectedPrior,
@@ -189,30 +312,49 @@ pub(crate) fn begin_publish(
             ));
         }
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)?;
+            create_dir_all_durably(parent)?;
         }
     }
-    let suffix = uuid::Uuid::new_v4().simple().to_string();
-    let mut temps = Vec::new();
-    for (target, bytes) in files {
-        let temp = sibling_transaction_path(target, &suffix, "new");
-        let written = (|| -> std::io::Result<()> {
-            use std::io::Write;
-            // Windows requires write access for FlushFileBuffers. Flush the
-            // same handle that staged the bytes, before any target is replaced.
-            let mut file = std::fs::File::create(&temp)?;
-            file.write_all(bytes)?;
-            file.sync_all()
-        })();
-        if let Err(error) = written {
-            for (staged, _) in &temps {
-                let _ = std::fs::remove_file(staged);
-            }
-            let _ = std::fs::remove_file(&temp);
-            return Err(error).with_context(|| format!("writing {}", temp.display()));
+    let paths = JournalPaths::for_pin(pin_path);
+    let lock = PublishLock::acquire(&paths)?;
+    let targets = files
+        .iter()
+        .map(|(target, _)| target.clone())
+        .collect::<Vec<_>>();
+    recover_before_publish(&paths, pin_path, tasks_root)?;
+    let transaction = uuid::Uuid::new_v4().simple().to_string();
+    let mut journal = Journal::new(
+        transaction.clone(),
+        remedy,
+        files
+            .iter()
+            .map(|(target, bytes)| JournalEntry {
+                target: target.clone(),
+                staged: sibling_transaction_path(target, &transaction, "new"),
+                backup: Some(sibling_transaction_path(target, &transaction, "old")),
+                written: content_digest(bytes),
+            })
+            .collect(),
+    );
+    journal.validate(&paths, &recover::publication_scopes(pin_path, tasks_root)?)?;
+    journal.store(&paths)?;
+    crash_point("prepared");
+    let mut created = Vec::new();
+    let staged = (|| -> Result<()> {
+        for (entry, (_, bytes)) in journal.entries.iter().zip(files) {
+            write_durably(&entry.staged, bytes).map_err(|error| {
+                // A partly written file is still ours to remove.
+                created.push(entry.staged.clone());
+                anyhow!(error).context(format!("writing {}", entry.staged.display()))
+            })?;
+            created.push(entry.staged.clone());
         }
-        temps.push((temp, target.clone()));
+        sync_parents(targets.iter().map(PathBuf::as_path))
+    })();
+    if let Err(error) = staged {
+        return Err(abandon(&paths, &created, error));
     }
+    crash_point("staged");
     // Last look before the first rename: every target must still hold the
     // bytes the caller verified, or another writer got there first.
     let changed = expected_prior
@@ -223,47 +365,50 @@ pub(crate) fn begin_publish(
         .map(|(path, _)| path.display().to_string())
         .collect::<Vec<_>>();
     if !changed.is_empty() {
-        for (temp, _) in &temps {
-            let _ = std::fs::remove_file(temp);
-        }
-        return Err(anyhow!(
+        let error = anyhow!(
             "the frozen chain changed since it was verified ({}); nothing was written — re-run against the current chain",
             changed.join(", ")
-        ));
+        );
+        return Err(abandon(&paths, &created, error));
     }
-    let mut replaced: Vec<Replaced> = Vec::new();
-    let operation = (|| -> Result<()> {
-        for ((temp, target), (_, bytes)) in temps.iter().zip(files) {
-            let backup = if target.exists() {
-                let backup = sibling_transaction_path(target, &suffix, "old");
-                std::fs::hard_link(target, &backup).with_context(|| {
-                    format!("backing up {} before publishing", target.display())
-                })?;
-                Some(backup)
-            } else {
-                None
+    let backed_up = (|| -> Result<()> {
+        for entry in &mut journal.entries {
+            let Some(backup) = entry.backup.clone() else {
+                continue;
             };
-            if let Err(error) = std::fs::rename(temp, target) {
-                if let Some(backup) = backup {
-                    let _ = std::fs::remove_file(backup);
-                }
-                return Err(error)
-                    .with_context(|| format!("publishing freeze to {}", target.display()));
+            if !entry.target.exists() {
+                entry.backup = None;
+                continue;
             }
-            replaced.push((target.clone(), backup, content_digest(bytes)));
+            std::fs::hard_link(&entry.target, &backup).with_context(|| {
+                format!("backing up {} before publishing", entry.target.display())
+            })?;
+            created.push(backup);
         }
-        Ok(())
+        sync_parents(targets.iter().map(PathBuf::as_path))?;
+        journal.state = JournalState::Applying;
+        journal.store(&paths)
     })();
-    if let Err(error) = operation {
-        for (temp, _) in &temps {
-            let _ = std::fs::remove_file(temp);
-        }
-        return match roll_back(&replaced) {
-            Ok(()) => Err(error),
-            Err(rollback) => Err(error.context(rollback.to_string())),
-        };
+    if let Err(error) = backed_up {
+        return Err(abandon(&paths, &created, error));
     }
-    Ok(PublishTransaction { replaced })
+    crash_point("applying");
+    let applied = (|| -> Result<()> {
+        for (index, entry) in journal.entries.iter().enumerate() {
+            rename(&entry.staged, &entry.target)
+                .with_context(|| format!("publishing freeze to {}", entry.target.display()))?;
+            crash_point(&format!("renamed-{index}"));
+        }
+        sync_parents(targets.iter().map(PathBuf::as_path))
+    })();
+    if let Err(error) = applied {
+        return Err(undo(&journal, &paths, error));
+    }
+    Ok(PublishTransaction {
+        _lock: lock,
+        paths,
+        journal,
+    })
 }
 
 pub(super) fn cleanup_committed_backups<F>(
@@ -274,21 +419,23 @@ where
     F: FnMut(&Path) -> std::io::Result<()>,
 {
     let mut warnings = Vec::new();
-    for (_, backup) in backups {
+    for (index, (_, backup)) in backups.iter().enumerate() {
         if let Err(error) = remove(backup) {
             warnings.push(format!(
                 "freeze is already committed, but transaction backup {} could not be removed: {error}; verify the live freeze, then remove the stale backup manually",
                 backup.display()
             ));
         }
+        crash_point(&format!("commit-backup-cleaned-{index}"));
     }
     warnings
 }
 
-fn sibling_transaction_path(target: &Path, suffix: &str, role: &str) -> PathBuf {
-    let name = target
-        .file_name()
-        .map(|name| name.to_string_lossy())
-        .unwrap_or_default();
-    target.with_file_name(format!(".{name}.{suffix}.{role}"))
+#[cfg(test)]
+#[path = "workflow_task_set_publish_crash_tests.rs"]
+mod crash_tests;
+
+#[cfg(test)]
+pub(crate) fn reader_test_step(step: &str) {
+    crash_point(step);
 }

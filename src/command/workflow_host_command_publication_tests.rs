@@ -100,7 +100,13 @@ fn mutation_sentinel_change_refuses_publication() {
     .unwrap();
     std::fs::write(&protected, b"after").unwrap();
 
-    let error = publish_audited(audited, &BTreeMap::new()).unwrap_err();
+    let error = publish_audited(
+        audited,
+        &BTreeMap::new(),
+        &temp.path().join("pins/set.json"),
+        temp.path(),
+    )
+    .unwrap_err();
     assert!(error.to_string().contains("mutation sentinel"), "{error}");
 }
 
@@ -112,25 +118,45 @@ fn receipt_records_exact_live_bytes_after_parent_commit() {
     let live = temp.path().join("live/one.txt");
     std::fs::create_dir_all(live.parent().unwrap()).unwrap();
     std::fs::write(&live, b"old bytes").unwrap();
-    let command = resolved(&staging.root, &["one.txt"]);
+    let gate = temp
+        .path()
+        .join(".archon/workflows/run/host-command-results/call/gate-envelope.json");
+    std::fs::write(staging.root.join("gate-envelope.json"), b"receipt").unwrap();
+    let command = resolved(&staging.root, &["one.txt", "gate-envelope.json"]);
     let audited = audit_prepared_publication(
         &staging,
-        &manifest("call-1", &[("one.txt", b"new bytes")]),
+        &manifest(
+            "call-1",
+            &[
+                ("one.txt", b"new bytes"),
+                ("gate-envelope.json", b"receipt"),
+            ],
+        ),
         &command,
         LiveMutationSentinels::capture(&[]).unwrap(),
     )
     .unwrap();
-    let destinations = BTreeMap::from([("one.txt".to_string(), live.clone())]);
-
-    let receipt = publish_audited(audited, &destinations).unwrap();
-    assert_eq!(std::fs::read(&live).unwrap(), b"new bytes");
-    assert_eq!(receipt.entries.len(), 1);
-    assert_eq!(receipt.entries[0].blake3, digest(b"new bytes"));
-    let old_digest = digest(b"old bytes");
-    assert_eq!(
-        receipt.entries[0].prior_blake3.as_deref(),
-        Some(old_digest.as_str())
+    let destinations = BTreeMap::from([
+        ("one.txt".to_string(), live.clone()),
+        ("gate-envelope.json".to_string(), gate.clone()),
+    ]);
+    let pin = crate::command::workflow_task_set::acceptance_pin_path(
+        temp.path(),
+        &temp.path().join("live"),
     );
+
+    let receipt = publish_audited(audited, &destinations, &pin, &temp.path().join("live")).unwrap();
+    assert_eq!(std::fs::read(&live).unwrap(), b"new bytes");
+    assert_eq!(receipt.entries.len(), 2);
+    assert_eq!(std::fs::read(&gate).unwrap(), b"receipt");
+    let one = receipt
+        .entries
+        .iter()
+        .find(|entry| entry.relative_path == "one.txt")
+        .unwrap();
+    assert_eq!(one.blake3, digest(b"new bytes"));
+    let old_digest = digest(b"old bytes");
+    assert_eq!(one.prior_blake3.as_deref(), Some(old_digest.as_str()));
 }
 
 #[cfg(unix)]
@@ -151,4 +177,49 @@ fn staged_symlink_is_refused() {
     )
     .unwrap_err();
     assert!(error.to_string().contains("symlink"), "{error}");
+}
+
+/// Issue 271 round 3: a per-check repair may hold the chain lock across model
+/// calls; the parent publication waits for it instead of failing the stage.
+#[test]
+fn parent_publication_waits_for_the_frozen_chain_lock() {
+    let temp = tempfile::tempdir().unwrap();
+    let tasks = temp.path().join("live");
+    std::fs::create_dir(&tasks).unwrap();
+    let live = tasks.join("one.txt");
+    std::fs::write(&live, b"old bytes").unwrap();
+    let pin = crate::command::workflow_task_set::acceptance_pin_path(temp.path(), &tasks);
+    let chain = crate::command::workflow_task_set::ChainLock::acquire(&pin, &tasks).unwrap();
+    let staging = prepare_staging(temp.path(), "call-chain").unwrap();
+    std::fs::write(staging.root.join("one.txt"), b"new bytes").unwrap();
+    let audited = audit_prepared_publication(
+        &staging,
+        &manifest("call-chain", &[("one.txt", b"new bytes")]),
+        &resolved(&staging.root, &["one.txt"]),
+        LiveMutationSentinels::capture(&[]).unwrap(),
+    )
+    .unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let destinations = BTreeMap::from([("one.txt".to_string(), live.clone())]);
+    let (pin_for_publish, tasks_for_publish) = (pin.clone(), tasks.clone());
+    let publisher = std::thread::spawn(move || {
+        let result = publish_audited(audited, &destinations, &pin_for_publish, &tasks_for_publish)
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        let _ = sender.send(result);
+    });
+    assert!(
+        receiver
+            .recv_timeout(std::time::Duration::from_millis(400))
+            .is_err(),
+        "publication must wait while a repair holds the chain lock"
+    );
+    assert_eq!(std::fs::read(&live).unwrap(), b"old bytes");
+    drop(chain);
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("publication proceeds once the lock is released")
+        .unwrap();
+    publisher.join().unwrap();
+    assert_eq!(std::fs::read(&live).unwrap(), b"new bytes");
 }

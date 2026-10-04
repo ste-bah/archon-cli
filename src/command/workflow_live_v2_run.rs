@@ -168,6 +168,7 @@ pub(crate) async fn resume_generated_v2_workflow(
     };
     let lease = workflow_live_v2_run_lease::take_for_resume(store, run_id, &ui_sink).await?;
     let run = store.load_state(run_id)?;
+    super::workflow_run_end_snapshot::recover_bound_task_set(store, plan.task_universe.as_ref())?;
     // Resume can reuse accepted calls from a cancelled run; only Completed refuses it.
     if run.status == RunStatus::Completed {
         return Ok(Some(format!(
@@ -309,7 +310,6 @@ async fn execute_generated_v2_run(
     // getting one named after itself. Installed here because a workflow is what
     // runs many isolated agents against one repository — an interactive session
     // gets no pool and builds where it always did.
-    //
     // Sized to how many agents may build at once, which is also what bounds the
     // disk: slots × one cache, however many tasks the run has. Installing is
     // first-caller-wins, so a second run in this process keeps the pool agents

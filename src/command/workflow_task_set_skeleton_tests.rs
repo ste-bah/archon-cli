@@ -128,7 +128,10 @@ fn failed_temp_staging_removes_every_transaction_file() {
     let temp = tempfile::tempdir().unwrap();
     let good = temp.path().join("first.json");
     let impossible = temp.path().join(format!("{}.json", "x".repeat(300)));
+    let anchor = tempfile::tempdir().unwrap();
     let error = publish_files_atomically(
+        &anchor.path().join("pin.json"),
+        temp.path(),
         &[
             (good.clone(), b"first".to_vec()),
             (impossible, b"second".to_vec()),

@@ -56,7 +56,10 @@ pub(crate) async fn reauthor_and_republish(
     scope: &AuthorScope,
 ) -> Result<ReauthorResult> {
     let tasks_root = request.tasks_root;
-    let _lock = ChainLock::acquire(&acceptance_pin_path(request.project_root, tasks_root))?;
+    let _lock = ChainLock::acquire(
+        &acceptance_pin_path(request.project_root, tasks_root),
+        tasks_root,
+    )?;
     let verified = verify(&request)?;
     // Re-judge with the model the freeze-time judge recorded, so a repaired
     // check is held to the same judge as every check kept as it was.
@@ -252,6 +255,8 @@ fn publish_chain(
         }
     }
     let transaction = begin_publish(
+        &verified.pin_path,
+        tasks_root,
         &files,
         "workflow freeze-acceptance --reauthor",
         verified.prior(),
@@ -273,7 +278,7 @@ fn publish_chain(
             Err(rollback) => error.context(rollback.to_string()),
         });
     }
-    for warning in transaction.commit() {
+    for warning in transaction.commit()? {
         diagnostics.push(format!("warning: {warning}"));
     }
     Ok(ReauthorResult {
@@ -313,9 +318,14 @@ pub(crate) fn reauthor_command(
 /// Refuse to launch a run bound to a contract carrying any check the judge
 /// did not accept (such a check can never pass, so the run could never
 /// complete), or bound to a freeze the host cannot read back: an unreadable
-/// contract, or a lock whose pin is missing or unreadable, as a crashed
-/// publish could leave. A task set with no contract and no lock launches.
+/// contract, or a lock whose pin is missing or unreadable. Any publish of the
+/// set a crash interrupted is first settled to one whole version (Issue 271).
+/// A task set with no contract and no lock launches.
 pub(crate) fn refuse_unaccepted_launch(project_root: &Path, tasks_root: &Path) -> Result<()> {
+    let (_publish_lock, _) =
+        super::lock_and_recover(&acceptance_pin_path(project_root, tasks_root), tasks_root)?;
+    #[cfg(test)]
+    super::publish::reader_test_step("launch-read");
     let path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let locked = tasks_root.join(ACCEPTANCE_LOCK_FILE).exists();
     if !path.exists() && !locked {
@@ -326,10 +336,19 @@ pub(crate) fn refuse_unaccepted_launch(project_root: &Path, tasks_root: &Path) -
         .and_then(|bytes| serde_json::from_slice(&bytes).map_err(anyhow::Error::from))
         .with_context(|| {
             format!(
-                "refusing to launch: the bound acceptance contract {} cannot be read; restore it (a crashed publish leaves the prior version as a .old backup beside it) or re-freeze",
+                "refusing to launch: the bound acceptance contract {} cannot be read; restore it or re-freeze",
                 path.display()
             )
         })?;
+    if !locked {
+        super::publish::verify_recovered_chain(
+            &acceptance_pin_path(project_root, tasks_root),
+            tasks_root,
+        )
+        .map_err(|reason| {
+            anyhow!("refusing to launch: the bound frozen chain is inconsistent: {reason}")
+        })?;
+    }
     if locked {
         let pin_path = acceptance_pin_path(project_root, tasks_root);
         std::fs::read(&pin_path)
@@ -339,7 +358,7 @@ pub(crate) fn refuse_unaccepted_launch(project_root: &Path, tasks_root: &Path) -
             })
             .with_context(|| {
                 format!(
-                    "refusing to launch: {} is frozen but its pin {} cannot be read; restore it (a crashed publish leaves the prior pin as a .old backup beside it) or re-freeze",
+                    "refusing to launch: {} is frozen but its pin {} cannot be read; restore it or re-freeze",
                     path.display(),
                     pin_path.display()
                 )

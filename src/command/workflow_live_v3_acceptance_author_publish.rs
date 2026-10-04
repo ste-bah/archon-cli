@@ -28,7 +28,7 @@ pub(super) fn publish_fresh(
         error: format!("{error:#}"),
     };
     let mode = archon_core::config::GateMode::Enforce;
-    let prepared = crate::command::workflow_task_set::prepare_from_judged(
+    let mut prepared = crate::command::workflow_task_set::prepare_from_judged(
         &context.project,
         &context.task_root,
         prd_path,
@@ -36,6 +36,7 @@ pub(super) fn publish_fresh(
         contract,
     )
     .map_err(refused)?;
+    prepared.record_recovery_refreeze().map_err(refused)?;
     let findings: Vec<(String, String)> = (prepared.findings.iter())
         .map(|finding| (finding.subject.clone(), finding.text.clone()))
         .collect();

@@ -86,6 +86,13 @@ pub(crate) fn frozen_chain_snapshot(
     if !task_root.is_dir() {
         return Ok(snapshot);
     }
+    // Issue 271: a publish a crash interrupted is settled before it is read.
+    let (_publish_lock, _) = super::workflow_task_set::lock_and_recover(
+        &super::workflow_task_set::acceptance_pin_path(project_root, task_root),
+        task_root,
+    )?;
+    #[cfg(test)]
+    super::workflow_task_set::reader_test_step("decomposition-read");
     let acceptance_lock = task_root.join(ACCEPTANCE_LOCK_FILE);
     let skeleton_lock = task_root.join(TASK_SKELETON_LOCK_FILE);
     if !acceptance_lock.exists() {
