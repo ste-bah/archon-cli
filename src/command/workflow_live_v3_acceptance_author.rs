@@ -147,8 +147,20 @@ fn working(
             None => list.push(entry),
         }
     }
-    contract.acceptance.sort_by(|a, b| a.id.cmp(&b.id));
-    contract.supplementary.sort_by(|a, b| a.id.cmp(&b.id));
+    for (entries, prior) in [
+        (&mut contract.acceptance, &base.acceptance),
+        (&mut contract.supplementary, &base.supplementary),
+    ] {
+        entries.sort_by_key(|entry| {
+            (
+                prior
+                    .iter()
+                    .position(|old| old.id == entry.id)
+                    .unwrap_or(prior.len()),
+                entry.id.clone(),
+            )
+        });
+    }
     contract
 }
 
@@ -340,7 +352,7 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
         .collect();
     let requirements = prd_requirement_texts(&prd_text).into_keys().collect();
     owed.extend(owed_supplementary(&prd_text, &requirements));
-    let base = AcceptanceContract {
+    let mut base = AcceptanceContract {
         schema_version: 1,
         prd: PrdIdentity {
             path: project_relative(&context.project, &prd_path),
@@ -359,6 +371,31 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
         acceptance: Vec::new(),
         supplementary: Vec::new(),
     };
+    let pin = crate::command::workflow_task_set::acceptance_pin_path(
+        &context.project,
+        &context.task_root,
+    );
+    match crate::command::workflow_task_set::recovery_lineage::refreeze_base(
+        &pin,
+        &context.task_root,
+    ) {
+        Ok(Some(prior)) if prior.prd.digest == prd_digest => {
+            owed = prior
+                .acceptance
+                .iter()
+                .chain(&prior.supplementary)
+                .map(|entry| {
+                    let mut candidate =
+                        placeholder(&entry.id, &entry.criterion, entry.covers.clone());
+                    candidate.gap_permitted = entry.gap_permitted;
+                    candidate
+                })
+                .collect();
+            base = prior;
+        }
+        Ok(_) => {}
+        Err(error) => return failed(format!("reading the recovery contract: {error:#}")),
+    }
     let mut staged = match Staged::load(site.run_dir, &prd_digest) {
         Ok(staged) => staged,
         Err(why) => return failed(why),

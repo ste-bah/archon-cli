@@ -150,72 +150,22 @@ async fn a_resumed_run_heals_a_recovery_unfreeze_to_an_accepted_contract() {
         .unwrap();
     }
 
-    // Older recovery's moved-aside files remain for inspection. A second,
-    // missing lock must record a NEW recovery event for this run.
+    // This is tampering after completed recovery, with no new crash marker.
     let lock = run.set.tasks.join(ACCEPTANCE_LOCK_FILE);
     std::fs::remove_file(&lock).unwrap();
     crate::command::workflow_live::recover_bound_task_set(&run.store, Some(&universe)).unwrap();
-    let (again, record) = stage(&run, &accepting()).await;
     assert!(
-        record.operational_errors.is_empty(),
-        "repeat recovery: {:?}",
-        record.operational_errors
+        run.set.pin_path().exists(),
+        "completed recovery grants no new unfreeze"
     );
-    assert_eq!(again.status, WorkflowV2Status::Accepted);
-    archon_workflow::task_skeleton::validate_full_chain(&run.set.tasks, &run.set.pin()).unwrap();
-
-    let refrozen = run.set.pin().identity();
-    crate::command::workflow_task_set::republish::reauthor_and_republish(
-        &client,
-        crate::command::workflow_task_set::republish::ReauthorRequest {
-            project_root: run.set.project.path(),
-            tasks_root: &run.set.tasks,
-            prd_path: &run.set.prd,
-            ids: &ids,
-            gate: run.set.gate(),
-            trigger: "after repeat recovery",
-        },
-        &scope,
-    )
-    .await
-    .unwrap();
-    crate::command::acceptance_chain::verify_launch_chain(
-        &refrozen,
-        archon_workflow::task_set_lineage::LaunchLineage::Recorded,
-        &run.set.pin(),
-        &run.set.pin_path(),
-        &run.set.tasks,
-        "a-run-launched-after-repeat-recovery",
-    )
-    .unwrap();
-
-    // Upgrade from a recovery that finished moving every artifact but did
-    // not yet record recovery lineage: the retained pin still binds the data.
-    let pin = run.set.pin_path();
-    let sidecar = pin
-        .parent()
-        .unwrap()
-        .join("check-sources")
-        .join(pin.file_name().unwrap());
-    for target in [
-        run.set.tasks.join(ACCEPTANCE_LOCK_FILE),
-        run.set.tasks.join(TASK_SKELETON_LOCK_FILE),
-        pin,
-        sidecar,
-    ] {
-        let name = target.file_name().unwrap().to_string_lossy();
-        let aside = target.with_file_name(format!(
-            ".{name}.unverified-99887766554433221100aabbccddeeff"
-        ));
-        std::fs::rename(target, aside).unwrap();
-    }
-    crate::command::workflow_live::recover_bound_task_set(&run.store, Some(&universe)).unwrap();
-    let (fully_moved, record) = stage(&run, &accepting()).await;
     assert!(
-        record.operational_errors.is_empty(),
-        "completed legacy unfreeze: {:?}",
-        record.operational_errors
+        crate::command::workflow_task_set::republish::refuse_unaccepted_launch(
+            run.set.project.path(),
+            &run.set.tasks
+        )
+        .is_err()
     );
-    assert_eq!(fully_moved.status, WorkflowV2Status::Accepted);
-    archon_workflow::task_skeleton::validate_full_chain(&run.set.tasks, &run.set.pin()).unwrap();
 }
+
+#[path = "workflow_live_v3_acceptance_recovery_round_five_tests.rs"]
+mod round_five;

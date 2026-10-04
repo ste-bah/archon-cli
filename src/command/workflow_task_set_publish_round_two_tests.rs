@@ -180,7 +180,7 @@ fn legacy_absent_target_and_interrupted_rollback_self_heal() {
         if rollback {
             std::fs::rename(&b, sibling_transaction_path(&b, TXN, "old")).unwrap();
             std::fs::write(&b, b"new-b").unwrap();
-            expected[1] = NEW[1];
+            expected[1] = OLD[1];
             expected[3] = None;
         } else {
             std::fs::write(&c, b"new-c").unwrap();

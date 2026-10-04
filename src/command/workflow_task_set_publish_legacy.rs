@@ -1,10 +1,9 @@
 //! Self-healing recovery of the transaction files a publisher without the
 //! journal left behind (Issue 271).
 //!
-//! No backup means staging never completed: discard it without touching live
-//! files. Backups prove staging finished, but may also survive an interrupted
-//! rollback. Persist verification intent before consuming either kind of
-//! evidence, and finish any interrupted move-aside before clearing intent.
+//! Persist a decision before consuming evidence. Discarded chain staging
+//! still requires verification: the first freeze may have no backups at all.
+//! Only a pending marker authorizes verification and interrupted move-aside.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,7 +17,8 @@ use archon_workflow::task_set_contract::{
 use super::journal::{
     JournalPaths, digest_of, is_transaction_id, remove_if_present, rename, sync_parents,
 };
-use super::recover::{RecoveryEvent, RecoveryOutcome, record};
+use super::recover::{RecoveryEvent, RecoveryOutcome, record, record_with_authority};
+use super::verification::{Decision, Marker};
 
 /// One journal-less transaction's files, by transaction id.
 #[derive(Default)]
@@ -27,7 +27,7 @@ struct LegacyTransaction {
     backups: Vec<PathBuf>,
 }
 
-/// Apply the binding legacy-debris decision per transaction, under the lock.
+/// Apply one durable decision per transaction under the publication lock.
 pub(super) fn recover_legacy(
     paths: &JournalPaths,
     scopes: &[(PathBuf, Option<String>)],
@@ -35,63 +35,91 @@ pub(super) fn recover_legacy(
     tasks_root: &Path,
 ) -> Result<Vec<RecoveryEvent>> {
     let chain = chain_files(pin_path, tasks_root);
-    let marker = pin_path.with_extension("publish-verification");
+    let marker_path = pin_path.with_extension("publish-verification");
+    let mut marker = Marker::load(&marker_path)?;
     let mut events = Vec::new();
     for (transaction, found) in collect(scopes)? {
-        if found.backups.is_empty() {
-            let event = RecoveryEvent {
-                transaction,
-                source: "legacy",
-                outcome: RecoveryOutcome::Discarded,
-                files: found
-                    .staged
-                    .iter()
-                    .map(|(staged, _)| staged.clone())
-                    .collect(),
-                detail: Some("no backup: staging may be partial; live files untouched".into()),
-            };
-            record(paths, &event)?;
-            for (staged, _) in &found.staged {
-                remove_if_present(staged)?;
-            }
-            sync_parents(found.staged.iter().map(|(staged, _)| staged.as_path()))?;
-            events.push(event);
-            continue;
-        }
-        pending(&marker, &transaction)?;
-        // A backup target equal to its old bytes, with staging gone, may have
-        // been restored by an interrupted rollback. Do not guess new bytes.
-        let mut forward = true;
-        for backup in &found.backups {
-            let target = target_of(backup);
-            if !found.staged.iter().any(|(_, path)| path == &target) {
-                let live = digest_of(&target)?;
-                if live.is_none() || live == digest_of(backup)? {
-                    forward = false;
+        let decision = marker
+            .as_ref()
+            .and_then(|marker| marker.decisions.get(&transaction))
+            .copied();
+        let decision = match decision {
+            Some(decision) => decision,
+            None if found.backups.is_empty() => Decision::Discard,
+            None => {
+                let mut rollback = false;
+                for backup in &found.backups {
+                    let target = target_of(backup);
+                    if !found.staged.iter().any(|(_, path)| path == &target) {
+                        let live = digest_of(&target)?;
+                        // During staging an equal file is simply unchanged.
+                        // With staging gone, an already restored target is
+                        // evidence of rollback: restore remaining backups too.
+                        if live.is_none() || (found.staged.is_empty() && live == digest_of(backup)?)
+                        {
+                            rollback = true;
+                        }
+                    }
+                }
+                // With no staging, an invalid live chain may be a rollback
+                // that died with backups remaining. Restore those old bytes.
+                if rollback
+                    || (found.staged.is_empty() && verify_chain(pin_path, tasks_root).is_err())
+                {
+                    Decision::Rollback
+                } else {
+                    Decision::Forward
                 }
             }
+        };
+        let verify = decision != Decision::Discard
+            || found
+                .staged
+                .iter()
+                .any(|(_, target)| chain.contains(target));
+        if verify {
+            let intent = marker.get_or_insert_with(|| Marker::new(&transaction));
+            intent.decisions.insert(transaction.clone(), decision);
+            intent.save(&marker_path)?;
         }
         let mut files = Vec::new();
-        for (staged, target) in &found.staged {
-            if forward {
+        if decision == Decision::Rollback {
+            for (index, backup) in found.backups.iter().enumerate() {
+                let target = target_of(backup);
+                rename(backup, &target)?;
+                super::journal::sync_parent(&target)?;
+                super::journal::crash_point(&format!("legacy-restored-{index}"));
+                files.push(target);
+            }
+        }
+        for (index, (staged, target)) in found.staged.iter().enumerate() {
+            if decision == Decision::Forward {
                 rename(staged, target)?;
                 files.push(target.clone());
             } else {
                 remove_if_present(staged)?;
                 files.push(staged.clone());
             }
+            super::journal::sync_parent(staged)?;
+            super::journal::crash_point(&format!("legacy-renamed-{index}"));
         }
-        sync_parents(found.staged.iter().map(|(staged, _)| staged.as_path()))?;
         let event = RecoveryEvent {
             transaction,
             source: "legacy",
-            outcome: if forward {
-                RecoveryOutcome::RolledForward
-            } else {
-                RecoveryOutcome::VerificationPending
+            outcome: match decision {
+                Decision::Discard => RecoveryOutcome::Discarded,
+                Decision::Forward => RecoveryOutcome::RolledForward,
+                Decision::Rollback => RecoveryOutcome::RolledBack,
             },
             files,
-            detail: Some("durable chain verification pending".into()),
+            detail: Some(
+                if verify {
+                    "durable chain verification pending"
+                } else {
+                    "incomplete staging discarded; live files untouched"
+                }
+                .into(),
+            ),
         };
         record(paths, &event)?;
         for backup in &found.backups {
@@ -101,91 +129,59 @@ pub(super) fn recover_legacy(
         super::journal::crash_point("legacy-backups-removed");
         events.push(event);
     }
-    let interrupted = unverified_transaction(&chain)?;
-    if marker.exists() || interrupted.is_some() {
-        let transaction = match std::fs::read_to_string(&marker) {
-            Ok(id) if is_transaction_id(&id) => id,
-            Ok(_) => uuid::Uuid::new_v4().simple().to_string(),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                // Inspection files can belong to an already completed recovery.
-                // Start a fresh event; only a surviving marker resumes an event.
-                uuid::Uuid::new_v4().simple().to_string()
-            }
-            Err(error) => return Err(error.into()),
-        };
-        pending(&marker, &transaction)?;
-        if let Err(reason) = verify_chain(pin_path, tasks_root) {
-            events.push(unfreeze(
+    // Moved-aside inspection files alone grant no new recovery authority.
+    if let Some(marker) = marker {
+        let interrupted = chain.iter().any(|target| {
+            target.file_name().is_some_and(|name| {
+                target
+                    .with_file_name(format!(
+                        ".{}.unverified-{}",
+                        name.to_string_lossy(),
+                        marker.transaction
+                    ))
+                    .exists()
+            })
+        });
+        let reason = verify_chain(pin_path, tasks_root).err();
+        if interrupted || reason.is_some() {
+            match unfreeze(
                 paths,
                 pin_path,
                 tasks_root,
-                &transaction,
-                &reason,
-            )?);
-        } else if !tasks_root.join(ACCEPTANCE_LOCK_FILE).exists() {
-            // An older recovery may already have finished every move but
-            // recorded no adoption authority. Its retained pin authenticates
-            // the data, and the marker keeps this import durable on a crash.
-            super::super::recovery_lineage::record_unfrozen_if_missing(
-                pin_path,
-                tasks_root,
-                &transaction,
-            )?;
+                &marker.transaction,
+                reason
+                    .as_deref()
+                    .unwrap_or("finishing interrupted unfreeze"),
+            ) {
+                Ok(event) => events.push(event),
+                Err(error) => {
+                    tracing::warn!(%error, "recovery verification deferred; marker retained for retry");
+                    let deferred = RecoveryEvent {
+                        transaction: marker.transaction.clone(),
+                        source: "legacy",
+                        outcome: RecoveryOutcome::VerificationPending,
+                        files: vec![marker_path.clone()],
+                        detail: Some(format!("{error:#}")),
+                    };
+                    if let Err(error) = record(paths, &deferred) {
+                        tracing::warn!(%error, "deferred recovery log will be retried with the marker");
+                    }
+                    events.push(deferred);
+                    return Ok(events);
+                }
+            }
         }
         super::journal::crash_point("legacy-verified");
-        remove_if_present(&marker)?;
-        super::journal::sync_parent(&marker)?;
+        remove_if_present(&marker_path)?;
+        super::journal::sync_parent(&marker_path)?;
+    }
+    if let Err(error) = super::super::recovery_lineage::cleanup_adopted(pin_path, tasks_root) {
+        tracing::warn!(%error, "recovery inspection cleanup deferred for retry");
     }
     Ok(events)
 }
 
-fn pending(marker: &Path, transaction: &str) -> Result<()> {
-    let parent = marker
-        .parent()
-        .ok_or_else(|| anyhow!("verification marker has no parent"))?;
-    super::scope::validate_destination(marker, &[(parent.to_path_buf(), None)])?;
-    match std::fs::read_to_string(marker) {
-        Ok(id) if is_transaction_id(&id) => {
-            // Retry a flush a prior attempt may have failed.
-            std::fs::OpenOptions::new()
-                .write(true)
-                .open(marker)?
-                .sync_all()?;
-        }
-        Ok(_) => super::journal::write_durably(marker, transaction.as_bytes())?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            super::journal::write_durably(marker, transaction.as_bytes())?;
-        }
-        Err(error) => return Err(error.into()),
-    }
-    super::journal::sync_parent(marker)
-}
-
 const UNVERIFIED: &str = ".unverified-";
-
-/// Whether any chain file has a moved-aside `.<name>.unverified-<id>` sibling.
-fn unverified_transaction(chain: &[PathBuf]) -> Result<Option<String>> {
-    for file in chain {
-        let (Some(dir), Some(name)) = (file.parent(), file.file_name()) else {
-            continue;
-        };
-        let prefix = format!(".{}{UNVERIFIED}", name.to_string_lossy());
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error).with_context(|| format!("listing {}", dir.display())),
-        };
-        for entry in entries {
-            let entry = entry.with_context(|| format!("listing {}", dir.display()))?;
-            if let Some(id) = entry.file_name().to_string_lossy().strip_prefix(&prefix)
-                && is_transaction_id(id)
-            {
-                return Ok(Some(id.to_string()));
-            }
-        }
-    }
-    Ok(None)
-}
 
 fn collect(scopes: &[(PathBuf, Option<String>)]) -> Result<BTreeMap<String, LegacyTransaction>> {
     let mut transactions = BTreeMap::<String, LegacyTransaction>::new();
@@ -335,6 +331,40 @@ fn unfreeze(
     reason: &str,
 ) -> Result<RecoveryEvent> {
     super::super::recovery_lineage::record_unfreeze(pin_path, tasks_root, transaction)?;
+    let authority = super::super::recovery_lineage::authority(pin_path, transaction)?;
+    // Bind the run anchors BEFORE the first move too. A crash between moves
+    // cannot let a modified pending receipt acquire new run authority on retry.
+    let log = match std::fs::read_to_string(&paths.log) {
+        Ok(log) => log,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.into()),
+    };
+    let prior = log
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| {
+            event["transaction"] == transaction
+                && event.get("authority").is_some_and(|value| !value.is_null())
+        });
+    match prior {
+        Some(event) if event.get("authority") != authority.as_ref() => {
+            return Err(anyhow!(
+                "pending recovery authority changed after it was logged"
+            ));
+        }
+        Some(_) => {}
+        None => record_with_authority(
+            paths,
+            &RecoveryEvent {
+                transaction: transaction.into(),
+                source: "legacy",
+                outcome: RecoveryOutcome::VerificationPending,
+                files: Vec::new(),
+                detail: Some("unfreeze authorization captured before moving artifacts".into()),
+            },
+            authority.clone(),
+        )?,
+    }
     let mut moved = Vec::new();
     let mut targets = vec![
         tasks_root.join(ACCEPTANCE_LOCK_FILE),
@@ -370,6 +400,6 @@ fn unfreeze(
         files: moved,
         detail: Some(reason.to_string()),
     };
-    record(paths, &event)?;
+    record_with_authority(paths, &event, authority)?;
     Ok(event)
 }

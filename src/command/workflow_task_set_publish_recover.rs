@@ -207,6 +207,14 @@ pub(super) fn record_journal(
 /// A durable record precedes journal removal. Failure retains the decision so
 /// the next acquisition retries; a crash may produce duplicate events.
 pub(super) fn record(paths: &JournalPaths, event: &RecoveryEvent) -> Result<()> {
+    record_with_authority(paths, event, None)
+}
+
+pub(super) fn record_with_authority(
+    paths: &JournalPaths,
+    event: &RecoveryEvent,
+    authority: Option<serde_json::Value>,
+) -> Result<()> {
     super::journal::crash_point("before-recovery-log");
     let files = event
         .files
@@ -228,6 +236,7 @@ pub(super) fn record(paths: &JournalPaths, event: &RecoveryEvent) -> Result<()> 
         "outcome": event.outcome.as_str(),
         "files": files,
         "detail": event.detail,
+        "authority": authority,
     });
     // A delimiter also keeps a retry's event readable after a torn append.
     super::scope::validate_destination(

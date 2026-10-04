@@ -340,6 +340,15 @@ pub(crate) fn refuse_unaccepted_launch(project_root: &Path, tasks_root: &Path) -
                 path.display()
             )
         })?;
+    if !locked {
+        super::publish::verify_recovered_chain(
+            &acceptance_pin_path(project_root, tasks_root),
+            tasks_root,
+        )
+        .map_err(|reason| {
+            anyhow!("refusing to launch: the bound frozen chain is inconsistent: {reason}")
+        })?;
+    }
     if locked {
         let pin_path = acceptance_pin_path(project_root, tasks_root);
         std::fs::read(&pin_path)

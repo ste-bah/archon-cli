@@ -189,6 +189,7 @@ fn an_interrupted_unfreeze_is_finished_by_the_next_recovery() {
             .join(format!(".{ACCEPTANCE_LOCK_FILE}.unverified-{TXN}")),
     )
     .unwrap();
+    std::fs::write(set.pin_path().with_extension("publish-verification"), TXN).unwrap();
     recover_interrupted_publish(&set.pin_path(), &set.tasks).unwrap();
     assert!(!set.tasks.join(TASK_SKELETON_LOCK_FILE).exists());
     assert!(!set.pin_path().exists());

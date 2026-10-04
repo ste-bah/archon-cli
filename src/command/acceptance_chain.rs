@@ -48,7 +48,12 @@ pub(crate) fn verify_launch_chain(
     run_id: &str,
 ) -> std::result::Result<ChainProof, String> {
     if let Some(proof) = crate::command::workflow_task_set::recovery_lineage::verify(
-        launch, pin, pin_path, task_root, run_id,
+        launch,
+        launch_lineage,
+        pin,
+        pin_path,
+        task_root,
+        run_id,
     )
     .map_err(|error| format!("{error:#}"))?
     {

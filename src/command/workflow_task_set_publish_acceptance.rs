@@ -68,5 +68,8 @@ pub(crate) fn publish_acceptance_files_with_recovery(
     for warning in transaction.commit()? {
         eprintln!("warning: {warning}");
     }
+    if let Err(error) = super::super::recovery_lineage::cleanup_adopted(&pin_path, tasks_root) {
+        tracing::warn!(%error, "recovery inspection cleanup deferred for retry");
+    }
     Ok(())
 }

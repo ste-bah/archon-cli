@@ -90,7 +90,11 @@ fn verification_is_durable_before_legacy_evidence_is_consumed() {
     ] {
         let set = frozen();
         let lock_path = set.tasks.join(ACCEPTANCE_LOCK_FILE);
-        std::fs::copy(&lock_path, sibling_transaction_path(&lock_path, TXN, "old")).unwrap();
+        std::fs::write(
+            sibling_transaction_path(&lock_path, TXN, "old"),
+            b"invalid rollback backup",
+        )
+        .unwrap();
         std::fs::write(&lock_path, b"interrupted legacy rollback").unwrap();
         let sidecar = set
             .pin_path()
@@ -161,6 +165,7 @@ fn every_interrupted_move_aside_boundary_finishes_unfreezing() {
             )
             .unwrap();
         }
+        std::fs::write(set.pin_path().with_extension("publish-verification"), TXN).unwrap();
         recover_interrupted_publish(&set.pin_path(), &set.tasks).unwrap();
         assert!(
             targets.iter().all(|path| !path.exists()),

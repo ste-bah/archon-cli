@@ -20,6 +20,9 @@ use super::{
     validate_existing_parents, write_durably,
 };
 const TRIGGER: &str = "recovery-refreeze:";
+#[path = "workflow_task_set_recovery_evidence.rs"]
+mod evidence;
+pub(crate) use evidence::{authority, cleanup_adopted, refreeze_base};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Recovery {
@@ -29,6 +32,8 @@ struct Recovery {
     prior: Option<AcceptancePin>,
     skeleton: Option<TaskSkeleton>,
     completed: Option<Completion>,
+    #[serde(default)]
+    evidence: BTreeMap<PathBuf, String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Completion {
@@ -83,12 +88,21 @@ pub(crate) fn record_unfreeze(pin: &Path, tasks: &Path, transaction: &str) -> Re
     match std::fs::read_dir(store.root()) {
         Ok(entries) => {
             for entry in entries {
-                let entry = entry?;
-                if !entry.file_type()?.is_dir() {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        tracing::warn!(%error, "skipping unreadable recovery run entry");
+                        continue;
+                    }
+                };
+                if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
                     continue;
                 }
                 let id = entry.file_name().to_string_lossy().into_owned();
-                validate_existing_parents(&entry.path(), store.root())?;
+                if let Err(error) = validate_existing_parents(&entry.path(), store.root()) {
+                    tracing::warn!(%error, run = %id, "skipping unsafe recovery run directory");
+                    continue;
+                }
                 // A run without a usable launch snapshot grants no authority.
                 if let Ok(snapshot) = crate::command::acceptance_chain::launch_snapshot(&store, &id)
                     && Path::new(&snapshot.canonical_task_root_identity)
@@ -106,25 +120,24 @@ pub(crate) fn record_unfreeze(pin: &Path, tasks: &Path, transaction: &str) -> Re
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
-    let prior = prior_pin(pin, tasks)?;
+    let prior = prior_pin(pin, tasks, transaction)?;
     let skeleton = prior.as_ref().and_then(|prior| {
         let bytes = std::fs::read(tasks.join(TASK_SKELETON_FILE)).ok()?;
         (prior.skeleton_digest.as_deref() == Some(content_digest(&bytes).as_str()))
             .then(|| serde_json::from_slice::<TaskSkeleton>(&bytes).ok())
             .flatten()
     });
-    if prior.is_none() && runs.is_empty() {
-        // No launch or retained pin can need adoption of this recovery.
-        return Ok(());
-    }
-    records.push(Recovery {
+    let mut record = Recovery {
         transaction: transaction.into(),
         task_root,
         runs,
         prior,
         skeleton,
         completed: None,
-    });
+        evidence: BTreeMap::new(),
+    };
+    evidence::capture(pin, tasks, &mut record)?;
+    records.push(record);
     let dest = path(pin);
     let parent = dest
         .parent()
@@ -139,26 +152,10 @@ pub(crate) fn record_unfreeze(pin: &Path, tasks: &Path, transaction: &str) -> Re
     sync_parent(&dest)
 }
 
-/// Import a completed move-aside from a publisher that recorded no recovery
-/// lineage. Preserve an already pending event through repeated acquisitions.
-pub(crate) fn record_unfrozen_if_missing(
-    pin: &Path,
-    tasks: &Path,
-    transaction: &str,
-) -> Result<()> {
-    let (records, _) = read(pin)?;
-    if records.iter().any(|record| {
-        record.completed.is_none() && (record.prior.is_some() || !record.runs.is_empty())
-    }) {
-        return sync_parent(&path(pin));
-    }
-    record_unfreeze(pin, tasks, transaction)
-}
-
 /// Old recoveries had no pending marker. After their pin move, recover a
 /// retained pin only when it authenticates the still-live skeleton (or the
 /// acceptance-only contract). Historical inspection files grant no new event.
-fn prior_pin(pin: &Path, tasks: &Path) -> Result<Option<AcceptancePin>> {
+fn prior_pin(pin: &Path, tasks: &Path, transaction: &str) -> Result<Option<AcceptancePin>> {
     let decode = |path: &Path| {
         std::fs::read(path)
             .ok()
@@ -186,7 +183,7 @@ fn prior_pin(pin: &Path, tasks: &Path) -> Result<Option<AcceptancePin>> {
         let Some(id) = name.strip_prefix(&prefix) else {
             continue;
         };
-        if id.len() != 32 || uuid::Uuid::parse_str(id).is_err() || !entry.file_type()?.is_file() {
+        if id != transaction || !entry.file_type()?.is_file() {
             continue;
         }
         let Some(prior) = decode(&entry.path()) else {
@@ -231,13 +228,9 @@ impl PreparedAcceptanceFreeze {
         else {
             return Ok(());
         };
-        if record.task_root
-            != self
-                .tasks_root
-                .canonicalize()
-                .map(archon_shell::paths::plain)?
-        {
-            return Err(anyhow!("recovery task root changed"));
+        if let Err(error) = evidence::validate(record, &pin_path, &self.tasks_root) {
+            tracing::warn!(%error, "recovery adoption deferred; pending authority retained for retry");
+            return Ok(());
         }
         let mut files = Vec::new();
         if let Some(skeleton) = &record.skeleton {
@@ -245,11 +238,13 @@ impl PreparedAcceptanceFreeze {
             skeleton.acceptance_digest = self.pin.acceptance_digest.clone();
             let bytes = serde_json::to_vec_pretty(&skeleton)?;
             let digest = content_digest(&bytes);
-            let gate = record
-                .prior
-                .as_ref()
-                .and_then(|pin| pin.skeleton_gate.clone())
-                .ok_or_else(|| anyhow!("recovered skeleton has no gate provenance"))?;
+            let findings = super::coverage_gate::skeleton_check_findings(
+                &skeleton,
+                &self.contract()?,
+                &self.tasks_root.join(TASK_SKELETON_FILE),
+            );
+            let gate = super::gate_stamp(self.pin.acceptance_gate.mode, &findings);
+            self.findings.extend(findings);
             let lock = TaskSkeletonLock {
                 algorithm: "blake3".into(),
                 digest: digest.clone(),
@@ -304,6 +299,7 @@ impl PreparedAcceptanceFreeze {
 /// exact recorded lineage. Later per-check hops are still checked normally.
 pub(crate) fn verify(
     launch: &PortableAcceptanceIdentityV1,
+    launch_lineage: LaunchLineage,
     pin: &AcceptancePin,
     pin_path: &Path,
     tasks: &Path,
@@ -338,18 +334,36 @@ pub(crate) fn verify(
         {
             continue;
         }
+        evidence::validate(record, pin_path, tasks)?;
+        let from = record
+            .prior
+            .as_ref()
+            .map(AcceptancePin::identity)
+            .or_else(|| record.runs.values().next().cloned())
+            .ok_or_else(|| anyhow!("recovery has no prior anchor"))?;
+        let hop = done
+            .lineage
+            .last()
+            .ok_or_else(|| anyhow!("recovery completion has no hop"))?;
+        if hop.from != from
+            || hop.to != done.identity
+            || hop.trigger != format!("{TRIGGER}{}", record.transaction)
+            || hop.reauthored_ids != done.ids
+        {
+            return Err(anyhow!(
+                "recovery completion does not bind its prior pin and ids"
+            ));
+        }
         super::publish::verify_recovered_chain(pin_path, tasks)
             .map_err(|reason| anyhow!(reason))?;
-        let mut proof = verify_reached_from(
-            &done.identity,
-            LaunchLineage::Recorded,
+        // Recovery is a recorded hop, never a replacement for launch checks.
+        let proof = verify_reached_from(
+            launch,
+            launch_lineage,
             pin,
             tasks,
             &ChainHistory::for_pin(pin_path),
         )?;
-        proof.identical = false;
-        proof.recorded_hops = proof.recorded_hops.map(|hops| hops + 1);
-        proof.changed_ids.extend(done.ids.iter().cloned());
         return Ok(Some(proof));
     }
     Err(anyhow!(
