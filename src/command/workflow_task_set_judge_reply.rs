@@ -2,27 +2,28 @@
 //! limit cuts it off, its continuations.
 //!
 //! A truncated reply is never parsed as it stands. It is continued only
-//! while its JSON document is still open: each continuation must extend the
+//! while its JSON document is open: each continuation must extend the
 //! document so that it stays a valid JSON prefix, and a resumed freeze
 //! continues the reply saved by an earlier attempt instead of asking again.
-//! Progress is the document growing as a parser reads it, never a count of
-//! continuations and never two chunks being unequal (a long string repeats
-//! text legitimately). A continuation that adds nothing, contradicts the
+//! Progress is the document's parse position moving over at least one token
+//! that is not whitespace, never a count of continuations and never two
+//! chunks being unequal (a long string repeats text legitimately); a reply
+//! past `MAX_PARTIAL_REPLY_BYTES` is no progress. A truncated reply with no
+//! document begun (prose only) is not continued: the judge is asked again. A continuation that adds nothing, contradicts the
 //! document (restarts it, breaks its syntax) or ends normally with the
 //! document still open is no progress: the judge is [`JudgeIncomplete`],
 //! resumable. A reply whose document is already complete when it is cut off
 //! is not continued (a continuation could restart with another document);
 //! it is no usable verdict, and the judge is asked again.
 
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
 use archon_workflow::WorkflowLlmClient;
 use archon_workflow::llm_client_port::WorkflowAgentOutcome;
 
+use super::partial::{MAX_PARTIAL_REPLY_BYTES, PartialReply};
 use super::{CONTINUE_PROMPT, JUDGE_TIMEOUT_SECS, JudgeIncomplete};
-use crate::command::workflow_freeze_budget::FreezeProgress;
 
 /// How a judge reply ended, read from its finish reason.
 pub(super) enum Ending {
@@ -73,99 +74,6 @@ pub(super) fn document(reply: &str) -> Document {
     }
 }
 
-/// A batch's partial reply, saved under the freeze cache for a retry, with
-/// the count of continuation chunks every attempt saved (the progress the
-/// host executor reads; it never goes back).
-pub(crate) struct PartialReply<'a> {
-    path: PathBuf,
-    key: String,
-    progress: &'a FreezeProgress,
-}
-
-#[derive(Default, serde::Serialize, serde::Deserialize)]
-struct Saved {
-    schema: u32,
-    key: String,
-    reply: String,
-    chunks: u64,
-}
-
-const SCHEMA: u32 = 1;
-
-impl<'a> PartialReply<'a> {
-    pub(crate) fn new(dir: &Path, key: &str, progress: &'a FreezeProgress) -> Self {
-        Self {
-            path: dir.join(format!("partial-{key}.json")),
-            key: key.to_string(),
-            progress,
-        }
-    }
-
-    fn load(&self) -> Saved {
-        std::fs::read(&self.path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok())
-            .filter(|saved| saved.schema == SCHEMA && saved.key == self.key)
-            .unwrap_or_default()
-    }
-
-    fn store(&self, saved: &Saved) {
-        let staging = self
-            .path
-            .with_extension(format!("{}.tmp", std::process::id()));
-        let written = self
-            .path
-            .parent()
-            .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
-            && serde_json::to_vec(saved).is_ok_and(|bytes| std::fs::write(&staging, bytes).is_ok())
-            && std::fs::rename(&staging, &self.path).is_ok();
-        if !written {
-            let _ = std::fs::remove_file(&staging);
-            eprintln!(
-                "the judge's partial reply could not be saved at {}; a retry continues from less",
-                self.path.display()
-            );
-        }
-    }
-
-    /// Counts the chunks earlier attempts saved, once per freeze attempt.
-    pub(crate) fn count_saved(&self) {
-        self.progress.reused_judged(self.load().chunks);
-    }
-
-    /// The reply to continue, if an earlier attempt left one open.
-    fn open_reply(&self) -> Option<String> {
-        let saved = self.load();
-        (!saved.reply.is_empty()
-            && matches!(
-                document(&saved.reply),
-                Document::Open | Document::NotStarted
-            ))
-        .then_some(saved.reply)
-    }
-
-    /// Saves `reply`, extended by one more chunk, and reports the progress.
-    fn extended(&self, reply: &str) {
-        let mut saved = self.load();
-        saved.schema = SCHEMA;
-        saved.key = self.key.clone();
-        saved.reply = reply.to_string();
-        saved.chunks += 1;
-        self.store(&saved);
-        self.progress.saved(true);
-    }
-
-    /// The saved reply is spent (complete, or no usable verdict): the next
-    /// ask starts afresh. The chunk count stays, so progress never goes back.
-    pub(crate) fn spent(&self) {
-        let mut saved = self.load();
-        if !saved.reply.is_empty() {
-            saved.reply.clear();
-            self.store(&saved);
-        }
-    }
-}
-
 /// One whole reply to `task`. `Ok(Ok(reply))` ended normally with a document
 /// to judge; `Ok(Err(why))` gave no usable verdict and may be asked again;
 /// `Err` is [`JudgeIncomplete`] (no progress, a provider error, a timeout).
@@ -175,7 +83,7 @@ pub(super) async fn complete_reply(
     model: &str,
     partial: Option<&PartialReply<'_>>,
 ) -> Result<std::result::Result<String, String>> {
-    let mut reply = partial
+    let (mut reply, mut chunks) = partial
         .and_then(PartialReply::open_reply)
         .unwrap_or_default();
     let mut continuing = !reply.is_empty();
@@ -197,11 +105,20 @@ pub(super) async fn complete_reply(
         })?
         .map_err(|error| JudgeIncomplete(format!("the provider gave no reply: {error}")))?;
         let grown = format!("{reply}{}", outcome.content);
+        if grown.len() > MAX_PARTIAL_REPLY_BYTES {
+            return Err(stalled(
+                &reply,
+                &format!(
+                    "the reply grew past {MAX_PARTIAL_REPLY_BYTES} bytes, more than any verdict needs"
+                ),
+            ));
+        }
+        let state = document(&grown);
         match ending(&outcome) {
             Ending::Unsupported(why) => return Ok(Err(why)),
             Ending::Complete if !continuing => return Ok(Ok(grown)),
             Ending::Complete => {
-                return match document(&grown) {
+                return match state {
                     Document::Complete => Ok(Ok(grown)),
                     state => Err(stalled(
                         &reply,
@@ -213,7 +130,6 @@ pub(super) async fn complete_reply(
                 };
             }
             Ending::Truncated(reason) => {
-                let state = document(&grown);
                 if state == Document::Complete {
                     // A whole document cut off after it: never continued
                     // (a continuation could restart with another one) and
@@ -225,20 +141,22 @@ pub(super) async fn complete_reply(
                         "the reply was truncated by stop reason '{reason}' after a complete document; a truncated reply is never accepted"
                     )));
                 }
-                if !continuing && state == Document::Invalid {
-                    // Not even the start of a JSON document: nothing to
-                    // continue, and no usable verdict; asked again.
+                if !continuing && state != Document::Open {
+                    // No document begun (prose only), or not a JSON prefix:
+                    // nothing to continue, and no usable verdict.
                     return Ok(Err(format!(
-                        "the reply was truncated by stop reason '{reason}' and is not a JSON document"
+                        "the reply was truncated by stop reason '{reason}' before any JSON document"
                     )));
                 }
-                if outcome.content.is_empty() || state == Document::Invalid {
+                // Progress: the document's parse position moved over at
+                // least one token that is not whitespace.
+                if outcome.content.trim().is_empty() || state != Document::Open {
                     return Err(stalled(
                         &reply,
                         &format!(
                             "the reply was truncated by stop reason '{reason}' and its continuation {}",
-                            if outcome.content.is_empty() {
-                                "added nothing"
+                            if outcome.content.trim().is_empty() {
+                                "added no token"
                             } else {
                                 "contradicts the document it must extend"
                             }
@@ -246,9 +164,10 @@ pub(super) async fn complete_reply(
                     ));
                 }
                 reply = grown;
+                chunks = chunks.saturating_add(1);
                 continuing = true;
                 if let Some(partial) = partial {
-                    partial.extended(&reply);
+                    partial.extended(&reply, chunks);
                 }
             }
         }

@@ -158,10 +158,7 @@ async fn a_continuation_that_adds_nothing_is_incomplete_never_a_verdict() {
         .expect_err("a truncated verdict is never accepted");
 
     let incomplete = JudgeIncomplete::caused(&error).expect("incomplete, not a failure");
-    assert!(
-        incomplete.to_string().contains("added nothing"),
-        "{error:#}"
-    );
+    assert!(incomplete.to_string().contains("no token"), "{error:#}");
     assert_eq!(client.calls().len(), 2);
 }
 
@@ -305,4 +302,65 @@ async fn extending_continuations_have_no_total_limit() {
 
     assert!(judged.acceptance[0].judgment.reason.starts_with("w0 w1 "));
     assert_eq!(client.calls().len(), 82);
+}
+
+/// Round 3 (decision D): a chunk that adds only whitespace does not move
+/// the document's parse position over a token: no progress.
+#[tokio::test]
+async fn a_whitespace_only_continuation_is_no_progress() {
+    let client = Scripted::new(vec![
+        Ok((r#"{"decisions":["#, Some("max_tokens"))),
+        Ok(("   ", Some("max_tokens"))),
+    ]);
+
+    let error = judge_contract(&client, contract(), &expected())
+        .await
+        .expect_err("whitespace never funds a continuation");
+
+    assert!(JudgeIncomplete::caused(&error).is_some(), "{error:#}");
+    assert_eq!(client.calls().len(), 2);
+}
+
+/// Round 3 (decision D): prose with no document is not continued; the
+/// judge is asked afresh.
+#[tokio::test]
+async fn a_truncated_reply_with_no_document_is_re_asked_never_continued() {
+    let client = Scripted::new(vec![
+        Ok(("Let me weigh each check in turn", Some("max_tokens"))),
+        Ok((ACCEPTED, Some("end_turn"))),
+    ]);
+
+    let judged = judge_contract(&client, contract(), &expected())
+        .await
+        .expect("the fresh reply is complete");
+
+    assert_eq!(
+        judged.acceptance[0].judgment.verdict,
+        JudgeDecision::Accepted
+    );
+    assert_eq!(
+        client.calls()[1].len(),
+        1,
+        "a fresh ask, not a continuation"
+    );
+}
+
+/// Round 3 (decision D): a partial reply past the byte cap is no progress.
+#[tokio::test]
+async fn a_reply_past_the_byte_cap_is_incomplete() {
+    let head =
+        r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":""#;
+    let huge = "x".repeat(9 * 1024 * 1024);
+    let client = Scripted::new(vec![
+        Ok((head, Some("max_tokens"))),
+        Ok((huge.as_str(), Some("max_tokens"))),
+        Ok((r#""}]}"#, Some("end_turn"))),
+    ]);
+
+    let error = judge_contract(&client, contract(), &expected())
+        .await
+        .expect_err("no verdict needs megabytes");
+
+    assert!(JudgeIncomplete::caused(&error).is_some(), "{error:#}");
+    assert_eq!(client.calls().len(), 2);
 }

@@ -143,25 +143,32 @@ pub(crate) struct FreezeProgress {
 impl FreezeProgress {
     /// Probe verdicts or judge verdicts saved by this attempt; reported.
     pub(crate) fn saved(&self, judge: bool) {
-        let counter = if judge { &self.judged } else { &self.saved };
-        counter.fetch_add(1, SeqCst);
+        add(if judge { &self.judged } else { &self.saved }, 1);
         self.report_line();
     }
 
     /// A unit an earlier attempt saved, found again.
     pub(crate) fn reused(&self, judge: bool) {
-        let counter = if judge { &self.judged } else { &self.reused };
-        counter.fetch_add(1, SeqCst);
+        add(if judge { &self.judged } else { &self.reused }, 1);
         // Reported too: after a kill, the last line must count every unit on
         // disk, or the executor reads too little progress and pauses early.
         self.report_line();
     }
 
-    /// `units` judge units (partial reply chunks) earlier attempts saved,
-    /// found again: counted once, so the progress line never goes back.
+    /// `units` judge units (partial reply chunks) earlier attempts saved
+    /// and still usable, found again.
     pub(crate) fn reused_judged(&self, units: u64) {
         if units > 0 {
-            self.judged.fetch_add(units, SeqCst);
+            add(&self.judged, units);
+            self.report_line();
+        }
+    }
+
+    /// `units` judge units that are no longer usable work (a spent partial
+    /// reply): progress shows only what survives (Issue 260).
+    pub(crate) fn withdraw_judged(&self, units: u64) {
+        if units > 0 {
+            let _ = (self.judged).fetch_update(SeqCst, SeqCst, |n| Some(n.saturating_sub(units)));
             self.report_line();
         }
     }
@@ -172,9 +179,12 @@ impl FreezeProgress {
         let _ = (self.saved).fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1));
     }
 
-    /// Every unit saved for this call so far, by any attempt.
+    /// Every unit saved for this call so far, by any attempt; saturating, so
+    /// counters read back from disk can never overflow it.
     pub(crate) fn total(&self) -> u64 {
-        self.saved.load(SeqCst) + self.reused.load(SeqCst) + self.judged.load(SeqCst)
+        (self.saved.load(SeqCst))
+            .saturating_add(self.reused.load(SeqCst))
+            .saturating_add(self.judged.load(SeqCst))
     }
 
     /// The host's progress line for [`Self::total`].
@@ -187,6 +197,11 @@ impl FreezeProgress {
             eprintln!("{}", self.line());
         }
     }
+}
+
+/// Adds `units` to `counter`, saturating.
+fn add(counter: &AtomicU64, units: u64) {
+    let _ = counter.fetch_update(SeqCst, SeqCst, |n| Some(n.saturating_add(units)));
 }
 
 /// The freeze stopped before it finished, with its progress saved: for its

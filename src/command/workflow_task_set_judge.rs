@@ -52,9 +52,11 @@ pub(super) fn batched_judge_prompt(contract: &AcceptanceContract) -> Result<Stri
     ))
 }
 
+#[path = "workflow_task_set_judge_partial.rs"]
+mod partial;
 #[path = "workflow_task_set_judge_reply.rs"]
 mod reply;
-pub(crate) use reply::PartialReply;
+pub(crate) use partial::PartialReply;
 use reply::{Ending, complete_reply, ending};
 
 /// Whether `outcome` ended normally (not truncated, not unknown).
@@ -276,9 +278,14 @@ async fn judge_batch(
         // ending the freeze: the judged shape is what makes a batch usable.
         let mut attempt = contract.clone();
         let judged = apply_judgments(&mut attempt, &content).and_then(|()| validate(&attempt));
-        // A whole reply is spent either way: a re-ask starts afresh.
+        // A judged reply is kept as its verdicts; an unusable one is spent,
+        // with its progress credit, and a re-ask starts afresh.
         if let Some(partial) = partial {
-            partial.spent();
+            if judged.is_ok() {
+                partial.completed();
+            } else {
+                partial.spent();
+            }
         }
         match judged {
             Ok(()) => {
