@@ -7,12 +7,15 @@
 //! removed and registered again under the same name and branch. None of
 //! these is the place the agent was confined to. So the identity holds the
 //! directory's generation (its file identity: device and inode, or on Windows
-//! volume serial and file index; and its creation time where recorded), and,
+//! volume serial and 128-bit file ID; and its creation time where recorded), and,
 //! inside a git repository, the working tree the repository itself registers
 //! for it and the generation of its git directory. A directory whose file
 //! identity cannot be read has no placement: a path and a writable creation
 //! time alone cannot tell a replacement apart.
 use std::path::{Path, PathBuf};
+
+/// Device and inode, or the full Windows volume serial and 128-bit file ID.
+type NodeIdentity = (u64, u128);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlacementIdentity {
@@ -24,8 +27,7 @@ pub struct PlacementIdentity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Stamp {
     path: PathBuf,
-    /// Device and inode, or volume serial and file index.
-    node: (u64, u64),
+    node: NodeIdentity,
     /// Creation time where the file system records one.
     born: Option<std::time::SystemTime>,
 }
@@ -84,7 +86,7 @@ impl Stamp {
 
     fn from_parts(
         path: PathBuf,
-        node: Option<(u64, u64)>,
+        node: Option<NodeIdentity>,
         born: Option<std::time::SystemTime>,
     ) -> Result<Self, String> {
         let node = node.ok_or_else(|| {
@@ -98,18 +100,18 @@ impl Stamp {
 }
 
 #[cfg(unix)]
-fn file_identity(_path: &Path, meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+fn file_identity(_path: &Path, meta: &std::fs::Metadata) -> Option<NodeIdentity> {
     use std::os::unix::fs::MetadataExt;
-    Some((meta.dev(), meta.ino()))
+    Some((meta.dev(), u128::from(meta.ino())))
 }
 
 #[cfg(windows)]
-fn file_identity(path: &Path, _meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+fn file_identity(path: &Path, _meta: &std::fs::Metadata) -> Option<NodeIdentity> {
     windows_identity::of(path)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn file_identity(_path: &Path, _meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+fn file_identity(_path: &Path, _meta: &std::fs::Metadata) -> Option<NodeIdentity> {
     None
 }
 
