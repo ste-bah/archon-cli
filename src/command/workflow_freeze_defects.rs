@@ -95,6 +95,10 @@ pub(super) fn refuse_element_shapes(
 mod shape_tests;
 
 #[cfg(test)]
+#[path = "workflow_freeze_round11_tests.rs"]
+mod round11_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

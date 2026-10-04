@@ -1,245 +1,335 @@
-//! The required-field table of each candidate element, walked on the JSON
-//! before serde (Issue 261). serde stops at an element's first error and
-//! would hide the rest; the table names every missing or invalid required
-//! field by its JSON pointer, so repairing fields one per attempt lowers the
-//! defect count. The table is the one declared schema the precheck reads, and
-//! a drift guard (workflow_freeze_shape_tests.rs) proves serde requires
-//! exactly the fields it names: for every field of a complete instance of
-//! each serde type, removing it or writing an undeclared value into it is
-//! refused by serde exactly when the table reports it.
-use crate::command::workflow_freeze_candidate::{candidate_document, judgment_placeholder};
+//! Report every serde shape defect before assembly. No first-error serde
+//! fallback: the exhaustive mutation corpus guards the complete field schema.
+use crate::command::workflow_freeze_candidate::candidate_document;
 use archon_workflow::defect::ValidationDefect;
 use serde_json::{Map, Value};
 
-/// The fields one JSON object must carry, as serde reads it.
-pub(crate) struct ObjectShape {
-    /// Required string fields.
-    pub(crate) strings: &'static [&'static str],
-    /// Required string fields with a closed vocabulary.
-    pub(crate) choices: &'static [(&'static str, &'static [&'static str])],
-    /// Required objects. A missing one reports the fields it requires.
-    pub(crate) objects: &'static [(&'static str, &'static ObjectShape)],
-    /// Optional lists of objects.
-    pub(crate) lists: &'static [(&'static str, &'static ObjectShape)],
-    /// An internally tagged union: the tag field, and the fields each of its
-    /// values requires beside the tag.
-    pub(crate) tagged: Option<(
+#[path = "workflow_freeze_schema.rs"]
+mod schema;
+
+#[derive(Clone, Copy)]
+enum Shape {
+    String,
+    Bool,
+    Unsigned(u64),
+    Any,
+    Choice(&'static [&'static str], bool),
+    Nullable(&'static Shape),
+    List(&'static Shape),
+    Map(&'static Shape),
+    Object(&'static ObjectShape),
+    Tagged(
         &'static str,
         &'static [(&'static str, &'static ObjectShape)],
-    )>,
+    ),
+}
+struct Field {
+    name: &'static str,
+    required: bool,
+    shape: Shape,
+}
+struct ObjectShape {
+    fields: &'static [Field],
+    deny_unknown: bool,
+    sequence_override: Option<&'static ObjectShape>,
 }
 
-const OBJECT: ObjectShape = ObjectShape {
-    strings: &[],
-    choices: &[],
-    objects: &[],
-    lists: &[],
-    tagged: None,
-};
-
-/// One kind of candidate element: the lists it appears in, its table, and
-/// serde's own read of it, run when the table passes an element.
-pub(crate) struct ElementShape {
-    pub(crate) lists: &'static [&'static str],
-    pub(crate) element: &'static ObjectShape,
-    pub(crate) serde_read: fn(&Value) -> Result<(), String>,
+pub(crate) enum ElementShape {
+    Tasks,
+    Acceptance,
 }
+pub(crate) const TASK_SHAPE: ElementShape = ElementShape::Tasks;
+pub(crate) const ENTRY_SHAPE: ElementShape = ElementShape::Acceptance;
 
-const DELIVERABLE_CONTRACT: ObjectShape = ObjectShape {
-    strings: &["kind", "artifact_path"],
-    ..OBJECT
-};
-
-const CONSUMED_ARTIFACT: ObjectShape = ObjectShape {
-    strings: &["artifact_path"],
-    ..OBJECT
-};
-
-const DEPENDENCY: ObjectShape = ObjectShape {
-    strings: &["task_id"],
-    lists: &[("consumes", &CONSUMED_ARTIFACT)],
-    ..OBJECT
-};
-
-const TASK: ObjectShape = ObjectShape {
-    strings: &["task_id", "file_name"],
-    lists: &[
-        ("depends_on", &DEPENDENCY),
-        ("deliverable_contracts", &DELIVERABLE_CONTRACT),
-    ],
-    ..OBJECT
-};
-
-const COMMAND_CHECK: ObjectShape = ObjectShape {
-    strings: &["command"],
-    choices: &[("cwd", &["project_root", "repo_root"])],
-    ..OBJECT
-};
-
-const FLOOR_CHECK: ObjectShape = ObjectShape {
-    objects: &[("contract", &DELIVERABLE_CONTRACT)],
-    ..OBJECT
-};
-
-const CHECK: ObjectShape = ObjectShape {
-    tagged: Some((
-        "kind",
-        &[("command", &COMMAND_CHECK), ("floor", &FLOOR_CHECK)],
-    )),
-    ..OBJECT
-};
-
-/// `judgment` is host-owned and stamped later, so it is not authored here.
-const ENTRY: ObjectShape = ObjectShape {
-    strings: &["id", "criterion"],
-    objects: &[("check", &CHECK)],
-    ..OBJECT
-};
-
-pub(crate) const TASK_SHAPE: ElementShape = ElementShape {
-    lists: &["tasks"],
-    element: &TASK,
-    serde_read: |item| read::<archon_workflow::task_skeleton::FrozenTask>(item.clone()),
-};
-
-/// Authored acceptance entries, read as assembly reads them: with the host's
-/// judgment placeholder stamped over whatever the author wrote there.
-pub(crate) const ENTRY_SHAPE: ElementShape = ElementShape {
-    lists: &["entries", "supplementary", "acceptance"],
-    element: &ENTRY,
-    serde_read: |item| {
-        let mut item = item.clone();
-        if let Some(object) = item.as_object_mut() {
-            object.insert("judgment".into(), judgment_placeholder());
-        }
-        read::<archon_workflow::task_set_contract::AcceptanceCriterion>(item)
-    },
-};
-
-fn read<T: serde::de::DeserializeOwned>(item: Value) -> Result<(), String> {
-    serde_json::from_value::<T>(item)
-        .map(drop)
-        .map_err(|error| error.to_string())
+fn pointer(at: &str, field: &str) -> String {
+    let field = field.replace('~', "~0").replace('/', "~1");
+    if at.is_empty() {
+        field
+    } else {
+        format!("{at}/{field}")
+    }
 }
-
-fn shape_defect(pointer: String, problem: &str) -> ValidationDefect {
-    let message = format!("{pointer} {problem}; write it exactly as the required shape names it");
-    ValidationDefect::new("invalid_candidate_shape", &pointer, "shape", message)
+fn shape_defect(at: &str, problem: &str) -> ValidationDefect {
+    ValidationDefect::new(
+        "invalid_candidate_shape",
+        at,
+        "shape",
+        format!("{at} {problem}"),
+    )
 }
 
 impl ObjectShape {
-    fn names(&self) -> impl Iterator<Item = &'static str> + '_ {
-        let keyed = |list: &'static [(&'static str, &'static ObjectShape)]| {
-            list.iter().map(|(name, _)| *name)
-        };
-        (self.strings.iter().copied())
-            .chain(self.choices.iter().map(|(name, _)| *name))
-            .chain(keyed(self.objects))
-            .chain(keyed(self.lists))
+    fn walk(
+        &self,
+        value: Option<&Value>,
+        at: &str,
+        allowed: &[&str],
+        out: &mut Vec<ValidationDefect>,
+    ) {
+        self.walk_parts(
+            value.and_then(Value::as_object),
+            value.and_then(Value::as_array).map(Vec::as_slice),
+            at,
+            allowed,
+            0,
+            None,
+            out,
+        );
     }
 
-    /// Every defect of `object` (`None` when it is missing) at `at`.
-    fn walk(&self, object: Option<&Map<String, Value>>, at: &str, out: &mut Vec<ValidationDefect>) {
-        let get = |field: &str| object.and_then(|object| object.get(field));
-        for field in self.strings {
-            if !get(field).is_some_and(Value::is_string) {
+    fn walk_parts(
+        &self,
+        object: Option<&Map<String, Value>>,
+        items: Option<&[Value]>,
+        at: &str,
+        allowed: &[&str],
+        offset: usize,
+        extra_start: Option<usize>,
+        out: &mut Vec<ValidationDefect>,
+    ) {
+        // An invalid authored entry can be repaired into either representation.
+        // Reserve the positional representation's required judgment before that
+        // repair; only an actual object is guaranteed to be stamped by assembly.
+        let shape = if object.is_none() {
+            self.sequence_override.unwrap_or(self)
+        } else {
+            self
+        };
+        for (index, field) in shape.fields.iter().enumerate() {
+            let value = object
+                .and_then(|map| map.get(field.name))
+                .or_else(|| items.and_then(|items| items.get(index)));
+            if value.is_some() || field.required {
+                let key = if items.is_some() {
+                    (index + offset).to_string()
+                } else {
+                    field.name.to_string()
+                };
+                field.shape.walk(value, &pointer(at, &key), out);
+            }
+        }
+        if let Some(items) = items {
+            for index in extra_start.unwrap_or(shape.fields.len())..items.len() {
                 out.push(shape_defect(
-                    format!("{at}/{field}"),
-                    "is missing or not a string",
+                    &pointer(at, &(index + offset).to_string()),
+                    "is an extra positional field; remove it",
                 ));
             }
         }
-        for (field, values) in self.choices {
-            if !get(field)
-                .and_then(Value::as_str)
-                .is_some_and(|value| values.contains(&value))
-            {
-                let problem = format!("is missing or not one of: {}", values.join(", "));
-                out.push(shape_defect(format!("{at}/{field}"), &problem));
-            }
-        }
-        for (field, shape) in self.objects {
-            let pointer = format!("{at}/{field}");
-            match get(field) {
-                None => shape.walk(None, &pointer, out),
-                Some(Value::Object(inner)) => shape.walk(Some(inner), &pointer, out),
-                Some(_) => out.push(shape_defect(pointer, "is not an object")),
-            }
-        }
-        for (field, shape) in self.lists {
-            let pointer = format!("{at}/{field}");
-            match get(field) {
-                None => {}
-                Some(Value::Array(items)) => shape.walk_items(items, &pointer, out),
-                Some(_) => out.push(shape_defect(pointer, "is not a list")),
-            }
-        }
-        if let Some((tag, variants)) = self.tagged {
-            let named = get(tag)
-                .and_then(Value::as_str)
-                .and_then(|value| variants.iter().find(|(name, _)| *name == value));
-            if named.is_none() {
-                let names: Vec<_> = variants.iter().map(|(name, _)| *name).collect();
-                let problem = format!("is missing or not one of: {}", names.join(", "));
-                out.push(shape_defect(format!("{at}/{tag}"), &problem));
-            }
-            // Without a valid tag, the one variant whose fields are present
-            // still has its other fields checked, so naming the tag later
-            // does not reveal defects this attempt could have reported.
-            let present = |shape: &ObjectShape| shape.names().any(|name| get(name).is_some());
-            let mut inferred = variants.iter().filter(|(_, shape)| present(shape));
-            let variant = named.or_else(|| match (inferred.next(), inferred.next()) {
-                (Some(only), None) => Some(only),
-                _ => None,
-            });
-            if let Some((_, shape)) = variant {
-                shape.walk(object, at, out);
+        if self.deny_unknown
+            && let Some(object) = object
+        {
+            for key in object.keys() {
+                if !allowed.contains(&key.as_str()) && !self.fields.iter().any(|f| f.name == key) {
+                    out.push(shape_defect(
+                        &pointer(at, key),
+                        "is an unknown field; remove it",
+                    ));
+                }
             }
         }
     }
-
-    fn walk_items(&self, items: &[Value], at: &str, out: &mut Vec<ValidationDefect>) {
-        for (index, item) in items.iter().enumerate() {
-            out.extend(table_defects(item, &format!("{at}/{index}"), self));
+}
+impl Shape {
+    fn walk(&self, value: Option<&Value>, at: &str, out: &mut Vec<ValidationDefect>) {
+        let valid = match self {
+            Self::String => value.is_some_and(Value::is_string),
+            Self::Bool => value.is_some_and(Value::is_boolean),
+            Self::Unsigned(max) => value.and_then(Value::as_u64).is_some_and(|n| n <= *max),
+            Self::Any => value.is_some(),
+            // Internally tagged checks use serde's buffered ContentDeserializer,
+            // whose unit reader also accepts an empty map. Direct enum reads do not.
+            Self::Choice(choices, buffered) => value.is_some_and(|value| {
+                value.as_str().is_some_and(|s| choices.contains(&s))
+                    || value.as_object().is_some_and(|map| {
+                        map.len() == 1
+                            && map.iter().any(|(name, payload)| {
+                                choices.contains(&name.as_str())
+                                    && (payload.is_null()
+                                        || (*buffered
+                                            && payload
+                                                .as_object()
+                                                .is_some_and(|map| map.is_empty())))
+                            })
+                    })
+            }),
+            Self::Nullable(inner) => {
+                if value.is_some_and(Value::is_null) {
+                    return;
+                }
+                inner.walk(value, at, out);
+                return;
+            }
+            Self::List(inner) => {
+                if let Some(Value::Array(items)) = value {
+                    for (index, item) in items.iter().enumerate() {
+                        inner.walk(Some(item), &pointer(at, &index.to_string()), out);
+                    }
+                    return;
+                }
+                false
+            }
+            Self::Map(inner) => {
+                if let Some(Value::Object(items)) = value {
+                    for (key, item) in items {
+                        inner.walk(Some(item), &pointer(at, key), out);
+                    }
+                    return;
+                }
+                false
+            }
+            Self::Object(shape) => {
+                let object = value.and_then(Value::as_object);
+                shape.walk(value, at, &[], out);
+                // A missing or mistyped object has its container defect AND every required
+                // leaf. Restoring {} removes the container defect; restoring a
+                // complete object removes all of them. Missing and invalid containers
+                // use the same identities, including every required leaf.
+                if object.is_none() && !value.is_some_and(Value::is_array) {
+                    out.push(shape_defect(
+                        at,
+                        "is missing or not a struct object or sequence",
+                    ));
+                }
+                return;
+            }
+            Self::Tagged(tag, variants) => {
+                walk_tagged(value, at, tag, variants, out);
+                return;
+            }
+        };
+        if !valid {
+            out.push(shape_defect(
+                at,
+                "is missing or has an invalid type or value",
+            ));
         }
     }
 }
 
-/// Every table defect of one element at `at`, without serde's read.
-pub(crate) fn table_defects(item: &Value, at: &str, shape: &ObjectShape) -> Vec<ValidationDefect> {
-    let mut out = Vec::new();
-    match item {
-        Value::Object(object) => shape.walk(Some(object), at, &mut out),
-        _ => out.push(shape_defect(at.to_string(), "is not an object")),
+fn walk_tagged(
+    value: Option<&Value>,
+    at: &str,
+    tag: &str,
+    variants: &[(&str, &ObjectShape)],
+    out: &mut Vec<ValidationDefect>,
+) {
+    let object = value.and_then(Value::as_object);
+    let items = value.and_then(Value::as_array);
+    let rest = items.map(|items| items.get(1..).unwrap_or_default());
+    let tag_at = pointer(at, if items.is_some() { "0" } else { tag });
+    let name = object
+        .and_then(|o| o.get(tag))
+        .or_else(|| items.and_then(|items| items.first()))
+        .and_then(Value::as_str);
+    if let Some((_, shape)) = variants.iter().find(|(kind, _)| Some(*kind) == name) {
+        shape.walk_parts(
+            object,
+            rest,
+            at,
+            &[tag],
+            usize::from(items.is_some()),
+            None,
+            out,
+        );
+        return;
     }
-    out
+    out.push(shape_defect(&tag_at, "is missing or not a known variant"));
+    if object.is_none() && items.is_none() {
+        out.push(shape_defect(at, "is not a tagged object or sequence"));
+    }
+    let mut allowed = vec![tag];
+    for (_, shape) in variants {
+        allowed.extend(shape.fields.iter().map(|f| f.name));
+    }
+    allowed.sort_unstable();
+    allowed.dedup();
+    let max_fields = variants
+        .iter()
+        .map(|(_, shape)| shape.fields.len())
+        .max()
+        .unwrap_or(0);
+    // Before a tag is resolved, every variant's required leaves are reachable.
+    // Reserve possible forbidden fields, even when absent: selecting ANY tag
+    // then removes at least the tag defect, and cannot reveal unknown fields.
+    // Positional variants can share a slot with different types, so their leaf
+    // identities stay distinct until the tag selects one interpretation.
+    for (kind, shape) in variants {
+        let start = out.len();
+        shape.walk_parts(
+            object,
+            rest,
+            at,
+            &allowed,
+            usize::from(items.is_some()),
+            rest.map(|_| max_fields),
+            out,
+        );
+        if items.is_some() {
+            for defect in &mut out[start..] {
+                if (0..shape.fields.len()).any(|index| {
+                    let prefix = pointer(at, &(index + 1).to_string());
+                    defect.identity.subject == prefix
+                        || defect.identity.subject.starts_with(&format!("{prefix}/"))
+                }) {
+                    defect.identity.location =
+                        format!("shape/variant/{kind}/{}", defect.identity.location);
+                }
+            }
+        }
+        if shape.deny_unknown {
+            let forbidden: Vec<_> = if items.is_some() {
+                (shape.fields.len()..max_fields)
+                    .map(|index| pointer(at, &(index + 1).to_string()))
+                    .collect()
+            } else {
+                allowed
+                    .iter()
+                    .filter(|field| {
+                        **field != tag && !shape.fields.iter().any(|f| f.name == **field)
+                    })
+                    .map(|field| pointer(at, field))
+                    .collect()
+            };
+            for at in forbidden {
+                let mut defect = shape_defect(
+                    &at,
+                    &format!("would be forbidden by {tag}={kind}; resolve {tag} first"),
+                );
+                defect.identity.location = format!("shape/forbidden_if/{kind}");
+                out.push(defect);
+            }
+        }
+    }
 }
 
-/// Every element shape defect of `candidate` under `shape`.
 pub(crate) fn element_shape_defects(
     candidate: &[u8],
     shape: &ElementShape,
 ) -> Vec<ValidationDefect> {
     let document = candidate_document(candidate);
-    let Ok(value) = serde_json::from_slice::<Value>(&document) else {
-        return Vec::new();
-    };
-    let mut defects = Vec::new();
-    for list in shape.lists {
-        let items = value.get(*list).and_then(Value::as_array);
-        for (index, item) in items.into_iter().flatten().enumerate() {
-            let at = format!("{list}/{index}");
-            let mut found = table_defects(item, &at, shape.element);
-            if found.is_empty()
-                && let Err(error) = (shape.serde_read)(item)
-            {
-                found.push(shape_defect(
-                    at,
-                    &format!("does not match the required shape ({error})"),
-                ));
-            }
-            defects.extend(found);
+    let value = match serde_json::from_slice::<Value>(&document) {
+        Ok(value) => value,
+        Err(error) => {
+            return vec![ValidationDefect::new(
+                "invalid_json",
+                "candidate",
+                "parse",
+                error.to_string(),
+            )];
         }
-    }
-    defects
+    };
+    // Assembly replaces the entire contract when entries is present, including
+    // acceptance, PRD and gap policy, and stamps BOTH authored entry lists.
+    // Legacy documents are retained verbatim, judgments included.
+    let root = match shape {
+        ElementShape::Tasks => &schema::SKELETON,
+        ElementShape::Acceptance if value.get("entries").is_some() => &schema::AUTHORED,
+        ElementShape::Acceptance => &schema::LEGACY,
+    };
+    let mut out = Vec::new();
+    Shape::Object(root).walk(Some(&value), "", &mut out);
+    out.sort_by(|a, b| a.identity.cmp(&b.identity));
+    out.dedup_by(|a, b| a.identity == b.identity);
+    out
 }
