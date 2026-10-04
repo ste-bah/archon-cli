@@ -47,6 +47,14 @@ impl AuthorizedCommand {
             cwd: TrustedCwd::ProjectRoot,
         })
     }
+    /// A command for runner tests, which drive `run_at` without a contract.
+    #[cfg(test)]
+    pub(crate) fn for_test(text: &str, cwd: TrustedCwd) -> Self {
+        Self {
+            bytes: text.as_bytes().to_vec(),
+            cwd,
+        }
+    }
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }

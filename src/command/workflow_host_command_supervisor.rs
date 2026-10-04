@@ -13,7 +13,9 @@ use tokio::sync::{mpsc, watch};
 use super::workflow_host_command_catalog::ResolvedHostCommand;
 #[path = "workflow_host_command_termination.rs"]
 mod termination;
-use termination::{terminate_and_reap, terminate_completed_group};
+use termination::{
+    audit_no_descendants, kill_on_drop, terminate_and_reap, terminate_completed_group,
+};
 
 #[cfg(unix)]
 const CLEANUP_GRACE: Duration = Duration::from_millis(100);
@@ -25,29 +27,6 @@ const REAP_DEADLINE: Duration = Duration::from_secs(2);
 const DESCENDANT_AUDIT_ATTEMPTS: u32 = 25;
 #[cfg(unix)]
 const DESCENDANT_AUDIT_INTERVAL: Duration = Duration::from_millis(40);
-
-#[cfg(unix)]
-const SIGKILL_VALUE: i32 = libc::SIGKILL;
-#[cfg(not(unix))]
-const SIGKILL_VALUE: i32 = 0;
-
-/// True when no process remains in the group.
-#[cfg(unix)]
-fn group_is_empty(pgid: u32) -> WorkflowResult<bool> {
-    // Signal 0 performs error checking without delivering anything.
-    if unsafe { libc::kill(-(pgid as libc::pid_t), 0) } == 0 {
-        return Ok(false);
-    }
-    let error = std::io::Error::last_os_error();
-    match error.raw_os_error() {
-        Some(libc::ESRCH) => Ok(true),
-        // The group exists but is not ours to signal. That is still a survivor.
-        Some(libc::EPERM) => Ok(false),
-        _ => Err(WorkflowError::StageFailed(format!(
-            "auditing host command process group {pgid} failed: {error}"
-        ))),
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HostCommandSignal {
@@ -147,8 +126,20 @@ pub(crate) async fn supervise_process_group(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Its own session, not only its own group: a nested runner gives each of
+    // its checks a group of its own, and the session still holds those
+    // (Issue 270). On Linux it also becomes the reaper of its orphans, so a
+    // descendant that leaves the session as well stays its descendant.
     #[cfg(unix)]
-    command.process_group(0);
+    // SAFETY: setsid and prctl are async-signal-safe syscalls.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            archon_shell::process_tree::become_subreaper()
+        });
+    }
 
     let mut child = command.spawn().map_err(|source| WorkflowError::Io {
         path: request.program.clone(),
@@ -159,7 +150,7 @@ pub(crate) async fn supervise_process_group(
     // observe this future being dropped - task cancellation, a panic, or an
     // early return on a path that never reaches termination - and a dropped
     // supervisor used to leave the whole process group running.
-    let mut group_guard = ProcessGroupGuard(process_group);
+    let mut group_guard = ProcessGroupGuard::new(process_group);
     let _record = super::workflow_host_command_groups::record_in(
         group_records,
         process_group,
@@ -228,6 +219,7 @@ pub(crate) async fn supervise_process_group(
 
     let status = match outcome {
         Outcome::Completed(status) => {
+            group_guard.reaped();
             let status = status.map_err(|error| {
                 WorkflowError::StageFailed(format!("waiting for host command failed: {error}"))
             })?;
@@ -236,8 +228,10 @@ pub(crate) async fn supervise_process_group(
             status
         }
         Outcome::TimedOut => {
-            terminate_and_reap(&mut child, process_group).await?;
-            audit_no_descendants(process_group).await?;
+            let killed = terminate_and_reap(&mut child, process_group).await?;
+            group_guard.reaped();
+            audit_no_descendants(process_group, killed).await?;
+            group_guard.disarm();
             abort_stdin(stdin_task);
             // Issue #255: returned, not raised. The output the child wrote
             // before the kill is the evidence (its progress marker) the
@@ -253,13 +247,17 @@ pub(crate) async fn supervise_process_group(
             });
         }
         Outcome::Controlled(signal) => {
-            terminate_and_reap(&mut child, process_group).await?;
+            let killed = terminate_and_reap(&mut child, process_group).await?;
+            group_guard.reaped();
             // Audited, but never allowed to replace the control signal. A pause
             // or cancel that comes back as `StageFailed` is not recognised as an
             // interruption, so no interrupted-call record is written and a clean
             // user cancel is recorded as a run failure.
-            if let Err(error) = audit_no_descendants(process_group).await {
-                tracing::warn!(%error, "surviving process group member after control interruption");
+            match audit_no_descendants(process_group, killed).await {
+                Ok(()) => group_guard.disarm(),
+                Err(error) => {
+                    tracing::warn!(%error, "surviving process tree member after control interruption")
+                }
             }
             abort_stdin(stdin_task);
             finish_pipe_tasks(stdout_task, stderr_task).await?;
@@ -275,8 +273,10 @@ pub(crate) async fn supervise_process_group(
             });
         }
         Outcome::Event(SupervisorEvent::OutputLimit { stream, limit }) => {
-            terminate_and_reap(&mut child, process_group).await?;
-            audit_no_descendants(process_group).await?;
+            let killed = terminate_and_reap(&mut child, process_group).await?;
+            group_guard.reaped();
+            audit_no_descendants(process_group, killed).await?;
+            group_guard.disarm();
             abort_stdin(stdin_task);
             finish_pipe_tasks(stdout_task, stderr_task).await?;
             return Err(WorkflowError::StageFailed(format!(
@@ -285,7 +285,10 @@ pub(crate) async fn supervise_process_group(
             )));
         }
         Outcome::Event(SupervisorEvent::StdinFailure(error)) => {
-            terminate_and_reap(&mut child, process_group).await?;
+            let killed = terminate_and_reap(&mut child, process_group).await?;
+            group_guard.reaped();
+            audit_no_descendants(process_group, killed).await?;
+            group_guard.disarm();
             abort_stdin(stdin_task);
             finish_pipe_tasks(stdout_task, stderr_task).await?;
             return Err(WorkflowError::StageFailed(format!(
@@ -374,133 +377,39 @@ fn abort_stdin(task: Option<tokio::task::JoinHandle<()>>) {
     }
 }
 
-/// Kills the process group if the supervisor stops running for a reason the
-/// select cannot see. Disarmed state is unnecessary: on the ordinary paths the
-/// group is already gone, so the signal is a no-op.
-struct ProcessGroupGuard(Option<u32>);
+/// Kills the process tree if the supervisor stops running for a reason the
+/// select cannot see. Disarmed once the tree is confirmed empty.
+struct ProcessGroupGuard {
+    leader: Option<u32>,
+    /// Once the leader is reaped its pid may be reused, so the tree is no
+    /// longer reached through it by ancestry.
+    reaped: bool,
+}
 
 impl ProcessGroupGuard {
-    /// Stops the guard signalling. Called once the group is confirmed empty:
-    /// the pid is free from that moment, so a later blind `SIGKILL` to the same
-    /// group id could reach an unrelated process that has since claimed it.
+    fn new(leader: Option<u32>) -> Self {
+        Self {
+            leader,
+            reaped: false,
+        }
+    }
+
+    fn reaped(&mut self) {
+        self.reaped = true;
+    }
+
+    /// Stops the guard signalling. Called once the tree is confirmed empty:
+    /// the pid is free from that moment, so a later blind kill of the same
+    /// group or session id could reach an unrelated process that claimed it.
     fn disarm(&mut self) {
-        self.0 = None;
+        self.leader = None;
     }
 }
 
 impl Drop for ProcessGroupGuard {
     fn drop(&mut self) {
-        let _ = signal_group(self.0, SIGKILL_VALUE);
-    }
-}
-
-/// Confirms no member of the group survived termination.
-///
-/// Killing a group and verifying nothing survived it are different obligations.
-/// A child that called `setsid` left the group and never received either
-/// signal, so reaping the direct child says nothing about it. Every capability
-/// declares `detaches: false`, which makes a survivor here a broken invariant
-/// rather than an expected case.
-///
-/// The retry exists because a just-killed member can still be a zombie in the
-/// process table for a moment; only a member that outlives the whole window is
-/// reported.
-#[cfg(unix)]
-async fn audit_no_descendants(process_group: Option<u32>) -> WorkflowResult<()> {
-    let Some(pid) = process_group else {
-        return Ok(());
-    };
-    for attempt in 0..DESCENDANT_AUDIT_ATTEMPTS {
-        if group_is_empty(pid)? {
-            return Ok(());
-        }
-        if attempt + 1 < DESCENDANT_AUDIT_ATTEMPTS {
-            tokio::time::sleep(DESCENDANT_AUDIT_INTERVAL).await;
+        if let Some(leader) = self.leader {
+            kill_on_drop(leader, !self.reaped);
         }
     }
-    Err(WorkflowError::StageFailed(format!(
-        "host command process group {pid} still has live members after termination"
-    )))
-}
-
-#[cfg(unix)]
-fn signal_group(process_group: Option<u32>, signal: i32) -> WorkflowResult<()> {
-    let Some(pid) = process_group else {
-        return Ok(());
-    };
-    let result = unsafe { libc::kill(-(pid as libc::pid_t), signal) };
-    if result == 0 {
-        return Ok(());
-    }
-    let error = std::io::Error::last_os_error();
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(());
-    }
-    signal_group_members(pid, signal, &error.to_string())
-}
-
-#[cfg(unix)]
-fn signal_group_members(pgid: u32, signal: i32, aggregate: &str) -> WorkflowResult<()> {
-    let members = process_group_members(pgid);
-    if members.is_empty() {
-        return Ok(());
-    }
-    for pid in &members {
-        let _ = unsafe { libc::kill(*pid as libc::pid_t, libc::SIGSTOP) };
-    }
-    for pid in members.iter().rev() {
-        let result = unsafe { libc::kill(*pid as libc::pid_t, signal) };
-        if result == -1 {
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::ESRCH) {
-                tracing::debug!(pid, %error, "host command member signal failed");
-            }
-        }
-    }
-    let survivors = process_group_members(pgid);
-    if survivors.is_empty() {
-        Ok(())
-    } else {
-        Err(WorkflowError::StageFailed(format!(
-            "signalling host command process group {pgid} failed: {aggregate} (still alive: {})",
-            survivors
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        )))
-    }
-}
-
-#[cfg(unix)]
-fn process_group_members(pgid: u32) -> Vec<u32> {
-    let Ok(output) = std::process::Command::new("ps")
-        .args(["-axo", "pid=,pgid=,stat="])
-        .output()
-    else {
-        return Vec::new();
-    };
-    let own = std::process::id();
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let pid: u32 = fields.next()?.parse().ok()?;
-            let group: u32 = fields.next()?.parse().ok()?;
-            let zombie = fields.next().is_some_and(|state| state.starts_with('Z'));
-            (group == pgid && pid != own && pid > 1 && !zombie).then_some(pid)
-        })
-        .collect()
-}
-
-#[cfg(not(unix))]
-fn signal_group(_process_group: Option<u32>, _signal: i32) -> WorkflowResult<()> {
-    Ok(())
-}
-
-/// Without process groups there are no descendants to audit; the child handle
-/// termination in `workflow_host_command_termination` is the whole cleanup.
-#[cfg(not(unix))]
-async fn audit_no_descendants(_process_group: Option<u32>) -> WorkflowResult<()> {
-    Ok(())
 }

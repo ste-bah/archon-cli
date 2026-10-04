@@ -18,6 +18,11 @@ pub(crate) struct HostCommandGroupRecord {
     pub(crate) schema_version: u32,
     pub(crate) pgid: u32,
     pub(crate) pid: u32,
+    /// The session the command leads (Issue 270). A nested runner gives its
+    /// checks process groups of their own; they stay in this session, so the
+    /// record runs while any of them does. Absent in records written before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) session: Option<u32>,
     pub(crate) command_id: String,
     pub(crate) host_pid: u32,
     pub(crate) started_at: String,
@@ -38,12 +43,14 @@ pub(crate) fn record_group(
     dir: &Path,
     pgid: u32,
     pid: u32,
+    session: Option<u32>,
     command_id: &str,
 ) -> WorkflowResult<GroupRecordGuard> {
     let record = HostCommandGroupRecord {
         schema_version: 1,
         pgid,
         pid,
+        session,
         command_id: command_id.to_string(),
         host_pid: std::process::id(),
         started_at: chrono::Utc::now().to_rfc3339(),
@@ -60,16 +67,17 @@ pub(crate) fn record_group(
     Ok(GroupRecordGuard(path))
 }
 
-/// [`record_group`] for a group whose leader is `pgid` (the supervisor makes
-/// each command a group leader), when the run keeps records and the child
-/// has an id.
+/// [`record_group`] for a command whose pid is `leader` (the supervisor makes
+/// each command a group leader and, on Unix, a session leader), when the run
+/// keeps records and the child has an id.
 pub(crate) fn record_in(
     dir: Option<&Path>,
-    pgid: Option<u32>,
+    leader: Option<u32>,
     command_id: &str,
 ) -> WorkflowResult<Option<GroupRecordGuard>> {
-    match (dir, pgid) {
-        (Some(dir), Some(pgid)) => record_group(dir, pgid, pgid, command_id).map(Some),
+    let session = if cfg!(unix) { leader } else { None };
+    match (dir, leader) {
+        (Some(dir), Some(pgid)) => record_group(dir, pgid, pgid, session, command_id).map(Some),
         _ => Ok(None),
     }
 }
@@ -89,6 +97,22 @@ pub(crate) fn group_running(pgid: u32) -> Option<bool> {
         let _ = pgid;
         None
     }
+}
+
+/// Whether anything `record` names still runs: its group, or any process of
+/// its session. `None` where that cannot be probed, which a caller must
+/// treat as possibly running; a failed session probe counts as running.
+pub(crate) fn record_running(record: &HostCommandGroupRecord) -> Option<bool> {
+    let group = group_running(record.pgid)?;
+    #[cfg(unix)]
+    if let (false, Some(session)) = (group, record.session) {
+        let scope = archon_shell::process_tree::Scope {
+            sessions: vec![session],
+            ..Default::default()
+        };
+        return Some(scope.members().map_or(true, |members| !members.is_empty()));
+    }
+    Some(group)
 }
 
 /// The records left under `run_dir`, split into groups that still run (or
@@ -118,7 +142,7 @@ pub(crate) fn left_groups(
                     path.display()
                 )
             })?;
-        if group_running(record.pgid) == Some(false) {
+        if record_running(&record) == Some(false) {
             std::fs::remove_file(&path)?;
             ended.push(record);
         } else {
@@ -128,7 +152,8 @@ pub(crate) fn left_groups(
     Ok((running, ended))
 }
 
-/// Refuses while a group that a dead executor left behind still runs.
+/// Refuses while a group (or a process of its session) that a dead executor
+/// left behind still runs.
 /// Returns the records of the groups that have ended.
 pub(crate) fn require_no_running_groups(
     run_dir: &Path,
