@@ -356,6 +356,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             .await?;
         // What the call records never holds a secret value the child was given.
         let secrets = HostSecrets::of(&context, &command.environment);
+        let truncated = observed.truncation();
         let raw_stdout = utf8(observed.stdout, "stdout")?;
         let (stdout, stderr) = (
             secrets.text(&raw_stdout),
@@ -370,8 +371,8 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 stderr_bytes: observed.stderr_bytes,
                 timed_out: observed.timed_out,
                 interrupted: false,
-                stdout_truncated: false,
-                stderr_truncated: false,
+                stdout_truncated: truncated.0,
+                stderr_truncated: truncated.1,
                 gate_envelope: None,
                 publication_receipt: None,
                 subjects: Vec::new(),
@@ -488,8 +489,8 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             stderr_bytes: observed.stderr_bytes,
             timed_out: false,
             interrupted: false,
-            stdout_truncated: false,
-            stderr_truncated: false,
+            stdout_truncated: truncated.0,
+            stderr_truncated: truncated.1,
             gate_envelope: Some(envelope),
             publication_receipt: Some(receipt),
             subjects,

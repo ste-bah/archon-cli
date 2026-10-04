@@ -7,10 +7,12 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use archon_workflow::{WorkflowError, WorkflowResult};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 
 use super::workflow_host_command_catalog::ResolvedHostCommand;
+#[path = "workflow_host_command_supervisor_io.rs"]
+mod io;
+use io::{SupervisorEvent, abort_stdin, drain_pipe, finish_pipe_tasks, spawn_stdin};
 #[path = "workflow_host_command_termination.rs"]
 mod termination;
 use termination::{
@@ -94,22 +96,23 @@ pub(crate) struct SupervisedProcessOutput {
     pub(crate) stderr_bytes: u64,
 }
 
-#[derive(Debug)]
-enum SupervisorEvent {
-    OutputLimit { stream: &'static str, limit: u64 },
-    StdinFailure(String),
-}
-
-#[derive(Debug)]
-struct CapturedPipe {
-    bytes: Vec<u8>,
-    total: u64,
+impl SupervisedProcessOutput {
+    /// Whether the child wrote more (stdout, stderr) than was kept, from the
+    /// byte counts. A call whose output overflowed fails in the supervisor,
+    /// so a returned output is not expected to be truncated; a record reports
+    /// these counts rather than assuming that.
+    pub(crate) fn truncation(&self) -> (bool, bool) {
+        (
+            self.stdout_bytes > self.stdout.len() as u64,
+            self.stderr_bytes > self.stderr.len() as u64,
+        )
+    }
 }
 
 /// `group_records`, when given, keeps a record of the group while it is
 /// owned, so a resume after a parent kill can see it (Issue 251).
 pub(crate) async fn supervise_process_group(
-    request: ResolvedHostCommand,
+    mut request: ResolvedHostCommand,
     control: HostCommandControl,
     group_records: Option<&std::path::Path>,
 ) -> WorkflowResult<SupervisedProcessOutput> {
@@ -175,20 +178,15 @@ pub(crate) async fn supervise_process_group(
         "stderr",
         event_tx.clone(),
     ));
-    let stdin_task = request.stdin.map(|bytes| {
-        let mut stdin = child.stdin.take().expect("piped stdin exists");
-        let tx = event_tx.clone();
-        tokio::spawn(async move {
-            let result = async {
-                stdin.write_all(&bytes).await?;
-                stdin.shutdown().await
-            }
-            .await;
-            if let Err(error) = result {
-                let _ = tx.send(SupervisorEvent::StdinFailure(error.to_string()));
-            }
-        })
-    });
+    let stdin_task = match request.stdin.take() {
+        Some(bytes) => {
+            let stdin = child.stdin.take().ok_or_else(|| {
+                WorkflowError::StageFailed("host command stdin pipe was not created".to_string())
+            })?;
+            Some(spawn_stdin(stdin, bytes, event_tx.clone()))
+        }
+        None => None,
+    };
     drop(event_tx);
 
     enum Outcome {
@@ -237,6 +235,11 @@ pub(crate) async fn supervise_process_group(
             // before the kill is the evidence (its progress marker) the
             // executor's retry-or-pause decision reads.
             let (stdout, stderr) = finish_pipe_tasks(stdout_task, stderr_task).await?;
+            // An overflow the drain had not reported when the clock ran out is
+            // still an overflow: the outcome must not depend on that order.
+            if let Some(error) = io::overflow(&request, &stdout, &stderr) {
+                return Err(error);
+            }
             return Ok(SupervisedProcessOutput {
                 exit_code: None,
                 timed_out: true,
@@ -272,38 +275,31 @@ pub(crate) async fn supervise_process_group(
                 )),
             });
         }
-        Outcome::Event(SupervisorEvent::OutputLimit { stream, limit }) => {
+        Outcome::Event(event) => {
             let killed = terminate_and_reap(&mut child, process_group).await?;
             group_guard.reaped();
             audit_no_descendants(process_group, killed).await?;
             group_guard.disarm();
             abort_stdin(stdin_task);
             finish_pipe_tasks(stdout_task, stderr_task).await?;
-            return Err(WorkflowError::StageFailed(format!(
-                "host command '{}' {stream} output exceeded {limit} bytes",
-                request.command_id
-            )));
-        }
-        Outcome::Event(SupervisorEvent::StdinFailure(error)) => {
-            let killed = terminate_and_reap(&mut child, process_group).await?;
-            group_guard.reaped();
-            audit_no_descendants(process_group, killed).await?;
-            group_guard.disarm();
-            abort_stdin(stdin_task);
-            finish_pipe_tasks(stdout_task, stderr_task).await?;
-            return Err(WorkflowError::StageFailed(format!(
-                "host command '{}' stdin delivery failed: {error}",
-                request.command_id
-            )));
+            return Err(match event {
+                SupervisorEvent::OutputLimit { stream, limit } => {
+                    io::over_limit(&request, stream, limit)
+                }
+                SupervisorEvent::Failed(detail) => io::failed(&request, &detail),
+            });
         }
     };
 
-    if let Some(task) = stdin_task {
-        task.await.map_err(|error| {
-            WorkflowError::StageFailed(format!("host command stdin task failed: {error}"))
-        })?;
-    }
+    // The exit is polled first, so an overflow or a stdin failure may still
+    // be queued, or not yet seen at all, when it wins. Each is decided again
+    // here from what the pipes and the stdin writer actually report, with
+    // the outcome the event path gives (Issue 272).
+    let stdin = io::finish_stdin(stdin_task).await?;
     let (stdout, stderr) = finish_pipe_tasks(stdout_task, stderr_task).await?;
+    if let Some(error) = io::completion_failure(&request, &stdout, &stderr, stdin) {
+        return Err(error);
+    }
     Ok(SupervisedProcessOutput {
         exit_code: status.code(),
         timed_out: false,
@@ -312,69 +308,6 @@ pub(crate) async fn supervise_process_group(
         stdout_bytes: stdout.total,
         stderr_bytes: stderr.total,
     })
-}
-
-async fn drain_pipe(
-    mut pipe: impl AsyncRead + Unpin,
-    limit: u64,
-    stream: &'static str,
-    events: mpsc::UnboundedSender<SupervisorEvent>,
-) -> CapturedPipe {
-    let mut retained = Vec::new();
-    let mut total = 0u64;
-    let mut reported = false;
-    let mut chunk = [0u8; 8192];
-    loop {
-        match pipe.read(&mut chunk).await {
-            Ok(0) => break,
-            Ok(read) => {
-                total = total.saturating_add(read as u64);
-                if retained.len() < limit as usize {
-                    let remaining = limit as usize - retained.len();
-                    retained.extend_from_slice(&chunk[..read.min(remaining)]);
-                }
-                if total > limit && !reported {
-                    let _ = events.send(SupervisorEvent::OutputLimit { stream, limit });
-                    reported = true;
-                }
-            }
-            Err(error) => {
-                let _ = events.send(SupervisorEvent::StdinFailure(format!(
-                    "reading {stream}: {error}"
-                )));
-                break;
-            }
-        }
-    }
-    CapturedPipe {
-        bytes: retained,
-        total,
-    }
-}
-
-async fn finish_pipe_tasks(
-    stdout: tokio::task::JoinHandle<CapturedPipe>,
-    stderr: tokio::task::JoinHandle<CapturedPipe>,
-) -> WorkflowResult<(CapturedPipe, CapturedPipe)> {
-    tokio::time::timeout(REAP_DEADLINE, async {
-        let stdout = stdout.await.map_err(|error| {
-            WorkflowError::StageFailed(format!("host command stdout task failed: {error}"))
-        })?;
-        let stderr = stderr.await.map_err(|error| {
-            WorkflowError::StageFailed(format!("host command stderr task failed: {error}"))
-        })?;
-        Ok((stdout, stderr))
-    })
-    .await
-    .map_err(|_| {
-        WorkflowError::StageFailed("host command pipe drain exceeded cleanup deadline".to_string())
-    })?
-}
-
-fn abort_stdin(task: Option<tokio::task::JoinHandle<()>>) {
-    if let Some(task) = task {
-        task.abort();
-    }
 }
 
 /// Kills the process tree if the supervisor stops running for a reason the
