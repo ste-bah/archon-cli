@@ -169,3 +169,6 @@ async fn a_resumed_run_heals_a_recovery_unfreeze_to_an_accepted_contract() {
 
 #[path = "workflow_live_v3_acceptance_recovery_round_five_tests.rs"]
 mod round_five;
+
+#[path = "workflow_live_v3_acceptance_recovery_round_six_tests.rs"]
+mod round_six;

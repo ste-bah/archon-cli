@@ -46,26 +46,27 @@ pub(super) fn recover_legacy(
         let decision = match decision {
             Some(decision) => decision,
             None if found.backups.is_empty() => Decision::Discard,
+            None if found.staged.is_empty() => {
+                // Old publishers linked every existing target, including
+                // unchanged files. Only the chain distinguishes completed
+                // publication from an interrupted rollback once staging is gone.
+                if verify_chain(pin_path, tasks_root).is_ok() {
+                    Decision::Forward
+                } else {
+                    Decision::Rollback
+                }
+            }
             None => {
                 let mut rollback = false;
                 for backup in &found.backups {
                     let target = target_of(backup);
-                    if !found.staged.iter().any(|(_, path)| path == &target) {
-                        let live = digest_of(&target)?;
-                        // During staging an equal file is simply unchanged.
-                        // With staging gone, an already restored target is
-                        // evidence of rollback: restore remaining backups too.
-                        if live.is_none() || (found.staged.is_empty() && live == digest_of(backup)?)
-                        {
-                            rollback = true;
-                        }
+                    if !found.staged.iter().any(|(_, path)| path == &target)
+                        && digest_of(&target)?.is_none()
+                    {
+                        rollback = true;
                     }
                 }
-                // With no staging, an invalid live chain may be a rollback
-                // that died with backups remaining. Restore those old bytes.
-                if rollback
-                    || (found.staged.is_empty() && verify_chain(pin_path, tasks_root).is_err())
-                {
+                if rollback {
                     Decision::Rollback
                 } else {
                     Decision::Forward

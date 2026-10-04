@@ -20,6 +20,8 @@ use super::{
     validate_existing_parents, write_durably,
 };
 const TRIGGER: &str = "recovery-refreeze:";
+#[path = "workflow_task_set_recovery_runs.rs"]
+mod anchors;
 #[path = "workflow_task_set_recovery_evidence.rs"]
 mod evidence;
 pub(crate) use evidence::{authority, cleanup_adopted, refreeze_base};
@@ -29,11 +31,15 @@ struct Recovery {
     transaction: String,
     task_root: PathBuf,
     runs: BTreeMap<String, PortableAcceptanceIdentityV1>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    skipped_runs: BTreeSet<String>,
     prior: Option<AcceptancePin>,
     skeleton: Option<TaskSkeleton>,
     completed: Option<Completion>,
     #[serde(default)]
     evidence: BTreeMap<PathBuf, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    contract_digest: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Completion {
@@ -79,12 +85,9 @@ pub(crate) fn record_unfreeze(pin: &Path, tasks: &Path, transaction: &str) -> Re
         return sync_parent(&path(pin));
     }
     let task_root = tasks.canonicalize().map(archon_shell::paths::plain)?;
-    let archon = pin
-        .parent()
-        .and_then(Path::parent)
-        .ok_or_else(|| anyhow!("pin has no store"))?;
-    let store = WorkflowStore::new(archon.join("workflows"));
+    let store = anchors::store(pin)?;
     let mut runs = BTreeMap::new();
+    let mut skipped_runs = BTreeSet::new();
     match std::fs::read_dir(store.root()) {
         Ok(entries) => {
             for entry in entries {
@@ -103,17 +106,28 @@ pub(crate) fn record_unfreeze(pin: &Path, tasks: &Path, transaction: &str) -> Re
                     tracing::warn!(%error, run = %id, "skipping unsafe recovery run directory");
                     continue;
                 }
-                // A run without a usable launch snapshot grants no authority.
-                if let Ok(snapshot) = crate::command::acceptance_chain::launch_snapshot(&store, &id)
-                    && Path::new(&snapshot.canonical_task_root_identity)
-                        .canonicalize()
-                        .map(archon_shell::paths::plain)
-                        .ok()
-                        .as_ref()
-                        == Some(&task_root)
-                    && let Some(identity) = snapshot.portable_acceptance_identity
+                // Keep a durable id for incomplete discovery. A later usable
+                // snapshot still has to prove its root and launch preimages.
+                let snapshot = match crate::command::acceptance_chain::launch_snapshot(&store, &id)
                 {
-                    runs.insert(id, identity);
+                    Ok(snapshot) => snapshot,
+                    Err(_) => {
+                        skipped_runs.insert(id);
+                        continue;
+                    }
+                };
+                if Path::new(&snapshot.canonical_task_root_identity)
+                    .canonicalize()
+                    .map(archon_shell::paths::plain)
+                    .ok()
+                    .as_ref()
+                    == Some(&task_root)
+                {
+                    if let Some(identity) = snapshot.portable_acceptance_identity {
+                        runs.insert(id, identity);
+                    } else {
+                        skipped_runs.insert(id);
+                    }
                 }
             }
         }
@@ -131,10 +145,12 @@ pub(crate) fn record_unfreeze(pin: &Path, tasks: &Path, transaction: &str) -> Re
         transaction: transaction.into(),
         task_root,
         runs,
+        skipped_runs,
         prior,
         skeleton,
         completed: None,
         evidence: BTreeMap::new(),
+        contract_digest: None,
     };
     evidence::capture(pin, tasks, &mut record)?;
     records.push(record);
@@ -220,18 +236,13 @@ impl PreparedAcceptanceFreeze {
         else {
             return Ok(());
         };
-        let Some(from) = record
-            .prior
-            .as_ref()
-            .map(AcceptancePin::identity)
-            .or_else(|| record.runs.values().next().cloned())
-        else {
-            return Ok(());
-        };
         if let Err(error) = evidence::validate(record, &pin_path, &self.tasks_root) {
             tracing::warn!(%error, "recovery adoption deferred; pending authority retained for retry");
             return Ok(());
         }
+        let Some(from) = anchors::anchor(record, &pin_path)? else {
+            return Ok(());
+        };
         let mut files = Vec::new();
         if let Some(skeleton) = &record.skeleton {
             let mut skeleton = skeleton.clone();
@@ -328,42 +339,35 @@ pub(crate) fn verify(
         let Some(done) = &record.completed else {
             continue;
         };
-        if record.task_root != root
-            || record.runs.get(run) != Some(launch)
-            || !pin.lineage.starts_with(&done.lineage)
-        {
+        if record.task_root != root || !pin.lineage.starts_with(&done.lineage) {
             continue;
         }
         evidence::validate(record, pin_path, tasks)?;
-        let from = record
+        if !anchors::authorized(record, pin_path, run, launch, launch_lineage)? {
+            continue;
+        }
+        let from = anchors::anchor(record, pin_path)?
+            .ok_or_else(|| anyhow!("recovery has no prior anchor"))?;
+        let mut expected = record
             .prior
             .as_ref()
-            .map(AcceptancePin::identity)
-            .or_else(|| record.runs.values().next().cloned())
-            .ok_or_else(|| anyhow!("recovery has no prior anchor"))?;
-        let hop = done
-            .lineage
-            .last()
-            .ok_or_else(|| anyhow!("recovery completion has no hop"))?;
-        if hop.from != from
-            || hop.to != done.identity
-            || hop.trigger != format!("{TRIGGER}{}", record.transaction)
-            || hop.reauthored_ids != done.ids
-        {
+            .map(|pin| pin.lineage.clone())
+            .unwrap_or_default();
+        expected.push(PinTransition::extending(
+            &expected,
+            from.clone(),
+            done.identity.clone(),
+            done.ids.clone(),
+            &format!("{TRIGGER}{}", record.transaction),
+        ));
+        if done.lineage != expected {
             return Err(anyhow!(
                 "recovery completion does not bind its prior pin and ids"
             ));
         }
         super::publish::verify_recovered_chain(pin_path, tasks)
             .map_err(|reason| anyhow!(reason))?;
-        // Recovery is a recorded hop, never a replacement for launch checks.
-        let proof = verify_reached_from(
-            launch,
-            launch_lineage,
-            pin,
-            tasks,
-            &ChainHistory::for_pin(pin_path),
-        )?;
+        let proof = anchors::proof(record, launch, launch_lineage, pin, pin_path, tasks, &from)?;
         return Ok(Some(proof));
     }
     Err(anyhow!(

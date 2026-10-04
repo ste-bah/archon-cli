@@ -1,0 +1,139 @@
+//! Run discovery and proofs for a recovery shared by several launch anchors.
+use super::*;
+
+pub(super) fn store(pin: &Path) -> Result<WorkflowStore> {
+    let root = pin
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| anyhow!("pin has no store"))?;
+    Ok(WorkflowStore::new(root.join("workflows")))
+}
+
+/// Use the surviving, archived contract rather than directory ordering to
+/// select a no-prior-pin template. Older receipts can use their captured
+/// skeleton or a surviving launch preimage instead.
+pub(super) fn anchor(
+    record: &Recovery,
+    pin: &Path,
+) -> Result<Option<PortableAcceptanceIdentityV1>> {
+    if let Some(prior) = &record.prior {
+        return Ok(Some(prior.identity()));
+    }
+    let digest = record.contract_digest.as_ref().or_else(|| {
+        record
+            .skeleton
+            .as_ref()
+            .map(|skeleton| &skeleton.acceptance_digest)
+    });
+    let history = ChainHistory::for_pin(pin);
+    for launch in record.runs.values() {
+        if digest.is_some_and(|digest| digest != &launch.acceptance_digest) {
+            continue;
+        }
+        if history.get(&launch.acceptance_digest)?.is_none() {
+            continue;
+        }
+        if let Some(digest) = &launch.skeleton_digest {
+            let Some(bytes) = history.get(digest)? else {
+                continue;
+            };
+            if let Some(skeleton) = &record.skeleton
+                && serde_json::from_slice::<TaskSkeleton>(&bytes)? != *skeleton
+            {
+                continue;
+            }
+        } else if record.skeleton.is_some() {
+            continue;
+        }
+        return Ok(Some(launch.clone()));
+    }
+    Ok(None)
+}
+
+/// An unreadable snapshot does not permanently disqualify a discovered run.
+/// Its id must have been logged before unfreeze, and its restored snapshot
+/// must bind the same root and identity supplied by the reader.
+pub(super) fn authorized(
+    record: &Recovery,
+    pin: &Path,
+    run: &str,
+    launch: &PortableAcceptanceIdentityV1,
+    launch_lineage: LaunchLineage,
+) -> Result<bool> {
+    if let Some(captured) = record.runs.get(run) {
+        return Ok(captured == launch);
+    }
+    if !record.skipped_runs.contains(run) {
+        return Ok(false);
+    }
+    let store = store(pin)?;
+    let metadata = store.run_dir(run).join("v2/generated-metadata.json");
+    let finalization = store.run_dir(run).join("v2/finalization.json");
+    validate_existing_parents(&metadata, store.root())?;
+    validate_existing_parents(&finalization, store.root())?;
+    let snapshot = crate::command::acceptance_chain::launch_snapshot(&store, run)?;
+    Ok(
+        snapshot.portable_acceptance_identity.as_ref() == Some(launch)
+            && LaunchLineage::from_marker(snapshot.lineage_recording) == launch_lineage
+            && Path::new(&snapshot.canonical_task_root_identity)
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .ok()
+                .as_ref()
+                == Some(&record.task_root),
+    )
+}
+
+/// Authenticate the actual shared lineage first. When it does not start at
+/// this run's anchor, derive a run-specific recovery hop using the logged
+/// transaction and its named checks, then apply the ordinary contract,
+/// skeleton and subsequent-hop checks to that proof view.
+pub(super) fn proof(
+    record: &Recovery,
+    launch: &PortableAcceptanceIdentityV1,
+    launch_lineage: LaunchLineage,
+    pin: &AcceptancePin,
+    pin_path: &Path,
+    tasks: &Path,
+    from: &PortableAcceptanceIdentityV1,
+) -> Result<ChainProof> {
+    let history = ChainHistory::for_pin(pin_path);
+    verify_reached_from(from, LaunchLineage::Recorded, pin, tasks, &history)?;
+    if pin.lineage.iter().any(|link| link.from == *launch) {
+        return Ok(verify_reached_from(
+            launch,
+            launch_lineage,
+            pin,
+            tasks,
+            &history,
+        )?);
+    }
+    let done = record
+        .completed
+        .as_ref()
+        .ok_or_else(|| anyhow!("recovery has no completion"))?;
+    let mut view = pin.clone();
+    view.lineage = vec![PinTransition::extending(
+        &[],
+        launch.clone(),
+        done.identity.clone(),
+        done.ids.clone(),
+        &format!("{TRIGGER}{}", record.transaction),
+    )];
+    for link in &pin.lineage[done.lineage.len()..] {
+        view.lineage.push(PinTransition::extending(
+            &view.lineage,
+            link.from.clone(),
+            link.to.clone(),
+            link.reauthored_ids.clone(),
+            &link.trigger,
+        ));
+    }
+    Ok(verify_reached_from(
+        launch,
+        launch_lineage,
+        &view,
+        tasks,
+        &history,
+    )?)
+}

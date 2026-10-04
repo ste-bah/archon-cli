@@ -49,7 +49,8 @@ fn interrupted_legacy_rollback_restores_remaining_backups() {
         Some(b"old-b".to_vec()),
         "restore, never delete a remaining rollback backup"
     );
-    // The locks can already be restored while a task body's .old remains.
+    // A saved rollback decision remains authoritative even after the locks
+    // have been restored and the chain verifies again.
     let set = frozen();
     let lock = set.tasks.join(ACCEPTANCE_LOCK_FILE);
     let body = set.tasks.join("TASK-F-001.md");
@@ -57,6 +58,11 @@ fn interrupted_legacy_rollback_restores_remaining_backups() {
     std::fs::copy(&lock, sibling_transaction_path(&lock, TXN, "old")).unwrap();
     std::fs::copy(&body, sibling_transaction_path(&body, TXN, "old")).unwrap();
     std::fs::write(&body, b"half rolled-back body").unwrap();
+    std::fs::write(
+        set.pin_path().with_extension("publish-verification"),
+        serde_json::json!({"transaction": TXN, "decisions": {TXN: "rollback"}}).to_string(),
+    )
+    .unwrap();
     recover_interrupted_publish(&set.pin_path(), &set.tasks).unwrap();
     assert_eq!(std::fs::read(body).unwrap(), old);
     assert!(lock.exists(), "the restored chain stays frozen");

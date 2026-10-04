@@ -436,3 +436,6 @@ mod round_four;
 
 #[path = "workflow_task_set_publish_round_five_tests.rs"]
 mod round_five;
+
+#[path = "workflow_task_set_publish_round_six_tests.rs"]
+mod round_six;

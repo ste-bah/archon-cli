@@ -94,7 +94,9 @@ pub(super) fn capture(pin: &Path, tasks: &Path, record: &mut Recovery) -> Result
             anchor.acceptance_digest == digest || anchor.skeleton_digest.as_ref() == Some(&digest)
         }) {
             archive(&history, &bytes)?;
-            if name == TASK_SKELETON_FILE {
+            if name == ACCEPTANCE_CONTRACT_FILE {
+                record.contract_digest = Some(digest);
+            } else {
                 record.skeleton = serde_json::from_slice(&bytes).ok();
             }
         }
@@ -227,11 +229,7 @@ pub(crate) fn refreeze_base(
         tracing::warn!(%error, "recovery template deferred; authority retained for retry");
         return Ok(None);
     }
-    let anchor = record
-        .prior
-        .as_ref()
-        .map(AcceptancePin::identity)
-        .or_else(|| record.runs.values().next().cloned());
+    let anchor = anchors::anchor(record, pin)?;
     let Some(anchor) = anchor else {
         return Ok(None);
     };
