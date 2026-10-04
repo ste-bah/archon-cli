@@ -114,33 +114,12 @@ impl ScratchPolicy {
                 ));
             }
         }
+        // Issue 282: an allowlisted value only carries data. Names a loader,
+        // toolchain, interpreter, shell or git reads to change what runs (and
+        // the host's own execution bindings) are refused, case-insensitively.
         for key in &self.environment_allowlist {
-            if key.is_empty()
-                || !key.bytes().enumerate().all(|(i, b)| {
-                    b == b'_' || b.is_ascii_alphabetic() || (i > 0 && b.is_ascii_digit())
-                })
-            {
-                return Err(invalid("invalid acceptance environment variable name"));
-            }
-            // Windows environment names are case-insensitive: `Path` is PATH.
-            if matches!(
-                key.to_ascii_uppercase().as_str(),
-                "HOME"
-                    | "TMPDIR"
-                    | "PATH"
-                    | "CARGO_HOME"
-                    | "CARGO_TARGET_DIR"
-                    | "BASH_ENV"
-                    | "ENV"
-                    | "DYLD_INSERT_LIBRARIES"
-                    | "RUSTC_WRAPPER"
-                    | "RUSTFLAGS"
-                    | "IFS"
-            ) {
-                return Err(invalid(
-                    "acceptance allowlist cannot override host execution bindings",
-                ));
-            }
+            archon_shell::data_environment::check_data_variable(key)
+                .map_err(|reason| invalid(format!("acceptance environment allowlist: {reason}")))?;
         }
         for (key, value) in &self.environment {
             // Only runtime-neutral, nonsecret knobs. Expand by reviewed host policy,

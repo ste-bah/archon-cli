@@ -154,6 +154,17 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
         ));
     }
 
+    // Issue 282: refused at load, by name, before any run captures the policy.
+    if let Some(acceptance) = &config.workflow.acceptance_execution {
+        for name in &acceptance.environment_allowlist {
+            archon_shell::data_environment::check_data_variable(name).map_err(|reason| {
+                ConfigError::ValidationError(format!(
+                    "workflow.acceptance_execution.environment_allowlist: {reason}"
+                ))
+            })?;
+        }
+    }
+
     config
         .sandbox
         .validate()
