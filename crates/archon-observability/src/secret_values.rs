@@ -100,6 +100,11 @@ impl SecretValues {
         })
     }
 
+    /// Every literal this set replaces, including its escaped forms.
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().map(String::as_str)
+    }
+
     /// Whether this set has no values to replace.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
