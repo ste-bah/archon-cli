@@ -10,6 +10,15 @@ use super::workflow_run_finalizer_tests::{
     events, read_finalization, seed_call, snapshot, spec, summary,
 };
 
+/// A summary is an execution outcome and is never committed over a stored
+/// operator pause (#253), so a resumed attempt decides only after the real
+/// resume transition, as it does live.
+fn resume(store: &WorkflowStore, run_id: &str) {
+    archon_workflow::LifecycleController::new(store.clone())
+        .apply(run_id, archon_workflow::LifecycleAction::Resume)
+        .unwrap();
+}
+
 /// The live defect: a paused run records no v2 terminal status, and the
 /// stages of the resumed attempt then fail. The decision from none to a
 /// decided status must finalize the run, not report corrupt state.
@@ -35,6 +44,7 @@ async fn a_resumed_run_may_decide_a_terminal_status_the_pause_left_open() {
             .terminal_v2_status
             .is_none()
     );
+    resume(&store, &run.id);
 
     finalize_summary(
         &store,
@@ -275,6 +285,7 @@ async fn an_observer_eligible_supersession_arms_the_observer_once() {
         None,
     )
     .unwrap();
+    resume(&store, &run.id);
     finalize_summary(
         &store,
         &run.id,

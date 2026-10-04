@@ -100,9 +100,11 @@ impl WorkflowScriptHost {
         method: String,
         payload: String,
     ) -> archon_workflow::WorkflowResult<String> {
+        let retry = (method.clone(), payload.clone());
         {
+            // Issue-285: only script calls are refused; host fallbacks run.
             let acc = self.accumulator.lock().await;
-            if acc.terminal_host_stop {
+            if acc.terminal_locked() {
                 return Err(WorkflowError::TerminalHostCall(format!(
                     "run {} has already stopped with {:?}",
                     self.runner.run_id, acc.status
@@ -338,6 +340,7 @@ impl WorkflowScriptHost {
         // Issue-213 C5: a host killed from here on is recorded at next start,
         // with what the call's sessions had been doing.
         let dispatched_at = std::time::Instant::now();
+        let call_generation = self.call_generation();
         let dispatched = self
             .refreshing_inflight(
                 &execution,
@@ -349,9 +352,20 @@ impl WorkflowScriptHost {
                     &execution,
                     source_metadata.source_task_graph.as_ref(),
                     execution_generation,
+                    call_generation,
                 )),
             )
             .await;
+        // Round 5 (#253): a result from before a lifecycle edit is dropped.
+        let dispatched = match dispatched {
+            Ok(Some(result)) if !self.call_superseded(&execution, call_generation) => Ok(result),
+            Err(err) if !self.call_superseded(&execution, call_generation) => Err(err),
+            _ => {
+                return self
+                    .redispatch_superseded(&execution, retry.0, retry.1)
+                    .await;
+            }
+        };
         let result = match dispatched {
             Ok(result) => result,
             Err(err) => {

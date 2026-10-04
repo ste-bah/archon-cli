@@ -81,10 +81,12 @@ async fn round3_obsolete_generated_executor_cannot_finalize_resumed_run() {
     }
 }
 
+/// The operator acts once, while the first dispatch of the call is in flight.
 struct ActionBeforeReply {
     store: WorkflowStore,
     run_id: String,
     action: LifecycleAction,
+    dispatches: std::sync::atomic::AtomicUsize,
 }
 
 #[async_trait::async_trait]
@@ -96,10 +98,16 @@ impl WorkflowLlmClient for ActionBeforeReply {
         _: Vec<serde_json::Value>,
         _: &str,
     ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
-        LifecycleController::new(self.store.clone()).apply(&self.run_id, self.action.clone())?;
+        let dispatch = self
+            .dispatches
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if dispatch == 0 {
+            LifecycleController::new(self.store.clone())
+                .apply(&self.run_id, self.action.clone())?;
+        }
         let result = WorkflowV2Result {
             status: WorkflowV2Status::Accepted,
-            summary: "inspection completed".into(),
+            summary: format!("inspection completed by dispatch {dispatch}"),
             evidence: vec![WorkflowV2Evidence::new(
                 WorkflowV2EvidenceKind::Inspection,
                 "read the requested area",
@@ -146,6 +154,7 @@ async fn assert_running_action_finalizes(action: LifecycleAction) {
         store: store.clone(),
         run_id: run.id.clone(),
         action,
+        dispatches: Default::default(),
     });
     let (ui, _receiver) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let result = execute_generated_v2_run(
@@ -153,7 +162,7 @@ async fn assert_running_action_finalizes(action: LifecycleAction) {
         run.clone(),
         plan,
         "test".into(),
-        llm,
+        llm.clone(),
         ui,
         Vec::new(),
         true,
@@ -161,6 +170,18 @@ async fn assert_running_action_finalizes(action: LifecycleAction) {
     )
     .await;
     assert!(result.is_ok(), "{result:?}");
+    // Round 5: the call in flight across the edit is fenced. Its pre-edit
+    // result is discarded and the owning executor dispatches it again.
+    assert_eq!(
+        llm.dispatches.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the pre-edit result must not be published"
+    );
+    let record = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"))
+        .load_call_record("inspect-one")
+        .unwrap()
+        .expect("the re-dispatched call is recorded");
+    assert_eq!(record.result.summary, "inspection completed by dispatch 1");
     assert_eq!(
         store.load_state(&run.id).unwrap().status,
         RunStatus::Completed,
@@ -175,12 +196,12 @@ async fn assert_running_action_finalizes(action: LifecycleAction) {
 }
 
 #[tokio::test]
-async fn round4_restart_stage_keeps_the_running_executor_owner() {
+async fn round5_restart_stage_fences_the_call_and_keeps_the_executor_owner() {
     assert_running_action_finalizes(LifecycleAction::RestartStage("call-1".into())).await;
 }
 
 #[tokio::test]
-async fn round4_restart_item_keeps_the_running_executor_owner() {
+async fn round5_restart_item_fences_the_call_and_keeps_the_executor_owner() {
     assert_running_action_finalizes(LifecycleAction::RestartItem {
         stage_id: "call-1".into(),
         item_id: "item-1".into(),
@@ -189,7 +210,7 @@ async fn round4_restart_item_keeps_the_running_executor_owner() {
 }
 
 #[tokio::test]
-async fn round4_force_accept_stage_keeps_the_running_executor_owner() {
+async fn round5_force_accept_stage_fences_the_call_and_keeps_the_executor_owner() {
     assert_running_action_finalizes(LifecycleAction::ForceAcceptStage {
         stage_id: "call-1".into(),
         forced_by: "operator".into(),

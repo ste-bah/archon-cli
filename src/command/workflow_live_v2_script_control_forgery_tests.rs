@@ -219,3 +219,74 @@ async fn round4_a_rethrown_error_cannot_replace_a_terminal_stop() {
     assert_eq!(summary.status, WorkflowV2Status::NeedsReview, "{summary:?}");
     assert_eq!(summary.failed_call.as_deref(), Some("gate"));
 }
+
+/// Runs `script` on its own thread and runtime, so a run that never ends
+/// fails this test instead of hanging the test binary.
+fn run_bounded(
+    script: &'static str,
+) -> (
+    archon_workflow::RunStatus,
+    archon_workflow::WorkflowResult<WorkflowV2ScriptSummary>,
+) {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("probe runtime");
+        let _ = sender.send(runtime.block_on(run_uncontrolled(script)));
+    });
+    receiver
+        .recv_timeout(Duration::from_secs(20))
+        .expect("the run must end after a terminal host stop")
+}
+
+fn assert_gate_stop_stands(
+    outcome: archon_workflow::WorkflowResult<WorkflowV2ScriptSummary>,
+) -> WorkflowV2ScriptSummary {
+    let summary = outcome.expect("summary");
+    assert_eq!(summary.status, WorkflowV2Status::NeedsReview, "{summary:?}");
+    assert_eq!(summary.failed_call.as_deref(), Some("gate"));
+    summary
+}
+
+#[test]
+fn round5_a_refused_call_loop_after_a_terminal_stop_still_ends_the_run() {
+    let (_, outcome) = run_bounded(
+        r#"async function workflow(w) {
+        try { await w.humanGate("gate", {task: "Require approval"}); } catch (_) {}
+        while (true) { try { await w.checkpoint("again"); } catch (_) {} }
+    }"#,
+    );
+    assert_gate_stop_stands(outcome);
+}
+
+#[test]
+fn round5_a_script_that_never_settles_after_a_terminal_stop_still_ends_the_run() {
+    let (_, outcome) = run_bounded(
+        r#"async function workflow(w) {
+        try { await w.humanGate("gate", {task: "Require approval"}); } catch (_) {}
+        await new Promise(() => {});
+    }"#,
+    );
+    assert_gate_stop_stands(outcome);
+}
+
+#[tokio::test]
+async fn round5_a_normal_return_after_a_terminal_stop_keeps_the_script_result() {
+    let (_, outcome) = run_uncontrolled(
+        r#"async function workflow(w) {
+        try { await w.humanGate("gate", {task: "Require approval"}); } catch (_) {}
+        return {reported: "after-stop"};
+    }"#,
+    )
+    .await;
+    let summary = assert_gate_stop_stands(outcome);
+    assert!(
+        summary
+            .script_result
+            .as_deref()
+            .is_some_and(|result| result.contains("after-stop")),
+        "{summary:?}"
+    );
+}

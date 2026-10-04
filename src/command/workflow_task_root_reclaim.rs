@@ -113,6 +113,8 @@ pub(crate) fn reclaim_with_liveness(
                     "reclaimed_at":chrono::Utc::now().to_rfc3339(),"operator_confirmed":true
                 }))?;
                 run.generation = next;
+                // Revoke ownership too: the old executor must not finalize.
+                run.executor_generation = Some(next);
                 run.status = RunStatus::Failed;
                 run.mark_updated();
                 locked.save_state(&run)?;

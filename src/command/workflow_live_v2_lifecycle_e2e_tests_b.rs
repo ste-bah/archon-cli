@@ -1,7 +1,13 @@
 use super::*;
 
-/// The board this binary shares, installed as at session boot.
-/// Test support owns the graph so all fixtures share one installation.
+/// The board this test binary shares, installed exactly as session boot and
+/// `workflow_live_board.rs` install a real one.
+///
+/// The graph itself lives in `workflow_live_test_support` rather than here, so
+/// that it is genuinely one board per binary: the fixtures in this file are no
+/// longer its only users, and a second `OnceLock` anywhere else in the binary
+/// would silently lose the install race and leave whoever lost asserting against
+/// a board the run never wrote to.
 pub(super) fn installed_board() -> Arc<archon_memory::MemoryGraph> {
     crate::command::workflow_live::workflow_live_test_support::installed_board()
 }
@@ -268,7 +274,7 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_terminal_final_report_refuses_a_host_fallback() {
+async fn failed_final_report_emits_host_built_fallback() {
     let temp = tempfile::tempdir().expect("tempdir");
     let spec = WorkflowSpec {
         schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
@@ -350,7 +356,7 @@ async fn a_terminal_final_report_refuses_a_host_fallback() {
         tool_budget: Arc::new(std::sync::Mutex::new(Default::default())),
     });
     let driver = LifecycleDriver::new(
-        host.clone(),
+        host,
         universe,
         None,
         Some(temp.path().display().to_string()),
@@ -380,7 +386,7 @@ async fn a_terminal_final_report_refuses_a_host_fallback() {
 
     assert!(
         result
-            .expect_err("the terminal report must stop the lifecycle")
+            .expect_err("fallback report should terminate needs-review lifecycle")
             .to_string()
             .contains(TERMINAL_HOST_CALL_MARKER)
     );
@@ -392,20 +398,19 @@ async fn a_terminal_final_report_refuses_a_host_fallback() {
             .status,
         WorkflowV2Status::Failed
     );
-    assert!(
-        v2_store
-            .load_call_record("forced-report-failure-host-fallback")
-            .expect("fallback record load")
-            .is_none(),
-        "no host call may follow a terminal failure"
-    );
-    let summary = host.summary().await;
-    assert_eq!(summary.status, WorkflowV2Status::Failed);
+    let fallback = v2_store
+        .load_call_record("forced-report-failure-host-fallback")
+        .expect("fallback record load")
+        .expect("fallback record");
+    assert_eq!(fallback.status, WorkflowV2Status::NeedsReview);
     assert_eq!(
-        summary.failed_call.as_deref(),
-        Some("forced-report-failure")
+        fallback.result.data["missing_tasks"],
+        serde_json::json!(["TASK-EX-FALLBACK"])
     );
-    assert_eq!(summary.calls.len(), 1);
+    assert!(fallback.result.artifacts.iter().any(|artifact| {
+        artifact.id == "forced-report-failure-host-fallback"
+            && std::path::Path::new(&artifact.path).is_file()
+    }));
 }
 
 #[tokio::test]

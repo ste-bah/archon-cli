@@ -103,4 +103,76 @@ mod tests {
     fn round4_legitimate_cancel_writes_control_evidence() {
         assert_control_evidence(LifecycleAction::Cancel, RunStatus::Cancelled);
     }
+
+    fn paused_run(actions: &[LifecycleAction]) -> (tempfile::TempDir, WorkflowStore, WorkflowRun) {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::project(temp.path());
+        let run = store
+            .create_run(super::super::super::workflow_run_finalizer_tests::spec())
+            .unwrap();
+        let lifecycle = LifecycleController::new(store.clone());
+        for action in actions {
+            lifecycle.apply(&run.id, action.clone()).unwrap();
+        }
+        (temp, store, run)
+    }
+
+    fn terminal_events(store: &WorkflowStore, run: &WorkflowRun) -> Vec<String> {
+        std::fs::read_to_string(store.events_path(&run.id))
+            .unwrap()
+            .lines()
+            .filter(|line| line.contains("terminal_status"))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Issue-253 round 5: the executor saw the pause; the operator then
+    /// cancelled. The executor's late control stop must not undo the cancel.
+    #[test]
+    fn round5_an_executor_pause_stop_cannot_replace_a_later_operator_cancel() {
+        let (_temp, store, run) = paused_run(&[LifecycleAction::Pause, LifecycleAction::Cancel]);
+        finalize_generated_control(
+            &store,
+            &run,
+            archon_workflow::WorkflowRunKind::FixedOrSavedScript,
+            RunStatus::Paused,
+            "executor observed the pause",
+        )
+        .unwrap();
+        assert_eq!(
+            store.load_state(&run.id).unwrap().status,
+            RunStatus::Cancelled
+        );
+        assert!(
+            terminal_events(&store, &run)
+                .iter()
+                .all(|event| !event.contains("\"paused\"")),
+            "{:?}",
+            terminal_events(&store, &run)
+        );
+    }
+
+    /// Issue-253 round 5: an ordinary executor failure while the operator has
+    /// the run paused leaves the pause in place, resumable.
+    #[test]
+    fn round5_an_executor_failure_cannot_replace_an_operator_pause() {
+        let (_temp, store, run) = paused_run(&[LifecycleAction::Pause]);
+        super::super::super::workflow_live_v2_finalizer::finalize_run_status(
+            &store,
+            &run.id,
+            archon_workflow::WorkflowRunKind::FixedOrSavedScript,
+            RunStatus::Failed,
+            "ordinary executor failure",
+            Some(run.generation),
+        )
+        .unwrap();
+        assert_eq!(store.load_state(&run.id).unwrap().status, RunStatus::Paused);
+        assert!(
+            terminal_events(&store, &run)
+                .iter()
+                .all(|event| !event.contains("\"failed\"")),
+            "{:?}",
+            terminal_events(&store, &run)
+        );
+    }
 }

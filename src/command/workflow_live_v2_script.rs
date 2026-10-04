@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{Duration, Instant};
+#[cfg(test)]
+use std::time::Duration;
 
 use archon_workflow::{
     WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowStore, WorkflowUiEvent,
@@ -31,10 +32,6 @@ use archon_workflow::v2::source_graph::{
 
 // The native lifecycle still consumes the port marker through this module.
 use archon_workflow::TERMINAL_HOST_CALL_MARKER;
-#[cfg(not(test))]
-const WORKFLOW_JS_WATCHDOG: Duration = Duration::from_secs(60);
-#[cfg(test)]
-const WORKFLOW_JS_WATCHDOG: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone)]
 pub(super) struct WorkflowV2ScriptSummary {
@@ -182,7 +179,10 @@ impl WorkflowV2ScriptRunner {
             scaffold_hash: workflow_scaffold_hash(harness_source),
             envelope_shape: script_envelope_shape(harness_source),
             runner: self,
-            accumulator: Arc::new(Mutex::new(WorkflowScriptAccumulator::default())),
+            accumulator: Arc::new(Mutex::new(WorkflowScriptAccumulator {
+                script_driven: true,
+                ..WorkflowScriptAccumulator::default()
+            })),
             tool_host: std::sync::OnceLock::new(),
             tool_budget: Arc::new(std::sync::Mutex::new(Default::default())),
         });
@@ -203,6 +203,7 @@ impl WorkflowV2ScriptRunner {
         let source = script_source(harness_source, script_args.as_ref());
         let host_for_js = host.clone();
         let watchdog_for_js = watchdog.clone();
+        let watchdog_for_deadline = watchdog.clone();
         // A notification failure the HOST raised, recorded here so the
         // outcome never depends on text a script can write.
         let notification_failure: Arc<StdMutex<Option<String>>> = Arc::default();
@@ -221,6 +222,11 @@ impl WorkflowV2ScriptRunner {
                         Box::pin(async move {
                             watchdog.pause();
                             let result = Box::pin(host.execute(method, payload)).await;
+                            // Issue-285: refused calls are instant, so after a
+                            // terminal stop one budget runs without resets.
+                            if host.accumulator.lock().await.terminal_host_stop {
+                                watchdog.start_terminal_budget();
+                            }
                             watchdog.resume();
                             if let Err(WorkflowError::NotificationDelivery(message)) = &result
                                 && let Ok(mut slot) = notification.lock()
@@ -262,7 +268,18 @@ impl WorkflowV2ScriptRunner {
                         ));
                     }
                 };
-                Ok(match promise.into_future::<String>().await.catch(&ctx) {
+                // Issue-285: a script idle forever after a terminal stop runs
+                // no JavaScript to interrupt, so the budget also ends the wait.
+                let settled = tokio::select! {
+                    biased;
+                    settled = promise.into_future::<String>() => settled,
+                    () = watchdog_for_deadline.terminal_budget_spent() => {
+                        return Ok(Err(format!(
+                            "workflow.js did not settle within {WORKFLOW_JS_WATCHDOG:?} of the host's terminal stop"
+                        )));
+                    }
+                };
+                Ok(match settled.catch(&ctx) {
                     Ok(result) => Ok(result),
                     Err(err) => Err(rquickjs::Error::new_from_js_message(
                         "workflow.js",
@@ -287,8 +304,11 @@ impl WorkflowV2ScriptRunner {
         }
         // Host evidence decides the outcome even if the script returns, catches
         // the rejection, or throws unrelated text. No later audit can replace it.
+        // A normal return still reports what the script returned.
         if host.accumulator.lock().await.terminal_host_stop {
-            return Ok(host.summary().await);
+            let mut summary = host.summary().await;
+            summary.script_result = outcome.ok();
+            return Ok(summary);
         }
         match outcome {
             Ok(result) => {
@@ -311,37 +331,9 @@ impl WorkflowV2ScriptRunner {
     }
 }
 
-#[derive(Clone)]
-struct WorkflowJsWatchdog {
-    active_since: Arc<StdMutex<Option<Instant>>>,
-}
-
-impl WorkflowJsWatchdog {
-    fn new() -> Self {
-        Self {
-            active_since: Arc::new(StdMutex::new(Some(Instant::now()))),
-        }
-    }
-
-    fn pause(&self) {
-        if let Ok(mut active_since) = self.active_since.lock() {
-            *active_since = None;
-        }
-    }
-
-    fn resume(&self) {
-        if let Ok(mut active_since) = self.active_since.lock() {
-            *active_since = Some(Instant::now());
-        }
-    }
-
-    fn should_interrupt(&self) -> bool {
-        let Ok(active_since) = self.active_since.lock() else {
-            return true;
-        };
-        active_since.is_some_and(|started| started.elapsed() >= WORKFLOW_JS_WATCHDOG)
-    }
-}
+#[path = "workflow_live_v2_script_watchdog.rs"]
+mod workflow_live_v2_script_watchdog;
+use workflow_live_v2_script_watchdog::{WORKFLOW_JS_WATCHDOG, WorkflowJsWatchdog};
 
 struct WorkflowScriptAccumulator {
     status: WorkflowV2Status,
@@ -353,6 +345,10 @@ struct WorkflowScriptAccumulator {
     failed_result_path: Option<String>,
     next_action: Option<String>,
     terminal_host_stop: bool,
+    /// Issue-285: a JavaScript script drives this host, so a terminal stop is
+    /// sticky and refuses later calls. The native lifecycle driver is host code
+    /// and keeps its own host-built fallback report.
+    script_driven: bool,
     /// Consecutive calls that failed without ever starting. Run-scoped: the
     /// bound only means anything across calls.
     never_started: NeverStartedStreak,
@@ -370,8 +366,16 @@ impl Default for WorkflowScriptAccumulator {
             failed_result_path: None,
             next_action: None,
             terminal_host_stop: false,
+            script_driven: false,
             never_started: NeverStartedStreak::default(),
         }
+    }
+}
+
+impl WorkflowScriptAccumulator {
+    /// A trusted terminal stop that a script can no longer change.
+    fn terminal_locked(&self) -> bool {
+        self.terminal_host_stop && self.script_driven
     }
 }
 

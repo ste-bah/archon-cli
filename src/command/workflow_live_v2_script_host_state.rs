@@ -238,7 +238,7 @@ impl WorkflowScriptHost {
         let mut acc = self.accumulator.lock().await;
         // Counted as the execution that recorded it was: a replayed review
         // map or superseded round is not a completed call.
-        if !acc.terminal_host_stop {
+        if !acc.terminal_locked() {
             acc.status = merge_v2_status(
                 acc.status,
                 run_terminal_status_contribution(record, record.status),
@@ -272,8 +272,8 @@ impl WorkflowScriptHost {
         // A final report is the script speaking for the whole run: its status
         // overrides accumulated call severities so script-recovered failures
         // do not doom an otherwise accepted run. A trusted terminal stop is
-        // sticky, including while previously dispatched calls finish.
-        if !acc.terminal_host_stop {
+        // sticky for a script, including while dispatched calls finish.
+        if !acc.terminal_locked() {
             if record.call.method == WorkflowV2HostMethod::FinalReport {
                 acc.status = status;
             } else {
@@ -326,7 +326,7 @@ impl WorkflowScriptHost {
         next_action: String,
     ) {
         let mut acc = self.accumulator.lock().await;
-        if acc.terminal_host_stop {
+        if acc.terminal_locked() {
             return;
         }
         acc.terminal_host_stop = true;
@@ -347,7 +347,7 @@ impl WorkflowScriptHost {
         let next_action =
             "fix the workflow.js/runtime error, then resume or start a fresh workflow".to_string();
         let mut acc = self.accumulator.lock().await;
-        if acc.terminal_host_stop {
+        if acc.terminal_locked() {
             drop(acc);
             return self.summary().await;
         }
