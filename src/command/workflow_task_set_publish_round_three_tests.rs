@@ -8,7 +8,7 @@ use archon_workflow::task_set_contract::{
 
 const TXN: &str = "aabbccddeeff00112233445566778899";
 
-fn frozen() -> crate::command::workflow_task_set::republish::test_fixture::FrozenSet {
+pub(super) fn frozen() -> crate::command::workflow_task_set::republish::test_fixture::FrozenSet {
     crate::command::workflow_task_set::republish::test_fixture::frozen_set(&[(
         "AC-F-001",
         "jq -e '.a == true' out.json",
@@ -34,6 +34,7 @@ fn legacy_debris_that_breaks_the_chain_unfreezes_the_set_for_refreeze() {
     let mut lock: AcceptanceLock =
         serde_json::from_slice(&std::fs::read(&lock_path).unwrap()).unwrap();
     lock.digest = content_digest(b"bytes the contract does not hold");
+    std::fs::copy(&lock_path, sibling_transaction_path(&lock_path, TXN, "old")).unwrap();
     std::fs::write(
         sibling_transaction_path(&lock_path, TXN, "new"),
         serde_json::to_vec_pretty(&lock).unwrap(),

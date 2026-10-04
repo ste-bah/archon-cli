@@ -20,10 +20,14 @@ pub(crate) enum RecoveryOutcome {
     /// The interrupted publish never reached its commit point: the complete
     /// old set is live again.
     RolledBack,
+    /// Legacy staging never reached the rename phase; live files are intact.
+    Discarded,
+    /// Ambiguous old-binary rollback debris requires chain verification.
+    VerificationPending,
     /// The publish had passed its commit point: the complete new set is live.
     RolledForward,
-    /// Legacy debris rolled forward left a chain that does not verify: its
-    /// locks and pin were moved aside so the workflow re-freezes the set.
+    /// Legacy debris left a chain that does not verify: its locks and pin
+    /// were moved aside so the workflow re-freezes the set.
     Unfrozen,
 }
 
@@ -31,6 +35,8 @@ impl RecoveryOutcome {
     fn as_str(self) -> &'static str {
         match self {
             Self::RolledBack => "rolled back",
+            Self::Discarded => "discarded incomplete legacy staging",
+            Self::VerificationPending => "legacy rollback debris consumed; verification pending",
             Self::RolledForward => "rolled forward",
             Self::Unfrozen => "unfrozen for re-freeze",
         }
@@ -87,6 +93,13 @@ pub(super) fn publication_scopes(
     tasks_root: &Path,
 ) -> Result<Vec<(PathBuf, Option<String>)>> {
     let mut scopes = legacy_scopes(pin_path, tasks_root);
+    let lineage = super::super::recovery_lineage::path(pin_path);
+    if let (Some(parent), Some(name)) = (lineage.parent(), lineage.file_name()) {
+        scopes.push((
+            parent.to_path_buf(),
+            Some(name.to_string_lossy().into_owned()),
+        ));
+    }
     scopes.extend(
         super::super::super::workflow_host_command_publish::receipt_scopes(pin_path, tasks_root)?,
     );

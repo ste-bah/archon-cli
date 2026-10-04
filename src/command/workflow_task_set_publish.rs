@@ -20,6 +20,7 @@ use archon_workflow::task_skeleton::TaskSkeletonLock;
 mod journal;
 #[path = "workflow_task_set_publish_legacy.rs"]
 mod legacy;
+pub(crate) use legacy::verify_chain as verify_recovered_chain;
 #[path = "workflow_task_set_publish_recover.rs"]
 mod recover;
 #[path = "workflow_task_set_publish_scope.rs"]
@@ -141,41 +142,11 @@ pub(super) fn publish_skeleton_files(
     )
 }
 
-pub(super) fn publish_acceptance_files(
-    tasks_root: &Path,
-    project_root: &Path,
-    contract_bytes: &[u8],
-    lock: &AcceptanceLock,
-    pin: &AcceptancePin,
-) -> Result<()> {
-    let pin_path = super::acceptance_pin_path(project_root, tasks_root);
-    if let Some(parent) = pin_path.parent() {
-        create_dir_all_durably(parent)?;
-    }
-    let _lock = ChainLock::acquire(&pin_path, tasks_root)?;
-    // PLAN-11: the sources each check runs are pinned with the chain.
-    let sidecar =
-        super::check_sources::frozen_sidecar(project_root, tasks_root, contract_bytes, None)?;
-    let mut pin = pin.clone();
-    pin.check_sources_digest = Some(content_digest(&sidecar.1));
-    publish_files_atomically(
-        &pin_path,
-        tasks_root,
-        &[
-            (
-                tasks_root.join(ACCEPTANCE_CONTRACT_FILE),
-                contract_bytes.to_vec(),
-            ),
-            (
-                tasks_root.join(ACCEPTANCE_LOCK_FILE),
-                serde_json::to_vec_pretty(lock)?,
-            ),
-            sidecar,
-            (pin_path.clone(), serde_json::to_vec_pretty(&pin)?),
-        ],
-        "workflow freeze-acceptance",
-    )
-}
+#[path = "workflow_task_set_publish_acceptance.rs"]
+mod acceptance;
+#[cfg(test)]
+pub(super) use acceptance::publish_acceptance_files;
+pub(super) use acceptance::publish_acceptance_files_with_recovery;
 
 /// Publish `files` as one crash-atomic transaction journaled beside the task
 /// set's acceptance pin at `pin_path`.

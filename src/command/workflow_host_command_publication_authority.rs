@@ -16,6 +16,11 @@ pub(crate) fn authorize_receipt(pin: &Path, tasks: &Path, target: &Path) -> Resu
         return Err(anyhow!("external receipt has no project publication scope"));
     };
     let store = archon_workflow::WorkflowStore::project(project);
+    // The configured .archon root may resolve outside the project.
+    let authority = store
+        .root()
+        .parent()
+        .ok_or_else(|| anyhow!("run store has no authority root"))?;
     let relative = target
         .strip_prefix(store.root())
         .context("receipt is outside the project's run store")?;
@@ -35,11 +40,11 @@ pub(crate) fn authorize_receipt(pin: &Path, tasks: &Path, target: &Path) -> Resu
         .parent()
         .ok_or_else(|| anyhow!("receipt has no parent"))?;
     // Check existing parents before mkdir, then validate the complete path.
-    validate_existing_parents(target, project)?;
+    validate_existing_parents(target, authority)?;
     super::super::workflow_task_set::create_dir_all_durably(parent)?;
-    validate_destination(target, &[(project.to_path_buf(), None)])?;
+    validate_destination(target, &[(authority.to_path_buf(), None)])?;
     let binding = parent.join(RECEIPT_BINDING);
-    validate_destination(&binding, &[(project.to_path_buf(), None)])?;
+    validate_destination(&binding, &[(authority.to_path_buf(), None)])?;
     let digest = root_digest(tasks)?;
     // A call belongs to one set. Refuse to rebind a directory another set owns.
     if binding.exists() {
@@ -52,7 +57,7 @@ pub(crate) fn authorize_receipt(pin: &Path, tasks: &Path, target: &Path) -> Resu
         }
     } else {
         let temp = parent.join(format!(".publish-authority-{}.tmp", uuid::Uuid::new_v4()));
-        validate_destination(&temp, &[(project.to_path_buf(), None)])?;
+        validate_destination(&temp, &[(authority.to_path_buf(), None)])?;
         super::super::workflow_task_set::write_durably(&temp, &serde_json::to_vec(&digest)?)?;
         // Exclusive linking publishes a complete immutable binding, including
         // when another task set races to claim the same call directory.
@@ -82,6 +87,11 @@ pub(crate) fn receipt_scopes(pin: &Path, tasks: &Path) -> Result<Vec<(PathBuf, O
         return Ok(Vec::new());
     };
     let store = archon_workflow::WorkflowStore::project(project);
+    // The configured .archon root may resolve outside the project.
+    let authority = store
+        .root()
+        .parent()
+        .ok_or_else(|| anyhow!("run store has no authority root"))?;
     let expected = match root_digest(tasks) {
         Ok(digest) => digest,
         Err(error)
@@ -96,7 +106,7 @@ pub(crate) fn receipt_scopes(pin: &Path, tasks: &Path) -> Result<Vec<(PathBuf, O
     let mut scopes = Vec::new();
     for run in directories(store.root())? {
         let prior_root = run.join(super::super::workflow_decompose::FIXED_DECOMPOSITION_STATE_PATH);
-        validate_existing_parents(&prior_root, project)?;
+        validate_existing_parents(&prior_root, authority)?;
         let legacy_bound = std::fs::read(&prior_root)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
@@ -110,7 +120,7 @@ pub(crate) fn receipt_scopes(pin: &Path, tasks: &Path) -> Result<Vec<(PathBuf, O
             .is_some_and(|root| root_digest(&root).ok().as_ref() == Some(&expected));
         for call in directories(&run.join("host-command-results"))? {
             let binding = call.join(RECEIPT_BINDING);
-            validate_existing_parents(&binding, project)?;
+            validate_existing_parents(&binding, authority)?;
             let bound = match std::fs::read(&binding) {
                 Ok(bytes) => {
                     serde_json::from_slice::<String>(&bytes)

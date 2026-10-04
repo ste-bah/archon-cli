@@ -1,23 +1,18 @@
 //! Self-healing recovery of the transaction files a publisher without the
 //! journal left behind (Issue 271).
 //!
-//! That publisher (main before this journal) staged and fsynced every
-//! `.<name>.<txn>.new` before its first rename, backed each prior version up
-//! as `.<name>.<txn>.old` just before replacing it, and also left a `.old`
-//! when a backup or rollback cleanup failed. Its debris is therefore always
-//! rolled forward: every staged file is moved into place and every backup is
-//! dropped. Because that evidence carries no manifest, the frozen chain is
-//! then verified; a chain that does not verify is treated as not frozen — its
-//! locks and pin are moved aside, kept for inspection — so the workflow
-//! re-freezes the set. Nothing here refuses a run, and every step is logged.
+//! No backup means staging never completed: discard it without touching live
+//! files. Backups prove staging finished, but may also survive an interrupted
+//! rollback. Persist verification intent before consuming either kind of
+//! evidence, and finish any interrupted move-aside before clearing intent.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::task_set_contract::{
-    ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceLock, AcceptancePin,
-    TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
+    ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceContract, AcceptanceLock,
+    AcceptancePin, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
 };
 
 use super::journal::{
@@ -32,8 +27,7 @@ struct LegacyTransaction {
     backups: Vec<PathBuf>,
 }
 
-/// Roll every legacy transaction in `scopes` forward, then verify the chain
-/// of the set pinned at `pin_path` if any of them touched it.
+/// Apply the binding legacy-debris decision per transaction, under the lock.
 pub(super) fn recover_legacy(
     paths: &JournalPaths,
     scopes: &[(PathBuf, Option<String>)],
@@ -41,64 +35,136 @@ pub(super) fn recover_legacy(
     tasks_root: &Path,
 ) -> Result<Vec<RecoveryEvent>> {
     let chain = chain_files(pin_path, tasks_root);
+    let marker = pin_path.with_extension("publish-verification");
     let mut events = Vec::new();
-    let mut touched_chain = None;
     for (transaction, found) in collect(scopes)? {
+        if found.backups.is_empty() {
+            let event = RecoveryEvent {
+                transaction,
+                source: "legacy",
+                outcome: RecoveryOutcome::Discarded,
+                files: found
+                    .staged
+                    .iter()
+                    .map(|(staged, _)| staged.clone())
+                    .collect(),
+                detail: Some("no backup: staging may be partial; live files untouched".into()),
+            };
+            record(paths, &event)?;
+            for (staged, _) in &found.staged {
+                remove_if_present(staged)?;
+            }
+            sync_parents(found.staged.iter().map(|(staged, _)| staged.as_path()))?;
+            events.push(event);
+            continue;
+        }
+        pending(&marker, &transaction)?;
+        // A backup target equal to its old bytes, with staging gone, may have
+        // been restored by an interrupted rollback. Do not guess new bytes.
+        let mut forward = true;
+        for backup in &found.backups {
+            let target = target_of(backup);
+            if !found.staged.iter().any(|(_, path)| path == &target) {
+                let live = digest_of(&target)?;
+                if live.is_none() || live == digest_of(backup)? {
+                    forward = false;
+                }
+            }
+        }
         let mut files = Vec::new();
         for (staged, target) in &found.staged {
-            rename(staged, target)?;
-            files.push(target.clone());
+            if forward {
+                rename(staged, target)?;
+                files.push(target.clone());
+            } else {
+                remove_if_present(staged)?;
+                files.push(staged.clone());
+            }
         }
-        let backups = found.backups.iter().map(PathBuf::as_path);
-        let staged = found.staged.iter().map(|(_, target)| target.as_path());
-        sync_parents(staged.chain(backups.clone()))?;
+        sync_parents(found.staged.iter().map(|(staged, _)| staged.as_path()))?;
         let event = RecoveryEvent {
-            transaction: transaction.clone(),
+            transaction,
             source: "legacy",
-            outcome: RecoveryOutcome::RolledForward,
+            outcome: if forward {
+                RecoveryOutcome::RolledForward
+            } else {
+                RecoveryOutcome::VerificationPending
+            },
             files,
-            detail: None,
+            detail: Some("durable chain verification pending".into()),
         };
-        // The durable record precedes dropping the last evidence.
         record(paths, &event)?;
         for backup in &found.backups {
             remove_if_present(backup)?;
         }
-        sync_parents(backups)?;
-        let names_chain = |path: &Path| chain.iter().any(|file| same_file_name(file, path));
-        if found.staged.iter().any(|(_, target)| names_chain(target))
-            || found
-                .backups
-                .iter()
-                .any(|backup| names_chain(&target_of(backup)))
-        {
-            touched_chain.get_or_insert(transaction);
-        }
+        sync_parents(found.backups.iter().map(PathBuf::as_path))?;
+        super::journal::crash_point("legacy-backups-removed");
         events.push(event);
     }
-    // An unfreeze a crash interrupted left some of the chain moved aside:
-    // verify again and finish it (a set re-frozen since verifies and stays).
-    let interrupted = has_unverified(&chain)?;
-    if (touched_chain.is_some() || interrupted)
-        && let Err(reason) = verify_chain(pin_path, tasks_root)
-    {
-        let transaction =
-            touched_chain.unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
-        events.push(unfreeze(
-            paths,
-            pin_path,
-            tasks_root,
-            &transaction,
-            &reason,
-        )?);
+    let interrupted = unverified_transaction(&chain)?;
+    if marker.exists() || interrupted.is_some() {
+        let transaction = match std::fs::read_to_string(&marker) {
+            Ok(id) if is_transaction_id(&id) => id,
+            Ok(_) => uuid::Uuid::new_v4().simple().to_string(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // Inspection files can belong to an already completed recovery.
+                // Start a fresh event; only a surviving marker resumes an event.
+                uuid::Uuid::new_v4().simple().to_string()
+            }
+            Err(error) => return Err(error.into()),
+        };
+        pending(&marker, &transaction)?;
+        if let Err(reason) = verify_chain(pin_path, tasks_root) {
+            events.push(unfreeze(
+                paths,
+                pin_path,
+                tasks_root,
+                &transaction,
+                &reason,
+            )?);
+        } else if !tasks_root.join(ACCEPTANCE_LOCK_FILE).exists() {
+            // An older recovery may already have finished every move but
+            // recorded no adoption authority. Its retained pin authenticates
+            // the data, and the marker keeps this import durable on a crash.
+            super::super::recovery_lineage::record_unfrozen_if_missing(
+                pin_path,
+                tasks_root,
+                &transaction,
+            )?;
+        }
+        super::journal::crash_point("legacy-verified");
+        remove_if_present(&marker)?;
+        super::journal::sync_parent(&marker)?;
     }
     Ok(events)
+}
+
+fn pending(marker: &Path, transaction: &str) -> Result<()> {
+    let parent = marker
+        .parent()
+        .ok_or_else(|| anyhow!("verification marker has no parent"))?;
+    super::scope::validate_destination(marker, &[(parent.to_path_buf(), None)])?;
+    match std::fs::read_to_string(marker) {
+        Ok(id) if is_transaction_id(&id) => {
+            // Retry a flush a prior attempt may have failed.
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(marker)?
+                .sync_all()?;
+        }
+        Ok(_) => super::journal::write_durably(marker, transaction.as_bytes())?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            super::journal::write_durably(marker, transaction.as_bytes())?;
+        }
+        Err(error) => return Err(error.into()),
+    }
+    super::journal::sync_parent(marker)
 }
 
 const UNVERIFIED: &str = ".unverified-";
 
 /// Whether any chain file has a moved-aside `.<name>.unverified-<id>` sibling.
-fn has_unverified(chain: &[PathBuf]) -> Result<bool> {
+fn unverified_transaction(chain: &[PathBuf]) -> Result<Option<String>> {
     for file in chain {
         let (Some(dir), Some(name)) = (file.parent(), file.file_name()) else {
             continue;
@@ -111,12 +177,14 @@ fn has_unverified(chain: &[PathBuf]) -> Result<bool> {
         };
         for entry in entries {
             let entry = entry.with_context(|| format!("listing {}", dir.display()))?;
-            if entry.file_name().to_string_lossy().starts_with(&prefix) {
-                return Ok(true);
+            if let Some(id) = entry.file_name().to_string_lossy().strip_prefix(&prefix)
+                && is_transaction_id(id)
+            {
+                return Ok(Some(id.to_string()));
             }
         }
     }
-    Ok(false)
+    Ok(None)
 }
 
 fn collect(scopes: &[(PathBuf, Option<String>)]) -> Result<BTreeMap<String, LegacyTransaction>> {
@@ -168,10 +236,6 @@ fn target_of(transaction_file: &Path) -> PathBuf {
     }
 }
 
-fn same_file_name(left: &Path, right: &Path) -> bool {
-    left.file_name() == right.file_name() && left.parent() == right.parent()
-}
-
 /// The chain files of the set: the four under the task root, the pin and its
 /// check-sources sidecar (named like the pin, as `PinStore::frozen` keys it).
 fn chain_files(pin_path: &Path, tasks_root: &Path) -> Vec<PathBuf> {
@@ -203,15 +267,19 @@ fn sidecar_path(pin_path: &Path) -> Option<PathBuf> {
 /// The digest bindings every reader checks: each lock against its file, the
 /// pin against both, the task root, and the check-sources sidecar. `Err`
 /// carries the first mismatch.
-fn verify_chain(pin_path: &Path, tasks_root: &Path) -> std::result::Result<(), String> {
+pub(crate) fn verify_chain(pin_path: &Path, tasks_root: &Path) -> std::result::Result<(), String> {
     let acceptance_lock = tasks_root.join(ACCEPTANCE_LOCK_FILE);
     let skeleton_lock = tasks_root.join(TASK_SKELETON_LOCK_FILE);
     if !acceptance_lock.exists() {
-        return match skeleton_lock.exists() {
-            true => Err(format!(
-                "{TASK_SKELETON_LOCK_FILE} without {ACCEPTANCE_LOCK_FILE}"
-            )),
-            false => Ok(()),
+        let surviving = skeleton_lock.exists()
+            || pin_path.exists()
+            || sidecar_path(pin_path).is_some_and(|sidecar| sidecar.exists());
+        return if surviving {
+            Err(format!(
+                "frozen chain artifact without {ACCEPTANCE_LOCK_FILE}"
+            ))
+        } else {
+            Ok(())
         };
     }
     let read_json = |path: &Path| -> std::result::Result<serde_json::Value, String> {
@@ -226,6 +294,16 @@ fn verify_chain(pin_path: &Path, tasks_root: &Path) -> std::result::Result<(), S
     if contract.as_deref() != Some(lock.digest.as_str()) || pin.acceptance_digest != lock.digest {
         return Err("acceptance contract, lock and pin digests differ".into());
     }
+    let contract: AcceptanceContract =
+        serde_json::from_value(read_json(&tasks_root.join(ACCEPTANCE_CONTRACT_FILE))?)
+            .map_err(|error| format!("invalid acceptance contract: {error}"))?;
+    let ids = contract
+        .acceptance
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect();
+    archon_workflow::task_set_contract::validate_acceptance_bundle(tasks_root, Some(&pin), &ids)
+        .map_err(|error| error.to_string())?;
     if skeleton_lock.exists() {
         archon_workflow::task_skeleton::validate_full_chain(tasks_root, &pin)
             .map_err(|error| error.to_string())?;
@@ -256,6 +334,7 @@ fn unfreeze(
     transaction: &str,
     reason: &str,
 ) -> Result<RecoveryEvent> {
+    super::super::recovery_lineage::record_unfreeze(pin_path, tasks_root, transaction)?;
     let mut moved = Vec::new();
     let mut targets = vec![
         tasks_root.join(ACCEPTANCE_LOCK_FILE),
@@ -263,13 +342,19 @@ fn unfreeze(
         pin_path.to_path_buf(),
     ];
     targets.extend(sidecar_path(pin_path));
-    for target in targets.iter().filter(|target| target.exists()) {
+    for (index, target) in targets
+        .iter()
+        .enumerate()
+        .filter(|(_, target)| target.exists())
+    {
         let name = target
             .file_name()
             .ok_or_else(|| anyhow!("{} has no file name", target.display()))?
             .to_string_lossy();
         let aside = target.with_file_name(format!(".{name}{UNVERIFIED}{transaction}"));
         rename(target, &aside)?;
+        super::journal::sync_parent(&aside)?;
+        super::journal::crash_point(&format!("unfreeze-moved-{index}"));
         moved.push(aside);
     }
     sync_parents(moved.iter().map(PathBuf::as_path))?;

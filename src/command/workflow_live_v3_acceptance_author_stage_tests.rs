@@ -312,3 +312,6 @@ async fn an_entry_whose_criterion_the_prd_changed_is_reauthored() {
         record.contract_repairs
     );
 }
+
+#[path = "workflow_live_v3_acceptance_recovery_tests.rs"]
+mod recovery_tests;

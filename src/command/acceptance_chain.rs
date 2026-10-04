@@ -35,7 +35,8 @@ pub(crate) fn launch_lineage(snapshot: &RunEndAcceptanceObserverSnapshotV1) -> L
 }
 
 /// Whether `pin` (with the files under `task_root`) was reached from
-/// `launch`; a refusal names the chain check that failed and its remedy.
+/// `launch` by a recorded re-author or recovery re-freeze; a refusal names
+/// the chain check that failed and its remedy.
 /// A run launched recording lineage (`launch_lineage`) never adopts a move
 /// its pin's lineage does not record, whatever the chain history holds.
 pub(crate) fn verify_launch_chain(
@@ -46,6 +47,13 @@ pub(crate) fn verify_launch_chain(
     task_root: &Path,
     run_id: &str,
 ) -> std::result::Result<ChainProof, String> {
+    if let Some(proof) = crate::command::workflow_task_set::recovery_lineage::verify(
+        launch, pin, pin_path, task_root, run_id,
+    )
+    .map_err(|error| format!("{error:#}"))?
+    {
+        return Ok(proof);
+    }
     // Tampering is named as such, never answered with the import remedy.
     if let Some(refusal) = unrecorded_under_recording(launch, launch_lineage, pin) {
         return Err(refusal.to_string());

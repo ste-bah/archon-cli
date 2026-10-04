@@ -36,16 +36,19 @@ pub(super) fn fixture(s: &Scenario, state: JournalState, identical: bool) -> Jou
 }
 
 fn recover_child(s: &Scenario, point: &str) -> bool {
+    let evidence = s.root().join("crash-step");
+    let _ = std::fs::remove_file(&evidence);
     let status = Command::new(std::env::current_exe().unwrap())
         .args([&child_test_name(), "--exact", "--test-threads=1"])
         .env(CHILD_ROOT_ENV, s.root())
         .env("ARCHON_TEST_RECOVER_CHILD", "1")
         .env(CRASH_ENV, point)
+        .env(super::super::journal::CRASH_EVIDENCE_ENV, &evidence)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
         .unwrap();
-    killed_at_crash_point(status, point)
+    killed_at_crash_point(status, point, &evidence)
 }
 
 #[test]
@@ -166,9 +169,8 @@ fn committed_missing_staging_must_refuse_instead_of_accepting_mixed_set() {
     assert!(j.entries[0].backup.as_ref().unwrap().exists());
 }
 
-/// Debris an older binary leaves on non-crash paths too — a target created
-/// before a crash, or a backup a failed rollback left — is rolled forward and
-/// logged, never refused (Issue 271 round 3).
+/// Without backups, staging is discarded and the live files stay untouched.
+/// A leftover backup also requires verification of the live frozen chain.
 #[test]
 fn legacy_absent_target_and_interrupted_rollback_self_heal() {
     for rollback in [false, true] {
@@ -179,10 +181,10 @@ fn legacy_absent_target_and_interrupted_rollback_self_heal() {
             std::fs::rename(&b, sibling_transaction_path(&b, TXN, "old")).unwrap();
             std::fs::write(&b, b"new-b").unwrap();
             expected[1] = NEW[1];
+            expected[3] = None;
         } else {
             std::fs::write(&c, b"new-c").unwrap();
             std::fs::write(sibling_transaction_path(&a, TXN, "new"), b"new-a").unwrap();
-            expected[0] = NEW[0];
             expected[2] = NEW[2];
         }
         let report = recover_interrupted_publish(&s.pin(), &s.tasks()).unwrap();

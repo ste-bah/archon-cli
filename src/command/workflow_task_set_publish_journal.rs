@@ -27,13 +27,23 @@ const JOURNAL_SCHEMA_VERSION: u32 = 1;
 /// Test-only fault injection: the named step aborts the process on the spot.
 #[cfg(test)]
 pub(crate) const CRASH_ENV: &str = "ARCHON_TEST_PUBLISH_CRASH_AT";
+#[cfg(test)]
+pub(crate) const CRASH_EVIDENCE_ENV: &str = "ARCHON_TEST_PUBLISH_CRASH_EVIDENCE";
+#[cfg(all(test, not(unix)))]
+pub(crate) const NAMED_CRASH_EXIT_CODE: i32 = 0x7E57;
 
 /// A crash point in the publish protocol. Compiled to nothing outside tests;
-/// in tests the process kills itself — SIGKILL on Unix, abort elsewhere: no
-/// destructors, no cleanup — when `CRASH_ENV` names the step.
+/// in tests the process terminates without cleanup — SIGKILL on Unix,
+/// TerminateProcess on Windows — when `CRASH_ENV` names the step.
 pub(super) fn crash_point(step: &str) {
     #[cfg(test)]
     if std::env::var(CRASH_ENV).ok().as_deref() == Some(step) {
+        // The parent requires the exact named-step evidence on every OS.
+        if let Some(path) = std::env::var_os(CRASH_EVIDENCE_ENV)
+            && let Err(error) = write_durably(Path::new(&path), step.as_bytes())
+        {
+            panic!("cannot record crash step: {error}");
+        }
         // SIGKILL to ourselves can return before the kernel ends the process,
         // so wait for it rather than racing it with a SIGABRT.
         #[cfg(unix)]
@@ -44,8 +54,10 @@ pub(super) fn crash_point(step: &str) {
             }
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
-        #[cfg(not(unix))]
-        std::process::abort();
+        #[cfg(windows)]
+        test_hooks::terminate();
+        #[cfg(not(any(unix, windows)))]
+        std::process::exit(NAMED_CRASH_EXIT_CODE);
     }
     #[cfg(test)]
     test_hooks::step(step);

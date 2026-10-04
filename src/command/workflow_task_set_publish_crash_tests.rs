@@ -118,6 +118,8 @@ impl Scenario {
     fn publish_killed_at(&self, step: &str) -> bool {
         let marker = self.root().join("child-started");
         let _ = std::fs::remove_file(&marker);
+        let evidence = self.root().join("crash-step");
+        let _ = std::fs::remove_file(&evidence);
         let status = Command::new(std::env::current_exe().unwrap())
             .args([
                 &child_test_name(),
@@ -127,12 +129,13 @@ impl Scenario {
             ])
             .env(CHILD_ROOT_ENV, self.root())
             .env(CRASH_ENV, step)
+            .env(super::journal::CRASH_EVIDENCE_ENV, &evidence)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
             .unwrap();
         assert!(marker.exists(), "the child publisher never ran");
-        killed_at_crash_point(status, step)
+        killed_at_crash_point(status, step, &evidence)
     }
 
     fn recovery_log(&self) -> String {
@@ -143,14 +146,16 @@ impl Scenario {
 /// True only when the child died at the crash point (SIGKILL on Unix). A
 /// panic or failed assertion in the child exits normally with status 101 and
 /// is reported as such, never mistaken for an interruption.
-fn killed_at_crash_point(status: std::process::ExitStatus, step: &str) -> bool {
+fn killed_at_crash_point(status: std::process::ExitStatus, step: &str, evidence: &Path) -> bool {
     #[cfg(unix)]
     let killed = {
         use std::os::unix::process::ExitStatusExt;
         status.signal() == Some(libc::SIGKILL)
     };
     #[cfg(not(unix))]
-    let killed = !status.success();
+    let killed = status.code() == Some(super::journal::NAMED_CRASH_EXIT_CODE);
+    let named = std::fs::read_to_string(evidence).ok().as_deref() == Some(step);
+    let killed = killed && named;
     assert!(
         killed || status.success(),
         "child failed at {step} without being killed there: {status}"
@@ -172,7 +177,8 @@ fn publish_crash_child() {
     };
     let root = PathBuf::from(root);
     std::fs::write(root.join("child-started"), b"").unwrap();
-    let tasks = root.join("tasks/set");
+    let tasks = root
+        .join(std::env::var_os("ARCHON_TEST_RECOVER_TASKS").unwrap_or_else(|| "tasks/set".into()));
     let pin = crate::command::workflow_task_set::acceptance_pin_path(&root, &tasks);
     let files = [
         tasks.join("a.json"),
@@ -305,7 +311,9 @@ fn debris_from_an_older_binary_without_a_manifest_is_rolled_forward() {
     std::fs::write(sibling(&c, "new"), b"new-c").unwrap();
     std::fs::write(sibling(&pin, "new"), b"new-pin").unwrap();
     let report = recover_interrupted_publish(&scenario.pin(), &scenario.tasks()).unwrap();
-    assert!(scenario.is(NEW), "{:?}", scenario.state());
+    let mut expected = NEW;
+    expected[3] = None;
+    assert!(scenario.is(expected), "{:?}", scenario.state());
     assert!(scenario.debris().is_empty(), "{:?}", scenario.debris());
     assert!(
         report
@@ -322,10 +330,10 @@ fn debris_from_an_older_binary_without_a_manifest_is_rolled_forward() {
     );
 }
 
-/// Staging an older binary left with no backup is rolled forward too; another
+/// Staging an older binary left with no backup is discarded; another
 /// task set's transaction in the shared pin store is never touched.
 #[test]
-fn staging_debris_from_an_older_binary_without_a_manifest_is_rolled_forward() {
+fn staging_debris_from_an_older_binary_without_a_backup_is_discarded() {
     let scenario = Scenario::new();
     let [a, ..] = scenario.targets();
     let stale = a.with_file_name(".a.json.fedcba9876543210fedcba9876543210.new");
@@ -334,9 +342,7 @@ fn staging_debris_from_an_older_binary_without_a_manifest_is_rolled_forward() {
     let foreign = pin_dir.join(".other.json.fedcba9876543210fedcba9876543210.new");
     std::fs::write(&foreign, b"theirs").unwrap();
     recover_interrupted_publish(&scenario.pin(), &scenario.tasks()).unwrap();
-    let mut expected = OLD;
-    expected[0] = NEW[0];
-    assert!(scenario.is(expected), "{:?}", scenario.state());
+    assert!(scenario.is(OLD), "{:?}", scenario.state());
     assert!(!stale.exists());
     assert!(foreign.exists(), "another set's staging must be left alone");
     assert!(
@@ -424,3 +430,6 @@ fn a_kill_mid_publish_is_recovered_before_decomposition_reads_the_chain() {
 mod round_three;
 #[path = "workflow_task_set_publish_round_two_tests.rs"]
 mod round_two;
+
+#[path = "workflow_task_set_publish_round_four_tests.rs"]
+mod round_four;
