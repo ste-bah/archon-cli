@@ -99,6 +99,11 @@ impl GroupRecordGuard {
         settled.stalled = true;
         settled.survivors_unknown = survivors.is_none();
         settled.survivors = survivors.map(<[_]>::to_vec).unwrap_or_default();
+        // The marker is settled first, through the handle already open: if
+        // the record rewrite then fails, the marker can no longer still say
+        // "supervised", which a reader would judge as a crash once this
+        // process exits.
+        let marked = self.mark_settled(&settled);
         let rewritten = serde_json::to_vec(&settled)
             .map_err(|error| error.to_string())
             .and_then(|bytes| {
@@ -108,14 +113,13 @@ impl GroupRecordGuard {
             });
         match rewritten {
             Ok(()) => {
-                let _ = std::fs::remove_file(&self.pending);
+                self.remove_pending();
                 None
             }
             Err(error) => {
                 // Directory permissions cannot revoke this already-open
                 // marker handle. In-place fallback needs no new directory
                 // entry and retains identities that escaped the scope.
-                let marked = self.mark_settled(&settled);
                 if marked.is_ok() {
                     let evidence = format!(
                         "record rewrite failed ({error}); survivor evidence retained in pending marker"
@@ -126,7 +130,7 @@ impl GroupRecordGuard {
                 let unknown = unknown_path(&self.path);
                 let renamed = std::fs::rename(&self.path, &unknown);
                 let removed = if renamed.is_ok() {
-                    let _ = std::fs::remove_file(&self.pending);
+                    self.remove_pending();
                     None
                 } else {
                     // The marker alone then says "unknown survivors", even
@@ -141,6 +145,14 @@ impl GroupRecordGuard {
                 Some(evidence)
             }
         }
+    }
+
+    /// The marker handle closes before its file is removed: on Windows an
+    /// open handle keeps the name visible, and a sibling's stall check that
+    /// reads it would be refused and pause the run.
+    fn remove_pending(&mut self) {
+        self.marker = None;
+        let _ = std::fs::remove_file(&self.pending);
     }
 
     fn mark_settled(&mut self, record: &HostCommandGroupRecord) -> Result<(), String> {
@@ -170,6 +182,7 @@ impl Drop for GroupRecordGuard {
             // it names, which is right for a confirmed teardown. A marker
             // that cannot go keeps both, read as unknown while this process
             // lives and judged by what they name once it has exited.
+            self.marker = None;
             match std::fs::remove_file(&self.pending) {
                 Ok(()) => {
                     let _ = std::fs::remove_file(&self.path);
