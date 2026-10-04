@@ -383,3 +383,24 @@ fn a_fifo_current_slot_is_quarantined_once_with_its_branch_history() {
     assert!(std::fs::symlink_metadata(&current).is_err());
     assert_revoked(&v2, "T-A");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_linked_superseded_archive_is_refused_before_any_move() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run(&temp, &[CALL]);
+    let v2 = v2_store(&store, &run);
+    landed_then_superseded(&v2, "T-A");
+    let current = v2.branch_outcome_path(CALL, &item("T-A").id);
+    let call_dir = current.parent().unwrap().to_path_buf();
+    let archive = call_dir.join("superseded");
+    std::fs::rename(&archive, call_dir.join("moved-away")).unwrap();
+    std::os::unix::fs::symlink(".", &archive).unwrap();
+    let before = std::fs::read(&current).unwrap();
+    let restarted = restart_generated_v2_task(&store, &run, "T-A");
+    let error = restarted.expect_err("a linked archive must be refused");
+    assert!(error.to_string().contains("superseded"), "{error}");
+    assert_eq!(std::fs::read(&current).unwrap(), before);
+    assert!(!call_dir.join("revoked").exists());
+    assert_eq!(v2.restart_epoch().unwrap(), 0);
+}
