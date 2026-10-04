@@ -13,7 +13,8 @@
 //! - `--tasks <DIR>` — a decomposed-PRD `TASK-*.md` directory. This is the only
 //!   surface in the tree that declares dataflow on both sides (contracted
 //!   artifacts out, named artifacts in), so it is the only one on which
-//!   [`TaskGraph::classify_edges`] can conclude anything.
+//!   [`TaskGraph::classify_edges`](archon_topology::ir::TaskGraph::classify_edges)
+//!   can conclude anything.
 //! - `--spec-file <PATH>` — a `WorkflowSpec`. Carries roles and fan-out, so
 //!   diamond conformance is meaningful; carries no read declarations, so the
 //!   dataflow lints stay silent by the crate's unknown rule.
@@ -36,6 +37,7 @@ mod fidelity_resume;
 mod fidelity_store;
 mod fidelity_waivers;
 mod focused_test_files;
+mod graph_load;
 mod owner_coverage;
 mod preflight;
 mod render;
@@ -50,11 +52,6 @@ mod unowned_obligations;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use archon_topology::ir::{GraphOrigin, TaskGraph};
-use archon_topology::reconstruct::reconstruct_graph;
-use archon_topology::trace::{TopologyPaths, read_trace};
-
-use crate::command::topology_task_graph::task_graph_from_root;
 
 pub(crate) use candidate::evaluate_task_file_candidate;
 pub(crate) use fences::unwrap_outer_fence;
@@ -63,6 +60,7 @@ pub(crate) use fidelity::{
 };
 pub(crate) use fidelity_resume::resumable_exit;
 pub(crate) use fidelity_waivers::{record_waivers, recorded_waivers, waivers_from_flags};
+use graph_load::load_graph;
 pub(crate) use owner_coverage::skeleton_defects as skeleton_owner_defects;
 
 /// Which graph to lint.
@@ -415,74 +413,6 @@ fn describe(source: &LintSource) -> String {
         LintSource::Tasks(path) => format!("task directory {}", path.display()),
         LintSource::Spec(path) => format!("workflow spec {}", path.display()),
         LintSource::Graph(id) => format!("recorded graph {id}"),
-    }
-}
-
-fn load_graph(cwd: &Path, source: &LintSource) -> Result<TaskGraph> {
-    match source {
-        LintSource::TaskFile(path) => Err(anyhow!(
-            "task-file lint is file-level only and does not lower {} to a graph",
-            absolute(cwd, path).display()
-        )),
-        LintSource::Tasks(path) => {
-            let root = absolute(cwd, path);
-            Ok(task_graph_from_root(&root)?)
-        }
-        LintSource::Spec(path) => {
-            let spec = crate::command::workflow::load_spec_file(cwd, &path.display().to_string())?;
-            let run_id = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("spec")
-                .to_string();
-            Ok(archon_workflow::lower_workflow_spec(&spec, run_id))
-        }
-        LintSource::Graph(id) => load_recorded_graph(cwd, id),
-    }
-}
-
-/// A recorded graph, preferring the declared `graph.json` and falling back to
-/// reconstruction from the trace.
-///
-/// The declared graph carries authored roles and fan-out but no observed reads;
-/// the trace carries observed reads but only reconstructed structure. Where both
-/// exist the declared shape wins and the trace supplies the reads it is missing,
-/// which is the only combination that lets all three lints run at once.
-fn load_recorded_graph(cwd: &Path, graph_id: &str) -> Result<TaskGraph> {
-    let paths = TopologyPaths::for_project(cwd);
-    let readout = read_trace(&paths.trace_jsonl(graph_id))?;
-    let declared = paths.read_graph(graph_id)?;
-
-    match declared {
-        Some(mut graph) => {
-            let observed = reconstruct_graph(
-                graph_id,
-                GraphOrigin::Session {
-                    session_id: graph_id.to_string(),
-                },
-                &readout.records,
-            );
-            for node in &mut graph.nodes {
-                if node.reads_are_known() {
-                    continue;
-                }
-                if let Some(seen) = observed.node(&node.id) {
-                    node.reads.clone_from(&seen.reads);
-                }
-            }
-            Ok(graph)
-        }
-        None if readout.is_empty() => Err(anyhow!(
-            "no graph.json and no trace records for graph '{graph_id}' under {}",
-            paths.root().display()
-        )),
-        None => Ok(reconstruct_graph(
-            graph_id,
-            GraphOrigin::Session {
-                session_id: graph_id.to_string(),
-            },
-            &readout.records,
-        )),
     }
 }
 
