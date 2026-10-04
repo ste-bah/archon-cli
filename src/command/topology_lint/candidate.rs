@@ -14,7 +14,7 @@ pub(crate) fn evaluate_task_file_candidate(
     super::preflight::task_file_freeze(cwd, &path)?;
     let raw = std::str::from_utf8(candidate)
         .context("candidate TASK body is not UTF-8; return one complete UTF-8 TASK file")?;
-    let lint = super::task_file::inspect_raw(cwd, &path, raw, mode);
+    let mut lint = super::task_file::inspect_raw(cwd, &path, raw, mode);
     let subject = format!("task file {}", path.display());
     let mut findings: Vec<_> = lint
         .blockers
@@ -25,13 +25,18 @@ pub(crate) fn evaluate_task_file_candidate(
             } else {
                 archon_workflow::RemediationScope::Body
             };
-            crate::command::workflow_gate::GateFinding::new(
+            let mut finding = crate::command::workflow_gate::GateFinding::new(
                 crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
                 text.clone(),
                 crate::command::workflow_gate::finding_subject(&text, &subject),
                 Some(path.clone()),
                 remediation_scope,
-            )
+            );
+            finding.deterministic_defect = lint
+                .deterministic
+                .get_mut(&text)
+                .and_then(|identities| identities.pop_front());
+            finding
         })
         .collect();
     let mut report = lint.report;
@@ -75,4 +80,89 @@ pub(crate) fn evaluate_task_file_candidate(
         Some(operational) => operational,
         None => crate::command::workflow_gate::GateEvaluation::new(report, findings),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    const RAW: &str = "# Body\n\n```yaml\ntask_id: TASK-X-001\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts:\n  - kind: first\n    artifact_path: out.json\n    typed_verifier_command: 'true'\n  - kind: second\n    artifact_path: out.json\n    typed_verifier_command: 'true'\n```\n\n## Focused Tests\n- `sh -c 'exit 1'`\n";
+
+    // Guard: distinct structural slots can have byte-identical diagnostics.
+    #[test]
+    fn workflow_host_command_distinct_contract_defects_survive_identical_diagnostics() {
+        let temp = tempfile::tempdir().expect("fixture");
+        let root = temp.path().join("tasks");
+        std::fs::create_dir(&root).expect("tasks");
+        let path = root.join("TASK-X-001.md");
+        let raw = RAW;
+        let envelope = super::evaluate_task_file_candidate(
+            temp.path(),
+            &path,
+            raw.as_bytes(),
+            archon_core::config::GateMode::Enforce,
+        )
+        .expect("lint")
+        .into_envelope()
+        .expect("envelope");
+        let identities: std::collections::BTreeSet<_> = envelope
+            .policy_findings
+            .iter()
+            .filter_map(|finding| finding.deterministic_defect.clone())
+            .filter(|identity| identity.code == "invalid_verifier")
+            .collect();
+        assert_eq!(identities.len(), 2, "{envelope:?}");
+        // Guard: the same validator identities must reach the set gate too.
+        std::fs::write(&path, RAW).expect("land task");
+        let envelope = super::super::evaluate_lint(
+            temp.path(),
+            &super::super::LintSource::Tasks(root),
+            archon_core::config::GateMode::Observe,
+        )
+        .expect("set lint")
+        .into_envelope()
+        .expect("set envelope");
+        let identities: std::collections::BTreeSet<_> = envelope
+            .policy_findings
+            .iter()
+            .filter_map(|finding| finding.deterministic_defect.clone())
+            .filter(|identity| identity.code == "invalid_verifier")
+            .collect();
+        assert_eq!(identities.len(), 2, "{envelope:?}");
+        // Guard: structured dependency identities also survive set lint.
+        std::fs::write(
+            &path,
+            RAW.replace(
+                "depends_on: []",
+                "depends_on:\n  - task_id: TASK-X-002\n    ordering_only: false\n    consumes: []",
+            ),
+        )
+        .expect("consumer");
+        std::fs::write(
+            path.parent().expect("tasks").join("TASK-X-002.md"),
+            RAW.replace("TASK-X-001", "TASK-X-002"),
+        )
+        .expect("producer");
+        let envelope = super::super::evaluate_lint(
+            temp.path(),
+            &super::super::LintSource::Tasks(path.parent().expect("tasks").to_path_buf()),
+            archon_core::config::GateMode::Observe,
+        )
+        .expect("edge lint")
+        .into_envelope()
+        .expect("edge envelope");
+        assert!(
+            envelope.policy_findings.iter().any(|finding| finding
+                .deterministic_defect
+                .as_ref()
+                .is_some_and(|identity| identity.code == "invalid_edge_declaration")),
+            "{envelope:?}"
+        );
+    }
+    #[test]
+    fn workflow_host_command_unparseable_task_does_not_hide_other_contract_defects() {
+        let temp = tempfile::tempdir().expect("fixture");
+        std::fs::write(temp.path().join("TASK-X-001.md"), RAW).expect("valid task");
+        std::fs::write(temp.path().join("TASK-X-002.md"), "broken task").expect("invalid task");
+        let findings = super::super::contracts::blocking_findings(Some(temp.path()));
+        assert_eq!(findings.len(), 3, "{findings:?}");
+    }
 }

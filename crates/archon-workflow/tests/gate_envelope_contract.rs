@@ -19,6 +19,7 @@ fn gate_envelope_round_trips_every_closed_remediation_scope() {
         policy_findings: scopes
             .into_iter()
             .map(|scope| GatePolicyFinding {
+                deterministic_defect: None,
                 text: format!("exact {scope:?} finding"),
                 subject: "TASK-X-010".into(),
                 source_path: Some("tasks/PRD-X/TASK-X-010.md".into()),

@@ -1,6 +1,6 @@
 //! Exact-one TASK-file linting against portable freezes and the host pin.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use archon_workflow::obligation_ids::acceptance_ids;
@@ -17,6 +17,8 @@ pub(super) struct TaskFileLint {
     pub(super) report: String,
     pub(super) blockers: Vec<String>,
     pub(super) inherited_blockers: BTreeSet<String>,
+    pub(super) deterministic:
+        BTreeMap<String, VecDeque<archon_workflow::defect::DeterministicDefect>>,
 }
 
 pub(super) fn inspect(
@@ -48,6 +50,7 @@ pub(super) fn inspect_raw(
     let path = absolute(cwd, path);
     let mut report = format!("# topology lint — task file {}\n", path.display());
     let mut blockers = Vec::new();
+    let mut deterministic: BTreeMap<_, VecDeque<_>> = BTreeMap::new();
     let mut inherited_blockers = BTreeSet::new();
     let task = match parse_task_file(&path, raw) {
         Ok(task) => task,
@@ -73,7 +76,14 @@ pub(super) fn inspect_raw(
             &task.dependencies,
         )
         .into_iter()
-        .map(|finding| format!("{}: {}", finding.field, finding.message)),
+        .map(|finding| {
+            let text = format!("{}: {}", finding.field, finding.message);
+            deterministic
+                .entry(text.clone())
+                .or_default()
+                .push_back(finding.identity);
+            text
+        }),
     );
     report.push_str(
         "\n## dependency contracts\n  local consumes/ordering_only shape checked; producer-path and multi-writer matching are NOT ANALYSED for --task-file and run under --tasks\n",
@@ -158,7 +168,9 @@ pub(super) fn inspect_raw(
                         report.push_str("\n## frozen skeleton\n  frozen fields match structurally\n");
                     } else {
                         blockers.extend(findings.into_iter().map(|finding| {
-                            format!("{}: {}", task.canonical_task_id, finding.message)
+                            let text = format!("{}: {}", task.canonical_task_id, finding.message);
+                            deterministic.entry(text.clone()).or_default().push_back(finding.identity);
+                            text
                         }));
                     }
                 }
@@ -179,7 +191,14 @@ pub(super) fn inspect_raw(
     let contract_findings = audit_contracts(&universe);
     for finding in &contract_findings {
         if finding.kind.is_certain() {
-            blockers.push(format!("{}: {}", finding.task_id, finding.message));
+            let text = format!("{}: {}", finding.task_id, finding.message);
+            if let Some(identity) = &finding.identity {
+                deterministic
+                    .entry(text.clone())
+                    .or_default()
+                    .push_back(identity.clone());
+            }
+            blockers.push(text);
         }
     }
     if contract_findings.is_empty() {
@@ -202,7 +221,9 @@ pub(super) fn inspect_raw(
             ));
         }
     }
-    finish(report, blockers, inherited_blockers)
+    let mut result = finish(report, blockers, inherited_blockers);
+    result.deterministic = deterministic;
+    result
 }
 
 fn validate_declared_shape(
@@ -318,6 +339,7 @@ fn finish(
         report,
         blockers,
         inherited_blockers,
+        deterministic: BTreeMap::new(),
     }
 }
 

@@ -18,7 +18,7 @@
 // bodies against it; an inherited finding goes to the predecessor body it
 // names, else to the skeleton. Rounds follow the one progress rule every
 // author loop follows (workflow_decompose_v1_progress.js, Issue 261): a round
-// makes progress when its open findings set a new best or are all new, a
+// makes progress when its distinct defect count sets a new best, a
 // round of SET_GATE_ESCALATE_AFTER without progress escalates the repair to a
 // skeleton re-author with every open finding, and STALL_ATTEMPTS rounds in a
 // row without progress PAUSE the run with the findings listed. A resumed run

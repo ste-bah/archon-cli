@@ -70,6 +70,7 @@ pub struct TaskSkeletonLock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskSetFinding {
+    pub identity: crate::defect::DeterministicDefect,
     pub field: String,
     pub message: String,
 }
@@ -77,6 +78,7 @@ pub struct TaskSetFinding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskSkeletonError {
     message: String,
+    pub defects: Vec<crate::defect::ValidationDefect>,
 }
 
 impl fmt::Display for TaskSkeletonError {
@@ -89,64 +91,9 @@ impl std::error::Error for TaskSkeletonError {}
 
 type SkeletonResult<T> = Result<T, TaskSkeletonError>;
 
-pub fn validate_skeleton(
-    skeleton: &TaskSkeleton,
-    expected_acceptance_digest: &str,
-) -> SkeletonResult<()> {
-    if skeleton.schema_version != 1 {
-        return invalid(format!(
-            "task skeleton schema_version must be 1, found {}; set it to 1 and re-run `workflow freeze-skeleton`",
-            skeleton.schema_version
-        ));
-    }
-    if skeleton.acceptance_digest != expected_acceptance_digest {
-        return invalid(format!(
-            "task skeleton acceptance_digest is {}, expected {}; restore the acceptance-bound skeleton or re-run `workflow freeze-skeleton`",
-            skeleton.acceptance_digest, expected_acceptance_digest
-        ));
-    }
-    if skeleton.tasks.is_empty() {
-        return invalid(
-            "task skeleton examined zero tasks; add every future TASK entry before running `workflow freeze-skeleton`",
-        );
-    }
-    let mut ids = BTreeSet::new();
-    let mut files = BTreeSet::new();
-    for task in &skeleton.tasks {
-        if !strict_task_id(&task.task_id) {
-            return invalid(format!(
-                "task skeleton task_id '{}' is invalid; use canonical TASK-<DOMAIN>-<NNN>",
-                task.task_id
-            ));
-        }
-        if !ids.insert(task.task_id.clone()) {
-            return invalid(format!(
-                "task skeleton task_id '{}' is duplicated; keep exactly one entry",
-                task.task_id
-            ));
-        }
-        if !files.insert(task.file_name.clone()) {
-            return invalid(format!(
-                "task skeleton file_name '{}' is duplicated; give each task one distinct TASK-*.md filename",
-                task.file_name
-            ));
-        }
-        let file = Path::new(&task.file_name);
-        if file
-            .parent()
-            .is_some_and(|parent| !parent.as_os_str().is_empty())
-            || task.file_name.contains('\\')
-            || !task.file_name.starts_with(&task.task_id)
-            || !task.file_name.ends_with(".md")
-        {
-            return invalid(format!(
-                "task '{}' file_name '{}' must be a direct TASK-*.md filename beginning with the canonical task id; remove directory components or rename it before freezing",
-                task.task_id, task.file_name
-            ));
-        }
-    }
-    Ok(())
-}
+#[path = "task_skeleton_validate.rs"]
+mod validate;
+pub use validate::{skeleton_defects, validate_skeleton};
 
 pub fn validate_skeleton_set(
     skeleton: &TaskSkeleton,
@@ -158,10 +105,11 @@ pub fn validate_skeleton_set(
         .map(|task| task.task_id.as_str())
         .collect();
     let mut findings = Vec::new();
-    for task in &skeleton.tasks {
-        for dependency in &task.depends_on {
+    for (slot, task) in skeleton.tasks.iter().enumerate() {
+        for (index, dependency) in task.depends_on.iter().enumerate() {
             if !ids.contains(dependency.task_id.as_str()) {
                 findings.push(TaskSetFinding {
+            identity: crate::defect::DeterministicDefect::new("missing_dependency", skeleton_subject(&task.task_id, slot), format!("depends_on/{index}")),
                     field: "depends_on".into(),
                     message: format!(
                         "task '{}' depends_on missing task '{}'; add the missing task to the skeleton or remove the edge",
@@ -170,9 +118,10 @@ pub fn validate_skeleton_set(
                 });
             }
         }
-        for blocked in &task.blocks {
+        for (index, blocked) in task.blocks.iter().enumerate() {
             if !ids.contains(blocked.as_str()) {
                 findings.push(TaskSetFinding {
+            identity: crate::defect::DeterministicDefect::new("missing_blocked_task", skeleton_subject(&task.task_id, slot), format!("blocks/{index}")),
                     field: "blocks".into(),
                     message: format!(
                         "task '{}' blocks missing task '{}'; add the missing task to the skeleton or remove the edge",
@@ -183,19 +132,18 @@ pub fn validate_skeleton_set(
         }
     }
 
-    if let Some(finding) = graph::graph_shape_finding(skeleton) {
-        findings.push(finding);
-    }
+    findings.extend(graph::graph_shape_findings(skeleton));
 
     let mut owners: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
-    for task in &skeleton.tasks {
-        for obligation in &task.implements {
+    for (slot, task) in skeleton.tasks.iter().enumerate() {
+        for (index, obligation) in task.implements.iter().enumerate() {
             owners
                 .entry(obligation.as_str())
                 .or_default()
                 .push(task.task_id.as_str());
             if !expected_obligations.contains(obligation) {
                 findings.push(TaskSetFinding {
+            identity: crate::defect::DeterministicDefect::new("unknown_obligation", skeleton_subject(&task.task_id, slot), format!("implements/{index}")),
                     field: "implements".into(),
                     message: format!(
                         "task '{}' claims unknown obligation '{}'; remove it or correct it to an id defined by the PRD",
@@ -208,6 +156,7 @@ pub fn validate_skeleton_set(
     for obligation in expected_obligations {
         if !owners.contains_key(obligation.as_str()) {
             findings.push(TaskSetFinding {
+            identity: crate::defect::DeterministicDefect::new("unowned_obligation", obligation, "implements"),
                 field: "implements".into(),
                 message: format!(
                     "PRD obligation '{}' has no skeleton owner; add it to at least one task's implements list",
@@ -348,6 +297,9 @@ pub fn compare_frozen_task(
         task.deliverable_contracts.clone(),
         frozen.deliverable_contracts.clone(),
     );
+    for finding in &mut findings {
+        finding.identity.subject.clone_from(&frozen.task_id);
+    }
     findings
 }
 
@@ -367,6 +319,7 @@ pub fn compare_task_set(
         .collect();
     for missing in frozen_ids.difference(&actual_ids) {
         findings.push(TaskSetFinding {
+            identity: crate::defect::DeterministicDefect::new("missing_frozen_task", *missing, "tasks"),
             field: "tasks".into(),
             message: format!(
                 "frozen task '{}' has no TASK file; create its frozen file_name or re-run `workflow freeze-skeleton` before body writing",
@@ -374,8 +327,9 @@ pub fn compare_task_set(
             ),
         });
     }
-    for extra in actual_ids.difference(&frozen_ids) {
+    for (index, extra) in actual_ids.difference(&frozen_ids).enumerate() {
         findings.push(TaskSetFinding {
+            identity: crate::defect::DeterministicDefect::new("extra_task", "task set", format!("tasks/{index}")),
             field: "tasks".into(),
             message: format!(
                 "TASK file '{}' is absent from the frozen skeleton; remove it or re-run `workflow freeze-skeleton` before body writing",
@@ -403,6 +357,7 @@ fn compare<T: PartialEq + fmt::Debug>(
 ) {
     if actual != frozen {
         findings.push(TaskSetFinding {
+            identity: crate::defect::DeterministicDefect::new("frozen_field_changed", "frozen task", field),
             field: field.into(),
             message: format!(
                 "frozen field '{field}' changed: expected {frozen:?}, actual {actual:?}; restore the frozen value or re-run `workflow freeze-skeleton` before body writing"
@@ -420,6 +375,14 @@ fn compare_set<T: Ord + fmt::Debug>(
     actual.sort();
     frozen.sort();
     compare(findings, field, &actual, &frozen);
+}
+
+pub(crate) fn skeleton_subject(id: &str, slot: usize) -> String {
+    if strict_task_id(id) {
+        id.to_string()
+    } else {
+        format!("tasks/{slot}")
+    }
 }
 
 fn strict_task_id(value: &str) -> bool {
@@ -470,5 +433,10 @@ fn invalid<T>(message: impl Into<String>) -> SkeletonResult<T> {
 fn error(message: impl Into<String>) -> TaskSkeletonError {
     TaskSkeletonError {
         message: message.into(),
+        defects: Vec::new(),
     }
 }
+
+#[cfg(test)]
+#[path = "task_skeleton_defect_tests.rs"]
+mod defect_tests;

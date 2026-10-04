@@ -9,19 +9,19 @@ async fn round3_distinct_evaluations_of_identical_content_replay_in_order() {
     host.varying.store(true, Ordering::SeqCst);
     run_fixed(&temp, &store, &run_id, &llm, &host)
         .await
-        .expect_err("one baseline, one novel finding and three repeats pause");
-    assert_eq!(host.lands.load(Ordering::SeqCst), 5);
-    assert_eq!(llm.calls.load(Ordering::SeqCst), 7);
+        .expect_err("one baseline and three attempts at the same count pause");
+    assert_eq!(host.lands.load(Ordering::SeqCst), 4);
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 6);
     host.fixed.store(true, Ordering::SeqCst);
     resume(&store, &run_id);
     let result = run_fixed(&temp, &store, &run_id, &llm, &host)
         .await
         .expect("historical evaluations replay without changing author prompts");
     assert_eq!(result.status, WorkflowV2Status::Accepted);
-    assert_eq!(llm.calls.load(Ordering::SeqCst), 8, "only one fresh author");
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 7, "only one fresh author");
     assert!(
-        record_exists(&store, &run_id, "body-TASK-X-010-author-6"),
-        "the new author must follow all five historical occurrences"
+        record_exists(&store, &run_id, "body-TASK-X-010-author-5"),
+        "the new author must follow all four historical occurrences"
     );
     let records = WorkflowV2ResultStore::new(store.run_dir(&run_id).join("v2"));
     assert_eq!(
@@ -35,7 +35,7 @@ async fn round3_distinct_evaluations_of_identical_content_replay_in_order() {
     );
     assert_eq!(
         host.lands.load(Ordering::SeqCst),
-        6,
+        5,
         "only one fresh evaluation"
     );
 }

@@ -335,12 +335,14 @@ fn fixed_status_renders_sanitized_route_call_shadow_and_active_detail() {
         serde_json::from_value(host.result.data.clone()).unwrap();
     outcome.gate_envelope.as_mut().unwrap().policy_findings = vec![
         archon_workflow::GatePolicyFinding {
+            deterministic_defect: None,
             text: "first finding".into(),
             subject: "acceptance".into(),
             source_path: None,
             remediation_scope: archon_workflow::RemediationScope::CandidateArtifact,
         },
         archon_workflow::GatePolicyFinding {
+            deterministic_defect: None,
             text: "second finding".into(),
             subject: "acceptance".into(),
             source_path: None,

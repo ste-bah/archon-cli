@@ -2,9 +2,10 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const scriptRoot = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
   'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js']
-  .map(name => fs.readFileSync(`${__dirname}/${name}`, 'utf8')).join('\n');
+  .map(name => fs.readFileSync(`${scriptRoot}/${name}`, 'utf8')).join('\n');
 function context(criteria = { A: 'a' }) {
   const ctx = { args: { acceptanceCriteria: criteria, gateMode: 'enforce', authorMaxParallelism: 1 } };
   vm.createContext(ctx);
@@ -20,7 +21,7 @@ function policy(ctx) {
       ctx.authorAcceptanceEntries(w, prompt, round, state) };
 }
 // Round 4: a judge that rewords one defect makes every finding "new"; only a
-// new best is real progress, so the loop pauses after 64 attempts without one.
+// a smaller count is progress, so the loop pauses after three attempts without it.
 async function novelty() {
   const ctx = context();
   let calls = 0, paused;
@@ -33,8 +34,8 @@ async function novelty() {
     pause: async (_, evidence) => { paused = evidence; throw new Error('paused'); } };
   await assert.rejects(ctx.authorCandidate(w, { phase: 'body', prompt: () => 'author',
     retryScopes: new Set(['candidate_artifact']), shadowScopes: new Set() }), /paused/);
-  assert.equal(calls, 65);
-  assert.equal(paused.reason, 'no_new_best');
+  assert.equal(calls, 4);
+  assert.equal(paused.reason, 'no_progress');
 }
 async function partial(operational, replacing) {
   const ids = ['A', 'B', 'C', 'D'];
@@ -56,8 +57,13 @@ async function partial(operational, replacing) {
     : clean(), pause: async (_, e) => {
     throw new Error(`unexpected pause with retained work ${completed}: ${JSON.stringify(e)}`);
   } };
-  await ctx.authorCandidate(w, policy(ctx));
-  assert.ok(completed.includes('D'));
+  if (replacing) {
+    await assert.rejects(ctx.authorCandidate(w, policy(ctx)), /unexpected pause/);
+    assert.ok(!completed.includes('D'), 'rewrites alone must not extend the progress window');
+  } else {
+    await ctx.authorCandidate(w, policy(ctx));
+    assert.ok(completed.includes('D'));
+  }
 }
 async function unchangedReplacement() {
   const ctx = context({ A: 'a', B: 'b' });

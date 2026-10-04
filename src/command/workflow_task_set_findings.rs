@@ -67,13 +67,15 @@ pub(super) fn acceptance_findings(
                 } else {
                     archon_workflow::RemediationScope::CandidateArtifact
                 };
-                GateFinding::new(
+                let mut gate_finding = GateFinding::new(
                     GateId::FreezeAcceptance,
                     finding.message,
                     subject,
                     Some(contract_path.to_path_buf()),
                     scope,
-                )
+                );
+                gate_finding.deterministic_defect = finding.identity;
+                gate_finding
             }),
     );
     findings
@@ -206,6 +208,7 @@ pub(super) fn skeleton_findings(
                     Some(skeleton_path.clone()),
                     archon_workflow::RemediationScope::Skeleton,
                 )
+                .with_defect(finding.identity)
             }),
     );
     let edge_analysis = analyze_task_set_edges(skeleton);
@@ -217,6 +220,7 @@ pub(super) fn skeleton_findings(
             Some(skeleton_path.clone()),
             archon_workflow::RemediationScope::Skeleton,
         )
+        .with_defect(finding.identity)
     }));
     // Issue-55: every repository file the PRD names must have an owning
     // task; the skeleton author assigns it on the retry this finding drives.

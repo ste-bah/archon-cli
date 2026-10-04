@@ -1,8 +1,5 @@
-//! Issue 261, round 4: novelty keeps a loop's short window open, but only a
-//! new best is real progress. A judge that rewords one defect on every call
-//! makes each finding "new" forever; the loop must still pause once
-//! NO_NEW_BEST_ATTEMPTS attempts pass without a new best, and a loop whose
-//! best keeps improving must never meet that bound.
+//! Issue 261: only a higher tier or a smaller distinct defect count is progress.
+//! Rewording and swapping defects share the three-attempt no-progress window.
 
 use super::{BODY, assert_paused, body, evidence, pause_ids, progress_flags, run};
 
@@ -19,18 +16,15 @@ fn a_judge_rewording_one_defect_pauses_when_no_attempt_sets_a_new_best() {
     ));
     assert_paused(&out);
     assert_eq!(
-        out["calls"], 65,
-        "a baseline, then 64 attempts without a new best: {out}"
+        out["calls"], 4,
+        "a baseline, then three attempts without progress: {out}"
     );
     assert_eq!(pause_ids(&out), ["pause-body-TASK-X-010-1"], "{out}");
     let evidence = evidence(&out, 0);
-    assert_eq!(evidence["reason"], "no_new_best", "{evidence}");
+    assert_eq!(evidence["reason"], "no_progress", "{evidence}");
     assert_eq!(evidence["no_new_best_window"], 64, "{evidence}");
-    assert_eq!(evidence["attempts_since_best"], 64, "{evidence}");
-    assert!(
-        progress_flags(evidence).iter().all(|flag| *flag),
-        "novelty kept the short window open the whole time: {evidence}"
-    );
+    assert_eq!(evidence["attempts_since_best"], 3, "{evidence}");
+    assert_eq!(progress_flags(evidence), [true, false, false, false]);
 }
 
 #[test]
@@ -46,8 +40,8 @@ fn a_resume_past_a_no_new_best_pause_gets_one_fresh_bound() {
     );
     assert_paused(&out);
     assert_eq!(
-        out["calls"], 129,
-        "65 calls, then a fresh bound of 64: {out}"
+        out["calls"], 7,
+        "four calls, then a fresh window of three: {out}"
     );
     assert_eq!(
         pause_ids(&out),
@@ -58,7 +52,9 @@ fn a_resume_past_a_no_new_best_pause_gets_one_fresh_bound() {
 
 #[test]
 fn a_subject_clearing_distinct_defects_is_not_stopped_by_the_short_window() {
-    let out = body(r##"{ findings: (n) => n <= 40 ? ["defect " + n] : [] }"##);
+    let out = body(
+        r##"{ findings: (n) => Array.from({length: Math.max(41 - n, 0)}, (_, i) => "defect " + i) }"##,
+    );
     assert_eq!(out["accepted"], true, "{out}");
     assert_eq!(out["calls"], 41, "{out}");
     assert!(pause_ids(&out).is_empty(), "{out}");
@@ -81,8 +77,8 @@ fn set_gate_rounds_whose_judge_rewords_one_defect_pause_without_a_new_best() {
     assert_paused(&out);
     assert_eq!(pause_ids(&out), ["pause-set-gates-1"], "{out}");
     let evidence = evidence(&out, 0);
-    assert_eq!(evidence["reason"], "no_new_best", "{evidence}");
-    assert_eq!(evidence["rounds"], 65, "{evidence}");
+    assert_eq!(evidence["reason"], "no_progress", "{evidence}");
+    assert_eq!(evidence["rounds"], 4, "{evidence}");
 }
 
 /// The judge rejects both entries with the same findings every time. Each
@@ -114,8 +110,8 @@ fn an_acceptance_entry_the_judge_rejects_after_every_rewrite_pauses() {
     assert_paused(&out);
     assert_eq!(pause_ids(&out), ["pause-acceptance-1"], "{out}");
     let evidence = evidence(&out, 0);
-    assert_eq!(evidence["reason"], "no_new_best", "{evidence}");
-    assert_eq!(evidence["attempts_since_best"], 64, "{evidence}");
+    assert_eq!(evidence["reason"], "no_progress", "{evidence}");
+    assert_eq!(evidence["attempts_since_best"], 3, "{evidence}");
 }
 
 /// The round-3 regression suite runs under cargo like the other node suites.
@@ -146,12 +142,13 @@ fn refusal(n: &str) -> String {
 }
 
 #[test]
-fn a_first_error_validator_cleared_one_defect_per_attempt_keeps_running() {
-    // Seventy invalid file names, one repaired per attempt; the validator
-    // names only the first one left, so the finding count never falls.
+fn a_complete_validator_cleared_one_defect_per_attempt_keeps_running() {
+    // Guard: complete structured findings shrink from seventy to zero.
+    // The real Rust validator's completeness has its own failing-before test.
     let out = body(&format!(
         r##"{{ answer: (n) => {{ {SPIN_GUARD} return {{ status: "accepted", stopReason: "end_turn", content: "# body " + n }}; }},
-          findings: (n) => n <= 70 ? [{{ text: {}, subject: "skeleton", remediation_scope: "candidate_artifact" }}] : [] }}"##,
+          findings: (n) => Array.from({{length: Math.max(71 - n, 0)}}, (_, i) => ({{ text: {}, subject: "skeleton", remediation_scope: "candidate_artifact",
+            deterministic_defect: {{provenance:"host_validator", code:"invalid_filename", subject:"TASK-X-" + (i + n), location:"file_name"}} }})) }}"##,
         refusal("String(n).padStart(3, \"0\")")
     ));
     assert_eq!(out["accepted"], true, "{out}");
@@ -166,18 +163,18 @@ fn a_deterministic_refusal_oscillating_between_two_defects_pauses() {
         refusal("(n % 2 ? \"001\" : \"002\")")
     ));
     assert_paused(&out);
-    assert_eq!(out["calls"], 5, "A, B, then A, B, A seen before: {out}");
+    assert_eq!(out["calls"], 4, "A, B, A, B: no smaller count: {out}");
     assert_eq!(evidence(&out, 0)["reason"], "no_progress");
     assert_eq!(
         progress_flags(evidence(&out, 0)),
-        [true, true, false, false, false]
+        [true, false, false, false]
     );
 }
 
 #[test]
 fn a_resumed_loop_still_knows_the_refusals_it_saw_before_the_pause() {
-    // X four times pauses; after the resume Y is new, then X (seen before the
-    // pause), Y and X again are not.
+    // X four times pauses; after resume Y, X, Y make no smaller count.
+    // A fresh window preserves the best even when the finding set changes.
     let out = run(
         "enforce",
         &format!(
@@ -188,7 +185,7 @@ fn a_resumed_loop_still_knows_the_refusals_it_saw_before_the_pause() {
         BODY,
     );
     assert_paused(&out);
-    assert_eq!(out["calls"], 8, "{out}");
+    assert_eq!(out["calls"], 7, "{out}");
     assert_eq!(
         pause_ids(&out),
         ["pause-body-TASK-X-010-1", "pause-body-TASK-X-010-2"]

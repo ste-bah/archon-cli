@@ -277,8 +277,6 @@ async function authorCandidate(w, policy) {
   // Seeded feedback is attempt 0 of the history: every later prompt in this
   // phase keeps showing the finding the phase was opened to repair.
   const history = feedback.length > 0 ? [{ attempt: 0, findings: feedback.slice() }] : [];
-  let bestCommitted = null;
-  let bestFindings = Infinity;
   let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
   let lastFindings = feedback.slice();
@@ -287,17 +285,12 @@ async function authorCandidate(w, policy) {
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
-      // Observe never blocks on the artifact's quality: a loop that stopped
-      // improving falls back to the best artifact it saw. An outage says
-      // nothing about the artifact, so it pauses in either mode.
-      if (stall !== "operational_no_progress" && args.gateMode === "observe" && bestCommitted) return bestCommitted;
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
     }
     call += 1;
     progress.calls += 1;
     AUTHOR_CALLS.set(policy.phase, call);
     const addedBefore = authorState.added || 0;
-    const replacedBefore = authorState.replaced || 0;
     const prompt = authorPrompt(policy.prompt(), attempt + 1, feedback, history);
     const authored = policy.author
       ? await policy.author(w, prompt, call, authorState)
@@ -311,10 +304,9 @@ async function authorCandidate(w, policy) {
       progress.answered += authorState.roundAnswered;
     }
     // A round without a candidate can still retain work when a sibling fails:
-    // a new entry is a new best, a changed rewrite only novelty. Without
-    // retained work, every failure counts against the shared window.
-    const advanced = (authorState.added || 0) > addedBefore ? ADVANCE_BEST
-      : (authorState.replaced || 0) > replacedBefore ? ADVANCE_NOVEL : ADVANCE_NONE;
+    // a previously missing entry lowers the outstanding-entry count. A
+    // rewrite alone clears no defect; every failure shares the same window.
+    const advanced = (authorState.added || 0) > addedBefore ? ADVANCE_BEST : ADVANCE_NONE;
     if (authored.status === "failed") {
       if (authored.malformed) {
         recordAnswered(progress, call, "entries", advanced, !measuredReplies);
@@ -348,26 +340,8 @@ async function authorCandidate(w, policy) {
         .filter(finding => policy.retryScopes.has(finding.remediation_scope));
       authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt));
     }
-    // A committed artifact is the best one so far, not the finished one. The
-    // gate publishing in observe mode says the gate did not block; it says
-    // nothing about whether the artifact still carries defects the author can
-    // fix. Returning here discarded the routing computed one line above, so a
-    // task set was published with 19 shadow findings — an acceptance floor the
-    // gate itself reported as not falsifiable among them — and built on for a
-    // week. Repairable findings are fed back below; observe still never blocks,
-    // because a stalled loop falls back to the best artifact seen.
-    //
-    // Best, not latest. Attempts do not improve monotonically — a live run went
-    // 2 findings, 1, 2, 1, 1 and then produced a malformed candidate, so keeping
-    // the most recent commit froze a worse contract than two earlier attempts
-    // had already produced. Ties keep the earlier artifact: it reached this
-    // quality with fewer author attempts and nothing later improved on it.
-    if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true) {
-      if (routed.all.length < bestFindings) {
-        bestCommitted = outcome;
-        bestFindings = routed.all.length;
-      }
-    }
+    // Publication and progress are separate: open repairable findings keep
+    // this loop running in either mode, and a stalled loop always pauses.
     if (routed.fatal.length > 0) {
       throw new Error(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
     }

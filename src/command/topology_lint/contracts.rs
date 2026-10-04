@@ -38,49 +38,87 @@ use archon_workflow::task_universe_contract_audit::{ContractFindingKind, audit_c
 /// guess that blocks a decomposition is a guess the author cannot argue with,
 /// and the first time it is wrong the whole gate gets switched off.
 pub(crate) fn blocking_findings(tasks_root: Option<&Path>) -> Vec<String> {
+    blocking_defects(tasks_root)
+        .into_iter()
+        .map(|defect| defect.message)
+        .collect()
+}
+
+fn blocking_defects(tasks_root: Option<&Path>) -> Vec<archon_workflow::defect::ValidationDefect> {
+    use archon_workflow::defect::ValidationDefect;
     let Some(root) = tasks_root else {
         return Vec::new();
     };
     let Some(universe) = load_universe(root) else {
-        return vec!["the task directory could not be read".to_string()];
+        return vec![ValidationDefect::new(
+            "unreadable_task_directory",
+            "tasks",
+            "directory",
+            "the task directory could not be read",
+        )];
     };
-    // A spec that does not parse is a certainty, not a heuristic: the runtime
-    // reads task files with this same parser, so one it cannot read is one no
-    // run can use. Blocking only on contract findings let a decomposition whose
-    // every file was unreadable exit zero — the gate computed no findings
-    // because it got to no contracts, and silence read as success.
-    let unreadable = unparseable_specs(root);
-    if !unreadable.is_empty() {
-        return unreadable;
-    }
-    audit_contracts(&universe)
-        .into_iter()
-        .filter(|finding| finding.kind.is_certain())
-        .map(|finding| format!("{}: {}", finding.task_id, finding.message))
-        .collect()
-}
-
-/// Task files the runtime's own parser cannot read, with the reason.
-fn unparseable_specs(root: &Path) -> Vec<String> {
-    let Ok(paths) = task_files_under(root) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for path in &paths {
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("<unnamed>");
-        match std::fs::read_to_string(path) {
-            Ok(raw) => {
-                if let Err(error) = parse_task_file(path, &raw) {
-                    out.push(format!("{name}: {error}"));
-                }
+    // An unreadable spec is one defect, never permission to hide defects in
+    // every other readable spec. Structural slots exclude rejected filenames.
+    let mut findings = Vec::new();
+    if let Ok(paths) = task_files_under(root) {
+        for (index, path) in paths.iter().enumerate() {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("<unnamed>");
+            let problem = match std::fs::read_to_string(path) {
+                Ok(raw) => parse_task_file(path, &raw)
+                    .err()
+                    .map(|error| ("invalid_task_spec", format!("{name}: {error}"))),
+                Err(error) => Some((
+                    "unreadable_task_spec",
+                    format!("{name}: unreadable: {error}"),
+                )),
+            };
+            if let Some((code, message)) = problem {
+                findings.push(ValidationDefect::new(
+                    code,
+                    &format!("tasks/{index}"),
+                    "spec",
+                    message,
+                ));
             }
-            Err(error) => out.push(format!("{name}: unreadable: {error}")),
         }
     }
-    out
+    findings.extend(
+        audit_contracts(&universe)
+            .into_iter()
+            .filter(|finding| finding.kind.is_certain())
+            .filter_map(|finding| {
+                finding.identity.map(|identity| ValidationDefect {
+                    identity,
+                    message: format!("{}: {}", finding.task_id, finding.message),
+                })
+            }),
+    );
+    findings
+}
+
+pub(super) fn attach_identities(
+    root: &Path,
+    findings: &mut [crate::command::workflow_gate::GateFinding],
+) {
+    let mut by_message: std::collections::BTreeMap<_, std::collections::VecDeque<_>> =
+        std::collections::BTreeMap::new();
+    for defect in blocking_defects(Some(root)) {
+        by_message
+            .entry(defect.message)
+            .or_default()
+            .push_back(defect.identity);
+    }
+    for finding in findings {
+        if let Some(identity) = by_message
+            .get_mut(&finding.text)
+            .and_then(|identities| identities.pop_front())
+        {
+            finding.deterministic_defect = Some(identity);
+        }
+    }
 }
 
 /// Parse every task file under `root`, skipping the ones that will not parse.

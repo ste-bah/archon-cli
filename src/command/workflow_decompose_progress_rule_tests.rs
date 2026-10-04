@@ -16,21 +16,27 @@ fn rewording_by_case_space_or_punctuation_is_the_same_finding() {
 }
 
 #[test]
-fn findings_that_differ_by_a_number_are_distinct_defects() {
-    // One argument per attempt, the previous one repaired each time.
+fn different_numbers_at_the_same_defect_count_do_not_progress() {
+    // Different argument numbers do not lower the number of outstanding defects.
     let out = body(r#"{ findings: (n) => n <= 5 ? ["argument " + n + " lacks validation"] : [] }"#);
-    assert_eq!(out["accepted"], true, "{out}");
-    assert_eq!(out["calls"], 6, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, false, false, false]
+    );
 }
 
 #[test]
-fn the_same_text_about_a_different_subject_is_a_distinct_finding() {
+fn changing_the_subject_at_the_same_defect_count_does_not_progress() {
     let out = body(
         r#"{ findings: (n) => n <= 5 ? [{ text: "check is weak", subject: "AC-X-00" + n, remediation_scope: "body" }] : [] }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, false, false, false]
+    );
 }
 
 // --- a converging loop is never stopped by a count --------------------------
@@ -47,14 +53,13 @@ fn a_best_that_keeps_improving_is_never_stopped_by_the_no_new_best_bound() {
 }
 
 #[test]
-fn novelty_that_also_sets_new_bests_now_and_then_is_not_stopped() {
-    // Mostly new findings at the same count, with a new best every 30th
-    // attempt: the no-new-best bound restarts each time the best improves.
+fn novelty_cannot_extend_the_window_until_a_distant_new_best() {
+    // A distant improvement cannot justify 29 attempts at the same count.
     let out = body(
         r#"{ findings: (n) => n <= 95 ? Array.from({ length: 5 - Math.floor(n / 30) }, (_, i) => "defect " + n + "-" + i) : [] }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert_eq!(out["calls"], 96, "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
 }
 
 // --- one count of consecutive attempts without progress ---------------------
@@ -102,7 +107,7 @@ fn an_acceptance_round_that_completes_an_entry_is_progress() {
 // --- set gates follow the same rule -----------------------------------------
 
 #[test]
-fn set_gate_rounds_that_each_clear_the_last_defect_and_find_a_new_one_are_progress() {
+fn set_gate_rounds_trading_one_defect_for_another_pause() {
     let out = run(
         "enforce",
         r#"{ findings: (n, capability) => {
@@ -112,8 +117,11 @@ fn set_gate_rounds_that_each_clear_the_last_defect_and_find_a_new_one_are_progre
         } }"#,
         "workflow(w)",
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, false, false, false]
+    );
 }
 
 #[test]

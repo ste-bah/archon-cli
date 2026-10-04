@@ -102,56 +102,54 @@ pub fn contract_defect(contract: &Value) -> Option<String> {
     template_binding_failure(contract)
 }
 
-fn template_binding_failure(contract: &Value) -> Option<String> {
-    if let Some(failure) = shell_template_failure(contract) {
-        return Some(failure);
-    }
-    for key in ["registry_path", "instance_source_path"] {
+/// Every independent template defect, named by a validator-owned field.
+pub fn contract_defects(contract: &Value) -> Vec<crate::defect::ValidationDefect> {
+    use crate::defect::ValidationDefect;
+    let mut defects = Vec::new();
+    for key in [
+        "artifact_path",
+        "registry_path",
+        "instance_source_path",
+        "payload_path",
+    ] {
         let Some(path) = contract_field(contract, key) else {
             continue;
         };
-        let tokens = template_tokens(&path);
+        let tokens = shell_tokens(&path);
         if !tokens.is_empty() {
-            return Some(format!(
-                "deliverable contract {key} '{path}' carries an unexpanded {}; the verifier \
-                 opens this path literally and no instance binding expands it, so declare a \
-                 concrete path",
-                rendered_tokens(&tokens)
-            ));
+            defects.push(ValidationDefect::new("unexpanded_shell_path", "contract", key, format!(
+                "deliverable contract {key} '{path}' carries an unexpanded shell {}; nothing in the verifier expands `${{...}}`, and an unset variable would expand to nothing and silently make the path relative, so declare a concrete path", rendered_tokens(&tokens))));
+        }
+        if ["registry_path", "instance_source_path"].contains(&key) {
+            let tokens = template_tokens(&path);
+            if !tokens.is_empty() {
+                defects.push(ValidationDefect::new("unexpanded_source_path", "contract", key, format!(
+                    "deliverable contract {key} '{path}' carries an unexpanded {}; the verifier opens this path literally and no instance binding expands it, so declare a concrete path", rendered_tokens(&tokens))));
+            }
         }
     }
-    let artifact_path = contract_field(contract, "artifact_path").unwrap_or_default();
-    let tokens = template_tokens(&artifact_path);
-    if tokens.is_empty() {
-        return None;
+    let path = contract_field(contract, "artifact_path").unwrap_or_default();
+    let tokens = template_tokens(&path);
+    if !tokens.is_empty() {
+        if contract.get("required_universe") == Some(&Value::Bool(true)) {
+            defects.push(ValidationDefect::new("templated_required_universe", "contract", "artifact_path", format!(
+                "deliverable contract declares required_universe against artifact_path '{path}', which carries an unexpanded {}; a required-universe contract names one enumerated artifact, so no instance binding applies to it", rendered_tokens(&tokens))));
+        }
+        if contract_field(contract, "typed_verifier_command").is_some() {
+            defects.push(ValidationDefect::new("templated_typed_verifier", "contract", "artifact_path", format!(
+                "deliverable contract declares typed_verifier_command against artifact_path '{path}', which carries an unexpanded {}; a typed verifier is handed one concrete path and cannot expand it", rendered_tokens(&tokens))));
+        }
+        if !source_collection_is_bound(contract) && declared_instance_floor(contract) < 1 {
+            defects.push(ValidationDefect::new("unbound_artifact_template", "contract", "artifact_path", format!(
+                "deliverable contract artifact_path '{path}' carries an unexpanded {} with no instance binding, so the gate can neither pass nor fail against it. Declare instance_artifact_field together with instance_source_path (or registry_path) and instance_source_records_field (or registry_records_field) so every instance is named by a source entry, or declare min_instances >= 1 so the expansion is a claim that can fail.", rendered_tokens(&tokens))));
+        }
     }
-    if contract.get("required_universe") == Some(&Value::Bool(true)) {
-        return Some(format!(
-            "deliverable contract declares required_universe against artifact_path \
-             '{artifact_path}', which carries an unexpanded {}; a required-universe contract \
-             names one enumerated artifact, so no instance binding applies to it",
-            rendered_tokens(&tokens)
-        ));
-    }
-    if contract_field(contract, "typed_verifier_command").is_some() {
-        return Some(format!(
-            "deliverable contract declares typed_verifier_command against artifact_path \
-             '{artifact_path}', which carries an unexpanded {}; a typed verifier is handed one \
-             concrete path and cannot expand it",
-            rendered_tokens(&tokens)
-        ));
-    }
-    if source_collection_is_bound(contract) || declared_instance_floor(contract) >= 1 {
-        return None;
-    }
-    Some(format!(
-        "deliverable contract artifact_path '{artifact_path}' carries an unexpanded {} with no \
-         instance binding, so the gate can neither pass nor fail against it. Declare \
-         instance_artifact_field together with instance_source_path (or registry_path) and \
-         instance_source_records_field (or registry_records_field) so every instance is named by \
-         a source entry, or declare min_instances >= 1 so the expansion is a claim that can fail.",
-        rendered_tokens(&tokens)
-    ))
+    defects
+}
+
+fn template_binding_failure(contract: &Value) -> Option<String> {
+    let defects = contract_defects(contract);
+    (!defects.is_empty()).then(|| crate::defect::defect_message(&defects))
 }
 
 fn source_collection_is_bound(contract: &Value) -> bool {
@@ -197,29 +195,6 @@ fn contract_field(contract: &Value, key: &str) -> Option<String> {
 /// leaves a literal `${DATASET_ID}` segment in a path someone may then create.
 /// Expand or refuse — and this engine cannot expand, so it refuses, naming the
 /// token.
-fn shell_template_failure(contract: &Value) -> Option<String> {
-    for key in [
-        "artifact_path",
-        "registry_path",
-        "instance_source_path",
-        "payload_path",
-    ] {
-        let Some(path) = contract_field(contract, key) else {
-            continue;
-        };
-        let tokens = shell_tokens(&path);
-        if !tokens.is_empty() {
-            return Some(format!(
-                "deliverable contract {key} '{path}' carries an unexpanded shell {}; nothing in \
-                 the verifier expands `${{...}}`, and an unset variable would expand to nothing \
-                 and silently make the path relative, so declare a concrete path",
-                rendered_tokens(&tokens)
-            ));
-        }
-    }
-    None
-}
-
 /// Every `${...}` span in a declared path, in the order written.
 fn shell_tokens(value: &str) -> Vec<String> {
     let mut tokens = Vec::new();

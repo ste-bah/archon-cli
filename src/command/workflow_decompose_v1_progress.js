@@ -3,24 +3,11 @@
 // here is hoisted into the same scope as `workflow`.
 //
 // A loop is limited by attempts that make NO progress, never by its total.
-// Fixed budgets (six acceptance attempts, ten per body, three operational)
-// failed the whole decomposition on the attempt after the last one, however
-// well the author was doing: a live body needed five attempts to converge,
-// and one exhausted body ended a set of fifteen. Every loop -- each subject's
-// author loop and the set-gate rounds -- now keeps one record: an attempt
-// that makes progress keeps it going, and STALL_ATTEMPTS consecutive attempts
-// that make none end it. Novelty -- findings no earlier attempt reported --
-// keeps that short window open. Real progress is narrower, and
-// NO_NEW_BEST_ATTEMPTS consecutive attempts without it end the loop too:
-// - a new best: a higher tier, or fewer findings at the best tier;
-// - a refusal the host itself produced (refused or packaging tier) whose
-//   finding set no earlier attempt in this loop produced. A first-error
-//   validator names one defect at a time, so clearing one per attempt never
-//   lowers the count; its next defect is a new set. Revisiting a set is not.
-// Judged-tier novelty is never real progress: the judge is a model, and one
-// that rewords a defect makes every finding new. A loop that keeps making
-// real progress meets neither limit, whatever its length. A loop that ends
-// PAUSES the run with its evidence (`w.pause`); it never fails it.
+// Progress is a higher tier or a strictly smaller distinct defect count than
+// any earlier attempt at that tier. Deterministic validators own structured
+// identities; their diagnostics, submitted values and finding-set novelty
+// cannot reset a window. A stall PAUSES the run and resume opens a fresh
+// window while preserving the best measure reconstructed by replay.
 
 // Consecutive attempts without progress that end a loop: every kind counts,
 // an outage, an incomplete reply and a judged repeat alike.
@@ -45,36 +32,44 @@ function progressText(finding) {
 }
 
 function findingTier(findings) {
-  const texts = findings.map(progressText);
-  if (texts.every((text) => text.includes(PACKAGING_REFUSAL))) return PACKAGING_TIER;
-  if (texts.every((text) => text.startsWith("candidate artifact was refused:"))) return REFUSED_TIER;
-  return JUDGED_TIER;
+  const tiers = findings.map((finding) => {
+    const text = progressText(finding);
+    const defect = finding && finding.deterministic_defect;
+    if (defect && defect.provenance === "host_validator") {
+      if (defect.code === "invalid_json" || defect.code === "invalid_candidate_shape") return PACKAGING_TIER;
+      if (defect.code === "unbound_candidate") return REFUSED_TIER;
+      return text.startsWith("candidate artifact was refused:") ? REFUSED_TIER : JUDGED_TIER;
+    }
+    if (text.includes(PACKAGING_REFUSAL)) return PACKAGING_TIER;
+    return text.startsWith("candidate artifact was refused:") ? REFUSED_TIER : JUDGED_TIER;
+  });
+  // Mixed validator/judge reports reached the strongest reported tier.
+  return tiers.reduce((tier, next) => Math.max(tier, next), PACKAGING_TIER);
 }
 
-// What makes two findings the same defect: the subject and path the gate
-// names it by, and its words. Case, spacing and punctuation are not words, so
-// restating a finding is not finding a new one. Numbers are: argument 1 and
-// argument 4, or AC-X-001 and AC-X-002, are different defects. A packaging
-// refusal is one defect whatever the parser said.
+// Host-produced deterministic identities never use diagnostic prose or rejected
+// values. Older envelopes and judged findings retain a conservative text key:
+// rewording can change identity, but cannot count as progress at the same count.
 function findingKey(finding) {
+  const defect = finding && finding.deterministic_defect;
+  if (defect && defect.provenance === "host_validator" && typeof defect.code === "string") {
+    return JSON.stringify([defect.code, defect.subject || "", defect.location || ""]);
+  }
   const text = progressText(finding);
   if (text.includes(PACKAGING_REFUSAL)) return PACKAGING_REFUSAL;
   const words = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
   const subject = typeof finding === "object" && finding && typeof finding.subject === "string" ? finding.subject : "";
   const path = typeof finding === "object" && finding && typeof finding.source_path === "string" ? finding.source_path : "";
-  return `${subject}\u0000${path}\u0000${words}`;
+  return JSON.stringify([subject, path, words]);
 }
 
-// One loop's progress record. `seed` is feedback the loop opened with (a set
-// gate's findings): a later attempt repeating it has found nothing new.
-function newProgress(seed) {
+function findingCount(findings) {
+  return new Set(findings.map(findingKey)).size;
+}
+
+function newProgress(_seed) {
   return {
     best: null,
-    seen: new Set((seed || []).map(findingKey)),
-    // Deterministic finding sets already produced. Like every other field it
-    // is rebuilt on resume: the resumed run replays each recorded attempt
-    // verbatim, so a set seen before the pause is still seen after it.
-    seenSets: new Set((seed || []).length > 0 ? [findingSetKey(seed)] : []),
     history: [],
     stalled: 0,
     stalledOperational: 0,
@@ -82,10 +77,6 @@ function newProgress(seed) {
     calls: 0,
     answered: 0
   };
-}
-
-function findingSetKey(findings) {
-  return findings.map(findingKey).sort().join("\u0001");
 }
 
 // `entry.progress` keeps the short window open; `best` is real progress.
@@ -102,49 +93,27 @@ function recordStep(progress, entry, best) {
   return entry.progress;
 }
 
-// Records one judged or refused attempt and returns whether it made progress.
-// `findings` are its repairable findings (gate finding objects, or texts).
-//
-// Progress is either of:
-// - a new best: a higher tier, or fewer findings at the best tier so far. The
-//   loop already keeps the artifact with the fewest findings as its best
-//   (attempts do not improve monotonically: live, 2, 1, 2, 1, 1);
-// - an all-new finding set at the best tier: every earlier finding cleared,
-//   and only defects no earlier attempt in the loop reported. That is an
-//   author working through distinct defects (a mechanical refusal names one
-//   at a time); trading a finding for one seen before is the oscillation the
-//   attempt history exists to break, and is not progress;
-// - a host refusal set never produced before at the best tier, which is also
-//   real progress (see the head of this file). Other novelty is not.
+// Only a higher tier or a new minimum count at the best tier is progress.
+// Trading, renaming, rewording or revisiting defects cannot reset the counter.
 function recordAttempt(progress, call, findings, answered = true) {
   if (answered) progress.answered += 1;
   const tier = findingTier(findings);
-  const keys = findings.map(findingKey);
+  const count = findingCount(findings);
   const best = progress.best;
-  const better = !best || tier > best.tier || (tier === best.tier && findings.length < best.count);
-  const atBest = !better && tier === best.tier;
-  const novel = atBest && keys.every((key) => !progress.seen.has(key));
-  const setKey = findingSetKey(findings);
-  const freshRefusal = atBest && tier < JUDGED_TIER && !progress.seenSets.has(setKey);
-  if (better) {
-    progress.best = { tier, count: findings.length };
-  }
-  for (const key of keys) progress.seen.add(key);
-  if (tier < JUDGED_TIER) progress.seenSets.add(setKey);
+  const better = !best || tier > best.tier || (tier === best.tier && count < best.count);
+  if (better) progress.best = { tier, count };
   return recordStep(progress, {
     call,
     kind: ["packaging", "refused", "judged"][tier],
-    findings: findings.length,
-    progress: better || novel || freshRefusal
-  }, better || freshRefusal);
+    findings: count,
+    progress: better
+  }, better);
 }
 
 // What a round without a candidate retained. An entry no earlier round
 // completed is a new best: the set of entries only grows, to the criteria.
-// A rewrite of a completed entry is novelty: new content the judge has not
-// accepted yet.
+// A rewrite of a completed entry clears no outstanding entry.
 const ADVANCE_NONE = { progress: false, best: false };
-const ADVANCE_NOVEL = { progress: true, best: false };
 const ADVANCE_BEST = { progress: true, best: true };
 
 // Records an attempt the provider answered but nothing measured: an

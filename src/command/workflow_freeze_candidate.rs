@@ -270,52 +270,20 @@ mod entry_assembly_tests {
 /// host reads verbatim. Prose and host-owned fields (`criterion`, `judgment`,
 /// `covers`) never refuse, so an author mentioning the marker cannot loop.
 /// Each finding uses the `check '<id>': ...` form the author loop re-authors.
+#[path = "workflow_freeze_marker_defects.rs"]
+mod markers;
+pub(crate) use markers::marker_defects;
+
+#[cfg(test)]
 pub(crate) fn redaction_marker_refusal(candidate: &serde_json::Value) -> Option<String> {
-    let mut named = Vec::new();
-    for list in ["entries", "supplementary", "acceptance"] {
-        let entries = candidate.get(list).and_then(serde_json::Value::as_array);
-        for entry in entries.into_iter().flatten() {
-            let id = entry.get("id").and_then(serde_json::Value::as_str);
-            if let (Some(id), Some(field)) = (id, marked_field(entry, &["check"])) {
-                named.push(format!("check '{id}': {}", marker_guidance(&field)));
-            }
-        }
-    }
-    (!named.is_empty()).then(|| named.join("; "))
+    let defects = marker_defects(candidate, false);
+    (!defects.is_empty()).then(|| archon_workflow::defect::defect_message(&defects))
 }
 
-/// [`redaction_marker_refusal`] for a task skeleton: each task's `file_name`,
-/// `depends_on` (consumed artifact paths) and `deliverable_contracts`, which
-/// the host stages and verifies verbatim. Ids and the host-owned
-/// `acceptance_digest` are not inspected.
+#[cfg(test)]
 pub(crate) fn skeleton_marker_refusal(candidate: &serde_json::Value) -> Option<String> {
-    let tasks = candidate.get("tasks").and_then(serde_json::Value::as_array);
-    let named: Vec<String> = tasks
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .filter_map(|(index, task)| {
-            let fields = ["file_name", "depends_on", "deliverable_contracts"];
-            let field = marked_field(task, &fields)?;
-            let id = task.get("task_id").and_then(serde_json::Value::as_str);
-            Some(format!(
-                "task '{}': {}",
-                id.unwrap_or("?"),
-                marker_guidance(&format!("/tasks/{index}{field}"))
-            ))
-        })
-        .collect();
-    (!named.is_empty()).then(|| named.join("; "))
-}
-
-/// The pointer, relative to `object`, of the first of `fields` that holds the
-/// marker as a whole word.
-fn marked_field(object: &serde_json::Value, fields: &[&str]) -> Option<String> {
-    fields.iter().find_map(|field| {
-        let value = object.get(*field)?;
-        let inner = archon_workflow::events::redaction_marker_path(value)?;
-        Some(format!("/{field}{inner}"))
-    })
+    let defects = marker_defects(candidate, true);
+    (!defects.is_empty()).then(|| archon_workflow::defect::defect_message(&defects))
 }
 
 fn marker_guidance(field: &str) -> String {
@@ -328,10 +296,20 @@ fn marker_guidance(field: &str) -> String {
 /// Assemble independently authored entries before the existing whole-contract gate.
 /// Legacy complete-contract input remains supported by the same CLI.
 pub(crate) fn acceptance_candidate(candidate: &[u8]) -> anyhow::Result<Vec<u8>> {
+    assemble_acceptance(candidate, true)
+}
+
+/// Staged validation collects marker, structure and check defects together.
+pub(crate) fn acceptance_candidate_for_validation(candidate: &[u8]) -> anyhow::Result<Vec<u8>> {
+    assemble_acceptance(candidate, false)
+}
+
+fn assemble_acceptance(candidate: &[u8], refuse_markers: bool) -> anyhow::Result<Vec<u8>> {
     let document = candidate_document(candidate);
     let mut value: serde_json::Value = serde_json::from_slice(&document)?;
-    if let Some(reason) = redaction_marker_refusal(&value) {
-        anyhow::bail!(reason);
+    let defects = marker_defects(&value, false);
+    if refuse_markers && !defects.is_empty() {
+        return Err(crate::command::workflow_task_set_candidate::CandidateDefects(defects).into());
     }
     if let Some(entries) = value.get("entries") {
         // `judgment` is host-owned: the author is told it is a placeholder and

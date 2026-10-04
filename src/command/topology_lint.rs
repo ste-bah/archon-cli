@@ -283,9 +283,11 @@ pub(crate) fn evaluate_lint(
         LintSource::Graph(_) => None,
     };
     let subject = describe(source);
+    let mut deterministic = std::collections::BTreeMap::new();
     let (base_findings, inherited_findings) = match source {
         LintSource::TaskFile(path) => {
             let lint = task_file::inspect(cwd, path, mode);
+            deterministic = lint.deterministic;
             (lint.blockers, lint.inherited_blockers)
         }
         _ => {
@@ -298,6 +300,7 @@ pub(crate) fn evaluate_lint(
             if let Some(root) = root.as_deref() {
                 let lint = task_set::inspect(cwd, root, mode)?;
                 blockers.extend(lint.blockers);
+                deterministic = lint.deterministic;
                 inherited = lint.inherited_blockers;
             }
             blockers.extend(
@@ -321,13 +324,18 @@ pub(crate) fn evaluate_lint(
                 default_scope
             };
             let finding_subject = crate::command::workflow_gate::finding_subject(&text, &subject);
-            crate::command::workflow_gate::GateFinding::new(
+            let identity = deterministic
+                .get_mut(&text)
+                .and_then(|identities| identities.pop_front());
+            let mut finding = crate::command::workflow_gate::GateFinding::new(
                 gate_id,
                 text,
                 finding_subject,
                 source_path.clone(),
                 remediation_scope,
-            )
+            );
+            finding.deterministic_defect = identity;
+            finding
         })
         .collect::<Vec<_>>();
     let coverage_root = match source {
@@ -338,12 +346,7 @@ pub(crate) fn evaluate_lint(
     let mut repository_error = None;
     if let Some(root) = coverage_root.as_deref() {
         findings.extend(tool_obligations::set_findings(cwd, root));
-        // Batch O: an empty write set or a prose forbidden entry is a body
-        // finding the set gate re-authors, never a silent `[]`.
         findings.extend(scope_declarations::set_findings(root));
-        // Issue-55: claims about repository paths and ownership of the
-        // repository files the PRD names, against the recorded repository. A
-        // record that cannot be read is operational, never a pass.
         match repository_claims::set_findings(cwd, root) {
             Ok(claims) => findings.extend(claims),
             Err(error) => {
@@ -360,7 +363,6 @@ pub(crate) fn evaluate_lint(
                 });
             }
         }
-        // Batch O2: every file a task's focused tests run is some task's.
         match focused_test_files::set_findings(root) {
             Ok(owned) => findings.extend(owned),
             Err(error) => {
@@ -385,6 +387,9 @@ pub(crate) fn evaluate_lint(
                 )
             }),
     );
+    if let Some(root) = coverage_root.as_deref() {
+        contracts::attach_identities(root, &mut findings);
+    }
     let evaluation = crate::command::workflow_gate::GateEvaluation::new(report, findings);
     let operational = match (graph_error, repository_error) {
         (Some(graph), Some(repository)) => Some(format!("{graph}; {repository}")),

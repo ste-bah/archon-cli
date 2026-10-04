@@ -1,6 +1,6 @@
 //! Directory-wide checks for optional portable freezes, structured edges, and TASK equality.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -21,6 +21,8 @@ use archon_workflow::task_universe::{
 
 pub(super) struct TaskSetFreezeLint {
     pub(super) report: String,
+    pub(super) deterministic:
+        BTreeMap<String, VecDeque<archon_workflow::defect::DeterministicDefect>>,
     pub(super) blockers: Vec<String>,
     pub(super) inherited_blockers: std::collections::BTreeSet<String>,
 }
@@ -45,6 +47,7 @@ pub(super) fn inspect(
 ) -> Result<TaskSetFreezeLint> {
     let mut report = String::from("\n## task-set freeze\n");
     let mut blockers = Vec::new();
+    let mut deterministic: BTreeMap<_, VecDeque<_>> = BTreeMap::new();
     let mut inherited_blockers = std::collections::BTreeSet::new();
     let tasks = load_tasks(tasks_root)?;
     let runtime_skeleton = skeleton_from_tasks(&tasks, String::new());
@@ -104,7 +107,14 @@ pub(super) fn inspect(
                 blockers.extend(
                     validate_skeleton_set(&draft, &expected_obligations)
                         .into_iter()
-                        .map(|finding| format!("{}: {}", finding.field, finding.message)),
+                        .map(|finding| {
+                            let text = format!("{}: {}", finding.field, finding.message);
+                            deterministic
+                                .entry(text.clone())
+                                .or_default()
+                                .push_back(finding.identity);
+                            text
+                        }),
                 );
                 report.push_str(
                     "  draft skeleton was linted against the acceptance freeze; it is NOT frozen until `workflow freeze-skeleton` publishes its lock and pin\n",
@@ -126,7 +136,14 @@ pub(super) fn inspect(
                 blockers.extend(
                     compare_task_set(&tasks, &frozen)
                         .into_iter()
-                        .map(|finding| format!("{}: {}", finding.field, finding.message)),
+                        .map(|finding| {
+                            let text = format!("{}: {}", finding.field, finding.message);
+                            deterministic
+                                .entry(text.clone())
+                                .or_default()
+                                .push_back(finding.identity);
+                            text
+                        }),
                 );
                 if blockers.is_empty() {
                     report.push_str(&format!(
@@ -148,8 +165,10 @@ pub(super) fn inspect(
         }
     };
 
-    append_edge_analysis(&skeleton, &mut report, &mut blockers);
-    Ok(finish(report, blockers, inherited_blockers))
+    append_edge_analysis(&skeleton, &mut report, &mut blockers, &mut deterministic);
+    let mut result = finish(report, blockers, inherited_blockers);
+    result.deterministic = deterministic;
+    Ok(result)
 }
 
 fn load_tasks(tasks_root: &Path) -> Result<Vec<WorkflowV2TaskUniverseTask>> {
@@ -308,14 +327,21 @@ fn append_predecessor_finding(
     blockers.push(text);
 }
 
-fn append_edge_analysis(skeleton: &TaskSkeleton, report: &mut String, blockers: &mut Vec<String>) {
+fn append_edge_analysis(
+    skeleton: &TaskSkeleton,
+    report: &mut String,
+    blockers: &mut Vec<String>,
+    deterministic: &mut BTreeMap<String, VecDeque<archon_workflow::defect::DeterministicDefect>>,
+) {
     let edge_analysis = analyze_task_set_edges(skeleton);
-    blockers.extend(
-        edge_analysis
-            .blockers
-            .iter()
-            .map(|finding| format!("{}: {}", finding.field, finding.message)),
-    );
+    blockers.extend(edge_analysis.blockers.iter().map(|finding| {
+        let text = format!("{}: {}", finding.field, finding.message);
+        deterministic
+            .entry(text.clone())
+            .or_default()
+            .push_back(finding.identity.clone());
+        text
+    }));
     if edge_analysis.information.is_empty() {
         report.push_str("  dependency contracts: no informational findings\n");
     } else {
@@ -353,5 +379,6 @@ fn finish(
         report,
         blockers,
         inherited_blockers,
+        deterministic: BTreeMap::new(),
     }
 }

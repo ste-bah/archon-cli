@@ -21,9 +21,10 @@ pub fn validate_dependency_declarations(
 ) -> Vec<TaskSetFinding> {
     let mut findings = Vec::new();
     let mut producers = BTreeSet::new();
-    for dependency in dependencies {
+    for (edge, dependency) in dependencies.iter().enumerate() {
         if !producers.insert(dependency.task_id.as_str()) {
             findings.push(TaskSetFinding {
+                identity: crate::defect::DeterministicDefect::new("duplicate_dependency", crate::task_skeleton::skeleton_subject(task_id, 0), format!("depends_on/{edge}")),
                 field: "depends_on".into(),
                 message: format!(
                     "task '{task_id}' declares producer '{}' more than once; merge its consumes entries into one dependency object",
@@ -39,6 +40,7 @@ pub fn validate_dependency_declarations(
                 "add a non-empty consumes list or set ordering_only: true"
             };
             findings.push(TaskSetFinding {
+                identity: crate::defect::DeterministicDefect::new("invalid_edge_declaration", crate::task_skeleton::skeleton_subject(task_id, 0), format!("depends_on/{edge}")),
                 field: "depends_on".into(),
                 message: format!(
                     "task '{task_id}' depends_on '{}', but the edge declares consumes={} and ordering_only={}; {remedy}",
@@ -46,9 +48,10 @@ pub fn validate_dependency_declarations(
                 ),
             });
         }
-        for consumed in &dependency.consumes {
+        for (artifact, consumed) in dependency.consumes.iter().enumerate() {
             if normalize_path(&consumed.artifact_path).is_empty() {
                 findings.push(TaskSetFinding {
+                identity: crate::defect::DeterministicDefect::new("empty_consumed_path", crate::task_skeleton::skeleton_subject(task_id, 0), format!("depends_on/{edge}/consumes/{artifact}")),
                     field: "consumes".into(),
                     message: format!(
                         "task '{task_id}' consumes an empty artifact_path from '{}'; write the exact producer artifact path",
@@ -82,23 +85,26 @@ pub fn analyze_task_set_edges(skeleton: &TaskSkeleton) -> TaskSetEdgeAnalysis {
     let mut analysis = TaskSetEdgeAnalysis::default();
     let mut edge_count = 0usize;
     let mut consumed_edge_count = 0usize;
-    for consumer in &skeleton.tasks {
-        analysis.blockers.extend(validate_dependency_declarations(
-            &consumer.task_id,
-            &consumer.depends_on,
-        ));
-        for dependency in &consumer.depends_on {
+    for (slot, consumer) in skeleton.tasks.iter().enumerate() {
+        let subject = crate::task_skeleton::skeleton_subject(&consumer.task_id, slot);
+        analysis.blockers.extend(
+            validate_dependency_declarations(&consumer.task_id, &consumer.depends_on)
+                .into_iter()
+                .map(|mut finding| {
+                    finding.identity.subject.clone_from(&subject);
+                    finding
+                }),
+        );
+        for (edge, dependency) in consumer.depends_on.iter().enumerate() {
             edge_count += 1;
             let has_consumes = !dependency.consumes.is_empty();
-            if has_consumes == dependency.ordering_only {
-                continue;
-            }
-            if dependency.ordering_only {
+            if dependency.ordering_only && !has_consumes {
                 continue;
             }
             consumed_edge_count += 1;
             let Some(producer) = tasks.get(dependency.task_id.as_str()) else {
                 analysis.blockers.push(TaskSetFinding {
+                identity: crate::defect::DeterministicDefect::new("missing_producer", crate::task_skeleton::skeleton_subject(&consumer.task_id, slot), format!("depends_on/{edge}")),
                     field: "depends_on".into(),
                     message: format!(
                         "task '{}' consumes from missing producer '{}'; add that producer to the skeleton or remove the edge",
@@ -107,11 +113,13 @@ pub fn analyze_task_set_edges(skeleton: &TaskSkeleton) -> TaskSetEdgeAnalysis {
                 });
                 continue;
             };
-            for consumed in &dependency.consumes {
+            for (artifact, consumed) in dependency.consumes.iter().enumerate() {
                 validate_consumed_artifact(
                     consumer.task_id.as_str(),
                     producer.task_id.as_str(),
+                    &subject,
                     consumed,
+                    &format!("depends_on/{edge}/consumes/{artifact}"),
                     &producer.deliverable_contracts,
                     &producers,
                     &mut analysis,
@@ -120,8 +128,8 @@ pub fn analyze_task_set_edges(skeleton: &TaskSkeleton) -> TaskSetEdgeAnalysis {
         }
     }
 
-    for producer in &skeleton.tasks {
-        for blocked in &producer.blocks {
+    for (slot, producer) in skeleton.tasks.iter().enumerate() {
+        for (edge, blocked) in producer.blocks.iter().enumerate() {
             let declared = tasks.get(blocked.as_str()).is_some_and(|consumer| {
                 consumer
                     .depends_on
@@ -130,6 +138,7 @@ pub fn analyze_task_set_edges(skeleton: &TaskSkeleton) -> TaskSetEdgeAnalysis {
             });
             if !declared {
                 analysis.blockers.push(TaskSetFinding {
+                identity: crate::defect::DeterministicDefect::new("missing_consumer_declaration", crate::task_skeleton::skeleton_subject(&producer.task_id, slot), format!("blocks/{edge}")),
                     field: "blocks".into(),
                     message: format!(
                         "block-only edge '{} -> {}' has no consumer-side structured declaration; add {} to {} depends_on with a non-empty consumes list or ordering_only: true",
@@ -150,6 +159,7 @@ pub fn analyze_task_set_edges(skeleton: &TaskSkeleton) -> TaskSetEdgeAnalysis {
             .any(has_positive_data_obligation)
     {
         analysis.blockers.push(TaskSetFinding {
+                identity: crate::defect::DeterministicDefect::new("missing_data_obligation", "task set", "graph"),
             field: "graph".into(),
             message: "every dependency is ordering_only and no contract declares a positive/source-bound instance set; declare at least one consumes edge or a positive/source-bound instance contract so the graph carries a falsifiable data obligation".into(),
         });
@@ -165,7 +175,9 @@ pub fn analyze_task_set_edges(skeleton: &TaskSkeleton) -> TaskSetEdgeAnalysis {
 fn validate_consumed_artifact(
     consumer_id: &str,
     producer_id: &str,
+    subject: &str,
     consumed: &ConsumedArtifact,
+    location: &str,
     contracts: &[WorkflowV2DeliverableContract],
     producers: &BTreeMap<String, BTreeSet<&str>>,
     analysis: &mut TaskSetEdgeAnalysis,
@@ -176,6 +188,7 @@ fn validate_consumed_artifact(
         .find(|contract| normalize_path(&contract.artifact_path) == path)
     else {
         analysis.blockers.push(TaskSetFinding {
+                identity: crate::defect::DeterministicDefect::new("missing_producer_deliverable", subject, location),
             field: "consumes".into(),
             message: format!(
                 "task '{consumer_id}' consumes '{path}' from producer '{producer_id}', but that producer declares no matching deliverable; add that exact artifact_path to the producer or correct the consumes path"
@@ -187,6 +200,7 @@ fn validate_consumed_artifact(
     if producers.get(&path).is_some_and(|owners| owners.len() > 1) {
         match record_binding(consumed) {
             None => analysis.blockers.push(TaskSetFinding {
+                identity: crate::defect::DeterministicDefect::new("missing_record_binding", subject, location),
                 field: "consumes".into(),
                 message: format!(
                     "task '{consumer_id}' consumes multi-writer artifact '{path}' from '{producer_id}' without a record binding; add {} to consumes or name a producer-specific artifact_path",
@@ -195,6 +209,7 @@ fn validate_consumed_artifact(
             }),
             Some((field, value)) => match producer_record_binding(contract) {
                 None => analysis.blockers.push(TaskSetFinding {
+                identity: crate::defect::DeterministicDefect::new("missing_producer_record_binding", subject, location),
                     field: "consumes".into(),
                     message: format!(
                         "task '{consumer_id}' declares {field}: {value} for multi-writer artifact '{path}', but producer '{producer_id}' declares no matching record field; add the same field to the producer contract or use a producer-specific path"
@@ -204,6 +219,7 @@ fn validate_consumed_artifact(
                     if field != producer_field || value != producer_value =>
                 {
                     analysis.blockers.push(TaskSetFinding {
+                identity: crate::defect::DeterministicDefect::new("record_binding_mismatch", subject, location),
                         field: "consumes".into(),
                         message: format!(
                             "task '{consumer_id}' {field} '{value}' does not match producer field '{producer_value}' ({producer_field}) on '{producer_id}' for '{path}'; make the consumer binding exactly match the named producer"
@@ -219,6 +235,7 @@ fn validate_consumed_artifact(
         && consumed_kind != producer_kind
     {
         analysis.information.push(TaskSetFinding {
+                identity: crate::defect::DeterministicDefect::new("kind_mismatch", subject, location),
             field: "kind".into(),
             message: format!(
                 "informational kind mismatch on '{path}': consumer '{consumer_id}' says '{consumed_kind}', producer '{producer_id}' says '{producer_kind}'; this informational mismatch does not block when the exact path and record binding match"

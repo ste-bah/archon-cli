@@ -106,6 +106,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
         let findings =
             if request.command_id == "land-task-body" && !self.fixed.load(Ordering::SeqCst) {
                 vec![archon_workflow::GatePolicyFinding {
+                    deterministic_defect: None,
                     text: if self.varying.load(Ordering::SeqCst)
                         && self.lands.load(Ordering::SeqCst) == 1
                     {

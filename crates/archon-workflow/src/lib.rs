@@ -27,6 +27,7 @@ pub mod context;
 mod context_output;
 pub mod control;
 pub mod control_race;
+pub mod defect;
 pub mod error;
 pub mod events;
 mod executor_output;

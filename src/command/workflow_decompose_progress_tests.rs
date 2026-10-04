@@ -134,15 +134,17 @@ fn a_subject_that_keeps_reducing_its_findings_is_retried_past_the_old_body_budge
 }
 
 #[test]
-fn findings_that_are_all_new_each_attempt_count_as_progress() {
-    // The count never falls, but every attempt clears everything seen before:
-    // an author working through distinct defects, not trading one for another.
+fn findings_that_are_all_new_at_the_same_count_pause() {
+    // A new set of the same size does not establish a new minimum.
     let out = body(
         r#"{ findings: (n) => n <= 11 ? ["defect " + String.fromCharCode(96 + n) + "x", "defect " + String.fromCharCode(96 + n) + "y"] : [] }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert_eq!(out["calls"], 12, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, false, false, false]
+    );
 }
 
 #[test]
@@ -191,24 +193,26 @@ fn an_author_alternating_between_two_findings_pauses() {
         r#"{ findings: (n) => [n % 2 ? "floor is not falsifiable" : "refuted by the judge"] }"#,
     );
     assert_paused(&out);
-    assert_eq!(out["calls"], 5, "{out}");
+    assert_eq!(out["calls"], 4, "{out}");
     assert_eq!(
         progress_flags(evidence(&out, 0)),
-        [true, true, false, false, false],
-        "the second finding is new once; returning to either is not progress"
+        [true, false, false, false],
+        "a different finding of the same count makes no progress"
     );
 }
 
 #[test]
-fn numbers_inside_identifiers_keep_findings_distinct() {
-    // One refuted entry per attempt, a different one each time: the author is
-    // working down the contract, so every attempt is progress.
+fn changing_numbers_inside_identifiers_does_not_lower_the_defect_count() {
+    // Different names at the same count are not measured progress.
     let out = body(
         r#"{ findings: (n) => n <= 6 ? ["check 'AC-X-00" + n + "' was refuted by the host judge at line " + (10 + n)] : [] }"#,
     );
-    assert_eq!(out["accepted"], true, "{out}");
-    assert_eq!(out["calls"], 7, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_paused(&out);
+    assert_eq!(out["calls"], 4, "{out}");
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, false, false, false]
+    );
 }
 
 #[test]
@@ -239,11 +243,11 @@ fn incomplete_provider_outcomes_pause_without_a_baseline() {
 }
 
 #[test]
-fn observe_mode_returns_the_best_committed_artifact_on_a_stall_instead_of_pausing() {
+fn observe_mode_pauses_on_a_stall_even_with_a_committed_artifact() {
     let out = run("observe", r#"{ findings: () => ["defect alpha"] }"#, BODY);
-    assert_eq!(out["accepted"], true, "{out}");
+    assert_paused(&out);
     assert_eq!(out["calls"], 4, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_eq!(pause_ids(&out), ["pause-body-TASK-X-010-1"]);
 }
 
 // --- resume -----------------------------------------------------------------

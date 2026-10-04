@@ -316,9 +316,14 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
     skeleton
         .acceptance_digest
         .clone_from(&pin.acceptance_digest);
-    CandidateRejected::tag(
-        validate_skeleton(&skeleton, &pin.acceptance_digest).map_err(anyhow::Error::from),
-    )?;
+    let mut defects =
+        archon_workflow::task_skeleton::skeleton_defects(&skeleton, &pin.acceptance_digest);
+    let marker_value: serde_json::Value =
+        serde_json::from_slice(&candidate).context("candidate marker inspection")?;
+    defects.extend(crate::command::workflow_freeze_candidate::marker_defects(
+        &marker_value,
+        true,
+    ));
     let mut findings = findings::skeleton_findings(
         tasks_root,
         &canonical_prd,
@@ -334,6 +339,25 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
         &skeleton_path,
     ));
 
+    if !defects.is_empty() {
+        // Shape and set defects are one complete refusal, including siblings
+        // that a first-error shape validator used to hide from the author.
+        defects.extend(findings.iter().enumerate().map(|(index, finding)| {
+            archon_workflow::defect::ValidationDefect {
+                identity: finding.deterministic_defect.clone().unwrap_or_else(|| {
+                    archon_workflow::defect::DeterministicDefect::new(
+                        "skeleton_policy",
+                        "skeleton",
+                        format!("finding/{index}"),
+                    )
+                }),
+                message: finding.text.clone(),
+            }
+        }));
+        return CandidateRejected::tag(Err(
+            crate::command::workflow_task_set_candidate::CandidateDefects(defects).into(),
+        ));
+    }
     let stamp = gate_stamp(freeze_mode, &findings);
     let skeleton_bytes = serde_json::to_vec_pretty(&skeleton)?;
     let digest = content_digest(&skeleton_bytes);

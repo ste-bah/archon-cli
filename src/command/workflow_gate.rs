@@ -33,6 +33,7 @@ impl GateId {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GateFinding {
+    pub(crate) deterministic_defect: Option<archon_workflow::defect::DeterministicDefect>,
     pub(crate) gate_id: GateId,
     pub(crate) text: String,
     pub(crate) subject: String,
@@ -49,12 +50,20 @@ impl GateFinding {
         remediation_scope: archon_workflow::RemediationScope,
     ) -> Self {
         Self {
+            deterministic_defect: None,
             gate_id,
             text: text.into(),
             subject: subject.into(),
             source_path,
             remediation_scope,
         }
+    }
+    pub(crate) fn with_defect(
+        mut self,
+        defect: archon_workflow::defect::DeterministicDefect,
+    ) -> Self {
+        self.deterministic_defect = Some(defect);
+        self
     }
 }
 
@@ -101,6 +110,7 @@ impl GateEvaluation {
             .findings
             .into_iter()
             .map(|finding| archon_workflow::GatePolicyFinding {
+                deterministic_defect: finding.deterministic_defect,
                 text: finding.text,
                 subject: finding.subject,
                 source_path: finding

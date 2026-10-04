@@ -233,9 +233,23 @@ fn observe_mode_never_accepts_a_set_with_findings_open() {
 #[test]
 fn rounds_continue_while_the_open_findings_keep_shrinking() {
     let f = |task: &str| body_finding(task, &format!("\"{TASK_ROOT}/{task}.md\""));
-    let (a, b) = (f("TASK-X-010"), f("TASK-X-020"));
+    // Guard: five distinct host-owned obligation defects, cleared one per round.
+    let distinct = |task: &str, n: usize| {
+        let finding = f(task);
+        format!(
+            r#"{}, deterministic_defect: {{provenance: "host_validator", code: "unclaimed_obligation", subject: "{task}", location: "obligation/{n}"}}}}"#,
+            finding.trim_end_matches('}')
+        )
+    };
+    let (a, b, c, d, e) = (
+        distinct("TASK-X-010", 1),
+        distinct("TASK-X-020", 2),
+        distinct("TASK-X-010", 3),
+        distinct("TASK-X-020", 4),
+        distinct("TASK-X-010", 5),
+    );
     let rounds = format!(
-        "[[{a}, {b}, {a}, {b}, {a}], [{a}, {b}, {a}, {b}], [{a}, {b}, {a}], [{a}, {b}], [{a}], []]"
+        "[[{a}, {b}, {c}, {d}, {e}], [{a}, {b}, {c}, {d}], [{a}, {b}, {c}], [{a}, {b}], [{a}], []]"
     );
     let out = run(&driver("{}", &rounds, ""));
     assert!(out.get("error").is_none(), "{out}");

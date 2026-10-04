@@ -161,16 +161,18 @@ async fn stage_acceptance(
         .await
         .context("building the staged acceptance judge client")?;
     let candidate =
-        match crate::command::workflow_freeze_candidate::acceptance_candidate(&candidate) {
+        match crate::command::workflow_freeze_candidate::acceptance_candidate_for_validation(
+            &candidate,
+        ) {
             Ok(bytes) => bytes,
             Err(error) => {
-                return refuse_candidate_artifact(
+                return defects::refuse_candidate_error(
                     cwd,
                     staged,
                     "freeze-acceptance",
                     crate::command::workflow_gate::GateId::FreezeAcceptance,
                     "acceptance",
-                    &error.to_string(),
+                    &error,
                 );
             }
         };
@@ -199,13 +201,13 @@ async fn stage_acceptance(
     {
         Ok(prepared) => prepared,
         Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
-            return refuse_candidate_artifact(
+            return defects::refuse_candidate_error(
                 cwd,
                 staged,
                 "freeze-acceptance",
                 crate::command::workflow_gate::GateId::FreezeAcceptance,
                 "acceptance",
-                &format!("{error:#}"),
+                &error,
             );
         }
         Err(error) => {
@@ -236,14 +238,9 @@ fn stage_skeleton(
     let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
     let tasks_root = absolute(cwd, tasks);
     let prd_path = absolute(cwd, prd);
-    let marker = serde_json::from_slice::<serde_json::Value>(&candidate_document(&candidate))
-        .ok()
-        .and_then(|value| {
-            crate::command::workflow_freeze_candidate::skeleton_marker_refusal(&value)
-        });
-    if let Some(reason) = marker.or_else(|| {
+    if let Some(reason) =
         candidate_parse_error::<archon_workflow::task_skeleton::TaskSkeleton>(&candidate)
-    }) {
+    {
         return refuse_candidate_artifact(
             cwd,
             staged,
@@ -262,13 +259,13 @@ fn stage_skeleton(
     ) {
         Ok(prepared) => prepared,
         Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
-            return refuse_candidate_artifact(
+            return defects::refuse_candidate_error(
                 cwd,
                 staged,
                 "freeze-skeleton",
                 crate::command::workflow_gate::GateId::FreezeSkeleton,
                 "skeleton",
-                &format!("{error:#}"),
+                &error,
             );
         }
         Err(error) => return report_operational_failure(cwd, staged, "freeze-skeleton", &error),
@@ -326,6 +323,9 @@ fn exit_incomplete_resumable(
     std::process::exit(crate::command::workflow_host_command_operational::EXIT_INCOMPLETE_RESUMABLE)
 }
 
+#[path = "workflow_freeze_defects.rs"]
+mod defects;
+
 fn refuse_candidate_artifact(
     cwd: &Path,
     staged: StagedArgs<'_>,
@@ -342,7 +342,10 @@ fn refuse_candidate_artifact(
         subject,
         None,
         archon_workflow::RemediationScope::CandidateArtifact,
-    );
+    ).with_defect(archon_workflow::defect::DeterministicDefect::new(
+        if reason.contains("the reply is not a JSON document") { "invalid_json" } else { "invalid_candidate_shape" },
+        subject, "candidate",
+    ));
     write_staged_manifest(
         cwd,
         staged,
