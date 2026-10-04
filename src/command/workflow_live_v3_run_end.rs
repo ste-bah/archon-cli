@@ -345,6 +345,34 @@ pub(super) fn apply_authored_run_outcome(
     )
 }
 
+/// Pauses `run_id`, owned by its current generation, because the final gate
+/// found residual gaps that stand only for want of progress.
+fn pause_on_residual_stall(
+    store: &WorkflowStore,
+    run_id: &str,
+    stalled: &[String],
+) -> archon_workflow::WorkflowError {
+    let generation = match store.load_state(run_id) {
+        Ok(run) => run.generation,
+        Err(error) => return error,
+    };
+    let detail = serde_json::json!({
+        "event": "residual_gate_stall_pause", "cause": "no_progress", "stalled": stalled,
+    });
+    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
+        Ok(event) => {
+            if let Err(error) = event {
+                tracing::warn!(%error, "residual gate pause event not recorded");
+            }
+            archon_workflow::WorkflowError::ControlPaused(format!(
+                "the residual passes made no progress on {} gap(s); run {run_id} is paused, not failed: fix what they name, then workflow resume {run_id}",
+                stalled.len()
+            ))
+        }
+        Err(error) => error,
+    }
+}
+
 /// [`apply_authored_run_outcome`], with the final gate's regression check
 /// (Issue-114, `regression_gate`) folded in: a new failure blocks, a
 /// pre-existing one is listed.
@@ -394,6 +422,12 @@ pub(super) fn apply_authored_run_outcome_with(
     // Issue-117: the residual gaps accepted verifiers recorded, and the
     // review units a host-planned round completed.
     let residual = residual_verdict(&summary.calls, v2_store, universe, repository_root);
+    // A stall is never terminal: gaps that stand only because the residual
+    // passes stopped making progress pause the run, with the evidence, and
+    // the resume plans the stalled pass again (rule A).
+    if !residual.stalled.is_empty() && summary.failed_call.is_none() {
+        return Err(pause_on_residual_stall(store, run_id, &residual.stalled));
+    }
     let outcome = authored_run_terminal_status_with(
         &AuthoredRunFacts {
             accumulated_status: summary.status,

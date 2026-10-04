@@ -191,3 +191,63 @@ async fn an_empty_gap_set_is_never_stopped() {
     assert_eq!(status, WorkflowV2Status::Accepted, "{why}");
     assert!(!why.contains("residual passes stopped"), "{why}");
 }
+
+/// Round 5: a residual stall pauses; a Resume is a new chance. The rerun
+/// script dispatches residual work again, and a run still stuck pauses
+/// again -- never `NeedsReview`.
+#[tokio::test]
+async fn a_resumed_stall_dispatches_residual_work_again_and_pauses_if_still_stuck() {
+    let host = session(fixture());
+    host.verdicts(CROSS, vec![Verdict::AcceptWith(vec![GAP_A])]);
+    host.verdicts(
+        "TASK-A",
+        vec![
+            Verdict::RefuseWith(vec![GAP_C]),
+            Verdict::AcceptDisposing(vec![GAP_B], vec![(GAP_A.0, "resolved")]),
+            Verdict::AcceptDisposing(vec![GAP_A], vec![(GAP_B.0, "resolved")]),
+            Verdict::RefuseWith(vec![]),
+        ],
+    );
+    let result = run(&script(), NEW_PRELUDE, host.clone()).await;
+    assert_eq!(result["paused"], serde_json::json!(true));
+    let dispatched = residual_calls(&host).len();
+    // The final gate reads the stall as a pause (the host pauses on
+    // `stalled`), never as a terminal `NeedsReview`.
+    let verdict = archon_workflow::v2::script::residual_plan::residual_verdict(
+        &host.calls.borrow(),
+        &host.store,
+        host.f.universe.as_ref(),
+        Some(&host.f.repo),
+    );
+    assert!(!verdict.stalled.is_empty(), "{verdict:#?}");
+
+    LifecycleController::new(host.f.store.clone())
+        .apply(&host.f.run, LifecycleAction::Resume)
+        .unwrap();
+    let Ok(old) = Rc::try_unwrap(host) else {
+        panic!("the session is still referenced")
+    };
+    let host = session(old.f);
+    // The resumed pass retries the open round; its verifier leaves the
+    // same gaps open again.
+    host.verdicts(CROSS, vec![Verdict::AcceptWith(vec![GAP_A])]);
+    host.verdicts(
+        "TASK-A",
+        (0..8).map(|_| Verdict::RefuseWith(vec![])).collect(),
+    );
+    let again = run(&script(), NEW_PRELUDE, host.clone()).await;
+    let ran_now = ran(&host)
+        .iter()
+        .filter(|id| id.contains("residual-"))
+        .count();
+    assert!(
+        ran_now > 0,
+        "the resumed run dispatched residual work (before: {dispatched}): {:#?}",
+        answers(&host)
+    );
+    assert_eq!(again["paused"], serde_json::json!(true), "{again:#?}");
+    assert_eq!(
+        host.f.store.load_state(&host.f.run).unwrap().status,
+        RunStatus::Paused
+    );
+}

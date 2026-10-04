@@ -358,30 +358,25 @@ async fn an_open_late_finding_holds_the_run_by_its_id() {
     );
     let result = run_reviewing(&script(false), reviewer.clone()).await;
     let host = &reviewer.host;
-    let late = result["review"]["movedReview"]["adversarial_findings"][0].clone();
-    let late_id = finding_id_of(&late);
-    let unresolved = result["review"]["unresolved"].as_array().unwrap();
+    // The late review ran; its finding stayed open with no progress, so
+    // the run pauses on it with the evidence (Issue 262).
     assert!(
-        unresolved
-            .iter()
-            .any(|entry| entry["findingId"] == json!(late_id)),
-        "{result}"
+        ids(host).iter().any(|id| id.contains("-moved-")),
+        "{:#?}",
+        ids(host)
     );
-    let outcome = terminal(host, &result);
-    assert_ne!(
-        outcome.status,
-        WorkflowV2Status::Accepted,
-        "{}",
-        outcome.explanation()
+    assert_stall_paused(host, &result);
+}
+
+/// The run is paused on a remediation stall, with its evidence.
+fn assert_stall_paused(host: &Host, result: &Value) {
+    assert_eq!(result, &json!({"paused": true}), "{result}");
+    assert_eq!(
+        host.f.store.load_state(&host.f.run).unwrap().status,
+        RunStatus::Paused
     );
-    assert!(
-        outcome
-            .blocking
-            .iter()
-            .any(|clause| clause.contains(&late_id)),
-        "{}",
-        outcome.explanation()
-    );
+    let events = std::fs::read_to_string(host.f.store.events_path(&host.f.run)).unwrap();
+    assert!(events.contains("remediation_stall_pause"), "{events}");
 }
 
 #[tokio::test]
@@ -403,9 +398,8 @@ async fn a_task_that_did_not_move_is_not_re_reviewed() {
         answered.iter().all(|id| !id.contains("-moved-")),
         "{answered:#?}"
     );
-    assert_eq!(result["review"]["movedReview"], Value::Null, "{result}");
-    let outcome = terminal(&reviewer.host, &result);
-    assert_ne!(outcome.status, WorkflowV2Status::Accepted);
+    // TASK-B's blocked remediation made no progress: the run pauses.
+    assert_stall_paused(&reviewer.host, &result);
 }
 
 /// A resume under the same prelude replays every call the first session

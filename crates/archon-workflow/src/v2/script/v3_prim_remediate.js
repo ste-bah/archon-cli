@@ -56,6 +56,10 @@
     const resolved = [];
     const unresolved = [];
     let residualRefused = false;
+    // Units whose cycle revisited an unresolved state. The pause waits until
+    // every unit of the pass had its chance: one unit's stall never stops
+    // another unit that can still make progress.
+    const stalls = [];
     for (const unit of units) {
       const tag = unit.cross ? { taskId: unit.key, taskIds: unit.taskIds, crossTask: true } : { taskId: unit.key };
       // A unit with nothing it may write cannot be dispatched (`agent()`
@@ -84,11 +88,9 @@
         if (!perId) break;
         const key = state();
         if (open.length > 0 && seen.has(key)) {
-          await w.checkpoint(inUnit(`remediation-stall-${slug(unit.key)}-${unit.part || 0}-${cycle}`), {
-            remediationPause: { cause: "no_progress", failing_ids: JSON.parse(key), task_ids: unit.taskIds,
-              reasons: last.reasons, evidence: { fix: last.fix, check: last.check } },
-          });
-          throw new Error("the host returned from a remediation stall without pausing");
+          stalls.push({ unit: unit.key, part: unit.part || 0, cycle, failing_ids: JSON.parse(key),
+            task_ids: unit.taskIds || [unit.key], reasons: last.reasons, evidence: { fix: last.fix, check: last.check } });
+          break;
         }
         seen.add(key);
       }
@@ -108,6 +110,13 @@
         continue;
       }
       legacyOutcome(last, done, unit, maxRounds, resolved, unresolved);
+    }
+    if (stalls.length > 0) {
+      await w.checkpoint(inUnit(`remediation-stall-${stalls.map((s) => `${slug(s.unit)}-${s.part}-${s.cycle}`).join("-")}`), {
+        remediationPause: { cause: "no_progress", failing_ids: [...new Set(stalls.flatMap((s) => s.failing_ids))].sort(),
+          task_ids: [...new Set(stalls.flatMap((s) => s.task_ids))].sort(), stalls },
+      });
+      throw new Error("the host returned from a remediation stall without pausing");
     }
     // REM-10: a blocked task this pass finished (every finding standing for
     // it closed) was never reviewed. Both maps run over exactly those tasks,

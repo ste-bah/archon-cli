@@ -13,11 +13,46 @@ use super::{left_open, open_ids};
 use crate::v2::{WorkflowV2CallRecord, WorkflowV2ResultStore};
 use crate::{WorkflowError, WorkflowResult};
 
+impl WorkflowV2ResultStore {
+    /// Record that the run paused on the no-progress stop of residual pass
+    /// `pass`. Called by the host only after the pause took effect, so the
+    /// only way back to the planner is a resume: there the pass plans its
+    /// rounds again, and a pass after it that still revisits a state pauses
+    /// again.
+    pub fn waive_residual_stall(&self, pass: u64) -> WorkflowResult<()> {
+        let mut waived = self.residual_stall_waivers();
+        if !waived.insert(pass) {
+            return Ok(());
+        }
+        let path = self.root().join(WAIVER_FILE);
+        std::fs::create_dir_all(self.root()).map_err(|err| WorkflowError::io(self.root(), err))?;
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec(&waived)?)
+            .map_err(|err| WorkflowError::io(&tmp, err))?;
+        std::fs::rename(&tmp, &path).map_err(|err| WorkflowError::io(&path, err))
+    }
+
+    fn residual_stall_waivers(&self) -> BTreeSet<u64> {
+        std::fs::read(self.root().join(WAIVER_FILE))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    /// Whether a resumed pause waived the no-progress stop of pass `pass`.
+    pub(in crate::v2::script) fn residual_stall_waived(&self, pass: u64) -> bool {
+        self.residual_stall_waivers().contains(&pass)
+    }
+}
+
 /// Legacy metadata default, retained for reading earlier runs. It is not
 /// an execution limit.
 pub const DEFAULT_MAX_RESIDUAL_PASSES: u64 = 6;
 
 const CEILING_FILE: &str = "residual-passes.json";
+/// The residual passes whose no-progress stop a pause recorded; a resume
+/// is the new chance it asked for (rule A), so that stop is waived once.
+const WAIVER_FILE: &str = "residual-stall-waivers.json";
 const CEILING_KEY: &str = "max_residual_passes";
 
 impl WorkflowV2ResultStore {
@@ -90,7 +125,7 @@ pub(super) fn checked(
         })
         .flatten();
     match repeats {
-        Some(at) => stopped(
+        Some(at) if !store.residual_stall_waived(n) => stopped(
             n,
             Stop::Cycle {
                 repeats: at as u64 + 1,
@@ -99,7 +134,7 @@ pub(super) fn checked(
             would,
             stored,
         ),
-        None => capped(n, would, previous, store, stored),
+        _ => capped(n, would, previous, store, stored),
     }
 }
 

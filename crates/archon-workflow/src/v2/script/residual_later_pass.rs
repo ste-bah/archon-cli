@@ -135,7 +135,9 @@ fn later(
     // by `stops::checked`; both preserve the open gaps as pause evidence.
     let before = &plans[plans.len() - 2];
     let open_now = open_ids(previous, stored);
-    if open_now == open_ids(before, stored) {
+    // A pause on this very stop, then a resume, waives it once (rule A):
+    // the resumed pass plans its rounds again.
+    if open_now == open_ids(before, stored) && !store.residual_stall_waived(n) {
         return stalled(n, previous, stored, &open_now);
     }
     let carried: Vec<(&BTreeSet<String>, &Residual)> = plans

@@ -59,6 +59,11 @@ impl WorkflowScriptHost {
         if let Err(error) = event {
             eprintln!("remediation paused; recording its pause event failed: {error}");
         }
+        // A residual pass's stop: the resume this pause asks for is its new
+        // chance, so the pass plans its rounds again then (rule A).
+        if let Some(pass) = evidence.get("pass").and_then(serde_json::Value::as_u64) {
+            self.runner.v2_store.waive_residual_stall(pass)?;
+        }
         Err(WorkflowError::ControlPaused(format!(
             "remediation made no progress on {}; run {} is paused with its evidence at {}; fix what it names, then workflow resume {}",
             failing_ids.into_iter().collect::<Vec<_>>().join(", "),

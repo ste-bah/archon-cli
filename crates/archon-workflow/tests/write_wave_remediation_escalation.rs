@@ -295,9 +295,8 @@ async fn a_blocker_no_other_task_owns_changes_nothing() {
         ids(&host)
     );
     assert_eq!(ids(&host).len(), 6, "{:?}", ids(&host));
-    assert_eq!(result["unresolved"][0]["outcome"], "unverified");
-    assert!(result["unresolved"][0].get("escalatedTo").is_none());
-    assert_eq!(terminal(&host, &result), WorkflowV2Status::NeedsReview);
+    // Issue 262: remediation that made no progress pauses the run.
+    harness::assert_stall_paused(&host, &result, "TASK-A");
 }
 
 #[tokio::test]
@@ -314,13 +313,8 @@ async fn a_second_refusal_after_escalation_ends_unverified_with_no_further_round
         .collect();
     assert_eq!(a_calls.len(), 6, "{a_calls:?}");
     assert!(a_calls[5].contains("-esc-"), "{a_calls:?}");
-    let a = &result["unresolved"][0];
-    assert_eq!(
-        (a["taskId"].as_str(), a["outcome"].as_str()),
-        (Some("TASK-A"), Some("unverified"))
-    );
-    assert_eq!(a["escalatedTo"], json!(["TASK-C"]));
-    assert_eq!(terminal(&host, &result), WorkflowV2Status::NeedsReview);
+    // Issue 262: the escalation made no progress either: the run pauses.
+    harness::assert_stall_paused(&host, &result, "TASK-A");
 }
 
 /// Session 1 is the deployed prelude (dfa009787): A's round 1 is refused
@@ -423,20 +417,13 @@ async fn an_escalated_round_that_lands_nothing_keeps_the_unit_blocking() {
         "{:?}",
         ids(&host)
     );
-    let a = &result["unresolved"][0];
-    assert_eq!(
-        (a["taskId"].as_str(), a["outcome"].as_str()),
-        (Some("TASK-A"), Some("unverified"))
-    );
-    // The refusal is recorded by the finding's own id.
-    assert!(a["findingId"].is_string(), "{result}");
-    assert_eq!(a["escalatedTo"], json!(["TASK-C"]), "{result}");
     assert_eq!(
         at_head(&host.f.repo, C_TEST),
         "// b tests",
         "C's file untouched"
     );
-    assert_eq!(terminal(&host, &result), WorkflowV2Status::NeedsReview);
+    // Issue 262: the finding stays open with no progress: the run pauses.
+    harness::assert_stall_paused(&host, &result, "TASK-A");
 }
 
 /// The live shape: the deployed prelude recorded two refused rounds, each

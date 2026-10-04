@@ -38,6 +38,10 @@ pub async fn run(script: &str, prelude: &str, host: Rc<Host>) -> Value {
                                     &host.f.store, &host.f.run, generation,
                                     serde_json::json!({"event":"remediation_stall_pause","evidence":evidence}),
                                 ).unwrap().unwrap();
+                                // As the live host: a residual stop is waived for the resume.
+                                if let Some(pass) = evidence.get("pass").and_then(Value::as_u64) {
+                                    host.store.waive_residual_stall(pass).unwrap();
+                                }
                                 return Err(rquickjs::Error::Unknown);
                             }
                             Ok::<_, rquickjs::Error>(view.to_string())
@@ -66,6 +70,22 @@ pub async fn run(script: &str, prelude: &str, host: Rc<Host>) -> Value {
         }
         Err(error) => panic!("script failed without pausing: {error}"),
     }
+}
+
+/// Remediation that stopped making progress paused the run (Issue 262):
+/// the script returned `{"paused": true}`, the run is `Paused`, and its
+/// pause evidence names `task` -- never a terminal `NeedsReview`.
+pub fn assert_stall_paused(host: &Host, result: &Value, task: &str) {
+    assert_eq!(result, &serde_json::json!({"paused": true}), "{result}");
+    assert_eq!(
+        host.f.store.load_state(&host.f.run).unwrap().status,
+        archon_workflow::RunStatus::Paused
+    );
+    let events = std::fs::read_to_string(host.f.store.events_path(&host.f.run)).unwrap();
+    assert!(
+        events.contains("remediation_stall_pause") && events.contains(task),
+        "{events}"
+    );
 }
 
 /// The repository file's content at HEAD.

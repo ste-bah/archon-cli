@@ -154,13 +154,19 @@ async fn a_third_pass_without_progress_ends_the_passes_and_what_stands_blocks() 
     verdicts(&host, Verdict::RefuseWith(vec![]));
     let result = run(&script(), NEW_PRELUDE, host.clone()).await;
     assert_eq!(passes(&host), [1, 2, 3], "{:#?}", answers(&host));
-    let (status, why) = terminal(&host, &result);
-    assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");
-    assert!(why.contains("gap-store-instrument"), "{why}");
-    // M1: the fourth slot planned no round -- the open gaps did not
-    // move -- and says so, quoting each gap that stands.
+    // M1 / Issue 262: the fourth slot planned no round -- the open gaps did
+    // not move -- and the run pauses with each standing gap quoted as its
+    // evidence; a stall is never a terminal `NeedsReview`.
+    assert_eq!(result["paused"], serde_json::json!(true), "{result:#?}");
+    assert_eq!(
+        host.f.store.load_state(&host.f.run).unwrap().status,
+        RunStatus::Paused
+    );
+    let why = std::fs::read_to_string(host.f.store.events_path(&host.f.run)).unwrap();
     assert!(
-        why.contains("residual passes stopped before pass 4") && why.contains(G2.2),
+        why.contains("residual passes paused before pass 4")
+            && why.contains("gap-store-instrument")
+            && why.contains(G2.2),
         "{why}"
     );
 }
@@ -202,10 +208,11 @@ async fn a_gap_reworded_every_pass_stops_the_passes_and_blocks_quoted() {
         "no pass after the third: {reached:?} {:#?}",
         answers(&host)
     );
-    let (status, why) = terminal(&host, &result);
-    assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");
+    // Issue 262: the stall pauses the run, quoting the reworded gap.
+    assert_eq!(result["paused"], serde_json::json!(true), "{result:#?}");
+    let why = std::fs::read_to_string(host.f.store.events_path(&host.f.run)).unwrap();
     assert!(
-        why.contains("residual passes stopped before pass 4") && why.contains("(wording "),
+        why.contains("residual passes paused before pass 4") && why.contains("(wording "),
         "{why}"
     );
 }

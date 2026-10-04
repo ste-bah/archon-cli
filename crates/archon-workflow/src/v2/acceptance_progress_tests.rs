@@ -251,3 +251,25 @@ fn rebuild_keeps_all_attempts_including_the_resumed_round_and_records_win() {
     );
     assert_eq!(decide_with(&mut ledger, &c).pause, Some(PAUSE_NO_PROGRESS));
 }
+
+/// Round 5: a resume restarts the loop at round 1, so attempts are read in
+/// the order they were recorded, never by (round, attempt). R1{X}, R2{X},
+/// then after a resume R1#2{Y}, R2#2{Y}: one revisit in a row, not two.
+#[test]
+fn the_ledger_is_rebuilt_in_recording_order_across_a_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let x = |n: u32, attempt: u32| {
+        let mut record = round(n, vec![failed("AC-X", "x")]);
+        record.attempt = attempt;
+        record
+    };
+    let y = |n: u32, attempt: u32| {
+        let mut record = round(n, vec![failed("AC-Y", "y")]);
+        record.attempt = attempt;
+        record
+    };
+    for record in [x(1, 1), x(2, 1), y(1, 2), y(2, 2)] {
+        write_round_record(dir.path(), &record).unwrap();
+    }
+    assert_eq!(ProgressLedger::load(dir.path(), 3).revisits, 1);
+}
