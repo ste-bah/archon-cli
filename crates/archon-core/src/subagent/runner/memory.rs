@@ -15,9 +15,9 @@ pub(crate) struct EffectiveRunContext {
     pub(crate) host_timeout: archon_tools::host_timeout::HostTimeout,
     /// Why this context can never be continued exactly, when it cannot.
     unrestorable: Option<String>,
-    /// Which git worktree the agent was placed in, so a directory found at
-    /// that path later is accepted only if it is still that worktree.
-    worktree_identity: Option<archon_tools::worktree_identity::WorktreeIdentity>,
+    /// Which directory the agent was placed in, whoever made it, so the one
+    /// found at that path later is accepted only if it is still that one.
+    placement: Option<archon_tools::placement_identity::PlacementIdentity>,
 }
 
 impl std::fmt::Debug for EffectiveRunContext {
@@ -83,15 +83,13 @@ impl EffectiveRunContext {
         let mut config = (*prototype.agent_config).clone();
         config.sandbox = prototype.tool_context.sandbox.clone();
         prototype.agent_config = Arc::new(config);
-        let mut worktree_identity = None;
-        if let Some(placed) = &worktree {
-            match archon_tools::worktree_identity::WorktreeIdentity::of(&placed.worktree_path) {
-                Ok(identity) => worktree_identity = Some(identity),
-                Err(why) => unrestorable = Some(why),
-            }
-        }
+        let placement = archon_tools::placement_identity::PlacementIdentity::of(
+            &prototype.tool_context.working_dir,
+        )
+        .map_err(|why| unrestorable = Some(why))
+        .ok();
         Self {
-            worktree_identity,
+            placement,
             prototype,
             parent_cancel,
             unrestorable,
@@ -122,11 +120,11 @@ impl EffectiveRunContext {
                 "cannot continue agent '{agent_id}': its original working directory is unavailable; start a new agent"
             ));
         }
-        if let (Some(identity), Some(placed)) = (&self.worktree_identity, &self.worktree)
-            && let Err(why) = identity.check(&placed.worktree_path)
+        if let Some(placement) = &self.placement
+            && let Err(why) = placement.check(&self.prototype.tool_context.working_dir)
         {
             return Err(format!(
-                "cannot continue agent '{agent_id}': its worktree is gone: {why}; start a new agent"
+                "cannot continue agent '{agent_id}': its working directory is gone: {why}; start a new agent"
             ));
         }
         if self

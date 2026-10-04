@@ -169,11 +169,11 @@ pub mod task_update;
 
 pub mod coordination_record;
 pub mod isolation;
+pub mod placement_identity;
 pub mod spawn_placement;
 pub mod worktree;
 pub mod worktree_disk;
 pub mod worktree_exit;
-pub mod worktree_identity;
 pub mod worktree_manager;
 pub mod worktree_ownership;
 pub mod worktree_review;

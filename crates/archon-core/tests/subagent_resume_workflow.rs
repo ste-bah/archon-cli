@@ -109,7 +109,7 @@ async fn a_plain_directory_recreated_at_the_worktree_path_refuses_the_repair() {
     std::fs::create_dir_all(&placed).unwrap();
     let refusal = refused_repair(&host, &root, id).await;
     assert!(
-        refusal.contains(id) && refusal.contains("worktree"),
+        refusal.contains(id) && refusal.contains("no longer"),
         "{refusal}"
     );
 }
@@ -125,7 +125,52 @@ async fn a_worktree_whose_git_metadata_is_gone_refuses_the_repair() {
     assert!(placed.is_dir());
     let refusal = refused_repair(&host, &root, id).await;
     assert!(
-        refusal.contains(id) && refusal.contains("worktree"),
+        refusal.contains(id) && refusal.contains("working directory is gone"),
         "{refusal}"
     );
+}
+
+/// A call dispatched into a workspace the workflow supplied, with no worktree
+/// of the executor's own; the workspace is then replaced at the same path.
+async fn replaced_supplied_workspace(root: &std::path::Path, workspace: &std::path::Path) {
+    let id = "run-1-0-coder-supplied";
+    let host = Host::new(root, "workflow-supplied", vec![STOP, STOP]);
+    host.spawn(id, request(workspace, None, vec![]), parent(root, &[]))
+        .await
+        .unwrap();
+    std::fs::remove_dir_all(workspace).unwrap();
+    std::fs::create_dir_all(workspace).unwrap();
+    let refusal = host
+        .repair(id, request(workspace, None, vec![]), parent(root, &[]))
+        .await
+        .expect_err("a repair ran in a replaced workspace")
+        .to_string();
+    assert!(
+        refusal.contains(id) && refusal.contains("no longer"),
+        "{refusal}"
+    );
+    assert_eq!(host.turns(), 1, "the refused repair still ran");
+}
+
+#[tokio::test]
+async fn a_replaced_supplied_worktree_refuses_the_repair() {
+    let (_t, root) = temp();
+    let repo = checkout(&root);
+    let supplied = root.join("supplied");
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .args(["worktree", "add", "-q", "-b", "branch-1"])
+        .arg(&supplied)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    replaced_supplied_workspace(&root, &supplied).await;
+}
+
+#[tokio::test]
+async fn a_replaced_supplied_plain_workspace_refuses_the_repair() {
+    let (_t, root) = temp();
+    let workspace = dir(&root, "workspace");
+    replaced_supplied_workspace(&root, &workspace).await;
 }
