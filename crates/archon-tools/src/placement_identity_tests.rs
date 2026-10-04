@@ -105,3 +105,23 @@ fn a_plain_directory_recreated_at_the_same_path_is_not_the_same() {
         "a recreated directory was accepted"
     );
 }
+
+#[test]
+fn git_init_inside_a_supplied_plain_workspace_keeps_its_placement() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("workspace");
+    std::fs::create_dir_all(&dir).unwrap();
+    let identity = PlacementIdentity::of(&dir).unwrap();
+    git(&dir, &["init", "-q"]);
+    identity
+        .check(&dir)
+        .expect("legitimate work inside the workspace changed its placement");
+}
+
+#[test]
+fn a_directory_whose_file_identity_cannot_be_read_has_no_placement() {
+    let born = Some(std::time::SystemTime::now());
+    let error = Stamp::from_parts(PathBuf::from("/workspace"), None, born)
+        .expect_err("a path and a creation time alone were accepted as a placement");
+    assert!(error.contains("file identity"), "{error}");
+}

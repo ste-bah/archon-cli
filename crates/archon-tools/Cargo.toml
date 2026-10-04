@@ -68,6 +68,10 @@ petgraph.workspace = true
 libc = "0.2"
 sha2.workspace = true
 
+# The file identity of a directory, so a replaced one is told apart (#241).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 archon-session = { path = "../archon-session", features = ["test-support"] }
