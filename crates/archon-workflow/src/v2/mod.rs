@@ -26,6 +26,7 @@ pub mod call_data;
 pub mod call_execution;
 pub mod completion_credit;
 pub mod completion_evidence;
+pub mod continuation;
 pub(crate) mod contract_code_targets;
 pub mod contract_roots;
 pub mod criterion_results;

@@ -65,7 +65,13 @@ async fn request_repair_output(
     prompt: String,
     first_error: WorkflowV2AgentError,
 ) -> Result<(String, WorkflowV2AgentError), WorkflowV2AgentError> {
-    match client.continue_agent_request(request, prompt).await {
+    let original = WorkflowV2AgentAdapter::new()
+        .build_prompt_parts(request)
+        .invocation;
+    let fresh = archon_workflow::v2::continuation::new_agent_prompt(&original, &prompt);
+    match archon_workflow::v2::continuation::continue_or_start_new(client, request, prompt, fresh)
+        .await
+    {
         Ok(output) => Ok((output, first_error)),
         Err(last) => Err(repair_exhausted_error(first_error, last)),
     }

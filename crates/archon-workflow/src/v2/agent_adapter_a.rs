@@ -208,9 +208,10 @@ pub trait WorkflowV2AgentClient {
         _request: &WorkflowV2AgentRequest,
         _prompt: String,
     ) -> Result<String, WorkflowV2AgentError> {
-        Err(WorkflowV2AgentError::Transport(
-            "cannot continue agent: this client keeps no completed agent session it can restore exactly; start a new agent".into(),
-        ))
+        Err(WorkflowV2AgentError::ContinuationRefused(format!(
+            "{}: this client keeps no completed agent session it can restore exactly; start a new agent",
+            super::continuation::CONTINUATION_REFUSED
+        )))
     }
 
     async fn run_agent(&self, prompt: String) -> Result<String, WorkflowV2AgentError>;

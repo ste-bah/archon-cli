@@ -101,10 +101,16 @@ impl SessionLease {
         }
         let data = if continuing {
             let Some(SessionState::Complete(previous)) = sessions.get(&key) else {
-                anyhow::bail!("no completed agent session for validation repair");
+                anyhow::bail!(
+                    "{}: no completed agent session for validation repair; start a new agent",
+                    archon_tools::subagent_session::CONTINUATION_REFUSED
+                );
             };
             if policy(&previous.request) != policy(request) {
-                anyhow::bail!("validation repair changed agent identity or execution policy");
+                anyhow::bail!(
+                    "{}: validation repair changed agent identity or execution policy; start a new agent",
+                    archon_tools::subagent_session::CONTINUATION_REFUSED
+                );
             }
             let Some(SessionState::Complete(data)) = sessions.remove(&key) else {
                 unreachable!()
