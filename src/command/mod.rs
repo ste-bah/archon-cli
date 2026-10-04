@@ -388,7 +388,7 @@ pub(crate) mod workflow_audit_control;
 mod workflow_host_command_supervisor_tests;
 
 pub(crate) mod workflow_host_envelope_seal;
-pub(crate) mod workflow_host_environment;
 #[cfg(test)]
 mod workflow_host_envelope_seal_tests;
+pub(crate) mod workflow_host_environment;
 pub(crate) mod workflow_host_secrets;

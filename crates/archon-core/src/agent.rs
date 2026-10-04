@@ -214,7 +214,8 @@ pub struct Agent {
     compaction_summary_tasks: Vec<tokio::task::JoinHandle<()>>,
     // GAP 6: Auto-mode permission evaluator
     auto_evaluator: Option<AutoModeEvaluator>,
-    // GAP 8: Subagent manager
+    // GAP 8: Subagent manager. TASK-AGS-105: subagents are spawned only by
+    // the Agent tool (archon-tools agent_tool.rs), never from this loop.
     subagent_manager: Arc<Mutex<SubagentManager>>,
     /// Shared flag: whether /thinking display is on (used to potentially skip thinking in future)
     pub show_thinking: Arc<AtomicBool>,

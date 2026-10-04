@@ -367,7 +367,8 @@ pub fn parent(working_dir: &Path, extra_dirs: &[&Path]) -> ToolContext {
 
 pub fn real_temp() -> (tempfile::TempDir, PathBuf) {
     let temp = tempfile::tempdir().expect("tempdir");
-    let root = std::fs::canonicalize(temp.path()).expect("real temp");
+    // The plain (non-verbatim) spelling: git refuses Windows `\\?\` paths.
+    let root = archon_shell::paths::canonicalize(temp.path()).expect("real temp");
     (temp, root)
 }
 
