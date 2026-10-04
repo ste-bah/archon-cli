@@ -6,9 +6,12 @@
 //! `.git` pointer to the same administrative directory; a worktree can be
 //! removed and registered again under the same name and branch. None of
 //! these is the place the agent was confined to. So the identity holds the
-//! directory's generation (its inode and creation time), and, inside a git
-//! repository, the working tree the repository itself registers for it and
-//! the generation of its git directory.
+//! directory's generation (its file identity: device and inode, or on Windows
+//! volume serial and file index; and its creation time where recorded), and,
+//! inside a git repository, the working tree the repository itself registers
+//! for it and the generation of its git directory. A directory whose file
+//! identity cannot be read has no placement: a path and a writable creation
+//! time alone cannot tell a replacement apart.
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,7 +24,7 @@ pub struct PlacementIdentity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Stamp {
     path: PathBuf,
-    /// Device and inode where the platform has them; zero elsewhere.
+    /// Device and inode, or volume serial and file index.
     node: (u64, u64),
     /// Creation time where the file system records one.
     born: Option<std::time::SystemTime>,
@@ -51,10 +54,12 @@ impl PlacementIdentity {
         Ok(Self { dir, git })
     }
 
-    /// `Ok` when `path` is still this placement.
+    /// `Ok` when `path` is still this placement. The repository is compared
+    /// only when there was one: an agent may legitimately create one inside
+    /// the directory it was given.
     pub fn check(&self, path: &Path) -> Result<(), String> {
         let now = Self::of(path)?;
-        if now == *self {
+        if now.dir == self.dir && (self.git.is_none() || now.git == self.git) {
             return Ok(());
         }
         Err(format!(
@@ -73,20 +78,44 @@ impl Stamp {
         if !meta.is_dir() {
             return Err(format!("{} is not a directory", path.display()));
         }
-        #[cfg(unix)]
-        let node = {
-            use std::os::unix::fs::MetadataExt;
-            (meta.dev(), meta.ino())
-        };
-        #[cfg(not(unix))]
-        let node = (0, 0);
-        Ok(Self {
-            node,
-            born: meta.created().ok(),
-            path,
-        })
+        let node = file_identity(&path, &meta);
+        Self::from_parts(path, node, meta.created().ok())
+    }
+
+    fn from_parts(
+        path: PathBuf,
+        node: Option<(u64, u64)>,
+        born: Option<std::time::SystemTime>,
+    ) -> Result<Self, String> {
+        let node = node.ok_or_else(|| {
+            format!(
+                "the file identity of {} cannot be read, so a replacement could not be told apart",
+                path.display()
+            )
+        })?;
+        Ok(Self { path, node, born })
     }
 }
+
+#[cfg(unix)]
+fn file_identity(_path: &Path, meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((meta.dev(), meta.ino()))
+}
+
+#[cfg(windows)]
+fn file_identity(path: &Path, _meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    windows_identity::of(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn file_identity(_path: &Path, _meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    None
+}
+
+#[cfg(windows)]
+#[path = "placement_identity_windows.rs"]
+mod windows_identity;
 
 impl GitPlacement {
     fn of(repo: &git2::Repository, dir: &Path) -> Result<Self, String> {
