@@ -40,6 +40,23 @@ impl WorkflowV2ResultStore {
         validate_branch_tree(&self.root.join("branches"))
     }
 
+    /// Everything item revocation will read, read now: the branch store's
+    /// shape, the call directory, and every stored outcome. Restart calls it
+    /// before it touches call records, so a refusal mutates nothing.
+    pub fn preflight_branch_revocation(&self, call_id: &str) -> WorkflowResult<()> {
+        validate_branch_tree(&self.root.join("branches"))?;
+        let dir = self.root.join("branches").join(sanitize_call_id(call_id));
+        match fs::symlink_metadata(&dir) {
+            Ok(meta) if meta.is_dir() => stored_outcomes_in(&dir).map(|_| ()),
+            Ok(_) => Err(WorkflowError::io(
+                &dir,
+                std::io::Error::other("branch call path is not a directory"),
+            )),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(WorkflowError::io(&dir, err)),
+        }
+    }
+
     pub fn revoke_branch_outcome(&self, call_id: &str, item_id: &str) -> WorkflowResult<bool> {
         validate_branch_tree(&self.root.join("branches"))?;
         let dir = self.root.join("branches").join(sanitize_call_id(call_id));

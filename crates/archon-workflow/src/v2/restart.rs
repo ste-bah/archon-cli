@@ -93,7 +93,7 @@ pub fn invalidate_generated_v2_restart_cache(
             let v2_store =
                 WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2")).with_durable_writes();
             // A corrupt branch store is refused before any call record moves.
-            v2_store.validate_branch_store()?;
+            v2_store.preflight_branch_revocation(call_id)?;
             let mut invalidated = invalidate_generated_v2_call_cache(store, run, call_id, false)?;
             for candidate in v2_branch_item_candidates(call_id, item_id) {
                 // Issue-266: current and superseded, never resurrected.
