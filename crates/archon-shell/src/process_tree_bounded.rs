@@ -6,7 +6,7 @@
 //! The cap bounds how many probe children exist at once, so killed children
 //! that never die cannot pile up. A probe past the cap waits for a slot
 //! within its own deadline: overlapping live probes only delay it. Only slots
-//! that stay held for the whole deadline (a stuck reaper) fail it.
+//! that stay held for the whole deadline fail it, before it spawns.
 use std::io::{self, Read};
 use std::os::fd::AsRawFd;
 use std::process::{Child, Command, Stdio};
@@ -15,6 +15,10 @@ use std::time::{Duration, Instant};
 
 const POLL: Duration = Duration::from_millis(10);
 const CAPACITY: usize = 8;
+/// Full slots may be slow live probes or killed ones not yet proven exited,
+/// so this names neither.
+const SLOTS_FULL: &str = "every probe slot stayed held until the deadline \
+    (slow probes, or killed probes not yet proven exited)";
 static PROBES: Admission = Admission::new();
 static STARTED: OnceLock<io::Result<()>> = OnceLock::new();
 
@@ -49,16 +53,13 @@ impl Admission {
     }
 
     /// A slot, waiting for one to be freed until `end`. Slots still all held
-    /// at `end` mean killed probes the reaper cannot prove exited.
+    /// at `end` fail the probe before it spawns anything.
     fn reserve(&'static self, end: Instant) -> io::Result<Slot> {
         let mut active = self.count();
         while *active >= CAPACITY {
             let left = end.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "probe reaper stayed at capacity until the deadline; survivors unknown",
-                ));
+                return Err(io::Error::new(io::ErrorKind::TimedOut, SLOTS_FULL));
             }
             active = self
                 .freed
@@ -310,6 +311,32 @@ mod tests {
     }
 
     #[test]
+    fn full_slots_and_a_slow_probe_reach_the_holder_caller_as_different_errors() {
+        // Round 2: the holder probe mapped every timeout to one text, so
+        // full slots read the same as a slow lsof.
+        use super::super::holders_impl::probe_failed;
+        let admission = own_admission();
+        let far = Instant::now() + Duration::from_secs(10);
+        let held: Vec<Slot> = (0..CAPACITY)
+            .map(|_| admission.reserve(far).unwrap())
+            .collect();
+        let short = Duration::from_millis(50);
+        let full = probe_on(admission, Command::new("/usr/bin/true"), short).unwrap_err();
+        drop(held);
+        let mut slow = Command::new("/bin/sleep");
+        slow.arg("5");
+        let slow = probe_on(admission, slow, short).unwrap_err();
+        let (full, slow) = (probe_failed(full), probe_failed(slow));
+        assert_eq!(
+            (full.kind(), slow.kind()),
+            (io::ErrorKind::TimedOut, io::ErrorKind::TimedOut)
+        );
+        assert!(full.to_string().contains(SLOTS_FULL), "{full}");
+        assert!(!slow.to_string().contains(SLOTS_FULL), "{slow}");
+        assert!(slow.to_string().contains("did not finish within"), "{slow}");
+    }
+
+    #[test]
     fn repeated_timed_out_probes_have_bounded_resources() {
         // Each probe forks a setsid child that holds its stdout open. A killed
         // probe holds one slot until a reap proves it exited, never a thread,
@@ -330,9 +357,7 @@ mod tests {
             {
                 holders.push(pid);
             }
-            let capped = result
-                .as_ref()
-                .is_err_and(|e| e.to_string().contains("stayed at capacity"));
+            let capped = result.as_ref().is_err_and(|e| e.to_string() == SLOTS_FULL);
             (
                 result.map(|_| ()).map_err(|e| e.kind()),
                 capped,
