@@ -27,18 +27,52 @@ pub(crate) struct HostCommandGroupRecord {
     /// resume opens to ask whether any process in it still runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) job: Option<String>,
+    /// Processes (pid, start time) left alive when teardown stalled
+    /// (Issue 270 round 2). A survivor that escaped the group and the
+    /// session is named here, and the record runs while any of them lives.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) survivors: Vec<(u32, u64)>,
     pub(crate) command_id: String,
     pub(crate) host_pid: u32,
     pub(crate) started_at: String,
 }
 
-/// Removes its record when the supervisor is done with the group.
+/// Removes its record when the supervisor is done with the group, unless
+/// teardown stalled and the record is kept for a resume to see.
 #[derive(Debug)]
-pub(crate) struct GroupRecordGuard(PathBuf);
+pub(crate) struct GroupRecordGuard {
+    path: PathBuf,
+    kept: bool,
+}
+
+impl GroupRecordGuard {
+    /// Keep the record: teardown stalled. `survivors` are added to it so a
+    /// resume refuses while any of them still runs.
+    pub(crate) fn keep(mut self, survivors: &[(u32, u64)]) {
+        self.kept = true;
+        let updated = std::fs::read(&self.path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<HostCommandGroupRecord>(&bytes).ok())
+            .map(|mut record| {
+                record.survivors = survivors.to_vec();
+                record
+            });
+        if let Some(record) = updated
+            && let Ok(bytes) = serde_json::to_vec(&record)
+        {
+            let staged = self.path.with_extension("json.tmp");
+            if std::fs::write(&staged, bytes).is_ok() {
+                let _ = std::fs::rename(&staged, &self.path);
+            }
+        }
+    }
+}
 
 impl Drop for GroupRecordGuard {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        if !self.kept {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 
@@ -57,6 +91,7 @@ pub(crate) fn record_group(
         pid,
         session,
         job: job.map(str::to_string),
+        survivors: Vec::new(),
         command_id: command_id.to_string(),
         host_pid: std::process::id(),
         started_at: chrono::Utc::now().to_rfc3339(),
@@ -70,7 +105,7 @@ pub(crate) fn record_group(
     let staged = path.with_extension("json.tmp");
     std::fs::write(&staged, serde_json::to_vec(&record)?).map_err(io(&staged))?;
     std::fs::rename(&staged, &path).map_err(io(&path))?;
-    Ok(GroupRecordGuard(path))
+    Ok(GroupRecordGuard { path, kept: false })
 }
 
 /// [`record_group`] for a command whose pid is `leader` (the supervisor makes
@@ -109,9 +144,19 @@ pub(crate) fn group_running(pgid: u32) -> Option<bool> {
 }
 
 /// Whether anything `record` names still runs: its group, any process of its
-/// session, or (Windows) any process in its job. `None` where that cannot be probed, which a caller must
-/// treat as possibly running; a failed session probe counts as running.
+/// session, a survivor it names, or (Windows) any process in its job. `None`
+/// where that cannot be probed, which a caller must treat as possibly
+/// running; a failed session probe counts as running.
 pub(crate) fn record_running(record: &HostCommandGroupRecord) -> Option<bool> {
+    // A survivor is the same process only while its start time matches.
+    #[cfg(unix)]
+    if record
+        .survivors
+        .iter()
+        .any(|(pid, start)| archon_shell::process_tree::start_of(*pid) == Some(*start))
+    {
+        return Some(true);
+    }
     // A job is gone once no handle holds it, and killed on close with every
     // process it held; while it exists, its accounting says what still runs.
     #[cfg(windows)]

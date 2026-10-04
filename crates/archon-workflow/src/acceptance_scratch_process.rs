@@ -29,53 +29,14 @@ type RunChild = Box<dyn process_wrap::tokio::ChildWrapper>;
 #[cfg(not(windows))]
 type RunChild = tokio::process::Child;
 
-/// Kills the check's process tree if `run_at` stops before its teardown.
-/// `0` once the tree is confirmed empty.
-struct GroupGuard {
-    pid: i32,
-    /// Once the leader is reaped its pid may be reused, so the tree is no
-    /// longer reached through it by ancestry.
-    #[cfg_attr(windows, allow(dead_code))]
-    reaped: bool,
-}
-impl Drop for GroupGuard {
-    fn drop(&mut self) {
-        // On Windows the child's Job Object (`process_wrap`'s `KillOnDrop`)
-        // reaps the whole job when the child drops; there is no process group
-        // to signal here.
-        #[cfg(unix)]
-        if self.pid > 0 {
-            let _ = tree(self.pid, !self.reaped).kill(Duration::from_millis(250));
-        }
-    }
-}
+#[path = "acceptance_scratch_confine.rs"]
+mod confine;
+use confine::{Confinement, terminate};
 
-/// Every process the check started (Issue 270): its group, and by ancestry
-/// every descendant that moved to a group of its own or left the session.
-/// Ancestry from the leader only while it is unreaped.
-#[cfg(unix)]
-fn tree(leader: i32, leader_unreaped: bool) -> archon_shell::process_tree::Scope {
-    let leader = u32::try_from(leader).unwrap_or(0);
-    archon_shell::process_tree::Scope {
-        roots: if leader_unreaped {
-            vec![leader]
-        } else {
-            Vec::new()
-        },
-        groups: vec![leader],
-        sessions: Vec::new(),
-    }
-}
-
-/// Kill the check's tree off the runtime thread; returns the survivors.
-#[cfg(unix)]
-async fn kill_tree(leader: i32, leader_unreaped: bool) -> WorkflowResult<Vec<u32>> {
-    let scope = tree(leader, leader_unreaped);
-    tokio::task::spawn_blocking(move || scope.kill(Duration::from_secs(3)))
-        .await
-        .map_err(|e| invalid(format!("scratch teardown task failed: {e}")))?
-        .map_err(|e| invalid(format!("scratch teardown failed: {e}")))
-}
+/// Scan the check's tree every this many 25 ms ticks (Issue 270): a
+/// descendant that leaves the group and the session is tied to the check
+/// only while its parent lives, so it has to be seen while the check runs.
+const SCAN_TICKS: u32 = 8;
 
 /// Spawn the prepared command as a confined child: a new Unix process group,
 /// or a Windows Job Object with kill-on-drop. On Linux the leader also reaps
@@ -234,14 +195,12 @@ pub async fn run_at(
         super::cache::record_group(root, None)?;
     }
     let mut child = spawn_confined(process, cwd)?;
-    let mut group = GroupGuard {
-        pid: child
-            .id()
-            .ok_or_else(|| invalid("scratch child has no process id"))? as i32,
-        reaped: false,
-    };
+    let leader = child
+        .id()
+        .ok_or_else(|| invalid("scratch child has no process id"))?;
+    let mut confinement = Confinement::new(leader);
     if let Some(root) = site.audit_root {
-        super::cache::record_group(root, Some(group.pid))?;
+        super::cache::record_group(root, Some(leader as i32))?;
     }
     let (stdout_pipe, stderr_pipe, stdin_pipe) = take_pipes(&mut child);
     let overflow = Arc::new(AtomicBool::new(false));
@@ -265,20 +224,27 @@ pub async fn run_at(
         Duration::from_secs(365 * 86_400)
     };
     let mut next_quota = tokio::time::Instant::now() + quota_period;
+    let mut stall = None;
+    let mut ticks = 0u32;
     let status = loop {
         tokio::select! {
-            result=child.wait()=>break result.map_err(|e|WorkflowError::io(cwd,e))?,
-            _=tokio::time::sleep_until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break terminate(&mut child,group.pid).await?;},
+            result=child.wait()=>break match result {
+                Ok(status) => Some(status),
+                Err(e) => { stall = Some(format!("waiting for the scratch child failed: {e}")); None }
+            },
+            _=tokio::time::sleep_until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break terminate(&mut child,&confinement,&mut stall).await;},
             _=tokio::time::sleep(Duration::from_millis(25))=>{
-                if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break terminate(&mut child,group.pid).await?;}
-                if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break terminate(&mut child,group.pid).await?;}
+                if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break terminate(&mut child,&confinement,&mut stall).await;}
+                if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break terminate(&mut child,&confinement,&mut stall).await;}
+                ticks += 1;
+                if ticks.is_multiple_of(SCAN_TICKS) { confinement.refresh().await; }
             }
             _=tokio::time::sleep_until(next_quota)=>{
                 quota_walk_count += 1;
                 if let Some(root) = site.audit_root {
                     match site.audited_size(root) {
-                        Ok(size) if size>site.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break terminate(&mut child,group.pid).await?;}
-                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break terminate(&mut child,group.pid).await?;}
+                        Ok(size) if size>site.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break terminate(&mut child,&confinement,&mut stall).await;}
+                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break terminate(&mut child,&confinement,&mut stall).await;}
                         _=>{}
                     }
                 }
@@ -287,21 +253,17 @@ pub async fn run_at(
         }
     };
     writer.abort();
-    group.reaped = true;
+    confinement.leader_reaped();
     // Reap remaining members even if the leader exited successfully: the
-    // whole tree, not only the members still in the leader's group.
-    #[cfg(unix)]
-    let survivors = kill_tree(group.pid, false).await?;
+    // whole tree, including every member a scan saw while the check ran.
+    let teardown = confinement.kill().await;
     // Windows: terminate the Job Object and wait on it, so every process the
     // check started is reaped before its output is read (Issue-234).
     #[cfg(windows)]
-    let survivors: Vec<u32> = {
+    {
         let _ = child.start_kill();
-        let _ = child.wait().await;
-        Vec::new()
-    };
-    // A descendant outside the tree that kept the check's stdout or stderr
-    // open is the evidence of an escape, not a reason to fail the runner.
+        let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
+    }
     let pipes = match tokio::time::timeout(Duration::from_secs(3), async {
         let out = (&mut stdout)
             .await
@@ -327,18 +289,14 @@ pub async fn run_at(
     };
     // The tree is disarmed only once no member is left, never merely because
     // the leader exited.
-    if survivors.is_empty() {
-        group.pid = 0;
-    } else {
-        error = Some(format!(
-            "scratch process tree teardown could not be verified (still alive: {})",
-            pids(&survivors)
-        ));
+    match teardown {
+        Ok(()) => confinement.disarm(),
+        Err(evidence) => error = Some(evidence),
     }
-    // A scratch is private to the observation: whatever still holds it after
-    // the tree is gone is a descendant no group or ancestry names any more.
+    // A scratch is private to the observation: what still holds it after
+    // the tree is gone may be a descendant nothing else names any more.
     if let Some(root) = site.audit_root
-        && let Some(escape) = detached_holders(root, site.audit_target).await
+        && let Some(escape) = confinement.detached_holders(root, site.audit_target).await
     {
         error = Some(escape);
     }
@@ -355,84 +313,20 @@ pub async fn run_at(
             _ => {}
         }
     }
+    // A stall outranks every other ending: the check could not be torn down,
+    // and that is what a resume has to know.
+    if let Some(evidence) = stall {
+        error = Some(evidence);
+    }
     Ok(CheckResult {
         acceptance_id: id.into(),
-        exit_code: status.code(),
+        exit_code: status.and_then(|status| status.code()),
         quota_walk_count,
         stdout: site.redact(&pipes.0.0, pipes.0.1),
         stderr: site.redact(&pipes.1.0, pipes.1.1),
         operational_error: error,
     })
 }
-async fn terminate(child: &mut RunChild, group: i32) -> WorkflowResult<std::process::ExitStatus> {
-    // While the leader is unreaped, so its descendants are reached through it.
-    #[cfg(unix)]
-    kill_tree(group, true).await?;
-    // Windows: terminate the whole Job Object, not just the leader.
-    #[cfg(windows)]
-    {
-        let _ = group;
-        let _ = child.start_kill();
-    }
-    tokio::time::timeout(Duration::from_secs(3), child.wait())
-        .await
-        .map_err(|_| invalid("scratch child reap deadline exceeded"))?
-        .map_err(|e| invalid(format!("scratch child reap failed: {e}")))
-}
-
-fn pids(pids: &[u32]) -> String {
-    pids.iter()
-        .map(u32::to_string)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// The operational error for processes that still hold the scratch (or the
-/// build target) once the check's tree is gone, if any. Polled for a short
-/// window: a process the kill just reached releases its files as it exits.
-/// A probe that cannot run proves nothing, so it is an error too.
-#[cfg(unix)]
-async fn detached_holders(root: &Path, target: Option<&Path>) -> Option<String> {
-    let roots: Vec<PathBuf> = std::iter::once(root)
-        .chain(target)
-        .map(Path::to_path_buf)
-        .collect();
-    let mut last = Vec::new();
-    for attempt in 0..HOLDER_PROBES {
-        let roots = roots.clone();
-        let probed = tokio::task::spawn_blocking(move || {
-            let roots: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
-            archon_shell::process_tree::holders(&roots)
-        })
-        .await;
-        match probed {
-            Ok(Ok(holders)) if holders.is_empty() => return None,
-            Ok(Ok(holders)) => last = holders,
-            Ok(Err(e)) => return Some(format!("scratch holder probe failed: {e}")),
-            Err(e) => return Some(format!("scratch holder probe task failed: {e}")),
-        }
-        if attempt + 1 < HOLDER_PROBES {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-    Some(format!(
-        "processes outside the check's process tree still use the scratch: {}",
-        last.iter()
-            .map(|h| format!("pid {} ({})", h.pid, h.path.display()))
-            .collect::<Vec<_>>()
-            .join(", ")
-    ))
-}
-
-/// Windows confines a check to its Job Object, whose wait drains every
-/// process in it; there is nothing outside it to find.
-#[cfg(not(unix))]
-async fn detached_holders(_root: &Path, _target: Option<&Path>) -> Option<String> {
-    None
-}
-
-#[cfg(unix)]
-const HOLDER_PROBES: u32 = 20;
 
 #[cfg(all(test, unix))]
 #[path = "acceptance_scratch_process_tests.rs"]

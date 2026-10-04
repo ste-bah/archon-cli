@@ -1,18 +1,15 @@
 //! Windows termination (Issue 273): the host command and everything it
-//! starts live in one Job Object this supervisor owns. Every exit path
-//! terminates the job and confirms that no process in it is still active;
-//! a dropped supervisor closes the job, which kills what is left.
+//! starts live in one Job Object this supervisor owns. Every exit path,
+//! a dropped supervisor included, terminates the job and waits, within a
+//! bound, until no process in it is active. A job still active then is a
+//! stall, which the supervisor reports as an operational, resumable outcome.
 use std::sync::Arc;
-use std::time::Duration;
 
 use archon_shell::job_object::Job;
 use archon_workflow::{WorkflowError, WorkflowResult};
 
 use super::super::REAP_DEADLINE;
-use super::{Tree, reap};
-
-const AUDIT_ATTEMPTS: u32 = 25;
-const AUDIT_INTERVAL: Duration = Duration::from_millis(40);
+use super::{Teardown, Tree, reap};
 
 fn failed(what: &str, error: impl std::fmt::Display) -> WorkflowError {
     WorkflowError::StageFailed(format!("{what}: {error}"))
@@ -51,71 +48,56 @@ pub(in super::super) fn confine(child: &mut tokio::process::Child) -> WorkflowRe
     })
 }
 
-/// Terminates the job and waits until it is empty, off the runtime thread.
-/// Returns how many processes were still active when the wait ran out.
-async fn kill_job(tree: &Tree) -> WorkflowResult<u32> {
-    let Some(job) = tree.job.clone() else {
-        return Ok(0);
-    };
-    tokio::task::spawn_blocking(move || job.kill_and_confirm(REAP_DEADLINE))
-        .await
-        .map_err(|error| failed("host command job termination task failed", error))?
-        .map_err(|error| failed("terminating the host command job failed", error))
+impl Tree {
+    /// The job holds every descendant already; there is nothing to scan.
+    pub(in super::super) async fn refresh(&self) {}
+
+    /// A job does not depend on the leader's pid.
+    pub(in super::super) fn leader_reaped(&self) {}
 }
 
-fn still_active(active: u32) -> WorkflowError {
-    WorkflowError::StageFailed(format!(
-        "host command job object still has {active} active process(es) after termination"
-    ))
+/// Terminate the job and wait until it is empty, within [`REAP_DEADLINE`].
+fn kill_job(job: &Job) -> Teardown {
+    match job.kill_and_confirm(REAP_DEADLINE) {
+        Ok(0) => Teardown::Confirmed,
+        Ok(active) => Teardown::stalled(format!(
+            "host command job object still has {active} active process(es) after termination"
+        )),
+        Err(error) => {
+            Teardown::stalled(format!("terminating the host command job failed: {error}"))
+        }
+    }
+}
+
+async fn kill_job_off_thread(tree: &Tree) -> Teardown {
+    let Some(job) = tree.job.clone() else {
+        return Teardown::Confirmed;
+    };
+    tokio::task::spawn_blocking(move || kill_job(&job))
+        .await
+        .unwrap_or_else(|error| Teardown::stalled(format!("job termination task failed: {error}")))
 }
 
 pub(in super::super) async fn terminate_and_reap(
     child: &mut tokio::process::Child,
     tree: &Tree,
-) -> WorkflowResult<Vec<u32>> {
+) -> Teardown {
     if tree.job.is_none() {
         let _ = child.start_kill();
     }
-    // A job still active here is left for the audit, so that a control
-    // interruption can still report itself.
-    kill_job(tree).await?;
-    reap(child).await?;
-    Ok(Vec::new())
-}
-
-pub(in super::super) async fn terminate_completed_group(tree: &Tree) -> WorkflowResult<()> {
-    match kill_job(tree).await? {
-        0 => Ok(()),
-        active => Err(still_active(active)),
+    let teardown = kill_job_off_thread(tree).await;
+    match reap(child).await {
+        Ok(()) => teardown,
+        Err(evidence) => teardown.and_stalled(evidence),
     }
 }
 
-pub(in super::super) async fn audit_no_descendants(
-    tree: &Tree,
-    _killed: Vec<u32>,
-) -> WorkflowResult<()> {
-    let Some(job) = &tree.job else {
-        return Ok(());
-    };
-    let mut active = 0;
-    for attempt in 0..AUDIT_ATTEMPTS {
-        active = job
-            .active_processes()
-            .map_err(|error| failed("auditing the host command job failed", error))?;
-        if active == 0 {
-            return Ok(());
-        }
-        if attempt + 1 < AUDIT_ATTEMPTS {
-            tokio::time::sleep(AUDIT_INTERVAL).await;
-        }
-    }
-    Err(still_active(active))
+pub(in super::super) async fn terminate_completed_group(tree: &Tree) -> Teardown {
+    kill_job_off_thread(tree).await
 }
 
-/// Terminates the job at once; the job handle the tree holds closes when the
-/// guard drops it, which kills anything that started in between.
-pub(in super::super) fn kill_on_drop(tree: &Tree, _leader_unreaped: bool) {
-    if let Some(job) = &tree.job {
-        let _ = job.terminate();
-    }
+/// The drop guard's teardown: synchronous, because a drop cannot await, and
+/// still confirmed, within the same bound, before the guard lets go.
+pub(in super::super) fn kill_blocking(tree: &Tree, _leader_unreaped: bool) -> Teardown {
+    tree.job.as_deref().map_or(Teardown::Confirmed, kill_job)
 }

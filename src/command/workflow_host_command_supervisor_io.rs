@@ -6,7 +6,7 @@
 //! the same failure after the child's exit has won the race with the event,
 //! which is the only order a child that exits at once produces.
 
-use archon_workflow::{WorkflowError, WorkflowResult};
+use archon_workflow::WorkflowError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
@@ -96,42 +96,47 @@ pub(super) fn spawn_stdin(
 }
 
 /// The stdin writer's failure, once the child has exited. Its tree is gone by
-/// then, so the writer has either finished or fails at once on a closed pipe.
+/// then, so the writer has either finished or fails at once on a closed pipe;
+/// a writer that does neither is a teardown stall (`Err`, the evidence), not
+/// a failure of the call.
 pub(super) async fn finish_stdin(
     task: Option<tokio::task::JoinHandle<Option<String>>>,
-) -> WorkflowResult<Option<String>> {
-    let Some(task) = task else {
+) -> Result<Option<String>, String> {
+    let Some(mut task) = task else {
         return Ok(None);
     };
-    tokio::time::timeout(REAP_DEADLINE, task)
-        .await
-        .map_err(|_| {
-            WorkflowError::StageFailed(
-                "host command stdin delivery exceeded cleanup deadline".to_string(),
-            )
-        })?
-        .map_err(|error| {
-            WorkflowError::StageFailed(format!("host command stdin task failed: {error}"))
-        })
+    match tokio::time::timeout(REAP_DEADLINE, &mut task).await {
+        Ok(Ok(failure)) => Ok(failure),
+        Ok(Err(error)) => Err(format!("host command stdin task failed: {error}")),
+        Err(_) => {
+            task.abort();
+            Err("host command stdin delivery did not end after teardown".to_string())
+        }
+    }
 }
 
+/// Both pipes, drained to end of file. Pipes that stay open after teardown
+/// are held by a process outside the tree: a stall (`Err`, the evidence),
+/// never a failure of the call. The drains are aborted then, not left behind.
 pub(super) async fn finish_pipe_tasks(
-    stdout: tokio::task::JoinHandle<CapturedPipe>,
-    stderr: tokio::task::JoinHandle<CapturedPipe>,
-) -> WorkflowResult<(CapturedPipe, CapturedPipe)> {
-    tokio::time::timeout(REAP_DEADLINE, async {
-        let stdout = stdout.await.map_err(|error| {
-            WorkflowError::StageFailed(format!("host command stdout task failed: {error}"))
-        })?;
-        let stderr = stderr.await.map_err(|error| {
-            WorkflowError::StageFailed(format!("host command stderr task failed: {error}"))
-        })?;
-        Ok((stdout, stderr))
+    mut stdout: tokio::task::JoinHandle<CapturedPipe>,
+    mut stderr: tokio::task::JoinHandle<CapturedPipe>,
+) -> Result<(CapturedPipe, CapturedPipe), String> {
+    let drained = tokio::time::timeout(REAP_DEADLINE, async {
+        let out = (&mut stdout)
+            .await
+            .map_err(|error| format!("host command stdout task failed: {error}"))?;
+        let err = (&mut stderr)
+            .await
+            .map_err(|error| format!("host command stderr task failed: {error}"))?;
+        Ok((out, err))
     })
-    .await
-    .map_err(|_| {
-        WorkflowError::StageFailed("host command pipe drain exceeded cleanup deadline".to_string())
-    })?
+    .await;
+    drained.unwrap_or_else(|_| {
+        stdout.abort();
+        stderr.abort();
+        Err("host command output pipes stayed open after teardown: a process outside its tree still holds them".to_string())
+    })
 }
 
 pub(super) fn abort_stdin(task: Option<tokio::task::JoinHandle<Option<String>>>) {

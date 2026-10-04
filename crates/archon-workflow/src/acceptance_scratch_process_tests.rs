@@ -134,26 +134,6 @@ async fn a_cancelled_check_kills_a_descendant_in_its_own_process_group() {
 }
 
 #[tokio::test]
-async fn a_detached_descendant_still_using_the_scratch_is_an_operational_error() {
-    // The check exits at once and its `setsid` descendant is reparented away:
-    // no group or ancestry still names it, but it still runs in the scratch.
-    let temp = tempfile::tempdir().unwrap();
-    let escaper = Escaper::new(temp.path());
-    let text = format!("{}\nexit 0", escaper.start_quiet(OWN_SESSION, 30));
-    let result = run(&site(temp.path(), true, 20), &text).await;
-    let _kill = Kill(escaper.pid());
-    let error = result.operational_error.as_deref().unwrap_or_default();
-    assert!(
-        error.contains("still use the scratch"),
-        "a detached descendant must not pass as a clean teardown: {result:?}"
-    );
-    assert!(
-        error.contains(&escaper.pid().to_string()),
-        "the error names the process: {error}"
-    );
-}
-
-#[tokio::test]
 async fn a_detached_descendant_holding_the_output_pipes_is_an_operational_error() {
     // Detached the same way, but still writing to the check's pipes: they
     // never reach end of file, and that is the evidence of the escape.
@@ -187,4 +167,84 @@ async fn a_descendant_that_exits_with_its_check_leaves_a_clean_teardown() {
     let result = run(&site(temp.path(), true, 20), text).await;
     assert_eq!(result.exit_code, Some(0), "{result:?}");
     assert!(result.operational_error.is_none(), "{result:?}");
+}
+
+/// Waits, within a bound, for `pid` to leave the process table (an orphan is
+/// reaped by init at once), and kills it if it does not.
+async fn assert_gone(pid: i32, cause: &str) {
+    let start = std::time::Instant::now();
+    // SAFETY: signal 0 only probes the process this test started.
+    while unsafe { libc::kill(pid, 0) } == 0 {
+        if start.elapsed() > Duration::from_secs(3) {
+            drop(Kill(pid));
+            panic!("descendant {pid} outlived {cause}");
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_direct_check_kills_a_setsid_descendant_seen_while_it_ran() {
+    // Round 2, rule 2: the descendant left the group and the session, and its
+    // parent (the check's shell) exits before teardown. A scan while it ran
+    // saw it, so teardown must still reach it.
+    let temp = tempfile::tempdir().unwrap();
+    let escaper = Escaper::new(temp.path());
+    let text = format!(
+        "{}\nsleep 1.2\nexit 0",
+        escaper.start_quiet(OWN_SESSION, 30)
+    );
+    let result = run(&site(temp.path(), false, 20), &text).await;
+    assert_eq!(result.exit_code, Some(0), "{result:?}");
+    assert_gone(escaper.pid(), "a direct check's teardown").await;
+}
+
+#[tokio::test]
+async fn an_unrelated_reader_of_the_scratch_does_not_fail_the_check() {
+    // Round 2, rule 5: a process this check never started (an editor, an
+    // indexer) reads a file in the scratch. It is not the check's escape.
+    let temp = tempfile::tempdir().unwrap();
+    let file = temp.path().join("read-by-another");
+    std::fs::write(&file, "x").unwrap();
+    let ready = temp.path().join("reader-ready");
+    let mut reader = std::process::Command::new("perl")
+        .args([
+            "-e",
+            "open(F, '<', $ARGV[0]) or die; open(R, '>', $ARGV[1]); close R; sleep 30",
+        ])
+        .arg(&file)
+        .arg(&ready)
+        .current_dir("/")
+        .spawn()
+        .unwrap();
+    while !ready.exists() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let result = run(&site(temp.path(), true, 20), "echo ok").await;
+    let _ = reader.kill();
+    let _ = reader.wait();
+    assert_eq!(result.exit_code, Some(0), "{result:?}");
+    assert!(result.operational_error.is_none(), "{result:?}");
+}
+
+#[tokio::test]
+async fn a_never_seen_writer_left_in_the_scratch_is_an_operational_error() {
+    // Detached at once, so no scan ever saw it; it still holds a file in the
+    // scratch open for writing, which no unrelated reader does.
+    let temp = tempfile::tempdir().unwrap();
+    let escaper = Escaper::new(temp.path());
+    let how = format!(
+        "POSIX::setsid(); open(W, \">>\", \"{}\")",
+        temp.path().join("written").display()
+    );
+    let text = format!("{}\nexit 0", escaper.start_quiet(&how, 30));
+    let result = run(&site(temp.path(), true, 20), &text).await;
+    let _kill = Kill(escaper.pid());
+    assert!(
+        result
+            .operational_error
+            .as_deref()
+            .is_some_and(|e| e.contains(&escaper.pid().to_string())),
+        "{result:?}"
+    );
 }

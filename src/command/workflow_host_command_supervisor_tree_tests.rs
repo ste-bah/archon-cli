@@ -156,3 +156,134 @@ fn a_record_whose_group_ended_but_whose_session_still_runs_blocks_resume() {
         "a live member of the recorded session must keep the record running"
     );
 }
+
+/// Waits, within a bound, for `pid` to leave the process table, and kills it
+/// if it does not.
+async fn assert_gone(pid: i32, cause: &str) {
+    let start = std::time::Instant::now();
+    // SAFETY: signal 0 only probes the process this test started.
+    while unsafe { libc::kill(pid, 0) } == 0 {
+        if start.elapsed() > Duration::from_secs(3) {
+            drop(Kill(pid));
+            panic!("descendant {pid} outlived {cause}");
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+fn read_pid(path: &Path) -> i32 {
+    std::fs::read_to_string(path)
+        .expect("descendant never started")
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn completion_kills_a_setsid_descendant_seen_while_the_command_ran() {
+    // Round 2, rule 2: the descendant leaves the group and the session, and
+    // the command exits normally. A scan while it ran saw it.
+    let temp = tempfile::tempdir().unwrap();
+    let pid_file = temp.path().join("daemon-pid");
+    let body = format!(
+        "perl -MPOSIX -e 'POSIX::setsid(); open(F, \">\", $ARGV[0]); print F $$; close F; sleep 30' '{}' </dev/null >/dev/null 2>&1 &\nuntil [ -s '{}' ]; do sleep 0.01; done\nsleep 1.5\nexit 0",
+        pid_file.display(),
+        pid_file.display()
+    );
+    let request = command(script(temp.path(), "seen-daemon", &body));
+    let (control, _handle) = HostCommandControl::new();
+    let output = supervise_process_group(request, control, None)
+        .await
+        .unwrap();
+    assert_eq!(output.exit_code, Some(0));
+    assert_gone(read_pid(&pid_file), "completion").await;
+}
+
+#[tokio::test]
+async fn an_escaped_descendant_holding_the_pipes_pauses_instead_of_failing() {
+    // Round 2, rule 3: a double-forked `setsid` descendant escapes before any
+    // scan and keeps the output pipes open, so teardown cannot complete. That
+    // is a stall: an operational, resumable outcome, never a failure.
+    let temp = tempfile::tempdir().unwrap();
+    let pid_file = temp.path().join("daemon-pid");
+    let body = format!(
+        "perl -MPOSIX -e 'fork and exit; POSIX::setsid(); open(F, \">\", $ARGV[0]); print F $$; close F; sleep 30' '{}' &\nuntil [ -s '{}' ]; do sleep 0.01; done\nexit 0",
+        pid_file.display(),
+        pid_file.display()
+    );
+    let request = command(script(temp.path(), "escaped-pipes", &body));
+    let (control, _handle) = HostCommandControl::new();
+    let result = supervise_process_group(request, control, None).await;
+    let _kill = Kill(read_pid(&pid_file));
+    let output = result.expect("a stalled teardown is not a failure");
+    assert_eq!(
+        output.exit_code,
+        Some(super::super::workflow_host_command_operational::EXIT_INCOMPLETE_RESUMABLE),
+        "{output:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("teardown"),
+        "the evidence names the stall: {output:?}"
+    );
+}
+
+/// A command whose double-forked `setsid` descendant escapes before any scan
+/// and holds the output pipes, then (with `rest`) keeps running itself.
+fn escaping_pipe_holder(dir: &Path, rest: &str) -> (PathBuf, PathBuf) {
+    let pid_file = dir.join("daemon-pid");
+    let body = format!(
+        "perl -MPOSIX -e 'fork and exit; POSIX::setsid(); open(F, \">\", $ARGV[0]); print F $$; close F; sleep 30' '{pid}' &\nuntil [ -s '{pid}' ]; do sleep 0.01; done\n{rest}",
+        pid = pid_file.display()
+    );
+    (script(dir, "escaping", &body), pid_file)
+}
+
+#[tokio::test]
+async fn a_pause_returns_the_pause_even_when_teardown_stalls() {
+    // Round 2, rule 3: a pause or cancel always comes back as itself; the
+    // stall is evidence, not a replacement.
+    let temp = tempfile::tempdir().unwrap();
+    let (program, pid_file) = escaping_pipe_holder(temp.path(), "sleep 30");
+    let (control, handle) = HostCommandControl::new();
+    let task = tokio::spawn(supervise_process_group(command(program), control, None));
+    while !pid_file.exists() {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    handle
+        .signal(super::super::workflow_host_command_supervisor::HostCommandSignal::Paused)
+        .unwrap();
+    let result = task.await.unwrap();
+    let _kill = Kill(read_pid(&pid_file));
+    assert!(
+        matches!(
+            result,
+            Err(archon_workflow::WorkflowError::ControlPaused(_))
+        ),
+        "{result:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_stalled_teardown_keeps_the_resume_record() {
+    let temp = tempfile::tempdir().unwrap();
+    let records = temp.path().join("records");
+    let (program, pid_file) = escaping_pipe_holder(temp.path(), "exit 0");
+    let (control, _handle) = HostCommandControl::new();
+    let result = supervise_process_group(command(program), control, Some(&records)).await;
+    let _kill = Kill(read_pid(&pid_file));
+    assert!(result.is_ok(), "{result:?}");
+    let kept = std::fs::read_dir(&records).unwrap().count();
+    assert_eq!(kept, 1, "the record of a stalled teardown is kept");
+}
+
+#[tokio::test]
+async fn a_confirmed_teardown_removes_the_resume_record() {
+    let temp = tempfile::tempdir().unwrap();
+    let records = temp.path().join("records");
+    let program = script(temp.path(), "plain", "exit 0");
+    let (control, _handle) = HostCommandControl::new();
+    supervise_process_group(command(program), control, Some(&records))
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read_dir(&records).unwrap().count(), 0);
+}

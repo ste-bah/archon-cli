@@ -1,27 +1,70 @@
-//! Platform-specific termination.
+//! Platform-specific confinement and teardown of one host command.
 //!
-//! On Unix a host command runs as the leader of its own session (Issue 270):
-//! a nested runner may give each of its checks a process group of its own,
-//! and a group kill never reaches those. Teardown therefore works on the
-//! whole tree - the command's group, its session, and every descendant by
-//! ancestry (`archon_shell::process_tree`) - and is confirmed only when no
-//! live member of any of them is left.
+//! On Unix the command leads its own session (Issue 270). A nested runner
+//! may give each of its checks a process group of its own, and a descendant
+//! may leave the session as well, so teardown works on the whole tree: the
+//! command's group and session, every descendant by ancestry, and every
+//! member a scan saw while the command ran (`archon_shell::process_tree::
+//! Tracker`), each pinned by its start time so that a reused pid is never
+//! signalled.
 //!
 //! On Windows the command runs in a Job Object this supervisor owns
-//! (Issue 273): it is created suspended, put in the job, then resumed, so
-//! every process it starts is in the job; teardown terminates the job and
-//! confirms that no process in it is still active.
-use archon_workflow::{WorkflowError, WorkflowResult};
+//! (Issue 273); teardown terminates the job and confirms that no process in
+//! it is still active.
+//!
+//! Teardown never fails a call. A member that will not die, a leader that
+//! cannot be reaped, or a tree that cannot be scanned is a [`Teardown::
+//! Stalled`], which the supervisor turns into an operational, resumable
+//! outcome (Issue 270 round 2).
+#[cfg(unix)]
+use archon_workflow::WorkflowResult;
 
+#[cfg(unix)]
+use super::CLEANUP_GRACE;
 use super::REAP_DEADLINE;
-#[cfg(unix)]
-use super::{CLEANUP_GRACE, DESCENDANT_AUDIT_ATTEMPTS, DESCENDANT_AUDIT_INTERVAL};
-#[cfg(unix)]
-use archon_shell::process_tree::Scope;
+
+/// What teardown established.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Teardown {
+    /// No process of the tree is left.
+    Confirmed,
+    /// Teardown could not finish: `evidence` says why, and `survivors`
+    /// (pid, start time) names the members still alive, where known.
+    Stalled {
+        evidence: String,
+        survivors: Vec<(u32, u64)>,
+    },
+}
+
+impl Teardown {
+    pub(super) fn stalled(evidence: impl Into<String>) -> Self {
+        Self::Stalled {
+            evidence: evidence.into(),
+            survivors: Vec::new(),
+        }
+    }
+
+    /// This outcome, with `evidence` added as a further cause of a stall.
+    pub(super) fn and_stalled(self, evidence: impl Into<String>) -> Self {
+        let evidence = evidence.into();
+        match self {
+            Self::Confirmed => Self::stalled(evidence),
+            Self::Stalled {
+                evidence: earlier,
+                survivors,
+            } => Self::Stalled {
+                evidence: format!("{earlier}; {evidence}"),
+                survivors,
+            },
+        }
+    }
+}
 
 /// Everything that confines one spawned host command.
 pub(super) struct Tree {
     leader: Option<u32>,
+    #[cfg(unix)]
+    tracker: std::sync::Arc<std::sync::Mutex<archon_shell::process_tree::Tracker>>,
     #[cfg(windows)]
     job: Option<std::sync::Arc<archon_shell::job_object::Job>>,
 }
@@ -46,172 +89,137 @@ impl Tree {
     }
 }
 
-/// Confines a child spawned as a session leader (`pre_exec` in the
-/// supervisor) on Unix: nothing more to do than to note its pid.
-#[cfg(unix)]
-pub(super) fn confine(child: &mut tokio::process::Child) -> WorkflowResult<Tree> {
-    Ok(Tree { leader: child.id() })
-}
-
 #[cfg(windows)]
 #[path = "workflow_host_command_termination_windows.rs"]
 mod windows;
 #[cfg(windows)]
-pub(super) use windows::{
-    audit_no_descendants, confine, kill_on_drop, terminate_and_reap, terminate_completed_group,
-};
+pub(super) use windows::{confine, kill_blocking, terminate_and_reap, terminate_completed_group};
 
-/// The tree of the command whose leader is `leader`. Ancestry from the
-/// leader itself is used only while it is unreaped (`leader_unreaped`): once
-/// reaped, its pid may already belong to an unrelated process.
+/// Confines a child spawned as a session leader (`pre_exec` in the
+/// supervisor): its tree is its group, its session, and its descendants.
 #[cfg(unix)]
-pub(super) fn scope(leader: u32, leader_unreaped: bool) -> Scope {
-    Scope {
-        roots: if leader_unreaped {
-            vec![leader]
-        } else {
-            Vec::new()
-        },
-        groups: vec![leader],
-        sessions: vec![leader],
-    }
-}
-
-/// Runs a blocking process-table operation off the runtime thread.
-#[cfg(unix)]
-async fn blocking<T: Send + 'static>(
-    what: &'static str,
-    work: impl FnOnce() -> std::io::Result<T> + Send + 'static,
-) -> WorkflowResult<T> {
-    tokio::task::spawn_blocking(work)
-        .await
-        .map_err(|error| WorkflowError::StageFailed(format!("{what} task failed: {error}")))?
-        .map_err(|error| WorkflowError::StageFailed(format!("{what} failed: {error}")))
-}
-
-#[cfg(unix)]
-fn survivors_error(leader: u32, survivors: &[u32]) -> WorkflowError {
-    WorkflowError::StageFailed(format!(
-        "host command process tree {leader} still has live members after termination: {}",
-        survivors
-            .iter()
-            .map(u32::to_string)
-            .collect::<Vec<_>>()
-            .join(", ")
-    ))
-}
-
-/// Asks the tree to stop, kills what is left after the grace, and reaps the
-/// direct child. Returns the members that survived the kill, for
-/// [`audit_no_descendants`]: some were reachable only through the leader,
-/// which is reaped now, so the audit could no longer find them itself. They
-/// are returned rather than raised so that a control interruption can still
-/// report itself.
-#[cfg(unix)]
-pub(super) async fn terminate_and_reap(
-    child: &mut tokio::process::Child,
-    tree: &Tree,
-) -> WorkflowResult<Vec<u32>> {
-    let mut survivors = Vec::new();
-    if let Some(leader) = tree.leader {
-        let tree = scope(leader, true);
-        let asked = tree.clone();
-        blocking("signalling the host command tree", move || {
-            asked.signal(libc::SIGTERM)
-        })
-        .await?;
-        tokio::time::sleep(CLEANUP_GRACE).await;
-        survivors = blocking("killing the host command tree", move || {
-            tree.kill(REAP_DEADLINE)
-        })
-        .await?;
-    } else {
-        let _ = child.start_kill();
-    }
-    reap(child).await?;
-    Ok(survivors)
-}
-
-/// After the leader exited on its own: kill whatever it left behind and
-/// confirm the tree is empty.
-#[cfg(unix)]
-pub(super) async fn terminate_completed_group(tree: &Tree) -> WorkflowResult<()> {
-    let Some(leader) = tree.leader else {
-        return Ok(());
+pub(super) fn confine(child: &mut tokio::process::Child) -> WorkflowResult<Tree> {
+    let leader = child.id();
+    let scope = archon_shell::process_tree::Scope {
+        roots: leader.into_iter().collect(),
+        groups: leader.into_iter().collect(),
+        sessions: leader.into_iter().collect(),
     };
-    let tree = scope(leader, false);
-    let survivors = blocking("killing the host command tree", move || {
-        tree.kill(REAP_DEADLINE)
+    Ok(Tree {
+        leader,
+        tracker: std::sync::Arc::new(std::sync::Mutex::new(
+            archon_shell::process_tree::Tracker::new(scope),
+        )),
     })
-    .await?;
-    if survivors.is_empty() {
-        Ok(())
-    } else {
-        Err(survivors_error(leader, &survivors))
-    }
 }
 
-/// Confirms no member of the tree survived termination.
-///
-/// Killing a tree and verifying nothing survived it are different
-/// obligations. Every capability declares `detaches: false`, which makes a
-/// survivor here a broken invariant rather than an expected case. The retry
-/// exists because a just-killed member can still be in the process table for
-/// a moment; only a member that outlives the whole window is reported.
-///
-/// `killed` are the members a kill left alive. A pid among them that is
-/// still in the table is still a survivor: a pid is not reused within the
-/// audit window on any system this runs on.
 #[cfg(unix)]
-pub(super) async fn audit_no_descendants(tree: &Tree, killed: Vec<u32>) -> WorkflowResult<()> {
-    let Some(leader) = tree.leader else {
-        return Ok(());
-    };
-    let mut survivors = Vec::new();
-    for attempt in 0..DESCENDANT_AUDIT_ATTEMPTS {
-        let tree = scope(leader, false);
-        let killed = killed.clone();
-        survivors = blocking("auditing the host command tree", move || {
-            let table = archon_shell::process_tree::snapshot()?;
-            let mut members = tree.members_in(&table);
-            for pid in killed {
-                let alive = table.iter().any(|p| p.pid == pid && !p.zombie);
-                if alive && !members.contains(&pid) {
-                    members.push(pid);
-                }
+impl Tree {
+    /// Scan once while the command runs, remembering every member alive
+    /// now. A failed scan loses only this scan.
+    pub(super) async fn refresh(&self) {
+        let tracker = self.tracker.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            if let Ok(mut tracker) = tracker.lock() {
+                let _ = tracker.refresh();
             }
-            Ok(members)
         })
-        .await?;
-        if survivors.is_empty() {
-            return Ok(());
-        }
-        if attempt + 1 < DESCENDANT_AUDIT_ATTEMPTS {
-            tokio::time::sleep(DESCENDANT_AUDIT_INTERVAL).await;
+        .await;
+    }
+
+    /// The leader is reaped: its pid may be reused, so ancestry from it ends.
+    pub(super) fn leader_reaped(&self) {
+        if let Ok(mut tracker) = self.tracker.lock() {
+            tracker.scope_mut().roots.clear();
         }
     }
-    Err(survivors_error(leader, &survivors))
-}
 
-/// The drop guard's kill: synchronous, because a drop cannot await, and
-/// short, because it runs on whatever thread dropped the supervisor.
-#[cfg(unix)]
-pub(super) fn kill_on_drop(tree: &Tree, leader_unreaped: bool) {
-    if let Some(leader) = tree.leader {
-        let _ = scope(leader, leader_unreaped).kill(std::time::Duration::from_millis(250));
-    }
-}
-
-pub(super) async fn reap(child: &mut tokio::process::Child) -> WorkflowResult<()> {
-    tokio::time::timeout(REAP_DEADLINE, child.wait())
+    async fn run(
+        &self,
+        work: impl FnOnce(&mut archon_shell::process_tree::Tracker) -> Teardown + Send + 'static,
+    ) -> Teardown {
+        let tracker = self.tracker.clone();
+        tokio::task::spawn_blocking(move || match tracker.lock() {
+            Ok(mut tracker) => work(&mut tracker),
+            Err(_) => Teardown::stalled("host command tree tracker is poisoned"),
+        })
         .await
-        .map_err(|_| {
-            WorkflowError::StageFailed(
-                "host command process reap exceeded cleanup deadline".to_string(),
-            )
-        })?
-        .map_err(|error| {
-            WorkflowError::StageFailed(format!("host command process reap failed: {error}"))
-        })?;
-    Ok(())
+        .unwrap_or_else(|error| Teardown::stalled(format!("teardown task failed: {error}")))
+    }
+}
+
+/// Kill every member of the tree within `bound`.
+#[cfg(unix)]
+fn kill_tracked(
+    tracker: &mut archon_shell::process_tree::Tracker,
+    bound: std::time::Duration,
+) -> Teardown {
+    match tracker.kill(bound) {
+        Ok(survivors) if survivors.is_empty() => Teardown::Confirmed,
+        Ok(survivors) => Teardown::Stalled {
+            evidence: format!(
+                "host command process tree still has live members after termination: {}",
+                survivors
+                    .iter()
+                    .map(|p| p.pid.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            survivors: survivors.iter().map(|p| (p.pid, p.start)).collect(),
+        },
+        Err(error) => Teardown::stalled(format!("host command process tree scan failed: {error}")),
+    }
+}
+
+/// Asks the tree to stop, kills what is left after the grace (every member
+/// the SIGTERM round found stays remembered), and reaps the direct child
+/// within [`REAP_DEADLINE`].
+#[cfg(unix)]
+pub(super) async fn terminate_and_reap(child: &mut tokio::process::Child, tree: &Tree) -> Teardown {
+    let _ = tree
+        .run(|tracker| match tracker.signal(libc::SIGTERM) {
+            Ok(_) => Teardown::Confirmed,
+            Err(error) => Teardown::stalled(error.to_string()),
+        })
+        .await;
+    tokio::time::sleep(CLEANUP_GRACE).await;
+    let teardown = tree
+        .run(|tracker| kill_tracked(tracker, REAP_DEADLINE))
+        .await;
+    match reap(child).await {
+        Ok(()) => teardown,
+        Err(evidence) => teardown.and_stalled(evidence),
+    }
+}
+
+/// After the leader exited on its own: kill whatever it left behind,
+/// including members that escaped its group and session while it ran.
+#[cfg(unix)]
+pub(super) async fn terminate_completed_group(tree: &Tree) -> Teardown {
+    tree.run(|tracker| kill_tracked(tracker, REAP_DEADLINE))
+        .await
+}
+
+/// The drop guard's teardown: synchronous, because a drop cannot await.
+#[cfg(unix)]
+pub(super) fn kill_blocking(tree: &Tree, leader_unreaped: bool) -> Teardown {
+    match tree.tracker.lock() {
+        Ok(mut tracker) => {
+            if !leader_unreaped {
+                tracker.scope_mut().roots.clear();
+            }
+            kill_tracked(&mut tracker, REAP_DEADLINE)
+        }
+        Err(_) => Teardown::stalled("host command tree tracker is poisoned"),
+    }
+}
+
+/// Reap the direct child within [`REAP_DEADLINE`]; the error is the evidence
+/// of a stall.
+pub(super) async fn reap(child: &mut tokio::process::Child) -> Result<(), String> {
+    match tokio::time::timeout(REAP_DEADLINE, child.wait()).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(error)) => Err(format!("host command process reap failed: {error}")),
+        Err(_) => Err("host command process reap exceeded cleanup deadline".to_string()),
+    }
 }
