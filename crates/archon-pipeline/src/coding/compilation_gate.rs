@@ -220,11 +220,16 @@ pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<Co
     match completed {
         Ok(output) => output.map(CommandExecution::Completed),
         Err(_) => {
+            // Windows: the bounded job termination starts first, so a direct
+            // child whose termination hangs cannot hold it back (issue #242).
+            #[cfg(windows)]
+            let job_confirmation =
+                tokio::task::spawn_blocking(move || job.kill_and_confirm(TREE_EXIT_BOUND));
             let child_outcome = cleanup_child(&mut child).await;
             #[cfg(unix)]
             let tree = confirm_tree_terminated(group).await;
             #[cfg(windows)]
-            let tree = confirm_job_terminated(job).await;
+            let tree = job_outcome(job_confirmation.await);
             Ok(CommandExecution::TimedOut {
                 child: child_outcome,
                 tree,
@@ -307,17 +312,31 @@ fn confine_in_job(
     Ok(std::sync::Arc::new(job))
 }
 
-/// Terminate the timed-out job until its accounting reports no active
-/// process, within `TREE_EXIT_BOUND`, off the runtime thread (the same
-/// real-time wait as the unix group check).
+/// What the bounded job termination established: the job's accounting
+/// reported no active process within `TREE_EXIT_BOUND`, or it did not, or
+/// the job could not be queried.
 #[cfg(windows)]
-async fn confirm_job_terminated(
-    job: std::sync::Arc<archon_shell::job_object::Job>,
-) -> TreeTermination {
-    match tokio::task::spawn_blocking(move || job.kill_and_confirm(TREE_EXIT_BOUND)).await {
+fn job_outcome(confirmed: Result<io::Result<u32>, tokio::task::JoinError>) -> TreeTermination {
+    match confirmed {
         Ok(Ok(0)) => TreeTermination::Confirmed,
         Ok(Ok(_)) => TreeTermination::StillPresent,
         _ => TreeTermination::CheckFailed,
+    }
+}
+
+/// How long the timed-out direct child's reap may take, in real time. Its
+/// termination can stay pending (I/O that cannot complete on Windows); the
+/// gate reports a failed reap then instead of waiting on it, so the tree
+/// check still runs. Real time, like `TREE_EXIT_BOUND`: a paused or
+/// auto-advancing test clock must not cut a reap short.
+const CHILD_REAP_BOUND: Duration = Duration::from_secs(5);
+
+/// Wait for the child within [`CHILD_REAP_BOUND`]: whether it was reaped.
+async fn bounded_wait(child: &mut Box<dyn ChildWrapper>) -> bool {
+    let bound = tokio::task::spawn_blocking(|| std::thread::sleep(CHILD_REAP_BOUND));
+    tokio::select! {
+        reaped = child.wait() => reaped.is_ok(),
+        _ = bound => false,
     }
 }
 
@@ -325,7 +344,7 @@ async fn cleanup_child(child: &mut Box<dyn ChildWrapper>) -> CleanupOutcome {
     match child.try_wait() {
         Ok(Some(_)) => {
             let _ = child.start_kill();
-            let _ = child.wait().await;
+            let _ = bounded_wait(child).await;
             CleanupOutcome::AlreadyExited
         }
         Ok(None) => cleanup_after_inspection(child, false).await,
@@ -342,7 +361,7 @@ async fn cleanup_after_inspection(
     } else {
         TerminationRequest::Failed
     };
-    let reap = if child.wait().await.is_ok() {
+    let reap = if bounded_wait(child).await {
         ChildReap::Succeeded
     } else {
         ChildReap::Failed

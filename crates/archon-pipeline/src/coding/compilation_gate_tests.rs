@@ -471,6 +471,10 @@ mod support;
 #[path = "compilation_gate_tests/tree.rs"]
 mod tree;
 
+#[cfg(unix)]
+#[path = "compilation_gate_tests/reap.rs"]
+mod reap;
+
 use support::{
     await_process_exit, controlled_child_spec, fire_deadline, hold_until_exited, hold_until_started,
 };
