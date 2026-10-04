@@ -20,7 +20,7 @@ use super::FIXED_SCRIPT_SOURCE;
 /// - `resumed`: pause ids a previous run already took.
 ///
 /// `entry` is the expression the driver awaits; `subject` and `w` are in scope.
-pub(super) fn run(gate_mode: &str, scenario: &str, entry: &str) -> serde_json::Value {
+pub(crate) fn run(gate_mode: &str, scenario: &str, entry: &str) -> serde_json::Value {
     let driver = format!(
         r##"{FIXED_SCRIPT_SOURCE}
 const scenario = {scenario};
@@ -81,7 +81,7 @@ Promise.resolve().then(() => {entry}).then(
     serde_json::from_slice(&out.stdout).expect("driver json")
 }
 
-pub(super) const BODY: &str = "authorCandidate(w, bodyPolicy(subject, []))";
+pub(crate) const BODY: &str = "authorCandidate(w, bodyPolicy(subject, []))";
 
 pub(super) fn body(scenario: &str) -> serde_json::Value {
     run("enforce", scenario, BODY)

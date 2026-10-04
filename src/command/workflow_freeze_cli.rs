@@ -160,6 +160,18 @@ async fn stage_acceptance(
         })
         .await
         .context("building the staged acceptance judge client")?;
+    let gate = (
+        "freeze-acceptance",
+        crate::command::workflow_gate::GateId::FreezeAcceptance,
+        "acceptance",
+    );
+    // Every entry's fields first: assembly reads the entries vector whole.
+    let shape = &defects::ENTRY_SHAPE;
+    if let Some(refused) =
+        defects::refuse_element_shapes::<serde_json::Value>(cwd, staged, gate, &candidate, shape)
+    {
+        return refused;
+    }
     let candidate =
         match crate::command::workflow_freeze_candidate::acceptance_candidate_for_validation(
             &candidate,
@@ -176,18 +188,6 @@ async fn stage_acceptance(
                 );
             }
         };
-    let gate = (
-        "freeze-acceptance",
-        crate::command::workflow_gate::GateId::FreezeAcceptance,
-        "acceptance",
-    );
-    let lists = ["acceptance", "supplementary"];
-    type Entry = archon_workflow::task_set_contract::AcceptanceCriterion;
-    if let Some(refused) =
-        defects::refuse_element_shapes::<Entry>(cwd, staged, gate, &candidate, &lists)
-    {
-        return refused;
-    }
     if let Some((code, reason)) =
         candidate_refusal::<archon_workflow::task_set_contract::AcceptanceContract>(&candidate)
     {
@@ -258,7 +258,7 @@ fn stage_skeleton(
     );
     type Task = archon_workflow::task_skeleton::FrozenTask;
     if let Some(refused) =
-        defects::refuse_element_shapes::<Task>(cwd, staged, gate, &candidate, &["tasks"])
+        defects::refuse_element_shapes::<Task>(cwd, staged, gate, &candidate, &defects::TASK_SHAPE)
     {
         return refused;
     }

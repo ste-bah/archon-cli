@@ -477,4 +477,4 @@ mod repair_tests;
 
 #[cfg(test)]
 #[path = "workflow_decompose_progress_tests.rs"]
-mod progress_tests;
+pub(crate) mod progress_tests;
