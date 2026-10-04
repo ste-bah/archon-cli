@@ -37,6 +37,11 @@ pub fn remember_author(request: &super::WorkflowV2AgentRequest) {
         let _ = AUTHOR.try_with(|session| *session.0.lock().unwrap() = Some((id, request.clone())));
     }
 }
+/// Drop the remembered author session: it cannot be continued, so a later
+/// author attempt starts a new agent rather than asking for it again.
+pub fn forget_author() {
+    let _ = AUTHOR.try_with(|session| *session.0.lock().unwrap() = None);
+}
 pub async fn scope_id<T>(id: String, work: impl std::future::Future<Output = T>) -> T {
     GENERATION.scope(id, work).await
 }

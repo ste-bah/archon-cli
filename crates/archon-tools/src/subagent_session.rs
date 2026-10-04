@@ -2,6 +2,10 @@
 //! A scope is tied to an exact executor id and cannot be inherited by a nested agent.
 use std::sync::{Arc, Mutex};
 
+/// How every refusal to continue a completed invocation begins (#241), so a
+/// workflow can tell one from a failure and start a new agent instead.
+pub const CONTINUATION_REFUSED: &str = "cannot continue agent";
+
 #[derive(Clone, Default)]
 pub struct CompletedHistory(Arc<Mutex<SessionState>>);
 

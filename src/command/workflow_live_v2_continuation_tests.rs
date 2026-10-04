@@ -119,11 +119,29 @@ async fn preflight_reask_reuses_author_generation_and_original_request() {
     assert!(ids.iter().all(|c| c.1 == ids[0].1));
 }
 
-/// The executor refuses a validation repair whose stored context it does not
-/// hold or cannot run exactly (#241).
-struct RefusingRepair;
+/// The executor refuses a continuation whose stored context it does not hold
+/// or cannot run exactly (#241). Fresh calls answer from `replies` in order.
+struct RefusingContinuation {
+    replies: Mutex<Vec<String>>,
+    calls: Mutex<Vec<(&'static str, String, String)>>,
+}
+impl RefusingContinuation {
+    fn new(replies: &[&str]) -> Arc<Self> {
+        Arc::new(Self {
+            replies: Mutex::new(replies.iter().rev().map(|r| r.to_string()).collect()),
+            calls: Mutex::new(vec![]),
+        })
+    }
+    fn record(&self, kind: &'static str, call: &WorkflowAgentCall) {
+        let prompt = serde_json::to_string(&call.messages).unwrap();
+        self.calls
+            .lock()
+            .unwrap()
+            .push((kind, call.session_id.clone(), prompt));
+    }
+}
 #[async_trait::async_trait]
-impl WorkflowLlmClient for RefusingRepair {
+impl WorkflowLlmClient for RefusingContinuation {
     async fn send_message(
         &self,
         _: Vec<serde_json::Value>,
@@ -135,14 +153,18 @@ impl WorkflowLlmClient for RefusingRepair {
     }
     async fn run_agent(
         &self,
-        _: WorkflowAgentCall,
+        call: WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
-        Ok(outcome("invalid initial answer".into()))
+        self.record("fresh", &call);
+        Ok(outcome(
+            self.replies.lock().unwrap().pop().expect("a reply"),
+        ))
     }
     async fn continue_agent(
         &self,
         call: WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        self.record("continue", &call);
         Err(archon_workflow::WorkflowError::port(anyhow::anyhow!(
             "subagent failed: cannot continue agent '{}': its confinement is only known to the \
              process that started it; start a new agent",
@@ -151,36 +173,68 @@ impl WorkflowLlmClient for RefusingRepair {
     }
 }
 
+fn accepted() -> String {
+    let mut result = archon_workflow::WorkflowV2Result::accepted("inspected");
+    result
+        .evidence
+        .push(archon_workflow::WorkflowV2Evidence::new(
+            archon_workflow::WorkflowV2EvidenceKind::Inspection,
+            "inspected source contents",
+        ));
+    serde_json::to_string(&result).unwrap()
+}
+
+/// The client, and the receiver its activity sink needs kept open.
+fn live(port: Arc<RefusingContinuation>) -> (LiveV2AgentClient, impl Sized) {
+    let (sink, rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let client = LiveV2AgentClient::new(port, sink, vec![], "refused-run".into(), None, Some(10));
+    (client, rx)
+}
+
+/// A refused repair continuation starts an explicit new agent, in a new
+/// session, told the prior attempt's findings; the call then succeeds.
 #[tokio::test]
-async fn a_refused_repair_ends_the_call_as_a_failed_repair() {
-    let (sink, _rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
-    let client = LiveV2AgentClient::new(
-        Arc::new(RefusingRepair),
-        sink,
-        vec![],
-        "refused-run".into(),
-        None,
-        Some(10),
-    );
+async fn a_refused_repair_starts_a_new_agent_and_the_call_proceeds() {
+    let port = RefusingContinuation::new(&["invalid initial answer", &accepted()]);
+    let (client, _rx) = live(port.clone());
     let request = tests::request(WorkflowV2HostMethod::Agent, None);
     let adapter = archon_workflow::WorkflowV2AgentAdapter::new();
-    let error =
-        super::super::workflow_live_v2_host_dispatch::run_v2_agent_call_with_rejected_output_log(
-            &adapter, &client, &request, None,
-        )
-        .await
-        .expect_err("a refused repair produced a result");
-    let text = error.to_string();
-    assert!(
-        text.contains("cannot continue agent") && text.contains("start a new agent"),
-        "the refusal was lost: {text}"
+    super::super::workflow_live_v2_host_dispatch::run_v2_agent_call_with_rejected_output_log(
+        &adapter, &client, &request, None,
+    )
+    .await
+    .expect("the refusal stopped the call instead of starting a new agent");
+    let calls = port.calls.lock().unwrap();
+    let kinds: Vec<_> = calls.iter().map(|call| call.0).collect();
+    assert_eq!(kinds, vec!["fresh", "continue", "fresh"]);
+    assert_ne!(
+        calls[2].1, calls[0].1,
+        "the new agent reused the old session"
     );
     assert!(
-        matches!(
-            error,
-            archon_workflow::WorkflowV2AgentError::RepairExhausted { .. }
-                | archon_workflow::WorkflowV2AgentError::Transport(_)
-        ),
-        "not handled as a failed repair: {error:?}"
+        calls[2].2.contains("invalid initial answer"),
+        "no prior findings"
     );
+}
+
+/// An author re-ask whose session cannot be continued starts a new author.
+#[tokio::test]
+async fn a_refused_author_continuation_starts_a_new_author() {
+    let port = RefusingContinuation::new(&[&accepted(), &accepted()]);
+    let (client, _rx) = live(port.clone());
+    let mut request = tests::request(WorkflowV2HostMethod::Agent, None);
+    request.call.id = "author-workflow-script".into();
+    let adapter = archon_workflow::WorkflowV2AgentAdapter::new();
+    archon_workflow::v2::repair_session::author_scope(async {
+        for _ in 0..2 {
+            super::super::workflow_live_v2_host_dispatch::run_v2_agent_call_with_rejected_output_log(
+                &adapter, &client, &request, None,
+            )
+            .await
+            .expect("a refused author continuation stopped the run");
+        }
+    })
+    .await;
+    let kinds: Vec<_> = port.calls.lock().unwrap().iter().map(|c| c.0).collect();
+    assert_eq!(kinds, vec!["fresh", "continue", "fresh"]);
 }

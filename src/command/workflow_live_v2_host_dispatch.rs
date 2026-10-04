@@ -438,7 +438,7 @@ async fn run_logged_agent_inner(
         .unwrap_or(request);
     archon_workflow::v2::repair_session::scope_id(generation, async {
         let first = if continuing {
-            client.continue_agent_request(request, prompt).await?
+            archon_workflow::v2::continuation::continue_or_restart(client, request, prompt).await?
         } else {
             client.run_agent_request(request, prompt).await?
         };

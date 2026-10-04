@@ -132,6 +132,10 @@ pub enum WorkflowV2AgentError {
     EmptyReply,
     #[error("agent transport failed: {0}")]
     Transport(String),
+    /// The completed invocation cannot be continued exactly (#241). Never a
+    /// failure of the call: the workflow starts an explicit new agent.
+    #[error("{0}")]
+    ContinuationRefused(String),
     #[error("required notification delivery failed: {0}")]
     NotificationDelivery(String),
     #[error("schema repair failed after bounded retries: root={first_error}; last={repair_error}")]
@@ -187,9 +191,10 @@ impl WorkflowV2AgentError {
             Self::ImplementationChangedFilesOutsideOwnership(_) | Self::ReadOnlyChangedFiles => {
                 RepairErrorClass::Ownership
             }
-            Self::EmptyReply | Self::Transport(_) | Self::NotificationDelivery(_) => {
-                RepairErrorClass::Execution
-            }
+            Self::EmptyReply
+            | Self::Transport(_)
+            | Self::ContinuationRefused(_)
+            | Self::NotificationDelivery(_) => RepairErrorClass::Execution,
             _ => RepairErrorClass::Contract,
         }
     }
@@ -265,9 +270,9 @@ impl WorkflowV2AgentAdapter {
     where
         C: WorkflowV2AgentClient + Sync,
     {
-        client
-            .continue_agent_request(request, self.build_repair_prompt(request, output, error))
-            .await
+        let repair = self.build_repair_prompt(request, output, error);
+        let fresh = super::continuation::new_agent_prompt(&self.build_prompt(request), &repair);
+        super::continuation::continue_or_start_new(client, request, repair, fresh).await
     }
 }
 

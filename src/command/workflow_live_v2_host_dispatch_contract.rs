@@ -54,6 +54,7 @@ fn repairable_agent_contract_error(error: &WorkflowV2AgentError) -> bool {
         // layer up.
         WorkflowV2AgentError::DeclaredOutputUnsatisfied { .. }
         | WorkflowV2AgentError::Transport(_)
+        | WorkflowV2AgentError::ContinuationRefused(_)
         | WorkflowV2AgentError::NotificationDelivery(_)
         | WorkflowV2AgentError::PlanOnlyImplementation
         | WorkflowV2AgentError::ImplementationAcceptedWithoutChanges
