@@ -314,6 +314,11 @@ pub(crate) fn acceptance_candidate_for_validation(candidate: &[u8]) -> anyhow::R
     assemble_acceptance(candidate, false)
 }
 
+/// The judgment the host stamps over an authored entry's own before judging.
+pub(crate) fn judgment_placeholder() -> serde_json::Value {
+    serde_json::json!({ "verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": "" })
+}
+
 fn assemble_acceptance(candidate: &[u8], refuse_markers: bool) -> anyhow::Result<Vec<u8>> {
     let document = candidate_document(candidate);
     let mut value: serde_json::Value = serde_json::from_slice(&document)?;
@@ -338,9 +343,7 @@ fn assemble_acceptance(candidate: &[u8], refuse_markers: bool) -> anyhow::Result
             let mut list = list.clone();
             for entry in list.as_array_mut().into_iter().flatten() {
                 if let Some(object) = entry.as_object_mut() {
-                    object.insert("judgment".to_string(), serde_json::json!({
-                        "verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": ""
-                    }));
+                    object.insert("judgment".to_string(), judgment_placeholder());
                 }
             }
             list

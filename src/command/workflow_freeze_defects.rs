@@ -67,138 +67,20 @@ pub(super) fn refuse_candidate_error(
     )
 }
 
-/// The fields an element must carry, checked on the JSON before serde (Issue
-/// 261): each missing or non-string required field is its own shape defect,
-/// named by its JSON pointer, so repairing fields one per attempt lowers the
-/// count. serde stops at an element's first error and would hide the rest.
-pub(crate) struct ElementShape {
-    pub(crate) lists: &'static [&'static str],
-    pub(crate) required: &'static [&'static str],
-    /// Optional lists of objects, and the string fields each object requires.
-    pub(crate) nested: &'static [(&'static str, &'static [&'static str])],
-    /// A required object, and the string fields it requires.
-    pub(crate) objects: &'static [(&'static str, &'static [&'static str])],
-    /// Whether an element the table passes is also read as `E`.
-    pub(crate) serde_fallback: bool,
-}
-
-pub(crate) const TASK_SHAPE: ElementShape = ElementShape {
-    lists: &["tasks"],
-    required: &["task_id", "file_name"],
-    nested: &[
-        ("depends_on", &["task_id"]),
-        ("deliverable_contracts", &["kind", "artifact_path"]),
-    ],
-    objects: &[],
-    serde_fallback: true,
-};
-
-/// Authored acceptance entries; `judgment` is host-owned and stamped later.
-pub(crate) const ENTRY_SHAPE: ElementShape = ElementShape {
-    lists: &["entries", "supplementary", "acceptance"],
-    required: &["id", "criterion"],
-    nested: &[],
-    objects: &[("check", &["kind"])],
-    serde_fallback: false,
-};
-
-fn shape_defect(pointer: String, problem: &str) -> archon_workflow::defect::ValidationDefect {
-    let message = format!("{pointer} {problem}; write it exactly as the required shape names it");
-    archon_workflow::defect::ValidationDefect::new(
-        "invalid_candidate_shape",
-        &pointer,
-        "shape",
-        message,
-    )
-}
-
-fn string_fields(
-    item: &serde_json::Value,
-    at: &str,
-    fields: &[&str],
-    out: &mut Vec<archon_workflow::defect::ValidationDefect>,
-) {
-    for field in fields {
-        if !item.get(*field).is_some_and(serde_json::Value::is_string) {
-            out.push(shape_defect(
-                format!("{at}/{field}"),
-                "is missing or not a string",
-            ));
-        }
-    }
-}
-
-/// Every element shape defect of `candidate` under `shape`.
-pub(crate) fn element_shape_defects<E: serde::de::DeserializeOwned>(
-    candidate: &[u8],
-    shape: &ElementShape,
-) -> Vec<archon_workflow::defect::ValidationDefect> {
-    let document = candidate_document(candidate);
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&document) else {
-        return Vec::new();
-    };
-    let mut defects = Vec::new();
-    for list in shape.lists {
-        let items = value.get(*list).and_then(serde_json::Value::as_array);
-        for (index, item) in items.into_iter().flatten().enumerate() {
-            let at = format!("{list}/{index}");
-            if !item.is_object() {
-                defects.push(shape_defect(at, "is not an object"));
-                continue;
-            }
-            let before = defects.len();
-            string_fields(item, &at, shape.required, &mut defects);
-            for (key, fields) in shape.objects {
-                match item.get(*key) {
-                    Some(object) if object.is_object() => {
-                        string_fields(object, &format!("{at}/{key}"), fields, &mut defects)
-                    }
-                    _ => defects.push(shape_defect(
-                        format!("{at}/{key}"),
-                        "is missing or not an object",
-                    )),
-                }
-            }
-            for (key, fields) in shape.nested {
-                match item.get(*key) {
-                    None => {}
-                    Some(serde_json::Value::Array(objects)) => {
-                        for (slot, object) in objects.iter().enumerate() {
-                            let nested = format!("{at}/{key}/{slot}");
-                            if object.is_object() {
-                                string_fields(object, &nested, fields, &mut defects);
-                            } else {
-                                defects.push(shape_defect(nested, "is not an object"));
-                            }
-                        }
-                    }
-                    Some(_) => defects.push(shape_defect(format!("{at}/{key}"), "is not a list")),
-                }
-            }
-            if defects.len() == before
-                && shape.serde_fallback
-                && let Err(error) = serde_json::from_value::<E>(item.clone())
-            {
-                defects.push(shape_defect(
-                    at,
-                    &format!("does not match the required shape ({error})"),
-                ));
-            }
-        }
-    }
-    defects
-}
+#[path = "workflow_freeze_shape.rs"]
+mod shape;
+pub(crate) use shape::{ENTRY_SHAPE, ElementShape, TASK_SHAPE, element_shape_defects};
 
 /// Refuses the candidate with every element shape defect, or `None` when
 /// every element has the required shape.
-pub(super) fn refuse_element_shapes<E: serde::de::DeserializeOwned>(
+pub(super) fn refuse_element_shapes(
     cwd: &Path,
     staged: StagedArgs<'_>,
     (command_id, gate_id, subject): (&str, crate::command::workflow_gate::GateId, &str),
     candidate: &[u8],
     shape: &ElementShape,
 ) -> Option<Result<()>> {
-    let defects = element_shape_defects::<E>(candidate, shape);
+    let defects = element_shape_defects(candidate, shape);
     if defects.is_empty() {
         return None;
     }
@@ -209,11 +91,15 @@ pub(super) fn refuse_element_shapes<E: serde::de::DeserializeOwned>(
 }
 
 #[cfg(test)]
+#[path = "workflow_freeze_shape_tests.rs"]
+mod shape_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     /// The real refusal envelope for `candidate` under `shape`.
-    fn envelope(
+    pub(super) fn envelope(
         dir: &Path,
         name: &str,
         candidate: &serde_json::Value,
@@ -233,9 +119,7 @@ mod tests {
             "skeleton",
         );
         let bytes = serde_json::to_vec(candidate).expect("json");
-        match refuse_element_shapes::<archon_workflow::task_skeleton::FrozenTask>(
-            dir, staged, gate, &bytes, shape,
-        ) {
+        match refuse_element_shapes(dir, staged, gate, &bytes, shape) {
             None => serde_json::json!({ "policy_findings": [] }),
             Some(result) => {
                 result.expect("refusal");
@@ -246,7 +130,7 @@ mod tests {
 
     /// Feeds real envelopes, in order, to the fixed script's author loop: the
     /// loop must accept, never pause, while the host defects fall.
-    fn assert_author_loop_keeps_running(envelopes: &[serde_json::Value]) {
+    pub(super) fn assert_author_loop_keeps_running(envelopes: &[serde_json::Value]) {
         let scenario = format!(
             "{{ findings: (n) => (({}[n - 1] || {{}}).policy_findings || []) }}",
             serde_json::to_string(envelopes).expect("json")
@@ -370,10 +254,8 @@ mod tests {
             let tasks: Vec<_> = (0..4).map(|n| task(n, n < fixed)).collect();
             let candidate =
                 serde_json::json!({"schema_version": 1, "acceptance_digest": "d", "tasks": tasks});
-            let defects = element_shape_defects::<archon_workflow::task_skeleton::FrozenTask>(
-                &serde_json::to_vec(&candidate).expect("json"),
-                &TASK_SHAPE,
-            );
+            let defects =
+                element_shape_defects(&serde_json::to_vec(&candidate).expect("json"), &TASK_SHAPE);
             assert_eq!(defects.len(), 4 - fixed, "{defects:?}");
             for defect in &defects {
                 assert_eq!(defect.identity.code, "invalid_candidate_shape");

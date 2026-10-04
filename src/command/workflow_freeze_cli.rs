@@ -167,9 +167,7 @@ async fn stage_acceptance(
     );
     // Every entry's fields first: assembly reads the entries vector whole.
     let shape = &defects::ENTRY_SHAPE;
-    if let Some(refused) =
-        defects::refuse_element_shapes::<serde_json::Value>(cwd, staged, gate, &candidate, shape)
-    {
+    if let Some(refused) = defects::refuse_element_shapes(cwd, staged, gate, &candidate, shape) {
         return refused;
     }
     let candidate =
@@ -256,9 +254,8 @@ fn stage_skeleton(
         crate::command::workflow_gate::GateId::FreezeSkeleton,
         "skeleton",
     );
-    type Task = archon_workflow::task_skeleton::FrozenTask;
     if let Some(refused) =
-        defects::refuse_element_shapes::<Task>(cwd, staged, gate, &candidate, &defects::TASK_SHAPE)
+        defects::refuse_element_shapes(cwd, staged, gate, &candidate, &defects::TASK_SHAPE)
     {
         return refused;
     }
