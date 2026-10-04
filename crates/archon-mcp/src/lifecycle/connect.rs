@@ -29,7 +29,7 @@ pub(super) async fn connect_server(config: &ServerConfig) -> Result<McpClient, M
     config.configured_secrets().register();
     connect_server_inner(config)
         .await
-        .map_err(McpError::redacted)
+        .map_err(|error| error.redacted(&config.configured_secrets()))
 }
 
 async fn connect_server_inner(config: &ServerConfig) -> Result<McpClient, McpError> {

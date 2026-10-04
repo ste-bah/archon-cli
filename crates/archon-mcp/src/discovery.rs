@@ -84,6 +84,6 @@ impl McpClient {
             "tools/list failed on '{}': {error}",
             self.server_name
         ))
-        .redacted()
+        .redacted(&self.secrets)
     }
 }

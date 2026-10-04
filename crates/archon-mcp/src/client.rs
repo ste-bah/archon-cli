@@ -31,6 +31,7 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 pub struct McpClient {
     service: RunningService<RoleClient, discovery::DiscoveryHandler>,
     server_name: String,
+    secrets: archon_observability::secret_values::SecretValues,
     progress: rmcp::handler::client::progress::ProgressDispatcher,
 }
 
@@ -45,7 +46,8 @@ impl McpClient {
         T: IntoTransport<RoleClient, E, A>,
         E: std::error::Error + Send + Sync + 'static,
     {
-        config.configured_secrets().register();
+        let secrets = config.configured_secrets();
+        secrets.register();
         let server_name = config.name.clone();
         let handler = discovery::DiscoveryHandler::default();
         let progress = handler.0.clone();
@@ -56,13 +58,14 @@ impl McpClient {
                 server: server_name.clone(),
                 reason: e.to_string(),
             })
-            .map_err(McpError::redacted)?;
+            .map_err(|error| error.redacted(&secrets))?;
 
         tracing::info!(server = %server_name, "MCP client initialized");
 
         Ok(Self {
             service,
             server_name,
+            secrets,
             progress,
         })
     }
@@ -102,7 +105,7 @@ impl McpClient {
                     "tools/call '{}' could not be sent to '{}': {}",
                     name, self.server_name, e
                 ))
-                .redacted()
+                .redacted(&self.secrets)
             })?;
 
         let response = await_response_cancel_on_drop(handle, CALL_TIMEOUT)
@@ -113,7 +116,7 @@ impl McpClient {
                     "tools/call '{}' failed on '{}': {}",
                     name, self.server_name, e
                 ))
-                .redacted()
+                .redacted(&self.secrets)
             })?;
 
         let ServerResult::CallToolResult(result) = response else {
@@ -121,7 +124,7 @@ impl McpClient {
                 "tools/call '{}' on '{}' answered with the wrong result type",
                 name, self.server_name
             ))
-            .redacted());
+            .redacted(&self.secrets));
         };
 
         let mut converted = convert_tool_result(&result);
@@ -149,13 +152,13 @@ impl McpClient {
     pub async fn shutdown(self) -> Result<(), McpError> {
         self.service.cancel().await.map_err(|e| {
             McpError::Shutdown(format!("shutdown failed for '{}': {}", self.server_name, e))
-                .redacted()
+                .redacted(&self.secrets)
         })?;
         Ok(())
     }
 
     pub(crate) fn redact(&self, text: &str) -> String {
-        archon_observability::redaction::redact_text(text)
+        self.secrets.text(text)
     }
 
     /// The name of the connected server.

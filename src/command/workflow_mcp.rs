@@ -109,9 +109,9 @@ async fn start_servers(
             }
             Err(reason) => reason,
         };
-        let failure = archon_observability::redaction::redact_text(&secrets.text(&format!(
+        let failure = secrets.text(&format!(
             "workflow MCP server '{name}' (executable '{command}') {reason}; {recovery}"
-        )));
+        ));
         if required {
             return Err(anyhow!(failure));
         }
