@@ -445,5 +445,26 @@ async fn a_client_that_cannot_restore_refuses_to_continue() {
         .continue_agent(request(ToolAccessLevel::ReadOnly))
         .await
         .expect_err("a stateless client continued with a fresh call");
-    assert!(error.to_string().contains("start a new agent"), "{error}");
+    assert!(
+        error
+            .downcast_ref::<archon_tools::subagent_session::ContinuationRefused>()
+            .is_some(),
+        "the refusal is not typed: {error}"
+    );
+}
+
+/// A continuation of a session the pipeline does not hold is a typed refusal
+/// the workflow can act on, not an ordinary failure (#241).
+#[tokio::test]
+async fn continuing_a_session_the_pipeline_does_not_hold_is_a_typed_refusal() {
+    let error = client(false)
+        .continue_agent(request(ToolAccessLevel::ReadOnly))
+        .await
+        .expect_err("a continuation ran without its session");
+    assert!(
+        error
+            .downcast_ref::<archon_tools::subagent_session::ContinuationRefused>()
+            .is_some(),
+        "the refusal is not typed: {error}"
+    );
 }

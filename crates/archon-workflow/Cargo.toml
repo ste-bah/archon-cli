@@ -67,6 +67,11 @@ uuid.workspace = true
 # Issue-234: Windows has no Unix process group, so the native acceptance runner
 # confines a check's descendants in a Job Object instead, and verifies teardown
 # by waiting on the job. Same wrapper archon-core and archon-tools already use.
+# The typed continuation refusal the executor and the pipeline raise (#241),
+# and, for tests, the write-wave e2e runs a branch's shell through the real
+# Bash tool. archon-tools does not depend on this crate, so no cycle can form.
+archon-tools = { path = "../archon-tools" }
+
 [target.'cfg(windows)'.dependencies]
 process-wrap = { workspace = true }
 
@@ -87,7 +92,3 @@ archon-test-support = { path = "../archon-test-support" }
 # Same one-liner archon-core, archon-llm and archon-pipeline already carry.
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
-# Batch G2: the write-wave e2e runs a branch's shell through the real Bash
-# tool under the guard its host stamps build, as the live dispatch does.
-# archon-tools does not depend on this crate, so no cycle can form.
-archon-tools = { path = "../archon-tools" }

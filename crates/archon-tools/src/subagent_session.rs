@@ -2,9 +2,30 @@
 //! A scope is tied to an exact executor id and cannot be inherited by a nested agent.
 use std::sync::{Arc, Mutex};
 
-/// How every refusal to continue a completed invocation begins (#241), so a
-/// workflow can tell one from a failure and start a new agent instead.
-pub const CONTINUATION_REFUSED: &str = "cannot continue agent";
+/// A refusal to continue a completed invocation (#241): it cannot be
+/// restored exactly. Carried as this type, never recognised from text, so a
+/// workflow can tell it from a failure and start a new agent instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContinuationRefused(pub String);
+
+impl std::fmt::Display for ContinuationRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ContinuationRefused {}
+
+impl ContinuationRefused {
+    /// The refusal of a client that keeps no completed sessions at all.
+    pub fn no_session_kept() -> Self {
+        Self(
+            "cannot continue agent: this client keeps no completed agent session it can restore \
+             exactly; start a new agent"
+                .into(),
+        )
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct CompletedHistory(Arc<Mutex<SessionState>>);
@@ -13,6 +34,8 @@ pub struct CompletedHistory(Arc<Mutex<SessionState>>);
 struct SessionState {
     messages: Vec<serde_json::Value>,
     context: Option<RuntimeContext>,
+    /// Set by the executor when it refuses to continue this session.
+    refusal: Option<String>,
 }
 
 #[derive(Clone)]
@@ -39,6 +62,22 @@ impl CompletedHistory {
             state.context = initial;
         }
         state.context.clone()
+    }
+
+    /// Record that continuing this session was refused (#241). Only the
+    /// executor calls this, so the host that owns the session can tell a
+    /// refusal from any failure, whatever words the failure carries.
+    pub fn refuse(&self, why: &str) {
+        self.0.lock().expect("completed history poisoned").refusal = Some(why.to_string());
+    }
+
+    /// The refusal recorded for this session, taken once.
+    pub fn take_refusal(&self) -> Option<String> {
+        self.0
+            .lock()
+            .expect("completed history poisoned")
+            .refusal
+            .take()
     }
 
     pub fn messages(&self) -> Vec<serde_json::Value> {

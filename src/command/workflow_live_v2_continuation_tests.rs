@@ -119,25 +119,47 @@ async fn preflight_reask_reuses_author_generation_and_original_request() {
     assert!(ids.iter().all(|c| c.1 == ids[0].1));
 }
 
-/// The executor refuses a continuation whose stored context it does not hold
-/// or cannot run exactly (#241). Fresh calls answer from `replies` in order.
+/// The executor refuses to continue the first session (it cannot restore it
+/// exactly, #241) and continues any later one. Every call answers from
+/// `replies` in order. `typed: false` raises the same words as an ordinary
+/// error, as a model value quoted into a validation error would.
 struct RefusingContinuation {
     replies: Mutex<Vec<String>>,
     calls: Mutex<Vec<(&'static str, String, String)>>,
+    typed: bool,
 }
 impl RefusingContinuation {
     fn new(replies: &[&str]) -> Arc<Self> {
+        Self::build(replies, true)
+    }
+    fn build(replies: &[&str], typed: bool) -> Arc<Self> {
         Arc::new(Self {
             replies: Mutex::new(replies.iter().rev().map(|r| r.to_string()).collect()),
             calls: Mutex::new(vec![]),
+            typed,
         })
     }
-    fn record(&self, kind: &'static str, call: &WorkflowAgentCall) {
+    fn record(&self, kind: &'static str, call: &WorkflowAgentCall) -> String {
         let prompt = serde_json::to_string(&call.messages).unwrap();
+        let mut calls = self.calls.lock().unwrap();
+        calls.push((kind, call.session_id.clone(), prompt));
+        calls[0].1.clone()
+    }
+    fn reply(&self) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        Ok(outcome(
+            self.replies.lock().unwrap().pop().expect("a reply"),
+        ))
+    }
+    fn kinds(&self) -> Vec<&'static str> {
         self.calls
             .lock()
             .unwrap()
-            .push((kind, call.session_id.clone(), prompt));
+            .iter()
+            .map(|call| call.0)
+            .collect()
+    }
+    fn session(&self, index: usize) -> String {
+        self.calls.lock().unwrap()[index].1.clone()
     }
 }
 #[async_trait::async_trait]
@@ -156,20 +178,26 @@ impl WorkflowLlmClient for RefusingContinuation {
         call: WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         self.record("fresh", &call);
-        Ok(outcome(
-            self.replies.lock().unwrap().pop().expect("a reply"),
-        ))
+        self.reply()
     }
     async fn continue_agent(
         &self,
         call: WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
-        self.record("continue", &call);
-        Err(archon_workflow::WorkflowError::port(anyhow::anyhow!(
-            "subagent failed: cannot continue agent '{}': its confinement is only known to the \
-             process that started it; start a new agent",
+        if self.record("continue", &call) != call.session_id {
+            return self.reply();
+        }
+        let words = format!(
+            "cannot continue agent '{}': its confinement is only known to the process that \
+             started it; start a new agent",
             call.session_id
-        )))
+        );
+        Err(match self.typed {
+            true => archon_workflow::WorkflowError::port(
+                archon_tools::subagent_session::ContinuationRefused(words),
+            ),
+            false => archon_workflow::WorkflowError::port(anyhow::anyhow!("{words}")),
+        })
     }
 }
 
@@ -184,6 +212,12 @@ fn accepted() -> String {
     serde_json::to_string(&result).unwrap()
 }
 
+/// Valid JSON that fails the result contract: a different error class from
+/// a malformed reply, so it earns the second repair.
+fn accepted_without_evidence() -> String {
+    serde_json::to_string(&archon_workflow::WorkflowV2Result::accepted("no evidence")).unwrap()
+}
+
 /// The client, and the receiver its activity sink needs kept open.
 fn live(port: Arc<RefusingContinuation>) -> (LiveV2AgentClient, impl Sized) {
     let (sink, rx) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
@@ -191,50 +225,83 @@ fn live(port: Arc<RefusingContinuation>) -> (LiveV2AgentClient, impl Sized) {
     (client, rx)
 }
 
-/// A refused repair continuation starts an explicit new agent, in a new
-/// session, told the prior attempt's findings; the call then succeeds.
-#[tokio::test]
-async fn a_refused_repair_starts_a_new_agent_and_the_call_proceeds() {
-    let port = RefusingContinuation::new(&["invalid initial answer", &accepted()]);
-    let (client, _rx) = live(port.clone());
-    let request = tests::request(WorkflowV2HostMethod::Agent, None);
+async fn call(
+    client: &LiveV2AgentClient,
+    request: &archon_workflow::WorkflowV2AgentRequest,
+) -> Result<archon_workflow::WorkflowV2Result, archon_workflow::WorkflowV2AgentError> {
     let adapter = archon_workflow::WorkflowV2AgentAdapter::new();
     super::super::workflow_live_v2_host_dispatch::run_v2_agent_call_with_rejected_output_log(
-        &adapter, &client, &request, None,
+        &adapter, client, request, None,
     )
     .await
-    .expect("the refusal stopped the call instead of starting a new agent");
-    let calls = port.calls.lock().unwrap();
-    let kinds: Vec<_> = calls.iter().map(|call| call.0).collect();
-    assert_eq!(kinds, vec!["fresh", "continue", "fresh"]);
+}
+
+/// A refused repair continuation starts an explicit new agent, in a new
+/// session, told the prior attempt's findings. When that agent's answer needs
+/// the second repair, the repair continues the new agent, not the refused one.
+#[tokio::test]
+async fn a_refused_repair_starts_a_new_agent_whose_session_later_repairs_continue() {
+    let port = RefusingContinuation::new(&[
+        "invalid initial answer",
+        &accepted_without_evidence(),
+        &accepted(),
+    ]);
+    let (client, _rx) = live(port.clone());
+    let request = tests::request(WorkflowV2HostMethod::Agent, None);
+    call(&client, &request)
+        .await
+        .expect("the refusal stopped the call instead of starting a new agent");
+    assert_eq!(port.kinds(), vec!["fresh", "continue", "fresh", "continue"]);
     assert_ne!(
-        calls[2].1, calls[0].1,
+        port.session(2),
+        port.session(0),
         "the new agent reused the old session"
     );
+    assert_eq!(
+        port.session(3),
+        port.session(2),
+        "the second repair went to the refused session"
+    );
     assert!(
-        calls[2].2.contains("invalid initial answer"),
-        "no prior findings"
+        port.calls.lock().unwrap()[2]
+            .2
+            .contains("invalid initial answer")
     );
 }
 
-/// An author re-ask whose session cannot be continued starts a new author.
+/// An author re-ask whose session cannot be continued starts a new author,
+/// and every later re-ask continues that new author.
 #[tokio::test]
-async fn a_refused_author_continuation_starts_a_new_author() {
-    let port = RefusingContinuation::new(&[&accepted(), &accepted()]);
+async fn a_refused_author_continuation_starts_a_new_author_that_later_calls_continue() {
+    let port = RefusingContinuation::new(&[&accepted(), &accepted(), &accepted()]);
     let (client, _rx) = live(port.clone());
     let mut request = tests::request(WorkflowV2HostMethod::Agent, None);
     request.call.id = "author-workflow-script".into();
-    let adapter = archon_workflow::WorkflowV2AgentAdapter::new();
     archon_workflow::v2::repair_session::author_scope(async {
-        for _ in 0..2 {
-            super::super::workflow_live_v2_host_dispatch::run_v2_agent_call_with_rejected_output_log(
-                &adapter, &client, &request, None,
-            )
-            .await
-            .expect("a refused author continuation stopped the run");
+        for _ in 0..3 {
+            call(&client, &request)
+                .await
+                .expect("a refused author continuation stopped the run");
         }
     })
     .await;
-    let kinds: Vec<_> = port.calls.lock().unwrap().iter().map(|c| c.0).collect();
-    assert_eq!(kinds, vec!["fresh", "continue", "fresh"]);
+    assert_eq!(port.kinds(), vec!["fresh", "continue", "fresh", "continue"]);
+    assert_eq!(
+        port.session(3),
+        port.session(2),
+        "the third call went to the refused author"
+    );
+}
+
+/// The refusal's words in an ordinary error (a model value quoted into a
+/// validation error) are not a refusal: no new agent is started.
+#[tokio::test]
+async fn refusal_words_in_an_ordinary_error_do_not_start_a_new_agent() {
+    let port = RefusingContinuation::build(&["invalid initial answer"], false);
+    let (client, _rx) = live(port.clone());
+    let request = tests::request(WorkflowV2HostMethod::Agent, None);
+    call(&client, &request)
+        .await
+        .expect_err("an ordinary error was taken for a refusal");
+    assert_eq!(port.kinds(), vec!["fresh", "continue"]);
 }

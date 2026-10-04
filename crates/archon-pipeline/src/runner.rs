@@ -402,9 +402,7 @@ pub trait LlmClient: Send + Sync {
     /// continues or not at all (#241). Only a client that restores the
     /// completed invocation exactly overrides this.
     async fn continue_agent(&self, _request: AgentExecutionRequest) -> Result<LlmResponse> {
-        anyhow::bail!(
-            "cannot continue agent: this client keeps no completed agent session it can restore exactly; start a new agent"
-        )
+        Err(archon_tools::subagent_session::ContinuationRefused::no_session_kept().into())
     }
 
     async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {

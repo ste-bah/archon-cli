@@ -119,3 +119,52 @@ async fn a_client_without_sessions_gets_an_explicit_new_agent_for_the_repair() {
         "the new agent was not told the prior findings"
     );
 }
+
+/// The refusal's words inside an ordinary error (a model value quoted into a
+/// validation error, say) are not a refusal: no new agent is started (#241).
+#[tokio::test]
+async fn refusal_words_in_an_ordinary_error_do_not_start_a_new_agent() {
+    struct Quoting(Mutex<usize>);
+    #[async_trait::async_trait]
+    impl WorkflowV2AgentClient for Quoting {
+        async fn run_agent(&self, _: String) -> Result<String, WorkflowV2AgentError> {
+            *self.0.lock().unwrap() += 1;
+            Ok("invalid initial answer".into())
+        }
+        async fn continue_agent_request(
+            &self,
+            _: &WorkflowV2AgentRequest,
+            _: String,
+        ) -> Result<String, WorkflowV2AgentError> {
+            Err(WorkflowV2AgentError::Transport(
+                "landed records invalid: schema_version 'cannot continue agent'".into(),
+            ))
+        }
+    }
+    let client = Quoting(Mutex::new(0));
+    let request = same_call_request();
+    WorkflowV2AgentAdapter::new()
+        .run_with_repair(&client, &request)
+        .await
+        .expect_err("an ordinary error was taken for a refusal");
+    assert_eq!(*client.0.lock().unwrap(), 1, "a new agent was started");
+}
+
+fn same_call_request() -> WorkflowV2AgentRequest {
+    WorkflowV2AgentRequest {
+        call: WorkflowV2HostCall {
+            id: "same-call".into(),
+            method: WorkflowV2HostMethod::Agent,
+            write_mode: None,
+            options: Default::default(),
+        },
+        role: "researcher".into(),
+        task: "inspect source".into(),
+        constraints: vec![],
+        input: serde_json::Value::Null,
+        repository_root: None,
+        project_artifacts: Default::default(),
+        target_files: vec![],
+        target_ownership_scopes: vec![],
+    }
+}
