@@ -311,6 +311,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         let observed = self
             .execute_with_operational_retry(&command, &call_id, expected_generation)
             .await?;
+        let truncated = observed.truncation();
         let raw_stdout = utf8(observed.stdout, "stdout")?;
         let mut prepared: Option<PreparedPublicationV1> = if observed.exit_code == Some(0) {
             Some(secrets.parse_json(
@@ -338,8 +339,8 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 stderr_bytes: observed.stderr_bytes,
                 timed_out: observed.timed_out,
                 interrupted: false,
-                stdout_truncated: false,
-                stderr_truncated: false,
+                stdout_truncated: truncated.0,
+                stderr_truncated: truncated.1,
                 gate_envelope: None,
                 publication_receipt: None,
                 subjects: Vec::new(),
@@ -458,8 +459,8 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             stderr_bytes: observed.stderr_bytes,
             timed_out: false,
             interrupted: false,
-            stdout_truncated: false,
-            stderr_truncated: false,
+            stdout_truncated: truncated.0,
+            stderr_truncated: truncated.1,
             gate_envelope: Some(envelope),
             publication_receipt: Some(receipt),
             subjects,

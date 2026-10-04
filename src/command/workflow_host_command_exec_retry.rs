@@ -3,8 +3,8 @@
 //! and the policy live in `workflow_host_command_operational`.
 use super::*;
 use crate::command::workflow_host_command_operational::{
-    NextStep, OperationalAttempt, OperationalReport, classify, next_step, pause_run, record_retry,
-    reported_progress, require_run_owned,
+    NextStep, OperationalAttempt, OperationalReport, classify, next_step, pause_for_stall,
+    pause_run, record_retry, reported_progress, require_run_owned,
 };
 
 impl FixedHostCommandExecutor {
@@ -64,6 +64,41 @@ impl FixedHostCommandExecutor {
                 limit_secs: command.timeout_secs,
                 attempts: &history,
             };
+            // A stalled teardown kept its record: processes it started may
+            // still write the call's roots, so no retry runs beside them.
+            // The run pauses, and a resume refuses until they are gone.
+            let stalled =
+                crate::command::workflow_host_command_groups::stalled_running(&self.run_root)
+                    .map_err(|error| format!("the host command records cannot be read: {error}"))
+                    .and_then(|records| {
+                        (!records.is_empty())
+                            .then(|| {
+                                records
+                                    .iter()
+                                    .map(|record| {
+                                        format!(
+                                    "host command '{}' (process group {}){}",
+                                    record.command_id,
+                                    record.pgid,
+                                    crate::command::workflow_host_command_groups::stall_note(
+                                        record
+                                    )
+                                )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("; ")
+                            })
+                            .map_or(Ok(()), Err)
+                    });
+            if let Err(evidence) = stalled {
+                return Err(pause_for_stall(
+                    &store,
+                    &self.run_root,
+                    expected_generation,
+                    &report,
+                    &evidence,
+                ));
+            }
             match next_step(&history) {
                 NextStep::Retry => record_retry(&store, &self.run_root, &report),
                 NextStep::Pause(cause) => {

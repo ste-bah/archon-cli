@@ -32,28 +32,28 @@ type RunChild = Box<dyn process_wrap::tokio::ChildWrapper>;
 #[cfg(not(windows))]
 type RunChild = tokio::process::Child;
 
-struct GroupGuard(i32);
-impl Drop for GroupGuard {
-    fn drop(&mut self) {
-        // On Windows the child's Job Object (`process_wrap`'s `KillOnDrop`)
-        // reaps the whole job when the child drops; there is no process group
-        // to signal here.
-        #[cfg(unix)]
-        {
-            if self.0 > 0 {
-                unsafe {
-                    libc::kill(-self.0, libc::SIGKILL);
-                }
-            }
-        }
-    }
-}
+#[path = "acceptance_scratch_confine.rs"]
+mod confine;
+#[cfg(not(unix))]
+use confine::Confinement;
+use confine::{leader_exit, reap, terminate};
+
+/// Scan the check's tree every this many 25 ms ticks (Issue 270): a
+/// descendant that leaves the group and the session is tied to the check
+/// only while its parent lives, so it has to be seen while the check runs.
+const SCAN_TICKS: u32 = 8;
 
 /// Spawn the prepared command as a confined child: a new Unix process group,
-/// or a Windows Job Object with kill-on-drop.
+/// or a Windows Job Object with kill-on-drop. On Linux the leader also reaps
+/// its orphans, so a descendant whose parent exits stays in its tree.
 #[cfg(not(windows))]
 fn spawn_confined(mut process: tokio::process::Command, cwd: &Path) -> WorkflowResult<RunChild> {
     process.process_group(0);
+    #[cfg(unix)]
+    // SAFETY: prctl is an async-signal-safe syscall.
+    unsafe {
+        process.pre_exec(archon_shell::process_tree::become_subreaper);
+    }
     process.spawn().map_err(|e| WorkflowError::io(cwd, e))
 }
 #[cfg(windows)]
@@ -199,19 +199,30 @@ pub async fn run_at(
     if let Some(root) = site.audit_root {
         super::cache::record_group(root, None)?;
     }
-    let mut child = spawn_confined(process, cwd)?;
-    let mut group = GroupGuard(
-        child
-            .id()
-            .ok_or_else(|| invalid("scratch child has no process id"))? as i32,
-    );
+    let child = spawn_confined(process, cwd)?;
+    let leader = child
+        .id()
+        .ok_or_else(|| invalid("scratch child has no process id"))?;
+    #[cfg(unix)]
+    let mut owned = confine::OwnedCheck::new(leader, child);
+    #[cfg(unix)]
+    let (child, confinement) = (&mut *owned.child, &mut owned.confinement);
+    // Borrowed on every platform, as the Unix owner hands them out.
+    #[cfg(not(unix))]
+    let mut confinement = Confinement::new(leader);
+    #[cfg(not(unix))]
+    let confinement = &mut confinement;
+    #[cfg(not(unix))]
+    let mut child = child;
+    #[cfg(not(unix))]
+    let child = &mut child;
     if let Some(root) = site.audit_root {
-        super::cache::record_group(root, Some(group.0))?;
+        super::cache::record_group(root, Some(leader as i32))?;
     }
-    let (stdout_pipe, stderr_pipe, stdin_pipe) = take_pipes(&mut child);
+    let (stdout_pipe, stderr_pipe, stdin_pipe) = take_pipes(child);
     let overflow = Arc::new(AtomicBool::new(false));
-    let stdout = tokio::spawn(drain(stdout_pipe, site.output_bytes, overflow.clone()));
-    let stderr = tokio::spawn(drain(stderr_pipe, site.output_bytes, overflow.clone()));
+    let mut stdout = tokio::spawn(drain(stdout_pipe, site.output_bytes, overflow.clone()));
+    let mut stderr = tokio::spawn(drain(stderr_pipe, site.output_bytes, overflow.clone()));
     let mut stdin = stdin_pipe;
     let bytes = command.bytes().to_vec();
     let writer = tokio::spawn(async move {
@@ -230,20 +241,29 @@ pub async fn run_at(
         Duration::from_secs(365 * 86_400)
     };
     let mut next_quota = tokio::time::Instant::now() + quota_period;
-    let status = loop {
+    let mut stall = None;
+    let mut ticks = 0u32;
+    // `None`: the leader exited and is not reaped yet (Unix); `Some`: it was
+    // stopped and reaped, with its status if that is known.
+    let stopped = loop {
         tokio::select! {
-            result=child.wait()=>break result.map_err(|e|WorkflowError::io(cwd,e))?,
-            _=tokio::time::sleep_until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break terminate(&mut child,group.0).await?;},
+            result=leader_exit(child)=>break match result {
+                Ok(()) => None,
+                Err(e) => { stall = Some(format!("waiting for the scratch child failed: {e}")); None }
+            },
+            _=tokio::time::sleep_until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break Some(terminate(child,confinement,&mut stall).await);},
             _=tokio::time::sleep(Duration::from_millis(25))=>{
-                if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break terminate(&mut child,group.0).await?;}
-                if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break terminate(&mut child,group.0).await?;}
+                if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break Some(terminate(child,confinement,&mut stall).await);}
+                if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break Some(terminate(child,confinement,&mut stall).await);}
+                ticks += 1;
+                if ticks.is_multiple_of(SCAN_TICKS) { confinement.scan(); }
             }
             _=tokio::time::sleep_until(next_quota)=>{
                 quota_walk_count += 1;
                 if let Some(root) = site.audit_root {
                     match site.audited_size(root) {
-                        Ok(size) if size>site.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break terminate(&mut child,group.0).await?;}
-                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break terminate(&mut child,group.0).await?;}
+                        Ok(size) if size>site.scratch_bytes=>{error=Some("native acceptance scratch limit exceeded".into());break Some(terminate(child,confinement,&mut stall).await);}
+                        Err(e)=>{error=Some(format!("scratch size audit failed: {e}"));break Some(terminate(child,confinement,&mut stall).await);}
                         _=>{}
                     }
                 }
@@ -252,52 +272,57 @@ pub async fn run_at(
         }
     };
     writer.abort();
-    // Reap remaining members even if the leader exited successfully.
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(-group.0, libc::SIGKILL);
-    }
+    // Reap remaining members even if the leader exited successfully: the
+    // whole tree, including every member a scan saw while the check ran,
+    // while an exited leader is still unreaped; then reap it.
+    let teardown = confinement.kill().await;
+    let status = match stopped {
+        Some(status) => status,
+        None => reap(child, &mut stall).await,
+    };
+    confinement.leader_reaped();
     // Windows: terminate the Job Object and wait on it, so every process the
     // check started is reaped before its output is read (Issue-234).
     #[cfg(windows)]
     {
         let _ = child.start_kill();
-        let _ = child.wait().await;
-        // The job's wait drained every process in it: teardown is verified.
-        group.0 = 0;
+        let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
     }
-    let pipes = tokio::time::timeout(Duration::from_secs(3), async {
-        let out = stdout
+    let pipes = match tokio::time::timeout(Duration::from_secs(3), async {
+        let out = (&mut stdout)
             .await
             .map_err(|e| invalid(e.to_string()))?
             .map_err(|e| WorkflowError::io(cwd, e))?;
-        let err = stderr
+        let err = (&mut stderr)
             .await
             .map_err(|e| invalid(e.to_string()))?
             .map_err(|e| WorkflowError::io(cwd, e))?;
         Ok::<_, WorkflowError>((out, err))
     })
     .await
-    .map_err(|_| invalid("scratch child pipes did not close after group teardown"))??;
-    // group is disarmed only after ESRCH, never merely because the leader exited.
-    #[cfg(unix)]
     {
-        for _ in 0..100 {
-            if unsafe { libc::kill(-group.0, 0) } == -1
-                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
-            {
-                group.0 = 0;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+        Ok(pipes) => pipes?,
+        Err(_) => {
+            stdout.abort();
+            stderr.abort();
+            error = Some(
+                "scratch child output pipes stayed open after teardown: a process outside the check's process tree still holds them".into(),
+            );
+            ((Vec::new(), false), (Vec::new(), false))
         }
+    };
+    // The tree is disarmed only once no member is left, never merely because
+    // the leader exited.
+    match teardown {
+        Ok(()) => confinement.disarm(),
+        Err(evidence) => error = Some(evidence),
     }
-    if group.0 != 0 {
-        error = Some(if cfg!(unix) {
-            "scratch process group teardown could not be verified".into()
-        } else {
-            "native acceptance process groups require a Unix host".into()
-        });
+    // A scratch is private to the observation: what still holds it after
+    // the tree is gone may be a descendant nothing else names any more.
+    if let Some(root) = site.audit_root
+        && let Some(escape) = confinement.detached_holders(root, site.audit_target).await
+    {
+        error = Some(escape);
     }
     if overflow.load(Ordering::SeqCst) {
         error = Some("native acceptance output limit exceeded".into());
@@ -312,10 +337,15 @@ pub async fn run_at(
             _ => {}
         }
     }
+    // A stall outranks every other ending: the check could not be torn down,
+    // and that is what a resume has to know.
+    if let Some(evidence) = stall {
+        error = Some(evidence);
+    }
     let mut result = CheckResult {
         classification: None,
         acceptance_id: id.into(),
-        exit_code: status.code(),
+        exit_code: status.and_then(|status| status.code()),
         quota_walk_count,
         stdout: pipes.0.0,
         stderr: pipes.1.0,
@@ -326,19 +356,7 @@ pub async fn run_at(
     result.stderr = site.redact(&result.stderr, pipes.1.1);
     Ok(result)
 }
-async fn terminate(child: &mut RunChild, group: i32) -> WorkflowResult<std::process::ExitStatus> {
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(-group, libc::SIGKILL);
-    }
-    // Windows: terminate the whole Job Object, not just the leader.
-    #[cfg(windows)]
-    {
-        let _ = group;
-        let _ = child.start_kill();
-    }
-    tokio::time::timeout(Duration::from_secs(3), child.wait())
-        .await
-        .map_err(|_| invalid("scratch child reap deadline exceeded"))?
-        .map_err(|e| invalid(format!("scratch child reap failed: {e}")))
-}
+
+#[cfg(all(test, unix))]
+#[path = "acceptance_scratch_process_tests.rs"]
+mod tests;

@@ -49,6 +49,11 @@ process-wrap.workspace = true
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
+# On Windows it owns the build's Job Object (archon-shell `job_object`), so it
+# can terminate the job and confirm it is empty (issue #242).
+[target.'cfg(windows)'.dependencies]
+archon-shell = { path = "../archon-shell" }
+
 [dev-dependencies]
 # `features = ["full"]` does not include `test-util`; the compilation-gate
 # lifecycle tests need it for `#[tokio::test(start_paused = true)]`, which is
