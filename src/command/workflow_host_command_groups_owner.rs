@@ -85,7 +85,8 @@ pub(super) enum Owner {
     /// A guard in this process holds it: a running command, not a stall.
     Supervising,
     /// The writer is proven gone (exited, or its pid now names another
-    /// process): no teardown will ever settle the record.
+    /// process), or its confined Windows job has ended: its record can
+    /// be judged without waiting for that writer.
     Exited,
     /// This process, settled without clearing it; another live process; or
     /// an owner whose identity cannot be read.
@@ -111,7 +112,18 @@ pub(super) fn owner(record: &HostCommandGroupRecord, pending: &Path) -> Owner {
         }
         Ok(Some(_)) | Err(_) => Owner::Unknown,
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        match record
+            .job
+            .as_deref()
+            .map(archon_shell::job_object::named_job_running)
+        {
+            Some(Ok(false)) => Owner::Exited,
+            _ => Owner::Unknown,
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     Owner::Unknown
 }
 

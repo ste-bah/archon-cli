@@ -66,75 +66,9 @@ const UNKNOWN_SUFFIX: &str = ".unknown.json";
 mod owner;
 use owner::Owner;
 
-/// Removes its record when the supervisor is done with the group, unless
-/// teardown stalled and the record is kept for a resume to see.
-#[derive(Debug)]
-pub(crate) struct GroupRecordGuard {
-    path: PathBuf,
-    kept: bool,
-    pending: PathBuf,
-}
-
-impl GroupRecordGuard {
-    /// Where the record is written.
-    #[cfg(test)]
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// Keep the record: teardown stalled. `survivors` (pid, start time) are
-    /// written into it so a resume refuses while any of them still runs;
-    /// `None` means they are not known, and the record then runs until the
-    /// tree is verified. If the record cannot be rewritten, it is renamed to
-    /// `<pgid>.unknown.json`, which means the same: never the old contents,
-    /// whose empty survivor list would let a resume go ahead. A pending
-    /// marker persisted at registration remains authoritative if both writes
-    /// fail. Any persistence failure is also returned as stall evidence.
-    pub(crate) fn keep(mut self, survivors: Option<&[(u32, u64)]>) -> Option<String> {
-        self.kept = true;
-        // From here a reader sees a settled teardown, never a running one.
-        owner::release(&self.pending);
-        let rewritten = std::fs::read(&self.path)
-            .map_err(|error| error.to_string())
-            .and_then(|bytes| {
-                serde_json::from_slice::<HostCommandGroupRecord>(&bytes)
-                    .map_err(|error| error.to_string())
-            })
-            .and_then(|mut record| {
-                record.stalled = true;
-                record.survivors_unknown = survivors.is_none();
-                record.survivors = survivors.map(<[_]>::to_vec).unwrap_or_default();
-                let bytes = serde_json::to_vec(&record).map_err(|error| error.to_string())?;
-                let staged = self.path.with_extension("json.tmp");
-                std::fs::write(&staged, bytes).map_err(|error| error.to_string())?;
-                std::fs::rename(&staged, &self.path).map_err(|error| error.to_string())
-            });
-        match rewritten {
-            Ok(()) => {
-                let _ = std::fs::remove_file(&self.pending);
-                None
-            }
-            Err(error) => {
-                let unknown = unknown_path(&self.path);
-                let renamed = std::fs::rename(&self.path, &unknown);
-                let removed = if renamed.is_ok() {
-                    let _ = std::fs::remove_file(&self.pending);
-                    None
-                } else {
-                    // The marker alone then says "unknown survivors", even
-                    // after this process exits; the old empty record, which
-                    // a reader would judge after a crash, goes.
-                    Some(std::fs::remove_file(&self.path))
-                };
-                let evidence = format!(
-                    "survivors unknown: record rewrite failed ({error}); fallback rename: {renamed:?}; record removal: {removed:?}"
-                );
-                tracing::error!(%evidence, record = %self.path.display(), "host command teardown record could not name survivors");
-                Some(evidence)
-            }
-        }
-    }
-}
+#[path = "workflow_host_command_groups_guard.rs"]
+mod guard;
+pub(crate) use guard::GroupRecordGuard;
 
 fn unknown_path(path: &Path) -> PathBuf {
     let stem = path
@@ -142,29 +76,6 @@ fn unknown_path(path: &Path) -> PathBuf {
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
     path.with_file_name(format!("{stem}{UNKNOWN_SUFFIX}"))
-}
-
-impl Drop for GroupRecordGuard {
-    fn drop(&mut self) {
-        if !self.kept {
-            // The marker first: a record left without it is judged by what
-            // it names, which is right for a confirmed teardown. A marker
-            // that cannot go keeps both, read as unknown while this process
-            // lives and judged by what they name once it has exited.
-            match std::fs::remove_file(&self.pending) {
-                Ok(()) => {
-                    let _ = std::fs::remove_file(&self.path);
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    let _ = std::fs::remove_file(&self.path);
-                }
-                Err(error) => {
-                    tracing::warn!(%error, "confirmed teardown marker could not be removed; record retained")
-                }
-            }
-        }
-        owner::release(&self.pending);
-    }
 }
 
 /// Writes the record of `pgid` under `dir` before the supervisor waits on it.
@@ -202,14 +113,13 @@ pub(crate) fn record_group(
     // record was left never collides with it; held live from here, so no
     // reader takes this running command for a stall or an ended group.
     let (path, pending) = owner::claim(dir, pgid, leader_start);
-    let guard = GroupRecordGuard {
+    let mut guard = GroupRecordGuard {
         path,
         pending,
         kept: false,
+        marker: None,
+        record: record.clone(),
     };
-    let mut unknown = record.clone();
-    unknown.stalled = true;
-    unknown.survivors_unknown = true;
     // The record first, then the marker that says "not settled": both exist
     // before any teardown can change permissions or exhaust the filesystem.
     // A crash between the two leaves a record judged by what it names.
@@ -223,9 +133,10 @@ pub(crate) fn record_group(
         .open(&guard.pending)
         .map_err(io(&guard.pending))?;
     marker
-        .write_all(&serde_json::to_vec(&unknown)?)
+        .write_all(&guard::supervised_marker(&record)?)
         .map_err(io(&guard.pending))?;
     marker.sync_all().map_err(io(&guard.pending))?;
+    guard.marker = Some(marker);
     Ok(guard)
 }
 
@@ -285,6 +196,12 @@ fn survivors_running(
 /// where that cannot be probed, which a caller must treat as possibly
 /// running; a failed session probe counts as running.
 pub(crate) fn record_running(record: &HostCommandGroupRecord) -> Option<bool> {
+    // A job is gone once no handle holds it, and killed on close with every
+    // process it held; while it exists, its accounting says what still runs.
+    #[cfg(windows)]
+    if let Some(job) = &record.job {
+        return archon_shell::job_object::named_job_running(job).ok();
+    }
     if record.survivors_unknown {
         return None;
     }
@@ -293,12 +210,6 @@ pub(crate) fn record_running(record: &HostCommandGroupRecord) -> Option<bool> {
     match survivors_running(record, archon_shell::process_tree::identity_of) {
         Some(false) => {}
         other => return other,
-    }
-    // A job is gone once no handle holds it, and killed on close with every
-    // process it held; while it exists, its accounting says what still runs.
-    #[cfg(windows)]
-    if let Some(job) = &record.job {
-        return archon_shell::job_object::named_job_running(job).ok();
     }
     // A stranger holding the leader's pid proves the group and session
     // ended: their numbers name someone else's processes now.
@@ -355,28 +266,47 @@ pub(crate) fn left_groups(
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => return Err(error.into()),
         };
-        let mut record: HostCommandGroupRecord = serde_json::from_slice(&bytes)
+        let marker_record = if lone_marker {
+            guard::pending_record(&path)?
+        } else {
+            None
+        };
+        let mut authoritative = marker_record.as_ref().is_some_and(|marker| marker.settled);
+        let mut record: HostCommandGroupRecord = marker_record.map(|marker| Ok(marker.record)).unwrap_or_else(|| serde_json::from_slice(&bytes))
             .map_err(|error| {
                 anyhow::anyhow!(
                     "host command group record {} is unreadable ({error}); check that group by hand, then remove the record",
                     path.display()
                 )
             })?;
-        record.file = Some(path.clone());
         let unknown = path.to_string_lossy().ends_with(UNKNOWN_SUFFIX);
         let pending = path.with_extension("pending");
         let marked = !unknown && !lone_marker && pending.exists();
-        match owner::owner(&record, &pending) {
-            // A command this process still supervises: running, not a
-            // stall, and never removed here.
-            Owner::Supervising => {
-                running.push(record);
-                continue;
-            }
+        record.file = Some(path.clone());
+        let owner = owner::owner(&record, &pending);
+        // A live local guard may be updating its marker right now. It is
+        // still running work, never a stall or an ended record.
+        if owner == Owner::Supervising {
+            running.push(record);
+            continue;
+        }
+        let settled = if marked {
+            guard::pending_record(&pending)?
+                .filter(|marker| marker.settled)
+                .map(|marker| marker.record)
+        } else {
+            None
+        };
+        authoritative |= settled.is_some();
+        if let Some(settled) = settled {
+            record = settled;
+        }
+        record.file = Some(path.clone());
+        match owner {
             // A marker its owner can no longer settle: the record is judged
             // by what it names (a crash), or by its stall if it was kept.
             Owner::Exited if marked => {}
-            _ if marked => {
+            _ if marked && !authoritative && !record.stalled => {
                 record.stalled = true;
                 record.survivors_unknown = true;
             }
@@ -384,7 +314,7 @@ pub(crate) fn left_groups(
         }
         // An unknown record, or a marker left alone by a stall whose
         // survivors could not be written: unknown until someone verifies.
-        if unknown || lone_marker {
+        if unknown || (lone_marker && !authoritative) {
             record.stalled = true;
             record.survivors_unknown = true;
         }
@@ -468,3 +398,7 @@ pub(crate) fn require_no_running_groups(
 #[cfg(all(test, unix))]
 #[path = "workflow_host_command_groups_tests.rs"]
 mod tests;
+
+#[cfg(all(test, windows))]
+#[path = "workflow_host_command_groups_windows_tests.rs"]
+mod windows_tests;

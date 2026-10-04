@@ -296,15 +296,28 @@ impl Tracker {
     /// rounds. A scan that cannot finish is an error: what is alive is then
     /// unknown, and the caller must not take the tree for empty.
     pub fn kill(&mut self, bound: Duration) -> io::Result<Vec<Pinned>> {
-        self.kill_observed(bound, &mut || {})
+        self.kill_inner(
+            bound,
+            #[cfg(test)]
+            &mut || {},
+        )
     }
 
     /// [`Self::kill`], calling `after_stop` once each freeze round has sent
     /// its stops (a test seam: it lets a test run the clock out there).
+    #[cfg(test)]
     pub(super) fn kill_observed(
         &mut self,
         bound: Duration,
         after_stop: &mut dyn FnMut(),
+    ) -> io::Result<Vec<Pinned>> {
+        self.kill_inner(bound, after_stop)
+    }
+
+    fn kill_inner(
+        &mut self,
+        bound: Duration,
+        #[cfg(test)] after_stop: &mut dyn FnMut(),
     ) -> io::Result<Vec<Pinned>> {
         let deadline = Instant::now() + bound;
         loop {
@@ -313,7 +326,13 @@ impl Tracker {
                 return Ok(members);
             }
             let mut stopped = BTreeSet::new();
-            let frozen = self.freeze(members, &mut stopped, deadline, after_stop);
+            let frozen = self.freeze(
+                members,
+                &mut stopped,
+                deadline,
+                #[cfg(test)]
+                after_stop,
+            );
             // Whatever ended the freeze, the deadline included: a stopped
             // member is neither running nor dead, so every one is killed
             // before anything returns. The set is finite and each kill is
@@ -334,7 +353,7 @@ impl Tracker {
         mut members: Vec<Pinned>,
         stopped: &mut BTreeSet<Pinned>,
         deadline: Instant,
-        after_stop: &mut dyn FnMut(),
+        #[cfg(test)] after_stop: &mut dyn FnMut(),
     ) -> io::Result<()> {
         for _ in 0..FREEZE_ROUNDS {
             let mut fresh = Vec::new();
@@ -352,6 +371,7 @@ impl Tracker {
                 self.send(pinned, libc::SIGSTOP);
                 stopped.insert(pinned);
             }
+            #[cfg(test)]
             after_stop();
             match self.refresh(deadline) {
                 Ok(next) => members = next,

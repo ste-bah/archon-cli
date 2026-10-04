@@ -70,11 +70,10 @@ fn a_record_with_unknown_survivors_runs_until_someone_verifies_the_tree() {
 }
 
 #[test]
-fn a_survivor_list_that_cannot_be_written_never_leaves_the_old_empty_list() {
+fn a_survivor_list_that_cannot_replace_the_record_is_retained_in_the_marker() {
     // The staging write fails (here: the staging name is a directory, as a
-    // full disk would fail it). The old contents (no survivors) would let a
-    // resume go ahead once the group ended; the record must instead mean
-    // "unknown survivors".
+    // full disk would fail it). The old empty record must not let resume
+    // proceed: its marker retains the survivor's identity instead.
     let run = tempfile::tempdir().unwrap();
     let dir = run.path().join(GROUP_RECORDS_DIR);
     let pgid = ended_group();
@@ -87,8 +86,8 @@ fn a_survivor_list_that_cannot_be_written_never_leaves_the_old_empty_list() {
     let _ = survivor.kill();
     let _ = survivor.wait();
     let refusal = refused.expect_err("an unwritten survivor list is not 'none left'");
-    assert!(refusal.to_string().contains("unknown"), "{refusal}");
-    assert!(unknown_path(&path).exists());
+    assert!(refusal.to_string().contains("survivors:"), "{refusal}");
+    assert!(path.with_extension("pending").exists());
 }
 
 #[test]
@@ -281,5 +280,100 @@ fn an_unwritten_stall_stays_unknown_after_its_owner_exits() {
     }
     owned_by(&dir, ended_group());
     let refusal = require_no_running_groups(run.path(), "run").unwrap_err();
+    assert!(refusal.to_string().contains("unknown"), "{refusal}");
+}
+
+#[test]
+fn unwritable_directory_stall_survives_owner_exit_and_heals() {
+    use std::os::unix::fs::PermissionsExt;
+    for readable_record in [true, false] {
+        let run = tempfile::tempdir().unwrap();
+        let dir = run.path().join(GROUP_RECORDS_DIR);
+        let pgid = ended_group();
+        let (mut survivor, pinned) = sleeper();
+        let guard = record_group(&dir, pgid, pgid, Some(pgid), None, "cmd").unwrap();
+        let path = guard.path().to_path_buf();
+        // Simulate the writer's subsequent exit without losing its real guard.
+        owned_by(&dir, ended_group());
+        if !readable_record {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let persistence = guard.keep(Some(&[pinned]));
+        let old_empty_remained = path.exists();
+        // Restore directory access before resume, as after a transient failure;
+        // deletion errors must not hide a false "ended" classification.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let refused = require_no_running_groups(run.path(), "run");
+        let _ = survivor.kill();
+        let _ = survivor.wait();
+        assert!(
+            persistence.is_some(),
+            "test requires an unwritable directory"
+        );
+        assert!(old_empty_remained, "the old empty record must remain");
+        let refusal = refused.expect_err("resume proceeded while the pinned leftover was alive");
+        assert!(refusal.to_string().contains("survivors:"), "{refusal}");
+        assert!(require_no_running_groups(run.path(), "run").is_ok());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn an_incomplete_marker_fallback_never_reads_as_a_crash() {
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    let pgid = ended_group();
+    let guard = record_group(&dir, pgid, pgid, Some(pgid), None, "cmd").unwrap();
+    let marker = guard.path().with_extension("pending");
+    std::mem::forget(guard);
+    owned_by(&dir, ended_group());
+    // The in-place fallback was interrupted after invalidating the marker.
+    std::fs::write(marker, b"{\"settled_record\":").unwrap();
+    let refusal = require_no_running_groups(run.path(), "run").unwrap_err();
+    assert!(refusal.to_string().contains("unknown"), "{refusal}");
+}
+
+#[test]
+fn unknown_marker_fallback_stays_closed_after_owner_exit() {
+    use std::os::unix::fs::PermissionsExt;
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    let pgid = ended_group();
+    let guard = record_group(&dir, pgid, pgid, Some(pgid), None, "cmd").unwrap();
+    owned_by(&dir, ended_group());
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let persistence = guard.keep(None);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(persistence.is_some());
+    let refusal = require_no_running_groups(run.path(), "run").unwrap_err();
+    assert!(refusal.to_string().contains("unknown"), "{refusal}");
+}
+
+#[test]
+fn a_legacy_ambiguous_marker_stays_closed_after_owner_exit() {
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    let pgid = ended_group();
+    let (mut survivor, _) = sleeper();
+    let guard = record_group(&dir, pgid, pgid, Some(pgid), None, "cmd").unwrap();
+    let path = guard.path().to_path_buf();
+    std::mem::forget(guard);
+    // Before explicit marker states, this could mean either a crash or a
+    // stall that failed to rewrite, rename AND delete the empty record.
+    let mut marker = read(&path);
+    marker.stalled = true;
+    marker.survivors_unknown = true;
+    std::fs::write(
+        path.with_extension("pending"),
+        serde_json::to_vec(&marker).unwrap(),
+    )
+    .unwrap();
+    owned_by(&dir, ended_group());
+    let refused = require_no_running_groups(run.path(), "run");
+    let _ = survivor.kill();
+    let _ = survivor.wait();
+    let refusal = refused.expect_err("legacy ambiguity was taken for a crash");
     assert!(refusal.to_string().contains("unknown"), "{refusal}");
 }
