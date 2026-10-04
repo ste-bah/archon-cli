@@ -335,6 +335,13 @@ async function authorCandidate(w, policy) {
 
     const outcome = await w.hostCommand(policy.capability, { stdin: authored.content });
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
+    if (routed.operational) {
+      // The gate never judged the candidate: the attempt makes no progress.
+      if (!measuredReplies) progress.answered += 1;
+      recordOperational(progress, call, routed.operational);
+      lastFindings = [`host gate operational failure: ${routed.operational}`];
+      continue;
+    }
     if (policy.author) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = (outcome.gateEnvelope?.policy_findings || [])
@@ -402,19 +409,23 @@ function acceptSetGate(gate) {
   return gate.outcome;
 }
 
+// A gate operational error (a truncated judge reply, a preparation failure)
+// is returned as `operational`, never thrown: the caller's loop counts it as
+// an attempt without progress and pauses the run when its window closes.
 function routeFindings(outcome, retryScopes, shadowScopes) {
   if (!outcome || typeof outcome !== "object") throw new Error("host command returned no typed outcome");
+  const routed = {
+    retry: [], retryFindings: [], fatal: [], inherited: [], inheritedFindings: [],
+    shadow: [], shadowFindings: [], all: [], allFindings: [], operational: null
+  };
   if (outcome.gateEnvelope?.operational_error) {
-    throw new Error(outcome.gateEnvelope.operational_error.text || "host gate operational failure");
+    routed.operational = String(outcome.gateEnvelope.operational_error.text || "host gate operational failure");
+    return routed;
   }
   const findings = Array.isArray(outcome.gateEnvelope?.policy_findings)
     ? outcome.gateEnvelope.policy_findings
     : [];
   const shadows = shadowScopes || new Set();
-  const routed = {
-    retry: [], retryFindings: [], fatal: [], inherited: [], inheritedFindings: [],
-    shadow: [], shadowFindings: [], all: [], allFindings: []
-  };
   for (const finding of findings) {
     const text = typeof finding.text === "string" ? finding.text : "unnamed policy finding";
     const scope = finding.remediation_scope;

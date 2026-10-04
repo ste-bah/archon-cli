@@ -55,6 +55,7 @@ fn run_js(driver: &str) -> String {
         "progressText",
         "findingTier",
         "findingKey",
+        "findingSetKey",
         "newProgress",
         "recordStep",
         "recordAttempt",

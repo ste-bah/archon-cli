@@ -135,3 +135,108 @@ fn round3_regression_suite_passes() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+// --- round 5: deterministic refusals and gate operational errors -------------
+
+/// A refusal the host produced (not a model's text) naming the `n`-th task.
+fn refusal(n: &str) -> String {
+    format!(
+        r##""candidate artifact was refused: task 'TASK-X-" + {n} + "' file_name 'bad' must be a direct TASK-*.md filename""##
+    )
+}
+
+#[test]
+fn a_first_error_validator_cleared_one_defect_per_attempt_keeps_running() {
+    // Seventy invalid file names, one repaired per attempt; the validator
+    // names only the first one left, so the finding count never falls.
+    let out = body(&format!(
+        r##"{{ answer: (n) => {{ {SPIN_GUARD} return {{ status: "accepted", stopReason: "end_turn", content: "# body " + n }}; }},
+          findings: (n) => n <= 70 ? [{{ text: {}, subject: "skeleton", remediation_scope: "candidate_artifact" }}] : [] }}"##,
+        refusal("String(n).padStart(3, \"0\")")
+    ));
+    assert_eq!(out["accepted"], true, "{out}");
+    assert_eq!(out["calls"], 71, "{out}");
+    assert!(pause_ids(&out).is_empty(), "{out}");
+}
+
+#[test]
+fn a_deterministic_refusal_oscillating_between_two_defects_pauses() {
+    let out = body(&format!(
+        r##"{{ findings: (n) => [{{ text: {}, subject: "skeleton", remediation_scope: "candidate_artifact" }}] }}"##,
+        refusal("(n % 2 ? \"001\" : \"002\")")
+    ));
+    assert_paused(&out);
+    assert_eq!(out["calls"], 5, "A, B, then A, B, A seen before: {out}");
+    assert_eq!(evidence(&out, 0)["reason"], "no_progress");
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [true, true, false, false, false]
+    );
+}
+
+#[test]
+fn a_resumed_loop_still_knows_the_refusals_it_saw_before_the_pause() {
+    // X four times pauses; after the resume Y is new, then X (seen before the
+    // pause), Y and X again are not.
+    let out = run(
+        "enforce",
+        &format!(
+            r##"{{ resumed: ["pause-body-TASK-X-010-1"],
+              findings: (n) => [{{ text: {}, subject: "skeleton", remediation_scope: "candidate_artifact" }}] }}"##,
+            refusal("(n > 4 && n % 2 ? \"002\" : \"001\")")
+        ),
+        BODY,
+    );
+    assert_paused(&out);
+    assert_eq!(out["calls"], 8, "{out}");
+    assert_eq!(
+        pause_ids(&out),
+        ["pause-body-TASK-X-010-1", "pause-body-TASK-X-010-2"]
+    );
+}
+
+#[test]
+fn a_gate_operational_error_pauses_the_author_loop_instead_of_failing() {
+    let out = body(
+        r##"{ operational: (n, capability) => capability === "land-task-body" ? "judge response was truncated" : null }"##,
+    );
+    assert_paused(&out);
+    assert_eq!(out["calls"], 3, "{out}");
+    let evidence = evidence(&out, 0);
+    assert_eq!(evidence["reason"], "operational_no_progress", "{evidence}");
+    assert!(
+        evidence["last_findings"][0]
+            .as_str()
+            .is_some_and(|text| text.contains("judge response was truncated")),
+        "{evidence}"
+    );
+}
+
+#[test]
+fn a_set_gate_operational_error_pauses_the_rounds_instead_of_failing() {
+    let out = run(
+        "enforce",
+        r##"{ operational: (n, capability) => capability === "task-set-lint" ? "lint preparation failed" : null }"##,
+        "workflow(w)",
+    );
+    assert_paused(&out);
+    assert_eq!(pause_ids(&out), ["pause-set-gates-1"], "{out}");
+    assert_eq!(evidence(&out, 0)["reason"], "operational_no_progress");
+}
+
+#[test]
+fn a_frozen_stage_verification_operational_error_pauses_instead_of_failing() {
+    let out = run(
+        "enforce",
+        r##"{ args: { frozenChain: { acceptance: true } },
+          operational: (n, capability) => capability === "verify-frozen-acceptance" ? "verification preparation failed" : null }"##,
+        "workflow(w)",
+    );
+    assert_paused(&out);
+    assert_eq!(
+        pause_ids(&out),
+        ["pause-verify-frozen-acceptance-1"],
+        "{out}"
+    );
+    assert_eq!(evidence(&out, 0)["reason"], "operational_no_progress");
+}

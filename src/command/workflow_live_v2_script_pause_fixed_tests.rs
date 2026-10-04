@@ -68,6 +68,8 @@ struct StallingHost {
     fixed: AtomicBool,
     varying: AtomicBool,
     refuse: AtomicBool,
+    /// The body gate reports an operational error while this is set.
+    operational: AtomicBool,
     lands: AtomicUsize,
 }
 
@@ -126,7 +128,19 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
         } else {
             Vec::new()
         };
-        let refused = !findings.is_empty() && self.refuse.load(Ordering::SeqCst);
+        let operational = (request.command_id == "land-task-body"
+            && self.operational.load(Ordering::SeqCst))
+        .then(|| archon_workflow::GateOperationalError {
+            kind: "operational".into(),
+            text: "judge response was truncated".into(),
+        });
+        let findings = if operational.is_some() {
+            Vec::new()
+        } else {
+            findings
+        };
+        let refused =
+            operational.is_some() || (!findings.is_empty() && self.refuse.load(Ordering::SeqCst));
         let call_id = self.call_identity(&request)?;
         Ok(archon_workflow::HostCommandResult {
             exit_code: Some(0),
@@ -142,7 +156,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
                 schema_version: archon_workflow::GATE_ENVELOPE_SCHEMA_VERSION,
                 report: serde_json::json!("judged"),
                 policy_findings: findings,
-                operational_error: None,
+                operational_error: operational,
             }),
             publication_receipt: (!refused).then(|| archon_workflow::PublicationReceiptV1 {
                 schema_version: archon_workflow::PUBLICATION_RECEIPT_SCHEMA_VERSION,
@@ -209,6 +223,7 @@ fn fixture() -> (
         fixed: AtomicBool::new(false),
         varying: AtomicBool::new(false),
         refuse: AtomicBool::new(false),
+        operational: AtomicBool::new(false),
         lands: AtomicUsize::new(0),
     });
     (temp, store, run_id, llm, host)
@@ -356,3 +371,5 @@ async fn a_resume_replays_the_failed_author_call_before_the_pause_instead_of_re_
 
 #[path = "workflow_live_v2_script_pause_occurrence_tests.rs"]
 mod occurrences;
+#[path = "workflow_live_v2_script_pause_operational_tests.rs"]
+mod operational;

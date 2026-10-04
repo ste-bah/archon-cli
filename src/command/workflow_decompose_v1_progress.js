@@ -10,18 +10,23 @@
 // author loop and the set-gate rounds -- now keeps one record: an attempt
 // that makes progress keeps it going, and STALL_ATTEMPTS consecutive attempts
 // that make none end it. Novelty -- findings no earlier attempt reported --
-// keeps that short window open, but it is not real progress: the judge is a
-// model, and a judge that rewords one defect makes every finding new. Only a
-// new best is real progress, and NO_NEW_BEST_ATTEMPTS consecutive attempts
-// without one end the loop too. A loop whose best keeps improving meets
-// neither limit, whatever its length. A loop that ends PAUSES the run with
-// its evidence (`w.pause`); it never fails it.
+// keeps that short window open. Real progress is narrower, and
+// NO_NEW_BEST_ATTEMPTS consecutive attempts without it end the loop too:
+// - a new best: a higher tier, or fewer findings at the best tier;
+// - a refusal the host itself produced (refused or packaging tier) whose
+//   finding set no earlier attempt in this loop produced. A first-error
+//   validator names one defect at a time, so clearing one per attempt never
+//   lowers the count; its next defect is a new set. Revisiting a set is not.
+// Judged-tier novelty is never real progress: the judge is a model, and one
+// that rewords a defect makes every finding new. A loop that keeps making
+// real progress meets neither limit, whatever its length. A loop that ends
+// PAUSES the run with its evidence (`w.pause`); it never fails it.
 
 // Consecutive attempts without progress that end a loop: every kind counts,
 // an outage, an incomplete reply and a judged repeat alike.
 const STALL_ATTEMPTS = 3;
-// Consecutive attempts without a new best that end a loop. Every attempt that
-// sets no new best counts, novelty included; each new best restarts it.
+// Consecutive attempts without real progress that end a loop. Every other
+// attempt counts, judged novelty included; real progress restarts it.
 const NO_NEW_BEST_ATTEMPTS = 64;
 // Bounds on what one pause event carries.
 const PAUSE_EVIDENCE_FINDINGS = 20;
@@ -66,6 +71,10 @@ function newProgress(seed) {
   return {
     best: null,
     seen: new Set((seed || []).map(findingKey)),
+    // Deterministic finding sets already produced. Like every other field it
+    // is rebuilt on resume: the resumed run replays each recorded attempt
+    // verbatim, so a set seen before the pause is still seen after it.
+    seenSets: new Set((seed || []).length > 0 ? [findingSetKey(seed)] : []),
     history: [],
     stalled: 0,
     stalledOperational: 0,
@@ -73,6 +82,10 @@ function newProgress(seed) {
     calls: 0,
     answered: 0
   };
+}
+
+function findingSetKey(findings) {
+  return findings.map(findingKey).sort().join("\u0001");
 }
 
 // `entry.progress` keeps the short window open; `best` is real progress.
@@ -100,25 +113,30 @@ function recordStep(progress, entry, best) {
 //   and only defects no earlier attempt in the loop reported. That is an
 //   author working through distinct defects (a mechanical refusal names one
 //   at a time); trading a finding for one seen before is the oscillation the
-//   attempt history exists to break, and is not progress. Novelty is not a
-//   new best either: it keeps the short window open and nothing more.
+//   attempt history exists to break, and is not progress;
+// - a host refusal set never produced before at the best tier, which is also
+//   real progress (see the head of this file). Other novelty is not.
 function recordAttempt(progress, call, findings, answered = true) {
   if (answered) progress.answered += 1;
   const tier = findingTier(findings);
   const keys = findings.map(findingKey);
   const best = progress.best;
   const better = !best || tier > best.tier || (tier === best.tier && findings.length < best.count);
-  const novel = !better && tier === best.tier && keys.every((key) => !progress.seen.has(key));
+  const atBest = !better && tier === best.tier;
+  const novel = atBest && keys.every((key) => !progress.seen.has(key));
+  const setKey = findingSetKey(findings);
+  const freshRefusal = atBest && tier < JUDGED_TIER && !progress.seenSets.has(setKey);
   if (better) {
     progress.best = { tier, count: findings.length };
   }
   for (const key of keys) progress.seen.add(key);
+  if (tier < JUDGED_TIER) progress.seenSets.add(setKey);
   return recordStep(progress, {
     call,
     kind: ["packaging", "refused", "judged"][tier],
     findings: findings.length,
-    progress: better || novel
-  }, better);
+    progress: better || novel || freshRefusal
+  }, better || freshRefusal);
 }
 
 // What a round without a candidate retained. An entry no earlier round

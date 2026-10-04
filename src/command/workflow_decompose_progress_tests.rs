@@ -15,6 +15,8 @@ use super::FIXED_SCRIPT_SOURCE;
 ///   complete reply.
 /// - `findings(n)`: the finding texts (or finding objects) the gate returns
 ///   for its `n`-th call; defaults to none.
+/// - `operational(n, capability)`: a gate operational error text for the
+///   gate's `n`-th call, or null; defaults to none.
 /// - `resumed`: pause ids a previous run already took.
 ///
 /// `entry` is the expression the driver awaits; `subject` and `w` are in scope.
@@ -40,6 +42,8 @@ const w = {{
     lands += 1;
     const texts = scenario.findings ? scenario.findings(lands, capability) : [];
     const callId = capability + "-" + lands;
+    const operational = scenario.operational ? scenario.operational(lands, capability) : null;
+    if (operational) return {{ gateEnvelope: {{ policy_findings: [], operational_error: {{ kind: "operational", text: operational }} }} }};
     return {{
       publicationReceipt: {{ call_id: callId }},
       result: {{ data: {{ publicationReceipt: {{ call_id: callId }} }} }},
