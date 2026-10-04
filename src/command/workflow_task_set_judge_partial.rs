@@ -27,6 +27,10 @@ struct Saved {
     key: String,
     reply: String,
     chunks: u64,
+    /// Raw bytes added by credited chunks, independent of redaction and
+    /// retained across resumes. None supports earlier schema-2 caches.
+    #[serde(default)]
+    credit_bytes: Option<u64>,
     /// The reply was judged and its verdicts saved: its chunks are part of
     /// that persisted work and keep counting.
     #[serde(default)]
@@ -34,15 +38,16 @@ struct Saved {
 }
 
 impl Saved {
-    /// Whether this is a reply a retry may continue, with sane counters:
-    /// each saved chunk added at least one byte.
+    /// Validate credit independently of the redacted reply's length. Each
+    /// chunk grew the bounded raw document; redaction can shrink it.
     fn usable(&self, key: &str) -> bool {
+        let credit_bound = self.credit_bytes.unwrap_or(MAX_PARTIAL_REPLY_BYTES as u64);
         let counted = if self.completed {
-            self.reply.is_empty() && self.chunks <= MAX_PARTIAL_REPLY_BYTES as u64
+            self.reply.is_empty() && self.chunks <= credit_bound
         } else if self.reply.is_empty() {
             self.chunks == 0
         } else {
-            self.chunks <= self.reply.len() as u64 && document(&self.reply) == Document::Open
+            self.chunks <= credit_bound && document(&self.reply) == Document::Open
         };
         self.schema == SCHEMA
             && self.key == key
@@ -83,27 +88,42 @@ impl<'a> PartialReply<'a> {
             .unwrap_or_default()
     }
 
-    fn store(&self, reply: &str, chunks: u64, completed: bool) {
+    fn store(&self, reply: &str, chunks: u64, credit_bytes: u64, completed: bool) -> bool {
         let saved = Saved {
             schema: SCHEMA,
             key: self.key.clone(),
             // Never secrets on disk: the same redaction the logs get.
             reply: archon_observability::redaction::redact_text(reply),
             chunks,
+            credit_bytes: Some(credit_bytes),
             completed,
         };
+        // Check the bytes actually persisted, after redaction. A rejected
+        // extension leaves the previous continuation and its credit intact.
+        if !saved.usable(&self.key) {
+            return false;
+        }
         if let Err(error) = write_private(&self.path, &saved) {
             eprintln!(
                 "the judge's partial reply could not be saved at {} ({error}); a retry continues from less",
                 self.path.display()
             );
+            return false;
         }
+        true
     }
 
     /// Counts the chunks a saved, still usable reply holds, once per freeze
     /// attempt.
-    pub(crate) fn count_saved(&self) {
-        self.progress.reused_judged(self.load().chunks);
+    pub(crate) fn count_saved(&self, verdict_saved: bool) {
+        let saved = self.load();
+        if saved.completed && !verdict_saved {
+            // An orphan marker is neither progress nor a continuation. Clear
+            // it before a fresh reply starts counting from its first chunk.
+            self.store("", 0, 0, false);
+            return;
+        }
+        self.progress.reused_judged(saved.chunks);
     }
 
     /// The saved reply to continue and its chunk count, when there is one.
@@ -113,9 +133,20 @@ impl<'a> PartialReply<'a> {
     }
 
     /// Saves `reply`, now built of `chunks` chunks, and reports one unit.
-    pub(super) fn extended(&self, reply: &str, chunks: u64) {
-        self.store(reply, chunks, false);
+    pub(super) fn extended(&self, reply: &str, chunks: u64, added_bytes: usize) -> bool {
+        let previous = self.load();
+        if added_bytes == 0 || chunks != previous.chunks.saturating_add(1) {
+            return false;
+        }
+        let credit_bytes = previous
+            .credit_bytes
+            .unwrap_or(previous.chunks)
+            .saturating_add(added_bytes as u64);
+        if !self.store(reply, chunks, credit_bytes, false) {
+            return false;
+        }
         self.progress.saved(true);
+        true
     }
 
     /// The reply is spent (judged, unusable or discarded): the next ask
@@ -125,8 +156,9 @@ impl<'a> PartialReply<'a> {
         if saved.completed || (saved.reply.is_empty() && saved.chunks == 0) {
             return;
         }
-        self.progress.withdraw_judged(saved.chunks);
-        self.store("", 0, false);
+        if self.store("", 0, 0, false) {
+            self.progress.withdraw_judged(saved.chunks);
+        }
     }
 
     /// The reply was judged and its verdicts are saved: the reply itself is
@@ -134,7 +166,12 @@ impl<'a> PartialReply<'a> {
     pub(crate) fn completed(&self) {
         let saved = self.load();
         if !saved.completed && !saved.reply.is_empty() {
-            self.store("", saved.chunks, true);
+            self.store(
+                "",
+                saved.chunks,
+                saved.credit_bytes.unwrap_or(saved.chunks),
+                true,
+            );
         }
     }
 }
@@ -178,3 +215,7 @@ fn write_private(path: &Path, saved: &Saved) -> std::io::Result<()> {
     }
     written
 }
+
+#[cfg(test)]
+#[path = "workflow_task_set_judge_partial_tests.rs"]
+mod tests;

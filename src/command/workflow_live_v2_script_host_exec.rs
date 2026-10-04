@@ -139,6 +139,13 @@ impl WorkflowScriptHost {
             self.runner.runtime.target_repository_root.as_deref(),
         );
         let execution_generation = self.fixed_execution_generation()?;
+        // A stall belongs to the generation at entry, including a non-fixed
+        // script. Never re-sample ownership after an awaited dispatch.
+        let view_generation = self
+            .runner
+            .workflow_store
+            .load_state(&self.runner.run_id)?
+            .generation;
         let input_hash = input_hash_with_source_fingerprint(
             &execution.input,
             source_metadata.source_fingerprint.as_deref(),
@@ -200,7 +207,7 @@ impl WorkflowScriptHost {
             {
                 self.restore_reused_record(&record, from_history, execution_generation)?;
                 self.mark_reused(&record, execution_generation).await?;
-                return self.result_view(&record);
+                return self.result_view_in_generation(&record, view_generation);
             }
             let source_metadata_reusable = !source_metadata.source_metadata_required
                 || source_metadata.source_fingerprint.is_some();
@@ -248,7 +255,7 @@ impl WorkflowScriptHost {
                 }
                 self.restore_reused_record(&record, from_history, execution_generation)?;
                 self.mark_reused(&record, execution_generation).await?;
-                return self.result_view(&record);
+                return self.result_view_in_generation(&record, view_generation);
             }
         }
 
@@ -264,7 +271,7 @@ impl WorkflowScriptHost {
             && self.refresh_audit_for_cache(&record).await?
         {
             self.mark_reused(&record, execution_generation).await?;
-            return self.result_view(&record);
+            return self.result_view_in_generation(&record, view_generation);
         }
         // Review remediation under a shifted ordinal, or a round a later round
         // superseded: replayed by content (`remediation_replay`). A write is
@@ -274,7 +281,7 @@ impl WorkflowScriptHost {
             && self.refresh_audit_for_cache(&record).await?
         {
             self.mark_reused(&record, execution_generation).await?;
-            return self.result_view(&record);
+            return self.result_view_in_generation(&record, view_generation);
         }
         self.note_fix_runs(&execution);
 
@@ -469,6 +476,6 @@ impl WorkflowScriptHost {
                 record.call.id, record.status
             )));
         }
-        self.result_view(&record)
+        self.result_view_in_generation(&record, view_generation)
     }
 }

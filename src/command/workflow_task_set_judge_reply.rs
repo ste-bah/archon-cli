@@ -105,7 +105,9 @@ pub(super) async fn complete_reply(
         })?
         .map_err(|error| JudgeIncomplete(format!("the provider gave no reply: {error}")))?;
         let grown = format!("{reply}{}", outcome.content);
-        if grown.len() > MAX_PARTIAL_REPLY_BYTES {
+        if grown.len() > MAX_PARTIAL_REPLY_BYTES
+            || archon_observability::redaction::redact_text(&grown).len() > MAX_PARTIAL_REPLY_BYTES
+        {
             return Err(stalled(
                 &reply,
                 &format!(
@@ -166,8 +168,13 @@ pub(super) async fn complete_reply(
                 reply = grown;
                 chunks = chunks.saturating_add(1);
                 continuing = true;
-                if let Some(partial) = partial {
-                    partial.extended(&reply, chunks);
+                if let Some(partial) = partial
+                    && !partial.extended(&reply, chunks, outcome.content.len())
+                {
+                    return Err(stalled(
+                        &reply,
+                        "the usable redacted continuation could not be persisted",
+                    ));
                 }
             }
         }

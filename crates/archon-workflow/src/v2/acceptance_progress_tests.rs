@@ -49,18 +49,23 @@ fn failed(id: &str, why: &str) -> AcceptanceCheckRecordV1 {
 
 #[test]
 fn the_loop_runs_past_the_old_round_count_while_the_failing_set_shrinks() {
-    let rounds: Vec<AcceptanceRoundRecordV1> = (1..=5)
-        .map(|n| {
-            let checks = (n..=5)
-                .map(|id| failed(&format!("AC-{id}"), "assertion failed"))
-                .collect();
-            round(n, checks)
-        })
-        .collect();
+    let mut rounds = vec![failing(0, 1)];
+    rounds.extend(
+        (1..=5)
+            .map(|n| {
+                let checks = (n..=5)
+                    .map(|id| failed(&format!("AC-{id}"), "assertion failed"))
+                    .collect();
+                round(n, checks)
+            })
+            .collect::<Vec<AcceptanceRoundRecordV1>>(),
+    );
     for n in 1..rounds.len() {
         let decision = decide(&rounds[..n], &rounds[n]);
         assert!(!decision.final_round, "round {} shrank the set", n + 1);
         assert!(!decision.escalate);
+        assert_eq!(decision.stalled_rounds, 0);
+        assert_eq!(decision.pause, None);
     }
 }
 
@@ -112,11 +117,13 @@ fn failing(n: u32, count: u32) -> AcceptanceRoundRecordV1 {
 /// reaches a failing set never seen, so round 64 and past never pause.
 #[test]
 fn a_loop_that_keeps_reaching_new_failing_sets_never_pauses() {
-    let history: Vec<_> = (1..=74).map(|n| failing(n, 200 - n)).collect();
+    let mut history = vec![failing(0, 1)];
+    history.extend((1..=74).map(|n| failing(n, 200 - n)));
     for n in 1..history.len() {
         let decision = decide(&history[..n], &history[n]);
         assert_eq!(decision.pause, None, "round {} reached a new set", n + 1);
         assert!(!decision.final_round);
+        assert_eq!(decision.stalled_rounds, 0);
     }
 }
 
@@ -217,8 +224,30 @@ fn the_ledger_is_persisted_and_rebuilt_from_records_when_absent() {
     );
     let mut ledger = rebuilt;
     assert_eq!(ledger.observe(&round(3, vec![failed("AC-1", "y")])), 1);
+    write_round_record(dir.path(), &round(3, vec![failed("AC-1", "y")])).unwrap();
     ledger.save(dir.path()).unwrap();
     let resumed = ProgressLedger::load(dir.path(), 3);
     assert_eq!(resumed.revisits, 1);
     assert_eq!(resumed.seen.len(), 2);
+}
+
+#[test]
+fn rebuild_keeps_all_attempts_including_the_resumed_round_and_records_win() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = round(1, vec![failed("A", "x")]);
+    let mut b = round(1, vec![failed("B", "x")]);
+    b.attempt = 2;
+    let c = round(2, vec![failed("A", "x")]);
+    for record in [&a, &b, &c] {
+        write_round_record(dir.path(), record).unwrap();
+    }
+    let expected = ProgressLedger::from_history(&[a.clone(), b, c.clone()]);
+    assert_eq!(ProgressLedger::load(dir.path(), 2), expected);
+    ProgressLedger::from_history(&[a]).save(dir.path()).unwrap();
+    let mut ledger = ProgressLedger::load(dir.path(), 2);
+    assert_eq!(
+        ledger, expected,
+        "a readable stale ledger cannot hide records"
+    );
+    assert_eq!(decide_with(&mut ledger, &c).pause, Some(PAUSE_NO_PROGRESS));
 }

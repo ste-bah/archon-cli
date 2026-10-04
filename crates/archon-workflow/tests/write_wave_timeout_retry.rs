@@ -243,6 +243,14 @@ async fn a_transport_drop_inside_the_retry_re_asks_within_the_retry_budget() {
             .unwrap();
     let result = branch.result.unwrap();
     assert_eq!(result.data["branch_runtime_timeout"], true, "{result:#?}");
+    let patch =
+        std::fs::read_to_string(result.data["partial_work"]["patch_path"].as_str().unwrap())
+            .unwrap();
+    assert!(
+        !patch.contains("implemented by retry"),
+        "the unchanged-tree fixture must leave the same bytes on every dropped dispatch: {patch}"
+    );
+
     assert!(
         result
             .residual_gaps

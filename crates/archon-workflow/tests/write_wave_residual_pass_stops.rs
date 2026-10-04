@@ -1,12 +1,4 @@
-//! Issue-225 end to end: the residual passes are bounded. Through the real
-//! prelude, the production write wave and the host's dispatch check, a
-//! verifier that records a NEW gap every pass is stopped at the run's pass
-//! ceiling, and one whose open gaps return to an earlier pass's set is
-//! stopped at the repeat. Either way the run is NOT accepted, and the
-//! recorded verdict names every open gap by id with the stop's reason. A
-//! verifier that converges within the ceiling is still accepted, a ceiling
-//! of 1 lets exactly the first pass run, and a run with no gap at all is
-//! never stopped.
+//! Residual stalls pause resumably; progressing passes have no total limit.
 #[path = "support/escalation_harness.rs"]
 mod harness;
 #[path = "support/write_wave_fixture.rs"]
@@ -107,23 +99,18 @@ async fn decided(host: &Rc<Host>) -> (WorkflowV2Status, String) {
 }
 
 #[tokio::test]
-async fn a_verifier_recording_a_new_gap_every_pass_stops_at_the_default_ceiling() {
+async fn a_verifier_recording_new_states_runs_past_the_legacy_default_ceiling() {
     let host = session(fixture());
     host.verdicts(CROSS, vec![Verdict::AcceptWith(vec![churn(0)])]);
     host.verdicts("TASK-A", (1..=12).map(churning).collect());
     let (status, why) = decided(&host).await;
-    assert_eq!(passes(&host), [1, 2, 3, 4, 5, 6], "{:#?}", answers(&host));
-    assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");
-    assert!(
-        why.contains("residual passes stopped before pass 7 on their ceiling")
-            && why.contains("ceiling of 6 residual pass(es)"),
-        "{why}"
+    assert_eq!(
+        passes(&host),
+        (1..=13).collect::<Vec<_>>(),
+        "{:#?}",
+        answers(&host)
     );
-    // The gap the sixth pass's verifier left open stands by id, quoted.
-    assert!(
-        why.contains("gap-churn-6") && why.contains(churn(6).2),
-        "{why}"
-    );
+    assert_eq!(status, WorkflowV2Status::Accepted, "{why}");
 }
 
 /// Open gaps {a, c} after pass 1 (a carried and refused, c recorded by the
@@ -145,12 +132,16 @@ async fn a_verifier_whose_open_gaps_return_to_an_earlier_set_stops_at_the_repeat
             Verdict::RefuseWith(vec![]),
         ],
     );
-    let (status, why) = decided(&host).await;
+    let result = run(&script(), NEW_PRELUDE, host.clone()).await;
+    assert_eq!(result["paused"], serde_json::json!(true));
+    assert_eq!(
+        host.f.store.load_state(&host.f.run).unwrap().status,
+        RunStatus::Paused
+    );
     assert_eq!(passes(&host), [1, 2, 3], "{:#?}", answers(&host));
-    assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");
+    let why = std::fs::read_to_string(host.f.store.events_path(&host.f.run)).unwrap();
     assert!(
-        why.contains("residual passes stopped before pass 4 on their cycle")
-            && why.contains("pass 3 left open the same gaps as pass 1"),
+        why.contains("cycle") && why.contains("pass 3 left open the same gaps as pass 1"),
         "{why}"
     );
     for gap in [GAP_A, GAP_C] {
@@ -178,26 +169,14 @@ async fn a_converging_verifier_is_accepted_at_exactly_the_ceiling() {
 }
 
 #[tokio::test]
-async fn a_ceiling_of_one_runs_the_first_pass_only_and_reports_what_it_left() {
+async fn a_legacy_ceiling_of_one_cannot_stop_progressing_passes() {
     let host = session(fixture());
     host.store.record_max_residual_passes(1).unwrap();
     host.verdicts(CROSS, vec![Verdict::AcceptWith(vec![churn(0)])]);
     host.verdicts("TASK-A", (1..=4).map(churning).collect());
     let (status, why) = decided(&host).await;
-    assert_eq!(passes(&host), [1], "{:#?}", answers(&host));
-    assert_eq!(status, WorkflowV2Status::NeedsReview, "{why}");
-    assert!(
-        why.contains("residual passes stopped before pass 2 on their ceiling")
-            && why.contains("ceiling of 1 residual pass(es)"),
-        "{why}"
-    );
-    assert!(
-        why.contains("gap-churn-1") && why.contains(churn(1).2),
-        "{why}"
-    );
-    // Reported once: the fixed third slot, also past the ceiling, does not
-    // report it again.
-    assert_eq!(why.matches("residual passes stopped").count(), 1, "{why}");
+    assert_eq!(passes(&host), [1, 2, 3, 4, 5], "{:#?}", answers(&host));
+    assert_eq!(status, WorkflowV2Status::Accepted, "{why}");
 }
 
 /// No verifier records a gap: no residual round, nothing to stop, and the

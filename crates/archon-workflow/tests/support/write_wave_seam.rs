@@ -119,7 +119,7 @@ impl WorkflowAgentDispatch for Scripted {
         *self.resumed.lock().unwrap() = root.join("added.txt").exists();
         // Each session leaves a different edit, so a partial patch says which
         // session it was captured after.
-        let owned = if call_index == 1 {
+        let owned = if call_index == 1 || matches!(self.reply, Reply::HostCutThenDrop) {
             "implemented\n"
         } else {
             "implemented by retry\n"

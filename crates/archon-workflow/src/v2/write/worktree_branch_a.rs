@@ -136,7 +136,10 @@ pub(super) async fn run_worktree_branch_agent(
     let started = std::time::Instant::now();
     let time_budget = branch.time_budget.resolve(dispatch);
     loop {
-        let before = worktree_progress::fingerprint(&branch.workspace_root);
+        let before = worktree_progress::fingerprint(
+            &branch.workspace_root,
+            &branch.execution.call.options.target_files,
+        );
         let dispatch_prompt = crate::v2::write_read_set::with_current_preamble(
             &prompt,
             v2_store,
@@ -175,7 +178,11 @@ pub(super) async fn run_worktree_branch_agent(
         {
             // Decision C: a session that changed the worktree before its
             // connection dropped made progress; the drop streak starts again.
-            if worktree_progress::fingerprint(&branch.workspace_root) != before {
+            if worktree_progress::fingerprint(
+                &branch.workspace_root,
+                &branch.execution.call.options.target_files,
+            ) != before
+            {
                 transport_failures = 0;
             }
             if transport_failures >= crate::v2::transport_retry::MAX_TRANSPORT_RETRIES {

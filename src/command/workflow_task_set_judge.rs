@@ -278,14 +278,12 @@ async fn judge_batch(
         // ending the freeze: the judged shape is what makes a batch usable.
         let mut attempt = contract.clone();
         let judged = apply_judgments(&mut attempt, &content).and_then(|()| validate(&attempt));
-        // A judged reply is kept as its verdicts; an unusable one is spent,
-        // with its progress credit, and a re-ask starts afresh.
-        if let Some(partial) = partial {
-            if judged.is_ok() {
-                partial.completed();
-            } else {
-                partial.spent();
-            }
+        // An unusable reply is spent with its credit. A usable reply keeps
+        // its continuation until JudgeStore durably saves the verdicts.
+        if judged.is_err()
+            && let Some(partial) = partial
+        {
+            partial.spent();
         }
         match judged {
             Ok(()) => {

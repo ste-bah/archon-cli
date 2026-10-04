@@ -92,13 +92,18 @@ impl ProgressLedger {
             .join(PROGRESS_LEDGER_FILE)
     }
 
-    /// The run's ledger; a run without a readable one (started before it
-    /// existed) gets the one its earlier rounds' records leave.
-    pub fn load(run_dir: &Path, round: u32) -> Self {
+    /// Records are authoritative: the record is written before the ledger,
+    /// so even a readable ledger may lag after an interrupted write. Replay
+    /// every recorded attempt, including attempts of the resumed round.
+    pub fn load(run_dir: &Path, _round: u32) -> Self {
+        let history = all_attempts(run_dir);
+        if !history.is_empty() {
+            return Self::from_history(&history);
+        }
         std::fs::read(Self::path(run_dir))
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_else(|| Self::from_history(&earlier_rounds(run_dir, round)))
+            .unwrap_or_default()
     }
 
     pub fn save(&self, run_dir: &Path) -> crate::WorkflowResult<()> {
@@ -111,6 +116,36 @@ impl ProgressLedger {
             .map_err(|e| crate::WorkflowError::io(&staging, e))?;
         std::fs::rename(&staging, &path).map_err(|e| crate::WorkflowError::io(&path, e))
     }
+}
+
+/// Every readable round record, ordered by round then attempt. Gaps in
+/// numbering and stale ledgers cannot erase recorded states.
+fn all_attempts(run_dir: &Path) -> Vec<AcceptanceRoundRecordV1> {
+    let mut history = Vec::new();
+    if let Ok(rounds) = std::fs::read_dir(run_dir.join(ACCEPTANCE_RECORDS_DIR)) {
+        for round in rounds.flatten() {
+            if let Ok(attempts) = std::fs::read_dir(round.path()) {
+                for attempt in attempts.flatten() {
+                    let path = attempt.path();
+                    let is_record =
+                        path.file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| {
+                                name.starts_with("attempt-") && name.ends_with(".json")
+                            });
+                    if is_record
+                        && let Ok(bytes) = std::fs::read(path)
+                        && let Ok(record) =
+                            serde_json::from_slice::<AcceptanceRoundRecordV1>(&bytes)
+                    {
+                        history.push(record);
+                    }
+                }
+            }
+        }
+    }
+    history.sort_by_key(|record| (record.round, record.attempt));
+    history
 }
 
 /// Whether `current` reached a failing state none of `history` reached.

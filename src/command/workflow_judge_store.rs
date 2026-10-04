@@ -87,8 +87,11 @@ impl JudgeStore {
         let path = self.dir.join(format!("{key}.json"));
         let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
         let written = std::fs::create_dir_all(&self.dir).is_ok()
-            && serde_json::to_vec(&saved)
-                .is_ok_and(|bytes| std::fs::write(&staging, bytes).is_ok())
+            && serde_json::to_vec(&saved).is_ok_and(|bytes| {
+                use std::io::Write;
+                std::fs::File::create(&staging)
+                    .is_ok_and(|mut file| file.write_all(&bytes).is_ok() && file.sync_all().is_ok())
+            })
             && std::fs::rename(&staging, &path).is_ok();
         if !written {
             let _ = std::fs::remove_file(&staging);
@@ -113,8 +116,12 @@ impl JudgeStore {
         // and the chunks it holds count as progress again, so the count the
         // executor reads never goes back.
         let partial = PartialReply::new(&self.dir, &key, &self.progress);
-        partial.count_saved();
-        if let Some(judged) = self.load(&key, &subset) {
+        let saved = self.load(&key, &subset);
+        partial.count_saved(saved.is_some());
+        if let Some(judged) = saved {
+            // Repair a crash after verdict persistence but before marking
+            // the partial complete. The verdict is already durable here.
+            partial.completed();
             eprintln!(
                 "acceptance judge: reused the saved verdicts of an identical batch ({key}); no provider call made"
             );
@@ -123,6 +130,8 @@ impl JudgeStore {
         }
         let judged = judge_contract_resumable(client, subset, expected, Some(&partial)).await?;
         if self.save(&key, &judged) {
+            // Never destroy the continuation before the verdict is on disk.
+            partial.completed();
             self.progress.saved(true);
         }
         Ok(judged)

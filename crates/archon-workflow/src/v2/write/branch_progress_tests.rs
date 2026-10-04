@@ -255,7 +255,7 @@ async fn transport_drops_without_worktree_progress_stop_at_the_bound() {
         drops: usize::MAX,
         writes: false,
     };
-    let _ = run_worktree_branch_agent(
+    let result = run_worktree_branch_agent(
         "implement",
         None,
         &dispatch,
@@ -264,7 +264,15 @@ async fn transport_drops_without_worktree_progress_stop_at_the_bound() {
         &branch(worktree.path()),
         None,
     )
-    .await;
+    .await
+    .expect("transport stall returns a captured branch outcome");
+    assert_eq!(result.status, WorkflowV2Status::NeedsReview, "{result:#?}");
+    assert!(
+        result.data["error"]
+            .as_str()
+            .is_some_and(|error| error.contains(TRANSPORT_NO_PROGRESS)),
+        "{result:#?}"
+    );
     assert_eq!(
         dispatch.attempts.load(Ordering::SeqCst),
         crate::v2::transport_retry::MAX_TRANSPORT_RETRIES + 1

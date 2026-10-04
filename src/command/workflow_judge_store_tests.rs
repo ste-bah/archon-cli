@@ -284,3 +284,62 @@ async fn the_saved_partial_reply_is_redacted_and_private() {
         assert_eq!(dir_mode, 0o700, "{dir_mode:o}");
     }
 }
+
+#[tokio::test]
+async fn failed_verdict_persistence_keeps_the_continuable_document() {
+    use super::super::judge::continuation_tests::{HEAD, Scripted, TAIL};
+    let temp = tempfile::tempdir().unwrap();
+    let progress = Arc::new(FreezeProgress::default());
+    let store = JudgeStore::at_with_progress(temp.path().to_path_buf(), progress.clone());
+    let subset = contract("check");
+    let expected = BTreeSet::from(["AC-X-001".to_string()]);
+    let client = Scripted::new(vec![Ok((TAIL, Some("end_turn")))]);
+    let key = JudgeStore::key(&client, &subset, &expected).unwrap();
+    let first = Scripted::new(vec![
+        Ok((HEAD, Some("max_tokens"))),
+        Ok(("", Some("max_tokens"))),
+    ]);
+    assert!(
+        store
+            .judge(&first, subset.clone(), &expected)
+            .await
+            .is_err()
+    );
+    std::fs::create_dir(temp.path().join(format!("{key}.json"))).unwrap();
+    store.judge(&client, subset, &expected).await.unwrap();
+    let saved: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(partials(temp.path()).pop().unwrap()).unwrap())
+            .unwrap();
+    assert_eq!(
+        saved["reply"], HEAD,
+        "verdict save failure must preserve continuation"
+    );
+    assert_eq!(saved["completed"], false);
+}
+
+#[tokio::test]
+async fn orphan_completion_marker_is_not_progress() {
+    use super::super::judge::continuation_tests::{HEAD, Scripted};
+    let temp = tempfile::tempdir().unwrap();
+    let progress = Arc::new(FreezeProgress::default());
+    let subset = contract("check");
+    let expected = BTreeSet::from(["AC-X-001".to_string()]);
+    let client = Scripted::new(vec![Ok(("", Some("max_tokens"))); 3]);
+    let key = JudgeStore::key(&client, &subset, &expected).unwrap();
+    let initial = JudgeStore::at_with_progress(temp.path().to_path_buf(), progress.clone());
+    let first = Scripted::new(vec![
+        Ok((HEAD, Some("max_tokens"))),
+        Ok(("", Some("max_tokens"))),
+    ]);
+    assert!(
+        initial
+            .judge(&first, subset.clone(), &expected)
+            .await
+            .is_err()
+    );
+    PartialReply::new(temp.path(), &key, &progress).completed();
+    let resumed = Arc::new(FreezeProgress::default());
+    let store = JudgeStore::at_with_progress(temp.path().to_path_buf(), resumed.clone());
+    assert!(store.judge(&client, subset, &expected).await.is_err());
+    assert_eq!(resumed.total(), 0, "a marker needs saved verdicts");
+}

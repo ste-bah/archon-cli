@@ -3,16 +3,16 @@
 //! connection dropped before it could report.
 //!
 //! The fingerprint covers what a later capture would keep: staged and
-//! unstaged changes to tracked files, and every untracked file with its
-//! bytes. `None` when the worktree cannot be read as a git checkout, so two
+//! unstaged changes to tracked files, captureable regular untracked files
+//! and declared ignored deliverables, under the capture file-size cap. `None` when the worktree cannot be read as a git checkout, so two
 //! unreadable states never look like a change.
 
-use std::path::Path;
+use std::{collections::BTreeSet, path::Path};
 
-use crate::write_coordinator::worktree_isolation::run_git;
+use crate::write_coordinator::worktree_isolation::{read_regular_bounded, run_git};
 
 /// A digest of the worktree's uncommitted state.
-pub(super) fn fingerprint(root: &Path) -> Option<String> {
+pub(super) fn fingerprint(root: &Path, declared: &[String]) -> Option<String> {
     let mut hasher = blake3::Hasher::new();
     for args in [
         &["diff", "--binary"][..],
@@ -23,16 +23,27 @@ pub(super) fn fingerprint(root: &Path) -> Option<String> {
         hasher.update(b"\0");
     }
     let untracked = run_git(&["ls-files", "--others", "--exclude-standard", "-z"], root).ok()?;
-    for name in untracked
+    // Declared targets include the ignored deliverables patch capture keeps.
+    // Undeclared ignored dependencies and noise earn no transport credit.
+    let paths: BTreeSet<String> = untracked
         .stdout
         .split(|byte| *byte == 0)
         .filter(|name| !name.is_empty())
-    {
-        hasher.update(name);
-        hasher.update(b"\0");
-        let path = root.join(String::from_utf8_lossy(name).as_ref());
-        hasher.update(&std::fs::read(path).unwrap_or_default());
-        hasher.update(b"\0");
+        .map(|name| String::from_utf8_lossy(name).into_owned())
+        .chain(declared.iter().cloned())
+        .collect();
+    let cap = crate::write_coordinator::WriteCoordinatorConfig::default().max_file_bytes;
+    for name in paths {
+        if let Ok(Some(bytes)) = read_regular_bounded(&root.join(&name), cap) {
+            hasher.update(name.as_bytes());
+            hasher.update(b"\0");
+            hasher.update(&bytes);
+            hasher.update(b"\0");
+        }
     }
     Some(hasher.finalize().to_hex().to_string())
 }
+
+#[cfg(test)]
+#[path = "worktree_progress_tests.rs"]
+mod tests;

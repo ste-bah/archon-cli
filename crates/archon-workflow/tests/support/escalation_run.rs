@@ -20,7 +20,8 @@ pub async fn run(script: &str, prelude: &str, host: Rc<Host>) -> Value {
     let runtime = AsyncRuntime::new().unwrap();
     runtime.set_max_stack_size(8 * 1024 * 1024).await;
     let context = AsyncContext::full(&runtime).await.unwrap();
-    let out: String = context
+    let observed = host.clone();
+    let out = context
         .async_with(async move |ctx| {
             ctx.globals()
                 .set(
@@ -29,7 +30,16 @@ pub async fn run(script: &str, prelude: &str, host: Rc<Host>) -> Value {
                         let host = host.clone();
                         async move {
                             let payload: Value = serde_json::from_str(&payload).unwrap();
-                            let view = host.answer(&method, payload).await;
+                            let generation = host.f.store.load_state(&host.f.run).unwrap().generation;
+                            let view = host.answer(&method, payload.clone()).await;
+                            if let Some(evidence) = payload["options"].get("remediationPause")
+                                .or_else(|| view.get("remediation_pause")) {
+                                archon_workflow::control_pause::pause_with_evidence(
+                                    &host.f.store, &host.f.run, generation,
+                                    serde_json::json!({"event":"remediation_stall_pause","evidence":evidence}),
+                                ).unwrap().unwrap();
+                                return Err(rquickjs::Error::Unknown);
+                            }
                             Ok::<_, rquickjs::Error>(view.to_string())
                         }
                     })),
@@ -45,9 +55,17 @@ pub async fn run(script: &str, prelude: &str, host: Rc<Host>) -> Value {
                 .catch(&ctx)
                 .map_err(|e| e.to_string())
         })
-        .await
-        .expect("script completes");
-    serde_json::from_str(&out).unwrap()
+        .await;
+    match out {
+        Ok(out) => serde_json::from_str::<Value>(&out).unwrap(),
+        Err(_)
+            if observed.f.store.load_state(&observed.f.run).unwrap().status
+                == archon_workflow::RunStatus::Paused =>
+        {
+            serde_json::json!({"paused":true})
+        }
+        Err(error) => panic!("script failed without pausing: {error}"),
+    }
 }
 
 /// The repository file's content at HEAD.

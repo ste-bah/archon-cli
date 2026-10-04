@@ -1,34 +1,11 @@
-//! Batch O2 (REM-11/CUT-5): residual passes that follow progress, not a
-//! count of three.
+//! Residual passes follow previously unseen open sets, never a pass total.
 //!
-//! Passes 1-3 are what they always were (their slots ask exactly what they
-//! always asked, so a resumed run replays them). After the third, the
-//! prelude asks the slot of pass N = 4, 5, ... (`residual-gaps-N`,
-//! [`super::RESIDUAL_PASS_KEY`] = N) and stops at the first pass the host
-//! plans nothing for. Pass N plans, exactly as the third pass plans over the
-//! second's rounds, over pass N-1's rounds -- evidence bounded by pass N's
-//! own first round (`cut`), so asking again while its rounds run plans the
-//! same rounds:
-//!
-//! - NEW work: every gap a verifier of pass N-1's rounds recorded that no
-//!   earlier pass carried or reported (`same_identity`; a refused
-//!   verifier's gap the host's own later runs answer is not work), and every
-//!   owed gap (`residual_owed`), regression (`residual_regression`) or
-//!   refused project-input landing no earlier pass carried;
-//! - a RETRY of each pass N-1 file round its judge left open, only when it
-//!   made progress: it was a first attempt, or its judge left FEWER of the
-//!   round's gaps open than the judge of the attempt it retried.
-//!
-//! Pass N is planned at all only while the open gaps -- any severity, by id
-//! -- move: pass N-1 left a set unlike pass N-2's.
-//!
-//! A pass that plans nothing ends the passes; what stands then blocks at
-//! the final gate. Every retry needs a strictly smaller open count, and a
-//! gap once carried is never new again -- but a verifier that records a
-//! NEW gap every pass keeps the open set moving forever, so progress alone
-//! does not end them. Two stops do (`residual_pass_stops`, Issue-225): an
-//! open set an earlier pass already left (a cycle), and the run's pass
-//! ceiling. A stopped pass plans no round and reports every open gap.
+//! Slots 1-3 preserve their dispatch identities for replay. Later slots plan
+//! new gaps and retry unresolved rounds with their last verifier's evidence.
+//! A sorted set of open gap IDs is the state; rewording and output text are
+//! not progress. A repeated nonempty state carries `no_progress` evidence
+//! to the live host, which pauses the owning generation resumably. It never
+//! turns a stall into a final-gate blocker or applies the legacy pass ceiling.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -154,9 +131,8 @@ fn later(
     if recording_moved_on(stored, asked) {
         return ResidualPlan::default();
     }
-    // Batch O2 (M1): a pass is planned only while the open gaps move -- any
-    // severity, by id: pass N-1 left a set unlike pass N-2's. Otherwise every
-    // gap still open stands, quoted, and blocks.
+    // A consecutive revisit is a stall. Nonconsecutive revisits are caught
+    // by `stops::checked`; both preserve the open gaps as pause evidence.
     let before = &plans[plans.len() - 2];
     let open_now = open_ids(previous, stored);
     if open_now == open_ids(before, stored) {
@@ -243,12 +219,12 @@ fn later(
     .into_iter()
     .map(rekey)
     .collect();
-    // Retries that made progress, after the new work.
+    // Retry unresolved rounds while the pass reaches new open states.
     let mut again: Vec<PlannedRound> = judges
         .iter()
         .filter_map(|(key, judge)| {
             let own = rounds.get(key)?;
-            (super::second_pass::retry::left_open(judge, own) && progressed(own, judge, store))
+            (super::second_pass::retry::left_open(judge, own))
                 .then(|| rekey(super::second_pass::retry::again(own, judge)))
         })
         .collect();
@@ -297,44 +273,6 @@ fn rekey(mut planned: PlannedRound, n: u64) -> PlannedRound {
     planned.key = format!("{base}p{n}");
     planned.pass = u8::try_from(n).unwrap_or(u8::MAX);
     planned
-}
-
-/// Whether retrying `own` again is progress: a first attempt (it answers
-/// no earlier judgment), or its judge left fewer of its gaps open than the
-/// judge of the attempt it retried.
-fn progressed(
-    own: &PlannedRound,
-    judge: &WorkflowV2CallRecord,
-    store: &WorkflowV2ResultStore,
-) -> bool {
-    let Some(earlier) = own
-        .refusal
-        .as_ref()
-        .and_then(|refusal| refusal.get("verifier"))
-        .and_then(Value::as_str)
-    else {
-        return true;
-    };
-    let Some(earlier) = store.load_call_record(earlier).ok().flatten() else {
-        return true;
-    };
-    open_count(judge, own) < open_count(&earlier, own)
-}
-
-/// How many of `round`'s gaps `judge` left open: every one when it refused
-/// without saying which, else each it did not dispose `resolved`.
-fn open_count(judge: &WorkflowV2CallRecord, round: &PlannedRound) -> usize {
-    let said: Vec<Option<Disposition>> = round
-        .residuals
-        .iter()
-        .map(|gap| disposition_of(judge, &gap.id))
-        .collect();
-    if !is_reusable_status(judge.status) && said.iter().all(Option::is_none) {
-        return round.residuals.len();
-    }
-    said.iter()
-        .filter(|said| **said != Some(Disposition::Resolved))
-        .count()
 }
 
 /// M1: whether `residual` is new work -- no carried gap is it, exactly or
@@ -399,7 +337,7 @@ fn open_ids(plan: &ResidualPlan, stored: &[WorkflowV2CallRecord]) -> BTreeSet<St
 }
 
 /// Pass `n` when the passes stalled: no round, and every gap the previous
-/// pass left open reported -- quoted whole -- so the final gate blocks on it.
+/// pass left open quoted whole as resumable pause evidence.
 fn stalled(
     n: u64,
     previous: &ResidualPlan,
@@ -412,7 +350,7 @@ fn stalled(
     for gap in left_open(previous, stored) {
         if seen.insert(gap.key()) {
             let why = format!(
-                "the residual passes stopped before pass {n}: pass {} left the same open gaps ({}) as the pass before it, so no further pass makes progress; it stands as recorded: {:?}",
+                "no_progress: the residual passes paused before pass {n}: pass {} left the same open gaps ({}) as the pass before it, so no further pass makes progress; it stands as recorded: {:?}",
                 n - 1,
                 if ids.is_empty() { "none" } else { ids.as_str() },
                 gap.description

@@ -38,7 +38,10 @@ impl WorkflowScriptHost {
             return Ok(None);
         }
         self.mark_reused(&record, generation).await?;
-        Ok(Some(self.result_view(&record)?))
+        Ok(Some(match generation {
+            Some(generation) => self.result_view_in_generation(&record, generation)?,
+            None => self.result_view(&record)?,
+        }))
     }
 
     /// Issue-250: a reused record read from the call's history (its last

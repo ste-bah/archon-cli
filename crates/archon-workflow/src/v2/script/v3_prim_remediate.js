@@ -10,7 +10,7 @@
   // of it (`hostReading`) closes the ids it proves. The ids left open go to
   // the next round with the verifier's reasons; a cycle of rounds that closed
   // any id buys another cycle over what is left, so the budget follows
-  // progress, and only a cycle that closes nothing ends the unit. Whatever is
+  // progress, and a cycle that revisits an unresolved state pauses the run. Whatever is
   // still open then is one unresolved entry per id, which holds the run. A
   // fix that changed nothing and asserts its findings are invalid is put to a
   // read-only verifier asking whether that refutation is sound. Findings no
@@ -73,15 +73,24 @@
       let open = unit.own.slice();
       const closedIds = [];
       let last = null;
+      const state = () => JSON.stringify(open.map((f) => f.finding_id).sort());
+      const seen = new Set([state()]);
       for (let cycle = 1; open.length > 0; cycle += 1) {
         last = await remediationCycle(unit, open, cycle, ctx, last ? last.reasons : null);
         if (last.residualRefused) residualRefused = true;
         const closed = new Set(last.closed);
         closedIds.push(...open.filter((f) => closed.has(f.finding_id)).map((f) => f.finding_id));
         open = open.filter((f) => !closed.has(f.finding_id));
-        // Only per-finding judging can tell a cycle closed something; one
-        // that closed nothing is a plateau, and more rounds buy nothing.
-        if (!perId || closed.size === 0) break;
+        if (!perId) break;
+        const key = state();
+        if (open.length > 0 && seen.has(key)) {
+          await w.checkpoint(inUnit(`remediation-stall-${slug(unit.key)}-${unit.part || 0}-${cycle}`), {
+            remediationPause: { cause: "no_progress", failing_ids: JSON.parse(key), task_ids: unit.taskIds,
+              reasons: last.reasons, evidence: { fix: last.fix, check: last.check } },
+          });
+          throw new Error("the host returned from a remediation stall without pausing");
+        }
+        seen.add(key);
       }
       const done = last && last.escalation ? { ...tag, escalatedTo: last.escalation.owners } : tag;
       if (perId) {
