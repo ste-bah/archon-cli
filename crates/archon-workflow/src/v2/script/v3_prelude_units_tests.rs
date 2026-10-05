@@ -122,7 +122,14 @@ console.log(JSON.stringify({
             String::from_utf8_lossy(&out.stderr)
         );
         let prompt = String::from_utf8_lossy(&out.stdout);
-        assert!(prompt.contains(&format!("full list at {path}")), "{prompt}");
+        // The prompt quotes the envelope as JSON, so a Windows path's
+        // backslashes appear escaped.
+        let quoted = serde_json::to_string(&path).expect("path json");
+        let quoted = &quoted[1..quoted.len() - 1];
+        assert!(
+            prompt.contains(&format!("full list at {quoted}")),
+            "{prompt}"
+        );
         assert!(prompt.len() < 40 * 1024, "{}", prompt.len());
     }
 }
