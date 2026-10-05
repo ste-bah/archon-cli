@@ -244,11 +244,35 @@ async fn a_freeze_under_a_broken_scratch_policy_refuses_without_asking_an_author
         &scope,
     )
     .await
-    .expect_err("nothing unproven is published")
-    .to_string();
+    .expect_err("nothing unproven is published");
+    // Issue 288: an incomplete, resumable outcome (exit 75 at the CLI) that
+    // says to re-run, never a hard error and never "continues from saved".
+    let incomplete = crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
+        .unwrap_or_else(|| panic!("an unproven check is resumable, not a failure: {error:#}"));
+    let report = incomplete.report();
+    let error = error.to_string();
     assert!(
         error.contains(super::super::executability::HOST_UNPROVEN),
         "{error}"
+    );
+    assert!(
+        error.starts_with(crate::command::workflow_freeze_budget::FREEZE_INCOMPLETE_RESUMABLE),
+        "{error}"
+    );
+    assert!(
+        error.contains("re-running the same freeze command"),
+        "{error}"
+    );
+    assert!(
+        !error.contains("continues from the saved results"),
+        "{error}"
+    );
+    assert_eq!(
+        report,
+        format!(
+            "{error}\n{}",
+            crate::command::workflow_host_command_operational::progress_line(0)
+        )
     );
     assert_eq!(client.authored(), 0, "no author was asked");
 }

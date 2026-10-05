@@ -223,6 +223,8 @@ pub mod host_timeout;
 
 pub mod subagent_activity;
 
+pub mod subagent_dispatch_clock;
+
 pub mod cache_gc;
 
 pub mod cache_paths;

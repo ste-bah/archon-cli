@@ -59,7 +59,8 @@ pub(super) async fn freeze_acceptance(
         client,
         &scope,
     )
-    .await?;
+    .await
+    .map_err(exit_if_incomplete)?;
     let findings = prepared.findings.clone();
     let publication_identity = prepared.publication_identity();
     let mut disposition = crate::command::workflow_gate::run_sync_gate(
@@ -137,7 +138,12 @@ pub(super) async fn reauthor_acceptance(
         },
         &scope,
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        exit_if_incomplete(crate::command::workflow_task_set::unproven_incomplete(
+            error,
+        ))
+    })?;
     for diagnostic in &result.diagnostics {
         eprintln!("{diagnostic}");
     }
@@ -149,4 +155,16 @@ pub(super) async fn reauthor_acceptance(
         result.skeleton_digest.as_deref().unwrap_or("none")
     );
     Ok(())
+}
+
+/// An incomplete, resumable freeze ends by the operational contract (Issue
+/// 288), as the staged freeze does: its reason and progress on stderr, then
+/// `EXIT_INCOMPLETE_RESUMABLE`. Any other error is returned.
+fn exit_if_incomplete(error: anyhow::Error) -> anyhow::Error {
+    if let Some(incomplete) =
+        crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
+    {
+        super::exit_incomplete_resumable(incomplete);
+    }
+    error
 }

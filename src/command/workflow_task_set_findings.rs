@@ -340,14 +340,17 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
         .collect();
     let crashed = probe.script_defects(&contract, &accepted).await;
     // A check the host could not prove, even after repairing its own
-    // environment, is the host's: the freeze refuses, operationally, and no
-    // author is asked to change it.
+    // environment, is the host's: nothing is published and no author is
+    // asked to change it. Like the staged freeze (Issue 263), it ends the
+    // freeze incomplete and resumable, never failed (Issue 288).
     let unproven = probe.take_unproven();
     if !unproven.is_empty() {
         for diagnostic in probe.take_diagnostics() {
             eprintln!("{diagnostic}");
         }
-        return Err(super::executability::HostUnproven(unproven).into());
+        return Err(unproven_incomplete(
+            super::executability::HostUnproven(unproven).into(),
+        ));
     }
     let mut named = prepared.non_accepted_ids().clone();
     named.extend(crashed.keys().cloned());
@@ -389,8 +392,24 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
     for diagnostic in probe.take_diagnostics() {
         eprintln!("{diagnostic}");
     }
-    let repaired = repaired?;
+    let repaired = repaired.map_err(unproven_incomplete)?;
     prepare_from_judged(project_root, tasks_root, prd_path, mode, &repaired)
+}
+
+/// An unproven check ends the unstaged freeze incomplete and resumable
+/// (Issue 288), with the host's own report as its reason; any other error is
+/// returned unchanged.
+pub(crate) fn unproven_incomplete(error: anyhow::Error) -> anyhow::Error {
+    let unproven = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<super::executability::HostUnproven>());
+    match unproven {
+        Some(unproven) => {
+            crate::command::workflow_freeze_budget::FreezeIncomplete::unsaved(unproven.to_string())
+                .into()
+        }
+        None => error,
+    }
 }
 
 #[cfg(all(test, unix))]

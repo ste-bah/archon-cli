@@ -222,6 +222,9 @@ async fn run_subagent_with_auto_background(
     // only for the session it was installed for.
     let activity = crate::subagent_activity::current_for(&subagent_id);
     let session = crate::subagent_session::current_for(&subagent_id);
+    // The dispatch clocks stop while the executor waits for a slot; it
+    // reports the wait on the spawned task, so they are restored there too.
+    let clocks = crate::subagent_dispatch_clock::current_for(&subagent_id);
     let mut join = archon_observability::spawn_named("subagent-executor", {
         let exec = Arc::clone(&exec);
         let cancel = cancel.clone();
@@ -237,7 +240,16 @@ async fn run_subagent_with_auto_background(
                     host_timeout,
                     crate::subagent_activity::inherit(
                         activity,
-                        exec.run_to_completion_with_system(sid, req, system, ctx, cancel.clone()),
+                        crate::subagent_dispatch_clock::inherit(
+                            clocks,
+                            exec.run_to_completion_with_system(
+                                sid,
+                                req,
+                                system,
+                                ctx,
+                                cancel.clone(),
+                            ),
+                        ),
                     ),
                 ),
             )

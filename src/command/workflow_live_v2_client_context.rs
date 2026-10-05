@@ -10,6 +10,25 @@ impl LiveV2AgentClient {
     }
 }
 
+/// The fixed author's attempt deadline over the call and its transient
+/// retries. It counts execution time only: while a session of the call waits
+/// for a subagent slot, the deadline does not run (Issue 288).
+pub(super) async fn author_attempt_deadline<T>(
+    timeout_secs: Option<u64>,
+    attempt: impl std::future::Future<Output = T>,
+) -> std::result::Result<T, WorkflowV2AgentError> {
+    let Some(seconds) = timeout_secs else {
+        return Ok(attempt.await);
+    };
+    archon_tools::subagent_dispatch_clock::within(std::time::Duration::from_secs(seconds), attempt)
+        .await
+        .ok_or_else(|| {
+            WorkflowV2AgentError::Transport(format!(
+                "author attempt deadline exceeded after {seconds}s, including transient retries"
+            ))
+        })
+}
+
 pub(super) fn stage_request_for_v2_agent(
     run_id: &str,
     provider_tier: ProviderTier,
