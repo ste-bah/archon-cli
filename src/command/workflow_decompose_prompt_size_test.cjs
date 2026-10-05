@@ -75,18 +75,35 @@ async function priorGrowsBoundedPerEntry() {
   const entryBytes = added.reduce((sum, e) => sum + JSON.stringify(e).length, 0) / 20;
   // What each added entry may cost: its own id, covers and check (cut at the
   // cap), plus the line's framing. Nothing else an entry carries.
-  const ownBytes = added.reduce((sum, e) => sum + Math.min(JSON.stringify({ id: e.id, covers: e.covers, gap_permitted: e.gap_permitted, check: e.check }).length, 8192 + 80), 0) / 20;
+  const ownBytes = added.reduce((sum, e) => sum + JSON.stringify({ id: e.id, covers: e.covers, gap_permitted: e.gap_permitted, check: e.check }).length, 0) / 20;
   const perEntry = (Buffer.byteLength(at120) - Buffer.byteLength(at100)) / 20;
   console.log(`acceptance author prompt: ${Buffer.byteLength(at100)} bytes after 100 entries, ${Buffer.byteLength(at120)} bytes after 120 entries, ${perEntry} bytes per completed entry (entry JSON ${entryBytes} bytes, its own check ${ownBytes} bytes)`);
   assert(perEntry <= ownBytes + 16, `prompt grows ${perEntry} bytes per completed entry; the entry's own check is ${ownBytes}`);
-  // Every check up to the cap is shown whole, its shared interface included;
-  // a larger one is cut, and the cut is marked.
+  // Every real-sized check (up to 15.5 KB) is shown whole, shared interface
+  // and cwd included: nothing is cut.
   for (let n = 0; n < 120; n += 1) {
-    const check = JSON.stringify(entry('x', n).check);
-    if (check.length < 8000) assert(at120.includes(check), `the check of AC-${pad(n + 1)} is shown whole`);
+    const check = entry('x', n).check;
+    assert(at120.includes(JSON.stringify(check.command)), `the command of AC-${pad(n + 1)} is shown whole`);
   }
-  assert.match(at120, /\[CUT: \d+ more characters of this entry are not shown\]/);
+  assert(!at120.includes('[CUT:'), 'no real-sized check is cut');
   assert(!at120.includes('host_call_id'), 'the host-owned judgment is not shown');
+}
+
+// A 15 KB real-shaped check is never cut. A runaway check (over 64 KB) is cut
+// with the mark, and its short fields -- cwd, kind, artifact format -- survive.
+async function onlyARunawayCheckIsCut() {
+  const ctx = context({});
+  const big = { id: 'AC-BIG', covers: ['REQ-001'], gap_permitted: false, check: { kind: 'command', command: command(1, 15545), cwd: 'project_root' } };
+  const line = ctx.priorText([big]);
+  assert(line.includes(JSON.stringify(big.check.command)) && !line.includes('[CUT:'), 'a 15 KB check is shown whole');
+  const runaway = { id: 'AC-RUN', check: { kind: 'command', command: command(2, 70000), cwd: 'project_root' } };
+  const cut = ctx.priorText([runaway]);
+  assert.match(cut, /\[CUT: \d+ more characters of this entry are not shown\]/);
+  assert(cut.includes('"cwd":"project_root"') && cut.includes('"kind":"command"'), 'the short fields survive the cut');
+  const floor = { id: 'AC-FLOOR', check: { kind: 'floor', contract: { typed_verifier_command: command(3, 70000), kind: 'report', artifact_path: 'out/report.json', artifact_format: 'json', required_true_fields: ['complete'] } } };
+  const floorCut = ctx.priorText([floor]);
+  assert.match(floorCut, /\[CUT:/);
+  for (const field of ['"artifact_path":"out/report.json"', '"artifact_format":"json"', '"required_true_fields":["complete"]']) assert(floorCut.includes(field), `${field} survives the cut`);
 }
 
 // Each attempt: three host findings that rotate (the oscillation the history
@@ -163,7 +180,7 @@ async function inactivityCutWithProgressKeepsTheWindow() {
 }
 
 (async () => {
-  for (const test of [priorGrowsBoundedPerEntry, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, inactivityCutWithProgressKeepsTheWindow]) {
+  for (const test of [priorGrowsBoundedPerEntry, onlyARunawayCheckIsCut, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, inactivityCutWithProgressKeepsTheWindow]) {
     try { await test(); } catch (error) { console.error(`${test.name}: ${error.message}`); process.exitCode = 1; }
   }
 })();

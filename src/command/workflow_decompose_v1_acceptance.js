@@ -55,13 +55,26 @@ function owedSupplementary() {
 // criterion and judgment (the criteria are listed separately; the judgment is
 // host text) -- one JSON line per entry holding its id, covers and its whole
 // check. The check is what later entries must agree with: the CLI flags,
-// output paths, JSON keys and formats it relies on. A check past
-// PRIOR_ENTRY_TEXT characters is cut there, and the cut is marked.
-const PRIOR_ENTRY_TEXT = 8192;
+// output paths, JSON keys and formats it relies on. PRIOR_ENTRY_TEXT guards
+// only against a runaway entry (real checks run to about 16 KB); past it the
+// line is cut and the cut is marked. The short fields are written before the
+// commands, so a cut can only shorten a command.
+const PRIOR_ENTRY_TEXT = 65536;
+
+function commandsLast(check) {
+  if (!check || typeof check !== "object" || Array.isArray(check)) return check;
+  const { command, contract, ...rest } = check;
+  let ordered = contract;
+  if (contract && typeof contract === "object" && !Array.isArray(contract)) {
+    const { typed_verifier_command, ...short } = contract;
+    ordered = { ...short, typed_verifier_command };
+  }
+  return { ...rest, contract: ordered, command };
+}
 
 function priorEntry(entry) {
   const value = entry && typeof entry === "object" ? entry : {};
-  const text = JSON.stringify({ id: value.id, covers: value.covers, gap_permitted: value.gap_permitted, check: value.check });
+  const text = JSON.stringify({ id: value.id, covers: value.covers, gap_permitted: value.gap_permitted, check: commandsLast(value.check) });
   if (text.length <= PRIOR_ENTRY_TEXT) return text;
   return `${text.slice(0, PRIOR_ENTRY_TEXT)} [CUT: ${text.length - PRIOR_ENTRY_TEXT} more characters of this entry are not shown]`;
 }
