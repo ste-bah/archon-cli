@@ -188,17 +188,64 @@ async fn a_contract_verifier_cannot_write_the_project() {
     }
 }
 
-/// Issue 219: a declarative floor with seven findings fails the branch
-/// naming all seven, never the first five.
-#[test]
-fn every_declarative_floor_finding_reaches_the_failure() {
-    let findings: Vec<String> = (1..=7).map(|n| format!("floor finding {n}")).collect();
-    match floor_failed(&findings) {
-        ContractVerification::Failed(detail) => {
-            for finding in &findings {
-                assert!(detail.contains(finding.as_str()), "{detail}");
-            }
-        }
-        _ => panic!("expected a failure"),
+/// 34 realistic findings (40-80 chars each), as a floor or a verifier
+/// reports them.
+fn many_findings() -> Vec<String> {
+    (1..=34)
+        .map(|n| format!("records[{n}].close is missing or not a finite number (row {n})"))
+        .collect()
+}
+
+/// Issue 219: every finding a failed contract reports reaches the residual
+/// gap remediation reads, and the branch data keeps them whole.
+fn assert_every_finding_reaches_the_gap(findings: &[String]) {
+    let mut outcome = accepted("v");
+    demote_failed_contract(&mut outcome, findings);
+    let result = outcome.result.expect("result");
+    let gap = &result.residual_gaps[0].description;
+    assert!(
+        gap.contains(&format!("{} finding(s)", findings.len())),
+        "{gap}"
+    );
+    for finding in findings {
+        assert!(
+            gap.contains(finding.as_str()),
+            "missing `{finding}` in {gap}"
+        );
     }
+    assert_eq!(
+        result.data["declared_contract_findings"],
+        serde_json::json!(findings)
+    );
+}
+
+#[test]
+fn every_declarative_floor_finding_reaches_the_residual_gap() {
+    let findings = many_findings();
+    assert!(findings.iter().all(|f| (40..=80).contains(&f.len())));
+    let ContractVerification::Failed(reported) = floor_failed(&findings) else {
+        panic!("expected a failure");
+    };
+    assert_every_finding_reaches_the_gap(&reported);
+}
+
+#[test]
+fn every_verifier_failure_reaches_the_residual_gap() {
+    let findings = many_findings();
+    let verdict = serde_json::json!({"status": "failed", "failures": findings});
+    let reported = verdict_failure(&verdict).expect("a failure");
+    assert_eq!(reported, findings);
+    assert_every_finding_reaches_the_gap(&reported);
+}
+
+/// A finding longer than the gap quotes is cut with a mark naming its
+/// length; the next finding still follows it.
+#[test]
+fn an_oversized_finding_is_cut_with_a_mark_and_drops_no_neighbour() {
+    let findings = vec!["y".repeat(2000), "records[2].open is missing".to_string()];
+    let mut outcome = accepted("v");
+    demote_failed_contract(&mut outcome, &findings);
+    let gap = &outcome.result.expect("result").residual_gaps[0].description;
+    assert!(gap.contains("[finding cut at 500 of 2000 chars"), "{gap}");
+    assert!(gap.contains("records[2].open is missing"), "{gap}");
 }

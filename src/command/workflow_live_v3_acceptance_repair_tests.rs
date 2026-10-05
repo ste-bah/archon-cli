@@ -13,8 +13,8 @@ use archon_workflow::{WorkflowSpec, WorkflowV2HostCall, WorkflowV2HostMethod};
 pub(super) struct Run {
     pub(super) set: FrozenSet,
     pub(super) store: WorkflowStore,
-    runtime: WorkflowV2ScriptRuntime,
-    universe: WorkflowV2TaskUniverse,
+    pub(super) runtime: WorkflowV2ScriptRuntime,
+    pub(super) universe: WorkflowV2TaskUniverse,
     pub(super) run_id: String,
 }
 

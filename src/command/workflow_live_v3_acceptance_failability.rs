@@ -153,9 +153,17 @@ pub(super) async fn hold_passing(
         return Ok(());
     }
     let Some(base) = base_of(round) else {
+        let context = round.context;
+        let why = format!(
+            "the run recorded no pre-implementation tree (no base commit, and no checkout the task set records) to run it on. To resume: make {} a git checkout whose commit is the tree before implementation, or record that commit as `base_commit` in {} (the decomposition writes this file), then resume the run",
+            context.repository.display(),
+            context
+                .task_root
+                .join(archon_workflow::repository_record::REPOSITORY_LOCK_FILE)
+                .display()
+        );
         for id in passing.keys() {
-            let why = "the run recorded no pre-implementation tree (no base commit, and no checkout the task set records) to run it on";
-            record.operational_errors.push(unproven(id, why));
+            record.operational_errors.push(unproven(id, &why));
         }
         return Ok(());
     };
