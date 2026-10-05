@@ -34,7 +34,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::repairs::{TreeRun, tree_results};
+use super::repairs::{TreeRun, timed_out, tree_results};
 use super::sites::{object_id, resolves};
 use super::*;
 
@@ -318,7 +318,13 @@ pub(super) async fn cannot_fail_findings(
     for reference in refs {
         let id = &reference.acceptance_id;
         let result = run.results.get(id);
-        if let Some(reason) = run.unrun(id) {
+        if result.is_some_and(timed_out) {
+            // Issue 323: past its bound on the base: unproven (timed out),
+            // retried; so again on the same base, the author's.
+            if let Some(finding) = silent::settle_timed_out(probe, &baseline.commit, contract, id) {
+                findings.insert(id.clone(), finding);
+            }
+        } else if let Some(reason) = run.unrun(id) {
             probe.unproven(
                 id,
                 format!(

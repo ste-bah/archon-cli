@@ -12,7 +12,8 @@
 //! - asks the freeze's budget before every check how long it may run, and
 //!   once too little is left runs nothing more and reports the freeze
 //!   [`FreezeIncomplete`] instead of being killed;
-//! - bounds every check by its site's own limit (`probe_check_cap_secs`);
+//! - bounds every check by its site's own limit (`probe_check_cap_secs`),
+//!   and never by more than the budget's share of its window (Issue 323);
 //! - keeps the nonce of each input mutation it draws, so a retry builds the
 //!   same mutated check and meets its saved verdict too.
 //!
@@ -213,6 +214,18 @@ impl HostProbe {
         true
     }
 
+    /// Issue 323: the one per-check bound this probe's checks run under at
+    /// every site: its site's own limit ([`probe_check_cap_secs`]), and in a
+    /// freeze never more than the budget's share of its window
+    /// ([`FreezeBudget::check_bound`]).
+    pub(super) fn check_bound_secs(&self) -> u64 {
+        if self.memo {
+            self.resume.budget.check_bound(self.check_cap_secs)
+        } else {
+            self.check_cap_secs
+        }
+    }
+
     pub(super) fn budget(&self) -> &FreezeBudget {
         &self.resume.budget
     }
@@ -277,7 +290,7 @@ impl HostProbe {
         store: Option<&ResultStore>,
         written: &Arc<Mutex<Vec<String>>>,
     ) -> ObserveHooks {
-        let (budget, cap) = (self.resume.budget.clone(), self.check_cap_secs);
+        let (budget, cap) = (self.resume.budget.clone(), self.check_bound_secs());
         let on_check = store.map(|store| {
             let (store, keys, written) = (store.clone(), keys.clone(), written.clone());
             Arc::new(move |result: &CheckResult| {
@@ -358,3 +371,7 @@ mod round2_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_cap_tests.rs"]
 mod cap_tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_bound_tests.rs"]
+mod bound_tests;

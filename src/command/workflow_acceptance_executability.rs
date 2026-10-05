@@ -61,14 +61,14 @@ use crate::command::acceptance_scratch_policy::NativeBinding;
 /// Bytes of a crashed check's stderr shown to its author.
 const FINDING_TAIL_BYTES: usize = 3000;
 
-/// Issue 263: the longest one probe check may run is its site's own
-/// per-check limit -- the configured `[workflow.acceptance_execution]
-/// timeout_secs` at the scratch site, else the direct default -- the limit
-/// the acceptance stage itself runs the check under, never a fixed cap. A
-/// check that needs a cold build longer than a fixed cap could otherwise
-/// never be proven able to fail. A check past it is unproven, timed out:
-/// the host's, never its author's; under a freeze's budget the budget's
-/// allowance bounds it further.
+/// Issues 263, 323: the one per-check bound of every probe site (scratch,
+/// direct and hermetic copy alike): the configured `[workflow.acceptance_
+/// execution] timeout_secs`, else -- the direct and hermetic sites exist only
+/// without that policy -- the direct default (1800 s), the limit the
+/// acceptance stage itself runs the check under. A freeze bounds it further
+/// by its budget's share (`HostProbe::check_bound_secs`). A check past it is
+/// unproven (timed out), the host's; the same on the same base again goes to
+/// its author (`workflow_acceptance_executability_silent`).
 fn probe_check_cap_secs(site: &Site) -> u64 {
     match site {
         Site::Scratch(binding) => binding.policy.timeout_secs,

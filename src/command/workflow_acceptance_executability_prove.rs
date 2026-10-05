@@ -70,6 +70,15 @@ pub(super) async fn prove(
             super::repairs::tree_results(probe, baseline, &mutated, &digest, &refs, None, false)
                 .await;
         let result = run.results.get(id);
+        if result.is_some_and(super::repairs::timed_out) {
+            // Issue 323: the mutated check (its nonce kept across retries)
+            // is struck on the base like any other.
+            let commit = &baseline.commit;
+            if let Some(finding) = super::silent::settle_timed_out(probe, commit, &mutated, id) {
+                findings.insert(id.clone(), finding);
+            }
+            continue;
+        }
         let host = match result {
             Some(result) if markers.guarded(result) => {
                 Some("the mutation's live-root guard stopped it".to_string())
