@@ -7,6 +7,13 @@
 //! Only a resume of an author stall is handed that rejection: the pause
 //! writes [`STALL_MARKER`] and the next authoring takes it. A re-author for
 //! any other reason (a deleted persisted script) starts from the brief alone.
+//!
+//! Issue 324: the marker names only the rejection the stalled authoring
+//! itself held (one it recorded, or one a stall handed it), never an older
+//! one; it is removed only once the next authoring's first attempt has a
+//! durable result, so a resume stopped before that keeps the last finding.
+//! An I/O fault or a damaged store during authoring is not a defect the
+//! author can fix: it pauses the run at once with the fault as evidence.
 
 use archon_workflow::{WorkflowError, WorkflowResult, WorkflowStore};
 
@@ -23,6 +30,43 @@ pub(super) enum AuthorStall {
     Defects { reason: String },
     /// Every transport attempt died before a script came back.
     Transport { error: String },
+    /// An I/O fault or a damaged store (Issue 324): nothing an author can fix,
+    /// and nothing a retry in this execution would change.
+    Infrastructure { error: String },
+}
+
+/// The attempts an authoring stall reports.
+pub(super) struct StallAttempts {
+    pub(super) defects: usize,
+    pub(super) transports: usize,
+    /// The highest recorded rejection number.
+    pub(super) recorded: usize,
+    /// The recorded rejection the stalled authoring held as its finding, if
+    /// any: the only one the pause names and hands to a resume.
+    pub(super) held: Option<usize>,
+}
+
+/// An I/O fault or a damaged store, as opposed to an authoring defect.
+pub(super) fn is_infrastructure_fault(error: &WorkflowError) -> bool {
+    matches!(
+        error,
+        WorkflowError::Io { .. } | WorkflowError::StateCorrupt(_)
+    )
+}
+
+/// Removes the hand-over marker once the authoring it was taken by has a
+/// durable first result (a recorded rejection or the persisted script).
+pub(super) fn clear_marker(store: &WorkflowStore, run_id: &str) {
+    let marker = store
+        .run_dir(run_id)
+        .join("rejected-scripts")
+        .join(STALL_MARKER);
+    match std::fs::remove_file(&marker) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            tracing::warn!(%error, run_id, "author stall marker not removed");
+        }
+        _ => {}
+    }
 }
 
 /// The last recorded rejection, from which a resumed loop goes on.
@@ -52,13 +96,13 @@ pub(super) fn prior_rejections(store: &WorkflowStore, run_id: &str) -> PriorReje
         })
         .max()
         .unwrap_or(0);
-    // Taken once: a later authoring for another reason starts afresh.
-    let marker = dir.join(STALL_MARKER);
-    let stalled_on = std::fs::read(&marker)
+    // Read here, removed by [`clear_marker`] once this authoring's first
+    // attempt has a durable result: a later authoring for another reason
+    // starts afresh, a resume stopped before then keeps the finding.
+    let stalled_on = std::fs::read(dir.join(STALL_MARKER))
         .ok()
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
         .and_then(|value| value.get("attempt").and_then(serde_json::Value::as_u64));
-    let _ = std::fs::remove_file(&marker);
     if highest == 0 || stalled_on != Some(highest as u64) {
         return PriorRejections {
             attempts: highest,
@@ -94,12 +138,16 @@ pub(super) fn pause_on_author_stall(
     run_id: &str,
     generation: u64,
     stall: AuthorStall,
-    defect_attempts: usize,
-    transport_attempts: usize,
-    recorded_attempts: usize,
+    attempts: StallAttempts,
 ) -> WorkflowError {
+    let StallAttempts {
+        defects: defect_attempts,
+        transports: transport_attempts,
+        recorded: recorded_attempts,
+        held,
+    } = attempts;
     let resume = format!("archon workflow resume --live --yes {run_id}");
-    let (cause, finding, headline) = match &stall {
+    let (stalled, finding, headline) = match &stall {
         AuthorStall::Defects { reason } => (
             "defect_attempts_exhausted",
             reason.as_str(),
@@ -114,13 +162,33 @@ pub(super) fn pause_on_author_stall(
                 "the workflow author call failed in transport {transport_attempts} times; last error: {error}"
             ),
         ),
+        AuthorStall::Infrastructure { error } => (
+            "infrastructure_fault",
+            error.as_str(),
+            format!(
+                "authoring stopped on an infrastructure fault (I/O or a damaged run store), not an authoring defect: {error}"
+            ),
+        ),
     };
-    let last_rejection = (recorded_attempts > 0)
-        .then(|| format!("rejected-scripts/attempt-{recorded_attempts}.json"));
+    // A fault is not a stall of the author: it is named apart from one.
+    let cause = match &stall {
+        AuthorStall::Infrastructure { .. } => "infrastructure_fault",
+        _ => "no_progress",
+    };
+    let next = match &stall {
+        AuthorStall::Infrastructure { .. } => {
+            "restore what the fault names (the rejected drafts and their findings stay under rejected-scripts/)"
+        }
+        _ => {
+            "the rejected drafts and their findings are under rejected-scripts/; fix what they name if needed"
+        }
+    };
+    let held = held.filter(|attempt| *attempt > 0);
+    let last_rejection = held.map(|attempt| format!("rejected-scripts/attempt-{attempt}.json"));
     let detail = serde_json::json!({
         "event": "author_stall_pause",
-        "cause": "no_progress",
-        "stall": cause,
+        "cause": cause,
+        "stall": stalled,
         "call_id": AUTHOR_CALL_ID,
         "defect_attempts": defect_attempts,
         "transport_attempts": transport_attempts,
@@ -130,13 +198,16 @@ pub(super) fn pause_on_author_stall(
         "resume": resume,
     });
     // The marker goes first: a resume of a recorded pause must find it. One
-    // that is not written costs only the hand-over of the last finding.
-    if recorded_attempts > 0 {
-        let marker = serde_json::json!({ "attempt": recorded_attempts });
+    // that is not written costs only the hand-over of the last finding. With
+    // no held rejection, an older marker would hand over a stale one.
+    if let Some(attempt) = held {
+        let marker = serde_json::json!({ "attempt": attempt });
         let path = format!("rejected-scripts/{STALL_MARKER}");
         if let Err(error) = store.write_run_json(run_id, path, &marker) {
             tracing::warn!(%error, run_id, "author stall marker not written");
         }
+    } else {
+        clear_marker(store, run_id);
     }
     match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
         Ok(event) => {
@@ -144,11 +215,34 @@ pub(super) fn pause_on_author_stall(
                 tracing::warn!(%error, run_id, "author stall pause event not recorded");
             }
             WorkflowError::ControlPaused(format!(
-                "{headline}; run {run_id} is paused, not failed. The rejected drafts and their findings are under rejected-scripts/; fix what they name if needed, then {resume}: authoring goes on with a new agent from the last finding"
+                "{headline}; run {run_id} is paused, not failed. Next: {next}, then {resume}: authoring goes on with a new agent from the last finding"
             ))
         }
         Err(error) => error,
     }
+}
+
+/// Pauses on an infrastructure fault met outside the authoring loop (reading
+/// the persisted script), naming the recorded rejections and handing none
+/// over. A store whose state cannot be read cannot be paused: that error is
+/// returned as it is.
+pub(super) fn pause_on_infrastructure_fault(
+    store: &WorkflowStore,
+    run_id: &str,
+    error: String,
+) -> WorkflowError {
+    let generation = match authoring_generation(store, run_id) {
+        Ok(generation) => generation,
+        Err(unreadable) => return unreadable,
+    };
+    let attempts = StallAttempts {
+        defects: 0,
+        transports: 0,
+        recorded: prior_rejections(store, run_id).attempts,
+        held: None,
+    };
+    let stall = AuthorStall::Infrastructure { error };
+    pause_on_author_stall(store, run_id, generation, stall, attempts)
 }
 
 /// Run control (an operator pause or cancel) stops the authoring loop as it
