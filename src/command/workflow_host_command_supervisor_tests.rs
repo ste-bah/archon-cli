@@ -224,5 +224,8 @@ async fn stdin_environment_child() {
 #[path = "workflow_host_command_supervisor_tree_tests.rs"]
 mod tree;
 
+#[path = "workflow_host_command_supervisor_descriptor_tests.rs"]
+mod descriptors;
+
 #[path = "workflow_host_command_supervisor_limit_tests.rs"]
 mod limit;

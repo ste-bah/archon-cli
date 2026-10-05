@@ -206,16 +206,11 @@ async fn an_escaped_descendant_holding_the_pipes_pauses_instead_of_failing() {
     // Round 2, rule 3: a double-forked `setsid` descendant escapes before any
     // scan and keeps the output pipes open, so teardown cannot complete. That
     // is a stall: an operational, resumable outcome, never a failure.
+    pause_scans();
     let temp = tempfile::tempdir().unwrap();
-    let pid_file = temp.path().join("daemon-pid");
-    let body = format!(
-        "perl -MPOSIX -e 'fork and exit; POSIX::setsid(); open(F, \">\", $ARGV[0]); print F $$; close F; sleep 30' '{}' &\nuntil [ -s '{}' ]; do sleep 0.01; done\nexit 0",
-        pid_file.display(),
-        pid_file.display()
-    );
-    let request = command(script(temp.path(), "escaped-pipes", &body));
+    let (program, pid_file) = escaping_pipe_holder(temp.path(), "exit 0");
     let (control, _handle) = HostCommandControl::new();
-    let result = supervise_process_group(request, control, None).await;
+    let result = supervise_process_group(command(program), control, None).await;
     let _kill = Kill(read_pid(&pid_file));
     let output = result.expect("a stalled teardown is not a failure");
     assert_eq!(
@@ -229,15 +224,28 @@ async fn an_escaped_descendant_holding_the_pipes_pauses_instead_of_failing() {
     );
 }
 
-/// A command whose double-forked `setsid` descendant escapes before any scan
-/// and holds the output pipes, then (with `rest`) keeps running itself.
+/// A command whose double-forked `setsid` descendant escapes and holds the
+/// output pipes, then (with `rest`) keeps running itself. The descendant
+/// writes its pid only once its forked parent is gone and it leads its own
+/// session (Issue 334: the pid used to be written while that parent could
+/// still be exiting, and a teardown scan found the descendant through it
+/// and killed it). On Linux the leader, a subreaper, adopts it until the
+/// leader itself exits, which is before any teardown. A test that needs the
+/// escape to come before every scan also calls [`pause_scans`]; the
+/// periodic scan could otherwise see it on the way.
 fn escaping_pipe_holder(dir: &Path, rest: &str) -> (PathBuf, PathBuf) {
     let pid_file = dir.join("daemon-pid");
     let body = format!(
-        "perl -MPOSIX -e 'fork and exit; POSIX::setsid(); open(F, \">\", $ARGV[0]); print F $$; close F; sleep 30' '{pid}' &\nuntil [ -s '{pid}' ]; do sleep 0.01; done\n{rest}",
+        "perl -MPOSIX -e 'my $parent = $$; fork and exit; POSIX::setsid(); select(undef, undef, undef, 0.01) while getppid() == $parent; open(F, \">\", $ARGV[0]); print F $$; close F; sleep 30' '{pid}' &\nuntil [ -s '{pid}' ]; do sleep 0.01; done\n{rest}",
         pid = pid_file.display()
     );
     (script(dir, "escaping", &body), pid_file)
+}
+
+/// No periodic scan runs in a supervisor this test thread drives, so a
+/// descendant that escapes is seen by no scan by construction.
+fn pause_scans() {
+    super::super::workflow_host_command_supervisor::SCANS_PAUSED.with(|paused| paused.set(true));
 }
 
 #[tokio::test]
@@ -267,6 +275,7 @@ async fn a_pause_returns_the_pause_even_when_teardown_stalls() {
 
 #[tokio::test]
 async fn a_stalled_teardown_keeps_the_resume_record() {
+    pause_scans();
     let temp = tempfile::tempdir().unwrap();
     let records = temp.path().join("records");
     let (program, pid_file) = escaping_pipe_holder(temp.path(), "exit 0");
@@ -290,17 +299,26 @@ async fn a_confirmed_teardown_removes_the_resume_record() {
     let records = temp.path().join("records");
     let program = script(temp.path(), "plain", "exit 0");
     let (control, _handle) = HostCommandControl::new();
-    supervise_process_group(command(program), control, Some(&records))
+    let output = supervise_process_group(command(program), control, Some(&records))
         .await
         .unwrap();
-    assert_eq!(std::fs::read_dir(&records).unwrap().count(), 0);
+    let left: Vec<_> = std::fs::read_dir(&records)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .collect();
+    assert!(
+        left.is_empty(),
+        "records left {left:?}; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[tokio::test]
 async fn abort_before_first_scan_kills_an_original_session_descendant() {
     // No periodic scan runs in this test (the supervisor is driven on this
     // thread), so the abort is before the first scan by construction.
-    super::super::workflow_host_command_supervisor::SCANS_PAUSED.with(|paused| paused.set(true));
+    pause_scans();
     let temp = tempfile::tempdir().unwrap();
     let pid_file = temp.path().join("unscanned-child");
     let body = format!(
