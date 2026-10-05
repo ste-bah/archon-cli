@@ -12,6 +12,40 @@ impl AgentSubagentExecutor {
         );
     }
 
+    pub(super) fn emit_subagent_queued(
+        &self,
+        subagent_id: &str,
+        agent_type: &str,
+        model: &str,
+        message: String,
+    ) {
+        self.emit_subagent_activity(
+            subagent_id,
+            agent_type,
+            model,
+            archon_observability::AgentActivityKind::AgentQueued,
+            archon_observability::AgentActivityStatus::Queued,
+            message,
+        );
+    }
+
+    pub(super) fn emit_subagent_slot_acquired(
+        &self,
+        subagent_id: &str,
+        agent_type: &str,
+        model: &str,
+        message: String,
+    ) {
+        self.emit_subagent_activity(
+            subagent_id,
+            agent_type,
+            model,
+            archon_observability::AgentActivityKind::AgentRunning,
+            archon_observability::AgentActivityStatus::Running,
+            message,
+        );
+    }
+
     pub(super) fn emit_subagent_finished(
         &self,
         subagent_id: &str,

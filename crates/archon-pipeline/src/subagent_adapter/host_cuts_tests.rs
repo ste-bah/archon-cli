@@ -36,7 +36,8 @@ async fn drive_bounded(
         run = bound.install("session", run);
     }
     let started = Instant::now();
-    let (outcome, cut) = drive(run, &cancel, wall, bound.as_ref()).await;
+    let (clock, run) = install_dispatch_clock("session", run);
+    let (outcome, cut) = drive(run, &cancel, &clock, wall, bound.as_ref()).await;
     (outcome, cut, Instant::now() - started)
 }
 

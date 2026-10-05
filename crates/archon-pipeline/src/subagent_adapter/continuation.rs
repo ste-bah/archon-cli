@@ -314,8 +314,17 @@ impl SubagentPipelineClient {
         if let Some(bound) = &inactivity {
             run = bound.install(&lease.id, run);
         }
-        let (outcome, cut) =
-            super::host_cuts::drive(run, &cancel, request.timeout_secs, inactivity.as_ref()).await;
+        // The wall clock, and the outer deadline of the call this session
+        // serves, stop while the executor waits for a slot (Issue 288).
+        let (clock, run) = super::host_cuts::install_dispatch_clock(&lease.id, run);
+        let (outcome, cut) = super::host_cuts::drive(
+            run,
+            &cancel,
+            &clock,
+            request.timeout_secs,
+            inactivity.as_ref(),
+        )
+        .await;
         if let Some(error) = super::host_cuts::inactivity_failure(&outcome, cut) {
             return Err(error);
         }

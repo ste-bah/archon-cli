@@ -1,6 +1,9 @@
 //! The two host bounds on one agent session, raced against its run: the wall
 //! clock, and inactivity (`archon_tools::subagent_activity`).
 //!
+//! The wall clock counts execution only: a session waiting for a subagent
+//! slot has not started, so the wait does not run it down (Issue 288).
+//!
 //! Each bound cancels the session the same way and then waits for it to wind
 //! down; what differs is how the ending is reported. A wall-clock cut keeps the
 //! "subagent timed out after Ns" text every host classifier already knows. An
@@ -14,6 +17,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use archon_tools::subagent_activity::{ActivityClock, inactivity_error_text, silence_exceeding};
+use archon_tools::subagent_dispatch_clock::{self, DispatchClock};
 use archon_tools::subagent_executor::SubagentOutcome;
 use tokio_util::sync::CancellationToken;
 
@@ -53,9 +57,12 @@ impl InactivityBound {
     }
 }
 
-async fn wall_clock(timeout_secs: Option<u64>) {
+/// The wall clock counts the session's execution only: it does not run while
+/// the executor waits for a subagent slot (Issue 288), so a queued session is
+/// never cut before it has run.
+async fn wall_clock(clock: &DispatchClock, timeout_secs: Option<u64>) {
     match timeout_secs {
-        Some(secs) => tokio::time::sleep(Duration::from_secs(secs.max(1))).await,
+        Some(secs) => clock.exceeding(Duration::from_secs(secs.max(1))).await,
         None => std::future::pending().await,
     }
 }
@@ -70,16 +77,36 @@ async fn inactivity(bound: Option<&InactivityBound>) -> (Duration, Duration) {
     }
 }
 
+/// Install the session's own dispatch clock for session `agent_id`, beside
+/// the outer deadline clock of the call it serves, if that call has one:
+/// both stop while the executor waits for a slot for this session.
+pub(super) fn install_dispatch_clock(
+    agent_id: &str,
+    run: SessionRun,
+) -> (Arc<DispatchClock>, SessionRun) {
+    let clock = DispatchClock::new();
+    let mut clocks = vec![Arc::clone(&clock)];
+    clocks.extend(subagent_dispatch_clock::current_call());
+    let run = Box::pin(subagent_dispatch_clock::scope_session(
+        agent_id.to_string(),
+        clocks,
+        run,
+    ));
+    (clock, run)
+}
+
 /// Run the session to its end, or cut it at whichever host bound fires first.
+/// `clock` is the session's dispatch clock ([`install_dispatch_clock`]).
 pub(super) async fn drive(
     mut run: SessionRun,
     cancel: &CancellationToken,
+    clock: &DispatchClock,
     timeout_secs: Option<u64>,
     bound: Option<&InactivityBound>,
 ) -> (SubagentOutcome, Option<HostCut>) {
     let cut = tokio::select! {
         outcome = &mut run => return (outcome, None),
-        _ = wall_clock(timeout_secs) => HostCut::WallClock,
+        _ = wall_clock(clock, timeout_secs) => HostCut::WallClock,
         (silent, limit) = inactivity(bound) => HostCut::Inactivity { silent, limit },
     };
     cancel.cancel();

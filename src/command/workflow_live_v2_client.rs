@@ -199,13 +199,7 @@ impl LiveV2AgentClient {
             archon_leann::language::default_exclude_patterns(),
             run_agent_with_transient_retry(&self.llm, call, |_attempt| async { Ok(()) }),
         );
-        let outcome = match self.timeout_secs {
-            Some(seconds) => tokio::time::timeout(std::time::Duration::from_secs(seconds), attempt)
-                .await.map_err(|_| WorkflowV2AgentError::Transport(
-                    format!("author attempt deadline exceeded after {seconds}s, including transient retries")
-                ))?,
-            None => attempt.await,
-        };
+        let outcome = author_attempt_deadline(self.timeout_secs, attempt).await?;
         outcome.map_err(|error| WorkflowV2AgentError::Transport(error.to_string()))
     }
 
