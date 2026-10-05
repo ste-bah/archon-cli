@@ -51,6 +51,39 @@ function owedSupplementary() {
   return acceptanceRepairIds.owed;
 }
 
+// Issue 288: the author sees each completed entry without its host-owned
+// criterion and judgment (the criteria are listed separately; the judgment is
+// host text) -- one JSON line per entry holding its id, covers and its whole
+// check. The check is what later entries must agree with: the CLI flags,
+// output paths, JSON keys and formats it relies on. PRIOR_ENTRY_TEXT guards
+// only against a runaway entry (real checks run to about 16 KB); past it the
+// line is cut and the cut is marked. The short fields are written before the
+// commands, so a cut can only shorten a command.
+const PRIOR_ENTRY_TEXT = 65536;
+
+function commandsLast(check) {
+  if (!check || typeof check !== "object" || Array.isArray(check)) return check;
+  const { command, contract, ...rest } = check;
+  let ordered = contract;
+  if (contract && typeof contract === "object" && !Array.isArray(contract)) {
+    const { typed_verifier_command, ...short } = contract;
+    ordered = { ...short, typed_verifier_command };
+  }
+  return { ...rest, contract: ordered, command };
+}
+
+function priorEntry(entry) {
+  const value = entry && typeof entry === "object" ? entry : {};
+  const text = JSON.stringify({ id: value.id, covers: value.covers, gap_permitted: value.gap_permitted, check: commandsLast(value.check) });
+  if (text.length <= PRIOR_ENTRY_TEXT) return text;
+  return `${text.slice(0, PRIOR_ENTRY_TEXT)} [CUT: ${text.length - PRIOR_ENTRY_TEXT} more characters of this entry are not shown]`;
+}
+
+function priorText(prior) {
+  if (prior.length === 0) return "Previously completed entries: none.";
+  return `Previously completed entries, one JSON line each without the host-owned criterion and judgment (keep this entry consistent with their checks -- the flags, paths, keys and formats they rely on -- and duplicate none):\n- ${prior.map(priorEntry).join("\n- ")}`;
+}
+
 // Each entry makes one provider call per round. The phase records the round's
 // retained work and failure; no inner retry window can hide malformed replies
 // or restart its count when a transport error interrupts them. Keep the call
@@ -58,7 +91,7 @@ function owedSupplementary() {
 async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   state.roundCalls += 1;
   const result = await w.agent(`acceptance-author-${id}-${round * STALL_ATTEMPTS + 1}`, {
-    task: `${prompt}\nAuthor ONLY entry ${id}: ${text}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\nPreviously completed entries: ${JSON.stringify(prior)}`,
+    task: `${prompt}\nAuthor ONLY entry ${id}: ${text}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\n${priorText(prior)}`,
     tier: "planner", resultMode: "rawOutcome"
   });
   if (result.status !== "failed") state.roundAnswered += 1;

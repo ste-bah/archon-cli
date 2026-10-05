@@ -176,9 +176,9 @@ impl WorkflowLlmClient for WindowLlm {
             .to_string();
         let prior = call
             .task
-            .split("Previously completed entries: ")
+            .split("Previously completed entries")
             .nth(1)
-            .unwrap_or("[]")
+            .unwrap_or("")
             .to_string();
         if self.paused.load(Ordering::SeqCst) {
             self.started_after_pause.fetch_add(1, Ordering::SeqCst);
@@ -269,10 +269,10 @@ async fn fixed_acceptance_window_holds_only_calls_behind_a_slow_entry() {
             .iter()
             .find(|(k, i, _)| *k == "start" && i == id)
             .unwrap();
-        serde_json::from_str::<Vec<serde_json::Value>>(prior)
-            .unwrap()
-            .iter()
-            .map(|entry| entry["id"].as_str().unwrap().to_string())
+        // Issue 288: one JSON line per completed entry, its id first.
+        (prior.lines().skip(1))
+            .filter_map(|line| line.strip_prefix("- {\"id\":\""))
+            .map(|line| line.split('"').next().unwrap().to_string())
             .collect()
     };
     assert!(prior("AC-X-003").is_empty());

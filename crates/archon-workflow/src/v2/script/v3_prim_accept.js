@@ -347,8 +347,10 @@
     const rounds = [];
     let checkIds = [];
     let last = null;
-    let lastSeen = null;
-    let lastDispatched = true;
+    // Issue 288: the stall belt compares a round with the last round that
+    // actually RAN checks, and a repeat pauses the run: it never ends the loop.
+    let basis = null;
+    let sentSinceBasis = true;
     for (let round = 1; ; round += 1) {
       last = await w.tool(`acceptance-contract-run-${round}`, {
         tool: "acceptance-contract-run",
@@ -363,11 +365,26 @@
       // host) ends it too rather than looping on a shape it does not know.
       if (last.final !== false || failing.length === 0) break;
       // Belt to the host's budget: a round that saw exactly what the last
-      // one saw, after a round that dispatched nothing, cannot progress.
-      const seen = JSON.stringify(failing.map((f) => [f && f.check_id, f && f.status]));
-      if (seen === lastSeen && !lastDispatched) break;
-      lastSeen = seen;
-      lastDispatched = false;
+      // round that ran checks saw, with nothing sent between them, made no
+      // progress. A round that evaluated no check (every failing one is an
+      // "error") says nothing about the product: it is never compared. A stall
+      // PAUSES the run with its evidence; a resumed run goes on with the loop.
+      const passedNow = Array.isArray(last.passed) ? last.passed : [];
+      const ranChecks = passedNow.length > 0 || failing.some((f) => f && f.status !== "error");
+      if (ranChecks) {
+        const seen = JSON.stringify(failing.map((f) => [f && f.check_id, f && f.status]));
+        if (basis && seen === basis.seen && !sentSinceBasis) {
+          await w.pause(`acceptance-stall-${round}`, {
+            reason: "no_progress",
+            round,
+            compared_with_round: basis.round,
+            failing_check_ids: failing.map((f) => f && f.check_id),
+            recovery: "The run is paused, not failed: this acceptance round failed exactly the checks the last round that ran checks failed, and nothing was sent to repair them in between. Repair what the failing checks name, then resume the run; the acceptance loop goes on.",
+          });
+        }
+        basis = { seen, round };
+        sentSinceBasis = false;
+      }
       // Issue-114: a check the host showed regressed at a run landing also
       // goes to that landing's tasks -- the owners may not write the change
       // that broke it. Absent that, exactly the owners, as before.
@@ -433,7 +450,7 @@
       for (const f of owned) if (routed(f, "granted_files").length > 0) hostGrants[findingKey(f)] = routed(f, "granted_files");
       const frozenChecks = {};
       for (const f of owned) if (typeof f.frozen_check === "string" && f.frozen_check) frozenChecks[findingKey(f)] = f.frozen_check;
-      lastDispatched = true;
+      sentSinceBasis = true;
       entry.remediation = await remediateFindings(findings, {
         hostGrants,
         hostEvidence: true,
