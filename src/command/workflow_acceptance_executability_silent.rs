@@ -21,11 +21,31 @@ use crate::command::workflow_task_set::passability::evidence::{Redactor, program
 /// Bytes of a silent failure's stderr kept as evidence.
 const EVIDENCE_BYTES: usize = 800;
 
-/// Where `probe`'s checks run: its site's search path, and `contract`'s
+/// Where `probe`'s checks run: its site's environment, and `contract`'s
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
-    let (environment, _) = super::sites::site_environment(probe);
-    Context::new(environment.get("PATH").cloned(), contract)
+    Context::new(super::sites::listing_environment(probe), contract)
+}
+
+impl HostProbe {
+    /// Where this probe's checks run, for judging their results: its
+    /// site's own environment and `contract`'s deliverables.
+    pub(crate) fn check_site(&self, contract: &AcceptanceContract) -> Context {
+        context(self, contract)
+    }
+}
+
+/// [`silent_failure`] on a blocking thread: deciding it may list a tool
+/// (`verdict_subcommand_list`), which must never hold an async worker.
+pub(super) async fn silent_failure_off_thread(
+    contract: &AcceptanceContract,
+    result: &CheckResult,
+    at: &Context,
+) -> Option<String> {
+    let (contract, result, at) = (contract.clone(), result.clone(), at.clone());
+    tokio::task::spawn_blocking(move || silent_failure(&contract, &result, &at))
+        .await
+        .unwrap_or_else(|error| Some(format!("deciding its verdict failed: {error}")))
 }
 
 /// Why `result`, a failed run of a check of `contract`, gave no verdict;

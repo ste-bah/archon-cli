@@ -102,7 +102,7 @@ pub(super) async fn prove(
         // Issue 328: nor did a run that failed for its host (a program that
         // could not start, a tree that did not build) fail on its own terms.
         let crashed = !super::crash_findings(&mutated, [result]).is_empty()
-            || super::silent::silent_failure(&mutated, result, &at).is_some();
+            || (super::silent::silent_failure_off_thread(&mutated, result, &at).await).is_some();
         if moved.is_empty() {
             findings.insert(
                 id.clone(),

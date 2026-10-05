@@ -42,7 +42,7 @@ mod bash_process_tests;
 pub(crate) mod bash_env;
 pub(crate) use bash_containment::LiveGroup;
 pub use bash_containment::end_process_groups_of;
-pub use bash_env::{host_env, isolated_env};
+pub use bash_env::{ENGINE_CREDENTIAL_VARS, host_env, isolated_env};
 
 /// Default command ceiling in seconds, configured by `tools.bash_timeout`.
 ///
