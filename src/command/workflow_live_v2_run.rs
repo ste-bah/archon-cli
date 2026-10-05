@@ -8,11 +8,14 @@ pub(crate) use super::workflow_live_v2_metadata::script_lifecycle_from_env;
 use workflow_live_v2_run_fold::fold_run_topology;
 #[path = "workflow_live_v2_run_control.rs"]
 mod run_control;
-use run_control::finalize_generated_control;
+use run_control::{generated_control_report, lost_ownership_report};
 
 #[cfg(test)]
 #[path = "workflow_live_v2_run_generation_tests.rs"]
 mod generation_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_lost_ownership_tests.rs"]
+mod lost_ownership_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_round6_publication_tests.rs"]
 mod round6_publication_tests;
@@ -429,16 +432,8 @@ async fn execute_generated_v2_run(
     };
     let summary = match run_result {
         Ok(summary) => summary,
-        Err(WorkflowError::ControlPaused(message)) => {
-            finalize_generated_control(store, &run, run_kind, RunStatus::Paused, &message)?;
-            return Ok(format!(
-                "Workflow paused: {}\n{}\nResume with: /workflow resume --live {}\n",
-                run.id, message, run.id
-            ));
-        }
-        Err(WorkflowError::ControlCancelled(message)) => {
-            finalize_generated_control(store, &run, run_kind, RunStatus::Cancelled, &message)?;
-            return Ok(format!("Workflow cancelled: {}\n{}\n", run.id, message));
+        Err(err @ (WorkflowError::ControlPaused(_) | WorkflowError::ControlCancelled(_))) => {
+            return Ok(generated_control_report(store, &run, run_kind, err)?);
         }
         Err(err) => {
             super::workflow_live_v2_finalizer::finalize_run_status(
@@ -466,9 +461,14 @@ async fn execute_generated_v2_run(
         Some(run.generation),
     )
     .await?;
-    let learning_note = record_generated_learning_event(store, &run.id, &plan, &summary, &v2_store)
-        .map(|path| format!("generated_learning: {}\n", path.display()))
-        .unwrap_or_else(|err| format!("generated_learning: degraded ({err})\n"));
+    // Issue 329: appended only while this executor owns the run.
+    let learning_note = match record_owned_learning_event(store, &run, &plan, &summary, &v2_store) {
+        Ok(path) => format!("generated_learning: {}\n", path.display()),
+        Err(WorkflowError::ControlCancelled(refused)) => {
+            return Ok(lost_ownership_report("Workflow", &run.id, &refused));
+        }
+        Err(err) => format!("generated_learning: degraded ({err})\n"),
+    };
     let status_label = match summary.status {
         WorkflowV2Status::Accepted | WorkflowV2Status::Noop => "complete",
         WorkflowV2Status::NeedsReview => "needs review",

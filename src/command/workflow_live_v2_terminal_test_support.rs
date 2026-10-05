@@ -5,7 +5,7 @@ use std::sync::Mutex;
 type Hook = Box<dyn FnOnce() + Send>;
 static UNWIND: Mutex<BTreeMap<PathBuf, Hook>> = Mutex::new(BTreeMap::new());
 
-pub(super) fn on_unwind(path: PathBuf, hook: Hook) {
+pub(in super::super) fn on_unwind(path: PathBuf, hook: Hook) {
     UNWIND.lock().unwrap().insert(path, hook);
 }
 
@@ -16,7 +16,7 @@ pub(in super::super) fn unwind(path: PathBuf) {
     }
 }
 
-pub(super) fn seed_fixed(store: &WorkflowStore, run_id: &str, root: &Path) {
+pub(crate) fn seed_fixed(store: &WorkflowStore, run_id: &str, root: &Path) {
     let task_root = root.join("tasks");
     fs::create_dir_all(&task_root).unwrap();
     let task_root = task_root
@@ -49,7 +49,7 @@ pub(super) fn seed_fixed(store: &WorkflowStore, run_id: &str, root: &Path) {
         .unwrap();
 }
 
-pub(super) fn save_fixed_metadata(store: &WorkflowStore, run_id: &str, plan: &WorkflowScriptPlan) {
+pub(crate) fn save_fixed_metadata(store: &WorkflowStore, run_id: &str, plan: &WorkflowScriptPlan) {
     let state: archon_workflow::FixedDecompositionStateV1 = serde_json::from_slice(
         &fs::read(
             store

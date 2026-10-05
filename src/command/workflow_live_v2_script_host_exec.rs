@@ -33,7 +33,9 @@ impl WorkflowScriptHost {
             .record_is_reusable(record)
     }
 
-    pub(crate) async fn execute(
+    /// One host call, once the session's control refusal gate has passed
+    /// (`execute`, `workflow_live_v2_script_host_control_refusal.rs`).
+    pub(super) async fn execute_host_call(
         &self,
         method: String,
         payload: String,

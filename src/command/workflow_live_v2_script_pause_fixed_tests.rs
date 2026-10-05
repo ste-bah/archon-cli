@@ -374,3 +374,5 @@ async fn a_resume_replays_the_failed_author_call_before_the_pause_instead_of_re_
 mod occurrences;
 #[path = "workflow_live_v2_script_pause_operational_tests.rs"]
 mod operational;
+#[path = "workflow_live_v2_script_pause_fixed_resume_tests.rs"]
+mod previous_binary_resume;

@@ -9,6 +9,8 @@ mod workflow_decomposition_author_budget_tests;
 mod workflow_decomposition_phase_tests;
 #[path = "workflow_live_v2_model_inflight_tests.rs"]
 mod workflow_live_v2_model_inflight_tests;
+#[path = "workflow_live_v2_script_control_refusal_tests.rs"]
+mod workflow_live_v2_script_control_refusal_tests;
 #[path = "workflow_live_v2_script_delivery_tests.rs"]
 mod workflow_live_v2_script_delivery_tests;
 #[path = "workflow_live_v2_script_fixed_progress_tests.rs"]
