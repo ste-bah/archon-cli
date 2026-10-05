@@ -102,15 +102,15 @@ fn log_path(run_dir: &Path) -> std::path::PathBuf {
 /// decides whether its attempt is free, appends its entry and lands the
 /// record under it, so two writers of one attempt can never both succeed.
 /// A lock that cannot be taken is an error, never a write without it.
-pub(in crate::v2::acceptance_stage) fn under_order_lock<T>(
+pub(in crate::v2::acceptance_stage) fn under_order_lock<T, E: From<crate::WorkflowError>>(
     run_dir: &Path,
-    act: impl FnOnce() -> crate::WorkflowResult<T>,
-) -> crate::WorkflowResult<T> {
+    act: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
     let path = log_path(run_dir);
     let dir = path.parent().unwrap_or(Path::new("."));
     let lock_path = dir.join(RECORDING_ORDER_LOCK);
-    let io = |error| crate::WorkflowError::io(&lock_path, error);
-    std::fs::create_dir_all(dir).map_err(|e| crate::WorkflowError::io(dir, e))?;
+    let io = |error| E::from(crate::WorkflowError::io(&lock_path, error));
+    std::fs::create_dir_all(dir).map_err(|e| E::from(crate::WorkflowError::io(dir, e)))?;
     let lock_file = (std::fs::OpenOptions::new())
         .create(true)
         .truncate(false)
@@ -149,7 +149,7 @@ pub(in crate::v2::acceptance_stage) fn note_recorded_locked(
 pub(in crate::v2::acceptance_stage) fn note_recorded(run_dir: &Path, round: u32, attempt: u32) {
     let noted = under_order_lock(run_dir, || {
         note_recorded_locked(run_dir, round, attempt);
-        Ok(())
+        crate::WorkflowResult::Ok(())
     });
     noted.expect("the order lock is taken");
 }
