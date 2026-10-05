@@ -21,11 +21,11 @@ use crate::command::workflow_task_set::passability::evidence::{Redactor, program
 /// Bytes of a silent failure's stderr kept as evidence.
 const EVIDENCE_BYTES: usize = 800;
 
-/// Where `probe`'s checks run: its site's search path, and `contract`'s
+/// Where `probe`'s checks run: its site's environment, and `contract`'s
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
     let (environment, _) = super::sites::site_environment(probe);
-    Context::new(environment.get("PATH").cloned(), contract)
+    Context::new(Some(environment), contract)
 }
 
 /// Why `result`, a failed run of a check of `contract`, gave no verdict;

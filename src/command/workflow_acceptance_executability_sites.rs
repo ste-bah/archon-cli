@@ -292,19 +292,28 @@ pub(super) fn git_head(repository: &std::path::Path) -> Option<String> {
 /// policy forwards from the host.
 pub(super) fn site_environment(probe: &HostProbe) -> (BTreeMap<String, String>, Vec<String>) {
     match &probe.site {
-        Site::Scratch(binding) => {
-            let policy = &binding.policy;
-            let mut env = policy.environment.clone();
-            env.insert("PATH".into(), policy.toolchain_path.clone());
-            for name in &policy.environment_allowlist {
-                if let Ok(value) = std::env::var(name) {
-                    env.insert(name.clone(), value);
-                }
-            }
-            (env, policy.environment_allowlist.clone())
-        }
+        Site::Scratch(binding) => (
+            scratch_environment(&binding.policy),
+            binding.policy.environment_allowlist.clone(),
+        ),
         _ => (hermetic::probe_environment(None), Vec::new()),
     }
+}
+
+/// The variables a scratch site of `policy` gives every check, besides its
+/// own fresh HOME, TMPDIR and build directories: those its policy binds,
+/// its toolchain PATH, and the host values it forwards.
+pub(super) fn scratch_environment(
+    policy: &archon_workflow::acceptance_scratch::ScratchPolicy,
+) -> BTreeMap<String, String> {
+    let mut env = policy.environment.clone();
+    env.insert("PATH".into(), policy.toolchain_path.clone());
+    for name in &policy.environment_allowlist {
+        if let Ok(value) = std::env::var(name) {
+            env.insert(name.clone(), value);
+        }
+    }
+    env
 }
 
 /// Captured once per freeze, using the check site's PATH and forwarded values.

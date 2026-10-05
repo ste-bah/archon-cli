@@ -6,7 +6,10 @@
 //! provide can never pass there, however good the implementation is. The
 //! host says so once, before any stage runs, so an operator sees it before
 //! a long run: an event (`toolchain_unresolved`) and a log line. It is a
-//! warning only: the run goes on, and nothing is refused or capped.
+//! warning only: the run goes on, and nothing is refused or capped. A
+//! subcommand is named when the host has its `tool-sub` program but the
+//! path does not (Issue 333); the tools that decides are listed on a
+//! blocking thread, with the scratch site's own environment.
 
 use std::collections::BTreeMap;
 
@@ -16,7 +19,9 @@ use archon_workflow::task_set_contract::{
 use archon_workflow::{SharedWorkflowUiSink, WorkflowEventKind, WorkflowEventLog, WorkflowStore};
 
 use crate::command::acceptance_scratch_policy::NativeBinding;
-use crate::command::workflow_task_set::executability::{executed_text, unresolved_on_path};
+use crate::command::workflow_task_set::executability::{
+    CheckSite, executed_text, unresolved_on_path,
+};
 
 /// What a run's checks run that the toolchain path cannot resolve.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,20 +54,24 @@ impl Unresolved {
     }
 }
 
-/// What `contract`'s accepted checks run that `toolchain_path` does not
-/// resolve; `None` when it resolves everything.
+/// What `contract`'s accepted checks run that the scratch site `at` (of the
+/// toolchain path `toolchain_path`) does not resolve; `None` when it
+/// resolves everything. Blocking: it may list the tools the checks run.
 pub(crate) fn unresolved(
     contract: &AcceptanceContract,
     toolchain_path: &str,
+    at: &CheckSite,
 ) -> Option<Unresolved> {
-    let checks: BTreeMap<String, Vec<String>> = (contract.acceptance.iter())
+    let accepted: Vec<(&str, &str)> = (contract.acceptance.iter())
         .chain(&contract.supplementary)
         .filter(|entry| entry.judgment.verdict == JudgeDecision::Accepted)
-        .filter_map(|entry| {
-            let (_, text) = executed_text(entry)?;
-            let missing = unresolved_on_path(text, toolchain_path);
-            (!missing.is_empty()).then(|| (entry.id.clone(), missing))
-        })
+        .filter_map(|entry| Some((entry.id.as_str(), executed_text(entry)?.1)))
+        .collect();
+    let texts: Vec<&str> = accepted.iter().map(|(_, text)| *text).collect();
+    let checks: BTreeMap<String, Vec<String>> = (accepted.iter())
+        .zip(unresolved_on_path(&texts, at))
+        .filter(|(_, missing)| !missing.is_empty())
+        .map(|((id, _), missing)| (id.to_string(), missing))
         .collect();
     (!checks.is_empty()).then(|| Unresolved {
         toolchain_path: toolchain_path.to_string(),
@@ -90,8 +99,17 @@ pub(crate) async fn warn(store: &WorkflowStore, run_id: &str, ui_sink: &SharedWo
     let Some((binding, contract)) = recorded(store, run_id) else {
         return;
     };
-    let Some(found) = unresolved(&contract, &binding.policy.toolchain_path) else {
-        return;
+    // The site is read here, then its tools are listed on a blocking
+    // thread: a slow one never holds an async worker (Issue 333).
+    let at = CheckSite::for_scratch(&binding.policy);
+    let path = binding.policy.toolchain_path;
+    let found = match tokio::task::spawn_blocking(move || unresolved(&contract, &path, &at)).await {
+        Ok(Some(found)) => found,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(run_id, %error, "checking the toolchain path failed");
+            return;
+        }
     };
     let line = found.summary_line();
     tracing::warn!(run_id, "{}", line.trim_end());

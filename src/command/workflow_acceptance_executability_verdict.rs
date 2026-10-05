@@ -27,9 +27,10 @@
 //!    tree (`bash scripts/new.sh`), is the deliverable not there yet: a
 //!    verdict;
 //!    A subcommand the check runs (`tool sub`) that is neither built into
-//!    its tool nor a program `tool-sub` on the search path, which the
-//!    tool rejected before any assertion ran, is the same: an environment
-//!    failure (Issue 331, `workflow_acceptance_executability_verdict_subcommand`);
+//!    its tool nor a program `tool-sub` on the search path, though the
+//!    host has that program, which the tool rejected before any assertion
+//!    ran, is the same: an environment failure (Issues 331, 333,
+//!    `workflow_acceptance_executability_verdict_subcommand`);
 //! 2. no exit status: the run was killed before it reported anything;
 //! 3. the check crashed in its own code
 //!    ([`archon_workflow::acceptance_check_crash`]);
@@ -47,6 +48,7 @@
 //! Anything else is the check's verdict on that tree, including a run that
 //! did no work (no test matched) and a failure naming no source location.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -61,6 +63,8 @@ use super::verdict_shell::{Simple, expands, simple_commands};
 mod subcommand;
 #[path = "workflow_acceptance_executability_verdict_which.rs"]
 mod which;
+#[cfg(test)]
+pub(crate) use subcommand::HOST_PATH;
 pub(crate) use subcommand::unresolved_on_path;
 
 /// Programs whose job is to compile or build: a compiler error they print
@@ -74,17 +78,27 @@ const BUILDERS: &[&str] = &[
 /// Arguments that make a build tool run the product, not just build it.
 const RUNS_PRODUCT: &[&str] = &["test", "nextest", "run", "bench", "exec", "pytest", "jest"];
 
-/// Where a check runs: its search path and the contract's declared
-/// deliverable paths.
+/// Where a check runs: its site's environment (its search path among it),
+/// the contract's declared deliverable paths, and the host's own search
+/// path, where a program the check's path lacks may be installed.
 pub(crate) struct Context {
     path: Option<String>,
     deliverables: Vec<String>,
+    /// Every variable the site gives a check, as `tool --list` sees them
+    /// (Issue 333): a toolchain proxy finds its toolchain through them.
+    environment: BTreeMap<String, String>,
+    host_path: Option<String>,
+    /// How long a listing may print nothing before it is given up.
+    list_stall: std::time::Duration,
 }
 
 impl Context {
-    /// The search path `path` (the host's when `None`), and every path a
-    /// floor of `contract` declares.
-    pub(crate) fn new(path: Option<String>, contract: &AcceptanceContract) -> Self {
+    /// The site environment `environment` (the host's when `None`), and
+    /// every path a floor of `contract` declares.
+    pub(crate) fn new(
+        environment: Option<BTreeMap<String, String>>,
+        contract: &AcceptanceContract,
+    ) -> Self {
         let deliverables = (contract.acceptance.iter())
             .chain(&contract.supplementary)
             .filter_map(|entry| match &entry.check {
@@ -100,9 +114,25 @@ impl Context {
             })
             .filter(|path| !path.trim().is_empty())
             .collect();
-        Self {
-            path: path.or_else(|| std::env::var("PATH").ok()),
+        Self::at(
+            environment.unwrap_or_else(|| std::env::vars().collect()),
             deliverables,
+        )
+    }
+
+    /// A scratch site of `policy`, as it gives every check the variables
+    /// its policy binds and forwards (no declared deliverables).
+    pub(crate) fn for_scratch(policy: &archon_workflow::acceptance_scratch::ScratchPolicy) -> Self {
+        Self::at(super::sites::scratch_environment(policy), Vec::new())
+    }
+
+    fn at(environment: BTreeMap<String, String>, deliverables: Vec<String>) -> Self {
+        Self {
+            path: environment.get("PATH").cloned(),
+            deliverables,
+            environment,
+            host_path: subcommand::host_path(),
+            list_stall: subcommand::LIST_STALL,
         }
     }
 

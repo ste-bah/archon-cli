@@ -1,46 +1,51 @@
-//! A subcommand a check's search path cannot resolve (Issue 331).
+//! A subcommand a check's search path cannot resolve (Issues 331, 333).
 //!
 //! Some tools dispatch their first argument: `tool sub` runs a subcommand
 //! built into `tool`, or else a program `tool-sub` found on the search path
 //! (cargo, git and kubectl plugins work so). A check that runs `tool sub`
-//! where neither exists fails whatever it asserts: the tool rejects the
-//! subcommand before anything is checked. That run gave no verdict -- an
-//! environment failure, like a missing program (rule 1 of
+//! where its search path has neither fails whatever it asserts: the tool
+//! rejects the subcommand before anything is checked. When the host itself
+//! has `tool-sub` installed, that run gave no verdict -- an environment
+//! failure, like a missing program (rule 1 of
 //! `workflow_acceptance_executability_verdict`) -- so it is unproven, then
 //! its author's finding under the same strike rule, never a proof.
 //!
-//! The rule is the same for every tool. `tool` dispatches when it has a
-//! program `tool-*` on the search path and lists its built-in commands:
-//! the commands `tool --list` lists when run with no search path and an
-//! empty home, where no external one can be found. Its subcommand `sub`
-//! (its first argument that is not an option) is missing from a search
-//! path when `sub` is not built in and `tool-sub` is not a program there.
-//! A tool whose built-in commands are not known that way is never judged:
-//! a subcommand it rejects may be a deliverable not built yet (the product's
-//! own command line), and that is a verdict.
+//! The rule is the same for every tool. `sub` is a plugin the check's
+//! environment lacks when all of these hold: no program `tool-sub` is on
+//! the check's search path, one is on the host's own search path, and
+//! `sub` is not among the commands `tool --list` lists at the check's site
+//! with no search path (`verdict_subcommand_list`). A subcommand no `tool-sub`
+//! anywhere provides may be one the deliverable adds (an alias in the
+//! tree's configuration, a command of the product's own command line): its
+//! rejection before the implementation is a verdict. A tool whose built-in
+//! commands are not known that way is never judged either.
 //!
-//! A failed run is an environment failure only when all of these hold:
-//! `sub` is missing from the check's search path, the run's output has a
-//! line that rejects `sub`, quoted, as an unknown command, and nothing
-//! shows an assertion ran. So a check that falls back when the subcommand
-//! is missing, or whose first argument is an option's value, keeps its
-//! verdict. Before a run the host also names each program and subcommand
-//! missing from the configured toolchain path ([`unresolved_on_path`]).
+//! `sub` is the tool's first argument that is not an option -- or, since an
+//! option may take a value (`tool --color never sub`), the word after such
+//! a value ([`candidates`]). A failed run is an environment failure only
+//! when the run's output has a line that rejects one of those words,
+//! quoted, as an unknown command, that word is a plugin its environment
+//! lacks, and nothing shows an assertion ran. So a check that falls back
+//! when the subcommand is missing keeps its verdict.
+//!
+//! Before a run the host also names each program and plugin subcommand
+//! missing from the configured toolchain path ([`unresolved_on_path`]). It
+//! lists only tools some check runs with a word the host has a `tool-word`
+//! program for, each tool once, all at once, never on an async thread.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::LazyLock;
 
 use regex::Regex;
 
 use super::super::verdict_shell::{Simple, simple_commands};
 use super::{ASSERTED, Context, which};
 
-/// The longest a tool may take to list its commands.
-const LIST_TIMEOUT: Duration = Duration::from_secs(10);
+#[path = "workflow_acceptance_executability_verdict_subcommand_list.rs"]
+mod list;
+pub(super) use list::LIST_STALL;
+use list::{Listing, listing, prefetch};
 
 /// A line that rejects a command: `no such command`, `unknown subcommand`,
 /// `'x' is not a git command`.
@@ -51,12 +56,24 @@ static REJECTION: LazyLock<Regex> = LazyLock::new(|| {
     .expect("static pattern")
 });
 
-/// Each listing tool's built-in commands, by its path.
-type Listings = BTreeMap<PathBuf, Option<BTreeSet<String>>>;
-static LISTED: LazyLock<Mutex<Listings>> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
+#[cfg(test)]
+thread_local! {
+    /// A test's stand-in for the host's search path, on its own thread.
+    pub(crate) static HOST_PATH: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The host's own search path.
+pub(super) fn host_path() -> Option<String> {
+    #[cfg(test)]
+    if let Some(path) = HOST_PATH.with(|path| path.borrow().clone()) {
+        return Some(path);
+    }
+    std::env::var("PATH").ok()
+}
 
 /// Why the failed run printing `output` gave no verdict because a
-/// subcommand one of `commands` runs is missing from `at`'s search path
+/// subcommand one of `commands` runs is a plugin `at`'s environment lacks
 /// (see the module docs); `None` otherwise.
 pub(super) fn missing(commands: &[Simple], output: &str, at: &Context) -> Option<String> {
     if ASSERTED.is_match(output) {
@@ -68,13 +85,19 @@ pub(super) fn missing(commands: &[Simple], output: &str, at: &Context) -> Option
     }
     commands.iter().find_map(|command| {
         let (tool, program) = tool(command, at)?;
-        let name = subcommand(command)?;
-        (rejections.iter()).find(|line| quoted(line, name))?;
-        lacks(&tool, &program, name, at).then(|| {
-            format!(
-                "it runs `{tool} {name}`, but `{name}` is neither a command built into `{tool}` nor a program `{tool}-{name}` on its search path (PATH={}): a subcommand its environment lacks",
-                at.path.as_deref().unwrap_or("")
-            )
+        candidates(command).into_iter().find_map(|name| {
+            (rejections.iter()).find(|line| quoted(line, name))?;
+            let host = plugin(&tool, name, at)?;
+            let Listing::Commands(builtins) = listing(&program, at) else {
+                return None;
+            };
+            (!builtins.contains(name)).then(|| {
+                format!(
+                    "it runs `{tool} {name}`, but `{name}` is neither a command built into `{tool}` nor a program `{tool}-{name}` on its search path (PATH={}), though the host has one at {}: a subcommand its environment lacks",
+                    at.path.as_deref().unwrap_or(""),
+                    host.display()
+                )
+            })
         })
     })
 }
@@ -88,40 +111,72 @@ pub(super) fn rejected(output: &str) -> bool {
             .any(|line| line.contains(['`', '\'', '"']))
 }
 
-/// The commands the check text `text` runs that the search path `path`
-/// does not resolve, each described for an operator: a program it starts
-/// by name that is not there, one it starts by an absolute path that does
-/// not exist, and a subcommand that does not resolve there, of a tool that
-/// dispatches (see the module docs).
-pub(crate) fn unresolved_on_path(text: &str, path: &str) -> Vec<String> {
-    let at = Context {
-        path: Some(path.to_string()),
-        deliverables: Vec::new(),
-    };
-    let mut found = Vec::new();
-    for command in simple_commands(text) {
-        let Some(program) = command.program.as_deref() else {
-            continue;
-        };
-        if which::is_path(program) {
-            if which::is_absolute(program) && !Path::new(program).exists() {
-                found.push(format!("`{program}` (no such file)"));
+/// For each check text of `texts`, the commands it runs that `at`'s search
+/// path does not resolve, each described for an operator: a program it
+/// starts by name that is not there, one it starts by an absolute path that
+/// does not exist, and a plugin subcommand that path lacks (see the module
+/// docs). Blocking: it may run the tools it lists.
+pub(crate) fn unresolved_on_path(texts: &[&str], at: &Context) -> Vec<Vec<String>> {
+    let commands: Vec<Vec<Simple>> = texts.iter().map(|text| simple_commands(text)).collect();
+    let listed: BTreeSet<PathBuf> = (commands.iter().flatten())
+        .filter_map(|command| {
+            let (tool, program) = tool(command, at)?;
+            let names = candidates(command);
+            (names.iter().any(|name| plugin(&tool, name, at).is_some())).then_some(program)
+        })
+        .collect();
+    prefetch(&listed, at);
+    commands
+        .iter()
+        .map(|commands| {
+            let mut found = Vec::new();
+            for command in commands {
+                found.extend(unresolved(command, at));
             }
-        } else if at.find(program).is_none() {
-            found.push(format!("`{program}` (not on the path)"));
-            continue;
+            found.dedup();
+            found
+        })
+        .collect()
+}
+
+/// What `command` runs that `at`'s search path does not resolve.
+fn unresolved(command: &Simple, at: &Context) -> Option<String> {
+    let program = command.program.as_deref()?;
+    if which::is_path(program) {
+        if which::is_absolute(program) && !Path::new(program).exists() {
+            return Some(format!("`{program}` (no such file)"));
         }
-        let Some(((tool, located), name)) = tool(&command, &at).zip(subcommand(&command)) else {
-            continue;
-        };
-        if lacks(&tool, &located, name, &at) {
-            found.push(format!(
-                "`{tool} {name}` (not built into `{tool}`, and no `{tool}-{name}` on the path)"
+    } else if at.find(program).is_none() {
+        return Some(format!("`{program}` (not on the path)"));
+    }
+    let (tool, located) = tool(command, at)?;
+    let names = candidates(command);
+    let on_path = |name: &str| at.on_path(&format!("{tool}-{name}"));
+    let index = (names.iter()).position(|name| plugin(&tool, name, at).is_some())?;
+    if names[..index].iter().any(|name| on_path(name)) {
+        return None;
+    }
+    let first = names[index];
+    let builtins = match listing(&located, at) {
+        Listing::Commands(builtins) => builtins,
+        Listing::Unknown(why) => {
+            return Some(format!(
+                "`{tool} {first}` (no `{tool}-{first}` on the path, though the host has one; whether `{first}` is built into `{tool}` is not known: {why})"
+            ));
+        }
+    };
+    for name in names {
+        if builtins.contains(name) || on_path(name) {
+            return None;
+        }
+        if let Some(host) = plugin(&tool, name, at) {
+            return Some(format!(
+                "`{tool} {name}` (not built into `{tool}`, and no `{tool}-{name}` on the path; the host has it at {})",
+                host.display()
             ));
         }
     }
-    found.dedup();
-    found
+    None
 }
 
 /// The tool `command` starts, by its own name, and where it is: a name on
@@ -137,11 +192,29 @@ fn tool(command: &Simple, at: &Context) -> Option<(String, PathBuf)> {
     (which::is_absolute(program) && path.is_file()).then(|| (name, path.to_path_buf()))
 }
 
-/// `command`'s first argument that is not an option, when it is shaped like
-/// a command name.
-fn subcommand(command: &Simple) -> Option<&str> {
-    let word = (command.args.iter()).find(|word| !word.starts_with(['-', '+']))?;
-    named(word).then_some(word.as_str())
+/// The words of `command` that may be its subcommand, in order: its first
+/// argument that is not an option and, while the word before is an option
+/// that may take a value (`--color never`, not `--color=never`), the word
+/// after that value. Only words shaped like a command name are kept.
+pub(super) fn candidates(command: &Simple) -> Vec<&str> {
+    let mut found = Vec::new();
+    let mut after_option = false;
+    for word in &command.args {
+        if word == "--" {
+            break;
+        }
+        if word.len() > 1 && word.starts_with(['-', '+']) {
+            after_option = !word.contains('=');
+            continue;
+        }
+        if named(word) {
+            found.push(word.as_str());
+        }
+        if !std::mem::take(&mut after_option) {
+            break;
+        }
+    }
+    found
 }
 
 fn named(word: &str) -> bool {
@@ -155,101 +228,24 @@ fn quoted(line: &str, name: &str) -> bool {
         .any(|quote| line.contains(&format!("{quote}{name}{quote}")))
 }
 
-/// Whether `tool` (at `program`) dispatches, and its subcommand `name` is
-/// missing from `at`'s search path: not built in, and no `tool-name` there.
-fn lacks(tool: &str, program: &Path, name: &str, at: &Context) -> bool {
-    !at.on_path(&format!("{tool}-{name}"))
-        && dispatches(tool, at)
-        && builtins(program).is_some_and(|commands| !commands.contains(name))
-}
-
-/// Whether some program `tool-*` is on `at`'s search path.
-fn dispatches(tool: &str, at: &Context) -> bool {
-    let prefix = format!("{tool}-");
-    let Some(path) = at.path.as_deref() else {
-        return false;
-    };
-    which::search_dirs(path, cfg!(windows))
-        .into_iter()
-        .filter_map(|dir| std::fs::read_dir(dir).ok())
-        .flatten()
-        .flatten()
-        .any(|entry| {
-            entry.file_name().to_string_lossy().starts_with(&prefix) && entry.path().is_file()
-        })
-}
-
-/// The commands `program` builds in, as `program --list` lists them with
-/// no search path and an empty home; `None` when it lists none. A tool that
-/// answered is asked once per process; one that could not be started or
-/// timed out is asked again next time.
-fn builtins(program: &Path) -> Option<BTreeSet<String>> {
-    let lock = || LISTED.lock().unwrap_or_else(|poison| poison.into_inner());
-    if let Some(known) = lock().get(program) {
-        return known.clone();
+/// Where the host has the program `tool-name` that `at`'s search path
+/// lacks; `None` when that path has it, or the host has none.
+fn plugin(tool: &str, name: &str, at: &Context) -> Option<PathBuf> {
+    let program = format!("{tool}-{name}");
+    if at.on_path(&program) {
+        return None;
     }
-    let commands = list(program)?;
-    lock().insert(program.to_path_buf(), commands.clone());
-    commands
-}
-
-/// `program`'s listed commands; `None` when it did not answer.
-fn list(program: &Path) -> Option<Option<BTreeSet<String>>> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let home = std::env::temp_dir().join(format!(
-        "archon-command-list-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&home).ok()?;
-    let listed = list_in(program, &home);
-    let _ = std::fs::remove_dir_all(&home);
-    listed
-}
-
-fn list_in(program: &Path, home: &Path) -> Option<Option<BTreeSet<String>>> {
-    let out = home.join(".list");
-    let spawn = || {
-        Command::new(program)
-            .arg("--list")
-            .current_dir(home)
-            .env_clear()
-            .env("PATH", "")
-            .env("HOME", home)
-            .env("TMPDIR", home)
-            .stdin(Stdio::null())
-            .stdout(std::fs::File::create(&out)?)
-            .stderr(Stdio::null())
-            .spawn()
-    };
-    // A program written a moment ago can be briefly unable to start while
-    // another thread's child still holds it open.
-    let mut child = (0..3).find_map(|attempt| {
-        std::thread::sleep(Duration::from_millis(50 * attempt));
-        spawn().ok()
-    })?;
-    let deadline = Instant::now() + LIST_TIMEOUT;
-    let status = loop {
-        if let Some(status) = child.try_wait().ok()? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    let text = std::fs::read_to_string(&out).ok()?;
-    let commands: BTreeSet<String> = (text.lines())
-        .filter(|line| line.starts_with(char::is_whitespace))
-        .filter_map(|line| line.split_whitespace().next())
-        .filter(|word| named(word))
-        .map(str::to_string)
-        .collect();
-    Some((status.success() && !commands.is_empty()).then_some(commands))
+    which::find(at.host_path.as_deref()?, &program)
 }
 
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_verdict_subcommand_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_verdict_subcommand_probe_tests.rs"]
+mod probe_tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_verdict_subcommand_333_tests.rs"]
+mod tests_333;

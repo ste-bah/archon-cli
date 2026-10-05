@@ -9,6 +9,7 @@ use archon_workflow::WorkflowStore;
 use archon_workflow::task_universe::{WorkflowV2TaskUniverse, WorkflowV2TaskUniverseTask};
 
 use super::warn;
+use crate::command::workflow_task_set::executability::HOST_PATH;
 use crate::command::workflow_task_set::republish::test_fixture::frozen_set;
 
 struct Lines(Arc<Mutex<Vec<String>>>);
@@ -42,10 +43,12 @@ fn git(dir: &std::path::Path, args: &[&str]) {
 
 /// A run of a frozen set whose checks are `checks`, under a scratch policy
 /// whose toolchain path is a bin directory holding `tools` and the system's
-/// directories; returns (store, run id, toolchain path, kept dirs).
+/// directories, on a host whose own search path also has `installed`
+/// (for this thread); returns (store, run id, toolchain path, kept dirs).
 fn launched(
     checks: &[(&str, &str, bool)],
     tools: &[&str],
+    installed: &[&str],
 ) -> (WorkflowStore, String, String, Vec<tempfile::TempDir>) {
     let set = frozen_set(checks);
     let outside = tempfile::tempdir().unwrap();
@@ -67,19 +70,28 @@ fn launched(
         ],
     );
     let bin = outside.path().canonicalize().unwrap().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    for tool in tools {
-        let file = bin.join(tool);
-        let script = match *tool {
-            "archon331tool" => {
-                "#!/bin/sh\n[ \"$1\" = --list ] && printf 'Commands:\\n    build    Build\\n'\nexit 0\n"
-            }
-            _ => "#!/bin/sh\nexit 0\n",
-        };
-        std::fs::write(&file, script).unwrap();
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let host = outside.path().canonicalize().unwrap().join("host");
+    for (dir, tools) in [(&bin, tools), (&host, installed)] {
+        std::fs::create_dir_all(dir).unwrap();
+        for tool in tools {
+            let file = dir.join(tool);
+            let script = match *tool {
+                "archon331tool" => {
+                    "#!/bin/sh\n[ \"$1\" = --list ] && printf 'Commands:\\n    build    Build\\n'\nexit 0\n"
+                }
+                // Issue 333: a listing that takes a while.
+                "archon333tool" => {
+                    "#!/bin/sh\n[ \"$1\" = --list ] && /bin/sleep 1 && printf 'Commands:\\n    build    Build\\n'\nexit 0\n"
+                }
+                _ => "#!/bin/sh\nexit 0\n",
+            };
+            std::fs::write(&file, script).unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
     let toolchain = format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display());
+    let host_path = format!("{}:{toolchain}", host.display());
+    HOST_PATH.with(|path| *path.borrow_mut() = Some(host_path));
     std::fs::create_dir_all(set.project.path().join(".archon")).unwrap();
     std::fs::write(
         set.project.path().join(".archon/config.toml"),
@@ -135,8 +147,12 @@ async fn a_run_start_warns_about_commands_its_toolchain_path_does_not_resolve() 
         ("AC-3", "archon-issue-331-absent --verify", true),
         ("AC-4", "archon-issue-331-refuted", false),
     ];
-    let (store, run_id, toolchain, _kept) =
-        launched(&checks, &["archon331tool", "archon331tool-other"]);
+    let (store, run_id, toolchain, kept) = launched(
+        &checks,
+        &["archon331tool", "archon331tool-other"],
+        &["archon331tool-lint", "archon331tool-other"],
+    );
+    let host = kept[1].path().canonicalize().unwrap().join("host");
     let (events, lines) = warned(&store, &run_id).await;
     assert_eq!(events.len(), 1, "{events:?}");
     let detail = &events[0]["detail"];
@@ -144,7 +160,7 @@ async fn a_run_start_warns_about_commands_its_toolchain_path_does_not_resolve() 
     assert_eq!(
         detail["checks"],
         serde_json::json!({
-            "AC-1": ["`archon331tool lint` (not built into `archon331tool`, and no `archon331tool-lint` on the path)"],
+            "AC-1": [format!("`archon331tool lint` (not built into `archon331tool`, and no `archon331tool-lint` on the path; the host has it at {})", host.join("archon331tool-lint").display())],
             "AC-3": ["`archon-issue-331-absent` (not on the path)"],
         }),
         "a resolved built-in and plugin, and an unaccepted check, are not named"
@@ -160,10 +176,44 @@ async fn a_run_start_warns_about_commands_its_toolchain_path_does_not_resolve() 
 #[tokio::test]
 async fn a_run_start_whose_checks_all_resolve_says_nothing() {
     let checks = [("AC-1", "archon331tool build && test -f x", true)];
-    let (store, run_id, _, _kept) = launched(&checks, &["archon331tool", "archon331tool-other"]);
+    let (store, run_id, _, _kept) = launched(
+        &checks,
+        &["archon331tool", "archon331tool-other"],
+        &["archon331tool-build"],
+    );
     let (events, lines) = warned(&store, &run_id).await;
     assert!(
         events.is_empty() && lines.is_empty(),
         "{events:?} {lines:?}"
+    );
+}
+
+/// Issue 333: the tools a run's checks run are listed on a blocking thread,
+/// so a slow listing never holds the async runtime that starts the run.
+#[tokio::test(flavor = "current_thread")]
+async fn a_run_start_lists_tools_off_the_async_thread() {
+    let checks = [("AC-1", "archon333tool lint", true)];
+    let (store, run_id, _, _kept) = launched(&checks, &["archon333tool"], &["archon333tool-lint"]);
+    let ticks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = ticks.clone();
+    let ticker = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    let (events, _) = warned(&store, &run_id).await;
+    ticker.abort();
+    let ticks = ticks.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        ticks >= 20,
+        "the runtime ran on while it listed: {ticks} ticks"
+    );
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert!(
+        events[0]["detail"]["checks"]["AC-1"][0]
+            .as_str()
+            .is_some_and(|line| line.starts_with("`archon333tool lint` (not built into")),
+        "{events:?}"
     );
 }
