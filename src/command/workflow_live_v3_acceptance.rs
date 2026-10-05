@@ -171,8 +171,10 @@ pub(super) async fn run_acceptance_stage(
     // Decision A: the failing states this run reached and the revisits in a
     // row, kept across attempts and resumes.
     // Issue 262 (round 8): damaged history heals or pauses, never fails.
+    // Issue 320: without a task set, a context that will not resolve is final.
+    let task_set = task_universe.is_some();
     let ledger::Decided { decision, path } =
-        ledger::record_and_decide(store, run_id, generation, &run_dir, &mut record)?;
+        ledger::record_and_decide(store, run_id, generation, &run_dir, &mut record, task_set)?;
     // Issue 262: a stall (or the runaway guard) pauses the run with the
     // round's record as evidence; it never ends the loop or fails the run.
     if let Some(cause) = decision.pause {

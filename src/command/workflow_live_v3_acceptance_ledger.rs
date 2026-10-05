@@ -30,12 +30,20 @@ pub(super) struct Decided {
 /// record and the ledger. `Err` is the control error the round ends with:
 /// a pause of the run (or, for a round an operator pause and resume made
 /// obsolete, the refusal to pause the newer generation).
+///
+/// Issue 320: a round whose stage context could not be resolved (no
+/// execution recorded) in a run with no task set (`task_set` false) has
+/// nothing the host can ever act on: no contract can be authored or run for
+/// it, and no resume changes that. It is final, unevaluated (NeedsReview),
+/// never a stall to pause on again and again. Every other round with an
+/// operational error stays open, and repeats pause on the no-progress bound.
 pub(super) fn record_and_decide(
     store: &WorkflowStore,
     run_id: &str,
     generation: u64,
     run_dir: &Path,
     record: &mut AcceptanceRoundRecordV1,
+    task_set: bool,
 ) -> Result<Decided, WorkflowError> {
     let pause = |record: &AcceptanceRoundRecordV1, reason: String, quarantined| {
         pause_on_history(store, run_id, generation, record, &reason, quarantined)
@@ -69,7 +77,17 @@ pub(super) fn record_and_decide(
         return Err(paused);
     }
     let mut ledger = healed.ledger;
-    let decision = progress::decide_with(&mut ledger, record);
+    let decision = if !task_set && record.execution.is_none() {
+        ledger.observe(record);
+        LoopDecision {
+            final_round: true,
+            escalate: false,
+            stalled_rounds: 0,
+            pause: None,
+        }
+    } else {
+        progress::decide_with(&mut ledger, record)
+    };
     record.final_round = decision.final_round;
     let path = match write_round_record(run_dir, record) {
         Ok(path) => path,

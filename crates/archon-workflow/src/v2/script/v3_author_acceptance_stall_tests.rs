@@ -95,3 +95,45 @@ async fn rounds_that_ran_no_checks_never_end_the_loop() {
     let result: serde_json::Value = serde_json::from_str(&result).expect("accounting json");
     assert_eq!(result["acceptance_gate"]["complete"], true);
 }
+
+/// Issue 320: a round with no failing check but operational errors, which the
+/// host keeps open (`final: false`), used to END the loop (one round, gate
+/// incomplete). The host repairs its own errors and decides; the loop goes on
+/// until the host ends it, and the script raises no pause of its own.
+#[tokio::test]
+async fn a_round_with_only_operational_errors_the_host_keeps_open_goes_on() {
+    let (calls, result) = run_scripted(
+        &script("schema: 2, ", ACCEPTANCE_TAIL),
+        |method, payload| {
+            let id = payload["id"].as_str().unwrap_or_default();
+            if method == "pause" {
+                return serde_json::json!({ "resumed": true, "pause_id": id });
+            }
+            match id {
+                "acceptance-contract-run-1" => {
+                    let mut reply = acceptance_reply(1, serde_json::json!([]), false);
+                    reply["passed"] = serde_json::json!(["REQ-1"]);
+                    reply["operational_errors"] =
+                        serde_json::json!(["the acceptance environment could not be prepared"]);
+                    reply
+                }
+                id if id.starts_with("acceptance-contract-run-") => {
+                    acceptance_reply(2, serde_json::json!([]), true)
+                }
+                _ => view(
+                    serde_json::json!({ "items": [], "outcomes": [] }),
+                    "accepted",
+                ),
+            }
+        },
+    )
+    .await;
+    assert!(ids(&calls, "pause").is_empty(), "{calls:#?}");
+    assert_eq!(
+        rounds(&calls),
+        ["acceptance-contract-run-1", "acceptance-contract-run-2"],
+        "the host kept the loop open, so the next round runs"
+    );
+    let result: serde_json::Value = serde_json::from_str(&result).expect("accounting json");
+    assert_eq!(result["acceptance_gate"]["complete"], true);
+}
