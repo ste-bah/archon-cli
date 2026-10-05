@@ -26,6 +26,24 @@ pub(super) fn find(path: &str, name: &str) -> Option<PathBuf> {
                 .map(move |file| dir.join(file))
         })
         .find(|program| program.is_file())
+        .map(|program| on_disk_name(program, windows))
+}
+
+/// `program` as its directory spells it. A `case_blind` file system (Windows)
+/// finds `tool.EXE` when the file is `tool.exe`; the file's own name is the
+/// one reported. Unchanged when no entry matches or the directory is unread.
+pub(super) fn on_disk_name(program: PathBuf, case_blind: bool) -> PathBuf {
+    let (Some(dir), Some(file)) = (program.parent(), program.file_name()) else {
+        return program;
+    };
+    if !case_blind {
+        return program;
+    }
+    let file = file.to_string_lossy();
+    let entries = std::fs::read_dir(dir).into_iter().flatten().flatten();
+    (entries.map(|entry| entry.file_name()))
+        .find(|name| name.to_string_lossy().eq_ignore_ascii_case(&file))
+        .map_or_else(|| program.clone(), |name| dir.join(name))
 }
 
 /// The directories of the search path `path`, split as `windows` does or
@@ -171,5 +189,21 @@ mod tests {
         assert_eq!(find(&path, "absent328"), None);
         assert!(is_path("scripts/new.sh") && !is_path("bash"));
         assert!(is_absolute("/opt/x") && !is_absolute("bin/x"));
+    }
+
+    /// Issue 328: `PATHEXT` lists `.EXE`; the file is `tool328.exe`. The
+    /// path reported is the file's own name, not the extension's spelling.
+    #[test]
+    fn a_case_blind_match_reports_the_file_name_as_the_directory_spells_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("tool328.exe"), "").unwrap();
+        let asked = dir.path().join("tool328.EXE");
+        assert_eq!(
+            on_disk_name(asked.clone(), true),
+            dir.path().join("tool328.exe")
+        );
+        assert_eq!(on_disk_name(asked.clone(), false), asked);
+        let absent = dir.path().join("absent328.EXE");
+        assert_eq!(on_disk_name(absent.clone(), true), absent);
     }
 }
