@@ -91,6 +91,10 @@ pub(super) struct WorkflowV2ScriptRunner {
     /// with that error instead of becoming a failed call value. Set for the v3
     /// authoring bootstrap only, whose loop pauses on such a fault.
     stops_on_host_fault: bool,
+    /// Issue 335: a workflow.js runtime error pauses the run with its
+    /// evidence. Off for the v3 authoring bootstrap only, whose own loop
+    /// re-authors on a script that came back without a result.
+    pauses_on_script_error: bool,
 }
 
 impl WorkflowV2ScriptRunner {
@@ -125,6 +129,7 @@ impl WorkflowV2ScriptRunner {
             reexecuted_task_closure: Arc::new(StdMutex::new(Default::default())),
             pending_calls: Arc::default(),
             stops_on_host_fault: false,
+            pauses_on_script_error: true,
         }
     }
 
@@ -303,6 +308,10 @@ impl WorkflowV2ScriptRunner {
         if terminal_stop {
             host.interrupt_terminal_calls().await;
         }
+        // Issue 335: an error before the script's promise existed is the
+        // source failing to evaluate (a syntax or top-level error); every
+        // later one is a runtime error of the script.
+        let unevaluable = js_result.is_err();
         let outcome = js_result.unwrap_or_else(|err| Err(err.to_string()));
         // Issue 329: a script that kept calling past a run control refusal
         // was stopped; that refusal, not the stop, words the outcome.
@@ -353,6 +362,22 @@ impl WorkflowV2ScriptRunner {
                     .and_then(|slot| slot.clone());
                 if let Some(message) = recorded {
                     return Err(WorkflowError::NotificationDelivery(message));
+                }
+                // Issue 335: a source that cannot be evaluated fails the
+                // run, since a resume evaluates it unchanged; a runtime error
+                // pauses it with its evidence, and a resume reuses the
+                // calls it recorded. The pause falls back to the failure only
+                // when it cannot be recorded.
+                if unevaluable {
+                    let error = format!(
+                        "workflow.js cannot be evaluated (a syntax or top-level error, before any call); a resume evaluates the same source and cannot change it, so fix the script source: {error}"
+                    );
+                    return Ok(host.mark_script_failure(&error).await);
+                }
+                if host.pauses_on_script_errors()
+                    && let Some(stop) = host.pause_on_script_error(&error).await
+                {
+                    return Err(stop);
                 }
                 let summary = host.mark_script_failure(&error).await;
                 Ok(summary)
@@ -451,6 +476,9 @@ mod workflow_live_v2_script_control_forgery_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_script_control_tests.rs"]
 mod workflow_live_v2_script_control_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_script_error_pause_tests.rs"]
+mod workflow_live_v2_script_error_pause_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_script_pause_rerun_tests.rs"]
 mod workflow_live_v2_script_pause_rerun_tests;

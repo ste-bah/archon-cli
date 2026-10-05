@@ -78,6 +78,7 @@ mod v3_prelude;
 mod v3_run_facts;
 mod v3_run_outcome;
 mod verification;
+mod worker_cancel;
 
 pub use dry_run_a::*;
 use dry_run_b::*;
@@ -118,3 +119,7 @@ mod dry_run_tool_tests;
 #[cfg(test)]
 #[path = "result_view_tests.rs"]
 mod result_view_tests;
+
+#[cfg(test)]
+#[path = "worker_cancel_tests.rs"]
+mod worker_cancel_tests;

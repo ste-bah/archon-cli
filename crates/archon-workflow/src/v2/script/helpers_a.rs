@@ -334,13 +334,14 @@ pub fn is_reusable_status(status: WorkflowV2Status) -> bool {
 
 pub fn terminal_stop_for_call(call: &WorkflowV2HostCall, status: WorkflowV2Status) -> bool {
     // Errors are values: task-level failures flow back to the script as
-    // structured results for script-owned remediation. Only cancellation and
-    // unsatisfied final/human gates unwind the script.
-    matches!(status, WorkflowV2Status::Cancelled)
-        || matches!(
-            call.method,
-            WorkflowV2HostMethod::HumanGate | WorkflowV2HostMethod::FinalReport
-        ) && !matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
+    // structured results for script-owned remediation. Only unsatisfied
+    // final/human gates unwind the script. Issue 335: a `cancelled` status is
+    // a worker's own report, a failed call (`worker_cancel`); run control
+    // stops a call with a control error, never with a status.
+    matches!(
+        call.method,
+        WorkflowV2HostMethod::HumanGate | WorkflowV2HostMethod::FinalReport
+    ) && !matches!(status, WorkflowV2Status::Accepted | WorkflowV2Status::Noop)
 }
 
 pub fn merge_v2_status(left: WorkflowV2Status, right: WorkflowV2Status) -> WorkflowV2Status {
@@ -401,6 +402,7 @@ pub fn normalize_result_for_call(
     execution: &WorkflowV2CallExecution,
     mut result: WorkflowV2Result,
 ) -> WorkflowV2Result {
+    super::worker_cancel::worker_cancel_as_failed_call(&execution.call.id, &mut result);
     crate::v2::artifact_refs::retain_filesystem_artifacts(&mut result);
     downgrade_read_only_accepted_task_coverage(&execution.call, &mut result);
     guard_empty_items_output(execution, &mut result);

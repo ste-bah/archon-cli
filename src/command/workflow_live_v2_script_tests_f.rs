@@ -1,7 +1,9 @@
 use super::*;
 
+/// Issue 335: the script layer's rejection is a runtime error, so it pauses
+/// the run with that error as evidence, still before any host call.
 #[tokio::test]
-async fn prose_target_files_fail_fast_in_the_script() {
+async fn prose_target_files_stop_fast_in_the_script() {
     let temp = tempfile::tempdir().expect("tempdir");
     let spec = test_spec();
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
@@ -29,7 +31,7 @@ async fn prose_target_files_fail_fast_in_the_script() {
         None,
     );
 
-    let summary = runner
+    let stopped = runner
             .run(
                 r#"
 export const meta = { name: 'prose-targets', phases: [{ title: 'One' }] }
@@ -43,18 +45,18 @@ return { accepted: [], blocked: [], adversarial_findings: [], uncovered_requirem
 "#,
             )
             .await
-            .expect("summary");
+            .expect_err("the script layer's rejection pauses the run");
 
-    assert_eq!(summary.status, WorkflowV2Status::Failed);
-    assert_eq!(
-        summary.failed_call.as_deref(),
-        Some("workflow.js"),
-        "prose targetFiles must fail in the script layer, before any host call"
-    );
-    let next = summary.next_action.unwrap_or_default();
+    let WorkflowError::ControlPaused(message) = &stopped else {
+        panic!("a script-layer rejection pauses: {stopped:?}");
+    };
     assert!(
-        next.contains("workflow.js"),
-        "failure must be attributed to the script: {next}"
+        message.contains("workflow.js stopped with a runtime error before its first call"),
+        "prose targetFiles must stop in the script layer, before any host call: {message}"
+    );
+    assert!(
+        message.contains("targetFiles entries must be literal repo-relative file paths"),
+        "the stop names the script's own rejection: {message}"
     );
 }
 

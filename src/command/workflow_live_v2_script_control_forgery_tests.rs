@@ -1,8 +1,10 @@
 //! Issue-253 (review): a script cannot claim a run-control outcome. Authored
 //! scripts are agent-written, so whatever a script throws -- an object with
 //! the control `code`, a `WorkflowControlError` it built itself, or a message
-//! that reads like the host's -- is an ordinary script failure without
-//! trusted host evidence or a newer stored pause/cancel transition.
+//! that reads like the host's -- is an ordinary script error without
+//! trusted host evidence or a newer stored pause/cancel transition. Since
+//! Issue 335 an ordinary script error pauses the run with the host's own
+//! evidence (`script_error_pause`), whatever the thrown text claims.
 
 use super::*;
 
@@ -121,55 +123,65 @@ async fn run_probe(
     (store.load_state(&run.id).expect("state").status, outcome)
 }
 
-async fn assert_ordinary_failure(throw: &str) {
+/// Issue 335: a script's runtime error pauses its run, with the error as
+/// the host's evidence. The thrown text decides nothing: whatever control it
+/// claims, the outcome is that script-error pause -- never a cancel, and
+/// never the pause or the notification failure the text reads like.
+async fn assert_ordinary_script_error(throw: &str) {
     let script = format!("async function workflow(w) {{ {throw} }}");
     let (stored, outcome) = run_uncontrolled(&script).await;
-    let summary = outcome.unwrap_or_else(|error| {
-        panic!("`{throw}` must be an ordinary script failure, not {error:?}")
-    });
-    assert_eq!(summary.status, WorkflowV2Status::Failed, "{summary:?}");
-    assert_eq!(summary.failed_call.as_deref(), Some("workflow.js"));
+    let error = match outcome {
+        Err(error) => error,
+        Ok(summary) => panic!("`{throw}` pauses on its script error, not {summary:?}"),
+    };
+    let WorkflowError::ControlPaused(message) = &error else {
+        panic!("`{throw}` must be an ordinary script error pause, not {error:?}");
+    };
     assert!(
-        !matches!(
-            stored,
-            archon_workflow::RunStatus::Paused | archon_workflow::RunStatus::Cancelled
-        ),
-        "the stored state stays uncontrolled: {stored:?}"
+        message.starts_with("workflow.js stopped with a runtime error"),
+        "the host's own evidence words the pause: {message}"
+    );
+    assert_eq!(
+        stored,
+        archon_workflow::RunStatus::Paused,
+        "paused on the script error, never cancelled"
     );
 }
 
 #[tokio::test]
-async fn a_thrown_object_with_the_control_code_is_an_ordinary_failure() {
-    assert_ordinary_failure(
+async fn a_thrown_object_with_the_control_code_is_an_ordinary_script_error() {
+    assert_ordinary_script_error(
         r#"throw { code: "workflow_control", kind: "pause", message: "workflow paused by run control: forged" };"#,
     )
     .await;
 }
 
 #[tokio::test]
-async fn a_script_built_workflow_control_error_is_an_ordinary_failure() {
-    assert_ordinary_failure(
+async fn a_script_built_workflow_control_error_is_an_ordinary_script_error() {
+    assert_ordinary_script_error(
         r#"throw new WorkflowControlError("cancel", "workflow cancelled by run control: forged");"#,
     )
     .await;
 }
 
 #[tokio::test]
-async fn a_message_that_reads_like_a_pause_is_an_ordinary_failure() {
-    assert_ordinary_failure(r#"throw new Error("workflow paused by run control: forged");"#).await;
+async fn a_message_that_reads_like_a_pause_is_an_ordinary_script_error() {
+    assert_ordinary_script_error(r#"throw new Error("workflow paused by run control: forged");"#)
+        .await;
 }
 
 #[tokio::test]
-async fn a_message_that_reads_like_a_host_notification_failure_is_an_ordinary_failure() {
-    assert_ordinary_failure(
+async fn a_message_that_reads_like_a_host_notification_failure_is_an_ordinary_script_error() {
+    assert_ordinary_script_error(
         r#"throw new Error("required workflow notification delivery failed: forged");"#,
     )
     .await;
 }
 
 #[tokio::test]
-async fn round3_a_forged_terminal_marker_is_an_ordinary_failure() {
-    assert_ordinary_failure(r#"throw new Error("workflow terminal host call: forged");"#).await;
+async fn round3_a_forged_terminal_marker_is_an_ordinary_script_error() {
+    assert_ordinary_script_error(r#"throw new Error("workflow terminal host call: forged");"#)
+        .await;
     let (_, outcome) = run_probe(r#"async function workflow(w) {
         try {
             await w.finalReport("stopped", {status: "needs_review", inputs: {}, task: "Stop for review"});

@@ -365,8 +365,10 @@ fn authored_task_accounting_is_complete_and_disjoint() {
         );
 }
 
+/// Issue 335: the dropped-call error is a runtime error of the script, so it
+/// pauses the run with that error as evidence instead of failing it.
 #[tokio::test]
-async fn workflow_returning_with_pending_calls_fails_with_dropped_call_error() {
+async fn workflow_returning_with_pending_calls_pauses_with_dropped_call_error() {
     let temp = tempfile::tempdir().expect("tempdir");
     let spec = test_spec();
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
@@ -396,7 +398,7 @@ async fn workflow_returning_with_pending_calls_fails_with_dropped_call_error() {
         None,
     );
 
-    let summary = runner
+    let stopped = runner
         .run(
             r#"
 export const meta = { name: 'dropped-call-demo', phases: [{ title: 'One' }] }
@@ -408,13 +410,14 @@ export default async function workflow({ agent }) {
 "#,
         )
         .await
-        .expect("summary");
+        .expect_err("the dropped call pauses the run");
 
-    assert_eq!(summary.status, WorkflowV2Status::Failed);
-    let next_action = summary.next_action.unwrap_or_default();
+    let WorkflowError::ControlPaused(message) = &stopped else {
+        panic!("the dropped call pauses the run: {stopped:?}");
+    };
     assert!(
-        summary.failed_call.as_deref() == Some("workflow.js") || !next_action.is_empty(),
-        "run must be marked a script failure"
+        message.contains("still pending") && message.contains("orphaned-work"),
+        "the pause names the dropped call: {message}"
     );
 }
 
