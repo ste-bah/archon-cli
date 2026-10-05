@@ -78,7 +78,9 @@ process-wrap = { workspace = true }
 # Issue 262: a durable rename (MoveFileExW with MOVEFILE_WRITE_THROUGH) and a
 # directory flush, which std does not offer. The version archon-session and
 # fd-lock already pull in, so no new crate enters the lock file.
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+# Issue 332: `Win32_System_Threading` for the script thread's CPU clock
+# (`GetThreadTimes`); archon-session already enables it on the same 0.59 line.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 
 [dev-dependencies]
 # The workflow-live JSON fixture corpus. `include_str!` resolves relative to the

@@ -31,8 +31,39 @@ fn read_thread_cpu_time() -> Option<Duration> {
     (status == 0).then(|| Duration::new(now.tv_sec as u64, now.tv_nsec as u32))
 }
 
-/// Platforms without a per-thread CPU clock in `libc` use the wall clock.
-#[cfg(not(unix))]
+/// CPU time (kernel plus user) the calling thread has used so far, from
+/// `GetThreadTimes`, in 100 ns units; `None` when it cannot be read.
+#[cfg(windows)]
+fn read_thread_cpu_time() -> Option<Duration> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
+    #[cfg(test)]
+    if tests::CLOCK_FAILS.with(std::cell::Cell::get) {
+        return None;
+    }
+    let zero = || FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut creation, mut exit, mut kernel, mut user) = (zero(), zero(), zero(), zero());
+    // SAFETY: the pseudo handle of the current thread needs no closing, and
+    // every out pointer is a valid, writable FILETIME for the call.
+    let ok = unsafe {
+        GetThreadTimes(
+            GetCurrentThread(),
+            &mut creation,
+            &mut exit,
+            &mut kernel,
+            &mut user,
+        )
+    };
+    let ticks =
+        |time: FILETIME| (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+    (ok != 0).then(|| Duration::from_nanos((ticks(kernel) + ticks(user)).saturating_mul(100)))
+}
+
+/// Platforms with neither per-thread CPU clock use the wall clock.
+#[cfg(not(any(unix, windows)))]
 fn read_thread_cpu_time() -> Option<Duration> {
     None
 }
