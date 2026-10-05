@@ -115,6 +115,19 @@ impl LintSource {
     }
 }
 
+/// One lint reads one version of the task set's frozen chain (Issue 294).
+pub(super) fn chain_read(
+    cwd: &Path,
+    source: &LintSource,
+) -> Result<Option<crate::command::workflow_task_set::ChainRead>> {
+    let root = match source {
+        LintSource::TaskFile(path) => absolute(cwd, path).parent().map(Path::to_path_buf),
+        LintSource::Tasks(path) => Some(absolute(cwd, path)),
+        LintSource::Spec(_) | LintSource::Graph(_) => None,
+    };
+    (root.map(|root| crate::command::workflow_task_set::ChainRead::of(cwd, &root))).transpose()
+}
+
 /// Load the named graph and render its lint report.
 ///
 /// The fourth section, requirement coverage, is not a graph analysis: it
@@ -127,6 +140,7 @@ fn run_lint_with_mode(
     source: &LintSource,
     mode: archon_core::config::GateMode,
 ) -> Result<String> {
+    let _read = chain_read(cwd, source)?;
     if let LintSource::TaskFile(path) = source {
         return Ok(task_file::inspect(cwd, path, mode).report);
     }
@@ -264,6 +278,7 @@ pub(crate) fn evaluate_lint(
     source: &LintSource,
     mode: archon_core::config::GateMode,
 ) -> Result<crate::command::workflow_gate::GateEvaluation> {
+    let _read = chain_read(cwd, source)?;
     preflight::operational_input(cwd, source)?;
     let graph_error = if matches!(source, LintSource::Tasks(_)) {
         load_graph(cwd, source).err().map(|error| {

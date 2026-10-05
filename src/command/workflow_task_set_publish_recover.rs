@@ -88,6 +88,20 @@ pub(crate) fn lock_and_recover(
     Ok((lock, report))
 }
 
+/// A reader's lock (Issue 294): the publish lock, with a journaled publish a
+/// crash left settled first. A read never walks every run's receipts when no
+/// journal is left; journal-less legacy debris is settled at launch, resume
+/// and the next publish, as before.
+pub(super) fn lock_for_read(pin_path: &Path, tasks_root: &Path) -> Result<PublishLock> {
+    let paths = JournalPaths::for_pin(pin_path);
+    let lock = PublishLock::acquire(&paths)?;
+    if paths.journal.exists() || paths.journal_temp().exists() {
+        let scopes = publication_scopes(pin_path, tasks_root)?;
+        recover_locked(&paths, &scopes, pin_path, tasks_root)?;
+    }
+    Ok(lock)
+}
+
 pub(super) fn publication_scopes(
     pin_path: &Path,
     tasks_root: &Path,

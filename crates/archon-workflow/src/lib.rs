@@ -78,6 +78,7 @@ pub mod task_scope_amendment;
 pub mod task_set_contract;
 pub mod task_set_edges;
 pub mod task_set_lineage;
+pub mod task_set_publish_lock;
 pub mod task_skeleton;
 pub mod task_universe;
 pub mod task_universe_contract_audit;

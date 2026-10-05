@@ -247,6 +247,9 @@ async fn audit_scoped(
     waivers: &[ObligationWaiver],
     scope: AuditScope<'_>,
 ) -> Result<FidelityAudit> {
+    // Issue 294: the bodies and skeleton are read as one version, before any
+    // model call.
+    let read = crate::command::workflow_task_set::ChainRead::of(cwd, tasks_root)?;
     let (mut claims, _skipped) = task_requirement_claims_tolerant(tasks_root).map_err(|error| {
         anyhow!(
             "reading task claims under {}: {error}",
@@ -296,6 +299,7 @@ async fn audit_scoped(
             }
         }
     }
+    drop(read);
     // Issue-43: each obligation is audited over its claimants plus the set
     // tasks a claimant names, so a result deferred to a sibling is read where
     // the sibling states it; a named task that claims nothing is noted.

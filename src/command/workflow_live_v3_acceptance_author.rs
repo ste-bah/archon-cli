@@ -311,6 +311,7 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
         &context.project,
         &context.task_root,
     );
+    let read = crate::command::workflow_task_set::ChainRead::workflow_at(&pin, &context.task_root)?;
     if context.task_root.join(ACCEPTANCE_LOCK_FILE).exists() || pin.exists() {
         return Ok(None);
     }
@@ -344,6 +345,7 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
             ));
         }
     };
+    drop(read);
     // The run store this run lives in holds every decomposition record.
     let Some(runs) = site.run_dir.parent() else {
         return failed(

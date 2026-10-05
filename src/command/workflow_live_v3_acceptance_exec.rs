@@ -213,6 +213,11 @@ pub(super) fn resolve_context(
 pub(super) fn load_contract(
     context: &StageContext,
 ) -> WorkflowResult<(AcceptanceContract, String, bool)> {
+    // Issue 294: contract, lock, pin and lineage are read as one version.
+    let _read = crate::command::workflow_task_set::ChainRead::workflow(
+        &context.project,
+        &context.task_root,
+    )?;
     let path = context.contract_path();
     let raw = std::fs::read(&path).map_err(|source| WorkflowError::Io {
         path: path.clone(),

@@ -92,31 +92,7 @@ impl JournalPaths {
     }
 }
 
-/// The exclusive publish lock of one task set. Held for the whole life of a
-/// publish transaction and by every recovery, so a recovery never undoes a
-/// live publisher's work. The OS releases it when its holder dies.
-pub(crate) struct PublishLock {
-    _file: std::fs::File,
-}
-
-impl PublishLock {
-    /// Blocks until the lock is free: a holder keeps it only while it writes
-    /// and verifies one transaction.
-    pub(super) fn acquire(paths: &JournalPaths) -> Result<Self> {
-        if let Some(parent) = paths.lock.parent() {
-            create_dir_all_durably(parent)?;
-        }
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&paths.lock)
-            .with_context(|| format!("opening publish lock {}", paths.lock.display()))?;
-        file.lock()
-            .with_context(|| format!("locking publish lock {}", paths.lock.display()))?;
-        Ok(Self { _file: file })
-    }
-}
+pub(crate) use super::lock::PublishLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
