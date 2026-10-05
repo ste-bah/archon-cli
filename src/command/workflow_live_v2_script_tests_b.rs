@@ -123,6 +123,35 @@ async function workflow(w) {
     );
 }
 
+/// Issue 332: a failed script's summary carries its error text, cut to the
+/// log's bound with a mark that says it is partial.
+#[tokio::test]
+async fn a_failed_script_summary_carries_its_error_text_within_the_log_bound() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = store.create_run(test_spec()).expect("run");
+    let (runner, _rx) = super::workflow_live_v2_script_pause_tests::runner(
+        &store,
+        &run.id,
+        Arc::new(PanicLlm),
+        None,
+        None,
+    );
+    let summary = runner
+        .run(r#"async function workflow(w) { throw new Error("long failure " + "x".repeat(5000)); }"#)
+        .await
+        .expect("failed summary");
+
+    assert_eq!(summary.failed_call.as_deref(), Some("workflow.js"));
+    let error = summary.script_error.expect("the summary carries the error");
+    assert!(error.contains("long failure xxx"), "{error}");
+    assert_eq!(
+        error.chars().count(),
+        crate::command::workflow_decompose_events::LOG_FIELD_CHARS
+    );
+    assert!(error.ends_with("more chars]"), "{error}");
+}
+
 pub(super) fn test_spec() -> WorkflowSpec {
     WorkflowSpec {
         schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
