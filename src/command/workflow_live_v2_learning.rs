@@ -1,5 +1,26 @@
 use super::*;
 
+/// Issue 329: the learning record of the executor launched at
+/// `run.generation`, appended under the run lock only while that executor
+/// still owns the run. A replaced executor appends nothing: the shared rule's
+/// refusal (`control_pause::require_executor`) is returned instead.
+pub(super) fn record_owned_learning_event(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    plan: &WorkflowScriptPlan,
+    summary: &workflow_live_v2_script::WorkflowV2ScriptSummary,
+    v2_store: &WorkflowV2ResultStore,
+) -> archon_workflow::WorkflowResult<PathBuf> {
+    // Tests take the run over here: after the finalizer, before the record.
+    #[cfg(test)]
+    super::workflow_live_v2_run::terminal_test_support::unwind(store.run_dir(&run.id));
+    store.with_run_lock(&run.id, |locked| {
+        let current = locked.load_state(&run.id)?;
+        archon_workflow::control_pause::require_executor(&current, run.generation)?;
+        record_generated_learning_event(locked, &run.id, plan, summary, v2_store)
+    })
+}
+
 pub(super) fn record_generated_learning_event(
     store: &WorkflowStore,
     run_id: &str,

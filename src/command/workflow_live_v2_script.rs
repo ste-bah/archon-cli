@@ -199,6 +199,11 @@ impl WorkflowV2ScriptRunner {
         if let Some(generation) = start.generation() {
             self.v2_store.bind_session_executor(generation);
         }
+        // Issue 329: a session a resume replaced before its script started
+        // starts nothing -- no repository audit, no script.
+        if let Ok(run) = self.workflow_store.load_state(&self.run_id) {
+            self.v2_store.require_session_executor(&run)?;
+        }
         self.initialize_repository_audit().await?;
         let script_args = self.script_args.clone();
         let host = Arc::new(WorkflowScriptHost {

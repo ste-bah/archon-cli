@@ -2,6 +2,10 @@
 
 use super::*;
 
+#[path = "workflow_live_v2_lost_ownership.rs"]
+pub(super) mod lost_ownership;
+use lost_ownership::{lost_ownership, lost_ownership_report};
+
 pub(crate) async fn execute_fixed_decomposition_v2_run(
     store: &WorkflowStore,
     mut run: WorkflowRun,
@@ -13,61 +17,43 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor,
     >,
 ) -> Result<String> {
-    persist_fixed_start(store, &mut run)?;
-    let execution_generation = run.generation;
-
-    let runtime = WorkflowV2ScriptRuntime {
-        target_repository_root: None,
-        generated_config: plan.generated_config.clone(),
+    const LABEL: &str = "Fixed decomposition";
+    let v2_store = match persist_fixed_start(store, &mut run) {
+        Ok(v2_store) => v2_store,
+        // A newer executor owns the run: this launch changed nothing.
+        Err(refusal) => match refusal {
+            WorkflowError::ControlCancelled(refused) => {
+                return Ok(lost_ownership_report(LABEL, &run.id, &refused));
+            }
+            other => return Err(other.into()),
+        },
     };
-    // The fixed decomposition author gets the SAME configured host-call timeout
-    // as a generated run (`workflow_live_v2_run.rs`), not a literal.
-    //
-    // This was `Some(1_500)` from 67a97c6e8 (2026-08-27) — 25 minutes, in no
-    // config file, so an operator raising `host_call_timeout_secs` changed
-    // nothing here. A live run lost five of six acceptance-author attempts
-    // to it on a clean 25-minute cadence while the provider answered normally
-    // (0 max_tokens, 0 empty replies, 71 completed responses); attempt 3 did
-    // finish, so the work fits the model, just not the timeout. Authoring a full
-    // acceptance contract from a 36KB PRD is legitimately longer work than an
-    // ordinary host call.
-    let client = LiveV2AgentClient::new(
+    let execution_generation = run.generation;
+    let runner = fixed_runner(
+        &run,
+        &plan,
         llm,
         ui_sink,
         agent_names,
-        run.id.clone(),
-        None,
-        Some(u64::from(runtime.generated_config.host_call_timeout_secs)),
-    )
-    .with_fixed_raw_tool_policy(vec![
-        "Read".to_string(),
-        "Grep".to_string(),
-        "Glob".to_string(),
-    ]);
-    let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
-    let runner = WorkflowV2ScriptRunner::new(
-        run.spec.task.clone(),
-        runtime,
-        WorkflowV2AgentAdapter::new(),
-        client,
-        v2_store.clone(),
-        store.clone(),
-        run.id.clone(),
-        true,
-        None,
-        plan.script_args.clone(),
-    )
-    .with_host_command_executor(host_command_executor)
-    .with_raw_outcomes(true);
+        host_command_executor,
+        store,
+        &v2_store,
+    );
     let summary = match runner.run(&plan.harness_source).await {
         Ok(summary) => summary,
         Err(WorkflowError::ControlPaused(message)) => {
+            if lost_ownership(store, &run.id, execution_generation).is_some() {
+                return Ok(lost_ownership_report(LABEL, &run.id, &message));
+            }
             return Ok(format!(
                 "Fixed decomposition paused: {}\n{}\nResume with: archon workflow resume --live --yes {}\n",
                 run.id, message, run.id
             ));
         }
         Err(WorkflowError::ControlCancelled(message)) => {
+            if lost_ownership(store, &run.id, execution_generation).is_some() {
+                return Ok(lost_ownership_report(LABEL, &run.id, &message));
+            }
             return Ok(format!(
                 "Fixed decomposition cancelled: {}\n{}\n",
                 run.id, message
@@ -131,15 +117,88 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
     Ok(report)
 }
 
-fn persist_fixed_start(
+/// The runner of a fixed decomposition launched at `run.generation`, writing
+/// through `v2_store`, whose session `persist_fixed_start` bound.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn fixed_runner(
+    run: &WorkflowRun,
+    plan: &WorkflowScriptPlan,
+    llm: Arc<dyn WorkflowLlmClient>,
+    ui_sink: SharedWorkflowUiSink,
+    agent_names: Vec<String>,
+    host_command_executor: Arc<
+        dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor,
+    >,
+    store: &WorkflowStore,
+    v2_store: &WorkflowV2ResultStore,
+) -> WorkflowV2ScriptRunner {
+    let runtime = WorkflowV2ScriptRuntime {
+        target_repository_root: None,
+        generated_config: plan.generated_config.clone(),
+    };
+    // The fixed decomposition author gets the SAME configured host-call timeout
+    // as a generated run (`workflow_live_v2_run.rs`), not a literal.
+    //
+    // This was `Some(1_500)` from 67a97c6e8 (2026-08-27) — 25 minutes, in no
+    // config file, so an operator raising `host_call_timeout_secs` changed
+    // nothing here. A live run lost five of six acceptance-author attempts
+    // to it on a clean 25-minute cadence while the provider answered normally
+    // (0 max_tokens, 0 empty replies, 71 completed responses); attempt 3 did
+    // finish, so the work fits the model, just not the timeout. Authoring a full
+    // acceptance contract from a 36KB PRD is legitimately longer work than an
+    // ordinary host call.
+    let client = LiveV2AgentClient::new(
+        llm,
+        ui_sink,
+        agent_names,
+        run.id.clone(),
+        None,
+        Some(u64::from(runtime.generated_config.host_call_timeout_secs)),
+    )
+    .with_fixed_raw_tool_policy(vec![
+        "Read".to_string(),
+        "Grep".to_string(),
+        "Glob".to_string(),
+    ]);
+    WorkflowV2ScriptRunner::new(
+        run.spec.task.clone(),
+        runtime,
+        WorkflowV2AgentAdapter::new(),
+        client,
+        v2_store.clone(),
+        store.clone(),
+        run.id.clone(),
+        true,
+        None,
+        plan.script_args.clone(),
+    )
+    .with_host_command_executor(host_command_executor)
+    .with_raw_outcomes(true)
+}
+
+/// Marks the run running and binds this executor's session to the
+/// generation it launched at, under the run lock (Issue 329). Bound here, at
+/// launch, and not when the script starts: a resume in between would
+/// otherwise have its newer generation read at script start and taken for
+/// this executor's own, leaving the session unfenced. A newer executor that
+/// already owns the run refuses the start
+/// (`control_pause::require_executor`), and nothing is written.
+pub(super) fn persist_fixed_start(
     store: &WorkflowStore,
     run: &mut WorkflowRun,
-) -> archon_workflow::WorkflowResult<()> {
+) -> archon_workflow::WorkflowResult<WorkflowV2ResultStore> {
     let run_id = run.id.clone();
     store.with_run_lock(&run_id, |locked| {
+        // An unreadable state proves nothing; the save below reports it.
+        if let Ok(current) = locked.load_state(&run_id) {
+            archon_workflow::control_pause::require_executor(&current, run.generation)?;
+        }
         run.status = RunStatus::Running;
         run.mark_updated();
-        locked.save_state(run)
+        locked.save_state(run)?;
+        let v2_store = WorkflowV2ResultStore::new(locked.run_dir(&run_id).join("v2"));
+        v2_store.bind_session_executor(run.generation);
+        Ok(v2_store)
     })
 }
 

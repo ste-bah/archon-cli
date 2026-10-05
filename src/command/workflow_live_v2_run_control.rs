@@ -1,5 +1,37 @@
 use super::*;
 
+pub(super) use super::super::workflow_live_v2_fixed_run::lost_ownership::{
+    lost_ownership, lost_ownership_report,
+};
+
+/// The ending of a generated run its script stopped with run control
+/// `error`. An executor a resume replaced stops nothing and reports that it
+/// lost ownership (Issue 329); the owner records the pause or cancel.
+pub(super) fn generated_control_report(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    run_kind: archon_workflow::WorkflowRunKind,
+    error: WorkflowError,
+) -> archon_workflow::WorkflowResult<String> {
+    let (status, message) = match error {
+        WorkflowError::ControlPaused(message) => (RunStatus::Paused, message),
+        WorkflowError::ControlCancelled(message) => (RunStatus::Cancelled, message),
+        other => return Err(other),
+    };
+    if lost_ownership(store, &run.id, run.generation).is_some() {
+        return Ok(lost_ownership_report("Workflow", &run.id, &message));
+    }
+    finalize_generated_control(store, run, run_kind, status.clone(), &message)?;
+    Ok(if status == RunStatus::Paused {
+        format!(
+            "Workflow paused: {}\n{}\nResume with: /workflow resume --live {}\n",
+            run.id, message, run.id
+        )
+    } else {
+        format!("Workflow cancelled: {}\n{}\n", run.id, message)
+    })
+}
+
 pub(super) fn finalize_generated_control(
     store: &WorkflowStore,
     run: &WorkflowRun,
