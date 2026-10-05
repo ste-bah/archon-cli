@@ -26,17 +26,30 @@ const words = (seed, length) => {
 };
 const criteria = (count) => Object.fromEntries(Array.from({ length: count }, (_, i) => [`AC-${pad(i + 1)}`, `criterion ${i + 1}: ${words(i, 240)}`]));
 
-// A completed entry the size of the live ones (about 9.9 KB of JSON each).
+// Check sizes (JSON characters) sampled evenly from 165 checks in 15 real
+// acceptance contracts (median 2,072, p90 7,225, max 15,501): commands are
+// multi-line scripts that name the shared paths, keys and formats.
+const CHECK_SIZES = [128, 195, 386, 445, 629, 789, 1193, 1295, 1414, 1485, 1882, 2040, 2129, 2271, 2810, 2973, 3103, 3542, 3824, 5090, 6521, 7554, 10103, 15501];
+
+// A command of about `size` characters ending in the interface it fixes.
+function command(n, size) {
+  const head = `python3 -c "\nimport json\nspec=json.load(open('out/spec_${pad(n)}.json'))\nreg=json.load(open('out/registry.json'))\n`;
+  const tail = `assert reg['datasets'][spec['id']+':'+spec['version']]['format']=='parquet', 'registry key id:version ${pad(n)}'\n"`;
+  let body = '';
+  for (let i = 0; head.length + body.length + tail.length < size - 60; i += 1) body += `assert spec.get('field_${i}') is not None, 'field_${i} missing'\n`;
+  return head + body + tail;
+}
+
+// A completed entry shaped like the real ones: the check, a short criterion
+// and an ~830-character judgment (the real median and mean).
 function entry(id, n) {
   return {
     id,
-    criterion: words(n, 300),
-    check: n % 2 === 0
-      ? { kind: 'command', command: `scripts/run-check.sh --case case_${pad(n)} --fixture fixtures/shared_fixture_${n % 7}.json && test -s out/result_${pad(n)}.json`, cwd: 'project_root' }
-      : { kind: 'floor', contract: { kind: `deliverable_${n % 5}`, artifact_path: `out/artifact_${pad(n)}.json`, artifact_format: 'json', required_true_fields: ['complete', 'verified'], typed_verifier_command: `scripts/verify.sh out/artifact_${pad(n)}.json` } },
+    criterion: words(n, 90),
+    check: { kind: 'command', command: command(n, CHECK_SIZES[n % CHECK_SIZES.length]), cwd: 'project_root' },
     gap_permitted: false,
     covers: [`REQ-${pad(n)}`, `REQ-${pad(n + 1)}`],
-    judgment: { verdict: 'accepted', counterexample: words(n + 1, 2400), reason: words(n + 2, 6800), host_call_id: `call-${n}` },
+    judgment: { verdict: 'accepted', counterexample: words(n + 1, 300), reason: words(n + 2, 480), host_call_id: `call-${n}` },
   };
 }
 
@@ -58,18 +71,22 @@ async function priorGrowsBoundedPerEntry() {
   const total = 121;
   const at100 = await acceptancePrompt(100, total);
   const at120 = await acceptancePrompt(120, total);
-  const entryJson = JSON.stringify(entry('AC-001', 1)).length;
+  const added = Array.from({ length: 20 }, (_, i) => entry(`AC-${pad(101 + i)}`, 100 + i));
+  const entryBytes = added.reduce((sum, e) => sum + JSON.stringify(e).length, 0) / 20;
+  // What each added entry may cost: its own id, covers and check (cut at the
+  // cap), plus the line's framing. Nothing else an entry carries.
+  const ownBytes = added.reduce((sum, e) => sum + Math.min(JSON.stringify({ id: e.id, covers: e.covers, gap_permitted: e.gap_permitted, check: e.check }).length, 8192 + 80), 0) / 20;
   const perEntry = (Buffer.byteLength(at120) - Buffer.byteLength(at100)) / 20;
-  console.log(`acceptance author prompt: ${Buffer.byteLength(at100)} bytes after 100 entries, ${Buffer.byteLength(at120)} bytes after 120 entries, ${perEntry} bytes per completed entry (entry JSON ${entryJson} bytes)`);
-  assert(perEntry <= 800, `prompt grows ${perEntry} bytes per completed entry; the bound is 800`);
-  // What the author needs to stay consistent: every earlier id, its check
-  // kind, what it covers, and the paths and fixtures it uses.
-  for (const n of [0, 57, 119]) {
-    const id = `AC-${pad(n + 1)}`;
-    assert(at120.includes(id), `prior names ${id}`);
-    assert(at120.includes(`REQ-${pad(n)}`), `prior keeps ${id}'s covers`);
-    assert(at120.includes(n % 2 === 0 ? `fixtures/shared_fixture_${n % 7}.json` : `out/artifact_${pad(n)}.json`), `prior keeps ${id}'s fixture or artifact`);
+  console.log(`acceptance author prompt: ${Buffer.byteLength(at100)} bytes after 100 entries, ${Buffer.byteLength(at120)} bytes after 120 entries, ${perEntry} bytes per completed entry (entry JSON ${entryBytes} bytes, its own check ${ownBytes} bytes)`);
+  assert(perEntry <= ownBytes + 16, `prompt grows ${perEntry} bytes per completed entry; the entry's own check is ${ownBytes}`);
+  // Every check up to the cap is shown whole, its shared interface included;
+  // a larger one is cut, and the cut is marked.
+  for (let n = 0; n < 120; n += 1) {
+    const check = JSON.stringify(entry('x', n).check);
+    if (check.length < 8000) assert(at120.includes(check), `the check of AC-${pad(n + 1)} is shown whole`);
   }
+  assert.match(at120, /\[CUT: \d+ more characters of this entry are not shown\]/);
+  assert(!at120.includes('host_call_id'), 'the host-owned judgment is not shown');
 }
 
 // Each attempt: three host findings that rotate (the oscillation the history
@@ -98,6 +115,17 @@ function historyGrowsBoundedPerAttempt() {
     assert.equal(count, 1, `a repeated finding is shown once, not ${count} times`);
   }
   assert.match(at30, /older distinct findings/, 'findings not shown are counted');
+  // A current finding earlier attempts also triggered is marked as a repeat.
+  assert.match(at30, /\(a repeat: seen in \d+ earlier attempts, attempts \d+-\d+\)/);
+}
+
+// Findings that differ by a sign, a digit or punctuation stay apart.
+function nearFindingsStayApart() {
+  const ctx = context({});
+  const texts = ["check 'A' value < 1", "check 'A' value > 1", "check 'A' offset -1", "check 'A' offset 1", 'field a_b', 'field a-b'];
+  const history = texts.map((text, i) => ({ attempt: i + 1, findings: [text] }));
+  const prompt = ctx.authorPrompt('author', 8, ['unrelated'], history);
+  for (const text of texts) assert(prompt.includes(`: ${text}`), `${text} is shown: ${prompt}`);
 }
 
 // The finding a phase was opened to repair stays in every prompt.
@@ -135,7 +163,7 @@ async function inactivityCutWithProgressKeepsTheWindow() {
 }
 
 (async () => {
-  for (const test of [priorGrowsBoundedPerEntry, historyGrowsBoundedPerAttempt, seededFindingStays, inactivityCutWithProgressKeepsTheWindow]) {
+  for (const test of [priorGrowsBoundedPerEntry, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, inactivityCutWithProgressKeepsTheWindow]) {
     try { await test(); } catch (error) { console.error(`${test.name}: ${error.message}`); process.exitCode = 1; }
   }
 })();

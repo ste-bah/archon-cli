@@ -51,33 +51,24 @@ function owedSupplementary() {
   return acceptanceRepairIds.owed;
 }
 
-// Issue 288: the author sees each completed entry as one bounded line -- its
-// id, check kind, what it covers and the artifact, command and fixtures it
-// uses -- enough to stay consistent with it and to duplicate none. The whole
-// entry (judgment text included) made the prompt grow by the size of every
-// entry before it: about 9.9 KB per entry, over 1 MB after 100 entries.
-const PRIOR_FIELD_TEXT = 200;
+// Issue 288: the author sees each completed entry without its host-owned
+// criterion and judgment (the criteria are listed separately; the judgment is
+// host text) -- one JSON line per entry holding its id, covers and its whole
+// check. The check is what later entries must agree with: the CLI flags,
+// output paths, JSON keys and formats it relies on. A check past
+// PRIOR_ENTRY_TEXT characters is cut there, and the cut is marked.
+const PRIOR_ENTRY_TEXT = 8192;
 
-function priorField(value) {
-  const text = String(value === undefined || value === null ? "" : value).replace(/\s+/g, " ").trim();
-  return text.length > PRIOR_FIELD_TEXT ? `${text.slice(0, PRIOR_FIELD_TEXT)}...` : text;
-}
-
-function priorLine(entry) {
-  const check = entry && entry.check && typeof entry.check === "object" ? entry.check : {};
-  const contract = check.contract && typeof check.contract === "object" ? check.contract : {};
-  const covers = Array.isArray(entry && entry.covers) ? entry.covers.filter((c) => typeof c === "string") : [];
-  const parts = [`${priorField(entry && entry.id)} [${priorField(check.kind || "unknown")}${contract.kind ? ` ${priorField(contract.kind)}` : ""}]`];
-  if (covers.length > 0) parts.push(`covers ${priorField(covers.join(", "))}`);
-  if (contract.artifact_path) parts.push(`artifact ${priorField(contract.artifact_path)}`);
-  const run = check.command || contract.typed_verifier_command;
-  if (run) parts.push(`runs ${priorField(run)}`);
-  return parts.join("; ");
+function priorEntry(entry) {
+  const value = entry && typeof entry === "object" ? entry : {};
+  const text = JSON.stringify({ id: value.id, covers: value.covers, gap_permitted: value.gap_permitted, check: value.check });
+  if (text.length <= PRIOR_ENTRY_TEXT) return text;
+  return `${text.slice(0, PRIOR_ENTRY_TEXT)} [CUT: ${text.length - PRIOR_ENTRY_TEXT} more characters of this entry are not shown]`;
 }
 
 function priorText(prior) {
   if (prior.length === 0) return "Previously completed entries: none.";
-  return `Previously completed entries, one line each (keep this entry consistent with them and duplicate none):\n- ${prior.map(priorLine).join("\n- ")}`;
+  return `Previously completed entries, one JSON line each without the host-owned criterion and judgment (keep this entry consistent with their checks -- the flags, paths, keys and formats they rely on -- and duplicate none):\n- ${prior.map(priorEntry).join("\n- ")}`;
 }
 
 // Each entry makes one provider call per round. The phase records the round's

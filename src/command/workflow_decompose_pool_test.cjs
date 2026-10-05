@@ -78,8 +78,8 @@ function acceptanceRun(seed, cap, criteria, state, options={}) {
  return {run,prompts,ends,starts,peak:()=>peak,active:()=>active,now:c.now};
 }
 
-// Issue 288: one line per completed entry, its id first.
-const priorIds=task=>task.split('Previously completed entries')[1].split('\n').slice(1).filter(line=>line.startsWith('- ')).map(line=>line.slice(2).split(' ')[0]);
+// Issue 288: one JSON line per completed entry, its id first.
+const priorIds=task=>task.split('Previously completed entries')[1].split('\n').slice(1).filter(line=>line.startsWith('- ')).map(line=>line.match(/^- \{"id":"([^"]*)"/)[1]);
 
 // Entry i sees exactly entries 0..i-cap of this round, however the calls
 // happen to finish: two seeds, different completion orders, same prompts.

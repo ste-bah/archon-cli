@@ -248,22 +248,35 @@ async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra
 const HISTORY_SHOWN = 16;
 const HISTORY_TEXT = 600;
 
+// Whitespace and case only: findings that differ by a sign, a digit or
+// punctuation are different findings.
 function historyKey(text) {
-  return String(text).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return String(text).replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+// A finding of the current attempt that earlier attempts also triggered is
+// reported as a repeat (`repeats`: how often, and when), not hidden.
 function earlierFindings(history, feedback) {
   const current = new Set((feedback || []).map(historyKey));
   const seeded = [];
   const distinct = new Map();
-  for (const entry of Array.isArray(history) ? history : []) {
+  const repeats = new Map();
+  const entries = Array.isArray(history) ? history.slice() : [];
+  // The attempt the current findings came from is not an earlier attempt.
+  const newest = entries[entries.length - 1];
+  if (newest && newest.attempt !== 0 && JSON.stringify((newest.findings || []).map(historyKey)) === JSON.stringify([...(feedback || [])].map(historyKey))) entries.pop();
+  for (const entry of entries) {
     for (const text of entry.findings || []) {
       const key = historyKey(text);
       if (entry.attempt === 0) {
         if (!seeded.some((seed) => seed.key === key)) seeded.push({ key, text });
         continue;
       }
-      if (current.has(key)) continue;
+      if (current.has(key)) {
+        const seen = repeats.get(key);
+        if (seen) { seen.count += 1; seen.last = entry.attempt; } else repeats.set(key, { count: 1, first: entry.attempt, last: entry.attempt });
+        continue;
+      }
       const known = distinct.get(key);
       if (known) {
         known.count += 1;
@@ -285,6 +298,7 @@ function earlierFindings(history, feedback) {
       ...seeded.map((seed) => `the set gate, before this body was sent back: ${seed.text}`),
       ...shown.map((found) => `${when(found)}: ${clip(String(found.text))}`),
     ],
+    repeats,
     omitted: hidden.length,
     omittedOccurrences: hidden.reduce((sum, found) => sum + found.count, 0),
     omittedRange: hidden.length === 0 ? ""

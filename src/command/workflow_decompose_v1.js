@@ -463,14 +463,18 @@ function requireSubject(subject) {
 
 function authorPrompt(base, attempt, feedback, history) {
   if (feedback.length === 0) return `${base}\nLogical attempt: ${attempt}.`;
-  let prompt = `${base}\nLogical attempt: ${attempt}. Repair these exact authoritative findings:\n- ${feedback.join("\n- ")}`;
+  const earlier = earlierFindings(history, feedback);
+  const repeat = (text) => {
+    const seen = earlier.repeats.get(historyKey(text));
+    return seen ? ` (a repeat: seen in ${seen.count} earlier attempt${seen.count === 1 ? "" : "s"}, ${seen.first === seen.last ? `attempt ${seen.last}` : `attempts ${seen.first}-${seen.last}`})` : "";
+  };
+  let prompt = `${base}\nLogical attempt: ${attempt}. Repair these exact authoritative findings:\n- ${feedback.map((text) => `${text}${repeat(text)}`).join("\n- ")}`;
   // Two gates can be individually satisfiable and jointly hard. Without the
   // history an author repairs the finding in front of it, trips the other, and
   // alternates until its budget is spent -- a live acceptance phase did exactly
   // that for all six attempts. Showing what earlier attempts already triggered
   // is what lets it satisfy both at once instead of trading one for the other.
   // Issue 288: each earlier finding once, bounded (earlierFindings).
-  const earlier = earlierFindings(history, feedback);
   if (earlier.lines.length > 0) {
     prompt += `\nEarlier attempts in this phase already triggered the following. Satisfy every one of them at once; repairing the finding above by reverting an earlier repair will not converge:\n- ${earlier.lines.join("\n- ")}`;
   }

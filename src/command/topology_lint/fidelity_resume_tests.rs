@@ -479,7 +479,7 @@ fn the_catalog_and_script_digests_are_unchanged() {
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "6931e6c3a663d6d66063d7360a41e8ef713da856ab2a12cc1c3c017930bfdaf7"
+        "717aa0136cf8a1adb66130560305bc7964ded98cbaa94498867c2ed34e5ced56"
     );
 }
 
