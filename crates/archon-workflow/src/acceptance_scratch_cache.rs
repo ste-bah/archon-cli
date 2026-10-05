@@ -430,7 +430,23 @@ fn set_mtime(path: &Path, stamp: Stamp) -> WorkflowResult<Stamp> {
 /// name the directory `lsof` is in, so the shared lookup finds it.
 #[cfg(unix)]
 fn target_idle(target: &Path) -> bool {
-    let program = archon_shell::process_tree::lsof_program();
+    lsof_says_idle(archon_shell::process_tree::lsof_program(), target)
+}
+
+/// [`target_idle`] with the `lsof` lookup's result given. No `lsof`, or one
+/// that cannot run, proves nothing: the target counts as busy.
+#[cfg(unix)]
+fn lsof_says_idle(program: std::io::Result<PathBuf>, target: &Path) -> bool {
+    let program = match program {
+        Ok(program) => program,
+        Err(error) => {
+            eprintln!(
+                "acceptance cache idle check has no lsof: {error}; {} counts as busy",
+                target.display()
+            );
+            return false;
+        }
+    };
     match std::process::Command::new(&program)
         .args(["-nP", "-t", "+D"])
         .arg(target)

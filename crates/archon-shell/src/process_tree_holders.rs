@@ -39,6 +39,17 @@ pub fn holders(roots: &[&Path]) -> io::Result<Vec<Holder>> {
 /// including `TimedOut` when the probe could not finish within `deadline`,
 /// means the probe proved nothing: a caller must treat it as "unknown".
 pub fn holders_within(roots: &[&Path], deadline: Duration) -> io::Result<Vec<Holder>> {
+    holders_using(roots, deadline, lsof_program)
+}
+
+/// [`holders_within`] with the `lsof` lookup given, so a test can name the
+/// program the probe spawns without changing PATH. Linux reads `/proc` and
+/// never calls `lsof`.
+pub(crate) fn holders_using(
+    roots: &[&Path],
+    deadline: Duration,
+    lsof: impl FnOnce() -> io::Result<PathBuf>,
+) -> io::Result<Vec<Holder>> {
     let end = Instant::now() + deadline;
     let roots = canonical_roots(roots);
     if roots.is_empty() {
@@ -49,7 +60,7 @@ pub fn holders_within(roots: &[&Path], deadline: Duration) -> io::Result<Vec<Hol
     let starts: BTreeMap<u32, u64> = table.processes.iter().map(|p| (p.pid, p.start)).collect();
     let under = |path: &Path| roots.iter().any(|root| path.starts_with(root));
     let mut found: BTreeMap<u32, Holder> = BTreeMap::new();
-    for (pid, path, writes) in open_paths(end)? {
+    for (pid, path, writes) in open_paths(end, lsof)? {
         if protected.contains(&pid) || !under(&path) {
             continue;
         }
@@ -92,7 +103,10 @@ pub(super) fn probe_failed(error: io::Error) -> io::Error {
 
 /// Every (pid, path, held for writing) this user's processes hold.
 #[cfg(target_os = "linux")]
-fn open_paths(end: Instant) -> io::Result<Vec<(u32, PathBuf, bool)>> {
+fn open_paths(
+    end: Instant,
+    _lsof: impl FnOnce() -> io::Result<PathBuf>,
+) -> io::Result<Vec<(u32, PathBuf, bool)>> {
     let mut paths = Vec::new();
     for entry in std::fs::read_dir("/proc")? {
         if Instant::now() >= end {
@@ -147,10 +161,15 @@ pub fn fdinfo_writes(text: &str) -> Option<bool> {
 /// Every (pid, path, held for writing) this user's processes hold, from
 /// `lsof` field output, read within the deadline.
 #[cfg(not(target_os = "linux"))]
-fn open_paths(end: Instant) -> io::Result<Vec<(u32, PathBuf, bool)>> {
+fn open_paths(
+    end: Instant,
+    lsof: impl FnOnce() -> io::Result<PathBuf>,
+) -> io::Result<Vec<(u32, PathBuf, bool)>> {
+    // No lsof proves nothing: the error reaches the caller as "unknown".
+    let program = lsof()?;
     // SAFETY: getuid cannot fail and touches no memory.
     let uid = unsafe { libc::getuid() };
-    let mut command = std::process::Command::new(lsof_program());
+    let mut command = std::process::Command::new(program);
     command
         .args(["-nP", "-w", "-Fpan", "-u"])
         .arg(uid.to_string());
@@ -165,38 +184,75 @@ fn open_paths(end: Instant) -> io::Result<Vec<(u32, PathBuf, bool)>> {
     Ok(parse_lsof_fields(&String::from_utf8_lossy(&stdout)))
 }
 
-/// The `lsof` every caller spawns. PATH wins when it names an `lsof`. A
-/// probe often runs under a confined PATH (for example `/usr/bin:/bin`)
-/// while `lsof` sits in an sbin directory, so the standard install
-/// locations come next. Linux holder probes read `/proc`, but other callers
-/// (a build cache's idle check) spawn `lsof` there too.
-pub fn lsof_program() -> PathBuf {
+/// Where `lsof` is installed, tried in this order before PATH.
+pub(crate) const STANDARD_LSOF: &[&str] = &[
+    "/usr/sbin/lsof",
+    "/usr/bin/lsof",
+    "/usr/local/sbin/lsof",
+    "/usr/local/bin/lsof",
+];
+
+/// The `lsof` every caller spawns. Both callers are teardown safety checks,
+/// so a fixed system location wins: a writable directory early on PATH (a
+/// toolchain directory, say) could hold a planted `lsof` that hides holders.
+/// PATH is the fallback only, for a host whose `lsof` is in none of them; a
+/// probe often runs under a confined PATH such as `/usr/bin:/bin`, which the
+/// standard locations cover. Linux holder probes read `/proc`, but other
+/// callers (a build cache's idle check) spawn `lsof` there too.
+///
+/// An error means no executable `lsof` was found: a caller must treat its
+/// check as "unknown", never as "no holders" or "idle".
+pub fn lsof_program() -> io::Result<PathBuf> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     lsof_program_from(
+        STANDARD_LSOF,
         std::env::split_paths(&path).map(|dir| dir.join("lsof")),
-        &[
-            "/usr/sbin/lsof",
-            "/usr/bin/lsof",
-            "/usr/local/sbin/lsof",
-            "/usr/local/bin/lsof",
-        ],
     )
 }
 
-/// The first executable file among the PATH entries, then the standard
-/// locations; a bare `lsof` when none exists, so the spawn error names it.
+/// The first executable file among the standard locations, else among the
+/// PATH entries (absolute ones only: a relative entry resolves against
+/// whatever the working directory is), with a warning that names it.
 pub(crate) fn lsof_program_from(
-    on_path: impl Iterator<Item = PathBuf>,
     standard: &[&str],
-) -> PathBuf {
+    on_path: impl Iterator<Item = PathBuf>,
+) -> io::Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
-    on_path
-        .chain(standard.iter().map(PathBuf::from))
-        .find(|path| {
-            std::fs::metadata(path)
-                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
-        })
-        .unwrap_or_else(|| PathBuf::from("lsof"))
+    let executable = |path: &PathBuf| {
+        std::fs::metadata(path)
+            .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+    };
+    if let Some(found) = standard.iter().map(PathBuf::from).find(executable) {
+        return Ok(found);
+    }
+    let mut on_path = on_path.filter(|path| path.is_absolute());
+    match on_path.find(executable) {
+        Some(found) => {
+            if first_path_fallback(&found) {
+                tracing::warn!(
+                    lsof = %found.display(),
+                    standard = ?standard,
+                    "no executable lsof at a standard location; using the one PATH names"
+                );
+            }
+            Ok(found)
+        }
+        None => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("no executable lsof at {} or on PATH", standard.join(", ")),
+        )),
+    }
+}
+
+/// Whether this process has not yet used `path` as a PATH fallback, so a
+/// probe that runs in a loop warns once per process and path.
+pub(crate) fn first_path_fallback(path: &Path) -> bool {
+    static WARNED: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    WARNED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(path.to_path_buf())
 }
 
 /// `lsof -F pan` output as (pid, path, held for writing): `p` starts a

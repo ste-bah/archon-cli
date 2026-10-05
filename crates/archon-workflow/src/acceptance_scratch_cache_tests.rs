@@ -222,3 +222,19 @@ fn confined_path_child_keeps_the_warm_target() {
     let idle = tempfile::tempdir().unwrap();
     assert!(target_idle(idle.path()), "an idle target read as busy");
 }
+
+/// Issue 321: no `lsof` anywhere, or one that cannot run, proves nothing,
+/// so an idle target counts as busy, never as idle.
+#[test]
+fn an_idle_check_without_a_runnable_lsof_reads_busy() {
+    let idle = tempfile::tempdir().unwrap();
+    let missing = std::io::Error::new(std::io::ErrorKind::NotFound, "no executable lsof");
+    assert!(!lsof_says_idle(Err(missing), idle.path()));
+    let plain = idle.path().join("plain-lsof");
+    std::fs::write(&plain, "").unwrap();
+    assert!(!lsof_says_idle(Ok(plain), idle.path()));
+    assert!(!lsof_says_idle(
+        Ok(idle.path().join("gone/lsof")),
+        idle.path()
+    ));
+}

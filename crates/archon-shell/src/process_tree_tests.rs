@@ -2,7 +2,10 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use super::holders_impl::{fdinfo_writes, lsof_program_from, parse_lsof_fields};
+use super::holders_impl::{
+    STANDARD_LSOF, fdinfo_writes, first_path_fallback, holders_using, lsof_program_from,
+    parse_lsof_fields,
+};
 use super::*;
 
 fn process(pid: u32, ppid: u32, pgid: u32, sid: u32) -> Process {
@@ -129,50 +132,35 @@ fn holders_finds_a_detached_process_by_its_cwd_and_skips_this_one() {
     assert!(holders(&[Path::new("/no/such/root")]).unwrap().is_empty());
 }
 
-const HANGING_LSOF_ENV: &str = "ARCHON_TEST_HANGING_LSOF";
+/// An executable script at `dir/name`.
+fn fake_program(dir: &Path, name: &str, script: &str) -> std::path::PathBuf {
+    let program = dir.join(name);
+    std::fs::create_dir_all(program.parent().unwrap()).unwrap();
+    std::fs::write(&program, script).unwrap();
+    std::fs::set_permissions(
+        &program,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+    program
+}
 
 /// Round 2, rule 4: a probe that cannot finish (lsof stuck on an unavailable
 /// filesystem) must end within a bound and say so, never hang the check.
-/// Run in a child test process, whose PATH puts a hanging `lsof` first.
+/// Issue 321: the hanging `lsof` comes in through the lookup seam, not PATH.
 #[test]
 fn holders_end_within_a_bound_when_lsof_hangs() {
     if cfg!(target_os = "linux") {
         return; // Linux reads /proc; no lsof is involved.
     }
     let fake = tempfile::tempdir().unwrap();
-    let lsof = fake.path().join("lsof");
-    std::fs::write(&lsof, "#!/bin/sh\nexec sleep 120\n").unwrap();
-    std::fs::set_permissions(&lsof, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    let path = format!(
-        "{}:{}",
-        fake.path().display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-    let status = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--ignored",
-            "--exact",
-            "process_tree::tests::holders_child_with_a_hanging_lsof",
-            "--nocapture",
-        ])
-        .env("PATH", path)
-        .env(HANGING_LSOF_ENV, "1")
-        .status()
-        .unwrap();
-    assert!(status.success());
-}
-
-#[test]
-#[ignore = "child process of holders_end_within_a_bound_when_lsof_hangs"]
-fn holders_child_with_a_hanging_lsof() {
-    if std::env::var_os(HANGING_LSOF_ENV).is_none() {
-        return;
-    }
+    let lsof = fake_program(fake.path(), "lsof", "#!/bin/sh\nexec sleep 120\n");
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().to_path_buf();
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = sender.send(holders(&[root.as_path()]).map(|_| ()));
+        let found = holders_using(&[root.as_path()], HOLDER_PROBE_DEADLINE, || Ok(lsof));
+        let _ = sender.send(found.map(|_| ()));
     });
     let result = receiver
         .recv_timeout(Duration::from_secs(30))
@@ -180,6 +168,34 @@ fn holders_child_with_a_hanging_lsof() {
     assert!(
         result.is_err(),
         "a probe that could not finish proves nothing"
+    );
+}
+
+/// Issue 321: no lsof, or one that cannot run, is an error ("unknown"),
+/// never an empty list of holders.
+#[test]
+fn holders_without_a_runnable_lsof_are_unknown_not_none() {
+    if cfg!(target_os = "linux") {
+        return; // Linux reads /proc; no lsof is involved.
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let missing = || {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no executable lsof",
+        ))
+    };
+    let error = holders_using(&[dir.path()], HOLDER_PROBE_DEADLINE, missing).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound, "{error}");
+    let plain = dir.path().join("plain-lsof");
+    std::fs::write(&plain, "").unwrap();
+    let found = holders_using(&[dir.path()], HOLDER_PROBE_DEADLINE, || Ok(plain));
+    assert!(found.is_err(), "an lsof that cannot run proved {found:?}");
+    let silent = fake_program(dir.path(), "silent/lsof", "#!/bin/sh\nexit 0\n");
+    let found = holders_using(&[dir.path()], HOLDER_PROBE_DEADLINE, || Ok(silent));
+    assert!(
+        found.is_err(),
+        "an lsof that listed nothing proved {found:?}"
     );
 }
 
@@ -220,8 +236,10 @@ fn holders_say_which_holder_writes() {
 #[path = "process_tree_tracker_tests.rs"]
 mod tracker;
 
+/// Issue 321: a fixed system location wins over PATH, which is used only
+/// when no standard location has an executable `lsof`.
 #[test]
-fn lsof_is_found_on_path_then_at_a_standard_location() {
+fn lsof_is_found_at_a_standard_location_then_on_path() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let make = |name: &str, mode: u32| {
@@ -231,28 +249,104 @@ fn lsof_is_found_on_path_then_at_a_standard_location() {
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
         p
     };
-    let on_path = make("path/lsof", 0o755);
+    let planted = make("toolchain/lsof", 0o755);
     let standard = make("sbin/lsof", 0o755);
     let not_executable = make("plain/lsof", 0o644);
-    let s = standard.to_str().unwrap();
-    let pick =
-        |path: Vec<std::path::PathBuf>, std_: &[&str]| lsof_program_from(path.into_iter(), std_);
-    assert_eq!(pick(vec![on_path.clone()], &[s]), on_path, "PATH wins");
+    let (s, plain) = (standard.to_str().unwrap(), not_executable.to_str().unwrap());
+    let missing = dir.path().join("missing/lsof");
+    let missing_s = missing.to_str().unwrap();
+    let pick = |std_: &[&str], path: Vec<std::path::PathBuf>| {
+        lsof_program_from(std_, path.into_iter()).map_err(|e| e.kind())
+    };
     assert_eq!(
-        pick(vec![dir.path().join("missing/lsof")], &[s]),
-        standard,
-        "a confined PATH without lsof uses the standard location"
+        pick(&[missing_s, s], vec![planted.clone()]),
+        Ok(standard.clone()),
+        "a standard location wins over a planted PATH lsof"
     );
     assert_eq!(
-        pick(vec![not_executable], &[s]),
-        standard,
-        "a file without an execute bit is not a program"
+        pick(&[s], vec![]),
+        Ok(standard.clone()),
+        "an empty or confined PATH still finds the standard location"
     );
     assert_eq!(
-        pick(vec![dir.path().join("path")], &[]),
-        std::path::PathBuf::from("lsof"),
-        "nothing found keeps a bare name so the spawn error names lsof"
+        pick(&[plain, s], vec![planted.clone()]),
+        Ok(standard.clone()),
+        "a standard file without an execute bit is skipped"
     );
+    assert_eq!(
+        pick(&[missing_s, plain], vec![missing.clone(), planted.clone()]),
+        Ok(planted.clone()),
+        "PATH is used when no standard location has an executable lsof"
+    );
+    let error =
+        lsof_program_from(&[missing_s, plain], vec![missing.clone()].into_iter()).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    assert!(error.to_string().contains("no executable lsof"), "{error}");
+    assert!(error.to_string().contains(missing_s), "{error}");
+}
+
+const RELATIVE_PATH_ENV: &str = "ARCHON_TEST_RELATIVE_PATH_LSOF";
+
+/// Issue 321: a relative PATH entry resolves against the working directory,
+/// so it is never used, even when an executable `lsof` sits right there.
+/// Run in a child test process whose cwd holds `toolchain/lsof`.
+#[test]
+fn a_relative_path_lsof_is_never_used() {
+    let cwd = tempfile::tempdir().unwrap();
+    fake_program(cwd.path(), "toolchain/lsof", "#!/bin/sh\nexit 1\n");
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "process_tree::tests::relative_path_lsof_child",
+            "--nocapture",
+        ])
+        .current_dir(cwd.path())
+        .env(RELATIVE_PATH_ENV, "1")
+        .status()
+        .unwrap();
+    assert!(status.success(), "the relative-PATH child failed: {status}");
+}
+
+#[test]
+#[ignore = "child process of a_relative_path_lsof_is_never_used"]
+fn relative_path_lsof_child() {
+    if std::env::var_os(RELATIVE_PATH_ENV).is_none() {
+        return;
+    }
+    let relative = std::path::PathBuf::from("toolchain/lsof");
+    assert!(relative.is_file(), "the cwd does not hold toolchain/lsof");
+    let missing = "/no/such/dir/lsof";
+    let found = lsof_program_from(&[missing], vec![relative].into_iter());
+    assert_eq!(
+        found.map_err(|e| e.kind()),
+        Err(std::io::ErrorKind::NotFound),
+        "a relative PATH entry is never used"
+    );
+}
+
+/// Issue 321: the PATH-fallback warning is logged once per process and path.
+#[test]
+fn a_path_fallback_warns_once_per_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a/lsof"), dir.path().join("b/lsof"));
+    assert!(first_path_fallback(&a));
+    assert!(!first_path_fallback(&a));
+    assert!(first_path_fallback(&b));
+}
+
+/// Issue 321, the production list: on a host with `lsof` at a standard
+/// location (`/usr/sbin/lsof` on macOS), a planted PATH `lsof` never wins.
+#[test]
+fn a_planted_path_lsof_never_beats_the_system_one() {
+    let Some(system) = STANDARD_LSOF.iter().find(|p| Path::new(p).is_file()) else {
+        return; // No system lsof here; the seam test above covers the order.
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let planted = fake_program(dir.path(), "lsof", "#!/bin/sh\nexit 1\n");
+    let found = lsof_program_from(STANDARD_LSOF, vec![planted.clone()].into_iter()).unwrap();
+    assert_ne!(found, planted);
+    assert_eq!(found, Path::new(system));
 }
 
 const CONFINED_PATH_ENV: &str = "ARCHON_TEST_CONFINED_PATH_HOLDERS";
