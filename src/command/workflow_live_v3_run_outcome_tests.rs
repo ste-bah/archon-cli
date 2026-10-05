@@ -306,3 +306,39 @@ async fn a_regression_holds_a_closed_run_and_a_pre_existing_failure_is_listed() 
         decided.next_action
     );
 }
+
+/// Issue 293: a run the host stopped is never a pass, even when every call
+/// it recorded passed. It keeps the stop's evidence and is held incomplete.
+#[test]
+fn a_host_stop_over_passing_calls_is_held_incomplete() {
+    let run = run();
+    for (failed_call, script_result) in [
+        (Some("approval-gate"), None),
+        (None, None),
+        (
+            Some("approval-gate"),
+            Some(r#"{"accepted":[],"blocked":[]}"#),
+        ),
+    ] {
+        let mut stopped = summary(WorkflowV2Status::Accepted);
+        stopped.failed_call = failed_call.map(str::to_string);
+        stopped.script_result = script_result.map(str::to_string);
+        let held = apply_authored_run_outcome(
+            &run.store,
+            &run.run_id,
+            &run.v2_store,
+            None,
+            None,
+            false,
+            stopped,
+        )
+        .unwrap();
+        assert_eq!(held.status, WorkflowV2Status::NeedsReview);
+        assert_eq!(held.failed_call.as_deref(), failed_call);
+        let next = held.next_action.unwrap_or_default();
+        assert!(
+            next.contains("stopped") || next.contains("terminal"),
+            "{next}"
+        );
+    }
+}

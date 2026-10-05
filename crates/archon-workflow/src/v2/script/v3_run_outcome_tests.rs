@@ -490,5 +490,7 @@ mod b;
 mod closure;
 #[path = "v3_run_outcome_tests_per_finding.rs"]
 mod per_finding;
+#[path = "v3_run_outcome_tests_stop.rs"]
+mod stop;
 #[path = "v3_run_outcome_tests_universe.rs"]
 mod universe;

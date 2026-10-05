@@ -163,8 +163,14 @@ pub fn authored_run_terminal_status_with(
     facts: &AuthoredRunFacts<'_>,
     discharged: &BTreeSet<String>,
 ) -> AuthoredRunOutcome {
+    // Issue 293: a stopped run is never a pass. A hard stop keeps the
+    // accumulated status unless that status is a pass: then it is incomplete.
+    let stopped = match facts.accumulated_status {
+        WorkflowV2Status::Accepted | WorkflowV2Status::Noop => WorkflowV2Status::NeedsReview,
+        status => status,
+    };
     let hard = |reason: String| AuthoredRunOutcome {
-        status: facts.accumulated_status,
+        status: stopped,
         from_accounting: false,
         blocking: vec![reason],
         notes: Vec::new(),

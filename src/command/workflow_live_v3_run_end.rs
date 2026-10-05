@@ -375,7 +375,9 @@ pub(super) fn apply_authored_run_outcome_with(
     .with_residual_gate(residual.blocking, residual.notes)
     .with_residual_gate(regression.blocking, regression.notes);
     let explanation = outcome.explanation();
-    if outcome.from_accounting {
+    // Issue 293: a hard stop keeps its own status and evidence, unless the
+    // rule found that status a pass it cannot be (a stopped run is incomplete).
+    if outcome.from_accounting || outcome.status != summary.status {
         summary.status = outcome.status;
         summary.next_action = (!matches!(
             outcome.status,

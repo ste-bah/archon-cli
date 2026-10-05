@@ -200,9 +200,11 @@ pub fn validate_review_accounting_from_reducers(
     details: &WorkflowDryRunPlanDetails,
     store: &WorkflowV2ResultStore,
 ) -> WorkflowResult<()> {
-    let raw = script_result.ok_or_else(|| {
-        WorkflowError::SpecInvalid("authored workflow returned no task accounting".to_string())
-    })?;
+    // Issue 293: no returned accounting is "no result", held incomplete by
+    // the terminal rule; never a spec defect.
+    let Some(raw) = script_result else {
+        return Ok(());
+    };
     let accounting: serde_json::Value = serde_json::from_str(raw).map_err(|err| {
         WorkflowError::SpecInvalid(format!(
             "authored workflow task accounting was not JSON: {err}"
