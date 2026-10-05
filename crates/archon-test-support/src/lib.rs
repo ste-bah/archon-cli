@@ -24,6 +24,8 @@
 //! - [`fixtures`] — the workflow-live JSON corpus, `include_str!`d once and
 //!   exposed as `pub const`, so tests in the binary and tests in
 //!   `archon-workflow` read the same bytes with no relative path between them.
+//! - [`live_process`] — `LiveChild`, a real running child process whose pid
+//!   liveness tests probe on every platform (Issue 339).
 //! - [`provider`] — `MockProvider` + `spawn_mock_server()` for LLM
 //!   acceptance tests.
 //! - [`memory`] — `MockMemoryTrait` recording `store_memory` calls for
@@ -35,6 +37,7 @@
 //!   (phase-4 REQ-FOR-D4 modularization safety net).
 
 pub mod fixtures;
+pub mod live_process;
 pub mod memory;
 pub mod provider;
 pub mod tempdir;

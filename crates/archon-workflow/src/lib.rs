@@ -52,6 +52,7 @@ pub mod obligation_ids;
 mod persistence;
 pub mod planner;
 pub mod policy;
+pub mod process_liveness;
 pub mod provider_tiers;
 mod remediation_items;
 pub mod repo_root;
