@@ -170,5 +170,7 @@ mod workflow_live_v2_script_host_state;
 #[path = "workflow_live_v2_script_host_audit.rs"]
 mod workflow_live_v2_script_host_audit;
 
+#[path = "workflow_live_v2_script_host_error_pause.rs"]
+mod error_pause;
 #[path = "workflow_live_v2_script_host_remediation_pause.rs"]
 mod remediation_pause;

@@ -60,8 +60,11 @@ async function workflow(w) {
     );
 }
 
+/// Issue 335: a workflow.js runtime error after a recorded call pauses the
+/// run with the error as evidence; it no longer fails it, and a resume
+/// re-runs the script from its records.
 #[tokio::test]
-async fn workflow_js_error_returns_failed_summary_for_state_sync() {
+async fn workflow_js_error_after_a_call_pauses_the_run_with_its_evidence() {
     let temp = tempfile::tempdir().expect("tempdir");
     let spec = test_spec();
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
@@ -89,7 +92,7 @@ async fn workflow_js_error_returns_failed_summary_for_state_sync() {
         None,
     );
 
-    let summary = runner
+    let error = runner
         .run(
             r#"
 async function workflow(w) {
@@ -99,24 +102,25 @@ async function workflow(w) {
 "#,
         )
         .await
-        .expect("failed summary");
+        .expect_err("a runtime error pauses the run");
 
-    assert_eq!(summary.status, WorkflowV2Status::Failed);
-    assert_eq!(summary.failed_call.as_deref(), Some("workflow.js"));
-    assert_eq!(summary.executed, 1);
-    archon_workflow::v2::run_state_sync::sync_v2_summary_to_run(
-        &workflow_store,
-        &run.id,
-        &summary.calls,
-        &v2_store,
-        summary.status,
-    )
-    .expect("sync failed summary");
+    let WorkflowError::ControlPaused(message) = &error else {
+        panic!("a runtime error pauses the run: {error:?}");
+    };
+    assert!(message.contains("boom after checkpoint"), "{message}");
+    assert!(message.contains("after call `before-crash`"), "{message}");
+    assert!(
+        v2_store
+            .load_call_record("before-crash")
+            .expect("lookup")
+            .is_some(),
+        "the call before the crash stays recorded"
+    );
     let run_state = workflow_store.load_state(&run.id).expect("run state");
-    assert_eq!(run_state.status, RunStatus::Failed);
+    assert_eq!(run_state.status, RunStatus::Paused);
     let events = std::fs::read_to_string(workflow_store.run_dir(&run.id).join("events.jsonl"))
         .expect("events");
-    assert!(events.contains("\"event\":\"script_stopped\""));
+    assert!(events.contains("\"event\":\"script_error_pause\""));
     assert!(
         !events.contains("\"event\":\"terminal_status\""),
         "terminal events belong to the central finalizer"
