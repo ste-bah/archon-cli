@@ -13,10 +13,15 @@
 //! * **Incomplete, resumable** - the command exited with
 //!   [`EXIT_INCOMPLETE_RESUMABLE`] (75, `EX_TEMPFAIL` in `sysexits.h`). It
 //!   stopped before it finished, on an operational limit of its own (for
-//!   example an internal deadline set below the catalog wall clock). It
-//!   persisted the work it finished OUTSIDE its call staging directory, and a
-//!   re-run of the same call continues from there. Its stdout is ignored and
-//!   nothing it staged is published.
+//!   example an internal deadline set below the catalog wall clock) or on a
+//!   step that made no progress. Its stdout is ignored and nothing it staged
+//!   is published. Exit 75 does NOT by itself mean that work was saved:
+//!   - A command that saves its work persists what it finished OUTSIDE its
+//!     call staging directory, and a re-run of the same call continues from
+//!     there.
+//!   - A command that saves nothing (the unstaged CLI freeze, Issue 288)
+//!     reports progress 0 and says so in its reason; a re-run of it starts
+//!     over.
 //!
 //! Either operational ending may report progress with a stderr line
 //! `archon-host-progress: <n>` ([`PROGRESS_MARKER`]). `<n>` is the cumulative
@@ -365,3 +370,7 @@ fn append_log(run_root: &Path, line: &str) {
 #[cfg(test)]
 #[path = "workflow_host_command_operational_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workflow_host_command_operational_contract_tests.rs"]
+mod contract_tests;

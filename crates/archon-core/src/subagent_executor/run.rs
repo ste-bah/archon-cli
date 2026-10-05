@@ -20,8 +20,28 @@ impl AgentSubagentExecutor {
         ctx: ToolContext,
         cancel: CancellationToken,
     ) -> Result<String, ExecutorError> {
+        // Every way the call ends after its activity row opens closes the row
+        // (Issue 322): the run's completion, `settle` for an error before it,
+        // and the row's drop for an abandoned call.
+        let mut row = self.activity_row(&subagent_id);
+        let result = self
+            .run_subagent_in_slot(subagent_id, request, system, ctx, cancel.clone(), &mut row)
+            .await;
+        row.settle(&result, &cancel);
+        result
+    }
+
+    async fn run_subagent_in_slot(
+        &self,
+        subagent_id: String,
+        request: SubagentRequest,
+        system: Vec<serde_json::Value>,
+        ctx: ToolContext,
+        cancel: CancellationToken,
+        row: &mut super::activity::ActivityRow,
+    ) -> Result<String, ExecutorError> {
         let _capacity_permit = self
-            .acquire_subagent_slot(&subagent_id, &request, &cancel)
+            .acquire_subagent_slot(&subagent_id, &request, &cancel, row)
             .await?;
         let ids = self.register_subagent_run(&subagent_id, &request).await?;
         // Held across everything below. The two statements that follow used to
@@ -39,7 +59,7 @@ impl AgentSubagentExecutor {
             .await
             .set_parent(&ids.manager_id, ctx.subagent_id.as_deref());
         let result = self
-            .run_registered_subagent_to_completion(&ids, request, system, ctx, cancel)
+            .run_registered_subagent_to_completion(&ids, request, system, ctx, cancel, row)
             .await;
         self.on_inner_complete(ids.cache_id, result.clone().map_err(|err| err.to_string()))
             .await;
@@ -53,35 +73,47 @@ impl AgentSubagentExecutor {
     /// use (Issue 288). The wait is reported where it happens: it stops the
     /// dispatch clocks the host installed for this session, so a queued call
     /// starts its run time when it starts to run, and it is logged and
-    /// emitted as activity when it begins and when the slot is acquired. The
-    /// wait has no clock of its own: each slot holder is bounded by its own.
+    /// emitted as activity when it begins and when the slot is acquired. A
+    /// call with no clock installed (an interactive call) is told so, never
+    /// that clocks are stopped (Issue 322). The wait has no clock of its own:
+    /// each slot holder is bounded by its own.
     async fn acquire_subagent_slot(
         &self,
         subagent_id: &str,
         request: &SubagentRequest,
         cancel: &CancellationToken,
+        row: &mut super::activity::ActivityRow,
     ) -> Result<tokio::sync::OwnedSemaphorePermit, ExecutorError> {
         if let Ok(permit) = self.subagent_capacity.clone().try_acquire_owned() {
             return Ok(permit);
         }
         let paused = archon_tools::subagent_dispatch_clock::slot_wait(subagent_id);
+        let clocks_paused = paused.as_ref().is_some_and(|pauses| !pauses.is_empty());
         let agent_type = request.subagent_type.as_deref().unwrap_or("subagent");
         let model = request.model.as_deref().unwrap_or(&self.parent_model);
         let limit = self.agent_config.max_subagent_concurrency.max(1);
-        let message = format!(
-            "{agent_type} waiting for a free subagent slot (all {limit} in use); its dispatch clocks do not run until it starts"
-        );
-        tracing::info!(subagent_id, clocks_paused = paused.is_some(), "{message}");
-        self.emit_subagent_queued(subagent_id, agent_type, model, message);
+        let clocks = if clocks_paused {
+            "its dispatch clocks do not run until it starts"
+        } else {
+            "no dispatch clock is installed for it, so none is stopped"
+        };
+        let message =
+            format!("{agent_type} waiting for a free subagent slot (all {limit} in use); {clocks}");
+        tracing::info!(subagent_id, clocks_paused, "{message}");
+        row.queued(agent_type, model, message);
         let waited = tokio::time::Instant::now();
         let permit = self.acquire_subagent_capacity(cancel).await?;
         drop(paused);
-        let message = format!(
-            "{agent_type} acquired a subagent slot after waiting {}s; its dispatch clocks start now",
-            waited.elapsed().as_secs()
-        );
+        let waited = waited.elapsed().as_secs();
+        let message = if clocks_paused {
+            format!(
+                "{agent_type} acquired a subagent slot after waiting {waited}s; its dispatch clocks start now"
+            )
+        } else {
+            format!("{agent_type} acquired a subagent slot after waiting {waited}s")
+        };
         tracing::info!(subagent_id, "{message}");
-        self.emit_subagent_slot_acquired(subagent_id, agent_type, model, message);
+        row.slot_acquired(agent_type, model, message);
         Ok(permit)
     }
 
@@ -108,6 +140,7 @@ impl AgentSubagentExecutor {
         system: Vec<serde_json::Value>,
         ctx: ToolContext,
         cancel: CancellationToken,
+        row: &mut super::activity::ActivityRow,
     ) -> Result<String, ExecutorError> {
         self.fire_subagent_start_hooks(&ids.manager_id, &request, ctx.nested)
             .await;
@@ -145,21 +178,20 @@ impl AgentSubagentExecutor {
         let activity_agent_type = context.activity_agent_type();
         let activity_model = runner.model().to_string();
 
-        self.emit_subagent_started(&ids.cache_id, activity_agent_type, &activity_model);
+        row.started(activity_agent_type, &activity_model);
         let runner_result =
             archon_tools::host_timeout::scope(context.host_timeout, runner.run(&request.prompt))
                 .await;
         let inner_result = runner_result.map_err(|e| format!("Subagent failed: {e}"));
-        self.emit_subagent_finished(
-            &ids.cache_id,
-            activity_agent_type,
-            &activity_model,
-            &inner_result,
-        );
+        row.finished(activity_agent_type, &activity_model, &inner_result);
 
         inner_result.map_err(ExecutorError::Internal)
     }
 }
+
+#[cfg(test)]
+#[path = "run_activity_tests.rs"]
+mod activity_tests;
 
 #[cfg(test)]
 mod tests {
@@ -207,8 +239,16 @@ mod tests {
     }
 
     fn test_executor(cap: usize) -> Arc<AgentSubagentExecutor> {
+        test_executor_with_sink(cap, None)
+    }
+
+    pub(super) fn test_executor_with_sink(
+        cap: usize,
+        activity_sink: Option<Arc<dyn archon_observability::AgentActivitySink>>,
+    ) -> Arc<AgentSubagentExecutor> {
         let agent_config = AgentConfig {
             max_subagent_concurrency: cap,
+            activity_sink,
             ..Default::default()
         };
         let project_dir = std::env::temp_dir();
@@ -303,7 +343,7 @@ mod tests {
         );
     }
 
-    fn queued_request() -> SubagentRequest {
+    pub(super) fn queued_request() -> SubagentRequest {
         SubagentRequest {
             prompt: "queued".to_string(),
             model: None,
@@ -333,8 +373,9 @@ mod tests {
             let executor = Arc::clone(&executor);
             let clock = Arc::clone(&clock);
             tokio::spawn(scope_session("queued", vec![clock], async move {
+                let mut row = executor.activity_row("queued");
                 let permit = executor
-                    .acquire_subagent_slot("queued", &queued_request(), &cancel)
+                    .acquire_subagent_slot("queued", &queued_request(), &cancel, &mut row)
                     .await
                     .expect("the queued call takes the slot once it is free");
                 (permit, tokio::time::Instant::now())
