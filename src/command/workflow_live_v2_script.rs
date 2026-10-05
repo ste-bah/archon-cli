@@ -237,6 +237,8 @@ impl WorkflowV2ScriptRunner {
         let notification_for_js = notification_failure.clone();
         let host_control: Arc<StdMutex<Option<HostControlStop>>> = Arc::default();
         let control_for_js = host_control.clone();
+        // Issue 329: the order in which the script issued its host calls.
+        let issued = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let js_result = context
             .async_with(async move |ctx| {
                 ctx.globals().set(
@@ -246,12 +248,16 @@ impl WorkflowV2ScriptRunner {
                         let watchdog = watchdog_for_js.clone();
                         let notification = notification_for_js.clone();
                         let control = control_for_js.clone();
+                        let issued = issued.clone();
+                        let order = issued.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                         Box::pin(async move {
                             watchdog.pause();
-                            let result = Box::pin(host.execute(method, payload)).await;
-                            // Issue-285: refused calls are instant, so after a
-                            // terminal stop one budget runs without resets.
-                            if host.accumulator.lock().await.terminal_host_stop {
+                            let result =
+                                Box::pin(host.execute_issued(method, payload, Some(order))).await;
+                            host.note_delivered(&result, &issued).await;
+                            // Issue-285/329: refused calls are instant, so after
+                            // a terminal or control stop one budget runs on.
+                            if host.accumulator.lock().await.session_stopped() {
                                 watchdog.start_terminal_budget();
                             }
                             watchdog.resume();
@@ -325,6 +331,12 @@ impl WorkflowV2ScriptRunner {
             host.interrupt_terminal_calls().await;
         }
         let outcome = js_result.unwrap_or_else(|err| Err(err.to_string()));
+        // Issue 329: a script that kept calling past a run control refusal
+        // was stopped; that refusal, not the stop, words the outcome.
+        let outcome = match &host.accumulator.lock().await.control_refusal {
+            Some(refusal) if refusal.called_again => Err(refusal.stopped_script_text()),
+            _ => outcome,
+        };
         // A host stop survives a concurrent resume while this script unwinds.
         // Round 7 (#285): after a terminal host stop only a stored operator
         // pause or cancel outranks it; a fence a later lifecycle edit raised

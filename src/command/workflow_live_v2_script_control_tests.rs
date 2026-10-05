@@ -147,14 +147,20 @@ async fn run_control_probe(
         None,
         None,
     );
-    let runner = if resume_during_unwind {
-        runner.with_host_command_executor(Arc::new(ResumeOnUnwind {
-            store: store.clone(),
-            run_id: run.id.clone(),
-        }))
-    } else {
-        runner
-    };
+    if resume_during_unwind {
+        // The operator resumes at the first host call the script makes after
+        // it caught the host's typed control error: the call the host
+        // refuses (Issue 329), with no sleeps or timing guesses.
+        let (store, run_id) = (store.clone(), run.id.clone());
+        crate::command::workflow_live::workflow_live_v2::workflow_live_v2_run::terminal_test_support::on_unwind(
+            store.run_dir(&run_id),
+            Box::new(move || {
+                archon_workflow::LifecycleController::new(store)
+                    .apply(&run_id, archon_workflow::LifecycleAction::Resume)
+                    .expect("resume during unwind");
+            }),
+        );
+    }
     let outcome = tokio::time::timeout(Duration::from_secs(300), runner.run(script))
         .await
         .expect("run control ends the in-flight call");
@@ -254,41 +260,6 @@ async fn a_pause_outranks_a_sibling_cancel_error_it_induced() {
         stored_status(&store, &run_id),
         archon_workflow::RunStatus::Paused
     );
-}
-
-/// Invoked by JS only after it has caught the host's typed control error.
-/// Identity resolution precedes the host's control poll, allowing the test
-/// to resume at precisely that boundary without sleeps or timing guesses.
-struct ResumeOnUnwind {
-    store: WorkflowStore,
-    run_id: String,
-}
-
-#[async_trait::async_trait]
-impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for ResumeOnUnwind {
-    fn call_identity(
-        &self,
-        _: &archon_workflow::HostCommandRequest,
-    ) -> archon_workflow::WorkflowResult<String> {
-        archon_workflow::LifecycleController::new(self.store.clone())
-            .apply(&self.run_id, archon_workflow::LifecycleAction::Resume)?;
-        Err(WorkflowError::PolicyDenied("unwind barrier reached".into()))
-    }
-
-    fn record_is_reusable(
-        &self,
-        _: &WorkflowV2CallRecord,
-    ) -> archon_workflow::WorkflowResult<bool> {
-        unreachable!("identity barrier rejects before reuse")
-    }
-
-    async fn execute(
-        &self,
-        _: archon_workflow::HostCommandRequest,
-        _: Option<u64>,
-    ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
-        unreachable!("identity barrier rejects before dispatch")
-    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

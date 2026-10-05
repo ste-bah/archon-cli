@@ -20,6 +20,36 @@ pub(super) struct WorkflowScriptAccumulator {
     /// Consecutive calls that failed without ever starting. Run-scoped: the
     /// bound only means anything across calls.
     pub(super) never_started: NeverStartedStreak,
+    /// Issue 329: the first run control refusal (pause, cancel, or a stale
+    /// session) a host call of this session received. Sticky: every later
+    /// call is refused with it (`workflow_live_v2_script_host_control_refusal.rs`).
+    pub(super) control_refusal: Option<ControlRefusal>,
+}
+
+/// A run control refusal, kept to refuse every later call of the session.
+#[derive(Clone, Debug)]
+pub(super) struct ControlRefusal {
+    pub(super) paused: bool,
+    pub(super) message: String,
+    /// How many calls the script had issued when the refusal reached it.
+    /// A call issued later is the script calling past the refusal; one
+    /// issued with it (a sibling in the same pool) still runs.
+    pub(super) delivered_at: Option<u64>,
+    /// The script called again after the refusal: it will not unwind alone.
+    pub(super) called_again: bool,
+}
+
+impl ControlRefusal {
+    /// The refusal as its control error words it, for a script stopped
+    /// because it kept calling after it.
+    pub(super) fn stopped_script_text(&self) -> String {
+        let error = if self.paused {
+            WorkflowError::ControlPaused(self.message.clone())
+        } else {
+            WorkflowError::ControlCancelled(self.message.clone())
+        };
+        format!("{error}; the script kept calling the host after this refusal and was stopped")
+    }
 }
 
 impl Default for WorkflowScriptAccumulator {
@@ -36,6 +66,7 @@ impl Default for WorkflowScriptAccumulator {
             terminal_host_stop: false,
             script_driven: false,
             never_started: NeverStartedStreak::default(),
+            control_refusal: None,
         }
     }
 }
@@ -44,5 +75,17 @@ impl WorkflowScriptAccumulator {
     /// A trusted terminal stop that a script can no longer change.
     pub(super) fn terminal_locked(&self) -> bool {
         self.terminal_host_stop && self.script_driven
+    }
+
+    /// Whether the script's one post-stop budget runs: after a terminal host
+    /// stop, or once the script calls again after a run control refusal. A
+    /// script that unwinds from the refusal and awaits its pending calls is
+    /// not cut short.
+    pub(super) fn session_stopped(&self) -> bool {
+        self.terminal_host_stop
+            || self
+                .control_refusal
+                .as_ref()
+                .is_some_and(|refusal| refusal.called_again)
     }
 }
