@@ -428,6 +428,7 @@ impl WorkflowScriptHost {
         acc.failed_call = Some("workflow.js".to_string());
         acc.failed_result_path = None;
         acc.next_action = Some(next_action.clone());
+        acc.script_error = Some(error.to_string());
         drop(acc);
         self.emit_v2_event(
             WorkflowEventKind::StageFailed,

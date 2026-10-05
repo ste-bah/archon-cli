@@ -188,6 +188,7 @@ fn record_learning_event(fixture: &LearningFixture) -> PathBuf {
         failed_result_path: None,
         script_result: None,
         next_action: None,
+        script_error: None,
     };
     record_generated_learning_event(&store, &fixture.run_id, &fixture.plan, &summary, &v2_store)
         .expect("record learning event")

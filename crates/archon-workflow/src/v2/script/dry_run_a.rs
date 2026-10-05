@@ -100,9 +100,10 @@ pub(super) async fn dry_run_on_current_thread(
     }));
     let runtime = AsyncRuntime::new()
         .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs runtime failed: {err}")))?;
-    let deadline = Instant::now() + WORKFLOW_DRY_RUN_WATCHDOG;
+    // Issue 332: CPU time of this script thread, which machine load never spends.
+    let budget = super::js_cpu_clock::JsCpuBudget::start(WORKFLOW_DRY_RUN_WATCHDOG);
     runtime
-        .set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)))
+        .set_interrupt_handler(Some(Box::new(move || budget.spent())))
         .await;
     let context = AsyncContext::full(&runtime)
         .await

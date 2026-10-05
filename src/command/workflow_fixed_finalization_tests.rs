@@ -12,6 +12,7 @@ fn summary() -> workflow_live_v2_script::WorkflowV2ScriptSummary {
         failed_call: None,
         failed_result_path: None,
         next_action: None,
+        script_error: None,
         script_result: None,
     }
 }

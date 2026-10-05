@@ -43,6 +43,9 @@ pub(super) struct WorkflowV2ScriptSummary {
     pub(super) failed_call: Option<String>,
     pub(super) failed_result_path: Option<String>,
     pub(super) next_action: Option<String>,
+    /// Issue 332: the error text a failed workflow.js raised, so the run
+    /// summary says why the script stopped.
+    pub(super) script_error: Option<String>,
     /// The script's own return value (JSON text). Consumed by the v3
     /// authoring bootstrap to hand back the authored workflow source.
     pub(super) script_result: Option<String>,
@@ -222,16 +225,14 @@ impl WorkflowV2ScriptRunner {
         host.record_orphaned_calls();
         let runtime = AsyncRuntime::new()
             .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs runtime failed: {err}")))?;
-        let watchdog = WorkflowJsWatchdog::new();
-        let watchdog_for_interrupt = watchdog.clone();
-        runtime
-            .set_interrupt_handler(Some(Box::new(move || {
-                watchdog_for_interrupt.should_interrupt()
-            })))
-            .await;
+        // Issue 332: a CPU-time budget of the script thread, so machine load
+        // never spends it.
+        let watchdog = WorkflowJsWatchdog::install(&runtime).await;
         let context = AsyncContext::full(&runtime)
             .await
             .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs context failed: {err}")))?;
+        #[cfg(test)]
+        workflow_live_v2_script_watchdog::stall_engine_start(&host.runner.run_id);
         let source = script_source(harness_source, script_args.as_ref());
         let host_for_js = host.clone();
         let watchdog_for_js = watchdog.clone();

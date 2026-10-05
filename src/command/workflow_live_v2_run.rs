@@ -367,9 +367,8 @@ async fn execute_generated_v2_run(
     .with_frontier_resume(adopt_accepted_cache)
     .with_resume_completed_ids(resume_completed_ids)
     .with_executor_lease(executor_lease, run.generation);
-    // Decomposed-PRD runs default to the Rust lifecycle. v3 script mode
-    // (ARCHON_SCRIPT_LIFECYCLE=1) instead AUTHORS a workflow.js from the
-    // task universe and executes it — composition as code, no reducer relay.
+    // Decomposed-PRD runs default to the Rust lifecycle. v3 script mode (ARCHON_SCRIPT_LIFECYCLE=1)
+    // instead AUTHORS a workflow.js from the task universe and executes it.
     // Preserve the persisted engine/cache choice; only legacy runs read the environment.
     let script_lifecycle = load_generated_v2_metadata(store, &run.id)
         .ok()
@@ -481,14 +480,15 @@ async fn execute_generated_v2_run(
         "Workflow V2 {status_label}: {} (status {:?}, completed {}, executed {}, reused {})\n",
         run.id, summary.status, summary.completed, summary.executed, summary.reused
     );
-    if let Some(call_id) = &summary.failed_call {
-        output.push_str(&format!("failed_call: {call_id}\n"));
-    }
-    if let Some(path) = &summary.failed_result_path {
-        output.push_str(&format!("failed_result: {path}\n"));
-    }
-    if let Some(next_action) = &summary.next_action {
-        output.push_str(&format!("next_action: {next_action}\n"));
+    for (label, value) in [
+        ("failed_call", &summary.failed_call),
+        ("failed_result", &summary.failed_result_path),
+        ("script_error", &summary.script_error),
+        ("next_action", &summary.next_action),
+    ] {
+        if let Some(value) = value {
+            output.push_str(&format!("{label}: {value}\n"));
+        }
     }
     output.push_str(&format!(
         "harness: {}\nv2_results: {}\n",

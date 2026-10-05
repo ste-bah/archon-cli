@@ -46,6 +46,7 @@ fn summary(status: WorkflowV2Status) -> WorkflowV2ScriptSummary {
         failed_call: None,
         failed_result_path: None,
         next_action: None,
+        script_error: None,
         script_result: None,
     }
 }

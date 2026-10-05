@@ -105,6 +105,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         for (label, value) in [
             ("failed_call", summary.failed_call.as_deref()),
             ("failed_result", summary.failed_result_path.as_deref()),
+            ("script_error", summary.script_error.as_deref()),
             ("next_action", summary.next_action.as_deref()),
         ] {
             let Some(value) = value.filter(|text| !text.trim().is_empty()) else {
