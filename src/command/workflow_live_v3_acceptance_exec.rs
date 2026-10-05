@@ -79,6 +79,37 @@ impl StageContext {
     }
 }
 
+/// Issue 324: why the stage context did not resolve, with what the operator
+/// does about it. No round and no resume changes it on its own, so a task-set
+/// run pauses on it again and again until the remedy is applied.
+#[derive(Debug)]
+pub(super) struct Unresolved {
+    pub(super) cause: WorkflowError,
+    pub(super) remedy: &'static str,
+}
+
+impl std::fmt::Display for Unresolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the acceptance stage context did not resolve: {}; remedy: {}",
+            self.cause, self.remedy
+        )
+    }
+}
+
+fn unresolved(remedy: &'static str) -> impl FnOnce(WorkflowError) -> Unresolved {
+    move |cause| Unresolved { cause, remedy }
+}
+
+const PROJECT_REMEDY: &str = "resume the run from the project whose .archon workflow store holds it (the stage takes the project root from where that store lives)";
+const METADATA_REMEDY: &str = "restore or repair the run's generated metadata file the error names";
+const TASK_ROOT_REMEDY: &str = "restore the task set directory the run was launched with (its task files in one directory), or start a new run on the task set where it now lives";
+const CONFIG_REMEDY: &str =
+    "fix or remove [workflow.acceptance_execution] in the project config file the error names";
+const REPOSITORY_REMEDY: &str = "restore the run's target repository at the path the error names";
+const MISMATCH_REMEDY: &str = "make [workflow.acceptance_execution].repository the run's target repository, or remove that key";
+
 /// Resolve roots and policy. Errors here are the stage's operational errors:
 /// the round is recorded as unevaluable, never as passed.
 pub(super) fn resolve_context(
@@ -86,13 +117,15 @@ pub(super) fn resolve_context(
     run_id: &str,
     target_repository_root: Option<&str>,
     universe: Option<&WorkflowV2TaskUniverse>,
-) -> WorkflowResult<StageContext> {
+) -> Result<StageContext, Unresolved> {
     let project = super::super::workflow_run_end_snapshot::project_root(store)
         .ok_or_else(|| {
             WorkflowError::StateCorrupt("workflow store has no project root".to_string())
-        })?
+        })
+        .map_err(unresolved(PROJECT_REMEDY))?
         .to_path_buf();
-    let snapshot = super::super::load_generated_v2_metadata(store, run_id)?
+    let snapshot = super::super::load_generated_v2_metadata(store, run_id)
+        .map_err(unresolved(METADATA_REMEDY))?
         .and_then(|metadata| metadata.observer_snapshot);
     let task_root = snapshot
         .as_ref()
@@ -107,16 +140,19 @@ pub(super) fn resolve_context(
             WorkflowError::SpecInvalid(
                 "acceptance stage cannot resolve the task set root: the task universe names no single task directory".to_string(),
             )
-        })?;
+        })
+        .map_err(unresolved(TASK_ROOT_REMEDY))?;
     let binding = match snapshot
         .as_ref()
         .and_then(|snapshot| snapshot.native_execution.clone())
         .filter(|value| value.get("policy").is_some())
         .map(serde_json::from_value::<NativeBinding>)
-        .transpose()?
+        .transpose()
+        .map_err(|error| unresolved(METADATA_REMEDY)(error.into()))?
     {
         Some(binding) => Some(binding),
-        None => crate::command::acceptance_scratch_policy::capture(&project, &task_root)?,
+        None => crate::command::acceptance_scratch_policy::capture(&project, &task_root)
+            .map_err(unresolved(CONFIG_REMEDY))?,
     };
     let repository = match target_repository_root
         .map(str::trim)
@@ -128,7 +164,8 @@ pub(super) fn resolve_context(
             .map_err(|source| WorkflowError::Io {
                 path: PathBuf::from(root),
                 source,
-            })?,
+            })
+            .map_err(unresolved(REPOSITORY_REMEDY))?,
         None => binding
             .as_ref()
             .map(|binding| binding.policy.repository.clone())
@@ -144,10 +181,12 @@ pub(super) fn resolve_context(
             .as_deref()
             != Some(repository.as_path())
     {
-        return Err(WorkflowError::SpecInvalid(format!(
-            "[workflow.acceptance_execution].repository ({}) is not the run's target repository ({}); acceptance must check the repository the run implemented",
-            binding.policy.repository.display(),
-            repository.display()
+        return Err(unresolved(MISMATCH_REMEDY)(WorkflowError::SpecInvalid(
+            format!(
+                "[workflow.acceptance_execution].repository ({}) is not the run's target repository ({}); acceptance must check the repository the run implemented",
+                binding.policy.repository.display(),
+                repository.display()
+            ),
         )));
     }
     // Batch J2: the round's own observation and every regression probe
