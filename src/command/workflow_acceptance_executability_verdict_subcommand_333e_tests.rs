@@ -73,15 +73,32 @@ fn scratch(
     }
 }
 
+/// Keys and tokens a scratch policy forwards to every check.
+const FORWARDED: [&str; 2] = ["ARCHON_333_SERVICE_API_KEY", "ARCHON_333_SERVICE_TOKEN"];
+
+fn forwarding(
+    mut binding: crate::command::acceptance_scratch_policy::NativeBinding,
+) -> crate::command::acceptance_scratch_policy::NativeBinding {
+    binding.policy.environment_allowlist = FORWARDED.iter().map(|name| name.to_string()).collect();
+    binding
+}
+
 #[tokio::test]
 async fn a_listing_never_sees_the_hosts_environment() {
-    // SAFETY: a variable of this test's own; no other test reads it.
-    unsafe { std::env::set_var(SECRET, "s3cr3t-333") };
+    // SAFETY: variables of this test's own; no other test reads them.
+    unsafe {
+        std::env::set_var(SECRET, "s3cr3t-333");
+        std::env::set_var(FORWARDED[0], "s3cr3t-333");
+        std::env::set_var(FORWARDED[1], "s3cr3t-333");
+    }
     let dir = tempfile::tempdir().unwrap();
     let operator_home = std::env::var("HOME").unwrap_or_default();
     for (label, binding) in [
-        ("scratch", Some(scratch(dir.path(), "/usr/bin:/bin"))),
-        ("hermetic", None),
+        (
+            "scratch",
+            Some(forwarding(scratch(dir.path(), "/usr/bin:/bin"))),
+        ),
+        ("direct", None),
     ] {
         let record = dir.path().join(format!("{label}.env"));
         let tool = spy(dir.path(), &record);
@@ -99,6 +116,7 @@ async fn a_listing_never_sees_the_hosts_environment() {
                 .await;
         assert_eq!(held["AC-333"], Original::Defect, "{label}");
         let seen = std::fs::read_to_string(&record).expect("it was listed");
+        // Nor a key or token the site forwards to its checks.
         assert!(
             !seen.contains(SECRET) && !seen.contains("s3cr3t-333"),
             "{label}: {seen}"
@@ -261,7 +279,14 @@ fn a_rejection_another_program_printed_is_not_the_tools() {
 #[test]
 fn nothing_a_listing_runs_with_is_read_from_the_hosts_environment() {
     // The hard rule: a listing's variables come only from its site's
-    // context (`Context::new` takes them); these never read the host's.
+    // context (`Context::new` takes them, `listing_environment` makes
+    // them); none of this reads the host's.
+    let sites = include_str!("workflow_acceptance_executability_sites.rs");
+    let start = sites.find("pub(super) fn listing_environment").unwrap();
+    let end = start
+        + sites[start..]
+            .find("/// The variables a scratch site")
+            .unwrap();
     for (file, text) in [
         (
             "list",
@@ -271,10 +296,74 @@ fn nothing_a_listing_runs_with_is_read_from_the_hosts_environment() {
             "verdict",
             include_str!("workflow_acceptance_executability_verdict.rs"),
         ),
+        ("listing_environment", &sites[start..end]),
     ] {
-        assert!(
-            !text.contains("env::vars"),
-            "{file} reads the host's environment"
-        );
+        for read in ["env::vars", "env::var(", "env::var_os(", "host_env("] {
+            assert!(
+                !text.contains(read),
+                "{file} reads the host's environment: {read}"
+            );
+        }
     }
+}
+
+/// Cargo 1.97's own rejection when a command of a similar name exists.
+fn similar(word: &str, like: &str) -> Vec<u8> {
+    format!(
+        "error: no such command: `{word}`\n\nhelp: a command with a similar name exists: `{like}`\n\nhelp: view all installed commands with `cargo --list`\nhelp: find a package to install `{word}` with `cargo search cargo-{word}`\n"
+    )
+    .into_bytes()
+}
+
+#[test]
+fn a_similar_name_cargo_suggests_never_takes_its_rejection_away() {
+    let bin = Bin::new(&or_skip!(host_cargo(), "cargo"), &[SIBLING]);
+    // It suggests `test`, a program the check also runs: the rejection is
+    // still cargo's, and nothing provides `nextest`.
+    let text = "cargo nextest run && test -f target/nextest/junit.xml";
+    let odd = result(Some(101), b"", &similar("nextest", "test"));
+    let why = no_verdict(text, &odd, &bin.context()).expect("never a proof");
+    assert!(
+        why.contains("`cargo nextest`") && why.contains("--list | grep -qw nextest"),
+        "{why}"
+    );
+    // A command the host lists that a pinned toolchain lacks: `cargo` is
+    // named only lines after the rejection, and it is still cargo's.
+    let odd = result(Some(101), b"", &similar("info", "init"));
+    let why = no_verdict("cargo info serde", &odd, &bin.context()).expect("never a proof");
+    assert!(why.contains("`cargo info`"), "{why}");
+}
+
+#[test]
+fn a_directory_left_behind_is_never_a_listings_own() {
+    let left: Vec<PathBuf> = super::list::next_scratch(8);
+    for dir in &left {
+        std::fs::create_dir_all(dir.join("home")).unwrap();
+        std::fs::write(dir.join("home/left-behind"), "x").unwrap();
+    }
+    let records = tempfile::tempdir().unwrap();
+    let record = records.path().join("home");
+    let tool = format!(
+        "#!/bin/sh\nif [ \"$1\" = --list ]; then echo \"$HOME\" > '{}'; printf 'Commands:\\n    build    Build\\n'; exit 0; fi\necho \"archon333left: '$1' is not a archon333left command\" >&2\nexit 2\n",
+        record.display()
+    );
+    let bin = Bin::new(Path::new("/bin/sh"), &[("archon333left", &tool)]);
+    warm(&bin, &["archon333left"]);
+    let run = bin.run("archon333left lint");
+    let why = no_verdict("archon333left lint", &run, &bin.context());
+    let home = std::fs::read_to_string(&record).unwrap();
+    let home = Path::new(home.trim());
+    let reused = left.iter().any(|dir| home.starts_with(dir));
+    let kept = left
+        .iter()
+        .all(|dir| dir.join("home/left-behind").is_file());
+    for dir in &left {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    assert!(why.is_some(), "it was judged");
+    assert!(
+        !reused,
+        "a fresh directory, never one left behind: {home:?}"
+    );
+    assert!(kept, "and what was left behind is not removed as its own");
 }

@@ -13,29 +13,32 @@
 //!
 //! The rule is the same for every tool. A failed run gave no verdict when
 //! its output has a line that rejects, quoted, as an unknown command, a
-//! word that may be the subcommand ([`candidates`]), nothing shows an
-//! assertion ran, no program `tool-word` is on the check's search path,
-//! and one of these holds:
+//! word that may be the subcommand ([`candidates`]), a line that is the
+//! tool's (its own line names no other program the check runs instead of
+//! the tool), nothing shows an assertion ran, no program `tool-word` is on
+//! the check's search path, and one of these holds:
 //!
 //! - the host's own search path has `tool-word`: a plugin the check's
 //!   environment lacks, whatever `tool --list` says;
 //! - `tool --list` (`verdict_subcommand_list`) names the tool's commands,
 //!   with `word` or without it. The listing runs in a fresh directory, not
 //!   the check's tree, so it never sees that tree's aliases or the
-//!   toolchain it pins: listed or not, the site rejected `word`, and the
-//!   host cannot tell why. Without it, and no `tool-word` anywhere, it
-//!   passes only if the deliverable adds it (an alias in the tree's
-//!   configuration). Its author makes the check show that first -- for
-//!   example `tool --list | grep -qw word && tool word ...` -- so its
-//!   failure before the implementation is its own assertion, which is a
-//!   verdict;
-//! - the tool gave no listing at all (it stalled, never stopped, could not
-//!   start or run, or a signal killed it): the host could not tell.
+//!   toolchain it pins: listed, the site lacks what the host lists. Not
+//!   listed, and no `tool-word` anywhere, it passes only if the
+//!   deliverable adds it (an alias in the tree's configuration); its author
+//!   makes the check show that first -- `tool --list | grep -qw word &&
+//!   tool word ...` -- so its failure before the implementation is its own
+//!   assertion, which is a verdict;
+//! - the tool gave no answer (it stalled, never stopped, could not start
+//!   or run, was killed, or failed without saying it has no `--list`): the
+//!   host could not tell.
 //!
-//! So the listing only ever withholds a verdict. A tool that answers its
-//! listing without listing any command (it has no `--list`), of whose
-//! `tool-word` the host has none, is not judged: the word may be a command
-//! its own deliverable adds to it (Issue 328).
+//! So the listing only ever withholds a verdict, and every case where the
+//! site may lack what a check runs tells its author not to depend on it
+//! ([`missing`] has the whole table). A tool that says it has no listing
+//! (`--list` succeeds listing nothing, or is rejected as an option), of
+//! whose `tool-word` the host has none, is not judged: the word may be a
+//! command its own deliverable adds to it (Issue 328).
 //!
 //! Before a run the host also names each program and subcommand missing
 //! from the configured toolchain path ([`unresolved_on_path`]). It lists
@@ -87,17 +90,20 @@ pub(super) fn host_path() -> Option<String> {
 /// the module docs); `None` otherwise.
 ///
 /// It is judged only when `output` has a line rejecting, quoted, a word
-/// `tool word` may run as its subcommand, attributed to `tool` (the line
-/// or the few after it name `tool`, or name no other program the check
-/// runs), and nothing shows an assertion ran. Then, by the `tool --list`
-/// listing (`verdict_subcommand_list`), whether the host's own search path
-/// has a program `tool-word`, and whether the check's does:
+/// `tool word` may run as its subcommand, and nothing shows an assertion
+/// ran. A rejection is `tool`'s unless its own line -- not the help lines
+/// after it, where a tool suggests a similar command such as `test` --
+/// names another program the check runs and not `tool`: `mycli: unknown
+/// command 'build'` in `cargo build && mycli build` is mycli's, never
+/// cargo's. A line that names no program is `tool`'s: a false proof is
+/// worse than a lost verdict. Then, by the `tool --list` listing
+/// (`verdict_subcommand_list`), whether the host's own search path has a
+/// program `tool-word`, and whether the check's does:
 ///
 /// | listing | host has `tool-word` | check's path has it | result |
 /// |---|---|---|---|
 /// | any | any | yes | verdict: the subcommand resolves, so the rejection is not for its lack; the check's own failure decides |
-/// | lists `word`, the rejection names `tool` | any | no | no verdict: the site rejected what the host lists, so the site lacks it (a toolchain its tree pins, which the listing never reads); the check depends on what the site does not provide |
-/// | lists `word`, the rejection names no program | any | no | verdict: `tool` has `word`, so the rejection came from something else the check runs |
+/// | lists `word` | any | no | no verdict: the site rejected what the host lists, so the site lacks it (a toolchain its tree pins, which the listing never reads); the check depends on what the site does not provide |
 /// | lists commands without `word` | yes | no | no verdict: an environment tool the site lacks; the check must not depend on it |
 /// | lists commands without `word` | no | no | no verdict: no program anywhere provides it, so it passes only if the deliverable adds it (an alias in the tree); its author guards it (`tool --list \| grep -qw word && tool word`), so that its failure before the implementation is its own assertion |
 /// | lists none (it has no `--list`) | yes | no | no verdict: the environment lacks a program the host has; the check must not depend on it |
@@ -107,8 +113,8 @@ pub(super) fn host_path() -> Option<String> {
 /// A verdict is a can-fail proof: the check is then held to fail before
 /// the implementation and pass after it. Every verdict cell above is one
 /// where some implementation can make it pass -- the subcommand resolves,
-/// or the rejection is not the tool's, or only the deliverable can provide
-/// the word. Every cell where the site may lack what the check needs, which
+/// or only the deliverable can provide the word. (A rejection another
+/// program's own line claims is judged as that program's, by this table.) Every cell where the site may lack what the check needs, which
 /// no implementation can supply, gives no verdict: the check goes back to
 /// its author, and never becomes a task that can never pass.
 pub(super) fn missing(commands: &[Simple], output: &str, at: &Context) -> Option<String> {
@@ -129,21 +135,16 @@ pub(super) fn missing(commands: &[Simple], output: &str, at: &Context) -> Option
     commands.iter().find_map(|command| {
         let (tool, program) = tool(command, at)?;
         candidates(command).into_iter().find_map(|name| {
-            // Whether a rejection of `name` names `tool`; `None` when no
-            // rejection of it may be `tool`'s.
-            let names_tool = (rejections.iter())
-                .filter(|&&line| quoted(lines[line], name))
-                .filter_map(|&line| {
-                    let block = &lines[line..lines.len().min(line + 4)];
-                    let names = |program: &str| block.iter().any(|text| names(text, program));
-                    let others = (programs.iter()).any(|other| *other != tool && names(other));
-                    match (names(&tool), others) {
-                        (true, _) => Some(true),
-                        (false, false) => Some(false),
-                        (false, true) => None,
-                    }
-                })
-                .max()?;
+            // A rejection of `name` is `tool`'s unless its own line names
+            // another program of the check and not `tool` (the quoted word
+            // itself aside: `test` rejected is not the program `test`).
+            let theirs = |line: &str| {
+                let line = ['`', '\'', '"'].iter().fold(line.to_string(), |line, quote| {
+                    line.replace(&format!("{quote}{name}{quote}"), "")
+                });
+                !names(&line, &tool) && (programs.iter()).any(|other| *other != tool && names(&line, other))
+            };
+            (rejections.iter()).find(|&&line| quoted(lines[line], name) && !theirs(lines[line]))?;
             if at.on_path(&format!("{tool}-{name}")) {
                 return None;
             }
@@ -154,7 +155,7 @@ pub(super) fn missing(commands: &[Simple], output: &str, at: &Context) -> Option
             let depends = depends(&tool, name);
             let host = plugin(&tool, name, at);
             match (listing(&program, at), host) {
-                (Listing::Commands(builtins), _) if builtins.contains(name) => names_tool.then(|| format!(
+                (Listing::Commands(builtins), _) if builtins.contains(name) => Some(format!(
                     "{lacks}; the host lists `{name}` as built into `{tool}`, yet `{tool}` rejected it at the check's site, so that site lacks it (for example a toolchain its tree pins, which the host does not read). {depends}"
                 )),
                 (Listing::Commands(_), Some(host)) => Some(format!(

@@ -95,12 +95,7 @@ pub(super) fn prefetch(programs: &BTreeSet<PathBuf>, at: &Context) -> BTreeMap<P
 /// `program`'s listing; `Err` when it gave no answer. Its directory goes
 /// however the listing ends; one that could not be removed is reported.
 fn list(program: &Path, at: &Context) -> Result<Listing, String> {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let root = Scratch(Some(std::env::temp_dir().join(format!(
-        "{SCRATCH_PREFIX}{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::SeqCst)
-    ))));
+    let root = Scratch::make()?;
     let listed = root.path().and_then(|root| list_in(program, root, at));
     match (listed, root.remove()) {
         (listed, Ok(())) => listed,
@@ -117,12 +112,44 @@ const MOST_SCRATCH: u64 = 16 << 20;
 /// A listing's own directory, removed however the listing ends.
 struct Scratch(Option<PathBuf>);
 
+/// The number of the next listing directory.
+static NEXT: AtomicU64 = AtomicU64::new(0);
+
+/// The names the next `count` listing directories would try first.
+#[cfg(test)]
+pub(super) fn next_scratch(count: u64) -> Vec<PathBuf> {
+    let next = NEXT.load(Ordering::SeqCst);
+    (next..next + count)
+        .map(|n| std::env::temp_dir().join(format!("{SCRATCH_PREFIX}{}-{n}", std::process::id())))
+        .collect()
+}
+
 impl Scratch {
-    /// The directory, made with its `home` and `work` directories.
+    /// A new directory of this listing's own: one that did not exist, so a
+    /// directory left behind is never reused, nor removed as this one.
+    fn make() -> Result<Self, String> {
+        for _ in 0..64 {
+            let root = std::env::temp_dir().join(format!(
+                "{SCRATCH_PREFIX}{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::SeqCst)
+            ));
+            match std::fs::create_dir(&root) {
+                Ok(()) => return Ok(Self(Some(root))),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(format!("no listing directory {}: {error}", root.display()));
+                }
+            }
+        }
+        Err("no listing directory: every name tried was taken".to_string())
+    }
+
+    /// The directory, with its fresh `home` and `work` directories.
     fn path(&self) -> Result<&Path, String> {
         let root = self.0.as_deref().expect("removed only by `remove`");
         for dir in [root.join("home"), root.join("work")] {
-            std::fs::create_dir_all(&dir)
+            std::fs::create_dir(&dir)
                 .map_err(|error| format!("no listing directory {}: {error}", dir.display()))?;
         }
         Ok(root)
@@ -208,13 +235,10 @@ fn bytes_under(dir: &Path) -> u64 {
 fn list_in(program: &Path, root: &Path, at: &Context) -> Result<Listing, String> {
     let (home, work) = (root.join("home"), root.join("work"));
     let shown = program.display();
-    // Only the site's own context (see `Context`), and never the engine's
-    // own credentials whatever that context holds (Issue 282).
+    // Only the site's own context (see `Context`), and never a credential
+    // whatever that context holds (Issue 282): a listing needs none.
     let mut environment = at.environment.clone();
-    environment.retain(|name, _| {
-        !(archon_tools::bash::ENGINE_CREDENTIAL_VARS.iter())
-            .any(|owned| owned.eq_ignore_ascii_case(name))
-    });
+    environment.retain(|name, _| !credential(name));
     for name in ["HOME", "TMPDIR"] {
         let fresh = home.to_string_lossy().into_owned();
         environment.entry(name.into()).or_insert(fresh);
@@ -374,6 +398,18 @@ static NO_LIST: LazyLock<regex::Regex> = LazyLock::new(|| {
     )
     .expect("static pattern")
 });
+
+/// Whether `name` is a variable a listing never gets: the engine's own
+/// credentials, and any key, token, secret or password a site forwards.
+fn credential(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    (archon_tools::bash::ENGINE_CREDENTIAL_VARS.iter())
+        .any(|owned| owned.eq_ignore_ascii_case(name))
+        || ["_API_KEY", "_TOKEN", "_SECRET", "_PASSWORD"]
+            .iter()
+            .any(|suffix| upper.ends_with(suffix))
+        || ["API_KEY", "TOKEN", "SECRET", "PASSWORD"].contains(&upper.as_str())
+}
 
 /// The signal that ended `status`, for an operator.
 fn signal(status: &ExitStatus) -> String {

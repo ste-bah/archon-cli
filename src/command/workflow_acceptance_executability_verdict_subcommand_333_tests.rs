@@ -249,8 +249,11 @@ fn a_site_that_runs_in_its_own_home_lists_what_that_home_installs() {
         unresolved_on_path(&["cargo archon333home"], &at)[0].is_empty(),
         "cargo finds it in the site's own home"
     );
+    // Listed there, so the site's rejection of it is a site the host
+    // cannot see: no verdict.
     let odd = result(Some(101), b"", b"error: no such command: `archon333home`\n");
-    assert_eq!(no_verdict("cargo archon333home", &odd, &at), None);
+    let why = no_verdict("cargo archon333home", &odd, &at).expect("no verdict");
+    assert!(why.contains("that site lacks it"), "{why}");
 }
 
 // ---- Item 3: an option's value before the subcommand.

@@ -87,6 +87,9 @@ fn launched(
             };
             std::fs::write(&file, script).unwrap();
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+            // A new script's first start can be checked at length by the
+            // system: start it once, so no listing's bound times that.
+            let _ = std::process::Command::new(&file).arg("warm").output();
         }
     }
     let toolchain = format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display());

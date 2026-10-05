@@ -91,8 +91,8 @@ fn a_plugin_the_host_has_gives_no_verdict_whatever_the_listing_says() {
         no_verdict("archon333git status", &run, &bin.context()),
         None
     );
-    // A listing that names the word turns it back into a verdict, when
-    // the rejection is not the tool's own (it names no program).
+    // A listing that names the word never turns it back into a verdict:
+    // the site rejected what the host lists.
     let lists = "#!/bin/sh\n[ \"$1\" = --list ] && { printf 'Commands:\\n    lfs    Built in\\n'; exit 0; }\nexit 1\n";
     let bin = Bin::with_host(
         Path::new("/bin/sh"),
@@ -100,10 +100,8 @@ fn a_plugin_the_host_has_gives_no_verdict_whatever_the_listing_says() {
         &[("archon333lister-lfs", PLAIN)],
     );
     let odd = result(Some(1), b"", b"error: unknown command 'lfs'\n");
-    assert_eq!(
-        no_verdict("archon333lister lfs", &odd, &bin.context()),
-        None
-    );
+    let why = no_verdict("archon333lister lfs", &odd, &bin.context()).expect("no verdict");
+    assert!(why.contains("that site lacks it"), "{why}");
 }
 
 #[test]

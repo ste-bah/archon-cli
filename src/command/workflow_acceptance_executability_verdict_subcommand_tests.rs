@@ -183,20 +183,20 @@ fn a_built_in_cargo_subcommand_is_unaffected() {
     let run = bin.run("cargo test -q");
     assert_eq!(run.exit_code, Some(101));
     assert_eq!(no_verdict("cargo test -q", &run, &bin.context()), None);
-    // Even output that seems to reject it: `test` is built into cargo, and
-    // the line names no program, so it is not cargo's.
-    let odd = result(Some(101), b"", b"error: no such command: `test`\n");
-    assert_eq!(no_verdict("cargo test", &odd, &bin.context()), None);
-    // Cargo's own rejection names cargo: the site lacks what the host
-    // lists (a toolchain its tree pins, which the host never reads).
-    let own =
-        b"error: no such command: `test`\n\n\tView all installed commands with `cargo --list`\n";
-    let own = result(Some(101), b"", own);
-    let why = no_verdict("cargo test", &own, &bin.context()).expect("no verdict");
-    assert!(
-        why.contains("that site lacks it") && why.contains("must not depend"),
-        "{why}"
-    );
+    // Output that rejects it though the host lists it as built in: the
+    // site lacks what the host lists (a toolchain its tree pins, which the
+    // host never reads), whether or not the line names cargo (Issue 333).
+    for own in [
+        &b"error: no such command: `test`\n"[..],
+        b"error: no such command: `test`\n\n\tView all installed commands with `cargo --list`\n",
+    ] {
+        let own = result(Some(101), b"", own);
+        let why = no_verdict("cargo test", &own, &bin.context()).expect("no verdict");
+        assert!(
+            why.contains("that site lacks it") && why.contains("must not depend"),
+            "{why}"
+        );
+    }
 }
 
 #[test]
