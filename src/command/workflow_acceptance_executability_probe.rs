@@ -160,8 +160,8 @@ impl HostProbe {
             self.run(contract, &digest, &refs).await
         };
         if hold {
+            let observed = originals(contract, results.clone()).await;
             let mut tree = self.failed_tree.lock().expect("failed tree lock");
-            let observed = originals(contract, &results);
             let held = tree.get_or_insert_with(|| FailedTree {
                 commit: self.site_commit(),
                 originals: BTreeMap::new(),

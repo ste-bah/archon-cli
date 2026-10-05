@@ -78,8 +78,11 @@ async fn a_scratch_freeze_never_counts_a_missing_cargo_subcommand_as_a_proof() {
     trees.assert_live_untouched(copies.path());
 }
 
+/// Issue 333: at a real freeze, a check of a subcommand no program anywhere
+/// provides is unproven (never a proof), and the same check that shows
+/// first that the tree provides it is a proof.
 #[tokio::test]
-async fn a_scratch_freeze_counts_a_subcommand_the_deliverable_adds_as_a_proof() {
+async fn a_scratch_freeze_proves_a_deliverable_alias_only_when_the_check_shows_it() {
     let Some(cargo) = host_cargo() else {
         eprintln!("skipped: no cargo on the host's PATH");
         return;
@@ -87,7 +90,14 @@ async fn a_scratch_freeze_counts_a_subcommand_the_deliverable_adds_as_a_proof() 
     // The host has no `cargo-archon333alias`: an alias the tree may add.
     let bin = Bin::with_host(&cargo, &[SIBLING], &[NEXTEST]);
     HOST_PATH.with(|path| *path.borrow_mut() = Some(bin.host_path()));
-    let trees = trees(&[("AC-333-001", "cargo archon333alias --check", REPO)]);
+    let trees = trees(&[
+        ("AC-333-001", "cargo archon333alias --check", REPO),
+        (
+            "AC-333-002",
+            "cargo --list | grep -qw archon333alias && cargo archon333alias --check",
+            REPO,
+        ),
+    ]);
     let scratch = configure(&trees, &bin.path());
     let copies = tempfile::tempdir().unwrap();
     let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
@@ -95,13 +105,21 @@ async fn a_scratch_freeze_counts_a_subcommand_the_deliverable_adds_as_a_proof() 
     let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
     let unproven = probe.take_unproven();
     let runs = probe.take_baseline_runs().expect("a baseline");
-    assert!(findings.is_empty(), "{findings:?}");
-    assert!(unproven.is_empty(), "never the host's: {unproven:?}");
-    let failed = runs.failures.get("AC-333-001").expect("a proof");
     assert!(
-        String::from_utf8_lossy(&failed.stderr).contains("no such command: `archon333alias`"),
-        "{failed:?}"
+        findings.is_empty(),
+        "never the author's at first: {findings:?}"
     );
+    let why = unproven.get("AC-333-001").expect("never a proof");
+    assert!(
+        why.contains("passes only if the deliverable adds it"),
+        "{why}"
+    );
+    assert!(!runs.failures.contains_key("AC-333-001"), "{runs:?}");
+    assert!(
+        runs.failures.contains_key("AC-333-002"),
+        "a proof: {unproven:?}"
+    );
+    assert!(!unproven.contains_key("AC-333-002"), "{unproven:?}");
     assert!(scratch_left(&scratch).is_empty());
     trees.assert_live_untouched(copies.path());
 }

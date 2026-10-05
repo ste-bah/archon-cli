@@ -26,10 +26,11 @@
 //!    in the tree (`./bin/tool`), or an interpreter given a script of the
 //!    tree (`bash scripts/new.sh`), is the deliverable not there yet: a
 //!    verdict;
-//!    A subcommand the check runs (`tool sub`) that is neither built into
-//!    its tool nor a program `tool-sub` on the search path, though the
-//!    host has that program, which the tool rejected before any assertion
-//!    ran, is the same: an environment failure (Issues 331, 333,
+//!    A subcommand the check runs (`tool sub`), which the tool rejected
+//!    before any assertion ran, and which no program `tool-sub` on the
+//!    search path provides, is the same when the host has that program,
+//!    the tool lists its commands without `sub`, or the host could not
+//!    list them (Issues 331, 333,
 //!    `workflow_acceptance_executability_verdict_subcommand`);
 //! 2. no exit status: the run was killed before it reported anything;
 //! 3. the check crashed in its own code
@@ -65,7 +66,7 @@ mod subcommand;
 mod which;
 #[cfg(test)]
 pub(crate) use subcommand::HOST_PATH;
-pub(crate) use subcommand::unresolved_on_path;
+pub(crate) use subcommand::{SiteTree, unresolved_on_path};
 
 /// Programs whose job is to compile or build: a compiler error they print
 /// is the tree's (rule 4). An interpreter compiles the source it imports.
@@ -81,6 +82,7 @@ const RUNS_PRODUCT: &[&str] = &["test", "nextest", "run", "bench", "exec", "pyte
 /// Where a check runs: its site's environment (its search path among it),
 /// the contract's declared deliverable paths, and the host's own search
 /// path, where a program the check's path lacks may be installed.
+#[derive(Clone)]
 pub(crate) struct Context {
     path: Option<String>,
     deliverables: Vec<String>,
@@ -90,10 +92,13 @@ pub(crate) struct Context {
     host_path: Option<String>,
     /// How long a listing may print nothing before it is given up.
     list_stall: std::time::Duration,
+    /// The tree the check runs on, whose configuration a listing reads.
+    tree: Option<SiteTree>,
 }
 
 impl Context {
-    /// The site environment `environment` (the host's when `None`), and
+    /// The site environment `environment` (the host's, on the host's search
+    /// path, when `None`), and
     /// every path a floor of `contract` declares.
     pub(crate) fn new(
         environment: Option<BTreeMap<String, String>>,
@@ -114,16 +119,32 @@ impl Context {
             })
             .filter(|path| !path.trim().is_empty())
             .collect();
-        Self::at(
-            environment.unwrap_or_else(|| std::env::vars().collect()),
-            deliverables,
-        )
+        let host = || {
+            let mut host: BTreeMap<String, String> = std::env::vars().collect();
+            host.extend(subcommand::host_path().map(|path| ("PATH".to_string(), path)));
+            host
+        };
+        Self::at(environment.unwrap_or_else(host), deliverables)
     }
 
     /// A scratch site of `policy`, as it gives every check the variables
-    /// its policy binds and forwards (no declared deliverables).
-    pub(crate) fn for_scratch(policy: &archon_workflow::acceptance_scratch::ScratchPolicy) -> Self {
-        Self::at(super::sites::scratch_environment(policy), Vec::new())
+    /// its policy binds and forwards, on its repository at `commit` (no
+    /// declared deliverables).
+    pub(crate) fn for_scratch(
+        policy: &archon_workflow::acceptance_scratch::ScratchPolicy,
+        commit: &str,
+    ) -> Self {
+        let tree = SiteTree {
+            repository: policy.repository.clone(),
+            commit: commit.to_string(),
+        };
+        Self::at(super::sites::scratch_environment(policy), Vec::new()).on(Some(tree))
+    }
+
+    /// This site, its checks running on `tree`.
+    pub(crate) fn on(mut self, tree: Option<SiteTree>) -> Self {
+        self.tree = tree;
+        self
     }
 
     fn at(environment: BTreeMap<String, String>, deliverables: Vec<String>) -> Self {
@@ -133,6 +154,7 @@ impl Context {
             environment,
             host_path: subcommand::host_path(),
             list_stall: subcommand::LIST_STALL,
+            tree: None,
         }
     }
 

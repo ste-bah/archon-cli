@@ -25,14 +25,14 @@ macro_rules! or_skip {
     };
 }
 
-const PLAIN: &str = "#!/bin/sh\nexit 0\n";
+pub(super) const PLAIN: &str = "#!/bin/sh\nexit 0\n";
 
 /// A test's no-progress bound: long enough for a new script to start.
-const STALL: Duration = Duration::from_millis(1500);
+pub(super) const STALL: Duration = Duration::from_millis(1500);
 
 /// A tool that dispatches `$1` to `tool-$1`, and whose `--list` records
 /// each call in `calls`, then runs `listing` (shell text).
-fn counting_tool(name: &str, calls: &Path, listing: &str) -> String {
+pub(super) fn counting_tool(name: &str, calls: &Path, listing: &str) -> String {
     format!(
         "#!/bin/sh\nif [ \"$1\" = --list ]; then echo x >> '{}'; {listing}; fi\necho \"{name}: '$1' is not a {name} command\" >&2\nexit 2\n",
         calls.display()
@@ -41,13 +41,13 @@ fn counting_tool(name: &str, calls: &Path, listing: &str) -> String {
 
 /// Run each of `tools` once, so a new script's first start (which the
 /// system may check at length) is not part of what a test times.
-fn warm(bin: &Bin, tools: &[&str]) {
+pub(super) fn warm(bin: &Bin, tools: &[&str]) {
     for tool in tools {
         bin.run(&format!("{tool} warm"));
     }
 }
 
-fn calls(file: &Path) -> usize {
+pub(super) fn calls(file: &Path) -> usize {
     std::fs::read_to_string(file).map_or(0, |text| text.lines().count())
 }
 
@@ -86,19 +86,15 @@ fn a_hanging_listing_is_asked_once_for_every_check_and_command() {
 }
 
 #[test]
-fn a_tool_the_host_has_no_plugin_for_is_never_listed() {
+fn a_tool_with_no_dispatched_program_anywhere_is_never_listed() {
     let calls_file = tempfile::NamedTempFile::new().unwrap();
     let listing = "printf 'Commands:\\n    build    Build\\n'; exit 0";
     let tool = counting_tool("archon333count", calls_file.path(), listing);
-    // A `tool-*` program on the check's own path is no reason to list it.
-    let tools = [
-        ("archon333count", tool.as_str()),
-        ("archon333count-other", PLAIN),
-    ];
-    let bin = Bin::new(Path::new("/bin/sh"), &tools);
+    // No `archon333count-*` program on the check's path or the host's.
+    let bin = Bin::new(Path::new("/bin/sh"), &[("archon333count", tool.as_str())]);
     let texts = [
         "archon333count status --short",
-        "archon333count -v run && archon333count other",
+        "archon333count -v run",
         "archon333count --color never lint",
     ];
     let warned = unresolved_on_path(&texts, &bin.context());
@@ -166,7 +162,7 @@ fn distinct_tools_are_listed_at_once() {
 // ---- Item 2: a rustup proxy lists as the site runs it.
 
 /// The host's rustup `cargo` proxy and its RUSTUP_HOME, if it has rustup.
-fn rustup_proxy() -> Option<(PathBuf, String)> {
+pub(super) fn rustup_proxy() -> Option<(PathBuf, String)> {
     let path = std::env::var("PATH").ok()?;
     let proxy = std::env::split_paths(&path)
         .find(|dir| dir.join("rustup").is_file() && dir.join("cargo").is_file())?
@@ -212,8 +208,11 @@ fn the_operators_rustup_home_is_never_consulted() {
         warned.len() == 1 && warned[0].contains("is not known") && warned[0].contains("rustup"),
         "{warned:?}"
     );
+    // Nor is that a proof: the host has `cargo-nextest`, so the rejection
+    // gives no verdict whatever the listing could not say.
     let odd = result(Some(101), b"", b"error: no such command: `nextest`\n");
-    assert_eq!(no_verdict("cargo nextest", &odd, &bin.context()), None);
+    let why = no_verdict("cargo nextest", &odd, &bin.context()).expect("no verdict");
+    assert!(why.contains("is not known"), "{why}");
 }
 
 #[test]
@@ -307,40 +306,57 @@ fn the_words_that_may_be_the_subcommand() {
 
 // ---- Item 4: a subcommand the deliverable adds.
 
+/// A subcommand no program anywhere provides goes back to its author,
+/// until the check shows first that the tree provides it: then its failure
+/// before the implementation is its own assertion, a proof.
 #[test]
-fn an_alias_the_deliverable_adds_is_a_verdict_at_base() {
+fn an_alias_the_deliverable_adds_counts_once_the_check_shows_it() {
     let cargo = or_skip!(host_cargo(), "cargo");
     let bin = Bin::new(&cargo, &[SIBLING]);
-    let command = "cargo archon333alias";
-    let run = bin.run(command);
+    let plain = "cargo archon333alias";
+    let run = bin.run(plain);
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
         stderr.contains("no such command: `archon333alias`"),
         "{stderr}"
     );
-    assert_eq!(no_verdict(command, &run, &bin.context()), None, "a proof");
-    assert!(bin.warned(command).is_empty(), "nothing to warn about");
-    // Once the tree defines it, the same check passes.
+    let why = no_verdict(plain, &run, &bin.context()).expect("never a proof");
+    assert!(
+        why.contains("passes only if the deliverable adds it"),
+        "{why}"
+    );
+    let warned = bin.warned(plain);
+    assert!(
+        warned.len() == 1 && warned[0].contains("passes only if the deliverable adds it"),
+        "{warned:?}"
+    );
+    let shown = "cargo --list | grep -qw archon333alias && cargo archon333alias";
+    let run = bin.run(shown);
+    assert_eq!(run.exit_code, Some(1), "{run:?}");
+    assert_eq!(no_verdict(shown, &run, &bin.context()), None, "a proof");
+    // Once the tree defines it, both checks pass.
     let tree = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(tree.path().join(".cargo")).unwrap();
     let config = "[alias]\narchon333alias = \"version\"\n";
     std::fs::write(tree.path().join(".cargo/config.toml"), config).unwrap();
-    let home = tempfile::tempdir().unwrap();
-    let mut implemented = std::process::Command::new("/bin/sh");
-    implemented
-        .args(["-c", command])
-        .current_dir(tree.path())
-        .env_clear();
-    implemented.env("PATH", bin.path()).env("HOME", home.path());
-    if let Some((_, rustup)) = rustup_proxy() {
-        implemented.env("RUSTUP_HOME", rustup);
+    for command in [plain, shown] {
+        let home = tempfile::tempdir().unwrap();
+        let mut implemented = std::process::Command::new("/bin/sh");
+        implemented
+            .args(["-c", command])
+            .current_dir(tree.path())
+            .env_clear();
+        implemented.env("PATH", bin.path()).env("HOME", home.path());
+        if let Some((_, rustup)) = rustup_proxy() {
+            implemented.env("RUSTUP_HOME", rustup);
+        }
+        let out = implemented.output().unwrap();
+        assert!(
+            out.status.success(),
+            "{command}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
-    let out = implemented.output().unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
 }
 
 #[test]

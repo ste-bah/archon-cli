@@ -25,7 +25,24 @@ const EVIDENCE_BYTES: usize = 800;
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
     let (environment, _) = super::sites::site_environment(probe);
-    Context::new(Some(environment), contract)
+    let tree = (probe.baseline.as_ref()).map(|baseline| super::verdict::SiteTree {
+        repository: baseline.repository.clone(),
+        commit: baseline.commit.clone(),
+    });
+    Context::new(Some(environment), contract).on(tree)
+}
+
+/// [`silent_failure`] on a blocking thread: deciding it may list a tool
+/// (`verdict_subcommand_list`), which must never hold an async worker.
+pub(super) async fn silent_failure_off_thread(
+    contract: &AcceptanceContract,
+    result: &CheckResult,
+    at: &Context,
+) -> Option<String> {
+    let (contract, result, at) = (contract.clone(), result.clone(), at.clone());
+    tokio::task::spawn_blocking(move || silent_failure(&contract, &result, &at))
+        .await
+        .unwrap_or_else(|error| Some(format!("deciding its verdict failed: {error}")))
 }
 
 /// Why `result`, a failed run of a check of `contract`, gave no verdict;

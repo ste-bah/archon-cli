@@ -217,3 +217,25 @@ async fn a_run_start_lists_tools_off_the_async_thread() {
         "{events:?}"
     );
 }
+
+/// Issue 333 round 2: a subcommand of a listing tool that no program on the
+/// path or the host provides is named too: its check passes only if the
+/// deliverable adds it.
+#[tokio::test]
+async fn a_run_start_names_a_subcommand_nothing_provides() {
+    let checks = [
+        ("AC-1", "archon331tool lint --all", true),
+        ("AC-2", "archon331tool build", true),
+    ];
+    let tools = ["archon331tool", "archon331tool-other"];
+    let (store, run_id, _, _kept) = launched(&checks, &tools, &[]);
+    let (events, lines) = warned(&store, &run_id).await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(
+        events[0]["detail"]["checks"],
+        serde_json::json!({
+            "AC-1": ["`archon331tool lint` (not built into `archon331tool`, and no `archon331tool-lint` on the path or the host's: it passes only if the deliverable adds it)"],
+        })
+    );
+    assert!(lines.len() == 1 && lines[0].contains("AC-1"), "{lines:?}");
+}

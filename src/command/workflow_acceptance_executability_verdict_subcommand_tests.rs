@@ -84,6 +84,7 @@ impl Bin {
             environment: site,
             host_path: Some(self.host_path()),
             list_stall: LIST_STALL,
+            tree: None,
         }
     }
 
@@ -263,9 +264,11 @@ fn a_program_missing_from_the_path_is_named() {
     );
 }
 
-/// A tool whose built-in commands are not known, or a subcommand of which
-/// the host has no program, may be the product itself: a subcommand it
-/// rejects may be the deliverable not built yet, a verdict.
+/// A tool that lists no commands, of whose `tool-word` the host has none,
+/// may be the product itself: a subcommand it rejects may be the
+/// deliverable not built yet, a verdict (Issue 328). One that lists its
+/// commands without the word, with no `tool-word` anywhere, passes only if
+/// the deliverable adds it, and so goes back to its author (Issue 333).
 #[test]
 fn a_tool_not_known_to_dispatch_keeps_its_verdict() {
     let rejects = "#!/bin/sh\necho \"error: unrecognized subcommand '$1'\" >&2\nexit 2\n";
@@ -277,20 +280,28 @@ fn a_tool_not_known_to_dispatch_keeps_its_verdict() {
     ];
     let cargo = host_cargo().unwrap_or_else(|| PathBuf::from("/bin/sh"));
     let bin = Bin::new(&cargo, &tools);
-    for command in ["archon331cli data status", "archon331lister data"] {
-        let run = bin.run(command);
-        assert_eq!(run.exit_code, Some(2), "{command}: {run:?}");
-        assert_eq!(no_verdict(command, &run, &bin.context()), None, "{command}");
-        assert!(bin.warned(command).is_empty(), "{command}");
-    }
-    // The host has `archon331cli-data`, but the tool lists no commands: it
-    // is still not judged, and the start of a run says what is not known.
-    let data = ("archon331cli-data", "#!/bin/sh\nexit 0\n");
-    let bin = Bin::with_host(&cargo, &tools, &[data]);
     let run = bin.run("archon331cli data status");
+    assert_eq!(run.exit_code, Some(2), "{run:?}");
     assert_eq!(
         no_verdict("archon331cli data status", &run, &bin.context()),
         None
+    );
+    assert!(bin.warned("archon331cli data status").is_empty());
+    let run = bin.run("archon331lister data");
+    let why = no_verdict("archon331lister data", &run, &bin.context()).expect("its author's");
+    assert!(
+        why.contains("passes only if the deliverable adds it"),
+        "{why}"
+    );
+    // The host has `archon331cli-data`: the tool lists no commands, so the
+    // listing cannot make it built in, and the run gives no verdict.
+    let data = ("archon331cli-data", "#!/bin/sh\nexit 0\n");
+    let bin = Bin::with_host(&cargo, &tools, &[data]);
+    let run = bin.run("archon331cli data status");
+    let why = no_verdict("archon331cli data status", &run, &bin.context()).expect("no verdict");
+    assert!(
+        why.contains("is not known") && why.contains("exited 2"),
+        "{why}"
     );
     let warned = bin.warned("archon331cli data status");
     assert!(

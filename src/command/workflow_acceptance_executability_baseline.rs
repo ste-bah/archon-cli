@@ -249,15 +249,44 @@ pub(crate) fn is_placeholder(entry: &AcceptanceCriterion) -> bool {
         && entry.judgment.reason.trim() == PLACEHOLDER_REASON
 }
 
+/// How each of `results` fared, by id (`originals_at`), decided on a
+/// blocking thread: deciding it may list a tool, which must never hold an
+/// async worker (Issue 333).
+pub(crate) async fn originals(
+    contract: &AcceptanceContract,
+    results: Vec<CheckResult>,
+) -> BTreeMap<String, Original> {
+    let (at, contract) = (
+        super::verdict::Context::new(None, contract),
+        contract.clone(),
+    );
+    let ids: Vec<String> = results.iter().map(|r| r.acceptance_id.clone()).collect();
+    tokio::task::spawn_blocking(move || originals_at(&contract, &results, &at))
+        .await
+        .unwrap_or_else(|_| ids.into_iter().map(|id| (id, Original::Defect)).collect())
+}
+
 /// How each of `results` fared, by id. A placeholder's result is never a
 /// verdict of its own ([`Original::Defect`]).
-pub(crate) fn originals<'a>(
+#[cfg(test)]
+pub(crate) fn originals_now<'a>(
     contract: &AcceptanceContract,
     results: impl IntoIterator<Item = &'a CheckResult>,
 ) -> BTreeMap<String, Original> {
+    originals_at(
+        contract,
+        results,
+        &super::verdict::Context::new(None, contract),
+    )
+}
+
+fn originals_at<'a>(
+    contract: &AcceptanceContract,
+    results: impl IntoIterator<Item = &'a CheckResult>,
+    at: &super::verdict::Context,
+) -> BTreeMap<String, Original> {
     let results: Vec<&CheckResult> = results.into_iter().collect();
     let crashed = crash_findings(contract, results.iter().copied());
-    let at = super::verdict::Context::new(None, contract);
     results
         .into_iter()
         .map(|result| {
@@ -267,7 +296,7 @@ pub(crate) fn originals<'a>(
                 .any(|entry| entry.id == id && is_placeholder(entry));
             // Issue 328: a run that gave no verdict (a program that could
             // not start, a tree that did not build) failed no assertion.
-            let silent = silent::silent_failure(contract, result, &at).is_some();
+            let silent = silent::silent_failure(contract, result, at).is_some();
             let original = if placeholder
                 || crashed.contains_key(&id)
                 || result.operational_error.is_some()
@@ -332,7 +361,7 @@ pub(super) async fn cannot_fail_findings(
                 ),
             );
         } else if let Some(result) = result {
-            if let Some(why) = silent::silent_failure(contract, result, &at) {
+            if let Some(why) = silent::silent_failure_off_thread(contract, result, &at).await {
                 // Issue 328: failing without a verdict proves nothing; failing
                 // so again on the same base goes to the author.
                 let commit = &baseline.commit;

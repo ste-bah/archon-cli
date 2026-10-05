@@ -365,7 +365,7 @@ fn a_placeholder_original_is_never_a_verdict_to_hold_a_repair_to() {
         operational_error: None,
     };
     let results = [failed("AC-H-001"), failed("AC-H-002")];
-    let originals = super::originals(&contract, &results);
+    let originals = super::baseline::originals_now(&contract, &results);
     assert_eq!(originals["AC-H-001"], Original::Defect);
     assert_eq!(originals["AC-H-002"], Original::Failed);
 }

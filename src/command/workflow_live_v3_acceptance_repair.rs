@@ -297,7 +297,14 @@ pub(super) async fn repair_ran(
     // The round's own site is the tree these checks just ran on.
     let failed = FailedTree {
         commit: None,
-        originals: originals(contract, ids.iter().filter_map(|id| results.get(id))),
+        originals: originals(
+            contract,
+            ids.iter()
+                .filter_map(|id| results.get(id))
+                .cloned()
+                .collect(),
+        )
+        .await,
     };
     let outcome = republish(
         round.llm,
