@@ -239,6 +239,74 @@ impl HostProbe {
     }
 }
 
+/// What [`HostProbe::prove_can_fail`] established for each check it was
+/// asked about: proven able to fail, a finding for its author, or unproven
+/// (the host's). A check with no script to run is in none of them.
+#[derive(Debug, Default)]
+pub(crate) struct CanFail {
+    pub(crate) proven: BTreeSet<String>,
+    pub(crate) findings: BTreeMap<String, String>,
+    pub(crate) unproven: BTreeMap<String, String>,
+}
+
+impl HostProbe {
+    /// Issue 219 (A5 at run time): hold `ids` -- checks a round already ran
+    /// and saw pass -- to the baseline alone: each must fail on the
+    /// pre-implementation tree, or fail there once the inputs it names are
+    /// moved aside. Nothing runs at the site again (the round ran it there).
+    pub(crate) async fn prove_can_fail(
+        &self,
+        contract: &AcceptanceContract,
+        ids: &BTreeSet<String>,
+    ) -> CanFail {
+        let mut out = CanFail::default();
+        let digest = match contract_digest(contract) {
+            Ok(digest) => digest,
+            Err(error) => {
+                for id in ids {
+                    let why = format!("the contract could not be encoded: {error}");
+                    out.unproven.insert(id.clone(), why);
+                }
+                return out;
+            }
+        };
+        (self.unproven.lock().expect("unproven lock")).retain(|id, _| !ids.contains(id));
+        let all = refs_for(contract, &digest, ids);
+        let mut findings = self.live_root_findings(contract, &all);
+        let sound: Vec<FrozenCommandRef> = (all.iter())
+            .filter(|reference| !findings.contains_key(&reference.acceptance_id))
+            .cloned()
+            .collect();
+        match (&self.site, &self.baseline) {
+            (Site::Unavailable(reason), _) => {
+                for reference in &sound {
+                    self.unproven(&reference.acceptance_id, reason.clone());
+                }
+            }
+            (_, None) => {
+                for reference in &sound {
+                    self.unproven(
+                        &reference.acceptance_id,
+                        "the run has no pre-implementation tree to run it on, so it is not proven able to fail".to_string(),
+                    );
+                }
+            }
+            (_, Some(baseline)) => findings.extend(
+                baseline::cannot_fail_findings(self, baseline, contract, &digest, &sound, None)
+                    .await,
+            ),
+        }
+        out.unproven = self.take_unproven();
+        findings.retain(|id, _| !out.unproven.contains_key(id));
+        out.proven = (all.into_iter())
+            .map(|reference| reference.acceptance_id)
+            .filter(|id| !findings.contains_key(id) && !out.unproven.contains_key(id))
+            .collect();
+        out.findings = findings;
+        out
+    }
+}
+
 #[async_trait]
 impl ExecutabilityProbe for HostProbe {
     async fn script_defects(

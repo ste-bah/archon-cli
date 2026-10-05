@@ -42,6 +42,8 @@ mod drift;
 mod env;
 #[path = "workflow_live_v3_acceptance_exec.rs"]
 mod exec;
+#[path = "workflow_live_v3_acceptance_failability.rs"]
+mod failability;
 #[path = "workflow_live_v3_acceptance_ledger.rs"]
 mod ledger;
 #[path = "workflow_live_v3_acceptance_output.rs"]
@@ -57,7 +59,7 @@ use check_rec::check_record;
 mod sources;
 #[cfg(all(test, unix))]
 use archon_workflow::v2::acceptance_stage::{AcceptanceCheckRecordV1, AcceptanceCheckStatus};
-use output::{with_frozen_identity, write_output_files};
+use output::{with_frozen_identity, write_output_files, write_repairs};
 use result::result_for;
 
 pub(super) fn is_acceptance_stage_call(execution: &WorkflowV2CallExecution) -> bool {
@@ -390,6 +392,17 @@ async fn evaluate(
     .await?
     .into_iter()
     .for_each(|(id, defect)| drop(defects.insert(id, defect)));
+    // Issue 219: a pass counts only from a check proven able to fail.
+    let held = failability::hold_passing(
+        &round,
+        run_dir,
+        &mut contract,
+        &mut chain_digest,
+        &mut results,
+        &mut defects,
+        record,
+    );
+    held.await?;
     let all: Vec<&AcceptanceCriterion> = (contract.acceptance.iter())
         .chain(&contract.supplementary)
         .collect();
@@ -462,18 +475,6 @@ async fn evaluate(
         digest: chain_digest,
     });
     Ok(())
-}
-
-/// The environment repairs a round made, beside its evidence.
-fn write_repairs(evidence_dir: &Path, repairs: &[String]) {
-    if repairs.is_empty() {
-        return;
-    }
-    let _ = std::fs::create_dir_all(evidence_dir);
-    let _ = std::fs::write(
-        evidence_dir.join("host-environment-repairs.json"),
-        serde_json::to_vec_pretty(repairs).unwrap_or_default(),
-    );
 }
 
 // The stage runs its checks through the POSIX process-group runner; the

@@ -65,7 +65,7 @@ pub(super) type Defects = BTreeMap<String, String>;
 
 /// Re-author, re-judge, probe and republish exactly `ids`, at the round's
 /// own execution site.
-async fn republish(
+pub(super) async fn republish(
     llm: Option<&dyn WorkflowLlmClient>,
     context: &StageContext,
     contract: &AcceptanceContract,
@@ -228,6 +228,16 @@ pub(super) struct Round<'a> {
     pub(super) base: Option<&'a str>,
 }
 
+/// Checks that ran this round and go back to their author: each one's
+/// finding, the repair's trigger, where their evidence is kept, and why no
+/// task can fix them.
+pub(super) struct RanDefects<'a> {
+    pub(super) findings: BTreeMap<String, String>,
+    pub(super) trigger: &'a str,
+    pub(super) evidence: &'a str,
+    pub(super) why: &'a str,
+}
+
 /// Repair, republish and re-run in this round every check in `results` that
 /// crashed in its own code. Repaired checks' re-run results replace the
 /// crashed ones; a check still crashing, or one the repair could not fix, is
@@ -242,13 +252,39 @@ pub(super) async fn repair_crashed(
     record: &mut AcceptanceRoundRecordV1,
 ) -> WorkflowResult<Defects> {
     let crashed = crash_findings_at(contract, results.values(), round.context.binding.as_ref());
+    let defects = RanDefects {
+        findings: crashed,
+        trigger: REPAIR_TRIGGER_SCRIPT_DEFECT,
+        evidence: "script-defect",
+        why: "No task can fix a check that never asserts its criterion",
+    };
+    repair_ran(round, contract, chain_digest, results, record, defects).await
+}
+
+/// Repair, republish and re-run in this round every check `defects` names
+/// (see [`repair_crashed`]); a repaired check that crashes on its re-run is
+/// a contract defect too.
+pub(super) async fn repair_ran(
+    round: &Round<'_>,
+    contract: &mut AcceptanceContract,
+    chain_digest: &mut String,
+    results: &mut BTreeMap<String, CheckResult>,
+    record: &mut AcceptanceRoundRecordV1,
+    defects: RanDefects<'_>,
+) -> WorkflowResult<Defects> {
+    let RanDefects {
+        findings: crashed,
+        trigger,
+        evidence,
+        why,
+    } = defects;
     if crashed.is_empty() {
         return Ok(Defects::new());
     }
-    // The crash itself is kept as evidence beside the round's outputs.
+    // The defect itself is kept as evidence beside the round's outputs.
     for id in crashed.keys() {
         if let Some(result) = results.get(id) {
-            super::write_output_files(&round.evidence_dir.join("script-defect"), result);
+            super::write_output_files(&round.evidence_dir.join(evidence), result);
         }
     }
     let ids: BTreeSet<String> = crashed.keys().cloned().collect();
@@ -286,7 +322,7 @@ pub(super) async fn repair_crashed(
             }
             record.contract_repairs.push(AcceptanceContractRepairV1 {
                 check_ids: ids.iter().cloned().collect(),
-                trigger: REPAIR_TRIGGER_SCRIPT_DEFECT.into(),
+                trigger: trigger.into(),
                 repaired: false,
                 freeze_event_id: String::new(),
                 failure: format!("{error:#}"),
@@ -300,7 +336,7 @@ pub(super) async fn repair_crashed(
                     (
                         id.clone(),
                         format!(
-                            "contract defect: {finding}\nNo task can fix a check that never asserts its criterion; the in-round re-author did not produce an accepted check that runs ({error:#}); repair the contract with: {command}"
+                            "contract defect: {finding}\n{why}; the in-round re-author did not produce an accepted check that runs ({error:#}); repair the contract with: {command}"
                         ),
                     )
                 })
@@ -309,7 +345,7 @@ pub(super) async fn repair_crashed(
     };
     record.contract_repairs.push(AcceptanceContractRepairV1 {
         check_ids: ids.iter().cloned().collect(),
-        trigger: REPAIR_TRIGGER_SCRIPT_DEFECT.into(),
+        trigger: trigger.into(),
         repaired: true,
         freeze_event_id: result.freeze_event_id,
         failure: String::new(),
@@ -346,7 +382,7 @@ pub(super) async fn repair_crashed(
             defects.insert(
                 result.acceptance_id.clone(),
                 format!(
-                    "contract defect: the repaired check still crashed when this round re-ran it: {finding}\nNo task can fix a check that never asserts its criterion; repair the contract with: {command}"
+                    "contract defect: the repaired check crashed when this round re-ran it: {finding}\nNo task can fix a check that never asserts its criterion; repair the contract with: {command}"
                 ),
             );
         }
