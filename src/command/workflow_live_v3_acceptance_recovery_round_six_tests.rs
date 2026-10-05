@@ -51,6 +51,7 @@ fn refreeze(run: &Run) {
         &run.set.prd,
         archon_core::config::GateMode::Observe,
         &contract,
+        None,
     )
     .unwrap();
     prepared.record_recovery_refreeze().unwrap();

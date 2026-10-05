@@ -101,6 +101,7 @@ pub(crate) fn freeze_acceptance(project: &Path, prd: &Path, tasks: &Path) -> Str
             algorithm: "blake3".into(),
             digest: acceptance_digest.clone(),
             gate: stamp(),
+            baseline_commit: None,
         })
         .unwrap(),
     )

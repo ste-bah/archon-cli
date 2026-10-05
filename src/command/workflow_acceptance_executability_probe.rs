@@ -336,4 +336,10 @@ impl ExecutabilityProbe for HostProbe {
     fn take_baseline_runs(&self) -> Option<BaselineRuns> {
         self.baseline_runs()
     }
+
+    fn baseline_commit(&self) -> Option<String> {
+        self.baseline
+            .as_ref()
+            .map(|baseline| baseline.commit.clone())
+    }
 }

@@ -42,6 +42,7 @@ fn write_task_file_lint_fixture(root: &Path) -> std::path::PathBuf {
             algorithm: "blake3".into(),
             digest: acceptance_digest.clone(),
             gate: clean_stamp(),
+            baseline_commit: None,
         })
         .unwrap(),
     )

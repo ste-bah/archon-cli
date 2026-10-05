@@ -66,7 +66,6 @@ struct FrozenFixture {
     task_root: std::path::PathBuf,
     snapshot: RunEndAcceptanceObserverSnapshotV1,
 }
-
 fn frozen_fixture(checks: Vec<AcceptanceCriterion>) -> FrozenFixture {
     frozen_fixture_with_permitted(checks, BTreeSet::new())
 }
@@ -104,6 +103,7 @@ fn frozen_fixture_with_permitted(
             algorithm: "blake3".into(),
             digest: acceptance_digest.clone(),
             gate: stamp(),
+            baseline_commit: None,
         })
         .unwrap(),
     )

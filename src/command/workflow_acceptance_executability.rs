@@ -115,6 +115,12 @@ pub(crate) trait ExecutabilityProbe: Send + Sync {
     fn take_baseline_runs(&self) -> Option<BaselineRuns> {
         None
     }
+
+    /// The pre-implementation commit this probe proves checks able to fail
+    /// on, if it has one (Issue 328: recorded in the lock it publishes).
+    fn baseline_commit(&self) -> Option<String> {
+        None
+    }
 }
 
 /// The host could not prove these checks: an operational failure, routed to
@@ -204,7 +210,9 @@ mod baseline;
 pub(crate) use baseline::Original;
 #[cfg(test)]
 pub(crate) use baseline::is_placeholder;
-pub(crate) use baseline::{Baseline, BaselineRuns, FailedTree, PLACEHOLDER_REASON, originals};
+pub(crate) use baseline::{
+    Baseline, BaselineRuns, FailedTree, PLACEHOLDER_REASON, originals, recorded_commit,
+};
 use sites::git_head;
 #[path = "workflow_acceptance_executability_hermetic.rs"]
 mod hermetic;
@@ -218,8 +226,14 @@ mod prove;
 mod repairs;
 #[path = "workflow_acceptance_executability_resume.rs"]
 mod resume;
+#[path = "workflow_acceptance_executability_silent.rs"]
+mod silent;
 #[path = "workflow_acceptance_executability_sites.rs"]
 mod sites;
+#[path = "workflow_acceptance_executability_verdict.rs"]
+mod verdict;
+#[path = "workflow_acceptance_executability_verdict_shell.rs"]
+mod verdict_shell;
 pub(crate) use mutation::CANNOT_FAIL;
 
 /// Sets the scratch observation's cancel flag when the probe is dropped (a
@@ -463,6 +477,9 @@ fn contract_digest(contract: &AcceptanceContract) -> Result<String, String> {
 
 // The probe executes checks through the POSIX process-group runner.
 #[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_baseline_tests.rs"]
+mod baseline_tests;
+#[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_probe_tests.rs"]
 mod probe_tests;
 #[cfg(all(test, unix))]
@@ -471,3 +488,9 @@ mod probe_tests_b;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_tests.rs"]
 pub(crate) mod tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_verdict_probe_tests.rs"]
+mod verdict_probe_tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_verdict_probe_tests_b.rs"]
+mod verdict_probe_tests_b;

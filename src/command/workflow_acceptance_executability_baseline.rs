@@ -55,24 +55,109 @@ impl Baseline {
         })
     }
 
-    /// The tree a task set's implementation starts from: the commit its
-    /// decomposition recorded (`repository.lock`), which stays the
-    /// pre-implementation tree when a repair runs after work has landed,
-    /// else `repository`'s HEAD.
+    /// The tree a task set's checks are proven able to fail on (Issue 328:
+    /// one baseline): the commit its frozen acceptance lock records as the
+    /// tree its freeze proved on; else the commit its decomposition recorded
+    /// (`repository.lock`), which stays the pre-implementation tree when a
+    /// repair runs after work has landed; else `repository`'s HEAD.
     pub(crate) fn for_task_set(repository: &Path, tasks_root: &Path) -> Option<Self> {
-        let recorded = archon_workflow::repository_record::read_repository_record(tasks_root)
+        Self::recorded(repository, tasks_root)
+            .or_else(|| Self::decomposed(repository, tasks_root))
+            .or_else(|| Self::head_of(repository))
+    }
+
+    /// The commit the task set's frozen acceptance lock records as its
+    /// freeze's baseline, when it names a commit of `repository`.
+    pub(crate) fn recorded(repository: &Path, tasks_root: &Path) -> Option<Self> {
+        let commit = recorded_commit(tasks_root).filter(|commit| resolves(repository, commit))?;
+        Some(Self {
+            commit,
+            repository: repository.to_path_buf(),
+        })
+    }
+
+    /// The commit the task set's decomposition recorded, when it resolves.
+    fn decomposed(repository: &Path, tasks_root: &Path) -> Option<Self> {
+        let commit = archon_workflow::repository_record::read_repository_record(tasks_root)
             .ok()
             .flatten()
             .map(|record| record.base_commit)
-            .filter(|commit| resolves(repository, commit));
-        match recorded {
-            Some(commit) => Some(Self {
-                commit,
-                repository: repository.to_path_buf(),
-            }),
-            None => Self::head_of(repository),
-        }
+            .filter(|commit| resolves(repository, commit))?;
+        Some(Self {
+            commit,
+            repository: repository.to_path_buf(),
+        })
     }
+
+    /// The tree an acceptance round proves its checks on: the one its
+    /// task set's freeze recorded. Only a lock that records none (written
+    /// before the record existed) falls back -- to the tree the freeze's own
+    /// rule used (`repository.lock`), else the run's base `run_base`, else
+    /// HEAD -- and then the note says which.
+    pub(crate) fn for_round(
+        repository: &Path,
+        tasks_root: &Path,
+        run_base: Option<&str>,
+    ) -> (Option<Self>, Option<String>) {
+        if let Some(recorded) = Self::recorded(repository, tasks_root) {
+            return (Some(recorded), None);
+        }
+        let missing = match recorded_commit(tasks_root) {
+            Some(commit) => format!(
+                "the acceptance freeze recorded baseline {commit}, which is not a commit of {}",
+                repository.display()
+            ),
+            None => "the acceptance freeze recorded no baseline commit".to_string(),
+        };
+        let (baseline, used) = match Self::decomposed(repository, tasks_root) {
+            Some(baseline) => (Some(baseline), "the decomposition's recorded base commit"),
+            None => match run_base.filter(|commit| resolves(repository, commit)) {
+                Some(commit) => (
+                    Some(Self {
+                        commit: commit.to_string(),
+                        repository: repository.to_path_buf(),
+                    }),
+                    "the run's base commit",
+                ),
+                None => (Self::head_of(repository), "the repository's HEAD"),
+            },
+        };
+        let note = match &baseline {
+            Some(baseline) => format!(
+                "{missing}; checks are proven able to fail on {used}, {}",
+                baseline.commit
+            ),
+            None => format!("{missing}, and no other pre-implementation tree is known"),
+        };
+        (baseline, Some(note))
+    }
+
+    /// The commit a v3 acceptance round in `run_dir` proves its checks able
+    /// to fail on ([`Self::for_round`], with the run's own base as its last
+    /// fallback); a fallback is logged.
+    pub(crate) fn round_commit(
+        repository: &Path,
+        tasks_root: &Path,
+        run_dir: &Path,
+    ) -> Option<String> {
+        let run_base = archon_workflow::v2::acceptance_regression::run_base_commit(
+            &archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2")),
+        );
+        let (baseline, note) = Self::for_round(repository, tasks_root, run_base.as_deref());
+        if let Some(note) = note {
+            tracing::warn!(task_root = %tasks_root.display(), "acceptance baseline: {note}");
+        }
+        baseline.map(|baseline| baseline.commit)
+    }
+}
+
+/// The baseline commit `tasks_root`'s acceptance lock records, if any.
+pub(crate) fn recorded_commit(tasks_root: &Path) -> Option<String> {
+    let path = tasks_root.join(archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE);
+    let bytes = std::fs::read(path).ok()?;
+    let lock: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let commit = lock.get("baseline_commit")?.as_str()?.trim();
+    (!commit.is_empty()).then(|| commit.to_string())
 }
 
 /// How the checks that failed on a probe's pre-implementation tree failed
@@ -164,6 +249,7 @@ pub(crate) fn originals<'a>(
 ) -> BTreeMap<String, Original> {
     let results: Vec<&CheckResult> = results.into_iter().collect();
     let crashed = crash_findings(contract, results.iter().copied());
+    let at = super::verdict::Context::new(None, contract);
     results
         .into_iter()
         .map(|result| {
@@ -171,14 +257,20 @@ pub(crate) fn originals<'a>(
             let placeholder = (contract.acceptance.iter())
                 .chain(&contract.supplementary)
                 .any(|entry| entry.id == id && is_placeholder(entry));
-            let original =
-                if placeholder || crashed.contains_key(&id) || result.operational_error.is_some() {
-                    Original::Defect
-                } else if passed(result) {
-                    Original::Passed
-                } else {
-                    Original::Failed
-                };
+            // Issue 328: a run that gave no verdict (a program that could
+            // not start, a tree that did not build) failed no assertion.
+            let silent = silent::silent_failure(contract, result, &at).is_some();
+            let original = if placeholder
+                || crashed.contains_key(&id)
+                || result.operational_error.is_some()
+                || silent
+            {
+                Original::Defect
+            } else if passed(result) {
+                Original::Passed
+            } else {
+                Original::Failed
+            };
             (id, original)
         })
         .collect()
@@ -213,6 +305,7 @@ pub(super) async fn cannot_fail_findings(
     }
     let short: String = baseline.commit.chars().take(12).collect();
     let run = tree_results(probe, baseline, contract, digest, refs, known, false).await;
+    let at = silent::context(probe, contract);
     let mut passing = Vec::new();
     for reference in refs {
         let id = &reference.acceptance_id;
@@ -225,6 +318,16 @@ pub(super) async fn cannot_fail_findings(
                 ),
             );
         } else if let Some(result) = result {
+            if let Some(why) = silent::silent_failure(contract, result, &at) {
+                // Issue 328: failing without a verdict proves nothing; failing
+                // so again on the same base goes to the author.
+                let commit = &baseline.commit;
+                if let Some(finding) = silent::settle(probe, commit, contract, result, &why) {
+                    findings.insert(id.clone(), finding);
+                }
+                continue;
+            }
+            silent::clear(probe, &baseline.commit, contract, id);
             if passed(result) {
                 passing.push(id.clone());
             } else {

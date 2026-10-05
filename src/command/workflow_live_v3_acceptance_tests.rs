@@ -121,6 +121,7 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
                 algorithm: "blake3".into(),
                 digest: acceptance_digest.clone(),
                 gate: stamp(),
+                baseline_commit: None,
             })
             .unwrap(),
         )

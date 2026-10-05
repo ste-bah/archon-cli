@@ -30,6 +30,7 @@ use archon_workflow::{
 };
 
 use super::WorkflowV2ScriptRuntime;
+use crate::command::workflow_task_set::executability::Baseline;
 #[path = "workflow_live_v3_acceptance_author.rs"]
 mod author;
 #[path = "workflow_live_v3_acceptance_author_drift.rs"]
@@ -223,10 +224,8 @@ async fn evaluate(
     };
     record.execution = Some(context.execution_record());
     // A5: every authored or repaired check must fail on the tree before
-    // implementation.
-    let base = archon_workflow::v2::acceptance_regression::run_base_commit(
-        &archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2")),
-    );
+    // implementation: the one its freeze recorded (Issue 328).
+    let base = Baseline::round_commit(&context.repository, &context.task_root, run_dir);
     let site = author::Site {
         llm,
         context: &context,

@@ -106,6 +106,7 @@ pub(super) fn fixture() -> Fixture {
         algorithm: "blake3".into(),
         digest: acceptance_digest.clone(),
         gate: stamp(),
+        baseline_commit: None,
     };
     write(task_root.join(ACCEPTANCE_LOCK_FILE), &lock);
     let skeleton = TaskSkeleton {
