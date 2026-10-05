@@ -139,6 +139,12 @@
       return out;
     };
     let lastRemaining = null;
+    let lastOpen = [];
+    // Non-shrinking attempts in a row. Round 2: a plateau is TWO of them, the
+    // same bound as the acceptance loop's ACCEPTANCE_STALL_LIMIT, so one noisy
+    // verdict cannot end the remediation of a task that is converging.
+    const PLATEAU_ATTEMPTS = 2;
+    let stalls = 0;
     return {
       // Called after each attempt with the VERIFIER envelope. Returns whether
       // another attempt is warranted.
@@ -147,7 +153,8 @@
       // envelopes because one observed failure was on the write half,
       // which never reaches the verifier envelope at all.
       shouldContinue(attempt, checkEnv, implEnv) {
-        if (schemaRefunds < maxSchemaRefunds && schemaRefundable(implEnv, checkEnv)) {
+        const refundable = schemaRefundable(implEnv, checkEnv);
+        if (schemaRefunds < maxSchemaRefunds && refundable) {
           schemaRefunds += 1;
         }
         const funded = base + schemaRefunds;
@@ -159,6 +166,8 @@
           const late = baseline !== null && ids.size > 0;
           baseline = ids;
           lastRemaining = ids.size;
+          lastOpen = [...ids];
+          stalls = 0;
           if (attempt < funded) return true;
           // A late diagnosis has not had an attempt measured against it yet.
           if (late) return true;
@@ -168,23 +177,35 @@
           );
           return false;
         }
-        const open = [...baseline].filter((id) => ids.has(id));
-        const remaining = open.length;
-        // Recorded on EVERY call, including inside the base window. Updating it
-        // only after the base attempts made a flat set look like progress: the
-        // comparison fell back to the baseline size and read 3 -> 3 as 5 -> 3.
-        const stillClosing = remaining < lastRemaining;
+        // Round 2: a verdict that names no gap, or one burned by something
+        // that says nothing about the work (the refund markers), measures
+        // nothing. Read as "0 open" it made the next real verdict look like a
+        // regression (0 -> 13) and stopped a steady closer. It is not progress
+        // either, so it still counts toward the plateau: a verifier that never
+        // names a gap again still runs out.
+        const measured = ids.size > 0 && !refundable;
         const before = lastRemaining;
-        lastRemaining = remaining;
+        let stillClosing = false;
+        if (measured) {
+          lastOpen = [...baseline].filter((id) => ids.has(id));
+          // Recorded on EVERY measured call, including inside the base window.
+          // Updating it only after the base attempts made a flat set look like
+          // progress: the comparison fell back to the baseline size and read
+          // 3 -> 3 as 5 -> 3.
+          stillClosing = lastOpen.length < lastRemaining;
+          lastRemaining = lastOpen.length;
+        }
+        stalls = stillClosing ? 0 : stalls + 1;
         if (attempt < funded) return true;
-        // Extend only while the ORIGINAL diagnosis is still shrinking. A
-        // plateau means attempts have stopped converging, which is when more
-        // of them stop being worth buying. No total caps a task that is still
-        // closing gaps (Issue 298).
-        if (stillClosing) return true;
+        // Extend while the ORIGINAL diagnosis is still shrinking. A plateau
+        // means attempts have stopped converging, which is when more of them
+        // stop being worth buying. No total caps a task that is still closing
+        // gaps (Issue 298).
+        if (stalls < PLATEAU_ATTEMPTS) return true;
         note(
-          "remediationBudget: stopping after attempt " + attempt + ": no progress (" + before +
-          " -> " + remaining + " of " + baseline.size + " original gaps open: " + open.join(", ") + ")"
+          "remediationBudget: stopping after attempt " + attempt + ": no progress for " + stalls +
+          " attempts in a row (" + before + " -> " + lastRemaining + " of " + baseline.size +
+          " original gaps open: " + lastOpen.join(", ") + ")"
         );
         return false;
       },

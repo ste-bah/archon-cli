@@ -57,10 +57,11 @@ fn budget_extends_while_the_original_diagnosis_shrinks_and_stops_on_a_plateau() 
     let a3 = envelope(&["paging", "mcp-path", "tui-alias", "zero-test-noise"]);
     let driver = format!(
         r#"const b = remediationBudget({{ baseAttempts: 3 }});
-console.log([b.shouldContinue(1, {a1}), b.shouldContinue(2, {a2}), b.shouldContinue(3, {a3})].join(","));"#
+console.log([b.shouldContinue(1, {a1}), b.shouldContinue(2, {a2}), b.shouldContinue(3, {a3}), b.shouldContinue(4, {a3})].join(","));"#
     );
-    // 1,2 are inside the base budget; 3 is the plateau and must stop.
-    assert_eq!(run_budget_js(&driver), "true,true,false");
+    // 1,2 are inside the base budget; 3 is the first flat attempt, which one
+    // noisy verdict may be (round 2); 4 is the second in a row and stops.
+    assert_eq!(run_budget_js(&driver), "true,true,true,false");
 }
 
 /// Churned gaps were never in the baseline, so they cannot buy budget.
@@ -343,8 +344,8 @@ const answers = [];
 for (let attempt = 1; attempt <= 21; attempt += 1) answers.push(b.shouldContinue(attempt, gaps(21 - attempt)));
 console.log(answers.every(Boolean) + "," + b.shouldContinue(22, gaps(0)));"#
     );
-    // Every closing attempt is funded; the first attempt that closes nothing
-    // (0 -> 0) is the plateau and stops.
+    // Every closing attempt is funded; the verdicts naming no gap measure
+    // nothing (round 2), and the second of them in a row stops.
     assert_eq!(run_budget_js(&driver), "true,false");
 }
 
@@ -390,7 +391,8 @@ fn a_late_first_diagnosis_becomes_the_baseline() {
 const b = remediationBudget({{ baseAttempts: 2 }});
 const answers = [b.shouldContinue(1, gaps(0)), b.shouldContinue(2, gaps(14))];
 for (let attempt = 3; attempt <= 15; attempt += 1) answers.push(b.shouldContinue(attempt, gaps(16 - attempt)));
-console.log(answers.every(Boolean) + "," + b.shouldContinue(16, gaps(1)));"#
+answers.push(b.shouldContinue(16, gaps(1)));
+console.log(answers.every(Boolean) + "," + b.shouldContinue(17, gaps(1)));"#
     );
     assert_eq!(run_budget_js(&driver), "true,false");
 }
@@ -406,6 +408,7 @@ globalThis.log = (message) => lines.push(message);
 const b = remediationBudget({{ baseAttempts: 2 }});
 b.shouldContinue(1, gaps(2));
 b.shouldContinue(2, gaps(2));
+b.shouldContinue(3, gaps(2));
 console.log(lines.join("|"));"#
     );
     let logged = run_budget_js(&driver);
@@ -414,4 +417,39 @@ console.log(lines.join("|"));"#
         logged.contains("gap-0") && logged.contains("gap-1"),
         "{logged}"
     );
+}
+
+/// Round 2 (a): a verdict that names no gap measures nothing. Read as
+/// "0 open", it made the next real verdict look like 0 -> 11 and stopped a
+/// steady closer at attempt 9.
+#[test]
+fn a_gap_less_verdict_between_closing_attempts_is_not_a_regression() {
+    let transport = transport_failure_envelope();
+    for between in [r#"{"result":{"residual_gaps":[]}}"#.to_string(), transport] {
+        let driver = format!(
+            r#"{GAPS_JS}
+const b = remediationBudget();
+const answers = [];
+for (let attempt = 1; attempt <= 12; attempt += 1) answers.push(b.shouldContinue(attempt, attempt === 8 ? {between} : gaps(20 - attempt)));
+console.log(answers.join(","));"#
+        );
+        assert_eq!(
+            run_budget_js(&driver),
+            vec!["true"; 12].join(","),
+            "{between}"
+        );
+    }
+}
+
+/// Round 2 (b): one noisy attempt does not end remediation; two
+/// non-shrinking attempts in a row do (as ACCEPTANCE_STALL_LIMIT = 2).
+#[test]
+fn one_noisy_attempt_does_not_end_remediation_but_two_do() {
+    let driver = format!(
+        r#"{GAPS_JS}
+const b = remediationBudget({{ baseAttempts: 2 }});
+const seq = [10, 9, 9, 8, 8, 8];
+console.log(seq.map((n, i) => b.shouldContinue(i + 1, gaps(n))).join(","));"#
+    );
+    assert_eq!(run_budget_js(&driver), "true,true,true,true,true,false");
 }
