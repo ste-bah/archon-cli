@@ -25,9 +25,10 @@
   //
   // The authoring prompt shows `remediationBudget()` bare and says outright "Do
   // not replace this with a fixed bound". A generated script did exactly that —
-  // `{ baseAttempts: 3, hardCap: 3, maxSchemaRefunds: 0 }` — which sets
-  // `ceiling === funded`, making the progress check below unreachable and
-  // turning a progress-following budget into a flat count of three.
+  // `{ baseAttempts: 3, hardCap: 3, maxSchemaRefunds: 0 }` — which made the
+  // progress check below unreachable and turned a progress-following budget
+  // into a flat count of three. There is no ceiling at all now (Issue 298), so
+  // `hardCap` has nothing left to narrow.
   //
   // Measured over the run that produced it: the tasks that plateaued stopped at
   // three either way, so the cap bought nothing there; the one task whose gap
@@ -46,14 +47,16 @@
       if (typeof log === "function") log(message);
     };
     const base = Math.max(1, Number(opts.baseAttempts) || 6);
-    const DEFAULT_HARD_CAP = 12;
-    const requestedHardCap = Number(opts.hardCap) || 0;
-    const hardCap = Math.max(base, DEFAULT_HARD_CAP, requestedHardCap);
-    if (requestedHardCap > 0 && requestedHardCap < hardCap) {
+    // No total ceiling (Issue 298). A `hardCap` stopped a task at attempt 12
+    // while it was still closing one original gap per attempt, nine open.
+    // Only NO PROGRESS ends the budget; a task that closes gaps is bounded by
+    // its own baseline, since every funded attempt past the window must close
+    // at least one baseline gap. `hardCap` is still accepted from scripts that
+    // pass it, and ignored.
+    if (opts.hardCap !== undefined) {
       note(
-        "remediationBudget: ignoring hardCap=" + requestedHardCap +
-        " (below the " + DEFAULT_HARD_CAP + "-attempt floor); a fixed bound disables the " +
-        "progress check that funds converging tasks"
+        "remediationBudget: ignoring hardCap=" + opts.hardCap +
+        "; the budget ends on no progress only, never on a total"
       );
     }
     // An attempt whose schema repair failed while its patch nonetheless LANDED
@@ -71,7 +74,7 @@
     // repair already retries under its own cap, so an unbounded exemption
     // trades a burned attempt for a hung task — strictly worse. An agent that
     // emits garbage and lands a patch every single time must still run out.
-    // Floored at one for the same reason as `hardCap`: a generated script set
+    // Floored at one so a script cannot neuter it: a generated script set
     // this to 0, switching the refund off entirely. Zero is not a defensible
     // choice — it charges the task for an attempt that produced work and no
     // verdict — and the bound below (once per task) is what keeps it safe, so
@@ -148,27 +151,42 @@
           schemaRefunds += 1;
         }
         const funded = base + schemaRefunds;
-        const ceiling = hardCap + schemaRefunds;
         const ids = gapIdsOf(checkEnv);
-        if (baseline === null) {
+        if (baseline === null || baseline.size === 0) {
+          // A verifier that named nothing gives nothing to measure against;
+          // the flat window still applies. The FIRST verdict that names gaps
+          // becomes the baseline, however late: closing those is progress.
+          const late = baseline !== null && ids.size > 0;
           baseline = ids;
           lastRemaining = ids.size;
-          // A verifier that named nothing gives nothing to measure against;
-          // the flat budget still applies.
-          return attempt < funded;
+          if (attempt < funded) return true;
+          // A late diagnosis has not had an attempt measured against it yet.
+          if (late) return true;
+          note(
+            "remediationBudget: stopping after attempt " + attempt +
+            ": no progress measurable (the verifier named no gap ids) within " + funded + " attempts"
+          );
+          return false;
         }
-        const remaining = [...baseline].filter((id) => ids.has(id)).length;
+        const open = [...baseline].filter((id) => ids.has(id));
+        const remaining = open.length;
         // Recorded on EVERY call, including inside the base window. Updating it
         // only after the base attempts made a flat set look like progress: the
         // comparison fell back to the baseline size and read 3 -> 3 as 5 -> 3.
         const stillClosing = remaining < lastRemaining;
+        const before = lastRemaining;
         lastRemaining = remaining;
         if (attempt < funded) return true;
-        if (attempt >= ceiling) return false;
         // Extend only while the ORIGINAL diagnosis is still shrinking. A
         // plateau means attempts have stopped converging, which is when more
-        // of them stop being worth buying.
-        return stillClosing;
+        // of them stop being worth buying. No total caps a task that is still
+        // closing gaps (Issue 298).
+        if (stillClosing) return true;
+        note(
+          "remediationBudget: stopping after attempt " + attempt + ": no progress (" + before +
+          " -> " + remaining + " of " + baseline.size + " original gaps open: " + open.join(", ") + ")"
+        );
+        return false;
       },
     };
   };
