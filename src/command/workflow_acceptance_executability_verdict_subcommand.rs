@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 use regex::Regex;
 
 use super::super::verdict_shell::{Simple, simple_commands};
-use super::{ASSERTED, Context};
+use super::{ASSERTED, Context, which};
 
 /// The longest a tool may take to list its commands.
 const LIST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -103,8 +103,8 @@ pub(crate) fn unresolved_on_path(text: &str, path: &str) -> Vec<String> {
         let Some(program) = command.program.as_deref() else {
             continue;
         };
-        if program.contains('/') {
-            if program.starts_with('/') && !Path::new(program).exists() {
+        if which::is_path(program) {
+            if which::is_absolute(program) && !Path::new(program).exists() {
                 found.push(format!("`{program}` (no such file)"));
             }
         } else if at.find(program).is_none() {
@@ -128,12 +128,13 @@ pub(crate) fn unresolved_on_path(text: &str, path: &str) -> Vec<String> {
 /// `at`'s search path, or an absolute path that exists.
 fn tool(command: &Simple, at: &Context) -> Option<(String, PathBuf)> {
     let program = command.program.as_deref()?;
-    if !program.contains('/') {
+    if !which::is_path(program) {
         return Some((program.to_string(), at.find(program)?));
     }
     let path = Path::new(program);
     let name = path.file_name()?.to_str()?;
-    (program.starts_with('/') && path.is_file()).then(|| (name.to_string(), path.to_path_buf()))
+    let name = which::bare_name(name);
+    (which::is_absolute(program) && path.is_file()).then(|| (name, path.to_path_buf()))
 }
 
 /// `command`'s first argument that is not an option, when it is shaped like
@@ -168,7 +169,8 @@ fn dispatches(tool: &str, at: &Context) -> bool {
     let Some(path) = at.path.as_deref() else {
         return false;
     };
-    std::env::split_paths(path)
+    which::search_dirs(path, cfg!(windows))
+        .into_iter()
         .filter_map(|dir| std::fs::read_dir(dir).ok())
         .flatten()
         .flatten()

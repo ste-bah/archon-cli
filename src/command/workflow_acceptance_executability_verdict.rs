@@ -59,6 +59,8 @@ use super::verdict_shell::{Simple, expands, simple_commands};
 
 #[path = "workflow_acceptance_executability_verdict_subcommand.rs"]
 mod subcommand;
+#[path = "workflow_acceptance_executability_verdict_which.rs"]
+mod which;
 pub(crate) use subcommand::unresolved_on_path;
 
 /// Programs whose job is to compile or build: a compiler error they print
@@ -109,12 +111,10 @@ impl Context {
         self.find(name).is_some()
     }
 
-    /// Where the program `name` is on the search path.
+    /// Where the program `name` is on the search path, as this platform's
+    /// launcher finds it (`verdict_which`).
     fn find(&self, name: &str) -> Option<std::path::PathBuf> {
-        let path = self.path.as_deref()?;
-        std::env::split_paths(path)
-            .map(|dir| dir.join(name))
-            .find(|program| program.is_file())
+        which::find(self.path.as_deref()?, name)
     }
 }
 
@@ -194,8 +194,8 @@ fn output(result: &CheckResult) -> String {
 fn missing_program(commands: &[Simple], at: &Context) -> Option<String> {
     (commands.iter())
         .filter_map(|c| c.program.as_deref())
-        .find(|program| match program.contains('/') {
-            true => program.starts_with('/') && !Path::new(program).exists(),
+        .find(|program| match which::is_path(program) {
+            true => which::is_absolute(program) && !Path::new(program).exists(),
             false => !at.on_path(program),
         })
         .map(str::to_string)
