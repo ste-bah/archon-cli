@@ -29,6 +29,18 @@ pub(super) fn brief(evidence: &str) -> String {
     failure_evidence(evidence.as_bytes(), 400)
 }
 
+/// The environment repairs a round made, beside its evidence.
+pub(super) fn write_repairs(evidence_dir: &Path, repairs: &[String]) {
+    if repairs.is_empty() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(evidence_dir);
+    let _ = std::fs::write(
+        evidence_dir.join("host-environment-repairs.json"),
+        serde_json::to_vec_pretty(repairs).unwrap_or_default(),
+    );
+}
+
 pub(super) fn write_output_files(dir: &Path, result: &CheckResult) {
     if std::fs::create_dir_all(dir).is_err() {
         return;

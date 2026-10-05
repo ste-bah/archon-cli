@@ -187,3 +187,122 @@ async fn a_contract_verifier_cannot_write_the_project() {
         );
     }
 }
+
+/// 34 realistic findings (40-80 chars each), as a floor or a verifier
+/// reports them.
+fn many_findings() -> Vec<String> {
+    (1..=34)
+        .map(|n| format!("records[{n}].close is missing or not a finite number (row {n})"))
+        .collect()
+}
+
+/// Issue 219: every finding a failed contract reports reaches the residual
+/// gap remediation reads, and the branch data keeps them whole.
+fn assert_every_finding_reaches_the_gap(findings: &[String]) {
+    let mut outcome = accepted("v");
+    demote_failed_contract(&mut outcome, findings, None);
+    let result = outcome.result.expect("result");
+    let gap = &result.residual_gaps[0].description;
+    assert!(
+        gap.contains(&format!("{} finding(s)", findings.len())),
+        "{gap}"
+    );
+    for finding in findings {
+        assert!(
+            gap.contains(finding.as_str()),
+            "missing `{finding}` in {gap}"
+        );
+    }
+    assert_eq!(
+        result.data["declared_contract_findings"],
+        serde_json::json!(findings)
+    );
+}
+
+#[test]
+fn every_declarative_floor_finding_reaches_the_residual_gap() {
+    let findings = many_findings();
+    assert!(findings.iter().all(|f| (40..=80).contains(&f.len())));
+    let ContractVerification::Failed(reported) = floor_failed(&findings) else {
+        panic!("expected a failure");
+    };
+    assert_every_finding_reaches_the_gap(&reported);
+}
+
+#[test]
+fn every_verifier_failure_reaches_the_residual_gap() {
+    let findings = many_findings();
+    let verdict = serde_json::json!({"status": "failed", "failures": findings});
+    let reported = verdict_failure(&verdict).expect("a failure");
+    assert_eq!(reported, findings);
+    assert_every_finding_reaches_the_gap(&reported);
+}
+
+/// A finding longer than the gap quotes is cut with a mark naming its
+/// length; the next finding still follows it.
+#[test]
+fn an_oversized_finding_is_cut_with_a_mark_and_drops_no_neighbour() {
+    let findings = vec!["y".repeat(9000), "records[2].open is missing".to_string()];
+    let mut outcome = accepted("v");
+    demote_failed_contract(&mut outcome, &findings, None);
+    let gap = &outcome.result.expect("result").residual_gaps[0].description;
+    assert!(gap.contains("[finding cut at 4096 of 9000 bytes"), "{gap}");
+    assert!(gap.contains("records[2].open is missing"), "{gap}");
+}
+
+/// Issue 219 round 3: a thousand findings (one per missing instance) keep
+/// the gap -- what every remediate and verify prompt quotes -- and the data
+/// within budget; the evidence file in the run directory holds all of them,
+/// and the gap names it.
+#[test]
+fn a_thousand_findings_stay_within_budget_and_all_reach_the_evidence_file() {
+    let run = tempfile::tempdir().unwrap();
+    let findings: Vec<String> = (1..=1000)
+        .map(|n| format!("records[{n}] declared instance is missing from the artifact"))
+        .collect();
+    let mut outcome = accepted("TASK-1");
+    demote_failed_contract(&mut outcome, &findings, Some(run.path()));
+    let result = outcome.result.expect("result");
+    let gap = &result.residual_gaps[0].description;
+    assert!(
+        gap.len() <= demote::GAP_BUDGET_BYTES + 1024,
+        "{}",
+        gap.len()
+    );
+    let path = result.data["declared_contract_findings_path"]
+        .as_str()
+        .expect("the evidence path");
+    assert!(
+        path.starts_with(&run.path().display().to_string()),
+        "{path}"
+    );
+    assert!(
+        gap.contains(&format!("more finding(s): full list at {path}")),
+        "{gap}"
+    );
+    assert!(gap.contains("1000 finding(s)"), "{gap}");
+    let written: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(written["findings"], serde_json::json!(findings));
+    let shown = result.data["declared_contract_findings"]
+        .as_array()
+        .unwrap();
+    assert!(!shown.is_empty() && shown.len() < 1000, "{}", shown.len());
+    assert_eq!(result.data["declared_contract_finding_count"], 1000);
+    assert!(serde_json::to_string(shown).unwrap().len() <= demote::GAP_BUDGET_BYTES + 1024);
+}
+
+/// Issue 219 round 3: a verifier whose stdout passes the read cap is cut
+/// with its byte count, and a pass printed before the cut never stands.
+#[cfg(unix)]
+#[tokio::test]
+async fn verifier_output_past_the_cap_is_cut_with_its_byte_count_and_never_passes() {
+    let command = r#"printf '{"status":"verified"}\n'; head -c 2000000 /dev/zero | tr '\0' 'x'"#;
+    match run_contract_verifier_within(command, std::time::Duration::from_secs(60)).await {
+        ContractVerification::Failed(findings) => {
+            let text = findings.join("; ");
+            assert!(text.contains("[output cut]"), "{text}");
+            assert!(text.contains("of 2000022 bytes"), "{text}");
+        }
+        _ => panic!("a cut verdict must never pass"),
+    }
+}

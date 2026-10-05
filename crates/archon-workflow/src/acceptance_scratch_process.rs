@@ -95,22 +95,35 @@ fn take_pipes(
     )
 }
 async fn drain(
-    mut pipe: impl AsyncRead + Unpin,
+    pipe: impl AsyncRead + Unpin,
     limit: usize,
     overflow: Arc<AtomicBool>,
 ) -> std::io::Result<(Vec<u8>, bool)> {
+    let (retained, total) = drain_counted(pipe, limit, &overflow).await?;
+    let truncated = total > retained.len() as u64;
+    Ok((retained, truncated))
+}
+
+/// Read `pipe` to its end keeping at most `limit` bytes: what was kept and
+/// how many bytes were read in all. `overflow` is set the moment a byte is
+/// dropped, so a caller watching it can stop the producer.
+pub(crate) async fn drain_counted(
+    mut pipe: impl AsyncRead + Unpin,
+    limit: usize,
+    overflow: &AtomicBool,
+) -> std::io::Result<(Vec<u8>, u64)> {
     let mut retained = Vec::new();
-    let mut truncated = false;
+    let mut total = 0u64;
     let mut buffer = [0; 8192];
     loop {
         let n = pipe.read(&mut buffer).await?;
         if n == 0 {
-            return Ok((retained, truncated));
+            return Ok((retained, total));
         }
+        total += n as u64;
         let keep = n.min(limit.saturating_sub(retained.len()));
         retained.extend_from_slice(&buffer[..keep]);
         if keep < n {
-            truncated = true;
             overflow.store(true, Ordering::SeqCst);
         }
     }

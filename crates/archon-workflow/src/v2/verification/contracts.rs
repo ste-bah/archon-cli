@@ -131,7 +131,7 @@ async fn enforce_one(
             ContractVerification::Unavailable(reason) => return Some(reason),
             ContractVerification::Failed(detail) => {
                 stamp_contract_evaluator(outcome, shared_floor_count, generated_count);
-                demote_failed_contract(outcome, &detail);
+                demote_failed_contract(outcome, &detail, run_root);
                 return None;
             }
         }
@@ -169,18 +169,22 @@ fn run_shared_declarative_floor(
     let facts = match collect_declarative_floor_facts(roots, &contract) {
         Ok(facts) => facts,
         Err(error) => {
-            return Some(ContractVerification::Failed(format!(
+            return Some(ContractVerification::Failed(vec![format!(
                 "host could not collect declared contract facts: {error}"
-            )));
+            )]));
         }
     };
     Some(match evaluate_declarative_floor(&contract, &facts) {
         DeclarativeFloorEvaluation::Passed => ContractVerification::Passed,
-        DeclarativeFloorEvaluation::Failed { findings } => ContractVerification::Failed(
-            findings.into_iter().take(5).collect::<Vec<_>>().join("; "),
-        ),
+        DeclarativeFloorEvaluation::Failed { findings } => floor_failed(&findings),
         DeclarativeFloorEvaluation::Deferred { .. } => return None,
     })
+}
+
+/// Issue 219: every floor finding reaches the branch's demotion, none
+/// dropped (only the first five used to).
+fn floor_failed(findings: &[String]) -> ContractVerification {
+    ContractVerification::Failed(findings.to_vec())
 }
 
 fn stamp_contract_evaluator(
@@ -236,7 +240,8 @@ const CONTRACT_VERIFIER_TIMEOUT: std::time::Duration = std::time::Duration::from
 
 pub(super) enum ContractVerification {
     Passed,
-    Failed(String),
+    /// Every finding the verifier or floor reported, none dropped (Issue 219).
+    Failed(Vec<String>),
     /// Batch G2: no verdict at all -- the verifier could not be started or
     /// waited on, or did not finish. The environment's, never the branch's.
     Unavailable(String),
@@ -312,7 +317,7 @@ pub(super) async fn run_contract_verifier_for(
         let _ = stdin.write_all(script.as_bytes()).await;
         let _ = stdin.shutdown().await;
     }
-    let run = child.wait_with_output();
+    let run = bounded_output(child);
     let output = match tokio::time::timeout(timeout, run).await {
         Ok(Ok(output)) => output,
         // Fail closed: an unrunnable verifier is not evidence of success --
@@ -341,25 +346,39 @@ pub(super) async fn run_contract_verifier_for(
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let verdicts = verifier_verdicts(&stdout);
+    // Issue 219: past the read cap the verdict cannot be read whole. What
+    // was read still counts; a pass never does.
+    let cut = (output.stdout_total > output.stdout.len() as u64).then(|| {
+        format!(
+            "declared contract verifier output cut at {} of {} bytes [output cut]: any failure printed after the cut is unread, and its verdict is not trusted as a pass",
+            output.stdout.len(),
+            output.stdout_total
+        )
+    });
     // Any stage that reported a failure demotes the branch, whichever one it
     // was. Returning on the FIRST verdict instead would let the typed
     // pre-check's permissive `{"status":"verified"}` mask the contract
     // verifier's own failure printed after it.
-    if let Some(detail) = verdicts.iter().find_map(verdict_failure) {
-        return ContractVerification::Failed(detail);
+    let failures: Vec<String> = verdicts
+        .iter()
+        .filter_map(verdict_failure)
+        .flatten()
+        .collect();
+    if !failures.is_empty() || cut.is_some() {
+        return ContractVerification::Failed(failures.into_iter().chain(cut).collect());
     }
     if !output.status.success() {
         // Its end and its failure lines (stdout when stderr is silent),
-        // within the 500-char gap cap below.
+        // well within one finding's 4 KB gap bound (`contracts_demote`).
         let said = if output.stderr.trim_ascii().is_empty() {
             &output.stdout
         } else {
             &output.stderr
         };
-        return ContractVerification::Failed(format!(
+        return ContractVerification::Failed(vec![format!(
             "declared contract verifier exited non-zero: {}",
             crate::failure_evidence::failure_evidence(said, 420)
-        ));
+        )]);
     }
     // The contract verifier is appended last, so the final status-bearing
     // object is its verdict. Requiring one keeps silence from counting as a
@@ -372,10 +391,10 @@ pub(super) async fn run_contract_verifier_for(
     }) {
         return ContractVerification::Passed;
     }
-    ContractVerification::Failed(
+    ContractVerification::Failed(vec![
         "declared contract verifier produced no parseable status; treating as unverified"
             .to_string(),
-    )
+    ])
 }
 
 /// Every JSON object the verification command printed, in emission order.
@@ -404,12 +423,12 @@ pub(super) fn verifier_verdicts(stdout: &str) -> Vec<serde_json::Value> {
     verdicts
 }
 
-/// The failure text a verdict carries, if it reports one.
+/// The failures a verdict carries, every one, if it reports any.
 ///
 /// A verdict fails either by saying `status: failed` or by carrying a non-empty
 /// `failures` array — the verifier's early exits print the latter with no
 /// `status` field at all, and their text is the only account of what broke.
-pub(super) fn verdict_failure(verdict: &serde_json::Value) -> Option<String> {
+pub(super) fn verdict_failure(verdict: &serde_json::Value) -> Option<Vec<String>> {
     let failed_status = verdict
         .get("status")
         .and_then(serde_json::Value::as_str)
@@ -421,52 +440,25 @@ pub(super) fn verdict_failure(verdict: &serde_json::Value) -> Option<String> {
     if !failed_status && failures.is_none() {
         return None;
     }
-    let detail = failures
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .take(5)
-                .collect::<Vec<_>>()
-                .join("; ")
-        })
-        .unwrap_or_default();
+    let detail: Vec<String> = failures
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_string)
+        .collect();
     Some(if detail.is_empty() {
-        "declared deliverable contract verification failed".to_string()
+        vec!["declared deliverable contract verification failed".to_string()]
     } else {
         detail
     })
 }
 
-pub(super) fn demote_failed_contract(outcome: &mut WorkflowV2BranchOutcome, detail: &str) {
-    let truncated: String = detail.chars().take(500).collect();
-    if let Some(result) = outcome.result.as_mut() {
-        result.status = WorkflowV2Status::NeedsReview;
-        result.residual_gaps.push(crate::WorkflowV2ResidualGap {
-            id: "declared_contract_verification_failed".to_string(),
-            description: format!(
-                "host-executed declared deliverable contract verification failed: {truncated}"
-            ),
-            severity: Some("review".to_string()),
-        });
-        result.evidence.push(WorkflowV2Evidence::new(
-            WorkflowV2EvidenceKind::Blocker,
-            "accepted branch demoted: the host ran the declared deliverable contract verifier and it failed",
-        ));
-        let mut data = result.data.as_object().cloned().unwrap_or_default();
-        data.insert(
-            "declared_contract_verification".to_string(),
-            serde_json::json!("failed"),
-        );
-        data.insert(
-            "verification_failure_class".to_string(),
-            serde_json::json!("declared_contract_violation"),
-        );
-        result.data = serde_json::Value::Object(data);
-    }
-    outcome.status = WorkflowV2Status::NeedsReview;
-    outcome.failure_kind = Some(BranchFailureKind::Semantic);
-}
+#[path = "contracts_output.rs"]
+mod output;
+use output::bounded_output;
+#[path = "contracts_demote.rs"]
+mod demote;
+pub(crate) use demote::demote_failed_contract;
 
 #[cfg(test)]
 #[path = "contracts_env_tests.rs"]

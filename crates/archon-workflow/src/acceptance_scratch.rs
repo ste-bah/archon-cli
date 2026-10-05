@@ -45,6 +45,7 @@ mod process;
 mod seal;
 pub use observe::observe_commands_hooked;
 pub use observe::{ObservationResult, observe_commands, observe_commands_cancellable};
+pub(crate) use process::drain_counted;
 pub use process::{CHECK_TIMED_OUT, CheckResult};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
