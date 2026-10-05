@@ -11,6 +11,7 @@ pub(crate) fn evaluate_task_file_candidate(
     mode: archon_core::config::GateMode,
 ) -> Result<crate::command::workflow_gate::GateEvaluation> {
     let path = super::absolute(cwd, path);
+    let _read = super::chain_read(cwd, &super::LintSource::TaskFile(path.clone()))?;
     super::preflight::task_file_freeze(cwd, &path)?;
     let raw = std::str::from_utf8(candidate)
         .context("candidate TASK body is not UTF-8; return one complete UTF-8 TASK file")?;

@@ -50,6 +50,7 @@ pub(crate) async fn observe_run_end(project: &Path, run_id: &str) -> Result<Stri
     if let Some(launch) = &snapshot.portable_acceptance_identity {
         let task_root = PathBuf::from(&snapshot.canonical_task_root_identity);
         let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project, &task_root);
+        let _read = crate::command::workflow_task_set::ChainRead::begin(&pin_path, &task_root)?;
         let pin: AcceptancePin = serde_json::from_slice(&std::fs::read(&pin_path)?)?;
         crate::command::acceptance_chain::verify_launch_chain(
             launch,

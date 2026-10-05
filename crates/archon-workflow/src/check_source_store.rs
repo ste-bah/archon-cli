@@ -84,6 +84,12 @@ impl PinStore {
             (Some(pin), true) => Some(chain_lock(pin)?),
             _ => None,
         };
+        // The pin and the sidecar change together under the publish lock the
+        // host's publishes and consistent readers hold (Issue 294).
+        let _publish = match (&self.pin, self.frozen) {
+            (Some(pin), true) => crate::task_set_publish_lock::PublishLockFile::hold(pin)?,
+            _ => None,
+        };
         if let (Some(pin_path), true) = (&self.pin, self.frozen)
             && pin_path.is_file()
         {
@@ -200,6 +206,12 @@ pub fn load_for_run(
     tasks_root: &Path,
     roots: &Roots,
 ) -> Result<Option<(PinStore, CheckSourcePins)>, String> {
+    // Issue 294: the contract, the pin and the sidecar are read as one
+    // version, never mid-republish (the publish lock every publisher holds).
+    let _read = match &PinStore::frozen(project_root, tasks_root).pin {
+        Some(pin) => crate::task_set_publish_lock::PublishLockFile::hold(pin)?,
+        None => None,
+    };
     let path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,

@@ -12,10 +12,16 @@ pub(super) async fn judge(
 ) -> Result<AcceptanceContract> {
     // A candidate's own judgment fields never authorize reuse. Failed validation
     // of historical evidence means rejudge, not silently trust its contents.
-    let base = std::fs::read(acceptance_pin_path(project, tasks))
-        .ok()
+    // Issue 294: pin and bundle are one version, or nothing is reused.
+    let read = crate::command::workflow_task_set::ChainRead::of(project, tasks)
+        .inspect_err(|error| tracing::warn!(error = %format!("{error:#}"), "no judgment reused"))
+        .ok();
+    let base = read
+        .as_ref()
+        .and_then(|_| std::fs::read(acceptance_pin_path(project, tasks)).ok())
         .and_then(|bytes| serde_json::from_slice::<AcceptancePin>(&bytes).ok())
         .and_then(|pin| validate_acceptance_bundle(tasks, Some(&pin), expected).ok());
+    drop(read);
     let mut reused = BTreeSet::new();
     if let Some(base) = &base
         && base.prd == contract.prd

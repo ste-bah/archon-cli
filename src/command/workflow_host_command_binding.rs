@@ -35,6 +35,11 @@ pub(crate) fn context_for_request(
     let candidate = request.stdin.as_deref().ok_or_else(|| {
         WorkflowError::SpecInvalid("land-task-body requires candidate stdin".to_string())
     })?;
+    // Issue 294: the pin, skeleton and bodies are read as one version.
+    let _read = crate::command::workflow_task_set::ChainRead::workflow(
+        &context.project_root,
+        &context.task_root,
+    )?;
     let pin = read_acceptance_pin(&context)?;
     let skeleton = archon_workflow::task_skeleton::validate_full_chain(&context.task_root, &pin)
         .map_err(|error| WorkflowError::SpecInvalid(error.to_string()))?;

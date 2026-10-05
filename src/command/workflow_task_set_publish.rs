@@ -20,6 +20,9 @@ use archon_workflow::task_skeleton::TaskSkeletonLock;
 mod journal;
 #[path = "workflow_task_set_publish_legacy.rs"]
 mod legacy;
+#[path = "workflow_task_set_publish_lock.rs"]
+mod lock;
+pub(crate) use lock::ChainRead;
 #[path = "workflow_task_set_publish_verification.rs"]
 mod verification;
 pub(crate) fn valid_recovery_transaction(value: &str) -> bool {

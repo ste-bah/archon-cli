@@ -136,6 +136,9 @@ impl FixedRunEndAcceptanceObserver {
         let project_root = project_root(&self.store)?;
         let pin_path =
             crate::command::workflow_task_set::acceptance_pin_path(project_root, &task_root);
+        // Issue 294: pin, chain and contract are read as one version.
+        let read =
+            crate::command::workflow_task_set::ChainRead::workflow_at(&pin_path, &task_root)?;
         let pin_bytes = std::fs::read(&pin_path).map_err(|source| WorkflowError::Io {
             path: pin_path.clone(),
             source,
@@ -163,6 +166,7 @@ impl FixedRunEndAcceptanceObserver {
             &expected,
         )
         .map_err(|error| WorkflowError::StateCorrupt(error.to_string()))?;
+        drop(read);
 
         if !matches!(
             context.terminal_status,

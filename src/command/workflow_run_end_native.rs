@@ -107,6 +107,8 @@ async fn evaluate_inner(
         ));
     }
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project, &tasks);
+    // Issue 294: the pin and the chain it is proven by are one version.
+    let read = crate::command::workflow_task_set::ChainRead::workflow_at(&pin_path, &tasks)?;
     let bytes = std::fs::read(&pin_path).map_err(|e| WorkflowError::Io {
         path: pin_path.clone(),
         source: e,
@@ -136,6 +138,7 @@ async fn evaluate_inner(
             "native observer chain differs from launch pin and is not proven reached from it: {detail}"
         ))
     })?;
+    drop(read);
     let evidence = binding
         .policy
         .scratch_parent

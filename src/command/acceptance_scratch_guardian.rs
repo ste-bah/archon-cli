@@ -48,6 +48,10 @@ pub(crate) fn validate_selected(
     request: &Request,
     selection: &CheckSelection,
 ) -> WorkflowResult<(AcceptanceContract, String, Vec<FrozenCommandRef>)> {
+    let _read = crate::command::workflow_task_set::ChainRead::workflow_at(
+        &request.pin_path,
+        &request.policy.task_root,
+    )?;
     let bytes = std::fs::read(&request.pin_path).map_err(|e| WorkflowError::Io {
         path: request.pin_path.clone(),
         source: e,

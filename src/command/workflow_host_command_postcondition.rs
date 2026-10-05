@@ -25,6 +25,11 @@ pub(super) fn evaluate_postcondition(
     context: &HostCommandResolutionContext,
     command_id: &str,
 ) -> WorkflowResult<(Vec<HostCommandSubject>, CommandPostconditionEvaluation)> {
+    // Issue 294: the whole evaluation reads one version of the chain.
+    let _read = crate::command::workflow_task_set::ChainRead::workflow(
+        &context.project_root,
+        &context.task_root,
+    )?;
     let pin = read_acceptance_pin(context)?;
     // A frozen-chain verification (Issue-46) answers the same question the
     // freeze it stands in for answered: the artifact on disk is the one the

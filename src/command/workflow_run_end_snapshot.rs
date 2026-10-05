@@ -40,6 +40,13 @@ pub(super) fn collect_run_end_observer_snapshot(
     {
         return None;
     }
+    // Issue 294: the pin and the native binding are one version. A set that
+    // cannot be locked is read as before, and the reason is logged.
+    let _read = crate::command::workflow_task_set::ChainRead::begin(&pin_path, &task_root)
+        .inspect_err(|error| {
+            tracing::warn!(error = %format!("{error:#}"), "launch snapshot read without the publish lock");
+        })
+        .ok();
     let portable_acceptance_identity = std::fs::read(&pin_path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<AcceptancePin>(&bytes).ok())
