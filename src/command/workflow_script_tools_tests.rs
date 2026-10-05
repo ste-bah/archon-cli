@@ -143,37 +143,8 @@ async fn an_unreadable_payload_fails_the_run() {
     assert!(format!("{error}").contains("unreadable"), "{error}");
 }
 
-/// A script is a loop with no model in it to get bored, so the call count is
-/// bounded. Exceeding it is fatal — unlike a refused call, there is no state in
-/// which continuing produces a smaller total.
-#[test]
-fn the_call_budget_stops_a_runaway_loop() {
-    let mut budget = ToolCallBudget::default();
-    for _ in 0..MAX_TOOL_CALLS {
-        budget.admit(1).expect("within the cap");
-    }
-
-    let error = budget.admit(1).expect_err("the cap must hold");
-
-    assert!(error.contains(&MAX_TOOL_CALLS.to_string()), "{error}");
-    assert_eq!(
-        budget.calls, MAX_TOOL_CALLS,
-        "a refused call is not counted"
-    );
-}
-
-/// The failure worth preventing is a thousand small reads, not one large one,
-/// so the byte cap is on the sum.
-#[test]
-fn the_byte_budget_bounds_the_total_rather_than_each_call() {
-    let mut budget = ToolCallBudget::default();
-    budget.admit(MAX_TOTAL_BYTES - 10).expect("within the cap");
-    budget.admit(10).expect("exactly at the cap is allowed");
-
-    let error = budget.admit(1).expect_err("one byte past is not");
-
-    assert!(error.contains("limit for one run"), "{error}");
-}
+// Issue 299: the run totals these tests pinned (500 calls, 8 MiB) are gone;
+// `workflow_script_tools_progress_tests.rs` covers what replaced them.
 
 #[test]
 fn a_budget_starts_empty() {

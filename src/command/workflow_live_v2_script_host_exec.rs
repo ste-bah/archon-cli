@@ -57,6 +57,12 @@ impl WorkflowScriptHost {
         if method == crate::command::workflow_live::workflow_script_tools::RUN_TOOL_METHOD {
             return self.run_script_tool(&payload).await;
         }
+        // Issue 299: any other host call is other work, after which a repeated
+        // tool call may read a changed world; it starts a new repeat streak.
+        self.tool_budget
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .break_streak();
         // Issue 261: a pause request is control flow, not a workflow call.
         if method == archon_workflow::v2::script::SCRIPT_PAUSE_METHOD {
             return self.request_script_pause(&payload).await;

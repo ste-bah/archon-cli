@@ -301,3 +301,6 @@ mod lock_credit;
 
 #[path = "workflow_live_v2_script_pause_owner_tests.rs"]
 mod owner;
+
+#[path = "workflow_live_v2_script_tool_stall_tests.rs"]
+mod tool_stall;
