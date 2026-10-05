@@ -252,6 +252,10 @@ enum IncompleteCause {
     /// a check the host could not prove). Retried by the executor while the
     /// freeze's progress grows, then the run pauses: never a failure.
     Stalled(String),
+    /// As `Stalled`, in a freeze that saves nothing for a retry (the unstaged
+    /// CLI freeze, Issue 288): nothing was published, and a re-run starts
+    /// over.
+    Unsaved(String),
 }
 
 impl FreezeIncomplete {
@@ -278,6 +282,16 @@ impl FreezeIncomplete {
         Self {
             cause: IncompleteCause::Stalled(reason.into()),
             progress: progress.line(),
+        }
+    }
+
+    /// A step of an unstaged freeze could not complete for `reason`. That
+    /// freeze saves nothing, so the operator is told to re-run it, never
+    /// that it continues from saved results.
+    pub(crate) fn unsaved(reason: impl Into<String>) -> Self {
+        Self {
+            cause: IncompleteCause::Unsaved(reason.into()),
+            progress: FreezeProgress::default().line(),
         }
     }
 
@@ -326,6 +340,10 @@ impl std::fmt::Display for FreezeIncomplete {
             IncompleteCause::Stalled(reason) => write!(
                 f,
                 "{FREEZE_INCOMPLETE_RESUMABLE}: a step made no progress ({reason}); every result saved so far is kept. Retry the freeze with the same candidate (resume the run): it continues from the saved results"
+            ),
+            IncompleteCause::Unsaved(reason) => write!(
+                f,
+                "{FREEZE_INCOMPLETE_RESUMABLE}: a step made no progress ({reason}); nothing was published and this freeze saves no results. Resume by re-running the same freeze command once the cause above is resolved: it starts the freeze again"
             ),
         }
     }

@@ -307,6 +307,7 @@ pub(crate) mod reauthor;
 pub(crate) mod republish;
 pub(crate) use findings::{
     non_accepted_ids, prepare_acceptance_freeze_reauthoring, prepare_from_judged,
+    unproven_incomplete,
 };
 #[cfg(test)]
 use publish::cleanup_committed_backups;
