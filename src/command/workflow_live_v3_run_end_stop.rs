@@ -32,11 +32,20 @@ fn stop_with(
             .load_state(run_id)
             .is_ok_and(|run| !run.execution_owned_at(expected))
     }) {
+        // Issue 291: a stale executor's stop is refused, never silently.
+        tracing::warn!(
+            run_id,
+            ?expected_generation,
+            "stale executor stop refused: a newer executor owns the run"
+        );
         return Ok(());
     }
     match finalize() {
         // Ownership may change between the early read and the locked write.
-        Err(archon_workflow::WorkflowError::ControlCancelled(_)) => Ok(()),
+        Err(archon_workflow::WorkflowError::ControlCancelled(refused)) => {
+            tracing::warn!(run_id, %refused, "stale executor stop refused at the locked write");
+            Ok(())
+        }
         result => result,
     }
 }

@@ -462,6 +462,7 @@ include!("result_store_revocation.rs");
 include!("result_store_archive.rs");
 include!("result_store_durable.rs");
 include!("result_store_restart_epoch.rs");
+include!("result_store_executor.rs");
 
 include!("result_store_io.rs");
 

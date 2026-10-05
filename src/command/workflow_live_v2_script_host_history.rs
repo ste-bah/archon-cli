@@ -73,7 +73,8 @@ impl WorkflowScriptHost {
                     )));
                 }
             }
-            self.runner.v2_store.require_session_restart_epoch()?;
+            // Issue 291: the epoch, and this session's executor.
+            self.runner.v2_store.require_session_owner()?;
             self.runner.v2_store.restore_call_record(record)
         })?;
         tracing::info!(

@@ -53,6 +53,8 @@ pub(super) fn persist_dispatched_call(
     publication_hook::run(store.run_dir(run_id));
     store.with_run_lock(run_id, |locked| {
         let current = locked.load_state(run_id)?;
+        // Issue 291: a session a resume replaced is refused as stale.
+        v2.require_session_executor(&current)?;
         // Executor ownership only: a pause, restart or force-accept moves
         // the generation but not the executor; a takeover does.
         if let Some(expected) = generation
@@ -83,6 +85,9 @@ fn publish(
     }
     store.with_run_lock(run_id, |locked| {
         let current = locked.load_state(run_id)?;
+        // Issue 291: a session a resume replaced is refused as stale, before
+        // any generation reading: nothing it sampled is its own.
+        v2.require_session_executor(&current)?;
         if let Some(expected) = generation
             && current.generation != expected
         {
@@ -110,8 +115,9 @@ fn save_and_project(
     kind: FixedCallProjectionKind,
 ) -> WorkflowResult<Option<WorkflowUiEvent>> {
     // Issue-256: on every run kind, a session stops writing once a
-    // restart moved the restart epoch on; checked under the run lock.
-    v2.require_session_restart_epoch()?;
+    // restart moved the restart epoch on; Issue 291: or once a newer
+    // executor owns the run. Checked under the run lock.
+    v2.require_session_owner()?;
     if kind != FixedCallProjectionKind::Reused {
         v2.save_call_record(record)?;
     }

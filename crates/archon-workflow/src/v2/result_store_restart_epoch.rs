@@ -78,7 +78,8 @@ impl WorkflowV2ResultStore {
             .map_err(|err| WorkflowError::io(&path, err))?;
         let mut lock = fd_lock::RwLock::new(file);
         let _guard = lock.write().map_err(|err| WorkflowError::io(&path, err))?;
-        self.require_session_restart_epoch()?;
+        // Issue 291: the epoch, and the executor this session writes for.
+        self.require_session_owner()?;
         write()
     }
 }

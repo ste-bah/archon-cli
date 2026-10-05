@@ -49,6 +49,12 @@ impl WorkflowScriptHost {
                 )));
             }
         }
+        // Issue 291: a session a resume replaced dispatches nothing -- no
+        // tool, pause or workflow call -- and is told so. An unreadable state
+        // proves nothing here; the paths below report it as before.
+        if let Err(stale @ WorkflowError::ControlCancelled(_)) = self.owned_generation() {
+            return Err(stale);
+        }
         // #189 Phase 4. Intercepted before the call is turned into a
         // `WorkflowV2CallExecution`: a tool call is not a workflow call. It
         // produces no stored record, takes part in no reuse, and has nothing to
@@ -99,11 +105,7 @@ impl WorkflowScriptHost {
         let execution_generation = self.fixed_execution_generation()?;
         // A stall belongs to the generation at entry, including a non-fixed
         // script. Never re-sample ownership after an awaited dispatch.
-        let view_generation = self
-            .runner
-            .workflow_store
-            .load_state(&self.runner.run_id)?
-            .generation;
+        let view_generation = self.owned_generation()?;
         let input_hash = input_hash_with_source_fingerprint(
             &execution.input,
             source_metadata.source_fingerprint.as_deref(),
@@ -273,11 +275,7 @@ impl WorkflowScriptHost {
             &self.runner.run_id,
             &execution.call.id,
         )?;
-        mark_v2_call_running(
-            &self.runner.workflow_store,
-            &self.runner.run_id,
-            &execution.call.id,
-        )?;
+        self.mark_call_running_owned(&execution.call.id)?;
         self.emit_v2_event(
             WorkflowEventKind::StageStarted,
             serde_json::json!({
@@ -318,12 +316,7 @@ impl WorkflowScriptHost {
         let call_id = execution.call.id.clone();
         // The generation this dispatch runs under (Issue 263): only it may
         // pause the run for a never-started streak.
-        let dispatch_generation = execution_generation.or_else(|| {
-            (self.runner.workflow_store)
-                .load_state(&self.runner.run_id)
-                .ok()
-                .map(|run| run.generation)
-        });
+        let dispatch_generation = execution_generation.or(call_generation);
         let dispatched = self
             .refreshing_inflight(
                 &execution,

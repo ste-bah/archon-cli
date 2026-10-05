@@ -110,9 +110,7 @@ impl WorkflowScriptHost {
             // recorded: a restart since this session opened, or a resume that
             // gave the run to a newer executor.
             self.runner.v2_store.require_session_restart_epoch()?;
-            if let Some(generation) = self.runner.start_generation {
-                archon_workflow::control_pause::require_executor(&run, generation)?;
-            }
+            self.runner.v2_store.require_session_executor(&run)?;
             // Coverage and the grant share the lock with run control and
             // generation-owned persistence: no slot may change between them.
             let credit = self.pause_credit(&record_path, &pause_id)?;
