@@ -71,4 +71,58 @@ console.log(JSON.stringify({
         assert!(!line.contains(".slice("), "{line}");
         assert!(!prelude.contains(".slice(0, 6000)"));
     }
+
+    /// Issue 219 round 3: a demoted branch's fix prompt (the completion
+    /// unit's verbatim rejected envelope) carries the path of the evidence
+    /// file that holds every declared-contract finding.
+    #[test]
+    fn the_fix_prompt_names_the_file_holding_every_contract_finding() {
+        let run = tempfile::tempdir().expect("tmp");
+        let findings: Vec<String> = (1..=1000)
+            .map(|n| format!("records[{n}] declared instance is missing from the artifact"))
+            .collect();
+        let mut outcome = crate::v2::WorkflowV2BranchOutcome {
+            item_id: "TASK-1".to_string(),
+            role: "implementer".to_string(),
+            status: crate::v2::WorkflowV2Status::Accepted,
+            result: Some(crate::v2::WorkflowV2Result::accepted("done")),
+            error: None,
+            failure_kind: None,
+            item_input_hash: None,
+            completion_evidence: Vec::new(),
+        };
+        crate::v2::verification::demote_failed_contract(&mut outcome, &findings, Some(run.path()));
+        let result = outcome.result.expect("result");
+        let path = result.data["declared_contract_findings_path"]
+            .as_str()
+            .expect("path")
+            .to_string();
+        let envelope = serde_json::json!({ "result": result });
+        let prelude = super::super::V3_PRIMITIVES_JS;
+        let start = prelude
+            .find("  const completionText = ")
+            .expect("completionText");
+        let end = prelude
+            .find("  const completionSaid = ")
+            .expect("completionSaid");
+        let driver = format!(
+            "{}\nconst rejected = `Implementation envelope:\\n${{completionText({envelope})}}`;\nprocess.stdout.write(`Remediate TASK-1. The previous attempt was REJECTED. Fix exactly what these verbatim envelopes name:\\n${{rejected}}`);\n",
+            &prelude[start..end]
+        );
+        let dir = tempfile::tempdir().expect("tmp");
+        let script = dir.path().join("prompt.mjs");
+        std::fs::write(&script, driver).expect("write driver");
+        let out = std::process::Command::new("node")
+            .arg(&script)
+            .output()
+            .expect("node must be available");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let prompt = String::from_utf8_lossy(&out.stdout);
+        assert!(prompt.contains(&format!("full list at {path}")), "{prompt}");
+        assert!(prompt.len() < 40 * 1024, "{}", prompt.len());
+    }
 }

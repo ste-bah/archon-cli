@@ -131,7 +131,7 @@ async fn enforce_one(
             ContractVerification::Unavailable(reason) => return Some(reason),
             ContractVerification::Failed(detail) => {
                 stamp_contract_evaluator(outcome, shared_floor_count, generated_count);
-                demote_failed_contract(outcome, &detail);
+                demote_failed_contract(outcome, &detail, run_root);
                 return None;
             }
         }
@@ -317,7 +317,7 @@ pub(super) async fn run_contract_verifier_for(
         let _ = stdin.write_all(script.as_bytes()).await;
         let _ = stdin.shutdown().await;
     }
-    let run = child.wait_with_output();
+    let run = bounded_output(child);
     let output = match tokio::time::timeout(timeout, run).await {
         Ok(Ok(output)) => output,
         // Fail closed: an unrunnable verifier is not evidence of success --
@@ -346,6 +346,15 @@ pub(super) async fn run_contract_verifier_for(
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let verdicts = verifier_verdicts(&stdout);
+    // Issue 219: past the read cap the verdict cannot be read whole. What
+    // was read still counts; a pass never does.
+    let cut = (output.stdout_total > output.stdout.len() as u64).then(|| {
+        format!(
+            "declared contract verifier output cut at {} of {} bytes [output cut]: any failure printed after the cut is unread, and its verdict is not trusted as a pass",
+            output.stdout.len(),
+            output.stdout_total
+        )
+    });
     // Any stage that reported a failure demotes the branch, whichever one it
     // was. Returning on the FIRST verdict instead would let the typed
     // pre-check's permissive `{"status":"verified"}` mask the contract
@@ -355,12 +364,12 @@ pub(super) async fn run_contract_verifier_for(
         .filter_map(verdict_failure)
         .flatten()
         .collect();
-    if !failures.is_empty() {
-        return ContractVerification::Failed(failures);
+    if !failures.is_empty() || cut.is_some() {
+        return ContractVerification::Failed(failures.into_iter().chain(cut).collect());
     }
     if !output.status.success() {
         // Its end and its failure lines (stdout when stderr is silent),
-        // within the 500-char gap cap below.
+        // well within one finding's 4 KB gap bound (`contracts_demote`).
         let said = if output.stderr.trim_ascii().is_empty() {
             &output.stdout
         } else {
@@ -444,9 +453,12 @@ pub(super) fn verdict_failure(verdict: &serde_json::Value) -> Option<Vec<String>
     })
 }
 
+#[path = "contracts_output.rs"]
+mod output;
+use output::bounded_output;
 #[path = "contracts_demote.rs"]
 mod demote;
-pub(super) use demote::demote_failed_contract;
+pub(crate) use demote::demote_failed_contract;
 
 #[cfg(test)]
 #[path = "contracts_env_tests.rs"]

@@ -364,7 +364,11 @@ mod declared_contract_enforcement_tests {
     #[test]
     fn a_failed_contract_demotes_the_branch_with_a_typed_gap() {
         let mut outcome = accepted_outcome("implement-tdl-080");
-        demote_failed_contract(&mut outcome, &["close steps are constant".to_string()]);
+        demote_failed_contract(
+            &mut outcome,
+            &["close steps are constant".to_string()],
+            None,
+        );
         assert_eq!(outcome.status, WorkflowV2Status::NeedsReview);
         assert_eq!(outcome.failure_kind, Some(BranchFailureKind::Semantic));
         let result = outcome.result.expect("result");
