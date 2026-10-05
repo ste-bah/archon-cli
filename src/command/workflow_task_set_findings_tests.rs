@@ -276,3 +276,42 @@ async fn a_freeze_under_a_broken_scratch_policy_refuses_without_asking_an_author
     );
     assert_eq!(client.authored(), 0, "no author was asked");
 }
+
+/// Issue 328: the lock records the tree the freeze proved its checks on,
+/// and once recorded that baseline is kept by every later publication.
+#[tokio::test]
+async fn a_freeze_records_the_baseline_it_proved_on_and_keeps_it() {
+    let (project, outside, tasks, prd) = outside_set(VACUOUS);
+    let client = Arc::new(ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, SOUND),
+        |_, _| true,
+    ));
+    let scope = AuthorScope::for_task_set(project.path(), &tasks, &prd);
+    let prepared = prepare_acceptance_freeze_reauthoring(
+        project.path(),
+        &tasks,
+        &prd,
+        GateMode::Enforce,
+        client,
+        &scope,
+    )
+    .await
+    .expect("a sound check freezes");
+    let base = archon_workflow::repository_record::read_repository_record(&tasks)
+        .unwrap()
+        .unwrap()
+        .base_commit;
+    assert_eq!(
+        prepared.lock.baseline_commit.as_deref(),
+        Some(base.as_str())
+    );
+    let _ = outside;
+    // A later publication whose probe names none keeps the recorded one.
+    std::fs::write(
+        tasks.join(archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE),
+        serde_json::to_vec(&prepared.lock).unwrap(),
+    )
+    .unwrap();
+    let (lock, _) = acceptance_lock_and_pin(&tasks, FreezeGateMode::Enforce, &[], b"{}", None);
+    assert_eq!(lock.baseline_commit.as_deref(), Some(base.as_str()));
+}

@@ -166,25 +166,32 @@ fn working(
     contract
 }
 
+/// The tree an authored check is proven on: the round's baseline, else the
+/// task set's (`Baseline::for_task_set`).
+fn baseline_of(site: &Site<'_>) -> Option<Baseline> {
+    let context = site.context;
+    match site.base {
+        Some(commit) => Some(Baseline {
+            commit: commit.to_string(),
+            repository: context.repository.clone(),
+        }),
+        None => Baseline::for_task_set(&context.repository, &context.task_root),
+    }
+}
+
 /// The probe every authored check clears: it runs without crashing at the
 /// round's own site, and it fails on the tree before implementation -- the
-/// run's base commit, else the commit the task set's decomposition recorded
-/// (`Baseline::for_task_set`). With neither, no check can be proven able to
+/// round's baseline (Issue 328: the one its freeze recorded,
+/// `Baseline::round_commit`), else the task set's (`Baseline::for_task_set`). With neither, no check can be proven able to
 /// fail, so none is authored (M5): an error, never an unproven publish.
 pub(super) fn probe(site: &Site<'_>) -> Result<HostProbe, String> {
     let context = site.context;
-    let baseline = match site.base {
-        Some(commit) => Baseline {
-            commit: commit.to_string(),
-            repository: context.repository.clone(),
-        },
-        None => Baseline::for_task_set(&context.repository, &context.task_root).ok_or_else(|| {
-            format!(
-                "no pre-implementation tree is known to prove an authored check can fail: the run recorded no base commit and {} is not a git checkout the task set records",
-                context.repository.display()
-            )
-        })?,
-    };
+    let baseline = baseline_of(site).ok_or_else(|| {
+        format!(
+            "no pre-implementation tree is known to prove an authored check can fail: the run recorded no base commit and {} is not a git checkout the task set records",
+            context.repository.display()
+        )
+    })?;
     Ok(HostProbe::at(
         context.project.clone(),
         context.repository.clone(),
@@ -429,7 +436,8 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
         }));
     }
     let contract = working(&base, &owed, &staged);
-    let published = publish_fresh(context, &prd_path, &contract);
+    let baseline = baseline_of(site).map(|baseline| baseline.commit);
+    let published = publish_fresh(context, &prd_path, &contract, baseline);
     let mut repair = AcceptanceContractRepairV1 {
         check_ids,
         trigger: REPAIR_TRIGGER_AUTHORED.into(),

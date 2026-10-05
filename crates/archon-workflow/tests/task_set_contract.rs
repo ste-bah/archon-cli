@@ -108,6 +108,7 @@ fn portable_lock_hashes_exact_file_bytes_and_pin_detects_reminting() {
         algorithm: "blake3".into(),
         digest: digest.clone(),
         gate: clean_stamp(),
+        baseline_commit: None,
     };
     fs::write(
         root.join(ACCEPTANCE_LOCK_FILE),
@@ -141,6 +142,7 @@ fn portable_lock_hashes_exact_file_bytes_and_pin_detects_reminting() {
         algorithm: "blake3".into(),
         digest: replacement_digest,
         gate: clean_stamp(),
+        baseline_commit: None,
     };
     fs::write(
         root.join(ACCEPTANCE_LOCK_FILE),
@@ -241,6 +243,7 @@ fn pin_binds_the_canonical_task_directory() {
             algorithm: "blake3".into(),
             digest: digest.clone(),
             gate: clean_stamp(),
+            baseline_commit: None,
         })
         .unwrap(),
     )

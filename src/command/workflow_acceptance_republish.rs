@@ -131,6 +131,7 @@ fn publish_chain(
         verified.acceptance_mode,
         &findings,
         &contract_bytes,
+        request.gate.probe.baseline_commit(),
     );
     // Obligations are unchanged by a per-check repair, so the operator's
     // recorded waivers still describe this task set.

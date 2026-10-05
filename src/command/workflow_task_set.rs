@@ -217,6 +217,8 @@ pub(crate) async fn prepare_acceptance_freeze_resumable(
         resume,
     )
     .await?;
+    // Issue 328: the lock records the tree the checks were proven on.
+    let baseline_commit = (probed.baseline.as_ref()).map(|runs| runs.commit.clone());
     // Issue 275: nor is one whose failure there is its own setup breaking a
     // rule a correct implementation keeps: it could never pass.
     let probed = passability::judge_baseline_failures(
@@ -238,6 +240,7 @@ pub(crate) async fn prepare_acceptance_freeze_resumable(
         freeze_mode,
         &contract,
         probed,
+        baseline_commit,
     )
 }
 

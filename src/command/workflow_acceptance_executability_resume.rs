@@ -17,7 +17,8 @@
 //!   same mutated check and meets its saved verdict too.
 //!
 //! Only verdicts are saved, never an operational result: a check that
-//! timed out or could not run is run again by the next attempt.
+//! timed out or could not run -- or failed for its host, gave no verdict
+//! (Issue 328: `verdict::host_failure`) -- is run again by the next attempt.
 
 use std::path::PathBuf;
 
@@ -79,7 +80,8 @@ impl ResultStore {
                 if saved.schema == SCHEMA
                     && saved.key == key
                     && saved.result.operational_error.is_none()
-                    && saved.result.classification.is_some() =>
+                    && saved.result.classification.is_some()
+                    && super::verdict::host_failure(&saved.result).is_none() =>
             {
                 Some(saved.result)
             }
@@ -95,7 +97,9 @@ impl ResultStore {
         let Some(path) = self.path(key) else {
             return false;
         };
-        if result.operational_error.is_some() {
+        // Issue 328: nor a run that failed for its host (a program that
+        // could not start, a tree that did not build): no verdict.
+        if result.operational_error.is_some() || super::verdict::host_failure(result).is_some() {
             return false;
         }
         let mut result = result.clone();

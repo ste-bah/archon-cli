@@ -92,7 +92,9 @@ pub(crate) fn non_accepted_ids(contract: &AcceptanceContract) -> BTreeSet<String
         .collect()
 }
 
-/// Stamp, lock and pin a judged contract into a publishable freeze.
+/// Stamp, lock and pin a judged contract into a publishable freeze; the
+/// lock records `baseline_commit`, the tree its checks were proven on.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn finish_acceptance(
     project_root: &Path,
     tasks_root: &Path,
@@ -101,6 +103,7 @@ pub(super) fn finish_acceptance(
     freeze_mode: FreezeGateMode,
     contract: &AcceptanceContract,
     probed: Vec<GateFinding>,
+    baseline_commit: Option<String>,
 ) -> Result<PreparedAcceptanceFreeze> {
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let mut findings = acceptance_findings(prd_path, prd_text, &contract_path, contract);
@@ -129,7 +132,13 @@ pub(super) fn finish_acceptance(
         contract,
     ));
     let contract_bytes = serde_json::to_vec_pretty(contract)?;
-    let (lock, pin) = acceptance_lock_and_pin(tasks_root, freeze_mode, &findings, &contract_bytes);
+    let (lock, pin) = acceptance_lock_and_pin(
+        tasks_root,
+        freeze_mode,
+        &findings,
+        &contract_bytes,
+        baseline_commit,
+    );
     Ok(PreparedAcceptanceFreeze {
         tasks_root: tasks_root.to_path_buf(),
         project_root: project_root.to_path_buf(),
@@ -151,12 +160,17 @@ fn cannot_pass_prefix(id: &str) -> String {
     format!("check '{id}': {}", super::passability::CANNOT_PASS)
 }
 
-/// A fresh acceptance lock and a pin with no successor skeleton bound.
+/// A fresh acceptance lock and a pin with no successor skeleton bound. The
+/// lock records `baseline_commit`, the tree this publication's checks were
+/// proven on -- which is the recorded one whenever the task set's lock
+/// records one (`Baseline::for_task_set`, `Baseline::for_round`) -- else
+/// the baseline the lock already records (Issue 328: one baseline).
 pub(super) fn acceptance_lock_and_pin(
     tasks_root: &Path,
     freeze_mode: FreezeGateMode,
     findings: &[GateFinding],
     contract_bytes: &[u8],
+    baseline_commit: Option<String>,
 ) -> (AcceptanceLock, AcceptancePin) {
     let stamp = gate_stamp(freeze_mode, findings);
     let digest = content_digest(contract_bytes);
@@ -164,6 +178,8 @@ pub(super) fn acceptance_lock_and_pin(
         algorithm: "blake3".into(),
         digest: digest.clone(),
         gate: stamp.clone(),
+        baseline_commit: baseline_commit
+            .or_else(|| super::executability::recorded_commit(tasks_root)),
     };
     let pin = AcceptancePin {
         check_sources_digest: None,
@@ -287,13 +303,15 @@ impl PreparedAcceptanceFreeze {
     }
 }
 
-/// Re-prepare a freeze from a contract whose checks were re-judged in place.
+/// Re-prepare a freeze from a contract whose checks were re-judged in place
+/// and proven on `baseline_commit`.
 pub(crate) fn prepare_from_judged(
     project_root: &Path,
     tasks_root: &Path,
     prd_path: &Path,
     mode: GateMode,
     contract: &AcceptanceContract,
+    baseline_commit: Option<String>,
 ) -> Result<PreparedAcceptanceFreeze> {
     let (prd, _, _) = validate_prd_input(prd_path)?;
     let prd_text = String::from_utf8(prd).context("PRD is not UTF-8")?;
@@ -305,6 +323,7 @@ pub(crate) fn prepare_from_judged(
         freeze_mode(mode)?,
         contract,
         Vec::new(),
+        baseline_commit,
     )
 }
 
@@ -393,7 +412,15 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
         eprintln!("{diagnostic}");
     }
     let repaired = repaired.map_err(unproven_incomplete)?;
-    prepare_from_judged(project_root, tasks_root, prd_path, mode, &repaired)
+    let baseline = prepared.lock.baseline_commit.clone();
+    prepare_from_judged(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        &repaired,
+        baseline,
+    )
 }
 
 /// An unproven check ends the unstaged freeze incomplete and resumable

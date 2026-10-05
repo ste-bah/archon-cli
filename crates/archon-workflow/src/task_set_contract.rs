@@ -131,6 +131,11 @@ pub struct AcceptanceLock {
     pub algorithm: String,
     pub digest: String,
     pub gate: FreezeGateStamp,
+    /// Issue 328: the pre-implementation commit the freeze proved every
+    /// check able to fail on. A run re-proves on this same commit; absent in
+    /// locks written before it was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline_commit: Option<String>,
 }
 
 pub use crate::task_set_lineage::AcceptancePin;

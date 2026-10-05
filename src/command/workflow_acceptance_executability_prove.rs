@@ -89,8 +89,10 @@ pub(super) async fn prove(
         }
         let result = result.expect("a result when the run completed");
         let moved = markers.moved(result);
+        // Issue 328: nor did a run that failed for its host (a program that
+        // could not start, a tree that did not build) fail on its own terms.
         let crashed = !super::crash_findings(&mutated, [result]).is_empty()
-            || matches!(result.exit_code, Some(126 | 127));
+            || super::verdict::host_failure(result).is_some();
         if moved.is_empty() {
             findings.insert(
                 id.clone(),
@@ -112,7 +114,7 @@ pub(super) async fn prove(
             findings.insert(
                 id.clone(),
                 format!(
-                    "{}; {already}; with {} moved aside it only crashed or failed to start a program, which says nothing about its criterion",
+                    "{}; {already}; with {} moved aside it only crashed, failed to start a program or failed to build, which says nothing about its criterion",
                     passed_there(id),
                     moved.join(", ")
                 ),

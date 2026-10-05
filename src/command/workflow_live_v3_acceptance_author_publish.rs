@@ -16,11 +16,13 @@ pub(super) struct Refused {
 }
 
 /// Freeze `contract` exactly as `workflow freeze-acceptance` publishes, under
-/// the enforce gate: every finding refuses it.
+/// the enforce gate: every finding refuses it. The lock records
+/// `baseline_commit`, the tree its checks were proven on (Issue 328).
 pub(super) fn publish_fresh(
     context: &StageContext,
     prd_path: &Path,
     contract: &AcceptanceContract,
+    baseline_commit: Option<String>,
 ) -> Result<String, Refused> {
     use crate::command::workflow_gate::{GateEvaluation, GateId, run_sync_gate};
     let refused = |error: anyhow::Error| Refused {
@@ -34,6 +36,7 @@ pub(super) fn publish_fresh(
         prd_path,
         mode,
         contract,
+        baseline_commit,
     )
     .map_err(refused)?;
     prepared.record_recovery_refreeze().map_err(refused)?;

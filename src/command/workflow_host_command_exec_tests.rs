@@ -59,6 +59,7 @@ pub(super) fn seed_frozen_chain(
             algorithm: "blake3".into(),
             digest: acceptance_digest.clone(),
             gate: stamp(),
+            baseline_commit: None,
         })
         .unwrap(),
     )

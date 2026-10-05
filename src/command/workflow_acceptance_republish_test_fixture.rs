@@ -205,6 +205,7 @@ pub(crate) fn write_chain(
         algorithm: "blake3".into(),
         digest: digest.clone(),
         gate: stamp(mode, findings),
+        baseline_commit: None,
     };
     std::fs::write(
         tasks.join(ACCEPTANCE_LOCK_FILE),

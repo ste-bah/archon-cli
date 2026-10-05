@@ -37,6 +37,7 @@ fn write_acceptance(root: &std::path::Path) -> (String, AcceptancePin) {
             algorithm: "blake3".into(),
             digest: digest.clone(),
             gate: clean_stamp(),
+            baseline_commit: None,
         })
         .unwrap(),
     )

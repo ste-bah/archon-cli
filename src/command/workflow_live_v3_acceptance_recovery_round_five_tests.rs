@@ -170,6 +170,7 @@ fn recovery_refreeze_reruns_skeleton_coverage() {
         &run.set.prd,
         archon_core::config::GateMode::Enforce,
         &contract,
+        None,
     )
     .unwrap();
     prepared.record_recovery_refreeze().unwrap();
@@ -195,6 +196,7 @@ fn stale_recovery_root_does_not_block_a_fresh_freeze() {
         &run.set.prd,
         archon_core::config::GateMode::Enforce,
         &run.set.contract(),
+        None,
     )
     .unwrap();
     assert!(
