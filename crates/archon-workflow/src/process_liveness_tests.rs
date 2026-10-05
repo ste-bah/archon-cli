@@ -24,7 +24,8 @@ fn pid_zero_is_never_a_running_process() {
 
 #[test]
 fn a_pid_outside_every_platform_range_is_not_running() {
-    // On Unix it would turn negative and name a process group; on Windows no
-    // process has it, as process ids are multiples of four.
+    // On Unix it would turn negative and name a process group. Windows ignores
+    // the low two bits of a pid, so this probes 0xFFFF_FFFC, far above any pid
+    // Windows hands out.
     assert!(!process_alive(u32::MAX));
 }

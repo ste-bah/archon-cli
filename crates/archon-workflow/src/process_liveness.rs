@@ -12,6 +12,10 @@
 /// a process the caller can own (on Unix `kill(0, 0)` probes the caller's own
 /// process group, on Windows it is the System Idle Process), so it is not
 /// running.
+///
+/// Only an answer that no process has `pid` (Unix ESRCH, Windows
+/// ERROR_INVALID_PARAMETER) or that it has exited means not running. Any
+/// other probe error proves nothing, so the process counts as running.
 pub fn process_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
@@ -26,43 +30,46 @@ fn platform_alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
     };
-    // SAFETY: signal 0 only probes whether the process exists; EPERM means it
-    // exists and belongs to someone else.
+    // SAFETY: signal 0 only probes whether the process exists. Only ESRCH
+    // means no such process; EPERM means it exists and belongs to someone
+    // else.
     let probed = unsafe { libc::kill(pid, 0) };
-    probed == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    probed == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
 #[cfg(windows)]
 fn platform_alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{
-        CloseHandle, ERROR_ACCESS_DENIED, GetLastError, STILL_ACTIVE,
+        CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, WAIT_OBJECT_0,
     };
+    use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
     use windows_sys::Win32::System::Threading::{
-        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
     };
 
     // SAFETY: OpenProcess takes plain values and returns a null handle on
     // failure; nothing is borrowed.
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, pid) };
     if handle.is_null() {
         // SAFETY: reads this thread's last error, set by the failed call.
-        // Access denied means the process exists but belongs to someone the
-        // caller may not query; every other failure (ERROR_INVALID_PARAMETER
-        // for a pid with no process) means there is no such process.
-        return unsafe { GetLastError() } == ERROR_ACCESS_DENIED;
+        // As on Unix, where only ESRCH means no process: only
+        // ERROR_INVALID_PARAMETER says no process has this pid. Every other
+        // failure (access denied for another user's process, a resource or
+        // quota error) proves nothing about the process, so it counts as
+        // running rather than letting a caller reclaim a live owner's work.
+        return unsafe { GetLastError() } != ERROR_INVALID_PARAMETER;
     }
-    let mut code: u32 = 0;
-    // SAFETY: `handle` is a valid process handle opened above with query
-    // rights, and `code` outlives the call.
-    let queried = unsafe { GetExitCodeProcess(handle, &mut code) };
+    // SAFETY: `handle` is a valid process handle opened above with
+    // SYNCHRONIZE; a zero timeout only polls its state.
+    let waited = unsafe { WaitForSingleObject(handle, 0) };
     // SAFETY: `handle` was opened above and is closed exactly once here.
     unsafe { CloseHandle(handle) };
     // A process that has exited keeps its object while any handle to it is
-    // open, so a successful open alone does not mean it runs: only an exit
-    // code other than STILL_ACTIVE proves it ended. A query that fails proves
-    // nothing, and the object exists, so like access denied it counts as
-    // running rather than letting a caller reclaim a live owner's work.
-    queried == 0 || code == STILL_ACTIVE as u32
+    // open, so a successful open alone does not mean it runs. Its handle is
+    // signaled exactly when it has exited, which, unlike an exit code
+    // compared with STILL_ACTIVE (259), no exit status can imitate. A timeout
+    // means it runs; a failed wait proves nothing and counts as running.
+    waited != WAIT_OBJECT_0
 }
 
 #[cfg(not(any(unix, windows)))]
