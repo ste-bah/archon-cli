@@ -316,8 +316,8 @@ pub(crate) use findings::{
 use publish::cleanup_committed_backups;
 pub(crate) use publish::{
     ChainLock, ChainRead, begin_publish, create_dir_all_durably, lock_and_recover,
-    publish_files_atomically, recover_interrupted_publish, sync_parent, validate_destination,
-    validate_existing_parents, write_durably,
+    publish_files_atomically, recover_interrupted_publish, register_publish_settle, sync_parent,
+    validate_destination, validate_existing_parents, write_durably,
 };
 use publish::{publish_acceptance_files_with_recovery, publish_skeleton_files};
 
