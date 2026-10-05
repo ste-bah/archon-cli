@@ -208,7 +208,13 @@ fn bytes_under(dir: &Path) -> u64 {
 fn list_in(program: &Path, root: &Path, at: &Context) -> Result<Listing, String> {
     let (home, work) = (root.join("home"), root.join("work"));
     let shown = program.display();
+    // Only the site's own context (see `Context`), and never the engine's
+    // own credentials whatever that context holds (Issue 282).
     let mut environment = at.environment.clone();
+    environment.retain(|name, _| {
+        !(archon_tools::bash::ENGINE_CREDENTIAL_VARS.iter())
+            .any(|owned| owned.eq_ignore_ascii_case(name))
+    });
     for name in ["HOME", "TMPDIR"] {
         let fresh = home.to_string_lossy().into_owned();
         environment.entry(name.into()).or_insert(fresh);
@@ -339,14 +345,35 @@ fn list_in(program: &Path, root: &Path, at: &Context) -> Result<Listing, String>
     if status.success() && !commands.is_empty() {
         return Ok(Listing::Commands(commands));
     }
-    Ok(Listing::Unlisted(format!(
-        "`{shown} --list`, run with the site's environment, {}{said}",
-        match status.code() {
-            Some(0) => "listed no commands".to_string(),
-            code => format!("exited {}", code.unwrap_or(-1)),
-        },
-    )))
+    // It has no listing only when it says so: it listed nothing and
+    // succeeded, or it rejected `--list` itself. Anything else -- commands
+    // and then a failure, a toolchain proxy that could not choose a
+    // toolchain -- is no answer.
+    if status.success() && commands.is_empty() {
+        return Ok(Listing::Unlisted(format!(
+            "`{shown} --list`, run with the site's environment, listed no commands{said}"
+        )));
+    }
+    let code = status.code().unwrap_or(-1);
+    match (out.lines().chain(err.lines())).find(|line| NO_LIST.is_match(line)) {
+        Some(line) => Ok(Listing::Unlisted(format!(
+            "`{shown} --list`, run with the site's environment, exited {code}: {}",
+            line.trim()
+        ))),
+        None => Err(format!(
+            "`{shown} --list` exited {code} without listing its commands{said}"
+        )),
+    }
 }
+
+/// A line that rejects the `--list` option itself: `unknown option:
+/// --list`, `unexpected argument '--list' found`.
+static NO_LIST: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r"(?i)^(?:.*\b(?:unknown|unrecogni[sz]ed|invalid|unexpected|illegal|unsupported|bad)\s+(?:option|argument|flag|switch|subcommand|command)\b.*--list\b|.*--list\b.*\b(?:unknown|unrecogni[sz]ed|invalid|unexpected|illegal|unsupported|bad)\s+(?:option|argument|flag|switch|subcommand|command)\b|.*\bno such (?:option|flag)\b.*--list\b|.*--list\b.*(?:wasn't|was not) expected)",
+    )
+    .expect("static pattern")
+});
 
 /// The signal that ended `status`, for an operator.
 fn signal(status: &ExitStatus) -> String {

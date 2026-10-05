@@ -205,14 +205,14 @@ fn the_operators_rustup_home_is_never_consulted() {
     // the host says so rather than list from the operator's own home.
     let warned = bin.warned("cargo nextest run");
     assert!(
-        warned.len() == 1 && warned[0].contains("is not known") && warned[0].contains("rustup"),
+        warned.len() == 1 && warned[0].contains("could not tell") && warned[0].contains("rustup"),
         "{warned:?}"
     );
-    // Nor is that a proof: the host has `cargo-nextest`, so the rejection
-    // gives no verdict whatever the listing could not say.
+    // Nor is that a proof: a listing that could not choose a toolchain is
+    // no answer.
     let odd = result(Some(101), b"", b"error: no such command: `nextest`\n");
     let why = no_verdict("cargo nextest", &odd, &bin.context()).expect("no verdict");
-    assert!(why.contains("is not known"), "{why}");
+    assert!(why.contains("could not tell"), "{why}");
 }
 
 #[test]
@@ -249,10 +249,8 @@ fn a_site_that_runs_in_its_own_home_lists_what_that_home_installs() {
         unresolved_on_path(&["cargo archon333home"], &at)[0].is_empty(),
         "cargo finds it in the site's own home"
     );
-    // Listed there, so a rejection of it is a site the host cannot see.
     let odd = result(Some(101), b"", b"error: no such command: `archon333home`\n");
-    let why = no_verdict("cargo archon333home", &odd, &at).expect("no verdict");
-    assert!(why.contains("the host cannot tell"), "{why}");
+    assert_eq!(no_verdict("cargo archon333home", &odd, &at), None);
 }
 
 // ---- Item 3: an option's value before the subcommand.

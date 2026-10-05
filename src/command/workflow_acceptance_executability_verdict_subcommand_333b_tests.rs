@@ -91,8 +91,8 @@ fn a_plugin_the_host_has_gives_no_verdict_whatever_the_listing_says() {
         no_verdict("archon333git status", &run, &bin.context()),
         None
     );
-    // A listing that names the word never turns it back into a verdict:
-    // the listing does not see the check's tree.
+    // A listing that names the word turns it back into a verdict, when
+    // the rejection is not the tool's own (it names no program).
     let lists = "#!/bin/sh\n[ \"$1\" = --list ] && { printf 'Commands:\\n    lfs    Built in\\n'; exit 0; }\nexit 1\n";
     let bin = Bin::with_host(
         Path::new("/bin/sh"),
@@ -100,8 +100,10 @@ fn a_plugin_the_host_has_gives_no_verdict_whatever_the_listing_says() {
         &[("archon333lister-lfs", PLAIN)],
     );
     let odd = result(Some(1), b"", b"error: unknown command 'lfs'\n");
-    let why = no_verdict("archon333lister lfs", &odd, &bin.context()).expect("no verdict");
-    assert!(why.contains("the host cannot tell"), "{why}");
+    assert_eq!(
+        no_verdict("archon333lister lfs", &odd, &bin.context()),
+        None
+    );
 }
 
 #[test]
@@ -122,7 +124,7 @@ fn a_listing_with_no_answer_gives_no_verdict() {
 
 // ---- R3: deciding a verdict never holds an async worker.
 
-fn contract(command: &str) -> AcceptanceContract {
+pub(super) fn contract(command: &str) -> AcceptanceContract {
     serde_json::from_value(serde_json::json!({
         "schema_version": 1,
         "prd": {"path": "p.md", "digest": "d"},
@@ -150,8 +152,6 @@ async fn the_verdict_path_lists_off_the_async_thread() {
         &[("archon333late", &slow), ("archon333late-x", PLAIN)],
     );
     warm(&bin, &["archon333late"]);
-    // The host's own environment, for the originals a repair holds.
-    super::HOST_PATH.with(|path| *path.borrow_mut() = Some(bin.host_path()));
     let ticks = Arc::new(AtomicUsize::new(0));
     let counter = ticks.clone();
     let ticker = tokio::spawn(async move {
@@ -171,7 +171,10 @@ async fn the_verdict_path_lists_off_the_async_thread() {
     let why = silent(&check, &odd, &bin.context()).await;
     let during = ticks.load(Ordering::SeqCst);
     assert!(why.is_some_and(|why| why.contains(NOWHERE)));
-    let held = super::super::super::baseline::originals(&check, vec![odd]).await;
+    // The originals a repair holds, at a site of its own (another
+    // variable), so the tool is listed there too.
+    let site = bin.context_with(&[("ARCHON_333_SITE", "repair")]);
+    let held = super::super::super::baseline::originals(&site, &check, vec![odd]).await;
     let after = ticks.load(Ordering::SeqCst) - during;
     ticker.abort();
     assert!(during >= 20, "the runtime ran while it listed: {during}");

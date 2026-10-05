@@ -252,14 +252,15 @@ pub(crate) fn is_placeholder(entry: &AcceptanceCriterion) -> bool {
 /// How each of `results` fared, by id (`originals_at`), decided on a
 /// blocking thread: deciding it may list a tool, which must never hold an
 /// async worker (Issue 333).
+/// They are judged at `at`, the site they ran on (`HostProbe::check_site`),
+/// never the host: a program the host has but that site lacks is no
+/// verdict there, and a listing never sees the host's environment.
 pub(crate) async fn originals(
+    at: &super::verdict::Context,
     contract: &AcceptanceContract,
     results: Vec<CheckResult>,
 ) -> BTreeMap<String, Original> {
-    let (at, contract) = (
-        super::verdict::Context::new(None, contract),
-        contract.clone(),
-    );
+    let (at, contract) = (at.clone(), contract.clone());
     let ids: Vec<String> = results.iter().map(|r| r.acceptance_id.clone()).collect();
     tokio::task::spawn_blocking(move || originals_at(&contract, &results, &at))
         .await
@@ -276,7 +277,7 @@ pub(crate) fn originals_now<'a>(
     originals_at(
         contract,
         results,
-        &super::verdict::Context::new(None, contract),
+        &super::verdict::Context::on_host_path(contract),
     )
 }
 

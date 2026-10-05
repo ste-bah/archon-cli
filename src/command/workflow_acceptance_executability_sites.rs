@@ -300,6 +300,68 @@ pub(super) fn site_environment(probe: &HostProbe) -> (BTreeMap<String, String>, 
     }
 }
 
+/// The variables a check's tool is listed with at `probe`'s site (Issue
+/// 333), from that site's own context only. A scratch site's are what it
+/// gives every check: its bound and forwarded variables, never the rest of
+/// the host's (Issue 282). Another site runs its checks on the host's
+/// environment, so its listing gets only the variables a tool needs to
+/// find itself and its toolchain ([`LISTING_VARIABLES`]), and the
+/// toolchain homes under the site's HOME, never HOME itself: the listing
+/// is given a fresh one.
+pub(super) fn listing_environment(probe: &HostProbe) -> BTreeMap<String, String> {
+    let (environment, _) = site_environment(probe);
+    match &probe.site {
+        Site::Scratch(_) => environment,
+        Site::Direct | Site::Hermetic | Site::Unavailable(_) => narrowed(&environment),
+    }
+}
+
+/// The variables of a site that runs on the host's environment which a
+/// listing keeps: where programs are, the locale, and the toolchains.
+const LISTING_VARIABLES: &[&str] = &[
+    "PATH",
+    "PATHEXT",
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "TERM",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "PROGRAMW6432",
+    "PROGRAMDATA",
+    "CARGO_HOME",
+    "RUSTUP_HOME",
+    "RUSTUP_TOOLCHAIN",
+];
+
+/// `environment` with only [`LISTING_VARIABLES`], and the toolchain homes
+/// a tool would find under its HOME named outright.
+pub(super) fn narrowed(environment: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let mut kept: BTreeMap<String, String> = (environment.iter())
+        .filter(|(name, _)| {
+            LISTING_VARIABLES
+                .iter()
+                .any(|kept| kept.eq_ignore_ascii_case(name))
+        })
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+    if let Some(home) = environment.get("HOME") {
+        for (name, under) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
+            let dir = Path::new(home).join(under);
+            if dir.is_dir() {
+                kept.entry(name.into())
+                    .or_insert_with(|| dir.to_string_lossy().into_owned());
+            }
+        }
+    }
+    kept
+}
+
 /// The variables a scratch site of `policy` gives every check, besides its
 /// own fresh HOME, TMPDIR and build directories: those its policy binds,
 /// its toolchain PATH, and the host values it forwards.

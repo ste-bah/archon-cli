@@ -294,10 +294,18 @@ pub(super) async fn repair_ran(
         contract,
         &ids,
     );
-    // The round's own site is the tree these checks just ran on.
+    // The round's own site is the tree these checks just ran on, and they
+    // are judged there, never on the host.
+    let site = HostProbe::at(
+        round.context.project.clone(),
+        round.context.repository.clone(),
+        round.context.binding.clone(),
+    )
+    .check_site(contract);
     let failed = FailedTree {
         commit: None,
         originals: originals(
+            &site,
             contract,
             ids.iter()
                 .filter_map(|id| results.get(id))

@@ -41,16 +41,22 @@ fn a_tree_alias_the_listing_cannot_see_goes_back_to_its_author() {
         warned.len() == 1 && warned[0].contains(NOWHERE) && warned[0].contains(guard),
         "{warned:?}"
     );
-    // So too when the host has a program of that name.
+    // When the host has a program of that name, it is an environment tool,
+    // which no guard makes passable: it must not be depended on.
     let installed = [("cargo-archon333tree", PLAIN)];
     let bin = Bin::with_host(&or_skip!(host_cargo(), "cargo"), &[SIBLING], &installed);
     let why = no_verdict("cargo archon333tree", &odd, &bin.context()).expect("never a proof");
     assert!(
-        why.contains("environment lacks") && why.contains(guard),
+        why.contains("environment lacks")
+            && why.contains("must not depend")
+            && !why.contains(guard),
         "{why}"
     );
     let warned = bin.warned("cargo archon333tree");
-    assert!(warned.len() == 1 && warned[0].contains(guard), "{warned:?}");
+    assert!(
+        warned.len() == 1 && warned[0].contains("must not depend") && !warned[0].contains(guard),
+        "{warned:?}"
+    );
 }
 
 /// A site whose only tool is `name`, `script`; nothing on the host.

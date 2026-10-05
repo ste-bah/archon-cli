@@ -87,8 +87,11 @@ const RUNS_PRODUCT: &[&str] = &["test", "nextest", "run", "bench", "exec", "pyte
 pub(crate) struct Context {
     path: Option<String>,
     deliverables: Vec<String>,
-    /// Every variable the site gives a check, as `tool --list` sees them
-    /// (Issue 333): a toolchain proxy finds its toolchain through them.
+    /// The variables a listing of a tool runs with (Issue 333), and the
+    /// search path the check runs on among them. Only the site's own
+    /// context gives them (`silent::context`, [`Context::for_scratch`]):
+    /// nothing here reads the host's environment, so a listing never sees
+    /// the operator's (Issue 282).
     environment: BTreeMap<String, String>,
     host_path: Option<String>,
     /// How long a listing may print nothing before it is given up.
@@ -96,11 +99,11 @@ pub(crate) struct Context {
 }
 
 impl Context {
-    /// The site environment `environment` (the host's, on the host's search
-    /// path, when `None`), and
-    /// every path a floor of `contract` declares.
+    /// The site environment `environment`, from the site's own context
+    /// (never the host's: see the field), and every path a floor of
+    /// `contract` declares.
     pub(crate) fn new(
-        environment: Option<BTreeMap<String, String>>,
+        environment: BTreeMap<String, String>,
         contract: &AcceptanceContract,
     ) -> Self {
         let deliverables = (contract.acceptance.iter())
@@ -118,12 +121,14 @@ impl Context {
             })
             .filter(|path| !path.trim().is_empty())
             .collect();
-        let host = || {
-            let mut host: BTreeMap<String, String> = std::env::vars().collect();
-            host.extend(subcommand::host_path().map(|path| ("PATH".to_string(), path)));
-            host
-        };
-        Self::at(environment.unwrap_or_else(host), deliverables)
+        Self::at(environment, deliverables)
+    }
+
+    /// A site whose only variable is the host's own search path.
+    #[cfg(test)]
+    pub(crate) fn on_host_path(contract: &AcceptanceContract) -> Self {
+        let path = subcommand::host_path().map(|path| ("PATH".to_string(), path));
+        Self::new(path.into_iter().collect(), contract)
     }
 
     /// A scratch site of `policy`, as it gives every check the variables

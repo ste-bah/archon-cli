@@ -27,7 +27,7 @@ fn host() -> Context {
         "acceptance": [], "supplementary": []
     }))
     .unwrap();
-    Context::new(None, &contract)
+    Context::on_host_path(&contract)
 }
 
 const RUSTC: &str = "   Compiling lake v0.1.0 (/tmp/copy)\nerror[E0308]: mismatched types\n --> src/broken.rs:1:21\n  |\n1 | pub fn f() -> u32 { \"x\" }\n  |                     ^^^ expected `u32`, found `&str`\n\nerror: could not compile `lake` (lib) due to 1 previous error\n";
@@ -172,7 +172,7 @@ fn a_compile_error_in_a_declared_deliverable_is_a_verdict() {
         "supplementary": []
     }))
     .unwrap();
-    let at = Context::new(None, &contract);
+    let at = Context::on_host_path(&contract);
     let result = run(Some(101), "", RUSTC);
     assert_eq!(no_verdict("cargo test -p lake", &result, &at), None);
     assert!(no_verdict("cargo test -p lake", &result, &host()).is_some());

@@ -24,8 +24,15 @@ const EVIDENCE_BYTES: usize = 800;
 /// Where `probe`'s checks run: its site's environment, and `contract`'s
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
-    let (environment, _) = super::sites::site_environment(probe);
-    Context::new(Some(environment), contract)
+    Context::new(super::sites::listing_environment(probe), contract)
+}
+
+impl HostProbe {
+    /// Where this probe's checks run, for judging their results: its
+    /// site's own environment and `contract`'s deliverables.
+    pub(crate) fn check_site(&self, contract: &AcceptanceContract) -> Context {
+        context(self, contract)
+    }
 }
 
 /// [`silent_failure`] on a blocking thread: deciding it may list a tool

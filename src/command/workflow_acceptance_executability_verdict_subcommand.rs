@@ -85,18 +85,65 @@ pub(super) fn host_path() -> Option<String> {
 /// Why the failed run printing `output` gave no verdict because a
 /// subcommand one of `commands` runs does not resolve at `at`'s site (see
 /// the module docs); `None` otherwise.
+///
+/// It is judged only when `output` has a line rejecting, quoted, a word
+/// `tool word` may run as its subcommand, attributed to `tool` (the line
+/// or the few after it name `tool`, or name no other program the check
+/// runs), and nothing shows an assertion ran. Then, by the `tool --list`
+/// listing (`verdict_subcommand_list`), whether the host's own search path
+/// has a program `tool-word`, and whether the check's does:
+///
+/// | listing | host has `tool-word` | check's path has it | result |
+/// |---|---|---|---|
+/// | any | any | yes | verdict: the subcommand resolves, so the rejection is not for its lack; the check's own failure decides |
+/// | lists `word`, the rejection names `tool` | any | no | no verdict: the site rejected what the host lists, so the site lacks it (a toolchain its tree pins, which the listing never reads); the check depends on what the site does not provide |
+/// | lists `word`, the rejection names no program | any | no | verdict: `tool` has `word`, so the rejection came from something else the check runs |
+/// | lists commands without `word` | yes | no | no verdict: an environment tool the site lacks; the check must not depend on it |
+/// | lists commands without `word` | no | no | no verdict: no program anywhere provides it, so it passes only if the deliverable adds it (an alias in the tree); its author guards it (`tool --list \| grep -qw word && tool word`), so that its failure before the implementation is its own assertion |
+/// | lists none (it has no `--list`) | yes | no | no verdict: the environment lacks a program the host has; the check must not depend on it |
+/// | lists none (it has no `--list`) | no | no | verdict (Issue 328): nothing the site could install provides `word`, so only the deliverable can add it to its own tool |
+/// | no answer (it stalled, never stopped, could not run, failed) | any | no | no verdict: the host could not tell; the check must not depend on what it cannot show the site provides |
+///
+/// A verdict is a can-fail proof: the check is then held to fail before
+/// the implementation and pass after it. Every verdict cell above is one
+/// where some implementation can make it pass -- the subcommand resolves,
+/// or the rejection is not the tool's, or only the deliverable can provide
+/// the word. Every cell where the site may lack what the check needs, which
+/// no implementation can supply, gives no verdict: the check goes back to
+/// its author, and never becomes a task that can never pass.
 pub(super) fn missing(commands: &[Simple], output: &str, at: &Context) -> Option<String> {
     if ASSERTED.is_match(output) {
         return None;
     }
-    let rejections: Vec<&str> = output.lines().filter(|l| REJECTION.is_match(l)).collect();
+    let lines: Vec<&str> = output.lines().collect();
+    let rejections: Vec<usize> = (0..lines.len())
+        .filter(|&at| REJECTION.is_match(lines[at]))
+        .collect();
     if rejections.is_empty() {
         return None;
     }
+    let programs: Vec<String> = (commands.iter())
+        .filter_map(|command| command.program.as_deref())
+        .map(|program| which::bare_name(program.rsplit('/').next().unwrap_or(program)))
+        .collect();
     commands.iter().find_map(|command| {
         let (tool, program) = tool(command, at)?;
         candidates(command).into_iter().find_map(|name| {
-            (rejections.iter()).find(|line| quoted(line, name))?;
+            // Whether a rejection of `name` names `tool`; `None` when no
+            // rejection of it may be `tool`'s.
+            let names_tool = (rejections.iter())
+                .filter(|&&line| quoted(lines[line], name))
+                .filter_map(|&line| {
+                    let block = &lines[line..lines.len().min(line + 4)];
+                    let names = |program: &str| block.iter().any(|text| names(text, program));
+                    let others = (programs.iter()).any(|other| *other != tool && names(other));
+                    match (names(&tool), others) {
+                        (true, _) => Some(true),
+                        (false, false) => Some(false),
+                        (false, true) => None,
+                    }
+                })
+                .max()?;
             if at.on_path(&format!("{tool}-{name}")) {
                 return None;
             }
@@ -104,32 +151,40 @@ pub(super) fn missing(commands: &[Simple], output: &str, at: &Context) -> Option
             let lacks = format!(
                 "it runs `{tool} {name}`, but no program `{tool}-{name}` is on its search path (PATH={path})"
             );
+            let depends = depends(&tool, name);
             let host = plugin(&tool, name, at);
-            let guard = guard(&tool, name);
             match (listing(&program, at), host) {
-                // The host's listing never sees the check's tree (its
-                // aliases, the toolchain it pins), so it never gives a
-                // verdict the site's own rejection denies.
-                (Listing::Commands(builtins), _) if builtins.contains(name) => Some(format!(
-                    "{lacks}; the host lists `{name}` as built into `{tool}`, yet `{tool}` rejected it at the check's site, so that site differs from the host's listing (for example a toolchain its tree pins, which the host does not read) and the host cannot tell"
+                (Listing::Commands(builtins), _) if builtins.contains(name) => names_tool.then(|| format!(
+                    "{lacks}; the host lists `{name}` as built into `{tool}`, yet `{tool}` rejected it at the check's site, so that site lacks it (for example a toolchain its tree pins, which the host does not read). {depends}"
                 )),
                 (Listing::Commands(_), Some(host)) => Some(format!(
-                    "{lacks} and `{name}` is not a command built into `{tool}`, though the host has one at {}: a subcommand its environment lacks. {guard}",
+                    "{lacks} and `{name}` is not a command built into `{tool}`, though the host has one at {}: a subcommand its environment lacks. {depends}",
                     host.display()
                 )),
                 (Listing::Unlisted(why), Some(host)) => Some(format!(
-                    "{lacks}, though the host has one at {}: a subcommand its environment lacks (whether `{name}` is built into `{tool}` is not known: {why}). {guard}",
+                    "{lacks}, though the host has one at {}: a subcommand its environment lacks (whether `{name}` is built into `{tool}` is not known: {why}). {depends}",
                     host.display()
                 )),
                 (Listing::Commands(_), None) => Some(format!(
-                    "{lacks}, nor on the host's, and `{name}` is not a command built into `{tool}`: it passes only if the deliverable adds it. {guard}"
+                    "{lacks}, nor on the host's, and `{name}` is not a command built into `{tool}`: it passes only if the deliverable adds it. {}",
+                    guard(&tool, name)
                 )),
                 (Listing::Unlisted(_), None) => None,
                 (Listing::NoAnswer(why), _) => Some(format!(
-                    "{lacks}, and the host could not tell whether `{name}` is built into `{tool}`: {why}. {guard}"
+                    "{lacks}, and the host could not tell whether `{name}` is built into `{tool}`: {why}. {depends}"
                 )),
             }
         })
+    })
+}
+
+/// Whether `text` names `program` as a word of its own.
+fn names(text: &str, program: &str) -> bool {
+    let part = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+    (text.match_indices(program)).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + program.len()..].chars().next();
+        !before.is_some_and(part) && !after.is_some_and(part)
     })
 }
 
@@ -225,14 +280,14 @@ fn unresolved(
                 return Some(format!(
                     "`{tool} {name}` (not built into `{tool}`, and no `{tool}-{name}` on the path; the host has it at {}. {})",
                     host.display(),
-                    guard(&tool, name)
+                    depends(&tool, name)
                 ));
             }
             (Listing::Unlisted(why), Some(host)) => {
                 return Some(format!(
                     "`{tool} {name}` (no `{tool}-{name}` on the path, though the host has it at {}; whether `{name}` is built into `{tool}` is not known: {why}. {})",
                     host.display(),
-                    guard(&tool, name)
+                    depends(&tool, name)
                 ));
             }
             _ => {}
@@ -247,14 +302,26 @@ fn unresolved(
         )),
         Listing::Unlisted(_) => None,
         Listing::NoAnswer(why) => Some(format!(
-            "{} (the host could not tell whether it is built into `{tool}`: {why})",
-            which(names[0])
+            "{} (the host could not tell whether it is built into `{tool}`: {why}. {})",
+            which(names[0]),
+            depends(&tool, names[0])
         )),
     }
 }
 
+/// What a check's author does when it runs `tool name`, a command the
+/// site does not provide, or may not: never depend on it. No guard helps:
+/// a check that shows first the command is there fails before the
+/// implementation by its own assertion, and fails after it too.
+fn depends(tool: &str, name: &str) -> String {
+    format!(
+        "The check depends on `{tool} {name}`, a program the site does not have, or may not: it must not depend on it; check the criterion with what the site provides"
+    )
+}
+
 /// What a check's author does when the deliverable adds `tool name` (an
-/// alias in the tree's configuration, which the host never reads).
+/// alias in the tree's configuration, which the host never reads); only
+/// where no program anywhere provides it.
 fn guard(tool: &str, name: &str) -> String {
     format!(
         "If the deliverable adds it (for example an alias in the tree's configuration), make the check show first that the tree provides it: `{tool} --list | grep -qw {name} && {tool} {name} ...`, so that it fails by its own assertion before the implementation"
@@ -343,3 +410,7 @@ mod tests_333c;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_verdict_subcommand_333d_tests.rs"]
 mod tests_333d;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_verdict_subcommand_333e_tests.rs"]
+mod tests_333e;
