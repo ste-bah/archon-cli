@@ -9,6 +9,12 @@ use archon_workflow::{WorkflowAgentOutcome, WorkflowLlmClient};
 enum Reply {
     Script(&'static str),
     Transport,
+    /// The live agent client fails on the host's own I/O.
+    Io,
+    /// The live agent client finds the host's state damaged.
+    Corrupt,
+    /// The author answers with text that is no envelope.
+    Garbage,
 }
 
 /// Gives `reply` to every call and records the task of each call.
@@ -29,6 +35,24 @@ impl ScriptedAuthor {
         self.tasks.lock().unwrap().push(task);
         let script = match self.reply {
             Reply::Script(script) => script,
+            Reply::Io => {
+                return Err(WorkflowError::Io {
+                    path: "/review/transcript".into(),
+                    source: std::io::Error::other("disk on fire"),
+                });
+            }
+            Reply::Corrupt => {
+                return Err(WorkflowError::StateCorrupt("review: damaged record".into()));
+            }
+            Reply::Garbage => {
+                return Ok(WorkflowAgentOutcome {
+                    content: "this is {not json".into(),
+                    tool_uses: vec![],
+                    tokens_in: 1,
+                    tokens_out: 1,
+                    stop_reason: Some("end_turn".into()),
+                });
+            }
             Reply::Transport => {
                 return Err(WorkflowError::StageFailed(
                     "agent transport failed: connection reset by peer".into(),
@@ -312,4 +336,92 @@ async fn a_persisted_script_that_cannot_be_read_pauses_the_run() {
     );
     assert_eq!(run.status(), archon_workflow::RunStatus::Paused);
     assert_eq!(run.last_pause()["stall"], "infrastructure_fault");
+}
+
+/// Round 2: a run-store I/O fault inside the author call's dispatch (its
+/// transport evidence file cannot be opened) is not re-typed as a failed
+/// stage: it pauses at once as an infrastructure fault, records no rejection
+/// and is never handed to an author.
+#[tokio::test]
+async fn a_dispatch_store_io_fault_pauses_at_once_and_is_never_a_rejection() {
+    let run = Fixture::new();
+    let v2 = run.store.run_dir(&run.run_id).join("v2");
+    std::fs::create_dir_all(v2.join("transport.jsonl")).unwrap();
+    let author = ScriptedAuthor::new(Reply::Script(AUTHORED_DEMO_SCRIPT));
+    let result = run.author(author.clone()).await;
+    assert!(
+        matches!(&result, Err(WorkflowError::ControlPaused(message))
+            if message.contains("infrastructure fault") && message.contains("transport.jsonl")),
+        "{result:?}"
+    );
+    assert!(!run.rejected().join("attempt-1.json").exists());
+    let detail = run.last_pause();
+    assert_eq!(detail["stall"], "infrastructure_fault", "{detail}");
+    assert_eq!(detail["cause"], "infrastructure_fault");
+    assert_eq!(detail["defect_attempts"], 0);
+}
+
+/// Round 2: an I/O fault the live agent client raises is the host's, not a
+/// provider drop: no transport retry, no rejection, a pause at once.
+#[tokio::test]
+async fn an_agent_client_io_fault_pauses_at_once_and_is_not_transport() {
+    let run = Fixture::new();
+    let author = ScriptedAuthor::new(Reply::Io);
+    let result = run.author(author.clone()).await;
+    assert!(
+        matches!(&result, Err(WorkflowError::ControlPaused(message))
+            if message.contains("infrastructure fault") && message.contains("disk on fire")),
+        "{result:?}"
+    );
+    assert_eq!(author.tasks.lock().unwrap().len(), 1, "never retried");
+    assert!(!run.rejected().join("attempt-1.json").exists());
+    assert_eq!(run.last_pause()["stall"], "infrastructure_fault");
+}
+
+/// Round 2: a damaged store the live agent client reports is kept as such.
+#[tokio::test]
+async fn an_agent_client_state_corrupt_fault_pauses_at_once() {
+    let run = Fixture::new();
+    let author = ScriptedAuthor::new(Reply::Corrupt);
+    let result = run.author(author.clone()).await;
+    assert!(
+        matches!(&result, Err(WorkflowError::ControlPaused(message))
+            if message.contains("infrastructure fault") && message.contains("damaged record")),
+        "{result:?}"
+    );
+    assert_eq!(author.tasks.lock().unwrap().len(), 1);
+    assert_eq!(run.last_pause()["stall"], "infrastructure_fault");
+}
+
+/// Round 2 guard: author output that is no envelope stays an authoring
+/// defect, handed back to the author.
+#[tokio::test]
+async fn unparseable_author_output_stays_a_defect() {
+    let run = Fixture::new();
+    let result = run.author(ScriptedAuthor::new(Reply::Garbage)).await;
+    assert!(
+        matches!(&result, Err(WorkflowError::ControlPaused(_))),
+        "{result:?}"
+    );
+    assert_eq!(run.last_pause()["stall"], "defect_attempts_exhausted");
+    assert!(run.rejected().join("attempt-6.json").exists());
+}
+
+/// Round 2 (a): a death between persisting the script and removing the
+/// hand-over marker leaves a matching marker. The persisted-script path
+/// removes it, so a later re-author is not handed that old finding.
+#[tokio::test]
+async fn a_persisted_script_removes_a_marker_left_by_a_death_after_persisting() {
+    let run = Fixture::new();
+    run.defect_stall().await;
+    let authored = run.rejected().with_file_name("authored-workflow.js");
+    std::fs::write(&authored, AUTHORED_DEMO_SCRIPT.trim()).unwrap();
+    run.control(archon_workflow::LifecycleAction::Resume);
+    run.author(ScriptedAuthor::new(Reply::Script(AUTHORED_DEMO_SCRIPT)))
+        .await
+        .expect("the persisted script executes");
+    assert!(
+        !run.rejected().join("stall-pause.json").exists(),
+        "the persisted script supersedes the marker"
+    );
 }

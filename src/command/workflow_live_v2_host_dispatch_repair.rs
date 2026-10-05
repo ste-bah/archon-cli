@@ -81,6 +81,10 @@ fn repair_exhausted_error(
     first: WorkflowV2AgentError,
     last: WorkflowV2AgentError,
 ) -> WorkflowV2AgentError {
+    // Issue 324: a host fault is the outcome as it is, never a repair result.
+    if last.is_host_fault() {
+        return last;
+    }
     if matches!(
         &first,
         WorkflowV2AgentError::EmptyReply | WorkflowV2AgentError::Transport(_)

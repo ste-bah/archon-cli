@@ -11,6 +11,7 @@ use archon_workflow::{
 };
 // Only this subsystem's tests build the call/coverage shapes by hand; the host
 // itself now receives them already parsed from `archon_workflow::v2::script`.
+use archon_workflow::v2::host_fault::copy_host_infrastructure_fault;
 #[cfg(test)]
 use archon_workflow::{
     WorkflowV2HostOptions, WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCoverageStatus,
@@ -83,6 +84,10 @@ pub(super) struct WorkflowV2ScriptRunner {
     /// taint must not be laundered by the clone.
     reexecuted_task_closure: Arc<StdMutex<std::collections::BTreeSet<String>>>,
     pending_calls: workflow_live_v2_script_host_pending::PendingCalls,
+    /// Issue 324: a host fault (I/O, damaged store) in a call stops the script
+    /// with that error instead of becoming a failed call value. Set for the v3
+    /// authoring bootstrap only, whose loop pauses on such a fault.
+    stops_on_host_fault: bool,
 }
 
 impl WorkflowV2ScriptRunner {
@@ -116,6 +121,7 @@ impl WorkflowV2ScriptRunner {
             executor_lease: None,
             reexecuted_task_closure: Arc::new(StdMutex::new(Default::default())),
             pending_calls: Arc::default(),
+            stops_on_host_fault: false,
         }
     }
 
@@ -237,6 +243,9 @@ impl WorkflowV2ScriptRunner {
         let notification_for_js = notification_failure.clone();
         let host_control: Arc<StdMutex<Option<HostControlStop>>> = Arc::default();
         let control_for_js = host_control.clone();
+        // Issue 324: the host fault that stopped a script that stops on one.
+        let host_fault: Arc<StdMutex<Option<WorkflowError>>> = Arc::default();
+        let fault_for_js = host_fault.clone();
         let js_result = context
             .async_with(async move |ctx| {
                 ctx.globals().set(
@@ -246,6 +255,7 @@ impl WorkflowV2ScriptRunner {
                         let watchdog = watchdog_for_js.clone();
                         let notification = notification_for_js.clone();
                         let control = control_for_js.clone();
+                        let fault = fault_for_js.clone();
                         Box::pin(async move {
                             watchdog.pause();
                             let result = Box::pin(host.execute(method, payload)).await;
@@ -259,6 +269,13 @@ impl WorkflowV2ScriptRunner {
                                 && let Ok(mut slot) = notification.lock()
                             {
                                 slot.get_or_insert_with(|| message.clone());
+                            }
+                            if let Err(err) = &result
+                                && host.runner.stops_on_host_fault
+                                && let Some(copy) = copy_host_infrastructure_fault(err)
+                                && let Ok(mut slot) = fault.lock()
+                            {
+                                slot.get_or_insert(copy);
                             }
                             result.or_else(|err| {
                                 // Issue-253: run control resolves to a typed
@@ -342,6 +359,10 @@ impl WorkflowV2ScriptRunner {
             outcome.as_ref().err().map(String::as_str),
         ) {
             return Err(control);
+        }
+        // Issue 324: kept typed, whatever the script did with the rejection.
+        if let Some(fault) = host_fault.lock().ok().and_then(|mut slot| slot.take()) {
+            return Err(fault);
         }
         // Host evidence decides the outcome even if the script returns, catches
         // the rejection, or throws unrelated text. No later audit can replace it.

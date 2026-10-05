@@ -39,6 +39,10 @@ where
     for attempt in 1..=LIVE_AGENT_TRANSIENT_ATTEMPTS {
         match llm.run_agent(agent_request.clone()).await {
             Ok(response) => return Ok(response),
+            // Issue 324: a host fault is neither retried nor re-typed.
+            Err(error) if crate::v2::host_fault::is_host_infrastructure_fault(&error) => {
+                return Err(error);
+            }
             Err(error) => {
                 let message = error.to_string();
                 if attempt < LIVE_AGENT_TRANSIENT_ATTEMPTS

@@ -187,15 +187,16 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
     repository_root_override: Option<String>,
     raw_outcomes_allowed: bool,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
-    let scope = v2_store
-        .map(|store| {
-            archon_observability::transport::EvidenceScope::new(
-                store.root().join("transport.jsonl"),
-                &execution.call.id,
-            )
-        })
+    // Issue 324: an unusable evidence file is an I/O fault of the host's store.
+    let evidence_path = v2_store.map(|store| store.root().join("transport.jsonl"));
+    let io = |source: std::io::Error| WorkflowError::Io {
+        path: evidence_path.clone().unwrap_or_default(),
+        source,
+    };
+    let scope = (evidence_path.clone())
+        .map(|path| archon_observability::transport::EvidenceScope::new(path, &execution.call.id))
         .transpose()
-        .map_err(|e| WorkflowError::StageFailed(format!("transport evidence unavailable: {e}")))?;
+        .map_err(&io)?;
     let canonical_root = target_repository_root.clone();
     // A write-capable call's own work: its working tree and what the write
     // layer stamped writable for it there (Batch G2: never the live project).
@@ -292,8 +293,7 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             if let Some(evidence) = &mut evidence {
                 evidence.finish(&response)?;
             }
-            let mut outcome =
-                response.map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+            let mut outcome = response.map_err(WorkflowV2AgentError::into_workflow_error)?;
             if let Some(records) = records
                 && let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&outcome.content)
                 && value.get("records_landed").is_some()
@@ -364,7 +364,7 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             Err(err) if is_host_call_timeout(&err.to_string()) => {
                 Err(WorkflowError::HostCallTimeout(err.to_string()))
             }
-            Err(err) => Err(WorkflowError::StageFailed(err.to_string())),
+            Err(err) => Err(err.into_workflow_error()),
         }
     };
     // Batch G: every agent call, of every kind, under the project-input
@@ -394,9 +394,7 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             }
             scope.record(serde_json::json!({"kind":if outcome.is_err() {"agent_call_failed"} else {"agent_call_completed"},
                 "transport_evidence":"transport.jsonl"}));
-            scope.check().map_err(|e| {
-                WorkflowError::StageFailed(format!("transport evidence write failed: {e}"))
-            })?;
+            scope.check().map_err(&io)?;
             outcome
         }
         None => invoke.await,

@@ -89,6 +89,9 @@ impl WorkflowV2ScriptRunner {
                     ));
                 }
             };
+            // Issue 324: a persisted script supersedes any hand-over marker
+            // (one a death between persisting and removing it left behind).
+            stall::clear_marker(&self.workflow_store, &self.run_id);
             let source = validate_authored_workflow_source(&source)?;
             // Pre-flight: the persisted script must still plan real work.
             if let Err(reason) = validate_authored_plan(&source, &expected_task_ids).await {
@@ -310,6 +313,9 @@ impl WorkflowV2ScriptRunner {
         author_attempt: usize,
     ) -> archon_workflow::WorkflowResult<String> {
         let mut bootstrap = self.clone();
+        // Issue 324: a host fault stops the bootstrap as itself, so the
+        // authoring loop pauses on it instead of reading a failed call.
+        bootstrap.stops_on_host_fault = true;
         // Frontier reuse is content-keyed now, so the authoring call needs no
         // opt-out of its own: the brief (task paths + per-file fingerprints +
         // lessons + retry feedback) IS the hashed input, so the retry attempt

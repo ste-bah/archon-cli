@@ -73,6 +73,67 @@ pub fn v2_result_for_call_error(call_id: &str, error: &WorkflowError) -> Workflo
     result
 }
 
+/// Issue 324: is this the host failing on its own state — an I/O fault or a
+/// damaged store — rather than a verdict, a provider error or transport?
+/// Such a fault keeps its kind through dispatch, so a caller that must not
+/// count it against the work (the v3 authoring loop) can tell it apart.
+pub fn is_host_infrastructure_fault(error: &WorkflowError) -> bool {
+    matches!(
+        error,
+        WorkflowError::Io { .. } | WorkflowError::StateCorrupt(_)
+    )
+}
+
+/// A copy of an infrastructure fault (`WorkflowError` is not `Clone`), for a
+/// caller that must both report it and keep it typed; `None` for any other.
+pub fn copy_host_infrastructure_fault(error: &WorkflowError) -> Option<WorkflowError> {
+    match error {
+        WorkflowError::Io { path, source } => Some(WorkflowError::Io {
+            path: path.clone(),
+            source: std::io::Error::new(source.kind(), source.to_string()),
+        }),
+        WorkflowError::StateCorrupt(message) => Some(WorkflowError::StateCorrupt(message.clone())),
+        _ => None,
+    }
+}
+
+impl crate::v2::WorkflowV2AgentError {
+    /// The agent-layer error for a failed provider call: a host fault keeps
+    /// its kind, anything else is transport, as before.
+    pub fn from_call_error(error: &WorkflowError) -> Self {
+        match error {
+            WorkflowError::Io { path, source } => Self::HostIo {
+                path: path.clone(),
+                kind: source.kind(),
+                message: source.to_string(),
+            },
+            WorkflowError::StateCorrupt(message) => Self::HostStateCorrupt(message.clone()),
+            other => Self::Transport(other.to_string()),
+        }
+    }
+
+    pub fn is_host_fault(&self) -> bool {
+        matches!(self, Self::HostIo { .. } | Self::HostStateCorrupt(_))
+    }
+
+    /// The run-level error for a failed agent call: a host fault as its own
+    /// kind again, anything else a failed stage with the agent error's text.
+    pub fn into_workflow_error(self) -> WorkflowError {
+        match self {
+            Self::HostIo {
+                path,
+                kind,
+                message,
+            } => WorkflowError::Io {
+                path,
+                source: std::io::Error::new(kind, message),
+            },
+            Self::HostStateCorrupt(message) => WorkflowError::StateCorrupt(message),
+            other => WorkflowError::StageFailed(other.to_string()),
+        }
+    }
+}
+
 /// Does this recorded result belong to a call that never started?
 ///
 /// Read back from the typed marker rather than re-derived, so the run-scoped

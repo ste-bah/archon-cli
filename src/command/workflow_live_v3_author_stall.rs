@@ -199,15 +199,25 @@ pub(super) fn pause_on_author_stall(
     });
     // The marker goes first: a resume of a recorded pause must find it. One
     // that is not written costs only the hand-over of the last finding. With
-    // no held rejection, an older marker would hand over a stale one.
-    if let Some(attempt) = held {
-        let marker = serde_json::json!({ "attempt": attempt });
-        let path = format!("rejected-scripts/{STALL_MARKER}");
-        if let Err(error) = store.write_run_json(run_id, path, &marker) {
-            tracing::warn!(%error, run_id, "author stall marker not written");
+    // no held rejection, an older marker would hand over a stale one. Issue
+    // 324: only while `generation` owns the run (#291), checked under the run
+    // lock first: a stale executor changes no marker and pauses nothing.
+    let owned = store.with_run_lock(run_id, |locked| {
+        archon_workflow::control_pause::require_generation(locked, run_id, generation)?;
+        match held {
+            Some(attempt) => {
+                let marker = serde_json::json!({ "attempt": attempt });
+                let path = format!("rejected-scripts/{STALL_MARKER}");
+                if let Err(error) = locked.write_run_json(run_id, path, &marker) {
+                    tracing::warn!(%error, run_id, "author stall marker not written");
+                }
+            }
+            None => clear_marker(locked, run_id),
         }
-    } else {
-        clear_marker(store, run_id);
+        Ok(())
+    });
+    if let Err(refused) = owned {
+        return refused;
     }
     match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
         Ok(event) => {
@@ -258,3 +268,8 @@ pub(super) fn is_run_control(error: &WorkflowError) -> bool {
 pub(super) fn authoring_generation(store: &WorkflowStore, run_id: &str) -> WorkflowResult<u64> {
     Ok(store.load_state(run_id)?.generation)
 }
+
+/// Round 2 (b): a stale generation changes no marker and pauses nothing.
+#[cfg(test)]
+#[path = "workflow_live_v3_author_stall_owner_tests.rs"]
+mod owner_tests;
