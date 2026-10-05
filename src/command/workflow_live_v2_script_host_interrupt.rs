@@ -93,6 +93,15 @@ impl WorkflowScriptHost {
             tracing::warn!(call_id = %id, %save_err, "unstarted call record not closed");
             return;
         }
+        // A delivery failure already decides the outcome (the bridge records
+        // it); any other error reaches the script, which may catch it, so the
+        // run must not end as if this call had answered. Not counted as
+        // executed: it never ran.
+        let mut acc = self.accumulator.lock().await;
+        if !acc.terminal_locked() {
+            acc.status = merge_v2_status(acc.status, WorkflowV2Status::NeedsReview);
+        }
+        drop(acc);
         if let Err(stage_err) = self.with_owned_run_lock(|locked| {
             super::workflow_live_v2_script_host_inflight::settle_interrupted_stage(
                 locked,

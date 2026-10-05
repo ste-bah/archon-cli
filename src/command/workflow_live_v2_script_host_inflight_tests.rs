@@ -325,9 +325,14 @@ async fn a_running_record_without_a_marker_is_closed_at_the_next_start() {
             Vec::new(),
         )
     };
+    let mut state = run.clone();
     for id in ["unstarted", "live"] {
         v2_store.save_call_record(&running(id)).expect("seed");
+        let mut stage = archon_workflow::run::StageState::pending(id);
+        stage.status = archon_workflow::StageStatus::Running;
+        state.stages.insert(id.to_string(), stage);
     }
+    workflow_store.save_state(&state).expect("running stages");
     // pid 1 always runs and is never this process: its call is its own.
     let mut live = marker("live");
     live.host_pid = 1;
@@ -339,15 +344,21 @@ async fn a_running_record_without_a_marker_is_closed_at_the_next_start() {
     )
     .expect("marker");
 
-    start_run(workflow_store, v2_store.clone(), &run.id).await;
+    start_run(workflow_store.clone(), v2_store.clone(), &run.id).await;
 
+    let stages = workflow_store.load_state(&run.id).expect("state").stages;
+    assert_eq!(
+        stages["unstarted"].status,
+        archon_workflow::StageStatus::NeedsReview
+    );
+    assert_eq!(stages["live"].status, archon_workflow::StageStatus::Running);
     let closed = v2_store
         .load_call_record("unstarted")
         .expect("lookup")
         .expect("record");
     assert_eq!(closed.status, WorkflowV2Status::NeedsReview);
     assert_eq!(closed.attempt, 3);
-    assert_eq!(closed.result.data["interrupted"], UNSTARTED_REASON);
+    assert_eq!(closed.result.data["interrupted"], "dispatch_not_started");
     assert_eq!(closed.result.data["inflight_marker"], false);
     assert!(!closed.is_reusable_for(&closed.input_hash));
     let kept = v2_store
