@@ -10,7 +10,7 @@
 //! subcommand is named when the path lacks its `tool-sub` program and the
 //! host has it, or the tool lists its commands without it and no program
 //! anywhere provides it (Issue 333); the tools that decides are listed on
-//! a blocking thread, with the scratch site's own environment and tree.
+//! a blocking thread, with the scratch site's own environment.
 
 use std::collections::BTreeMap;
 
@@ -102,7 +102,7 @@ pub(crate) async fn warn(store: &WorkflowStore, run_id: &str, ui_sink: &SharedWo
     };
     // The site is read here, then its tools are listed on a blocking
     // thread: a slow one never holds an async worker (Issue 333).
-    let at = CheckSite::for_scratch(&binding.policy, &binding.source_commit);
+    let at = CheckSite::for_scratch(&binding.policy);
     let path = binding.policy.toolchain_path;
     let found = match tokio::task::spawn_blocking(move || unresolved(&contract, &path, &at)).await {
         Ok(Some(found)) => found,

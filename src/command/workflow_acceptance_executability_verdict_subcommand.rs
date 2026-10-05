@@ -18,21 +18,24 @@
 //! and one of these holds:
 //!
 //! - the host's own search path has `tool-word`: a plugin the check's
-//!   environment lacks. Only `tool --list` at the check's site
-//!   (`verdict_subcommand_list`) listing `word` -- built in after all --
-//!   turns it back into a verdict;
-//! - the listing names the tool's commands and `word` is not one, and no
-//!   `tool-word` is anywhere: it passes only if the deliverable adds it
-//!   (an alias in the tree's configuration). Its author makes the check
-//!   show that first -- for example `tool --list | grep -qw word && tool
-//!   word ...` -- so its failure before the implementation is its own
-//!   assertion, which is a verdict;
-//! - the tool gave no listing at all (it stalled, or could not start): the
-//!   host could not tell.
+//!   environment lacks, whatever `tool --list` says;
+//! - `tool --list` (`verdict_subcommand_list`) names the tool's commands,
+//!   with `word` or without it. The listing runs in a fresh directory, not
+//!   the check's tree, so it never sees that tree's aliases or the
+//!   toolchain it pins: listed or not, the site rejected `word`, and the
+//!   host cannot tell why. Without it, and no `tool-word` anywhere, it
+//!   passes only if the deliverable adds it (an alias in the tree's
+//!   configuration). Its author makes the check show that first -- for
+//!   example `tool --list | grep -qw word && tool word ...` -- so its
+//!   failure before the implementation is its own assertion, which is a
+//!   verdict;
+//! - the tool gave no listing at all (it stalled, never stopped, could not
+//!   start or run, or a signal killed it): the host could not tell.
 //!
-//! A tool that answers its listing without listing any command (it has no
-//! `--list`), of whose `tool-word` the host has none, is not judged: the
-//! word may be a command its own deliverable adds to it (Issue 328).
+//! So the listing only ever withholds a verdict. A tool that answers its
+//! listing without listing any command (it has no `--list`), of whose
+//! `tool-word` the host has none, is not judged: the word may be a command
+//! its own deliverable adds to it (Issue 328).
 //!
 //! Before a run the host also names each program and subcommand missing
 //! from the configured toolchain path ([`unresolved_on_path`]). It lists
@@ -51,11 +54,8 @@ use super::{ASSERTED, Context, which};
 
 #[path = "workflow_acceptance_executability_verdict_subcommand_list.rs"]
 mod list;
-#[path = "workflow_acceptance_executability_verdict_subcommand_tree.rs"]
-mod tree;
 pub(super) use list::LIST_STALL;
 use list::{Listing, listing, prefetch};
-pub(crate) use tree::SiteTree;
 
 /// A line that rejects a command: `no such command`, `unknown subcommand`,
 /// `'x' is not a git command`.
@@ -105,22 +105,28 @@ pub(super) fn missing(commands: &[Simple], output: &str, at: &Context) -> Option
                 "it runs `{tool} {name}`, but no program `{tool}-{name}` is on its search path (PATH={path})"
             );
             let host = plugin(&tool, name, at);
+            let guard = guard(&tool, name);
             match (listing(&program, at), host) {
-                (Listing::Commands(builtins), _) if builtins.contains(name) => None,
+                // The host's listing never sees the check's tree (its
+                // aliases, the toolchain it pins), so it never gives a
+                // verdict the site's own rejection denies.
+                (Listing::Commands(builtins), _) if builtins.contains(name) => Some(format!(
+                    "{lacks}; the host lists `{name}` as built into `{tool}`, yet `{tool}` rejected it at the check's site, so that site differs from the host's listing (for example a toolchain its tree pins, which the host does not read) and the host cannot tell"
+                )),
                 (Listing::Commands(_), Some(host)) => Some(format!(
-                    "{lacks} and `{name}` is not a command built into `{tool}`, though the host has one at {}: a subcommand its environment lacks",
+                    "{lacks} and `{name}` is not a command built into `{tool}`, though the host has one at {}: a subcommand its environment lacks. {guard}",
                     host.display()
                 )),
                 (Listing::Unlisted(why), Some(host)) => Some(format!(
-                    "{lacks}, though the host has one at {}: a subcommand its environment lacks (whether `{name}` is built into `{tool}` is not known: {why})",
+                    "{lacks}, though the host has one at {}: a subcommand its environment lacks (whether `{name}` is built into `{tool}` is not known: {why}). {guard}",
                     host.display()
                 )),
                 (Listing::Commands(_), None) => Some(format!(
-                    "{lacks}, nor on the host's, and `{name}` is not a command built into `{tool}`: it passes only if the deliverable adds it; if it does, make the check show first that the tree provides it (for example `{tool} --list | grep -qw {name} && ...`), so that it fails by its own assertion before the implementation"
+                    "{lacks}, nor on the host's, and `{name}` is not a command built into `{tool}`: it passes only if the deliverable adds it. {guard}"
                 )),
                 (Listing::Unlisted(_), None) => None,
                 (Listing::NoAnswer(why), _) => Some(format!(
-                    "{lacks}, and the host could not tell whether `{name}` is built into `{tool}`: {why}"
+                    "{lacks}, and the host could not tell whether `{name}` is built into `{tool}`: {why}. {guard}"
                 )),
             }
         })
@@ -217,14 +223,16 @@ fn unresolved(
             (Listing::Commands(builtins), _) if builtins.contains(*name) => return None,
             (Listing::Commands(_), Some(host)) => {
                 return Some(format!(
-                    "`{tool} {name}` (not built into `{tool}`, and no `{tool}-{name}` on the path; the host has it at {})",
-                    host.display()
+                    "`{tool} {name}` (not built into `{tool}`, and no `{tool}-{name}` on the path; the host has it at {}. {})",
+                    host.display(),
+                    guard(&tool, name)
                 ));
             }
             (Listing::Unlisted(why), Some(host)) => {
                 return Some(format!(
-                    "`{tool} {name}` (no `{tool}-{name}` on the path, though the host has it at {}; whether `{name}` is built into `{tool}` is not known: {why})",
-                    host.display()
+                    "`{tool} {name}` (no `{tool}-{name}` on the path, though the host has it at {}; whether `{name}` is built into `{tool}` is not known: {why}. {})",
+                    host.display(),
+                    guard(&tool, name)
                 ));
             }
             _ => {}
@@ -233,8 +241,9 @@ fn unresolved(
     let last = names[names.len() - 1];
     match listing {
         Listing::Commands(_) => Some(format!(
-            "{} (not built into `{tool}`, and no `{tool}-{last}` on the path or the host's: it passes only if the deliverable adds it)",
-            which(last)
+            "{} (not built into `{tool}`, and no `{tool}-{last}` on the path or the host's: it passes only if the deliverable adds it. {})",
+            which(last),
+            guard(&tool, last)
         )),
         Listing::Unlisted(_) => None,
         Listing::NoAnswer(why) => Some(format!(
@@ -242,6 +251,14 @@ fn unresolved(
             which(names[0])
         )),
     }
+}
+
+/// What a check's author does when the deliverable adds `tool name` (an
+/// alias in the tree's configuration, which the host never reads).
+fn guard(tool: &str, name: &str) -> String {
+    format!(
+        "If the deliverable adds it (for example an alias in the tree's configuration), make the check show first that the tree provides it: `{tool} --list | grep -qw {name} && {tool} {name} ...`, so that it fails by its own assertion before the implementation"
+    )
 }
 
 /// The tool `command` starts, by its own name, and where it is: a name on
@@ -322,3 +339,7 @@ mod tests_333b;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_verdict_subcommand_333c_tests.rs"]
 mod tests_333c;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_verdict_subcommand_333d_tests.rs"]
+mod tests_333d;

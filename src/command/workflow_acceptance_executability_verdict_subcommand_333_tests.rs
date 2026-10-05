@@ -79,7 +79,7 @@ fn a_hanging_listing_is_asked_once_for_every_check_and_command() {
     );
     for found in &warned {
         assert!(
-            found.len() == 1 && found[0].contains("printed nothing for 1500 ms"),
+            found.len() == 1 && found[0].contains("printed nothing new for 1500 ms"),
             "{warned:?}"
         );
     }
@@ -106,7 +106,7 @@ fn a_tool_with_no_dispatched_program_anywhere_is_never_listed() {
 fn a_listing_that_keeps_printing_is_not_cut_off() {
     let calls_file = tempfile::NamedTempFile::new().unwrap();
     // Silent for less than the bound at a time, but for longer in all.
-    let listing = "for i in 1 2 3 4 5 6; do echo 'Loading...'; /bin/sleep 0.5; done; printf 'Commands:\\n    build    Build\\n'; exit 0";
+    let listing = "for i in 1 2 3 4 5 6; do echo \"Loading $i...\"; /bin/sleep 0.5; done; printf 'Commands:\\n    build    Build\\n'; exit 0";
     let tool = counting_tool("archon333slow", calls_file.path(), listing);
     let bin = Bin::with_host(
         Path::new("/bin/sh"),
@@ -249,8 +249,10 @@ fn a_site_that_runs_in_its_own_home_lists_what_that_home_installs() {
         unresolved_on_path(&["cargo archon333home"], &at)[0].is_empty(),
         "cargo finds it in the site's own home"
     );
+    // Listed there, so a rejection of it is a site the host cannot see.
     let odd = result(Some(101), b"", b"error: no such command: `archon333home`\n");
-    assert_eq!(no_verdict("cargo archon333home", &odd, &at), None);
+    let why = no_verdict("cargo archon333home", &odd, &at).expect("no verdict");
+    assert!(why.contains("the host cannot tell"), "{why}");
 }
 
 // ---- Item 3: an option's value before the subcommand.

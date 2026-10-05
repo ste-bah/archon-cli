@@ -84,7 +84,6 @@ impl Bin {
             environment: site,
             host_path: Some(self.host_path()),
             list_stall: LIST_STALL,
-            tree: None,
         }
     }
 
@@ -184,9 +183,12 @@ fn a_built_in_cargo_subcommand_is_unaffected() {
     let run = bin.run("cargo test -q");
     assert_eq!(run.exit_code, Some(101));
     assert_eq!(no_verdict("cargo test -q", &run, &bin.context()), None);
-    // Even output that seems to reject it: `test` is built into cargo.
+    // Output that rejects it though the host lists it as built in: the
+    // site differs from the host's listing (a toolchain its tree pins,
+    // which the host never reads), so the host cannot tell (Issue 333).
     let odd = result(Some(101), b"", b"error: no such command: `test`\n");
-    assert_eq!(no_verdict("cargo test", &odd, &bin.context()), None);
+    let why = no_verdict("cargo test", &odd, &bin.context()).expect("no verdict");
+    assert!(why.contains("the host cannot tell"), "{why}");
 }
 
 #[test]

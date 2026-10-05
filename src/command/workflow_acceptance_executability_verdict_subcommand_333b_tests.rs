@@ -13,9 +13,9 @@ use std::time::Duration;
 use archon_workflow::task_set_contract::AcceptanceContract;
 
 use super::super::no_verdict;
-use super::tests::{Bin, NEXTEST, SIBLING, host_cargo, result};
-use super::tests_333::{PLAIN, STALL, calls, counting_tool, rustup_proxy, warm};
-use super::{SiteTree, unresolved_on_path};
+use super::tests::{Bin, SIBLING, host_cargo, result};
+use super::tests_333::{PLAIN, STALL, calls, counting_tool, warm};
+use super::unresolved_on_path;
 
 macro_rules! or_skip {
     ($found:expr, $what:literal) => {
@@ -91,7 +91,8 @@ fn a_plugin_the_host_has_gives_no_verdict_whatever_the_listing_says() {
         no_verdict("archon333git status", &run, &bin.context()),
         None
     );
-    // A listing that names the word turns it back into a verdict.
+    // A listing that names the word never turns it back into a verdict:
+    // the listing does not see the check's tree.
     let lists = "#!/bin/sh\n[ \"$1\" = --list ] && { printf 'Commands:\\n    lfs    Built in\\n'; exit 0; }\nexit 1\n";
     let bin = Bin::with_host(
         Path::new("/bin/sh"),
@@ -99,10 +100,8 @@ fn a_plugin_the_host_has_gives_no_verdict_whatever_the_listing_says() {
         &[("archon333lister-lfs", PLAIN)],
     );
     let odd = result(Some(1), b"", b"error: unknown command 'lfs'\n");
-    assert_eq!(
-        no_verdict("archon333lister lfs", &odd, &bin.context()),
-        None
-    );
+    let why = no_verdict("archon333lister lfs", &odd, &bin.context()).expect("no verdict");
+    assert!(why.contains("the host cannot tell"), "{why}");
 }
 
 #[test]
@@ -337,113 +336,3 @@ fn a_changed_tool_is_asked_again_and_a_stall_is_never_remembered() {
 }
 
 // ---- R6: the committed configuration of the check's tree.
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(["-c", "user.email=t@example.invalid", "-c", "user.name=t"])
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
-}
-
-/// A repository whose commit holds `files`; its tree.
-fn committed(files: &[(&str, &str)]) -> (tempfile::TempDir, SiteTree) {
-    let repo = tempfile::tempdir().unwrap();
-    git(repo.path(), &["init", "-q"]);
-    for (path, text) in files {
-        let file = repo.path().join(path);
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(file, text).unwrap();
-    }
-    git(repo.path(), &["add", "-A"]);
-    git(
-        repo.path(),
-        &["commit", "-q", "--allow-empty", "-m", "base"],
-    );
-    let commit = git(repo.path(), &["rev-parse", "HEAD"]);
-    let repository = repo.path().to_path_buf();
-    (repo, SiteTree { repository, commit })
-}
-
-const ALIAS: &str = "[alias]\narchon333tree = \"version\"\n";
-
-#[test]
-fn a_listing_reads_the_committed_configuration_of_the_checks_tree() {
-    let bin = Bin::new(&or_skip!(host_cargo(), "cargo"), &[SIBLING]);
-    let (_repo, tree) = committed(&[(".cargo/config.toml", ALIAS), ("Cargo.toml", "")]);
-    let at = bin.context().on(Some(tree));
-    assert!(
-        unresolved_on_path(&["cargo archon333tree"], &at)[0].is_empty(),
-        "its alias"
-    );
-    let odd = result(Some(101), b"", b"error: no such command: `archon333tree`\n");
-    assert_eq!(no_verdict("cargo archon333tree", &odd, &at), None);
-    // Without the tree, nothing defines it.
-    assert_eq!(bin.warned("cargo archon333tree").len(), 1);
-    // An alias only in the working tree is not in the commit the site runs.
-    let (repo, tree) = committed(&[("Cargo.toml", "")]);
-    std::fs::create_dir_all(repo.path().join(".cargo")).unwrap();
-    std::fs::write(repo.path().join(".cargo/config.toml"), ALIAS).unwrap();
-    let at = bin.context().on(Some(tree));
-    assert_eq!(
-        unresolved_on_path(&["cargo archon333tree"], &at)[0].len(),
-        1
-    );
-    // Nor is one in a directory below the root.
-    let (_repo, tree) = committed(&[("sub/.cargo/config.toml", ALIAS)]);
-    let at = bin.context().on(Some(tree));
-    assert_eq!(
-        unresolved_on_path(&["cargo archon333tree"], &at)[0].len(),
-        1
-    );
-}
-
-#[test]
-fn a_listing_follows_the_toolchain_the_tree_pins() {
-    let (proxy, home) = or_skip!(rustup_proxy(), "rustup");
-    let bin = Bin::with_host(&proxy, &[SIBLING], &[NEXTEST]);
-    let pin = "[toolchain]\nchannel = \"archon-333-pinned\"\n";
-    let (_repo, tree) = committed(&[("rust-toolchain.toml", pin)]);
-    let at = bin
-        .context_with(&[("RUSTUP_HOME", home.as_str())])
-        .on(Some(tree));
-    let warned = unresolved_on_path(&["cargo nextest run"], &at);
-    assert!(
-        warned[0].len() == 1 && warned[0][0].contains("archon-333-pinned"),
-        "{warned:?}"
-    );
-}
-
-#[test]
-fn only_the_roots_small_files_and_hidden_directories_are_copied() {
-    let big = "x".repeat((1 << 20) + 1);
-    let (_repo, tree) = committed(&[
-        ("rust-toolchain.toml", "t"),
-        (".cargo/config.toml", "c"),
-        (".config/deep/x.toml", "d"),
-        ("src/lib.rs", "s"),
-        ("data.bin", &big),
-    ]);
-    let dir = tempfile::tempdir().unwrap();
-    super::tree::materialize(&tree, dir.path()).unwrap();
-    let has = |path: &str| dir.path().join(path).is_file();
-    assert!(has("rust-toolchain.toml") && has(".cargo/config.toml") && has(".config/deep/x.toml"));
-    assert!(!has("src/lib.rs") && !has("data.bin"));
-    assert_eq!(
-        std::fs::read_to_string(dir.path().join(".cargo/config.toml")).unwrap(),
-        "c"
-    );
-    let missing = SiteTree {
-        repository: tree.repository.clone(),
-        commit: "0".repeat(40),
-    };
-    assert!(super::tree::materialize(&missing, dir.path()).is_err());
-}

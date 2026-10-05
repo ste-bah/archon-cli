@@ -29,8 +29,9 @@
 //!    A subcommand the check runs (`tool sub`), which the tool rejected
 //!    before any assertion ran, and which no program `tool-sub` on the
 //!    search path provides, is the same when the host has that program,
-//!    the tool lists its commands without `sub`, or the host could not
-//!    list them (Issues 331, 333,
+//!    the tool lists its commands (with `sub` or without: the listing
+//!    never sees the check's tree), or the host could not list them
+//!    (Issues 331, 333,
 //!    `workflow_acceptance_executability_verdict_subcommand`);
 //! 2. no exit status: the run was killed before it reported anything;
 //! 3. the check crashed in its own code
@@ -66,7 +67,7 @@ mod subcommand;
 mod which;
 #[cfg(test)]
 pub(crate) use subcommand::HOST_PATH;
-pub(crate) use subcommand::{SiteTree, unresolved_on_path};
+pub(crate) use subcommand::unresolved_on_path;
 
 /// Programs whose job is to compile or build: a compiler error they print
 /// is the tree's (rule 4). An interpreter compiles the source it imports.
@@ -92,8 +93,6 @@ pub(crate) struct Context {
     host_path: Option<String>,
     /// How long a listing may print nothing before it is given up.
     list_stall: std::time::Duration,
-    /// The tree the check runs on, whose configuration a listing reads.
-    tree: Option<SiteTree>,
 }
 
 impl Context {
@@ -128,23 +127,9 @@ impl Context {
     }
 
     /// A scratch site of `policy`, as it gives every check the variables
-    /// its policy binds and forwards, on its repository at `commit` (no
-    /// declared deliverables).
-    pub(crate) fn for_scratch(
-        policy: &archon_workflow::acceptance_scratch::ScratchPolicy,
-        commit: &str,
-    ) -> Self {
-        let tree = SiteTree {
-            repository: policy.repository.clone(),
-            commit: commit.to_string(),
-        };
-        Self::at(super::sites::scratch_environment(policy), Vec::new()).on(Some(tree))
-    }
-
-    /// This site, its checks running on `tree`.
-    pub(crate) fn on(mut self, tree: Option<SiteTree>) -> Self {
-        self.tree = tree;
-        self
+    /// its policy binds and forwards (no declared deliverables).
+    pub(crate) fn for_scratch(policy: &archon_workflow::acceptance_scratch::ScratchPolicy) -> Self {
+        Self::at(super::sites::scratch_environment(policy), Vec::new())
     }
 
     fn at(environment: BTreeMap<String, String>, deliverables: Vec<String>) -> Self {
@@ -154,7 +139,6 @@ impl Context {
             environment,
             host_path: subcommand::host_path(),
             list_stall: subcommand::LIST_STALL,
-            tree: None,
         }
     }
 

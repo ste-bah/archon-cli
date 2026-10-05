@@ -160,7 +160,7 @@ async fn a_run_start_warns_about_commands_its_toolchain_path_does_not_resolve() 
     assert_eq!(
         detail["checks"],
         serde_json::json!({
-            "AC-1": [format!("`archon331tool lint` (not built into `archon331tool`, and no `archon331tool-lint` on the path; the host has it at {})", host.join("archon331tool-lint").display())],
+            "AC-1": [format!("`archon331tool lint` (not built into `archon331tool`, and no `archon331tool-lint` on the path; the host has it at {}. If the deliverable adds it (for example an alias in the tree's configuration), make the check show first that the tree provides it: `archon331tool --list | grep -qw lint && archon331tool lint ...`, so that it fails by its own assertion before the implementation)", host.join("archon331tool-lint").display())],
             "AC-3": ["`archon-issue-331-absent` (not on the path)"],
         }),
         "a resolved built-in and plugin, and an unaccepted check, are not named"
@@ -234,7 +234,7 @@ async fn a_run_start_names_a_subcommand_nothing_provides() {
     assert_eq!(
         events[0]["detail"]["checks"],
         serde_json::json!({
-            "AC-1": ["`archon331tool lint` (not built into `archon331tool`, and no `archon331tool-lint` on the path or the host's: it passes only if the deliverable adds it)"],
+            "AC-1": ["`archon331tool lint` (not built into `archon331tool`, and no `archon331tool-lint` on the path or the host's: it passes only if the deliverable adds it. If the deliverable adds it (for example an alias in the tree's configuration), make the check show first that the tree provides it: `archon331tool --list | grep -qw lint && archon331tool lint ...`, so that it fails by its own assertion before the implementation)"],
         })
     );
     assert!(lines.len() == 1 && lines[0].contains("AC-1"), "{lines:?}");

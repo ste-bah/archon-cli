@@ -1,24 +1,30 @@
 //! The commands a tool builds in, as a check's site sees it (Issues 331,
 //! 333).
 //!
-//! `tool --list` runs with the site's own environment -- the variables its
-//! policy binds, such as where a toolchain proxy finds its toolchains --
-//! but with an empty search path, so no `tool-*` program on a path is
-//! listed, and with a fresh empty HOME and TMPDIR where the site gives none
-//! of its own (a scratch site gives every check fresh ones). It runs in a
-//! fresh directory holding the configuration of the tree the check runs on
-//! (`verdict_subcommand_tree`), so a proxy resolves the toolchain that tree
-//! pins and the tree's own aliases are listed, as at the site.
+//! `tool --list` runs with the site's own environment -- its search path
+//! and the variables its policy binds, such as where a toolchain proxy
+//! finds its toolchains -- so a program the tool starts by name (an
+//! `#!/usr/bin/env` shim's interpreter) resolves as at the site. It runs
+//! with a fresh empty HOME and TMPDIR where the site gives none of its own
+//! (a scratch site gives every check fresh ones), in a fresh empty
+//! directory: never the live tree, which a `--list` could write to. So it
+//! never sees the configuration of the tree a check runs on -- its aliases,
+//! the toolchain it pins -- and its answer is used only to withhold a
+//! verdict, never to give one (`verdict_subcommand`).
 //!
-//! A listing is stopped when it prints nothing for the site's stall bound
-//! (a no-progress bound), prints more than [`MOST_OUTPUT`] (a tool that
-//! never stops: its output is read from pipes, never written to disk), or
-//! writes more than [`MOST_SCRATCH`] to its own directories. Each of those
-//! is no answer. The tool leads its own process group, and the whole group
-//! is killed and the tool reaped on every way out; the listing's directory
-//! is removed on every way out too. A tool is asked once per
-//! program (its resolved path, size and change time), environment and tree,
-//! whatever it answered; one that gave no answer is asked again next time.
+//! A listing is stopped when it prints no new line for the site's stall
+//! bound (a no-progress bound: a line printed again is not progress),
+//! prints more than [`MOST_OUTPUT`] (a tool that never stops: its output is
+//! read from pipes, never written to disk), or writes more than
+//! [`MOST_SCRATCH`] to its own directories. Each of those is no answer, and
+//! so is a tool that could not run (exit 126 or 127, a shim that found no
+//! interpreter) or was killed by a signal. The tool leads its own process
+//! group, and the whole group is killed and the tool reaped on every way
+//! out; the listing's directory is removed on every way out too, and a
+//! directory that could not be removed is reported, and is no answer. A
+//! tool is asked once per program (its resolved path, size and change time)
+//! and environment, whatever it answered; one that gave no answer is asked
+//! again next time.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -46,7 +52,7 @@ pub(super) enum Listing {
 }
 
 type Identity = (PathBuf, u64, Option<SystemTime>);
-type Key = (Identity, BTreeMap<String, String>, Option<super::SiteTree>);
+type Key = (Identity, BTreeMap<String, String>);
 static LISTED: LazyLock<Mutex<BTreeMap<Key, Listing>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
@@ -62,7 +68,7 @@ pub(super) fn listing(program: &Path, at: &Context) -> Listing {
         meta.as_ref().map_or(0, std::fs::Metadata::len),
         meta.and_then(|meta| meta.modified().ok()),
     );
-    let key = (identity, at.environment.clone(), at.tree.clone());
+    let key = (identity, at.environment.clone());
     if let Some(known) = lock().get(&key) {
         return known.clone();
     }
@@ -87,22 +93,20 @@ pub(super) fn prefetch(programs: &BTreeSet<PathBuf>, at: &Context) -> BTreeMap<P
 }
 
 /// `program`'s listing; `Err` when it gave no answer. Its directory goes
-/// however the listing ends.
+/// however the listing ends; one that could not be removed is reported.
 fn list(program: &Path, at: &Context) -> Result<Listing, String> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
-    let root = Scratch(std::env::temp_dir().join(format!(
+    let root = Scratch(Some(std::env::temp_dir().join(format!(
         "{SCRATCH_PREFIX}{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::SeqCst)
-    )));
-    let (home, tree) = (root.0.join("home"), root.0.join("tree"));
-    for dir in [&home, &tree] {
-        std::fs::create_dir_all(dir).map_err(|error| format!("no listing directory: {error}"))?;
+    ))));
+    let listed = root.path().and_then(|root| list_in(program, root, at));
+    match (listed, root.remove()) {
+        (listed, Ok(())) => listed,
+        (Ok(_), Err(left)) => Err(left),
+        (Err(why), Err(left)) => Err(format!("{why}; {left}")),
     }
-    if let Some(site) = &at.tree {
-        super::tree::materialize(site, &tree)?;
-    }
-    list_in(program, &root.0, &home, &tree, at)
 }
 
 /// The name every listing directory starts with.
@@ -110,12 +114,80 @@ pub(super) const SCRATCH_PREFIX: &str = "archon-command-list-";
 /// The most a listing's HOME, TMPDIR and directory may hold.
 const MOST_SCRATCH: u64 = 16 << 20;
 
-/// A listing's own directory, removed when it is dropped.
-struct Scratch(PathBuf);
+/// A listing's own directory, removed however the listing ends.
+struct Scratch(Option<PathBuf>);
+
+impl Scratch {
+    /// The directory, made with its `home` and `work` directories.
+    fn path(&self) -> Result<&Path, String> {
+        let root = self.0.as_deref().expect("removed only by `remove`");
+        for dir in [root.join("home"), root.join("work")] {
+            std::fs::create_dir_all(&dir)
+                .map_err(|error| format!("no listing directory {}: {error}", dir.display()))?;
+        }
+        Ok(root)
+    }
+
+    /// Remove the directory; why it could not be, when it is still there.
+    fn remove(mut self) -> Result<(), String> {
+        let root = self.0.take().expect("removed once");
+        match std::fs::remove_dir_all(&root) {
+            Err(error) if root.exists() => {
+                let left = format!(
+                    "the listing's directory {} could not be removed: {error}",
+                    root.display()
+                );
+                tracing::warn!("{left}");
+                Err(left)
+            }
+            _ => Ok(()),
+        }
+    }
+}
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        let Some(root) = self.0.take() else {
+            return;
+        };
+        if let Err(error) = std::fs::remove_dir_all(&root)
+            && root.exists()
+        {
+            tracing::warn!(
+                "the listing's directory {} could not be removed: {error}",
+                root.display()
+            );
+        }
+    }
+}
+
+/// What a stream printed, and whether more of it is progress: a line
+/// unlike the one before it. A line printed again and again is not.
+#[derive(Default)]
+struct Printed {
+    bytes: Vec<u8>,
+    line_start: usize,
+    last: Option<std::ops::Range<usize>>,
+}
+
+impl Printed {
+    /// Add `chunk`; whether it completed a line unlike the one before.
+    fn push(&mut self, chunk: &[u8]) -> bool {
+        let from = self.bytes.len();
+        self.bytes.extend_from_slice(chunk);
+        let ends: Vec<usize> = (from..self.bytes.len())
+            .filter(|&at| self.bytes[at] == b'\n')
+            .collect();
+        let mut progress = false;
+        for end in ends {
+            let line = self.line_start..end;
+            let again = (self.last.clone())
+                .is_some_and(|last| self.bytes[last] == self.bytes[line.clone()]);
+            progress |= !again;
+            self.last = Some(line);
+            self.line_start = end + 1;
+        }
+        progress
     }
 }
 
@@ -133,16 +205,10 @@ fn bytes_under(dir: &Path) -> u64 {
         .sum()
 }
 
-fn list_in(
-    program: &Path,
-    root: &Path,
-    home: &Path,
-    tree: &Path,
-    at: &Context,
-) -> Result<Listing, String> {
+fn list_in(program: &Path, root: &Path, at: &Context) -> Result<Listing, String> {
+    let (home, work) = (root.join("home"), root.join("work"));
     let shown = program.display();
     let mut environment = at.environment.clone();
-    environment.insert("PATH".into(), String::new());
     for name in ["HOME", "TMPDIR"] {
         let fresh = home.to_string_lossy().into_owned();
         environment.entry(name.into()).or_insert(fresh);
@@ -151,7 +217,7 @@ fn list_in(
         let mut command = Command::new(program);
         command
             .arg("--list")
-            .current_dir(tree)
+            .current_dir(&work)
             .env_clear()
             .envs(&environment)
             .stdin(Stdio::null())
@@ -192,14 +258,15 @@ fn list_in(
     }
     drop(sender);
     let mut group = Group(Some(child));
-    let (mut output, mut status) = ([Vec::new(), Vec::new()], None);
+    let (mut output, mut status) = ([Printed::default(), Printed::default()], None);
     let (mut since, mut polls) = (Instant::now(), 0u64);
     loop {
         match received.recv_timeout(Duration::from_millis(20)) {
             Ok((stream, chunk)) => {
-                output[stream].extend_from_slice(&chunk);
-                since = Instant::now();
-                let printed = output.iter().map(|o| o.len() as u64).sum::<u64>();
+                if output[stream].push(&chunk) {
+                    since = Instant::now();
+                }
+                let printed = (output.iter()).map(|o| o.bytes.len() as u64).sum::<u64>();
                 if printed > MOST_OUTPUT {
                     return Err(format!(
                         "`{shown} --list` output exceeded {MOST_OUTPUT} bytes, so it was stopped"
@@ -238,13 +305,31 @@ fn list_in(
                 break;
             }
             return Err(format!(
-                "`{shown} --list` printed nothing for {} ms, so it was stopped",
+                "`{shown} --list` printed nothing new for {} ms, so it was stopped",
                 at.list_stall.as_millis()
             ));
         }
     }
     let status = status.expect("the loop ends only once the tool is reaped");
-    let [out, err] = output.map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+    let [out, err] = output.map(|printed| String::from_utf8_lossy(&printed.bytes).into_owned());
+    let said = (err.lines().map(str::trim)).find(|line| !line.is_empty());
+    let said = said.map(|line| format!(": {line}")).unwrap_or_default();
+    // It never ran: a shim found no interpreter, or it was not executable;
+    // or a signal ended it. Neither is an answer.
+    match status.code() {
+        Some(code @ (126 | 127)) => {
+            return Err(format!(
+                "`{shown} --list` could not run (exit {code}){said}"
+            ));
+        }
+        None => {
+            return Err(format!(
+                "`{shown} --list` was killed{}{said}",
+                signal(&status)
+            ));
+        }
+        Some(_) => {}
+    }
     let commands: BTreeSet<String> = (out.lines())
         .filter(|line| line.starts_with(char::is_whitespace))
         .filter_map(|line| line.split_whitespace().next())
@@ -254,16 +339,23 @@ fn list_in(
     if status.success() && !commands.is_empty() {
         return Ok(Listing::Commands(commands));
     }
-    let said = (err.lines().map(str::trim)).find(|line| !line.is_empty());
     Ok(Listing::Unlisted(format!(
-        "`{shown} --list`, run with the site's environment and an empty search path, {}{}",
+        "`{shown} --list`, run with the site's environment, {}{said}",
         match status.code() {
             Some(0) => "listed no commands".to_string(),
-            Some(code) => format!("exited {code}"),
-            None => "was killed".to_string(),
+            code => format!("exited {}", code.unwrap_or(-1)),
         },
-        said.map(|line| format!(": {line}")).unwrap_or_default()
     )))
+}
+
+/// The signal that ended `status`, for an operator.
+fn signal(status: &ExitStatus) -> String {
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(status) {
+        return format!(" by signal {signal}");
+    }
+    let _ = status;
+    String::new()
 }
 
 /// A listing tool, the leader of its own process group: the group is

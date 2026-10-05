@@ -25,11 +25,7 @@ const EVIDENCE_BYTES: usize = 800;
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
     let (environment, _) = super::sites::site_environment(probe);
-    let tree = (probe.baseline.as_ref()).map(|baseline| super::verdict::SiteTree {
-        repository: baseline.repository.clone(),
-        commit: baseline.commit.clone(),
-    });
-    Context::new(Some(environment), contract).on(tree)
+    Context::new(Some(environment), contract)
 }
 
 /// [`silent_failure`] on a blocking thread: deciding it may list a tool
