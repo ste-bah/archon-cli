@@ -132,6 +132,19 @@ pub enum WorkflowV2AgentError {
     EmptyReply,
     #[error("agent transport failed: {0}")]
     Transport(String),
+    /// Issue 324: the host failed on its own state (an I/O fault) while
+    /// serving the call. Never the agent's output and never transport: it
+    /// keeps its kind to the caller (`host_fault::agent_error_into_workflow`).
+    #[error("io error at {}: {message}", .path.display())]
+    HostIo {
+        path: std::path::PathBuf,
+        kind: std::io::ErrorKind,
+        message: String,
+    },
+    /// Issue 324: the host found its own run state damaged while serving the
+    /// call; kept as `StateCorrupt`, like [`Self::HostIo`].
+    #[error("workflow state is corrupt: {0}")]
+    HostStateCorrupt(String),
     /// The completed invocation cannot be continued exactly (#241). Never a
     /// failure of the call: the workflow starts an explicit new agent.
     #[error("{0}")]
@@ -193,6 +206,8 @@ impl WorkflowV2AgentError {
             }
             Self::EmptyReply
             | Self::Transport(_)
+            | Self::HostIo { .. }
+            | Self::HostStateCorrupt(_)
             | Self::ContinuationRefused(_)
             | Self::NotificationDelivery(_) => RepairErrorClass::Execution,
             _ => RepairErrorClass::Contract,
@@ -280,6 +295,10 @@ fn repair_exhausted(
     first_error: WorkflowV2AgentError,
     last_error: WorkflowV2AgentError,
 ) -> WorkflowV2AgentError {
+    // Issue 324: a host fault is the outcome as it is, never a repair result.
+    if last_error.is_host_fault() {
+        return last_error;
+    }
     if matches!(
         &first_error,
         WorkflowV2AgentError::EmptyReply | WorkflowV2AgentError::Transport(_)

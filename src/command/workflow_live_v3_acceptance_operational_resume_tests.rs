@@ -126,3 +126,40 @@ async fn operational_only_rounds_pause_on_the_host_stall_and_the_resume_goes_on(
         archon_workflow::RunStatus::Paused
     );
 }
+
+/// Issue 324: a task-set run whose acceptance context never resolves pauses
+/// on every resume until the operator acts, so the pause names the cause and
+/// the remedy, and says a resume without the fix pauses again.
+#[tokio::test]
+async fn an_unresolvable_acceptance_context_pause_names_its_cause_and_remedy() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = store.create_run(test_spec()).expect("run");
+    let (ui_sink, _tui_rx) = default_workflow_ui_sink();
+    let paused = runner_for(&store, &run.id, ui_sink).run(SCRIPT).await;
+    let Err(WorkflowError::ControlPaused(message)) = &paused else {
+        panic!("{paused:?}");
+    };
+    for named in [
+        "cannot evaluate",
+        "workflow store has no project root",
+        "remedy: resume the run from the project whose .archon workflow store holds it",
+        "a resume without the fix pauses here again",
+    ] {
+        assert!(message.contains(named), "{named}: {message}");
+    }
+    let events = std::fs::read_to_string(store.events_path(&run.id)).unwrap();
+    let line = (events.lines())
+        .find(|line| line.contains("acceptance_stall_pause"))
+        .expect("the stall pause carries its evidence");
+    let event: serde_json::Value = serde_json::from_str(line).unwrap();
+    let detail = event.get("detail").unwrap_or(&event);
+    assert_eq!(detail["context_unresolved"], true, "{detail}");
+    assert!(
+        detail["remedy"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("remedy"),
+        "{detail}"
+    );
+}

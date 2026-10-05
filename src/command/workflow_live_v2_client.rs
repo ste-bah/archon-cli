@@ -200,7 +200,7 @@ impl LiveV2AgentClient {
             run_agent_with_transient_retry(&self.llm, call, |_attempt| async { Ok(()) }),
         );
         let outcome = author_attempt_deadline(self.timeout_secs, attempt).await?;
-        outcome.map_err(|error| WorkflowV2AgentError::Transport(error.to_string()))
+        outcome.map_err(|error| WorkflowV2AgentError::from_call_error(&error))
     }
 
     fn activity_event(
@@ -413,7 +413,7 @@ impl LiveV2AgentClient {
                 if let Some(refused) = err.continuation_refusal() {
                     return Err(WorkflowV2AgentError::ContinuationRefused(refused));
                 }
-                return Err(WorkflowV2AgentError::Transport(err.to_string()));
+                return Err(WorkflowV2AgentError::from_call_error(&err));
             }
         };
         self.emit_required_activity(

@@ -6,3 +6,5 @@ mod workflow_live_v2_script_tests_e_a;
 mod workflow_live_v3_acceptance_operational_resume_tests;
 #[path = "workflow_live_v3_author_pause_tests.rs"]
 mod workflow_live_v3_author_pause_tests;
+#[path = "workflow_live_v3_author_stall_tests.rs"]
+mod workflow_live_v3_author_stall_tests;

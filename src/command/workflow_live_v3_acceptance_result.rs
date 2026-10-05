@@ -221,14 +221,31 @@ pub(super) fn pause_on_stall(
 ) -> archon_workflow::WorkflowError {
     let failing = record.failing_check_ids();
     let resume = format!("archon workflow resume --live --yes {run_id}");
-    let message = format!(
-        "acceptance round {} (attempt {}) made no progress ({cause}: {} trailing round(s) without progress, {} check(s) still failing: {}); the run is paused, not failed. The evidence is {record_path}; fix what it names, then {resume}",
-        record.round,
-        record.attempt,
-        decision.stalled_rounds,
-        failing.len(),
-        failing.join(", ")
-    );
+    // Issue 324: a round whose context did not resolve evaluated nothing. Its
+    // errors carry the cause and the remedy, and no resume changes them alone.
+    let unresolved = record.execution.is_none();
+    let remedy = unresolved.then(|| {
+        format!(
+            "apply the remedy the operational error names, then {resume}; a resume without the fix pauses here again"
+        )
+    });
+    let message = if unresolved {
+        format!(
+            "acceptance round {} (attempt {}) made no progress and cannot evaluate: {}. No round changes this on its own, and a resume without the fix pauses here again; the run is paused, not failed. The evidence is {record_path}; apply the remedy, then {resume}",
+            record.round,
+            record.attempt,
+            record.operational_errors.join("; ")
+        )
+    } else {
+        format!(
+            "acceptance round {} (attempt {}) made no progress ({cause}: {} trailing round(s) without progress, {} check(s) still failing: {}); the run is paused, not failed. The evidence is {record_path}; fix what it names, then {resume}",
+            record.round,
+            record.attempt,
+            decision.stalled_rounds,
+            failing.len(),
+            failing.join(", ")
+        )
+    };
     let detail = serde_json::json!({
         "event": "acceptance_stall_pause",
         "round": record.round,
@@ -237,6 +254,8 @@ pub(super) fn pause_on_stall(
         "stalled_rounds": decision.stalled_rounds,
         "failing_check_ids": failing,
         "operational_errors": record.operational_errors,
+        "context_unresolved": unresolved,
+        "remedy": remedy,
         "record_path": record_path,
         "resume": resume,
     });

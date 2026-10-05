@@ -11,6 +11,7 @@ use archon_workflow::{
 };
 // Only this subsystem's tests build the call/coverage shapes by hand; the host
 // itself now receives them already parsed from `archon_workflow::v2::script`.
+use archon_workflow::v2::host_fault::copy_host_infrastructure_fault;
 #[cfg(test)]
 use archon_workflow::{
     WorkflowV2HostOptions, WorkflowV2TaskCompletionEvidence, WorkflowV2TaskCoverageStatus,
@@ -83,6 +84,10 @@ pub(super) struct WorkflowV2ScriptRunner {
     /// taint must not be laundered by the clone.
     reexecuted_task_closure: Arc<StdMutex<std::collections::BTreeSet<String>>>,
     pending_calls: workflow_live_v2_script_host_pending::PendingCalls,
+    /// Issue 324: a host fault (I/O, damaged store) in a call stops the script
+    /// with that error instead of becoming a failed call value. Set for the v3
+    /// authoring bootstrap only, whose loop pauses on such a fault.
+    stops_on_host_fault: bool,
 }
 
 impl WorkflowV2ScriptRunner {
@@ -116,6 +121,7 @@ impl WorkflowV2ScriptRunner {
             executor_lease: None,
             reexecuted_task_closure: Arc::new(StdMutex::new(Default::default())),
             pending_calls: Arc::default(),
+            stops_on_host_fault: false,
         }
     }
 
@@ -233,67 +239,28 @@ impl WorkflowV2ScriptRunner {
             .await
             .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs context failed: {err}")))?;
         let source = script_source(harness_source, script_args.as_ref());
-        let host_for_js = host.clone();
-        let watchdog_for_js = watchdog.clone();
         let watchdog_for_deadline = watchdog.clone();
         // A notification failure the HOST raised, recorded here so the
         // outcome never depends on text a script can write.
         let notification_failure: Arc<StdMutex<Option<String>>> = Arc::default();
-        let notification_for_js = notification_failure.clone();
         let host_control: Arc<StdMutex<Option<HostControlStop>>> = Arc::default();
-        let control_for_js = host_control.clone();
-        // Issue 329: the order in which the script issued its host calls.
-        let issued = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        // Issue 324: the host fault that stopped a script that stops on one.
+        let host_fault: Arc<StdMutex<Option<WorkflowError>>> = Arc::default();
+        let bridge = ScriptHostCallBridge {
+            host: host.clone(),
+            watchdog: watchdog.clone(),
+            notification: notification_failure.clone(),
+            control: host_control.clone(),
+            // Issue 329: the order in which the script issued its host calls.
+            issued: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            fault: host_fault.clone(),
+        };
         let js_result = context
             .async_with(async move |ctx| {
                 ctx.globals().set(
                     "__archonHost",
                     Func::from(Async(move |method: String, payload: String| {
-                        let host = host_for_js.clone();
-                        let watchdog = watchdog_for_js.clone();
-                        let notification = notification_for_js.clone();
-                        let control = control_for_js.clone();
-                        let issued = issued.clone();
-                        let order = issued.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-                        Box::pin(async move {
-                            watchdog.pause();
-                            let result =
-                                Box::pin(host.execute_issued(method, payload, Some(order))).await;
-                            host.note_delivered(&result, &issued).await;
-                            // Issue-285/329: refused calls are instant, so after
-                            // a terminal or control stop one budget runs on.
-                            if host.accumulator.lock().await.session_stopped() {
-                                watchdog.start_terminal_budget();
-                            }
-                            watchdog.resume();
-                            if let Err(WorkflowError::NotificationDelivery(message)) = &result
-                                && let Ok(mut slot) = notification.lock()
-                            {
-                                slot.get_or_insert_with(|| message.clone());
-                            }
-                            result.or_else(|err| {
-                                // Issue-253: run control resolves to a typed
-                                // envelope; every other error rejects as before.
-                                control_envelope(
-                                    &host.runner.workflow_store,
-                                    &host.runner.run_id,
-                                    &err,
-                                )
-                                .map(|(envelope, observed)| {
-                                    if let Ok(mut slot) = control.lock() {
-                                        slot.get_or_insert(observed);
-                                    }
-                                    envelope
-                                })
-                                .ok_or_else(|| {
-                                    rquickjs::Error::new_from_js_message(
-                                        "archon workflow host",
-                                        "string",
-                                        err.to_string(),
-                                    )
-                                })
-                            })
-                        })
+                        Box::pin(bridge.clone().call(method, payload))
                     })),
                 )?;
                 let promise: Promise = match ctx.eval(source.as_str()).catch(&ctx) {
@@ -360,6 +327,10 @@ impl WorkflowV2ScriptRunner {
         ) {
             return Err(control);
         }
+        // Issue 324: kept typed, whatever the script did with the rejection.
+        if let Some(fault) = host_fault.lock().ok().and_then(|mut slot| slot.take()) {
+            return Err(fault);
+        }
         // Host evidence decides the outcome even if the script returns, catches
         // the rejection, or throws unrelated text. No later audit can replace it.
         // A normal return still reports what the script returned.
@@ -411,6 +382,10 @@ use workflow_live_v2_script_control::{
 #[path = "workflow_live_v2_script_host.rs"]
 mod workflow_live_v2_script_host;
 use workflow_live_v2_script_host::*;
+
+#[path = "workflow_live_v2_script_host_call.rs"]
+mod workflow_live_v2_script_host_call;
+use workflow_live_v2_script_host_call::ScriptHostCallBridge;
 
 use archon_workflow::v2::host_fault::{
     NeverStartedStreak, is_never_started_fault, result_reports_never_started,

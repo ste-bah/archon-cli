@@ -13,6 +13,18 @@ use super::*;
 /// record is written without the paused/cancelled ownership check.
 pub(super) const NOTIFICATION_DELIVERY_REASON: &str = "notification_delivery_failed";
 
+/// The reason an interrupted record gives when a host fault (I/O, damaged
+/// store) stopped a script that stops on one (Issue 324).
+pub(super) const HOST_FAULT_REASON: &str = "host_infrastructure_fault";
+
+impl WorkflowScriptHost {
+    /// Issue 324: does `err` stop this script rather than become a value?
+    pub(super) fn stops_on_host_fault(&self, err: &WorkflowError) -> bool {
+        self.runner.stops_on_host_fault
+            && archon_workflow::v2::host_fault::is_host_infrastructure_fault(err)
+    }
+}
+
 /// The reason a pending call's record gives when a host terminal stop ended
 /// the script before the call settled (Issue-285).
 pub(super) const TERMINAL_HOST_STOP_REASON: &str = "terminal_host_stop";

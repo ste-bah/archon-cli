@@ -76,11 +76,22 @@ impl WorkflowV2ScriptRunner {
             })
             .unwrap_or_default();
         let authored_source = if authored_path.exists() {
-            let source =
-                std::fs::read_to_string(&authored_path).map_err(|err| WorkflowError::Io {
-                    path: authored_path.clone(),
-                    source: err,
-                })?;
+            // Issue 324: an I/O fault reading it pauses, as in authoring.
+            let source = match std::fs::read_to_string(&authored_path) {
+                Ok(source) => source,
+                Err(source) => {
+                    let path = authored_path.clone();
+                    let error = WorkflowError::Io { path, source }.to_string();
+                    return Err(stall::pause_on_infrastructure_fault(
+                        &self.workflow_store,
+                        &self.run_id,
+                        error,
+                    ));
+                }
+            };
+            // Issue 324: a persisted script supersedes any hand-over marker
+            // (one a death between persisting and removing it left behind).
+            stall::clear_marker(&self.workflow_store, &self.run_id);
             let source = validate_authored_workflow_source(&source)?;
             // Pre-flight: the persisted script must still plan real work.
             if let Err(reason) = validate_authored_plan(&source, &expected_task_ids).await {
@@ -107,21 +118,28 @@ impl WorkflowV2ScriptRunner {
             // Issue 296: exhausting either budget pauses the run with its
             // evidence. A resume goes on from the last recorded rejection with
             // a new agent, numbering after the recorded attempts.
+            // Issue 324: an I/O fault or a damaged store pauses at once with
+            // the fault as evidence; it is never an authoring defect.
             let generation = stall::authoring_generation(&self.workflow_store, &self.run_id)?;
             let prior = stall::prior_rejections(&self.workflow_store, &self.run_id);
+            // The finding this authoring holds, and the recorded attempt it
+            // came from: the only rejection a stall pause hands over.
+            let mut held = prior.last.as_ref().map(|_| prior.attempts);
             let mut rejection: Option<(String, Option<String>)> = prior.last;
             let mut defect_attempts = 0usize;
             let mut transport_attempts = 0usize;
-            let pause = |stalled: stall::AuthorStall, defects: usize, transports: usize| {
-                stall::pause_on_author_stall(
-                    &self.workflow_store,
-                    &self.run_id,
-                    generation,
-                    stalled,
+            let pause = |stalled, defects, transports, held| {
+                let attempts = stall::StallAttempts {
                     defects,
                     transports,
-                    prior.attempts + defects,
-                )
+                    recorded: prior.attempts + defects,
+                    held,
+                };
+                let (store, run_id) = (&self.workflow_store, &self.run_id);
+                stall::pause_on_author_stall(store, run_id, generation, stalled, attempts)
+            };
+            let fault = |error: WorkflowError| stall::AuthorStall::Infrastructure {
+                error: error.to_string(),
             };
             let source = loop {
                 let (feedback, draft) = match &rejection {
@@ -135,7 +153,8 @@ impl WorkflowV2ScriptRunner {
                         prior.attempts + defect_attempts + transport_attempts,
                     )
                     .await;
-                match authored {
+                // A defect: its reason and the draft it rejected, if any.
+                let defect = match authored {
                     Ok(source) => match async {
                         validate_authored_workflow_source(&source).map_err(|e| e.to_string())?;
                         // The draft pre-flight adds the source lints (hand-rolled
@@ -146,60 +165,65 @@ impl WorkflowV2ScriptRunner {
                     .await
                     {
                         Ok(()) => break source,
-                        Err(reason) => {
-                            defect_attempts += 1;
-                            rejections::record(
-                                &self.workflow_store,
-                                &self.run_id,
-                                prior.attempts + defect_attempts,
-                                &reason,
-                                Some(&source),
-                            )?;
-                            if defect_attempts >= MAX_AUTHORING_DEFECT_ATTEMPTS {
-                                let stalled = stall::AuthorStall::Defects { reason };
-                                return Err(pause(stalled, defect_attempts, transport_attempts));
-                            }
-                            rejection = Some((reason, Some(source)));
-                        }
+                        Err(reason) => (reason, Some(source)),
                     },
                     Err(err) if stall::is_run_control(&err) => return Err(err),
+                    Err(err) if stall::is_infrastructure_fault(&err) => {
+                        let (defects, transports) = (defect_attempts, transport_attempts);
+                        return Err(pause(fault(err), defects, transports, held));
+                    }
                     Err(err) if is_transport_failure(&err) => {
                         transport_attempts += 1;
                         if transport_attempts >= MAX_AUTHORING_TRANSPORT_ATTEMPTS {
                             let error = err.to_string();
                             let stalled = stall::AuthorStall::Transport { error };
-                            return Err(pause(stalled, defect_attempts, transport_attempts));
+                            return Err(pause(stalled, defect_attempts, transport_attempts, held));
                         }
                         // The prior rejection (if any) stands: this attempt
                         // produced nothing to learn from, so the next one asks
                         // the same question rather than starting over blind.
+                        continue;
                     }
-                    Err(err) => {
-                        defect_attempts += 1;
-                        let reason = format!(
+                    // No usable script came back, so there is no draft to
+                    // repair — the next attempt gets the reason alone.
+                    Err(err) => (
+                        format!(
                             "the authoring envelope was unusable ({err}); the complete script text must be the data.workflow_js field of the standard result envelope"
-                        );
-                        rejections::record(
-                            &self.workflow_store,
-                            &self.run_id,
-                            prior.attempts + defect_attempts,
-                            &reason,
-                            None,
-                        )?;
-                        if defect_attempts >= MAX_AUTHORING_DEFECT_ATTEMPTS {
-                            let stalled = stall::AuthorStall::Defects { reason };
-                            return Err(pause(stalled, defect_attempts, transport_attempts));
-                        }
-                        // No usable script came back, so there is no draft to
-                        // repair — the next attempt gets the reason alone.
-                        rejection = Some((reason, None));
-                    }
+                        ),
+                        None,
+                    ),
+                };
+                let (reason, draft) = defect;
+                let attempt = prior.attempts + defect_attempts + 1;
+                let recorded = rejections::record(
+                    &self.workflow_store,
+                    &self.run_id,
+                    attempt,
+                    &reason,
+                    draft.as_deref(),
+                );
+                if let Err(err) = recorded {
+                    let (defects, transports) = (defect_attempts, transport_attempts);
+                    return Err(pause(fault(err), defects, transports, held));
                 }
+                // Durably recorded: the hand-over marker has done its job.
+                stall::clear_marker(&self.workflow_store, &self.run_id);
+                defect_attempts += 1;
+                held = Some(attempt);
+                if defect_attempts >= MAX_AUTHORING_DEFECT_ATTEMPTS {
+                    let stalled = stall::AuthorStall::Defects { reason };
+                    return Err(pause(stalled, defect_attempts, transport_attempts, held));
+                }
+                rejection = Some((reason, draft));
             };
-            std::fs::write(&authored_path, &source).map_err(|err| WorkflowError::Io {
-                path: authored_path.clone(),
-                source: err,
-            })?;
+            if let Err(source) = std::fs::write(&authored_path, &source) {
+                let err = WorkflowError::Io {
+                    path: authored_path.clone(),
+                    source,
+                };
+                return Err(pause(fault(err), defect_attempts, transport_attempts, held));
+            }
+            stall::clear_marker(&self.workflow_store, &self.run_id);
             source
         };
         let summary = self.clone().run(&authored_source).await?;
@@ -289,6 +313,9 @@ impl WorkflowV2ScriptRunner {
         author_attempt: usize,
     ) -> archon_workflow::WorkflowResult<String> {
         let mut bootstrap = self.clone();
+        // Issue 324: a host fault stops the bootstrap as itself, so the
+        // authoring loop pauses on it instead of reading a failed call.
+        bootstrap.stops_on_host_fault = true;
         // Frontier reuse is content-keyed now, so the authoring call needs no
         // opt-out of its own: the brief (task paths + per-file fingerprints +
         // lessons + retry feedback) IS the hashed input, so the retry attempt

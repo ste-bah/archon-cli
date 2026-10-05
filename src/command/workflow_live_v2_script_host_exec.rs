@@ -362,12 +362,16 @@ impl WorkflowScriptHost {
             Ok(result) => result,
             Err(err)
                 if control_interruption_reason(&err).is_none()
-                    && !matches!(&err, WorkflowError::NotificationDelivery(_)) =>
+                    && !matches!(&err, WorkflowError::NotificationDelivery(_))
+                    && !self.stops_on_host_fault(&err) =>
             {
                 self.result_for_failed_dispatch(&call_id, err).await?
             }
             Err(err) => {
                 let control = control_interruption_reason(&err);
+                let control_or_fault = control.or(self
+                    .stops_on_host_fault(&err)
+                    .then_some(workflow_live_v2_script_host_interrupt::HOST_FAULT_REASON));
                 if control.is_some() {
                     // Issue-134: the run's call trees end before any record.
                     archon_tools::bash::end_process_groups_of(&self.runner.run_id);
@@ -379,7 +383,7 @@ impl WorkflowScriptHost {
                     }
                 }
                 // Issue-213 C5: an undelivered call's record says why.
-                let reason = control.unwrap_or(
+                let reason = control_or_fault.unwrap_or(
                     workflow_live_v2_script_host_interrupt::NOTIFICATION_DELIVERY_REASON,
                 );
                 if let Err(save_err) = self
