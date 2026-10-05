@@ -51,6 +51,35 @@ function owedSupplementary() {
   return acceptanceRepairIds.owed;
 }
 
+// Issue 288: the author sees each completed entry as one bounded line -- its
+// id, check kind, what it covers and the artifact, command and fixtures it
+// uses -- enough to stay consistent with it and to duplicate none. The whole
+// entry (judgment text included) made the prompt grow by the size of every
+// entry before it: about 9.9 KB per entry, over 1 MB after 100 entries.
+const PRIOR_FIELD_TEXT = 200;
+
+function priorField(value) {
+  const text = String(value === undefined || value === null ? "" : value).replace(/\s+/g, " ").trim();
+  return text.length > PRIOR_FIELD_TEXT ? `${text.slice(0, PRIOR_FIELD_TEXT)}...` : text;
+}
+
+function priorLine(entry) {
+  const check = entry && entry.check && typeof entry.check === "object" ? entry.check : {};
+  const contract = check.contract && typeof check.contract === "object" ? check.contract : {};
+  const covers = Array.isArray(entry && entry.covers) ? entry.covers.filter((c) => typeof c === "string") : [];
+  const parts = [`${priorField(entry && entry.id)} [${priorField(check.kind || "unknown")}${contract.kind ? ` ${priorField(contract.kind)}` : ""}]`];
+  if (covers.length > 0) parts.push(`covers ${priorField(covers.join(", "))}`);
+  if (contract.artifact_path) parts.push(`artifact ${priorField(contract.artifact_path)}`);
+  const run = check.command || contract.typed_verifier_command;
+  if (run) parts.push(`runs ${priorField(run)}`);
+  return parts.join("; ");
+}
+
+function priorText(prior) {
+  if (prior.length === 0) return "Previously completed entries: none.";
+  return `Previously completed entries, one line each (keep this entry consistent with them and duplicate none):\n- ${prior.map(priorLine).join("\n- ")}`;
+}
+
 // Each entry makes one provider call per round. The phase records the round's
 // retained work and failure; no inner retry window can hide malformed replies
 // or restart its count when a transport error interrupts them. Keep the call
@@ -58,7 +87,7 @@ function owedSupplementary() {
 async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   state.roundCalls += 1;
   const result = await w.agent(`acceptance-author-${id}-${round * STALL_ATTEMPTS + 1}`, {
-    task: `${prompt}\nAuthor ONLY entry ${id}: ${text}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\nPreviously completed entries: ${JSON.stringify(prior)}`,
+    task: `${prompt}\nAuthor ONLY entry ${id}: ${text}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\n${priorText(prior)}`,
     tier: "planner", resultMode: "rawOutcome"
   });
   if (result.status !== "failed") state.roundAnswered += 1;

@@ -469,10 +469,13 @@ function authorPrompt(base, attempt, feedback, history) {
   // alternates until its budget is spent -- a live acceptance phase did exactly
   // that for all six attempts. Showing what earlier attempts already triggered
   // is what lets it satisfy both at once instead of trading one for the other.
-  const earlier = Array.isArray(history) ? history.filter((entry) => entry.findings.length > 0) : [];
-  if (earlier.length > 0) {
-    const lines = earlier.map((entry) => `${entry.attempt === 0 ? "the set gate, before this body was sent back" : `attempt ${entry.attempt}`}: ${entry.findings.join("; ")}`);
-    prompt += `\nEarlier attempts in this phase already triggered the following. Satisfy every one of them at once; repairing the finding above by reverting an earlier repair will not converge:\n- ${lines.join("\n- ")}`;
+  // Issue 288: each earlier finding once, bounded (earlierFindings).
+  const earlier = earlierFindings(history, feedback);
+  if (earlier.lines.length > 0) {
+    prompt += `\nEarlier attempts in this phase already triggered the following. Satisfy every one of them at once; repairing the finding above by reverting an earlier repair will not converge:\n- ${earlier.lines.join("\n- ")}`;
+  }
+  if (earlier.omitted > 0) {
+    prompt += `\n${earlier.omitted} older distinct findings (${earlier.omittedOccurrences} occurrences, attempts ${earlier.omittedRange}) are not repeated here.`;
   }
   return prompt;
 }

@@ -32,7 +32,7 @@ async function run(globalFinding = false, structural = false) {
   assert.equal(calls.filter(x=>x.round===1)[0].key,'AC-X-5');
   assert.equal(assembled[1].entries.find(x=>x.id==='AC-X-1').version,0,'clean entry retained byte-for-byte');
  }
- assert(calls.find(x=>x.key==='AC-X-9'&&x.round===0).task.includes('"AC-X-1","version":0'),'an entry past the window sees the entries before it');
+ assert(calls.find(x=>x.key==='AC-X-9'&&x.round===0).task.includes('\n- AC-X-1 ['),'an entry past the window sees the entries before it (Issue 288: one line each)');
 }
 async function failedEntry() {
  const context={args:{acceptanceCriteria:{A:'a',B:'b',C:'c',D:'d'},authorMaxParallelism:3},console};

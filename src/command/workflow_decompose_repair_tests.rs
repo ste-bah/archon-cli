@@ -77,6 +77,11 @@ fn run_js(driver: &str) -> String {
         "routeFindings",
         "requireCommitted",
         "authorPrompt",
+        // Issue 288: the bounded earlier-attempt history authorPrompt shows.
+        "HISTORY_SHOWN",
+        "HISTORY_TEXT",
+        "historyKey",
+        "earlierFindings",
         "authorCandidate",
         "acceptanceRepairIds",
     ] {

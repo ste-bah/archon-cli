@@ -129,6 +129,27 @@ fn round8_regression_suite_passes() {
     );
 }
 
+/// Issue 288: author prompts grow by a bounded amount per completed entry and
+/// per attempt (the suite prints the measured bytes), and an inactivity cut in
+/// a round that kept new work does not consume the no-progress window.
+#[test]
+fn author_prompts_stay_bounded_per_entry_and_attempt() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/command/workflow_decompose_prompt_size_test.cjs"
+        ))
+        .output()
+        .expect("node must be available");
+    println!("{}", String::from_utf8_lossy(&output.stdout));
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 /// The round-3 regression suite runs under cargo like the other node suites.
 #[test]
 fn round3_regression_suite_passes() {
