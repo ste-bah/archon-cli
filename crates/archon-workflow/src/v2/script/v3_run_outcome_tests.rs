@@ -469,9 +469,12 @@ fn hard_stops_keep_the_accumulated_status() {
     let outcome = case.decide();
     assert_eq!(outcome.status, Failed);
     assert!(!outcome.from_accounting);
+    // Issue 335: a call's own 'cancelled' report never cancels the run.
     case.failed_call = None;
     case.accumulated = WorkflowV2Status::Cancelled;
-    assert_eq!(case.decide().status, WorkflowV2Status::Cancelled);
+    let held = case.decide();
+    assert_eq!(held.status, NeedsReview);
+    assert!(held.blocking[0].contains("only run control cancels a run"));
     let stopped = authored_run_terminal_status(&AuthoredRunFacts {
         accumulated_status: Failed,
         host_terminal_failure: Some("workflow.js"),

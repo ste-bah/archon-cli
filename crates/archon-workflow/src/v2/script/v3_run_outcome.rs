@@ -175,8 +175,18 @@ pub fn authored_run_terminal_status_with(
         blocking: vec![reason],
         notes: Vec::new(),
     };
+    // Issue 335: only run control cancels a run, and it ends the run before
+    // this rule. A `cancelled` call status is a worker's own report (new
+    // records hold it as a failed call): the run needs review, never ends
+    // cancelled by it.
     if facts.accumulated_status == WorkflowV2Status::Cancelled {
-        return hard("a call was cancelled".to_string());
+        return AuthoredRunOutcome {
+            status: WorkflowV2Status::NeedsReview,
+            ..hard(
+                "a call reported 'cancelled' in its own result; only run control cancels a run"
+                    .to_string(),
+            )
+        };
     }
     if let Some(call_id) = facts.host_terminal_failure {
         return hard(format!(
