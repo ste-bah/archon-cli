@@ -77,7 +77,7 @@ pub(super) fn read_acceptance_gate(
         let latest = latest_round_record(&run_dir)?;
         return Ok(latest.map(|(record, path)| gate_record(&run_dir, record, path, false)));
     };
-    // Issue 313: a damaged call record is rebuilt from its round, or pauses.
+    // Issue 313: a damaged or unreadable call record pauses the run.
     let Some(result) = super::call::acceptance_call_record(store, run_id, v2_store, call)?
         .map(|record| record.result)
     else {

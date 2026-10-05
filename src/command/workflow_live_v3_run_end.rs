@@ -311,8 +311,8 @@ pub(super) fn apply_authored_run_outcome_with(
     regression: archon_workflow::v2::verification::regression_gate::RegressionVerdict,
 ) -> WorkflowResult<WorkflowV2ScriptSummary> {
     let accumulated = summary.status;
-    // Issue 313: an acceptance call's damaged record is rebuilt from its
-    // round, or the run pauses; it is never read as a stage that never ran.
+    // Issue 313: an acceptance call's damaged record pauses the run; it is
+    // never read as a stage that never ran, nor guessed from a round record.
     let facts = authored_call_facts(&summary.calls, |call_id| {
         match (summary.calls.iter())
             .find(|call| call.id == call_id && is_acceptance_stage_call(call))

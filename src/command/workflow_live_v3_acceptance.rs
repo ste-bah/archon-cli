@@ -58,7 +58,7 @@ mod sources;
 #[cfg(all(test, unix))]
 use archon_workflow::v2::acceptance_stage::{AcceptanceCheckRecordV1, AcceptanceCheckStatus};
 use output::{with_frozen_identity, write_output_files};
-pub(super) use result::result_for;
+use result::result_for;
 
 pub(super) fn is_acceptance_stage_call(execution: &WorkflowV2CallExecution) -> bool {
     archon_workflow::v2::script::is_acceptance_stage_call(&execution.call)

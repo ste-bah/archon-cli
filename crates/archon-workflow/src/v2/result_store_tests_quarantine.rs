@@ -31,23 +31,22 @@ fn a_damaged_slot_is_quarantined_with_evidence_whatever_its_bytes() {
         let path = store.result_path("slot");
         std::fs::write(&path, damage).unwrap();
 
-        let WorkflowV2CallSlot::Damaged { evidence, fresh } =
-            store.load_call_slot_healing("slot").unwrap()
+        let WorkflowV2CallSlot::Damaged(evidence) = store.load_call_slot_healing("slot").unwrap()
         else {
             panic!("{damage}: damage must not read as a record or as absence");
         };
 
-        assert!(fresh, "{damage}");
         assert!(!path.exists(), "{damage}: the slot is emptied");
         let moved = store.root().join(&evidence.quarantined);
         assert_eq!(std::fs::read_to_string(moved).unwrap(), damage);
         assert_eq!(evidence.call_id, "slot");
         assert_eq!(evidence.event, CALL_QUARANTINE_EVENT);
-        // The emptied slot stays damaged for the next read, and the
-        // directory scans no longer meet the damage.
+        // Round 2: the evidence is forensic only; it never makes the
+        // emptied slot read as damaged again, and the directory scans no
+        // longer meet the damage.
         assert!(matches!(
             store.load_call_slot_healing("slot").unwrap(),
-            WorkflowV2CallSlot::Damaged { fresh: false, .. }
+            WorkflowV2CallSlot::Empty
         ));
         assert!(store.load_call_records().unwrap().is_empty(), "{damage}");
     }
@@ -63,7 +62,7 @@ fn another_calls_record_in_the_slot_is_damage() {
 
     let slot = store.load_call_slot_healing("slot").unwrap();
 
-    let WorkflowV2CallSlot::Damaged { evidence, .. } = slot else {
+    let WorkflowV2CallSlot::Damaged(evidence) = slot else {
         panic!("{slot:?}");
     };
     assert!(evidence.reason.contains("other"), "{evidence:?}");

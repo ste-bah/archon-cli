@@ -29,7 +29,7 @@ pub(super) const BLOCKED_GAP_PREFIX: &str = "acceptance-blocked-";
 /// `NeedsReview` for a final round that still fails — so the record is
 /// re-executed rather than replayed on resume, and the run's own status
 /// merge agrees with the finalizer's gate.
-pub(in super::super) fn result_for(
+pub(super) fn result_for(
     record: &AcceptanceRoundRecordV1,
     record_path: &str,
     decision: &LoopDecision,

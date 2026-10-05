@@ -1,13 +1,12 @@
 //! Issue 313: the acceptance call's own record can be damaged by the time
 //! the run ends. Not JSON and the wrong shape are the same damage: never an
-//! error that fails the run, never "the stage recorded no round". The record
-//! is rebuilt from its round record; when that is lost too, the run pauses,
-//! and the resume heals it.
+//! error that fails the run, never "the stage recorded no round", and never
+//! a verdict guessed from a round record (round 2: the newest round of the
+//! call can be stale). The damage is quarantined and the run pauses; the
+//! resume runs the stage again and heals it.
 
 use super::*;
 use archon_workflow::{LifecycleAction, LifecycleController};
-
-const BOUND: &str = "v2/acceptance/round-01/attempt-01.json";
 
 /// Not JSON, and JSON carrying every key the store looks for, wrongly typed.
 const DAMAGE: [&str; 2] = [
@@ -15,7 +14,7 @@ const DAMAGE: [&str; 2] = [
     r#"{"call":{"id":"x"},"attempt":"one","input_hash":1,"status":"accepted","result":{}}"#,
 ];
 
-fn damage_call(fixture: &Fixture, summary: &WorkflowV2ScriptSummary, damage: &str) {
+fn damage_call(fixture: &Fixture, summary: &WorkflowV2ScriptSummary, damage: &[u8]) {
     std::fs::write(fixture.v2_store.result_path(&summary.calls[0].id), damage).unwrap();
 }
 
@@ -33,24 +32,23 @@ fn paused_message(error: &anyhow::Error) -> Option<String> {
     }
 }
 
-/// The run end: the record is rebuilt from the round it names, the damaged
-/// bytes are quarantined with an event, and the run ends on its round.
+/// The run end: the damaged record is quarantined with an event and the
+/// run pauses naming it, never Completed on a guess. The resume runs the
+/// stage again and the run ends on the new round.
 #[tokio::test]
-async fn a_damaged_acceptance_call_record_is_rebuilt_from_its_round_and_the_run_ends() {
+async fn a_damaged_acceptance_call_record_pauses_with_evidence_and_the_resume_heals() {
     for damage in DAMAGE {
         let fixture = fixture();
-        let observer = scripted(&fixture, 0);
         let summary = in_run_round(&fixture).await;
-        damage_call(&fixture, &summary, damage);
+        damage_call(&fixture, &summary, damage.as_bytes());
 
-        let finalized = try_finalize_with(&fixture, &observer, summary).await;
+        let error = try_finalize_with(&fixture, &scripted(&fixture, 0), summary)
+            .await
+            .expect_err("a damaged call record pauses the run");
 
-        let finalized = finalized.unwrap_or_else(|error| panic!("{damage}: {error:#}"));
-        assert_eq!(finalized.status, WorkflowV2Status::Accepted, "{damage}");
-        assert_eq!(status(&fixture), RunStatus::Completed, "{damage}");
-        let gate = record(&fixture).acceptance_gate;
-        let gate = gate.unwrap_or_else(|| panic!("{damage}: the gate is dropped"));
-        assert_eq!(gate.record_path, BOUND, "{damage}");
+        let message = paused_message(&error).unwrap_or_else(|| panic!("{damage}: {error:#}"));
+        assert!(message.contains("acceptance call record"), "{message}");
+        assert_eq!(status(&fixture), RunStatus::Paused, "{damage}");
         assert!(
             labels(&fixture)
                 .iter()
@@ -58,62 +56,6 @@ async fn a_damaged_acceptance_call_record_is_rebuilt_from_its_round_and_the_run_
             "{damage}: {:?}",
             labels(&fixture)
         );
-    }
-}
-
-/// Inside the runner (the authored outcome): a damaged call record gives
-/// the outcome its whole copy gives, never an error the run fails on.
-#[tokio::test]
-async fn the_authored_outcome_reads_a_damaged_acceptance_call_as_its_round() {
-    let outcome = |fixture: &Fixture, summary| {
-        apply_authored_run_outcome(
-            &fixture.store,
-            &fixture.run_id,
-            &fixture.v2_store,
-            Some(&fixture.universe),
-            Some(fixture.repo.path()),
-            true,
-            summary,
-        )
-        .map(|summary| {
-            let next = summary.next_action.unwrap_or_default();
-            (summary.status, next.replace(&fixture.run_id, "<run>"))
-        })
-    };
-    let whole = fixture();
-    let summary = in_run_round(&whole).await;
-    let expected = outcome(&whole, summary).expect("a whole record");
-    for damage in DAMAGE {
-        let fixture = fixture();
-        let summary = in_run_round(&fixture).await;
-        damage_call(&fixture, &summary, damage);
-
-        let got = outcome(&fixture, summary);
-
-        let got = got.unwrap_or_else(|error| panic!("{damage}: {error}"));
-        assert_eq!(got, expected, "{damage}");
-    }
-}
-
-/// Both copies lost: the run pauses naming the call record, never Failed
-/// and never Running; the resume runs the stage again and the run ends on
-/// the new round.
-#[tokio::test]
-async fn a_damaged_call_record_with_no_whole_round_pauses_and_the_resume_heals() {
-    for damage in DAMAGE {
-        let fixture = fixture();
-        let summary = in_run_round(&fixture).await;
-        damage_call(&fixture, &summary, damage);
-        let bound = fixture.store.run_dir(&fixture.run_id).join(BOUND);
-        std::fs::write(bound, "{\"round\":").unwrap();
-
-        let error = try_finalize_with(&fixture, &scripted(&fixture, 0), summary)
-            .await
-            .expect_err("no whole copy: the run pauses");
-
-        let message = paused_message(&error).unwrap_or_else(|| panic!("{damage}: {error:#}"));
-        assert!(message.contains("acceptance call record"), "{message}");
-        assert_eq!(status(&fixture), RunStatus::Paused, "{damage}");
         LifecycleController::new(fixture.store.clone())
             .apply(&fixture.run_id, LifecycleAction::Resume)
             .unwrap();
@@ -125,6 +67,98 @@ async fn a_damaged_call_record_with_no_whole_round_pauses_and_the_resume_heals()
             .acceptance_gate
             .expect("the new round's gate");
         assert_eq!(gate.record_path, "v2/acceptance/round-01/attempt-02.json");
+    }
+}
+
+/// Round 2 (review repro): round 1 passed as attempt-01; a later execution
+/// of the same call failed before writing a round, and its record is cut in
+/// half. The call's newest round is stale: no Accepted record and no clean
+/// gate may come from it. The run pauses.
+#[tokio::test]
+async fn a_damaged_failed_reexecution_is_never_judged_on_a_stale_round() {
+    let fixture = fixture();
+    let summary = in_run_round(&fixture).await;
+    let id = &summary.calls[0].id;
+    let mut failed = fixture.v2_store.load_call_record(id).unwrap().unwrap();
+    failed.attempt += 1;
+    failed.status = WorkflowV2Status::Failed;
+    failed.result = archon_workflow::v2::script::failed_v2_result(
+        id,
+        &WorkflowError::HostOperational("stage errored before its round".into()),
+    );
+    let bytes = serde_json::to_vec(&failed).unwrap();
+    damage_call(&fixture, &summary, &bytes[..bytes.len() / 2]);
+
+    let call = super::super::call::acceptance_call_record(
+        &fixture.store,
+        &fixture.run_id,
+        &fixture.v2_store,
+        id_call(&summary),
+    );
+
+    assert!(
+        matches!(&call, Err(WorkflowError::ControlPaused(_))),
+        "a stale round must not stand in for the damaged record: {call:?}"
+    );
+    assert_eq!(status(&fixture), RunStatus::Paused);
+}
+
+fn id_call(summary: &WorkflowV2ScriptSummary) -> &archon_workflow::WorkflowV2HostCall {
+    &summary.calls[0]
+}
+
+/// Inside the runner, through the real terminal rule: with the whole record
+/// the rule judges the script's accounting; with the record damaged the run
+/// pauses before any verdict, never errors and never judges a guess.
+#[tokio::test]
+async fn the_authored_outcome_pauses_on_a_damaged_acceptance_call() {
+    let accounting = serde_json::json!({
+        "accepted": ["TASK-H-001"], "blocked": [], "adversarial_findings": [],
+        "uncovered_requirements": [],
+        "review_remediation": { "resolved": [], "unresolved": [], "unassigned": [] },
+    })
+    .to_string();
+    let outcome = |fixture: &Fixture, mut summary: WorkflowV2ScriptSummary| {
+        summary.script_result = Some(accounting.clone());
+        apply_authored_run_outcome(
+            &fixture.store,
+            &fixture.run_id,
+            &fixture.v2_store,
+            Some(&fixture.universe),
+            Some(fixture.repo.path()),
+            true,
+            summary,
+        )
+    };
+    let judged = |fixture: &Fixture| {
+        std::fs::read_to_string(fixture.store.events_path(&fixture.run_id))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|event| event["detail"]["event"] == "authored_run_outcome")
+            .map(|event| event["detail"]["from_accounting"].clone())
+    };
+    let whole = fixture();
+    let summary = in_run_round(&whole).await;
+    outcome(&whole, summary).expect("a whole record is judged");
+    assert_eq!(
+        judged(&whole),
+        Some(serde_json::json!(true)),
+        "the rule ran"
+    );
+    for damage in DAMAGE {
+        let fixture = fixture();
+        let summary = in_run_round(&fixture).await;
+        damage_call(&fixture, &summary, damage.as_bytes());
+
+        let got = outcome(&fixture, summary);
+
+        assert!(
+            matches!(&got, Err(WorkflowError::ControlPaused(_))),
+            "{damage}: {got:?}"
+        );
+        assert_eq!(status(&fixture), RunStatus::Paused, "{damage}");
+        assert_eq!(judged(&fixture), None, "{damage}: no verdict on damage");
     }
 }
 
