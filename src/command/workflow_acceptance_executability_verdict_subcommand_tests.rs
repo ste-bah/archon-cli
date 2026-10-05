@@ -11,6 +11,18 @@ use super::unresolved_on_path;
 
 /// The host's own `cargo`, if it has one.
 pub(super) fn host_cargo() -> Option<PathBuf> {
+    // A rustup proxy finds no toolchain under the fixture's empty HOME, so
+    // the fixture links the toolchain's own cargo when rustup names one.
+    let toolchain = std::process::Command::new("rustup")
+        .args(["which", "cargo"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))
+        .filter(|cargo| cargo.is_file());
+    if toolchain.is_some() {
+        return toolchain;
+    }
     let path = std::env::var("PATH").ok()?;
     std::env::split_paths(&path)
         .map(|dir| dir.join("cargo"))
