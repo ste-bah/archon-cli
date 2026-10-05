@@ -6,7 +6,7 @@
 //! refused with the same values. Every value goes into every site, and each
 //! verdict is compared both ways: no false refusal and no false green.
 use super::*;
-use crate::command::workflow_freeze_candidate::candidate_document;
+use crate::command::workflow_freeze_candidate::{candidate_document, marker_defects};
 use archon_workflow::task_skeleton::TaskSkeleton;
 
 const HEAD: &str = r#""schema_version":1,"acceptance_digest":"d""#;
@@ -184,8 +184,43 @@ fn workflow_freeze_shape_skeleton_document_reads_what_the_reader_reads() {
         }
     }
     assert!(read_by_both > values().len() * 4, "{read_by_both}");
-    let document = fill(&sites()[1].1, br#""\ud800""#);
-    let read = skeleton_document(&document).expect("read");
-    assert_eq!(read["tasks"][0]["task_id"], "T");
-    assert!(read["tasks"][0]["zz"].is_null(), "{read}");
+    // Every field the marker scan reads is kept in full, whatever the
+    // ignored fields beside it hold, and every ignored field is null.
+    for (value, bytes) in values() {
+        let document = fill(MARKED, &bytes);
+        assert!(
+            serde_json::from_slice::<TaskSkeleton>(&document).is_ok(),
+            "{value}"
+        );
+        let read = skeleton_document(&document).expect("read");
+        let expected: serde_json::Value =
+            serde_json::from_slice(&fill(MARKED, b"null")).expect("json");
+        assert_eq!(read, expected, "{value}");
+        for field in [
+            "task_id",
+            "file_name",
+            "depends_on",
+            "deliverable_contracts",
+        ] {
+            let kept = &read["tasks"][0][field];
+            assert!(
+                !kept.is_null() && *kept == expected["tasks"][0][field],
+                "{value} {field}"
+            );
+        }
+        let markers = marker_defects(&read, true);
+        assert_eq!(markers, marker_defects(&expected, true), "{value}");
+        assert_eq!(markers.len(), 4, "{value}: {markers:?}");
+    }
 }
+
+/// A task with every field the marker scan reads, a marker in four of them,
+/// and a hole the reader ignores at each depth the scan walks.
+const MARKED: &str = r#"{"schema_version":1,"acceptance_digest":"d","zz":@,"tasks":[{
+  "task_id":"T","file_name":"f <redacted>","zz":@,
+  "depends_on":[{"task_id":"U","ordering_only":true,"zz":@,
+    "consumes":[{"artifact_path":"a <redacted>","kind":"k","zz":@}]}],
+  "blocks":["b"],"implements":["i"],
+  "deliverable_contracts":[{"kind":"file","artifact_path":"o <redacted>",
+    "typed_verifier_command":"v","minimum_count_fields":{"m":1},
+    "registry_identity_fields":{"r":"<redacted>"}}]}]}"#;
