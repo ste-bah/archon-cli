@@ -43,6 +43,7 @@ pub use baseline_rule::{
 pub use baseline_run_base::{
     BaseRedTest, ExcusedRedTests, RunBaseRedContext, UNOWNED_RED_GAP_ID, excuse_run_base_red_tests,
 };
+#[cfg(test)]
 pub(crate) use contracts::demote_failed_contract;
 pub use contracts::{
     enforce_declared_contracts, enforce_declared_contracts_watched, mark_branch_operational,
