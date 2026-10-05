@@ -1,4 +1,4 @@
-use std::fs;
+use std::path::PathBuf;
 
 use super::*;
 
@@ -22,13 +22,18 @@ fn task(id: &str, tools: &str, env: &str, tail: &str) -> String {
     )
 }
 
+/// Lints the files in memory: what is under test is the analysis of each
+/// file's text, and a temp directory only added an OS dependency (Issue 327).
 fn lint(files: &[String]) -> String {
-    let dir = tempfile::tempdir().expect("tempdir");
-    for (index, contents) in files.iter().enumerate() {
-        let id = format!("TASK-X-{:03}", index + 1);
-        fs::write(dir.path().join(format!("{id}.md")), contents).expect("write");
-    }
-    section(Some(dir.path()))
+    let paths: Vec<PathBuf> = (1..=files.len())
+        .map(|index| PathBuf::from(format!("TASK-X-{index:03}.md")))
+        .collect();
+    let read: Vec<_> = paths
+        .iter()
+        .zip(files)
+        .map(|(path, contents)| (path.as_path(), Some(contents.clone())))
+        .collect();
+    checked_files(&read)
 }
 
 /// The live case: a task declaring no tools while running cargo. The host
@@ -297,4 +302,17 @@ fn focused_subsections_reach_lint_without_sibling_commands() {
             .iter()
             .any(|s| s.contains("exit 99") || s.contains("wrong_command"))
     );
+}
+
+/// `section` reads task files from disk; a committed corpus covers that path
+/// without creating anything in the shared temp directory (Issue 327).
+#[test]
+fn section_reads_a_task_corpus_from_disk() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/archon-workflow/tests/fixtures/write-wave-synthetic");
+    let out = section(Some(&root));
+    assert!(!out.contains("NOT checked"), "{out}");
+    for task in ["TASK-SYN-010", "TASK-SYN-020"] {
+        assert!(out.contains(task), "{task} was not read: {out}");
+    }
 }

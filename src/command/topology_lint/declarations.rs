@@ -127,15 +127,27 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
         out.push_str(&format!("  no task files under {}.\n", root.display()));
         return out;
     }
+    let files: Vec<_> = paths
+        .iter()
+        .map(|path| (path.as_path(), fs::read_to_string(path).ok()))
+        .collect();
+    out.push_str(&checked_files(&files));
+    out
+}
 
+/// The section body for task files already read; `None` is a file that could
+/// not be read. Kept apart from the reading so its tests need no filesystem
+/// (Issue 327: a shared temp directory failed one on Windows CI).
+fn checked_files(files: &[(&Path, Option<String>)]) -> String {
+    let mut out = String::new();
     let mut no_commands: Vec<String> = Vec::new();
     let mut undeclared_tools: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut undeclared_env: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut unread: Vec<String> = Vec::new();
     let mut checked = 0usize;
 
-    for path in &paths {
-        let Ok(raw) = fs::read_to_string(path) else {
+    for (path, raw) in files {
+        let Some(raw) = raw else {
             unread.push(display_name(path));
             continue;
         };
@@ -143,21 +155,21 @@ pub(super) fn section(tasks_root: Option<&Path>) -> String {
         // wrong in the way this whole section exists to prevent: with every
         // file unparseable the summary below said "every runner is declared",
         // which is a clean bill of health for a corpus nothing had read.
-        let Ok(task) = parse_task_file(path, &raw) else {
+        let Ok(task) = parse_task_file(path, raw) else {
             unread.push(display_name(path));
             continue;
         };
         checked += 1;
         let name = task.canonical_task_id.clone();
 
-        let commands = focused_test_commands(&raw);
+        let commands = focused_test_commands(raw);
         // A task with no runnable verifier is the worse defect and used to be
         // invisible here: with nothing parsed there is no undeclared runner to
         // report, so the summary called the corpus clean. Observed live — six
         // of fifteen specs moved their commands into fenced ```bash blocks
         // while a repair drove a "prose entries" count to zero, and every
         // requirement those tasks claim became unprovable in the same stroke.
-        if !task_has_runnable_test(&raw) {
+        if !task_has_runnable_test(raw) {
             no_commands.push(name.clone());
         }
         for command in commands {
