@@ -8,13 +8,13 @@ use archon_workflow::task_set_contract::TrustedCwd;
 use super::probe_tests::{git, trees};
 use super::{Baseline, ExecutabilityProbe, HostProbe};
 
-const REPO: TrustedCwd = TrustedCwd::RepoRoot;
+pub(super) const REPO: TrustedCwd = TrustedCwd::RepoRoot;
 
 /// Compiles the tree's library, then asserts the feature exists.
-const BUILDS_THEN_ASSERTS: &str = "rustc --crate-type lib --emit=metadata --out-dir \"$(mktemp -d)\" src/lib.rs && test -f feature.txt";
+pub(super) const BUILDS_THEN_ASSERTS: &str = "rustc --crate-type lib --emit=metadata --out-dir \"$(mktemp -d)\" src/lib.rs && test -f feature.txt";
 
 /// The round's own site (live, no policy) held to `commit`.
-fn round_at(
+pub(super) fn round_at(
     trees: &super::probe_tests::Trees,
     commit: &str,
     copies: &std::path::Path,
@@ -32,7 +32,7 @@ fn round_at(
 }
 
 /// Commit `files` (path, text) to `repo`; returns the new HEAD.
-fn commit(repo: &std::path::Path, files: &[(&str, &str)], message: &str) -> String {
+pub(super) fn commit(repo: &std::path::Path, files: &[(&str, &str)], message: &str) -> String {
     for (path, text) in files {
         std::fs::write(repo.join(path), text).unwrap();
     }
@@ -46,14 +46,18 @@ async fn a_check_failing_only_because_the_base_does_not_build_is_unproven_not_pr
     let trees = trees(&[("AC-328-001", BUILDS_THEN_ASSERTS, REPO)]);
     // The pre-implementation tree's own code does not compile; the live
     // tree's does, and has the feature.
+    // The break is in a module the check neither names nor owns.
     let broken = commit(
         &trees.repo,
-        &[("src/lib.rs", "pub fn f() -> u32 { \"x\" }\n")],
+        &[
+            ("src/lib.rs", "mod parser;\n"),
+            ("src/parser.rs", "pub fn f() -> u32 { \"x\" }\n"),
+        ],
         "broken base",
     );
     commit(
         &trees.repo,
-        &[("src/lib.rs", "pub fn f() -> u32 { 1 }\n")],
+        &[("src/parser.rs", "pub fn f() -> u32 { 1 }\n")],
         "fixed",
     );
     let copies = tempfile::tempdir().unwrap();
@@ -89,7 +93,7 @@ async fn a_check_failing_only_because_a_tool_is_missing_is_unproven_not_proven()
     let why = unproven
         .get("AC-328-002")
         .unwrap_or_else(|| panic!("a missing tool is no proof it can fail: {unproven:?}"));
-    assert!(why.contains("could not be started (exit 127"), "{why}");
+    assert!(why.contains("not on its search path (exit 127)"), "{why}");
     trees.assert_live_untouched(copies.path());
 }
 

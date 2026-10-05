@@ -37,7 +37,6 @@ use std::path::{Path, PathBuf};
 use super::repairs::{TreeRun, tree_results};
 use super::sites::resolves;
 use super::*;
-use crate::command::workflow_task_set::passability::evidence::{Redactor, program_output};
 
 /// The tree before any implementation, in the repository it belongs to.
 #[derive(Debug, Clone)]
@@ -250,6 +249,7 @@ pub(crate) fn originals<'a>(
 ) -> BTreeMap<String, Original> {
     let results: Vec<&CheckResult> = results.into_iter().collect();
     let crashed = crash_findings(contract, results.iter().copied());
+    let at = super::verdict::Context::new(None, contract);
     results
         .into_iter()
         .map(|result| {
@@ -259,7 +259,7 @@ pub(crate) fn originals<'a>(
                 .any(|entry| entry.id == id && is_placeholder(entry));
             // Issue 328: a run that gave no verdict (a program that could
             // not start, a tree that did not build) failed no assertion.
-            let silent = silent_failure(contract, result).is_some();
+            let silent = silent::silent_failure(contract, result, &at).is_some();
             let original = if placeholder
                 || crashed.contains_key(&id)
                 || result.operational_error.is_some()
@@ -288,19 +288,6 @@ pub(super) fn passed(result: &CheckResult) -> bool {
         && !archon_workflow::acceptance::output_reports_zero_work(&stdout, &stderr)
 }
 
-/// Bytes of a silent failure's stderr kept as the host's evidence.
-const EVIDENCE_BYTES: usize = 800;
-
-/// Why `result`, a failed run of a check of `contract`, gave no verdict
-/// (`verdict::no_verdict`); `None` when its failure is a verdict.
-fn silent_failure(contract: &AcceptanceContract, result: &CheckResult) -> Option<String> {
-    let entry = (contract.acceptance.iter())
-        .chain(&contract.supplementary)
-        .find(|entry| entry.id == result.acceptance_id)?;
-    let (_, text) = executed_text(entry)?;
-    verdict::no_verdict(text, result)
-}
-
 /// Author findings, keyed by id, for every check of `refs` that cannot be
 /// shown to fail on the baseline or could not be run there (see the module
 /// docs).
@@ -318,8 +305,7 @@ pub(super) async fn cannot_fail_findings(
     }
     let short: String = baseline.commit.chars().take(12).collect();
     let run = tree_results(probe, baseline, contract, digest, refs, known, false).await;
-    let (environment, forwarded) = super::sites::site_environment(probe);
-    let redactor = Redactor::for_environment(environment, &forwarded);
+    let at = silent::context(probe, contract);
     let mut passing = Vec::new();
     for reference in refs {
         let id = &reference.acceptance_id;
@@ -332,17 +318,18 @@ pub(super) async fn cannot_fail_findings(
                 ),
             );
         } else if let Some(result) = result {
+            if let Some(why) = silent::silent_failure(contract, result, &at) {
+                // Issue 328: failing without a verdict proves nothing; failing
+                // so again on the same base goes to the author.
+                let commit = &baseline.commit;
+                if let Some(finding) = silent::settle(probe, commit, contract, result, &why) {
+                    findings.insert(id.clone(), finding);
+                }
+                continue;
+            }
+            silent::clear(probe, &baseline.commit, contract, id);
             if passed(result) {
                 passing.push(id.clone());
-            } else if let Some(why) = silent_failure(contract, result) {
-                // Issue 328: failing without a verdict proves nothing.
-                let evidence = program_output(&result.stderr, &redactor, EVIDENCE_BYTES);
-                probe.unproven(
-                    id,
-                    format!(
-                        "it failed on the pre-implementation tree at {short}, but {why}, so it gave no verdict there and is not proven able to fail; once the host can run it there, it is probed again. Its stderr there:\n{evidence}"
-                    ),
-                );
             } else {
                 probe.failed_on_baseline(result);
             }

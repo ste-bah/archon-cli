@@ -193,7 +193,7 @@ pub(super) async fn run_at(
             continue;
         };
         if let (Some(key), None) = (key, &result.operational_error)
-            && super::verdict::host_failure(&result).is_none()
+            && !super::verdict::may_be_host_failure(&result)
             && let Ok(mut memo) = memo().lock()
         {
             memo.insert(key, result.clone());

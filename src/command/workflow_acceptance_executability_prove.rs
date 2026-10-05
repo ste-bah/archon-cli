@@ -42,6 +42,7 @@ pub(super) async fn prove(
         probe.project.canonicalize().map(archon_shell::paths::plain),
     ];
     let live: Vec<&Path> = live.iter().flatten().map(PathBuf::as_path).collect();
+    let at = super::silent::context(probe, contract);
     for id in passing {
         let names = (contract.acceptance.iter())
             .chain(&contract.supplementary)
@@ -92,7 +93,7 @@ pub(super) async fn prove(
         // Issue 328: nor did a run that failed for its host (a program that
         // could not start, a tree that did not build) fail on its own terms.
         let crashed = !super::crash_findings(&mutated, [result]).is_empty()
-            || super::verdict::host_failure(result).is_some();
+            || super::silent::silent_failure(&mutated, result, &at).is_some();
         if moved.is_empty() {
             findings.insert(
                 id.clone(),

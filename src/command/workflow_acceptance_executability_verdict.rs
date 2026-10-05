@@ -4,78 +4,109 @@
 //! implementation. That failure proves something only when the check itself
 //! decided it: its assertion found the criterion false, or the deliverable
 //! it drives is absent there. A run that stopped before the check could
-//! decide anything -- a program it runs could not start, the tree did not
-//! build, its own script crashed, it never exited -- gave NO verdict: it
-//! would fail the same way whatever the check asserts, so it proves nothing
-//! about the check. That run is unproven (the host's, resumable), never a
-//! proof.
+//! decide anything -- a tool it runs is missing, the tree it builds did not
+//! compile, its own script crashed, it never exited -- gave NO verdict: it
+//! would fail the same way whatever the check asserts. That run is unproven
+//! (the host's), never a proof; one that stays unproven on the same base is
+//! sent to its author (`workflow_acceptance_executability_silent`), so no
+//! check is blocked for good.
 //!
-//! Test harnesses draw the same line, mostly through their exit status:
-//! pytest exits 1 when tests failed and 2-5 when they were interrupted,
-//! could not be collected, hit an internal or usage error, or found none;
-//! POSIX `grep`, `diff` and `cmp` exit 1 for a negative answer and 2 for
-//! trouble; a POSIX shell exits 126 or 127 when a program cannot be run or
-//! is not found. Other runners share one status for both: `cargo test` exits
-//! 101 for a failed test and for a compile error, jest 1 for a failed test
-//! and for a suite that failed to run; only their output separates them (a
-//! test result summary versus a compiler error). A check is any script, so
-//! the host reads no runner's status as its own; it applies the conventions
-//! every one of these keeps:
+//! Test harnesses draw the same line: pytest exits 1 when tests failed and
+//! 2-5 when they could not run; POSIX `grep`, `diff` and `cmp` exit 1 for a
+//! negative answer and 2 for trouble; a POSIX shell exits 126 or 127 when it
+//! cannot start a program. `cargo test` (101) and jest (1) give one status
+//! for a failed test and for a compile error; only the output separates
+//! them. A check is any script, so the host decides from the check's own
+//! text (`workflow_acceptance_executability_verdict_shell`) and its site's
+//! search path, never from what its output says alone:
 //!
-//! 1. exit 126 or 127: the shell could not start a program it looked up by
-//!    NAME on the search path, or by an absolute path, or a script's
-//!    interpreter (a tool or interpreter the environment lacks). A program
-//!    named by a RELATIVE path (`./bin/tool`, `bash scripts/new.sh`) is a
-//!    file of the tree: its absence is the deliverable's absence, a verdict.
-//!    An exit 126/127 whose missing program the shell does not name is
-//!    taken as no verdict;
+//! 1. exit 126 or 127, and a program the check starts by NAME is not on
+//!    its search path (or by an absolute path that does not exist): a tool
+//!    or interpreter its environment lacks. A program it starts by a path
+//!    in the tree (`./bin/tool`), or an interpreter given a script of the
+//!    tree (`bash scripts/new.sh`), is the deliverable not there yet: a
+//!    verdict;
 //! 2. no exit status: the run was killed before it reported anything;
 //! 3. the check crashed in its own code
 //!    ([`archon_workflow::acceptance_check_crash`]);
-//! 4. the output carries a compiler error at a source location, in a shape
-//!    compilers share -- `path:line[:col]: [fatal ]error...` (the GNU
-//!    convention), `path(line,col): error...`, an `error...:` header whose
-//!    primary span is `--> path:line[:col]`, or an interpreter's
-//!    `SyntaxError` in a source file -- and nothing shows an assertion ran:
-//!    no runner reports a failed test (`N failed`, `FAILED`), no panic, no
-//!    failed assertion. The tree did not build, so nothing was asserted.
+//! 4. the check starts a compiler or build tool ([`BUILDERS`]), its output
+//!    carries a compiler error at a source location (`path:line[:col]:
+//!    error`, `path(line,col): error`, an `error...:` header whose span is
+//!    `--> path:line`, or a `SyntaxError` in a source file), every such
+//!    location is outside the check's own files and the contract's declared
+//!    deliverable paths, nothing shows an assertion ran (`N failed`,
+//!    `FAILED`, a panic, a failed assertion), and the build is not itself
+//!    the check's assertion (its last program is not a build or lint step).
+//!    A compile error in the check's own sources (a test written before the
+//!    code it calls) or in a deliverable is a verdict.
 //!
-//! Anything else is the check's verdict on that tree: any other non-zero
-//! exit, and a run that did no work (no test matched): the deliverable it
-//! needs is absent there, which is exactly what a pre-implementation tree
-//! must show. A failure that names no source location (a test target or
-//! subcommand that does not exist yet) is the same. No tool, language or
-//! PRD is named here.
+//! Anything else is the check's verdict on that tree, including a run that
+//! did no work (no test matched) and a failure naming no source location.
 
+use std::path::Path;
 use std::sync::LazyLock;
 
 use archon_workflow::acceptance_check_crash::{CheckRunClass, classify_check_run};
 use archon_workflow::acceptance_scratch::CheckResult;
+use archon_workflow::task_set_contract::{AcceptanceCheck, AcceptanceContract};
 use regex::Regex;
+
+use super::verdict_shell::{Simple, expands, simple_commands};
+
+/// Programs whose job is to compile or build: a compiler error they print
+/// is the tree's (rule 4). An interpreter compiles the source it imports.
+const BUILDERS: &[&str] = &[
+    "cargo", "rustc", "go", "gcc", "g++", "cc", "c++", "clang", "clang++", "javac", "kotlinc",
+    "scalac", "tsc", "swiftc", "swift", "make", "cmake", "ninja", "gradle", "gradlew", "mvn",
+    "dotnet", "npm", "npx", "yarn", "pnpm", "bazel", "python", "python3",
+];
+
+/// Arguments that make a build tool run the product, not just build it.
+const RUNS_PRODUCT: &[&str] = &["test", "nextest", "run", "bench", "exec", "pytest", "jest"];
+
+/// Where a check runs: its search path and the contract's declared
+/// deliverable paths.
+pub(crate) struct Context {
+    path: Option<String>,
+    deliverables: Vec<String>,
+}
+
+impl Context {
+    /// The search path `path` (the host's when `None`), and every path a
+    /// floor of `contract` declares.
+    pub(crate) fn new(path: Option<String>, contract: &AcceptanceContract) -> Self {
+        let deliverables = (contract.acceptance.iter())
+            .chain(&contract.supplementary)
+            .filter_map(|entry| match &entry.check {
+                AcceptanceCheck::Floor { contract } => Some(contract),
+                AcceptanceCheck::Command { .. } => None,
+            })
+            .flat_map(|floor| {
+                [Some(&floor.artifact_path), floor.registry_path.as_ref()]
+                    .into_iter()
+                    .chain([floor.instance_source_path.as_ref()])
+                    .flatten()
+                    .cloned()
+            })
+            .filter(|path| !path.trim().is_empty())
+            .collect();
+        Self {
+            path: path.or_else(|| std::env::var("PATH").ok()),
+            deliverables,
+        }
+    }
+
+    /// Whether `name` is a program on the search path.
+    fn on_path(&self, name: &str) -> bool {
+        (self.path.as_deref())
+            .is_some_and(|path| std::env::split_paths(path).any(|dir| dir.join(name).is_file()))
+    }
+}
 
 /// Why the failed run `result` of the check text `command` gave no verdict
 /// (see the module docs); `None` when it passed, could not run at all (an
 /// operational error, reported as such), or its failure is a verdict.
-pub(crate) fn no_verdict(command: &str, result: &CheckResult) -> Option<String> {
-    if let Some(why) = host_failure(result) {
-        return Some(why);
-    }
-    if result.operational_error.is_some() || super::baseline::passed(result) {
-        return None;
-    }
-    match classify_check_run(command, result) {
-        CheckRunClass::ScriptDefect(defect) => Some(format!(
-            "it crashed in its own {} code ({}) before it asserted anything",
-            defect.interpreter, defect.rule
-        )),
-        CheckRunClass::Passed | CheckRunClass::Failed => None,
-    }
-}
-
-/// Why `result` failed for its host rather than for its check -- rules 1, 2
-/// and 4 of the module docs -- or `None`. Such a run is never remembered as
-/// a verdict: once the host can run the check, it runs again.
-pub(crate) fn host_failure(result: &CheckResult) -> Option<String> {
+pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> Option<String> {
     if result.operational_error.is_some() || super::baseline::passed(result) {
         return None;
     }
@@ -85,58 +116,118 @@ pub(crate) fn host_failure(result: &CheckResult) -> Option<String> {
                 .to_string(),
         );
     };
-    if matches!(code, 126 | 127) {
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        // A file of the tree that is not there yet: the deliverable's absence.
-        if missing_program(&stderr).is_some_and(|name| tree_file(&name)) {
-            return None;
-        }
+    let commands = simple_commands(command);
+    if matches!(code, 126 | 127)
+        && let Some(name) = missing_program(&commands, at)
+    {
         return Some(format!(
-            "a program it runs could not be started (exit {code}: not found, or not executable), a tool or interpreter its environment lacks"
+            "it starts `{name}`, which is not on its search path (exit {code}): a tool or interpreter its environment lacks"
         ));
     }
-    if code == 0 {
-        // It ran and did no work: the deliverable is absent, a verdict.
+    if let CheckRunClass::ScriptDefect(defect) = classify_check_run(command, result) {
+        return Some(format!(
+            "it crashed in its own {} code ({}) before it asserted anything",
+            defect.interpreter, defect.rule
+        ));
+    }
+    if matches!(code, 0 | 126 | 127) {
         return None;
     }
-    let output = format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr)
-    );
-    (!ASSERTED.is_match(&output) && compile_error(&output)).then(|| {
-        "the tree it ran on did not build: it stopped at a compiler error at a source location before any assertion ran".to_string()
+    let locations = compile_errors(&output(result));
+    let builds = commands
+        .iter()
+        .any(|c| c.program.as_deref().is_some_and(builder));
+    let foreign =
+        !locations.is_empty() && (locations.iter()).all(|location| !owned(location, &commands, at));
+    (builds && foreign && !build_is_assertion(&commands)).then(|| {
+        "the tree it ran on did not build: it stopped at a compiler error outside its own files and the deliverables, before any assertion ran".to_string()
     })
 }
 
-/// The shell's report of a program it could not start: `sh: 1: NAME: not
-/// found`, `bash: line 1: NAME: command not found`, `bash: NAME: No such
-/// file or directory`, `env: 'NAME': No such file or directory`.
-static NOT_STARTED: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"^[^:\s]+:(?: line \d+:| \d+:)? (.+?): (?:command not found|not found|No such file or directory|Permission denied)\s*$",
-    )
-    .expect("static pattern")
-});
-
-/// The program the last such report in `stderr` names; `None` when there is
-/// none, or it is a script whose interpreter is missing.
-fn missing_program(stderr: &str) -> Option<String> {
-    let line = (stderr.lines().rev()).find(|line| NOT_STARTED.is_match(line.trim_end()))?;
-    if line.contains("bad interpreter") {
-        return None;
+/// Whether `result` may have failed for its host (rules 1, 2, 4 without the
+/// check's text): such a run is never remembered as a verdict, so a retry
+/// runs it again.
+pub(crate) fn may_be_host_failure(result: &CheckResult) -> bool {
+    if result.operational_error.is_some() || super::baseline::passed(result) {
+        return false;
     }
-    let name = NOT_STARTED.captures(line.trim_end())?.get(1)?.as_str();
-    Some(
-        name.trim_matches(|c| matches!(c, '\'' | '"' | '`'))
-            .to_string(),
+    match result.exit_code {
+        None | Some(126 | 127) => true,
+        Some(0) => false,
+        Some(_) => !compile_errors(&output(result)).is_empty(),
+    }
+}
+
+fn output(result: &CheckResult) -> String {
+    format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
     )
 }
 
-/// Whether `name` is a path relative to the check's working directory: a
-/// file of the tree, not a program looked up on the search path.
-fn tree_file(name: &str) -> bool {
-    name.contains('/') && !name.starts_with('/') && !name.contains(char::is_whitespace)
+/// The first program `commands` start that cannot start: a bare name not on
+/// the search path, or an absolute path that does not exist.
+fn missing_program(commands: &[Simple], at: &Context) -> Option<String> {
+    (commands.iter())
+        .filter_map(|c| c.program.as_deref())
+        .find(|program| match program.contains('/') {
+            true => program.starts_with('/') && !Path::new(program).exists(),
+            false => !at.on_path(program),
+        })
+        .map(str::to_string)
+}
+
+/// The program's own name: a build tool whatever directory it is run from.
+fn builder(program: &str) -> bool {
+    let name = program.rsplit('/').next().unwrap_or(program);
+    BUILDERS.contains(&name) || (name.starts_with("python3.") && name.len() > 8)
+}
+
+/// Rule 4's exception: the check's last program is a build or lint step,
+/// so the build IS its assertion.
+fn build_is_assertion(commands: &[Simple]) -> bool {
+    // The check's status is its last command's: a builtin (`test`) there
+    // asserts something other than the build.
+    let Some(last) = commands.last() else {
+        return false;
+    };
+    let Some(program) = last.program.as_deref() else {
+        return false;
+    };
+    let name = program.rsplit('/').next().unwrap_or(program);
+    builder(program)
+        && !name.starts_with("python")
+        && !(last.args.iter()).any(|arg| RUNS_PRODUCT.contains(&arg.as_str()))
+}
+
+/// Whether the compile error at `location` is in the check's own files: a
+/// path its text names, a deliverable the contract declares, or a file whose
+/// stem is a word of the check (a test target it selects by name).
+fn owned(location: &str, commands: &[Simple], at: &Context) -> bool {
+    let location = location.trim_start_matches("./");
+    let words = (commands.iter())
+        .flat_map(|c| c.program.iter().chain(&c.args))
+        .filter(|word| !word.starts_with('-') && !expands(word));
+    let mut identifiers = Vec::new();
+    for word in words {
+        let path = word.trim_start_matches("./");
+        if !path.is_empty() && (location == path || location.ends_with(&format!("/{path}"))) {
+            return true;
+        }
+        identifiers.extend(
+            word.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .filter(|part| part.len() >= 2)
+                .map(str::to_string),
+        );
+    }
+    let declared = (at.deliverables.iter()).any(|path| {
+        let path = path.trim_start_matches("./");
+        location == path || location.ends_with(&format!("/{path}"))
+    });
+    let file = location.rsplit('/').next().unwrap_or(location);
+    let stem = file.split('.').next().unwrap_or(file);
+    declared || identifiers.iter().any(|word| word == stem)
 }
 
 /// Evidence that an assertion ran: a runner's count of failed tests, a
@@ -150,7 +241,7 @@ static ASSERTED: LazyLock<Regex> = LazyLock::new(|| {
 
 /// `path:line[:col]: [fatal ]error...` and `path(line,col): error...`.
 static LOCATED_ERROR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\S+?(?::\d+(?::\d+)?:|\(\d+,\d+\):?)\s+(?:fatal\s+)?error\b")
+    Regex::new(r"^(\S+?)(?::\d+(?::\d+)?:|\(\d+,\d+\):?)\s+(?:fatal\s+)?error\b")
         .expect("static pattern")
 });
 
@@ -161,7 +252,7 @@ static ERROR_HEADER: LazyLock<Regex> = LazyLock::new(|| {
 
 /// A diagnostic's primary span: `--> path:line[:col]`.
 static SPAN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^-->\s+\S+:\d+").expect("static pattern"));
+    LazyLock::new(|| Regex::new(r"^-->\s+(\S+?):\d+").expect("static pattern"));
 
 /// A source file's interpreter frame: `File "path", line N`, not a program
 /// read from stdin or `-c`.
@@ -170,17 +261,23 @@ static SOURCE_FRAME: LazyLock<Regex> =
 
 const SYNTAX_ERRORS: [&str; 3] = ["SyntaxError", "IndentationError", "TabError"];
 
-/// Whether `output` carries a compiler error at a source location (see the
-/// module docs).
-fn compile_error(output: &str) -> bool {
+/// The source files `output` names as compiler error locations, none when
+/// an assertion ran (see the module docs).
+fn compile_errors(output: &str) -> Vec<String> {
+    if ASSERTED.is_match(output) {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
     let mut header = false;
     for line in output.lines() {
         if line.trim().is_empty() {
             header = false;
             continue;
         }
-        if LOCATED_ERROR.is_match(line) || (header && SPAN.is_match(line.trim_start())) {
-            return true;
+        if let Some(located) = LOCATED_ERROR.captures(line) {
+            found.push(located[1].to_string());
+        } else if header && let Some(span) = SPAN.captures(line.trim_start()) {
+            found.push(span[1].to_string());
         }
         // Any other unindented line (a warning's header, plain output) ends
         // the error's block: a span after it is not the error's.
@@ -189,14 +286,17 @@ fn compile_error(output: &str) -> bool {
         }
     }
     let lines: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
-    let Some(last) = lines.last().map(|line| line.trim()) else {
-        return false;
-    };
-    let syntax = SYNTAX_ERRORS.iter().any(|class| {
-        last.strip_prefix(class)
-            .is_some_and(|rest| rest.starts_with(':'))
+    let syntax = lines.last().is_some_and(|last| {
+        let last = last.trim();
+        (SYNTAX_ERRORS.iter()).any(|class| {
+            last.strip_prefix(class)
+                .is_some_and(|rest| rest.starts_with(':'))
+        })
     });
-    syntax && lines.iter().any(|line| SOURCE_FRAME.is_match(line))
+    if syntax && let Some(frame) = lines.iter().rev().find_map(|l| SOURCE_FRAME.captures(l)) {
+        found.push(frame[1].to_string());
+    }
+    found
 }
 
 #[cfg(test)]

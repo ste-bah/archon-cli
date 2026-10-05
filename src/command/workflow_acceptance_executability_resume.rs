@@ -18,7 +18,7 @@
 //!
 //! Only verdicts are saved, never an operational result: a check that
 //! timed out or could not run -- or failed for its host, gave no verdict
-//! (Issue 328: `verdict::host_failure`) -- is run again by the next attempt.
+//! (Issue 328: `verdict::may_be_host_failure`) -- is run again by the next attempt.
 
 use std::path::PathBuf;
 
@@ -81,7 +81,7 @@ impl ResultStore {
                     && saved.key == key
                     && saved.result.operational_error.is_none()
                     && saved.result.classification.is_some()
-                    && super::verdict::host_failure(&saved.result).is_none() =>
+                    && !super::verdict::may_be_host_failure(&saved.result) =>
             {
                 Some(saved.result)
             }
@@ -99,7 +99,7 @@ impl ResultStore {
         };
         // Issue 328: nor a run that failed for its host (a program that
         // could not start, a tree that did not build): no verdict.
-        if result.operational_error.is_some() || super::verdict::host_failure(result).is_some() {
+        if result.operational_error.is_some() || super::verdict::may_be_host_failure(result) {
             return false;
         }
         let mut result = result.clone();

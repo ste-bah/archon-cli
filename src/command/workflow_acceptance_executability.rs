@@ -226,10 +226,14 @@ mod prove;
 mod repairs;
 #[path = "workflow_acceptance_executability_resume.rs"]
 mod resume;
+#[path = "workflow_acceptance_executability_silent.rs"]
+mod silent;
 #[path = "workflow_acceptance_executability_sites.rs"]
 mod sites;
 #[path = "workflow_acceptance_executability_verdict.rs"]
 mod verdict;
+#[path = "workflow_acceptance_executability_verdict_shell.rs"]
+mod verdict_shell;
 pub(crate) use mutation::CANNOT_FAIL;
 
 /// Sets the scratch observation's cancel flag when the probe is dropped (a
@@ -487,3 +491,6 @@ pub(crate) mod tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_verdict_probe_tests.rs"]
 mod verdict_probe_tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_verdict_probe_tests_b.rs"]
+mod verdict_probe_tests_b;
