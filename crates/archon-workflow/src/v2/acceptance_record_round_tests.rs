@@ -29,7 +29,11 @@ fn on_disk(run_dir: &Path, attempt: u32) -> AcceptanceRoundRecordV1 {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
 
-fn accept(record: &mut AcceptanceRoundRecordV1) -> WorkflowResult<u32> {
+fn accept(
+    record: &mut AcceptanceRoundRecordV1,
+    landing: &mut RoundLanding<'_>,
+) -> WorkflowResult<u32> {
+    landing.land(record)?;
     Ok(record.attempt)
 }
 
@@ -102,7 +106,7 @@ fn a_refused_writer_lands_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let mut record = failing(1, 1, "AC-A");
 
-    let refused = record_round(dir.path(), &mut record, |_| {
+    let refused = record_round(dir.path(), &mut record, |_, _| {
         WorkflowResult::<()>::Err(WorkflowError::ControlCancelled("obsolete".into()))
     });
 
@@ -114,4 +118,29 @@ fn a_refused_writer_lands_nothing() {
         .join("recording-order.log");
     assert!(std::fs::read_to_string(log).unwrap_or_default().is_empty());
     assert_eq!(next_attempt(dir.path(), 1), 1);
+}
+
+/// An act that never lands, or lands twice, is refused: a decided record
+/// never goes unwritten in silence, and one landing is one record.
+#[test]
+fn a_landing_is_made_exactly_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut record = failing(1, 1, "AC-A");
+
+    let unlanded = record_round(dir.path(), &mut record, |_, _| WorkflowResult::Ok(()));
+    let twice = record_round(dir.path(), &mut record, |record, landing| {
+        landing.land(record)?;
+        landing.land(record)
+    });
+
+    assert!(
+        matches!(unlanded, Err(WorkflowError::StateCorrupt(_))),
+        "{unlanded:?}"
+    );
+    assert!(
+        matches!(twice, Err(WorkflowError::StateCorrupt(_))),
+        "{twice:?}"
+    );
+    assert!(round_dir(dir.path(), 1).join(attempt_file_name(1)).exists());
+    assert!(!round_dir(dir.path(), 1).join(attempt_file_name(2)).exists());
 }

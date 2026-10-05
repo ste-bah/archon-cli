@@ -654,6 +654,7 @@ async fn repository_audit_direct_implementation_requires_sealed_dispatch() {
         None,
         None,
         false,
+        store.load_state(&run.id).unwrap().generation,
     )
     .await
     .unwrap();

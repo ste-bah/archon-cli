@@ -361,44 +361,9 @@ pub fn write_round_record(
     })
 }
 
-/// Issue 316: records `record` for the round's owner, as the next FREE
-/// attempt of its round. Under the recording-order lock, held until the
-/// record has landed: when another writer took its attempt meanwhile (the
-/// number was chosen when the round started), the record takes the next
-/// free one instead, so the owner is never refused for a number. Then
-/// `decide` runs on the record with the number it lands as: it fences the
-/// writer (an owner a resume replaced is refused, and nothing lands) and
-/// settles what the record says from the history it now sees, the other
-/// writer's record included. An `Err` from it lands nothing.
-pub fn record_round<T, E: From<WorkflowError>>(
-    run_dir: &Path,
-    record: &mut AcceptanceRoundRecordV1,
-    decide: impl FnOnce(&mut AcceptanceRoundRecordV1) -> Result<T, E>,
-) -> Result<(PathBuf, T), E> {
-    let dir = round_dir(run_dir, record.round);
-    std::fs::create_dir_all(&dir).map_err(|source| WorkflowError::io(&dir, source))?;
-    progress::under_order_lock(run_dir, || {
-        if attempt_taken(&dir, record.attempt)? {
-            let wanted = record.attempt;
-            record.attempt = next_attempt(run_dir, record.round);
-            if attempt_taken(&dir, record.attempt)? {
-                return Err(WorkflowError::StateCorrupt(format!(
-                    "acceptance round {} has no free attempt past {}",
-                    record.round, record.attempt
-                ))
-                .into());
-            }
-            tracing::warn!(
-                round = record.round,
-                wanted,
-                attempt = record.attempt,
-                "another writer took this acceptance attempt; the record takes the next free one"
-            );
-        }
-        let decided = decide(record)?;
-        Ok((land_locked(run_dir, &dir, record)?, decided))
-    })
-}
+#[path = "acceptance_round_landing.rs"]
+mod round_landing;
+pub use round_landing::{RoundLanding, record_round};
 
 /// Whether `attempt` of the round directory `dir` is taken: recorded, or
 /// quarantined. The caller holds the order lock.

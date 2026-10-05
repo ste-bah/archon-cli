@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use archon_workflow::v2::acceptance_stage::progress::{
     self, LoopDecision, ProgressLedger, QUARANTINE_DIR, QuarantinedRecordV1,
 };
-use archon_workflow::v2::acceptance_stage::{AcceptanceRoundRecordV1, record_round};
+use archon_workflow::v2::acceptance_stage::{AcceptanceRoundRecordV1, RoundLanding, record_round};
 use archon_workflow::{WorkflowError, WorkflowStore};
 
 /// The loop's decision after the round, and where its record was written.
@@ -55,7 +55,8 @@ impl From<WorkflowError> for Halt {
 /// executor's round lands nothing, and when another writer took this
 /// round's attempt the record takes the next free one, decided on the
 /// history that includes the other record. The owner never pauses for a
-/// number.
+/// number. `generation` is the one the executor dispatched the round under
+/// while it owned the run, never re-sampled after (review B2).
 ///
 /// Issue 320: a round whose stage context could not be resolved (no
 /// execution recorded) in a run with no task set (`task_set` false) has
@@ -72,8 +73,8 @@ pub(super) fn record_and_decide(
     task_set: bool,
 ) -> Result<Decided, WorkflowError> {
     let mut quarantined = Vec::new();
-    let landed = record_round(run_dir, record, |record| {
-        decide_locked(
+    let landed = record_round(run_dir, record, |record, landing| {
+        let (decision, ledger) = decide_locked(
             store,
             run_id,
             generation,
@@ -81,13 +82,26 @@ pub(super) fn record_and_decide(
             record,
             task_set,
             &mut quarantined,
-        )
+        )?;
+        #[cfg(test)]
+        if let Some(hook) = BEFORE_LAND.with(|hook| hook.borrow_mut().take()) {
+            hook();
+        }
+        land_owned(store, run_id, generation, record, landing)?;
+        // The ledger is a copy (the records are authoritative); a copy
+        // that did not save costs only the rebuild of a record damaged
+        // later. Saved under the order lock, so copies land in record
+        // order and never share a staging file.
+        if let Err(error) = ledger.save(run_dir) {
+            tracing::warn!(%error, run_id, "acceptance progress ledger copy not saved");
+        }
+        Ok(decision)
     });
     progress::record_quarantine_events(store, run_id, &quarantined);
     let pause = |record: &AcceptanceRoundRecordV1, reason: String, quarantined| {
         pause_on_history(store, run_id, generation, record, &reason, quarantined)
     };
-    let (path, (decision, ledger)) = match landed {
+    let (path, decision) = match landed {
         Ok(landed) => landed,
         Err(Halt::Stop(refused)) => return Err(refused),
         Err(Halt::Pause(reason)) => return Err(pause(record, reason, &quarantined)),
@@ -103,17 +117,47 @@ pub(super) fn record_and_decide(
             return Err(paused);
         }
     };
-    // The ledger is a copy (the records are authoritative); a copy that
-    // did not save costs only the rebuild of a record damaged later.
-    if let Err(error) = ledger.save(run_dir) {
-        tracing::warn!(%error, run_id, "acceptance progress ledger copy not saved");
-    }
     Ok(Decided { decision, path })
 }
 
-/// Under the order lock: fences the writer, heals the history and decides
-/// the loop after `record`, which lands as its attempt when this returns
-/// `Ok`. `quarantined` gets what the load moved, for its events.
+#[cfg(test)]
+thread_local! {
+    /// Runs once between the decision and the landing: where a resume
+    /// would race the landing (the Issue 316 review, B1).
+    pub(super) static BEFORE_LAND: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Issue 316 (review B1): the owner check and the landing under one run
+/// lock, inside the order lock. A resume hands the run to a newer executor
+/// under the run lock, so no change of owner falls between them. The
+/// nesting cannot deadlock: only this stage takes the order lock
+/// (`record_round`, from the async round, which never runs inside the
+/// synchronous run-lock closure), so no holder of the run lock waits on it.
+fn land_owned(
+    store: &WorkflowStore,
+    run_id: &str,
+    generation: u64,
+    record: &AcceptanceRoundRecordV1,
+    landing: &mut RoundLanding<'_>,
+) -> Result<PathBuf, Halt> {
+    let landed = store.with_run_lock(run_id, |locked| {
+        let run = locked.load_state(run_id)?;
+        if let Err(refused) = archon_workflow::control_pause::require_executor(&run, generation) {
+            return Ok(Err(refused));
+        }
+        landing.land(record).map(Ok)
+    });
+    match landed {
+        Ok(Ok(path)) => Ok(path),
+        Ok(Err(refused)) => Err(Halt::Stop(refused)),
+        Err(error) => Err(Halt::from(error)),
+    }
+}
+
+/// Under the order lock: turns away a writer that no longer owns the run
+/// before it heals anything, heals the history and decides the loop after
+/// `record`. `quarantined` gets what the load moved, for its events.
 fn decide_locked(
     store: &WorkflowStore,
     run_id: &str,

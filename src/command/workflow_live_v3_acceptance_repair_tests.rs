@@ -117,6 +117,7 @@ pub(super) async fn stage(
         &round_one(),
         &run.store,
         &run.run_id,
+        run.store.load_state(&run.run_id).unwrap().generation,
         Some(&run.universe),
         Some(client),
     )

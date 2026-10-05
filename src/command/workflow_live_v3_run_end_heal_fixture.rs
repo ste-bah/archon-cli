@@ -214,11 +214,17 @@ pub(super) async fn in_run_round(fixture: &Fixture) -> WorkflowV2ScriptSummary {
         input: serde_json::json!({}),
         depends_on: Vec::new(),
     };
+    let generation = fixture
+        .store
+        .load_state(&fixture.run_id)
+        .unwrap()
+        .generation;
     let result = super::super::super::workflow_live_v3_acceptance::run_acceptance_stage(
         &fixture.runtime,
         &execution,
         &fixture.store,
         &fixture.run_id,
+        generation,
         Some(&fixture.universe),
         None,
     )

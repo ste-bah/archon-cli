@@ -107,20 +107,20 @@ fn parse_request(execution: &WorkflowV2CallExecution) -> WorkflowResult<StageReq
     })
 }
 
-/// Run one acceptance round for the authored run and record it.
+/// Run one acceptance round and record it, under the `generation` its executor
+/// dispatched it at while it owned the run, never one read now (Issue 316).
 pub(super) async fn run_acceptance_stage(
     runtime: &WorkflowV2ScriptRuntime,
     execution: &WorkflowV2CallExecution,
     store: &WorkflowStore,
     run_id: &str,
+    generation: u64,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     llm: Option<&dyn archon_workflow::WorkflowLlmClient>,
 ) -> WorkflowResult<WorkflowV2Result> {
     let request = parse_request(execution)?;
     let call_id = execution.call.id.clone();
     let run_dir = store.run_dir(run_id);
-    // The generation this round runs under: only it may pause the run.
-    let generation = store.load_state(run_id)?.generation;
     let attempt = next_attempt(&run_dir, request.round);
     let mut record = AcceptanceRoundRecordV1 {
         schema_version: ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION,

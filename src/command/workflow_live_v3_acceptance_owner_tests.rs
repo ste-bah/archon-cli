@@ -161,5 +161,74 @@ fn a_second_owner_writer_takes_the_next_attempt_and_counts_the_first() {
         "the first record counted"
     );
     assert!(second.decision.escalate);
+    // Review A3: the ledger copy is saved under the order lock, in record
+    // order: it holds both records, as the numbers they landed as.
+    use archon_workflow::v2::acceptance_stage::progress::{PROGRESS_LEDGER_FILE, ProgressLedger};
+    let copy = (fixture.store.run_dir(&fixture.run_id))
+        .join(archon_workflow::v2::acceptance_stage::ACCEPTANCE_RECORDS_DIR)
+        .join(PROGRESS_LEDGER_FILE);
+    let copy: ProgressLedger = serde_json::from_slice(&std::fs::read(copy).unwrap()).unwrap();
+    let landed: Vec<(u32, u32)> = (copy.observed.iter())
+        .map(|observed| (observed.round, observed.attempt))
+        .collect();
+    assert_eq!(landed, [(1, 1), (1, 2)]);
+    assert_not_paused(&fixture);
+}
+
+/// Review B1: the run is resumed after the writer was checked and decided,
+/// before its record lands. The owner check is made again with the landing
+/// under the run lock, so the obsolete record never lands, and the new
+/// owner records its own number without counting it.
+#[test]
+fn a_resume_between_the_decision_and_the_landing_lands_nothing() {
+    let fixture = fixture(true);
+    let old = generation(&fixture);
+    let resumer = (fixture.store.clone(), fixture.run_id.clone());
+    super::super::ledger::BEFORE_LAND.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move || {
+            let lifecycle = archon_workflow::LifecycleController::new(resumer.0);
+            lifecycle.apply(&resumer.1, LifecycleAction::Pause).unwrap();
+            lifecycle
+                .apply(&resumer.1, LifecycleAction::Resume)
+                .unwrap();
+        }));
+    });
+
+    let obsolete = record(&fixture, old, &mut failing(&fixture, 1, 1, "REQ-2"));
+
+    assert!(
+        matches!(obsolete, Err(WorkflowError::ControlCancelled(_))),
+        "the replaced executor lands nothing: {:?}",
+        obsolete.as_ref().map(|decided| &decided.path)
+    );
+    assert!(on_disk(&fixture, 1).is_none(), "nothing landed");
+    let new = generation(&fixture);
+    assert!(new > old, "the hook resumed the run");
+    let current = record(&fixture, new, &mut failing(&fixture, 1, 1, "REQ-2")).unwrap();
+    assert!(current.path.ends_with(attempt_file_name(1)));
+    assert_eq!(
+        current.decision.stalled_rounds, 0,
+        "no obsolete record counted"
+    );
+    assert_not_paused(&fixture);
+}
+
+/// Review B2: a round dispatched before a resume runs under the generation
+/// it was dispatched at, never the newer owner's read when it starts: it
+/// lands nothing and pauses nothing.
+#[tokio::test]
+async fn a_round_dispatched_before_a_resume_never_adopts_the_new_owner() {
+    let fixture = fixture(true);
+    let dispatched = generation(&fixture);
+    pause_and_resume(&fixture);
+
+    let error = run_at(&fixture, &execution(1, 3, &[]), dispatched).await;
+
+    assert!(
+        matches!(error, Err(WorkflowError::ControlCancelled(_))),
+        "the replaced executor stops: {:?}",
+        error.as_ref().map(|result| &result.status)
+    );
+    assert!(on_disk(&fixture, 1).is_none(), "nothing landed");
     assert_not_paused(&fixture);
 }

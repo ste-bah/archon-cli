@@ -117,7 +117,9 @@ pub(super) async fn finalize_run_observed(
     };
     let reopen = reentry
         .filter(|_| run_kind == WorkflowRunKind::AuthoredTaskWorkflow)
-        .map(|reentry| reopen::AcceptanceReopen::new(store, run_id, reentry));
+        .map(|reentry| {
+            reopen::AcceptanceReopen::new(store, run_id, reentry, (expected_generation, v2_store))
+        });
     let finalized = super::workflow_live_v2_finalizer::finalize_summary_with_gate(
         store,
         run_id,

@@ -98,6 +98,7 @@ async fn a_passing_check_with_no_pre_implementation_tree_pauses_naming_the_way_o
             &round(n),
             &run.store,
             &run.run_id,
+            run.store.load_state(&run.run_id).unwrap().generation,
             Some(&run.universe),
             Some(&client),
         )

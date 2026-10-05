@@ -15,6 +15,7 @@ use archon_workflow::v2::acceptance_stage::{AcceptanceRoundRecordV1, progress};
 use archon_workflow::v2::script::is_acceptance_stage_call;
 use archon_workflow::{
     WorkflowError, WorkflowLlmClient, WorkflowResult, WorkflowStore, WorkflowV2CallExecution,
+    WorkflowV2ResultStore,
 };
 
 use super::super::WorkflowV2ScriptRuntime;
@@ -35,6 +36,9 @@ pub(super) struct AcceptanceReopen<'a> {
     runtime: &'a WorkflowV2ScriptRuntime,
     llm: Option<&'a dyn WorkflowLlmClient>,
     universe: Option<&'a WorkflowV2TaskUniverse>,
+    /// The executor's own generation, when the finalizer was given it.
+    generation: Option<u64>,
+    v2_store: &'a WorkflowV2ResultStore,
 }
 
 impl<'a> AcceptanceReopen<'a> {
@@ -42,6 +46,7 @@ impl<'a> AcceptanceReopen<'a> {
         store: &'a WorkflowStore,
         run_id: &'a str,
         (runtime, llm, universe): AcceptanceReentry<'a>,
+        (generation, v2_store): (Option<u64>, &'a WorkflowV2ResultStore),
     ) -> Self {
         Self {
             store,
@@ -49,7 +54,22 @@ impl<'a> AcceptanceReopen<'a> {
             runtime,
             llm,
             universe,
+            generation,
+            v2_store,
         }
+    }
+
+    /// Issue 316 (review B2): the generation the re-entered round runs
+    /// under is this executor's own -- the one the finalizer holds, else the
+    /// run's now, read only while this session's executor owns the run --
+    /// never a newer owner's adopted.
+    fn owned_generation(&self) -> WorkflowResult<u64> {
+        if let Some(generation) = self.generation {
+            return Ok(generation);
+        }
+        let run = self.store.load_state(self.run_id)?;
+        self.v2_store.require_session_executor(&run)?;
+        Ok(run.generation)
     }
 }
 
@@ -74,6 +94,7 @@ impl RunEndReopen for AcceptanceReopen<'_> {
             &execution,
             self.store,
             self.run_id,
+            self.owned_generation()?,
             self.universe,
             self.llm,
         )

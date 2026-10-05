@@ -249,11 +249,23 @@ pub(super) async fn run(
     fixture: &Fixture,
     execution: &WorkflowV2CallExecution,
 ) -> WorkflowResult<WorkflowV2Result> {
+    // Dispatched now, as the host samples it: the run's generation.
+    let generation = fixture.store.load_state(&fixture.run_id)?.generation;
+    run_at(fixture, execution, generation).await
+}
+
+/// [`run`], dispatched under `generation`.
+pub(super) async fn run_at(
+    fixture: &Fixture,
+    execution: &WorkflowV2CallExecution,
+    generation: u64,
+) -> WorkflowResult<WorkflowV2Result> {
     run_acceptance_stage(
         &fixture.runtime,
         execution,
         &fixture.store,
         &fixture.run_id,
+        generation,
         Some(&fixture.universe),
         None,
     )
