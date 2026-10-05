@@ -142,9 +142,21 @@ fn read_pin(path: &Path) -> Result<AcceptancePin, String> {
         .map_err(|error| format!("{} is malformed: {error}", path.display()))
 }
 
+/// The task set's chain lock held by [`chain_lock`]. Dropping it unlocks the
+/// file at once (Issue 330): a close alone leaves the lock held while a child
+/// that any thread forked still shares the open file before its `exec`, and a
+/// freeze or repair that tries the lock then is refused although it is free.
+pub struct ChainLockGuard(std::fs::File);
+
+impl Drop for ChainLockGuard {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
 /// The task set's chain lock, the one every freeze and republish of it
 /// holds (`<pin>.chain.lock`), waited for up to a minute.
-pub fn chain_lock(pin_path: &Path) -> Result<std::fs::File, String> {
+pub fn chain_lock(pin_path: &Path) -> Result<ChainLockGuard, String> {
     let path = pin_path.with_extension("chain.lock");
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -157,7 +169,7 @@ pub fn chain_lock(pin_path: &Path) -> Result<std::fs::File, String> {
         .map_err(|error| format!("opening chain lock {}: {error}", path.display()))?;
     for _ in 0..120 {
         if file.try_lock().is_ok() {
-            return Ok(file);
+            return Ok(ChainLockGuard(file));
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
