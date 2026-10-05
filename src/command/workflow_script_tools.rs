@@ -41,18 +41,11 @@ use archon_workflow::{WorkflowError, WorkflowResult};
 /// about a tool call, and the bridge dispatches on the raw string anyway.
 pub(crate) const RUN_TOOL_METHOD: &str = "runTool";
 
-/// Most tool calls one script run may make.
-///
-/// A script is a loop with no model in it to get bored, so an accidental
-/// unbounded loop over a directory would otherwise run until the watchdog
-/// fires. High enough that no plausible orchestration reaches it.
-pub(crate) const MAX_TOOL_CALLS: usize = 500;
-
-/// Most bytes all tool calls in one run may return in total.
-///
-/// The per-call cap is the tool's own; this bounds the sum, because the failure
-/// worth preventing is a thousand small reads rather than one large one.
-pub(crate) const MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
+// Issue 299: no run totals. Each result is bounded and a run of tool calls
+// that brings no new answer pauses the run; see `workflow_script_tools_progress.rs`.
+#[path = "workflow_script_tools_progress.rs"]
+mod progress;
+pub(crate) use progress::ToolCallBudget;
 
 /// What the script asked for.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -92,37 +85,13 @@ pub(crate) struct RunToolResponse {
     pub tool: String,
     pub content: String,
     pub is_error: bool,
-}
-
-/// Running totals for one script run.
-#[derive(Debug, Default)]
-pub(crate) struct ToolCallBudget {
-    pub calls: usize,
-    pub bytes: usize,
-}
-
-impl ToolCallBudget {
-    /// Charge one result against the budget, or explain what was exceeded.
-    ///
-    /// Charged after the call rather than before: the byte cost is not known
-    /// until the tool has answered, and refusing the call that crosses the line
-    /// while still returning its output would spend the bytes and lose them.
-    pub(crate) fn admit(&mut self, bytes: usize) -> Result<(), String> {
-        if self.calls >= MAX_TOOL_CALLS {
-            return Err(format!(
-                "this script has made {MAX_TOOL_CALLS} tool calls, which is the limit for one run"
-            ));
-        }
-        if self.bytes.saturating_add(bytes) > MAX_TOTAL_BYTES {
-            return Err(format!(
-                "this script's tool calls have returned {} bytes, and the limit for one run is {MAX_TOTAL_BYTES}",
-                self.bytes
-            ));
-        }
-        self.calls += 1;
-        self.bytes += bytes;
-        Ok(())
-    }
+    /// Set when `content` was cut to [`progress::MAX_RESULT_BYTES`]; absent otherwise,
+    /// so an ordinary result keeps its exact shape.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+    /// The full result's size, present only when it was truncated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_bytes: Option<usize>,
 }
 
 /// The registry and gate a script's tool calls run through.
@@ -289,11 +258,24 @@ impl ScriptToolHost {
             tool: request.name.clone(),
             content: result.content,
             is_error: result.is_error,
+            truncated: false,
+            original_bytes: None,
         })
     }
 }
 
+fn lock_budget(
+    budget: &std::sync::Mutex<ToolCallBudget>,
+) -> std::sync::MutexGuard<'_, ToolCallBudget> {
+    budget
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Parse, run and serialise one `runTool` host call.
+///
+/// A stall comes back as `ControlPaused` with its evidence held on `budget`
+/// ([`ToolCallBudget::take_stall`]) for the host to record with the pause.
 pub(crate) async fn execute_run_tool(
     host: &Arc<ScriptToolHost>,
     budget: &Arc<std::sync::Mutex<ToolCallBudget>>,
@@ -311,6 +293,18 @@ pub(crate) async fn execute_run_tool(
         ));
     }
 
+    // Compared exactly, never previewed: two calls are the same call only if
+    // every argument is the same.
+    let arguments = serde_json::to_string(&request.input).unwrap_or_default();
+    // Checked BEFORE the call runs. A stall is only knowable from calls that
+    // already answered, so the call that would repeat a full streak is refused
+    // unexecuted and the run pauses: nothing runs and is then thrown away.
+    if let Some(message) =
+        lock_budget(budget).refuse_repeat(&envelope.id, &request.name, &arguments)
+    {
+        return Err(WorkflowError::ControlPaused(message));
+    }
+
     let response = match host.run(&envelope.id, &request).await {
         Ok(response) => response,
         // A refusal is the script's to handle — it may have a fallback — so it
@@ -320,19 +314,14 @@ pub(crate) async fn execute_run_tool(
             tool: request.name.clone(),
             content: message,
             is_error: true,
+            truncated: false,
+            original_bytes: None,
         },
     };
-
-    {
-        let mut budget = budget
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        // Exceeding the run budget *is* fatal: unlike a refused call, there is
-        // no state in which continuing produces a smaller total.
-        budget
-            .admit(response.content.len())
-            .map_err(WorkflowError::SpecInvalid)?;
-    }
+    // The call has run once; an oversized answer is cut and marked, never
+    // refused, so its effect and the script's view of it agree.
+    let response = progress::bound_response(response);
+    lock_budget(budget).record(&envelope.id, &request.name, &arguments, &response);
 
     serde_json::to_string(&response).map_err(|error| {
         WorkflowError::SpecInvalid(format!("could not serialise a tool result: {error}"))
@@ -346,3 +335,7 @@ mod tests;
 #[cfg(test)]
 #[path = "workflow_script_tools_admission_tests.rs"]
 mod admission_tests;
+
+#[cfg(test)]
+#[path = "workflow_script_tools_progress_tests.rs"]
+mod progress_tests;

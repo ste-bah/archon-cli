@@ -98,12 +98,48 @@ impl WorkflowScriptHost {
                 self.tool_host.get().map_or(built, Arc::clone)
             }
         };
-        crate::command::workflow_live::workflow_script_tools::execute_run_tool(
+        // Issue 299: sampled before the call, as every stall pause is: the
+        // generation that observed the stall is the one it may pause.
+        let generation = self
+            .runner
+            .workflow_store
+            .load_state(&self.runner.run_id)?
+            .generation;
+        let outcome = crate::command::workflow_live::workflow_script_tools::execute_run_tool(
             &host,
             &self.tool_budget,
             payload,
         )
-        .await
+        .await;
+        let Err(WorkflowError::ControlPaused(message)) = &outcome else {
+            return outcome;
+        };
+        let evidence = self
+            .tool_budget
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take_stall();
+        let Some(detail) = evidence else {
+            return outcome;
+        };
+        // A stall pauses, never fails. A refusal here means a newer
+        // generation owns the run, and that refusal is the answer.
+        let event = archon_workflow::control_pause::pause_with_evidence(
+            &self.runner.workflow_store,
+            &self.runner.run_id,
+            generation,
+            detail,
+        )?;
+        if let Err(error) = event {
+            eprintln!(
+                "script tool stall paused the run; recording its pause event failed: {error}"
+            );
+        }
+        Err(WorkflowError::ControlPaused(format!(
+            "{message}; run {} is paused with the repeated call as evidence in its event log; \
+             fix what keeps the answer the same, then workflow resume {}",
+            self.runner.run_id, self.runner.run_id,
+        )))
     }
 }
 

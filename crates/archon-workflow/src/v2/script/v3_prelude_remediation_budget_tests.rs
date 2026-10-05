@@ -57,10 +57,11 @@ fn budget_extends_while_the_original_diagnosis_shrinks_and_stops_on_a_plateau() 
     let a3 = envelope(&["paging", "mcp-path", "tui-alias", "zero-test-noise"]);
     let driver = format!(
         r#"const b = remediationBudget({{ baseAttempts: 3 }});
-console.log([b.shouldContinue(1, {a1}), b.shouldContinue(2, {a2}), b.shouldContinue(3, {a3})].join(","));"#
+console.log([b.shouldContinue(1, {a1}), b.shouldContinue(2, {a2}), b.shouldContinue(3, {a3}), b.shouldContinue(4, {a3})].join(","));"#
     );
-    // 1,2 are inside the base budget; 3 is the plateau and must stop.
-    assert_eq!(run_budget_js(&driver), "true,true,false");
+    // 1,2 are inside the base budget; 3 is the first flat attempt, which one
+    // noisy verdict may be (round 2); 4 is the second in a row and stops.
+    assert_eq!(run_budget_js(&driver), "true,true,true,false");
 }
 
 /// Churned gaps were never in the baseline, so they cannot buy budget.
@@ -188,16 +189,15 @@ fn a_script_supplied_fixed_bound_cannot_disable_the_progress_check() {
 b.shouldContinue(1, {a1}); b.shouldContinue(2, {a2}); b.shouldContinue(3, {a3});
 console.log(b.shouldContinue(4, {a4}));"#
     );
-    // Attempt 4 must be funded: the diagnosis is still closing, and the
-    // DEFAULT_HARD_CAP floor keeps the ceiling there regardless of the
-    // requested 3.
+    // Attempt 4 must be funded: the diagnosis is still closing, and a
+    // requested `hardCap: 3` is ignored (there is no total ceiling, Issue 298).
     assert_eq!(run_budget_js(&driver), "true");
 }
 
-/// The floor must not turn into "never stop". A plateau still ends the
-/// budget — widening the ceiling only funds attempts that are converging.
+/// No ceiling must not turn into "never stop". A plateau still ends the
+/// budget: only attempts that are converging are funded past the window.
 #[test]
-fn the_hard_cap_floor_still_stops_on_a_plateau() {
+fn an_ignored_hard_cap_still_stops_on_a_plateau() {
     let a1 = envelope(&["gap-a", "gap-b"]);
     let flat = envelope(&["gap-a", "gap-b"]);
     let driver = format!(
@@ -326,4 +326,160 @@ console.log([a.shouldContinue(1, {never_started}), b.shouldContinue(1, {ran_and_
     );
 
     assert_eq!(run_budget_js(&driver), "true,false");
+}
+
+/// Gap envelopes built inside the driver, so a long sequence stays readable:
+/// `gaps(n, from)` names `gap-<from>` .. `gap-<from+n-1>`.
+const GAPS_JS: &str = r#"const gaps = (n, from = 0) => ({ result: { residual_gaps: Array.from({ length: n }, (_, i) => ({ id: "gap-" + (from + i) })) } });"#;
+
+/// Issue 298, the review's reproduction: one original gap closes per attempt.
+/// The old total ceiling stopped it at attempt 12 with nine gaps open; a
+/// task that keeps closing gaps must keep its budget until they are closed.
+#[test]
+fn a_task_closing_one_original_gap_per_attempt_is_never_cut_at_a_total() {
+    let driver = format!(
+        r#"{GAPS_JS}
+const b = remediationBudget();
+const answers = [];
+for (let attempt = 1; attempt <= 21; attempt += 1) answers.push(b.shouldContinue(attempt, gaps(21 - attempt)));
+console.log(answers.every(Boolean) + "," + b.shouldContinue(22, gaps(0)));"#
+    );
+    // Every closing attempt is funded; the verdicts naming no gap measure
+    // nothing (round 2), and the second of them in a row stops.
+    assert_eq!(run_budget_js(&driver), "true,false");
+}
+
+/// New ids may appear while the originals shrink. They never earn budget,
+/// and they never cancel the progress the originals show.
+#[test]
+fn new_gaps_appearing_do_not_hide_originals_that_keep_closing() {
+    let driver = format!(
+        r#"{GAPS_JS}
+const b = remediationBudget();
+const answers = [];
+for (let attempt = 1; attempt <= 15; attempt += 1) {{
+  const env = gaps(16 - attempt);
+  env.result.residual_gaps.push(...gaps(attempt, 100).result.residual_gaps);
+  answers.push(b.shouldContinue(attempt, env));
+}}
+console.log(answers.every(Boolean));"#
+    );
+    assert_eq!(run_budget_js(&driver), "true");
+}
+
+/// A refund still adds one attempt to the window, and no longer interacts
+/// with a total: a refunded task that keeps closing keeps going.
+#[test]
+fn a_refunded_task_that_keeps_closing_keeps_its_budget() {
+    let landed = schema_landed_envelope();
+    let driver = format!(
+        r#"{GAPS_JS}
+const b = remediationBudget({{ baseAttempts: 2 }});
+const answers = [b.shouldContinue(1, gaps(16), {landed})];
+for (let attempt = 2; attempt <= 16; attempt += 1) answers.push(b.shouldContinue(attempt, gaps(16 - attempt)));
+console.log(answers.every(Boolean) + "," + b.shouldContinue(17, gaps(0)));"#
+    );
+    assert_eq!(run_budget_js(&driver), "true,false");
+}
+
+/// The first verifier named nothing, a later one named gaps: the first
+/// named set is the baseline, so closing those is progress.
+#[test]
+fn a_late_first_diagnosis_becomes_the_baseline() {
+    let driver = format!(
+        r#"{GAPS_JS}
+const b = remediationBudget({{ baseAttempts: 2 }});
+const answers = [b.shouldContinue(1, gaps(0)), b.shouldContinue(2, gaps(14))];
+for (let attempt = 3; attempt <= 15; attempt += 1) answers.push(b.shouldContinue(attempt, gaps(16 - attempt)));
+answers.push(b.shouldContinue(16, gaps(1)));
+console.log(answers.every(Boolean) + "," + b.shouldContinue(17, gaps(1)));"#
+    );
+    assert_eq!(run_budget_js(&driver), "true,false");
+}
+
+/// The stop names its evidence: which original gaps are still open, and
+/// that the cause is no progress, not a count.
+#[test]
+fn a_plateau_stop_logs_the_open_original_gaps() {
+    let driver = format!(
+        r#"{GAPS_JS}
+const lines = [];
+globalThis.log = (message) => lines.push(message);
+const b = remediationBudget({{ baseAttempts: 2 }});
+b.shouldContinue(1, gaps(2));
+b.shouldContinue(2, gaps(2));
+b.shouldContinue(3, gaps(2));
+console.log(lines.join("|"));"#
+    );
+    let logged = run_budget_js(&driver);
+    assert!(logged.contains("no progress"), "{logged}");
+    assert!(
+        logged.contains("gap-0") && logged.contains("gap-1"),
+        "{logged}"
+    );
+}
+
+/// Round 2 (a): a verdict that names no gap measures nothing. Read as
+/// "0 open", it made the next real verdict look like 0 -> 11 and stopped a
+/// steady closer at attempt 9.
+#[test]
+fn a_gap_less_verdict_between_closing_attempts_is_not_a_regression() {
+    let transport = transport_failure_envelope();
+    for between in [r#"{"result":{"residual_gaps":[]}}"#.to_string(), transport] {
+        let driver = format!(
+            r#"{GAPS_JS}
+const b = remediationBudget();
+const answers = [];
+for (let attempt = 1; attempt <= 12; attempt += 1) answers.push(b.shouldContinue(attempt, attempt === 8 ? {between} : gaps(20 - attempt)));
+console.log(answers.join(","));"#
+        );
+        assert_eq!(
+            run_budget_js(&driver),
+            vec!["true"; 12].join(","),
+            "{between}"
+        );
+    }
+}
+
+/// Round 2 (b): one noisy attempt does not end remediation; two
+/// non-shrinking attempts in a row do (as ACCEPTANCE_STALL_LIMIT = 2).
+#[test]
+fn one_noisy_attempt_does_not_end_remediation_but_two_do() {
+    let driver = format!(
+        r#"{GAPS_JS}
+const b = remediationBudget({{ baseAttempts: 2 }});
+const seq = [10, 9, 9, 8, 8, 8];
+console.log(seq.map((n, i) => b.shouldContinue(i + 1, gaps(n))).join(","));"#
+    );
+    assert_eq!(run_budget_js(&driver), "true,true,true,true,true,false");
+}
+
+/// Round 3: progress is a new BEST, not a drop from the last attempt.
+/// Verdicts alternating 10 and 9 open gaps "closed" one every other attempt
+/// against the previous verdict and ran 200+ attempts; against the best (9)
+/// nothing after the first 9 is progress, so two attempts later it stops.
+#[test]
+fn verdicts_alternating_between_two_counts_stop_within_a_small_bound() {
+    let driver = format!(
+        r#"{GAPS_JS}
+const b = remediationBudget({{ baseAttempts: 2 }});
+let attempt = 1;
+while (attempt <= 200 && b.shouldContinue(attempt, gaps(attempt % 2 === 1 ? 10 : 9))) attempt += 1;
+console.log(attempt);"#
+    );
+    // 1: baseline 10; 2: 9 (new best); 3: 10 and 4: 9 are no new best.
+    assert_eq!(run_budget_js(&driver), "4");
+}
+
+/// Round 3: the noisy closer from review keeps going: 20 -> 14, a verdict
+/// naming no gap, then 13 and 12 are each a new best.
+#[test]
+fn a_noisy_closer_with_a_gap_less_verdict_keeps_going() {
+    let driver = format!(
+        r#"{GAPS_JS}
+const b = remediationBudget({{ baseAttempts: 2 }});
+const empty = {{ result: {{ residual_gaps: [] }} }};
+console.log([gaps(20), gaps(14), empty, gaps(13), gaps(12)].map((env, i) => b.shouldContinue(i + 1, env)).join(","));"#
+    );
+    assert_eq!(run_budget_js(&driver), "true,true,true,true,true");
 }
