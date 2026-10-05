@@ -51,9 +51,12 @@ pub fn validate_authored_task_accounting(
     if expected.is_empty() {
         return Ok(());
     }
-    let raw = script_result.ok_or_else(|| {
-        WorkflowError::SpecInvalid("authored workflow returned no task accounting".to_string())
-    })?;
+    // Issue 293: a script that never returned has no accounting to judge.
+    // That is "no result", never a spec defect: the terminal rule
+    // (`authored_run_terminal_status`) holds such a run incomplete.
+    let Some(raw) = script_result else {
+        return Ok(());
+    };
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|err| {
         WorkflowError::SpecInvalid(format!(
             "authored workflow task accounting was not JSON: {err}"

@@ -244,25 +244,36 @@ impl WorkflowV2ScriptRunner {
                 );
             }
         }
-        let mut review_details = dry_run_workflow_plan_full_details(&authored_source, None).await?;
-        review_details.calls = summary.calls.clone();
-        validate_map_reduce_review_calls(&review_details, &expected_task_ids).map_err(|reason| {
-            WorkflowError::SpecInvalid(format!(
-                "the executed run violated the mandatory map→reduce review contract ({reason}); the live call sequence diverged from the pre-flight plan (likely conditional review calls) — delete {} to re-author with unconditional reviews",
-                authored_path.display()
-            ))
-        })?;
-        // Obs-32: a script authored under the acceptance-stage rule must have
-        // REACHED the stage, as its last call. The plan check accepted that
-        // shape; a live path that skipped it is the divergence the plan check
-        // cannot see.
-        validate_executed_acceptance_stage(&authored_source, &summary.calls)?;
-        validate_authored_task_accounting(summary.script_result.as_deref(), &expected_task_ids)?;
-        validate_review_accounting_from_reducers(
-            summary.script_result.as_deref(),
-            &review_details,
-            &self.v2_store,
-        )?;
+        // Issue 293: the executed-run checks judge a script that RETURNED. A
+        // terminal host stop or a script failure is its own outcome: the
+        // terminal rule below holds it to the stopped call (never Accepted),
+        // and judging it here replaced that evidence with SpecInvalid.
+        let returned = summary.script_result.is_some() && summary.failed_call.is_none();
+        if returned {
+            let mut review_details =
+                dry_run_workflow_plan_full_details(&authored_source, None).await?;
+            review_details.calls = summary.calls.clone();
+            validate_map_reduce_review_calls(&review_details, &expected_task_ids).map_err(|reason| {
+                WorkflowError::SpecInvalid(format!(
+                    "the executed run violated the mandatory map→reduce review contract ({reason}); the live call sequence diverged from the pre-flight plan (likely conditional review calls) — delete {} to re-author with unconditional reviews",
+                    authored_path.display()
+                ))
+            })?;
+            // Obs-32: a script authored under the acceptance-stage rule must have
+            // REACHED the stage, as its last call. The plan check accepted that
+            // shape; a live path that skipped it is the divergence the plan check
+            // cannot see.
+            validate_executed_acceptance_stage(&authored_source, &summary.calls)?;
+            validate_authored_task_accounting(
+                summary.script_result.as_deref(),
+                &expected_task_ids,
+            )?;
+            validate_review_accounting_from_reducers(
+                summary.script_result.as_deref(),
+                &review_details,
+                &self.v2_store,
+            )?;
+        }
         // The terminal status comes from where the run ENDED, not from the
         // worst verdict any intermediate call returned: a review that found
         // something, or a verifier that rejected round 1, is how the script's
@@ -271,10 +282,7 @@ impl WorkflowV2ScriptRunner {
         // the final tip that did not at the run base -- block; failures that
         // predate the run are listed. Only for a script that returned: a run
         // the host stopped is held by that stop.
-        let regression = match (
-            summary.script_result.is_some() && summary.failed_call.is_none(),
-            self.runtime.target_repository_root.as_deref(),
-        ) {
+        let regression = match (returned, self.runtime.target_repository_root.as_deref()) {
             (true, Some(root)) => {
                 let dispatch =
                     super::super::live_agent_dispatch::LiveAgentDispatch::new(self.client.clone())
