@@ -455,6 +455,7 @@ include!("result_store_records.rs");
 include!("result_store_run_root.rs");
 include!("result_store_history.rs");
 include!("result_store_scan.rs");
+include!("result_store_quarantine.rs");
 
 include!("result_store_invalidation.rs");
 include!("result_store_revocation.rs");

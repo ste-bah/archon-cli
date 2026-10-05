@@ -22,7 +22,7 @@ use archon_workflow::v2::acceptance_stage::AcceptanceRoundRecordV1;
 use archon_workflow::v2::script::residual_plan::residual_verdict;
 use archon_workflow::v2::script::{
     AuthoredAcceptanceGateFact, AuthoredCallRole, AuthoredRunFacts, authored_call_facts,
-    authored_run_terminal_status_with, writable_task_ids,
+    authored_run_terminal_status_with, is_acceptance_stage_call, writable_task_ids,
 };
 use archon_workflow::{
     AuthoredAcceptanceGateV1, RunEndAcceptanceObserverSnapshotV1, WorkflowEventKind,
@@ -32,6 +32,8 @@ use archon_workflow::{
 
 use super::workflow_live_v2_script::WorkflowV2ScriptSummary;
 
+#[path = "workflow_live_v3_run_end_call.rs"]
+mod call;
 #[path = "workflow_live_v3_run_end_gate.rs"]
 mod gate;
 use gate::{GateRecord, gate_of, read_acceptance_gate};
@@ -309,7 +311,16 @@ pub(super) fn apply_authored_run_outcome_with(
     regression: archon_workflow::v2::verification::regression_gate::RegressionVerdict,
 ) -> WorkflowResult<WorkflowV2ScriptSummary> {
     let accumulated = summary.status;
-    let facts = authored_call_facts(&summary.calls, |call_id| v2_store.load_call_record(call_id))?;
+    // Issue 313: an acceptance call's damaged record pauses the run; it is
+    // never read as a stage that never ran, nor guessed from a round record.
+    let facts = authored_call_facts(&summary.calls, |call_id| {
+        match (summary.calls.iter())
+            .find(|call| call.id == call_id && is_acceptance_stage_call(call))
+        {
+            Some(call) => call::acceptance_call_record(store, run_id, v2_store, call),
+            None => v2_store.load_call_record(call_id),
+        }
+    })?;
     let gate = read_acceptance_gate(store, run_id, v2_store, &summary.calls)?;
     let last_acceptance = facts
         .iter()

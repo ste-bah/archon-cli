@@ -34,7 +34,8 @@ pub(super) fn write_atomic(run_dir: &Path, relative: &Path, bytes: &[u8]) -> Wor
             .map_err(|e| WorkflowError::io(&tmp, e))?;
         file.sync_all().map_err(|e| WorkflowError::io(&tmp, e))?;
     }
-    fs::rename(&tmp, &target).map_err(|e| WorkflowError::io(&target, e))
+    // Issue 318: published like every other durable write.
+    super::rename_durable(&tmp, &target)
 }
 
 /// Keep the same private boundary when records move to an archive. Validation

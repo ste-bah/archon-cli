@@ -20,8 +20,8 @@ use archon_workflow::v2::acceptance_stage::{
 };
 use archon_workflow::v2::script::is_acceptance_stage_call;
 use archon_workflow::{
-    AuthoredAcceptanceGateV1, WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowResult,
-    WorkflowStore, WorkflowV2ResultStore,
+    AuthoredAcceptanceGateV1, WorkflowEventKind, WorkflowEventLog, WorkflowResult, WorkflowStore,
+    WorkflowV2ResultStore,
 };
 
 /// The acceptance round the gate is judged on, and whether it is BOUND to a
@@ -77,8 +77,8 @@ pub(super) fn read_acceptance_gate(
         let latest = latest_round_record(&run_dir)?;
         return Ok(latest.map(|(record, path)| gate_record(&run_dir, record, path, false)));
     };
-    let Some(result) = v2_store
-        .load_call_record(&call.id)?
+    // Issue 313: a damaged or unreadable call record pauses the run.
+    let Some(result) = super::call::acceptance_call_record(store, run_id, v2_store, call)?
         .map(|record| record.result)
     else {
         return Ok(None);
@@ -91,7 +91,7 @@ pub(super) fn read_acceptance_gate(
         Bound::Whole(record) => *record,
         Bound::Unreadable(error) => {
             let reason = format!("the bound acceptance record {named} cannot be read ({error})");
-            return Err(pause(store, run_id, named, &reason));
+            return Err(super::call::pause(store, run_id, named, &reason));
         }
         Bound::Lost(why) => match rebuild(&run_dir, run_id, &call.id, named, &result.data) {
             Ok(record) => {
@@ -102,7 +102,7 @@ pub(super) fn read_acceptance_gate(
                 let reason = format!(
                     "the bound acceptance record {named} is lost: {why}; the acceptance call's result is no whole copy of the round ({missing})"
                 );
-                return Err(pause(store, run_id, named, &reason));
+                return Err(super::call::pause(store, run_id, named, &reason));
             }
         },
     };
@@ -208,32 +208,6 @@ fn rebuilt(store: &WorkflowStore, run_id: &str, call_id: &str, named: &str, why:
         .and_then(|seq| WorkflowEventLog::new(store.clone()).emit(run_id, seq, kind, detail))
     {
         tracing::warn!(%error, run_id, "acceptance gate rebuild event not recorded");
-    }
-}
-
-/// Pauses `run_id`, owned by its current generation, because the final
-/// gate cannot be judged; the error the finalization ends with.
-fn pause(store: &WorkflowStore, run_id: &str, named: &str, reason: &str) -> WorkflowError {
-    let generation = match store.load_state(run_id) {
-        Ok(run) => run.generation,
-        Err(error) => return error,
-    };
-    let resume = format!("archon workflow resume --live --yes {run_id}");
-    let detail = serde_json::json!({
-        "event": "acceptance_gate_pause", "record_path": named, "reason": reason, "resume": resume,
-    });
-    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
-        Ok(event) => {
-            if let Err(error) = event {
-                tracing::warn!(%error, run_id, "acceptance gate pause event not recorded");
-            }
-            let message = format!(
-                "the final acceptance gate cannot be judged: {reason}; run {run_id} is paused, not failed. Restore {named} (or its acceptance call's result), then {resume}"
-            );
-            tracing::warn!(run_id, "{message}");
-            WorkflowError::ControlPaused(message)
-        }
-        Err(error) => error,
     }
 }
 
