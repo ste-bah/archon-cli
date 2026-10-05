@@ -11,7 +11,7 @@ use super::super::probe_tests::{Trees, trees};
 use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeIncomplete, FreezeResume};
 
 /// Configure the scratch site of `trees` with `timeout_secs` per check.
-fn configure(trees: &Trees, timeout_secs: u64) {
+pub(super) fn configure(trees: &Trees, timeout_secs: u64) {
     let scratch = trees.outside.path().join("scratch");
     std::fs::create_dir_all(trees.set.project.path().join(".archon")).unwrap();
     std::fs::write(

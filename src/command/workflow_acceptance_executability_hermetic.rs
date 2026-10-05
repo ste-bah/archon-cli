@@ -364,7 +364,8 @@ pub(super) async fn run_in_copy(
         repository: copy.repository.clone(),
         project: copy.project.clone(),
         environment: probe_environment(Some(&target)),
-        timeout_secs: DIRECT_DEFAULT_TIMEOUT_SECS,
+        // Issue 323: the probe's one per-check bound, as at every site.
+        timeout_secs: probe.check_bound_secs(),
         output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
     };
     let cancel = Arc::new(AtomicBool::new(false));
@@ -380,8 +381,8 @@ pub(super) async fn run_in_copy(
                 break;
             }
             Some(CheckAllowance::Run { timeout_secs, cut }) => {
-                site.timeout_secs = timeout_secs.clamp(1, DIRECT_DEFAULT_TIMEOUT_SECS);
-                cut && site.timeout_secs < DIRECT_DEFAULT_TIMEOUT_SECS
+                site.timeout_secs = timeout_secs.clamp(1, probe.check_bound_secs());
+                cut
             }
             None => false,
         };

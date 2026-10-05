@@ -1513,6 +1513,11 @@ max_investigation_iterations = 6
 # environment = {}
 # environment_allowlist = []
 # cargo_seed = "/absolute/path/to/trusted/cargo-seed" # Optional; omit if unused.
+# Per-check bound for the acceptance stage and every executability probe
+# site. Without this section the bound is 1800 s (direct site and the probe's
+# hermetic copy). A staged freeze gives one check at most a quarter of its
+# usable window; a check past its bound is "unproven (timed out)", retried,
+# and goes to its author if it times out again on the same base commit.
 # timeout_secs = 3600
 # output_bytes = 1048576
 # scratch_bytes = 10737418240

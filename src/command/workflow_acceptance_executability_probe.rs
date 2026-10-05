@@ -79,7 +79,8 @@ impl HostProbe {
                     project: self.project.clone(),
                     // Exactly the round's own direct site environment.
                     environment: archon_tools::bash::host_env().into_iter().collect(),
-                    timeout_secs: DIRECT_DEFAULT_TIMEOUT_SECS,
+                    // Issue 323: the probe's one per-check bound.
+                    timeout_secs: self.check_bound_secs(),
                     output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
                 };
                 let cancel = Arc::new(AtomicBool::new(false));

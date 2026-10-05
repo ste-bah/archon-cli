@@ -41,6 +41,12 @@ pub(crate) const MIN_CHECK_WINDOW_SECS: u64 = 120;
 /// No observation starts with less than this beyond one check's window:
 /// preparing a scratch slot alone takes most of a minute.
 pub(crate) const OBSERVATION_SETUP_SECS: u64 = 120;
+/// Issue 323: a freeze gives one probe check at most this fraction
+/// (`1 / CHECK_SHARE`) of its usable window, however long its site's own
+/// per-check limit is ([`FreezeBudget::check_bound`]). A probed check runs
+/// at least twice (its site's tree and the pre-implementation tree), so one
+/// check past its bound leaves at least half the window for the others.
+pub(crate) const CHECK_SHARE: u64 = 4;
 /// How every [`FreezeIncomplete`] text starts, for whoever must tell an
 /// incomplete, resumable freeze from a failed one.
 pub(crate) const FREEZE_INCOMPLETE_RESUMABLE: &str = "operational: freeze incomplete, resumable";
@@ -105,6 +111,19 @@ impl FreezeBudget {
     fn remaining(&self) -> Option<Duration> {
         self.deadline
             .map(|deadline| deadline.saturating_duration_since((self.clock)()))
+    }
+
+    /// The per-check bound a probe check runs under in this budget: its
+    /// site's own `cap_secs`, never more than [`CHECK_SHARE`]'s share of the
+    /// usable window (nor less than [`MIN_CHECK_WINDOW_SECS`]); unlimited,
+    /// `cap_secs` itself. A check past it is unproven (timed out), never a
+    /// spent budget, so one slow check never consumes the whole freeze.
+    pub(crate) fn check_bound(&self, cap_secs: u64) -> u64 {
+        if self.deadline.is_none() {
+            return cap_secs;
+        }
+        let usable = self.outer_secs.saturating_sub(FREEZE_SAFETY_MARGIN_SECS);
+        cap_secs.min((usable / CHECK_SHARE).max(MIN_CHECK_WINDOW_SECS))
     }
 
     /// How long the next check may run under a per-check `cap_secs`.

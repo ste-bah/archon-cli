@@ -16,11 +16,12 @@
 //! repair record keeps it). Only what still gives no verdict after every
 //! repair becomes the author's finding, with the repair log attached.
 //!
-//! A freeze probe never repairs two outcomes (Issue 255). A check that ran
-//! past its per-check limit is unproven, timed out, at once: running it
-//! again, let alone cold, only spends that limit again. And once the
-//! freeze's budget has run out (`workflow_acceptance_executability_resume`)
-//! nothing runs again at all: the freeze stops, resumable.
+//! No probe repairs two outcomes (Issues 255, 323). A check that ran past
+//! its per-check bound is unproven, timed out, at once: running it again,
+//! let alone cold, only spends that bound again while the other checks
+//! wait. And once a freeze's budget has run out
+//! (`workflow_acceptance_executability_resume`) nothing runs again at all:
+//! the freeze stops, resumable.
 
 use archon_workflow::acceptance_scratch::CHECK_TIMED_OUT;
 
@@ -78,7 +79,7 @@ impl TreeRun {
 }
 
 /// Whether `result` is a check stopped at its own time limit.
-fn timed_out(result: &CheckResult) -> bool {
+pub(super) fn timed_out(result: &CheckResult) -> bool {
     result.operational_error.as_deref() == Some(CHECK_TIMED_OUT)
 }
 
@@ -116,7 +117,7 @@ pub(super) async fn tree_results(
 ) -> TreeRun {
     let mut run = TreeRun::known(&[], "");
     run.results = (known.into_iter().flatten())
-        .filter(|result| result.operational_error.is_none() || (probe.memo && timed_out(result)))
+        .filter(|result| result.operational_error.is_none() || timed_out(result))
         .map(|result| (result.acceptance_id.clone(), result.clone()))
         .collect();
     let short: String = tree.commit.chars().take(12).collect();
@@ -124,13 +125,7 @@ pub(super) async fn tree_results(
     loop {
         let pending: Vec<FrozenCommandRef> = (refs.iter())
             .filter(|reference| run.error(&reference.acceptance_id).is_some())
-            .filter(|reference| {
-                !(probe.memo
-                    && run
-                        .results
-                        .get(&reference.acceptance_id)
-                        .is_some_and(timed_out))
-            })
+            .filter(|reference| !(run.results.get(&reference.acceptance_id)).is_some_and(timed_out))
             .cloned()
             .collect();
         if pending.is_empty() || probe.is_incomplete() {
