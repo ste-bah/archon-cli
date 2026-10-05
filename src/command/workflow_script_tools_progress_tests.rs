@@ -1,16 +1,19 @@
 //! Issue 299: a script's tool calls are limited on NO-PROGRESS only, never
 //! on totals. Many distinct calls and many bytes across calls succeed; one
-//! oversized result is bounded in place; a loop that repeats the same call
-//! and gets the same answer pauses the run before the call runs again.
+//! oversized result is bounded in place; a run of calls that brings no new
+//! answer (repeats, alternations, bumped arguments) pauses the run before the
+//! next call runs.
 
+use super::progress::{MAX_RESULT_BYTES, REPEAT_STALL_CALLS};
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const MIB: usize = 1024 * 1024;
 
 /// A tool whose every execution is counted, so a test can prove which calls
-/// actually ran. Input `bytes` sets the answer's size; `echo_count` makes the
-/// answer change on every call; any other field only makes the call distinct.
+/// actually ran. It answers with its own input (so distinct inputs give
+/// distinct answers), padded with `x` to `bytes`; `answer` fixes the answer
+/// whatever the other arguments; `echo_count` changes it on every call.
 #[derive(Debug)]
 struct Fake(Arc<AtomicUsize>);
 
@@ -45,8 +48,15 @@ impl archon_tools::tool::Tool for Fake {
         if input["echo_count"] == serde_json::json!(true) {
             return archon_tools::tool::ToolResult::success(format!("call {count}"));
         }
-        let bytes = input["bytes"].as_u64().unwrap_or(4) as usize;
-        archon_tools::tool::ToolResult::success("x".repeat(bytes))
+        if let Some(answer) = input["answer"].as_str() {
+            return archon_tools::tool::ToolResult::success(answer.to_string());
+        }
+        let mut answer = input.to_string();
+        let bytes = input["bytes"].as_u64().unwrap_or(0) as usize;
+        if answer.len() < bytes {
+            answer.push_str(&"x".repeat(bytes - answer.len()));
+        }
+        archon_tools::tool::ToolResult::success(answer)
     }
 }
 
@@ -157,7 +167,7 @@ async fn a_loop_repeating_the_same_call_pauses_before_it_runs_again() {
     let budget = budget();
     let mut answered = 0;
     let mut stop = None;
-    for i in 0..1_000 {
+    for i in 0..5_000 {
         match execute_run_tool(
             &host,
             &budget,
@@ -177,12 +187,70 @@ async fn a_loop_repeating_the_same_call_pauses_before_it_runs_again() {
         matches!(&stop, WorkflowError::ControlPaused(message) if message.contains("Fake")),
         "a stall pauses, never fails: {stop:?}"
     );
-    assert!(answered < 1_000, "{answered}");
+    assert!(answered < 5_000, "{answered}");
     assert_eq!(
         runs.load(Ordering::SeqCst),
         answered,
         "the paused call was not executed and discarded"
     );
+}
+
+/// Round 2: drives `inputs` until the run pauses or they run out, and
+/// returns (answered, the stop, executions).
+async fn drive(
+    session: &str,
+    inputs: impl Iterator<Item = serde_json::Value>,
+) -> (usize, Option<WorkflowError>, usize) {
+    let (host, runs) = fake_host(session);
+    let budget = budget();
+    let mut answered = 0;
+    for (i, input) in inputs.enumerate() {
+        match execute_run_tool(&host, &budget, &call(i, input)).await {
+            Ok(_) => answered += 1,
+            Err(error) => return (answered, Some(error), runs.load(Ordering::SeqCst)),
+        }
+    }
+    (answered, None, runs.load(Ordering::SeqCst))
+}
+
+fn assert_paused(answered: usize, stop: Option<WorkflowError>, runs: usize) {
+    let stop = stop.expect("a loop that brings nothing new must pause");
+    assert!(
+        matches!(&stop, WorkflowError::ControlPaused(message) if message.contains("Fake")),
+        "a stall pauses, never fails: {stop:?}"
+    );
+    assert_eq!(
+        runs, answered,
+        "the paused call was not executed and discarded"
+    );
+}
+
+/// A cursor loop A, B, A, B... gets only answers it has already seen.
+#[tokio::test]
+async fn an_alternating_loop_with_answers_already_seen_pauses() {
+    let inputs = (0..10_000).map(|i| {
+        let cursor = if i % 2 == 0 { "A" } else { "B" };
+        serde_json::json!({ "cursor": cursor })
+    });
+    let (answered, stop, runs) = drive("progress-alternate", inputs).await;
+    assert_paused(answered, stop, runs);
+}
+
+/// Bumping an argument while the answer stays the same is not progress.
+#[tokio::test]
+async fn bumped_arguments_with_the_same_answer_pause() {
+    let inputs = (0..10_000).map(|i| serde_json::json!({ "page": i, "answer": "no more items" }));
+    let (answered, stop, runs) = drive("progress-bumped", inputs).await;
+    assert_paused(answered, stop, runs);
+}
+
+/// Every call brings a new answer: no count of calls pauses it.
+#[tokio::test]
+async fn ten_thousand_distinct_new_answers_never_pause() {
+    let inputs = (0..10_000).map(|i| serde_json::json!({ "file": format!("f{i}.txt") }));
+    let (answered, stop, runs) = drive("progress-distinct-10k", inputs).await;
+    assert!(stop.is_none(), "{stop:?}");
+    assert_eq!((answered, runs), (10_000, 10_000));
 }
 
 fn response(content: &str) -> RunToolResponse {
@@ -195,64 +263,71 @@ fn response(content: &str) -> RunToolResponse {
     }
 }
 
-/// The refusal carries the streak as evidence for the pause record.
+/// The refusal carries the window as evidence for the pause record.
 #[test]
-fn a_full_streak_refuses_the_next_identical_call_with_evidence() {
+fn a_window_without_new_answers_refuses_the_next_call_with_evidence() {
     let mut budget = ToolCallBudget::default();
-    for i in 0..REPEAT_STALL_CALLS {
+    budget.record("c0", "Fake", r#"{"cursor":"A"}"#, &response("page A"));
+    budget.record("c1", "Fake", r#"{"cursor":"B"}"#, &response("page B"));
+    for i in 2..(REPEAT_STALL_CALLS + 2) {
         assert!(
             budget
                 .refuse_repeat(&format!("c{i}"), "Fake", "{}")
                 .is_none()
         );
-        budget.record(&format!("c{i}"), "Fake", "{}", &response("same"));
+        let answer = if i % 2 == 0 { "page A" } else { "page B" };
+        budget.record(
+            &format!("c{i}"),
+            "Fake",
+            &format!(r#"{{"cursor":{i}}}"#),
+            &response(answer),
+        );
     }
-    assert!(
-        budget
-            .refuse_repeat("other", "Fake", r#"{"a":1}"#)
-            .is_none(),
-        "a different call is not refused"
-    );
     let message = budget
-        .refuse_repeat("next", "Fake", "{}")
-        .expect("the repeat is refused");
+        .refuse_repeat("next", "Other", r#"{"a":1}"#)
+        .expect("any next call is refused once the window is stale");
     assert!(message.contains("was not run"), "{message}");
     let evidence = budget.take_stall().expect("evidence is kept");
     assert_eq!(
-        evidence["identical_calls_in_a_row"],
+        evidence["calls_without_a_new_answer"],
         serde_json::json!(REPEAT_STALL_CALLS)
     );
-    assert_eq!(evidence["first_call_id"], "c0");
+    assert_eq!(evidence["distinct_answers_in_window"], 2);
+    assert_eq!(evidence["last_new_answer_call_id"], "c1");
     assert_eq!(evidence["refused_call_id"], "next");
     assert_eq!(evidence["refused_call_executed"], false);
+    assert!(
+        evidence["recent_calls"]
+            .as_array()
+            .is_some_and(|calls| !calls.is_empty())
+    );
     assert!(budget.take_stall().is_none(), "taken once");
 }
 
-/// Progress resets the streak: a changed answer, changed arguments, or any
-/// other host call in between.
+/// A new answer resets the count; another host call resets the window, so an
+/// answer seen before it is new again after it.
 #[test]
-fn a_changed_answer_changed_arguments_or_other_work_resets_the_streak() {
+fn a_new_answer_or_other_work_resets_the_count() {
     let mut budget = ToolCallBudget::default();
     let fill = |budget: &mut ToolCallBudget, n: usize, answer: &str| {
         for i in 0..n {
-            budget.record(&format!("c{i}"), "Fake", "{}", &response(answer));
+            budget.record(&format!("c{i}"), "Fake", &format!("{i}"), &response(answer));
         }
     };
-    fill(&mut budget, REPEAT_STALL_CALLS - 1, "one");
+    fill(&mut budget, REPEAT_STALL_CALLS, "one");
     fill(&mut budget, 1, "two");
     assert!(
         budget.refuse_repeat("x", "Fake", "{}").is_none(),
-        "answer changed"
+        "a new answer"
     );
-    fill(&mut budget, REPEAT_STALL_CALLS - 1, "two");
-    budget.record("y", "Fake", r#"{"b":2}"#, &response("two"));
-    fill(&mut budget, 1, "two");
+    fill(&mut budget, REPEAT_STALL_CALLS, "one");
     assert!(
-        budget.refuse_repeat("x", "Fake", "{}").is_none(),
-        "arguments changed"
+        budget.refuse_repeat("x", "Fake", "{}").is_some(),
+        "only seen answers"
     );
-    fill(&mut budget, REPEAT_STALL_CALLS, "two");
+    budget.take_stall();
     budget.break_streak();
+    fill(&mut budget, REPEAT_STALL_CALLS, "one");
     assert!(
         budget.refuse_repeat("x", "Fake", "{}").is_none(),
         "other work happened"
@@ -260,21 +335,16 @@ fn a_changed_answer_changed_arguments_or_other_work_resets_the_streak() {
 }
 
 /// An answer that changes on every call is progress however often the same
-/// arguments repeat, and no count of calls stops it.
+/// arguments repeat.
 #[tokio::test]
 async fn identical_arguments_with_changing_answers_never_pause() {
-    let (host, runs) = fake_host("progress-changing");
-    let budget = budget();
-    for i in 0..(REPEAT_STALL_CALLS * 3) {
-        execute_run_tool(
-            &host,
-            &budget,
-            &call(i, serde_json::json!({ "echo_count": true })),
-        )
-        .await
-        .unwrap_or_else(|error| panic!("call {} was refused: {error}", i + 1));
-    }
-    assert_eq!(runs.load(Ordering::SeqCst), REPEAT_STALL_CALLS * 3);
+    let inputs = (0..(REPEAT_STALL_CALLS * 3)).map(|_| serde_json::json!({ "echo_count": true }));
+    let (answered, stop, runs) = drive("progress-changing", inputs).await;
+    assert!(stop.is_none(), "{stop:?}");
+    assert_eq!(
+        (answered, runs),
+        (REPEAT_STALL_CALLS * 3, REPEAT_STALL_CALLS * 3)
+    );
 }
 
 /// The cut lands on a character boundary and a result at the bound is whole.

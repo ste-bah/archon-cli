@@ -41,13 +41,11 @@ use archon_workflow::{WorkflowError, WorkflowResult};
 /// about a tool call, and the bridge dispatches on the raw string anyway.
 pub(crate) const RUN_TOOL_METHOD: &str = "runTool";
 
-// Issue 299: no run totals. Each result is bounded and a repeat loop that
-// learns nothing pauses the run; see `workflow_script_tools_progress.rs`.
+// Issue 299: no run totals. Each result is bounded and a run of tool calls
+// that brings no new answer pauses the run; see `workflow_script_tools_progress.rs`.
 #[path = "workflow_script_tools_progress.rs"]
 mod progress;
 pub(crate) use progress::ToolCallBudget;
-#[cfg(test)]
-use progress::{MAX_RESULT_BYTES, REPEAT_STALL_CALLS};
 
 /// What the script asked for.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
