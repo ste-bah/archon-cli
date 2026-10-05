@@ -428,6 +428,39 @@ jobs:
       - name: Run Issue 115 live smoke
         run: python3 tests/python/live_issue_115_smoke.py
 
+  # #325: the workflow script suites are plain node files (no npm project), so
+  # nothing ran them and their pass was local only. Suites are discovered by
+  # name, so a new `*_test.cjs` / `*.test.cjs` is picked up without editing
+  # this job. Every suite runs even after a failure; any failure, or finding
+  # no suites at all, fails the job.
+  node-tests:
+    name: node test suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run every node *.cjs test suite
+        run: |
+          mapfile -t suites < <(git ls-files -- '*_test.cjs' '*.test.cjs')
+          if [ "${#suites[@]}" -eq 0 ]; then
+            echo "::error::no node test suites found; the discovery glob matches nothing"
+            exit 1
+          fi
+          failed=()
+          for suite in "${suites[@]}"; do
+            echo "::group::node $suite"
+            node "$suite" || failed+=("$suite")
+            echo "::endgroup::"
+          done
+          echo "ran ${#suites[@]} node suites, ${#failed[@]} failed"
+          if [ "${#failed[@]}" -gt 0 ]; then
+            printf '::error::node suite failed: %s\n' "${failed[@]}"
+            exit 1
+          fi
+
   arch-lint:
     name: arch-lint (D10 spawn-everything)
     runs-on: ubuntu-latest

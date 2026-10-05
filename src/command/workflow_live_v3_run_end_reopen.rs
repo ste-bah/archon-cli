@@ -7,10 +7,11 @@
 //! path (`acceptance_chain::verify_launch_chain`), so a chain that moved by
 //! sanctioned re-authoring is adopted there and one that did not is recorded
 //! as the round's operational error. The outcome is then held to the round
-//! the re-entry wrote, exactly as the last in-run round was.
+//! the re-entry wrote, exactly as the last in-run round was. A round that
+//! reads back damaged or unreadable pauses the run (Issue 326).
 
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
-use archon_workflow::v2::acceptance_stage::AcceptanceRoundRecordV1;
+use archon_workflow::v2::acceptance_stage::{AcceptanceRoundRecordV1, progress};
 use archon_workflow::v2::script::is_acceptance_stage_call;
 use archon_workflow::{
     WorkflowError, WorkflowLlmClient, WorkflowResult, WorkflowStore, WorkflowV2CallExecution,
@@ -89,12 +90,7 @@ impl RunEndReopen for AcceptanceReopen<'_> {
                 ))
             })?
             .to_string();
-        let path = run_dir.join(&relative);
-        let bytes = std::fs::read(&path).map_err(|source| WorkflowError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        let record: AcceptanceRoundRecordV1 = serde_json::from_slice(&bytes)?;
+        let (record, path) = reentered_round(self.store, self.run_id, &relative)?;
         let gate = super::gate_of(&run_dir, &record, &path);
         let (summary, gate) =
             super::hold_to_round(self.run_id, summary.clone(), gate, &record, &path);
@@ -104,4 +100,67 @@ impl RunEndReopen for AcceptanceReopen<'_> {
             record_path: Some(relative),
         }))
     }
+}
+
+/// The round the re-entered stage wrote at `relative` (Issue 326). Damage
+/// is never an error and never stands in for a verdict: a record that will
+/// not parse is quarantined with evidence (the history's own healing load,
+/// [`progress::ProgressLedger::load_healing`]), one that is gone or that the
+/// file system will not hand over is left as it is, and either way the run
+/// PAUSES with the reason (`Err(ControlPaused)`). Nothing is rebuilt from
+/// another record (Issue 313, round 2); the resume runs the stage again and
+/// its new round heals the run.
+pub(super) fn reentered_round(
+    store: &WorkflowStore,
+    run_id: &str,
+    relative: &str,
+) -> WorkflowResult<(AcceptanceRoundRecordV1, std::path::PathBuf)> {
+    let run_dir = store.run_dir(run_id);
+    let path = run_dir.join(relative);
+    let pause = |reason: String| super::call::pause(store, run_id, relative, &reason);
+    let why = match std::fs::read(&path) {
+        Ok(bytes) => match serde_json::from_slice(&bytes) {
+            Ok(record) => return Ok((record, path)),
+            Err(error) => format!("it will not parse ({error})"),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let reason = format!("the re-entered acceptance round {relative} is gone");
+            return Err(pause(reason));
+        }
+        Err(error) => {
+            let reason =
+                format!("the re-entered acceptance round {relative} cannot be read ({error})");
+            return Err(pause(reason));
+        }
+    };
+    let healed = match progress::ProgressLedger::load_healing(&run_dir) {
+        Ok(healed) => healed,
+        Err(error) => {
+            let reason = format!(
+                "the re-entered acceptance round {relative} is damaged ({why}) and cannot be quarantined ({error})"
+            );
+            return Err(pause(reason));
+        }
+    };
+    progress::record_quarantine_events(store, run_id, &healed.quarantined);
+    let moved = (healed.quarantined.iter()).find(|q| q.original == relative);
+    let kept = moved.map_or_else(
+        || "it was not quarantined".to_string(),
+        |q| format!("it is quarantined at {}", q.quarantined),
+    );
+    let reason = format!("the re-entered acceptance round {relative} is damaged ({why}); {kept}");
+    let paused = pause(reason);
+    // The pause reports this loss: acknowledged only once it is recorded,
+    // so the resumed stage does not pause on it a second time.
+    let lost: Vec<_> = (healed.unacknowledged.iter())
+        .filter(|q| q.original == relative)
+        .cloned()
+        .collect();
+    if matches!(paused, WorkflowError::ControlPaused(_))
+        && !lost.is_empty()
+        && let Err(error) = progress::acknowledge_quarantined(&run_dir, &lost)
+    {
+        tracing::warn!(%error, run_id, "the reported loss of the re-entered acceptance round was not acknowledged; the resumed stage pauses on it again");
+    }
+    Err(paused)
 }
