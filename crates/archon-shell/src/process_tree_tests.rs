@@ -3,7 +3,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use super::holders_impl::{
-    STANDARD_LSOF, fdinfo_writes, holders_using, lsof_program_from, parse_lsof_fields,
+    STANDARD_LSOF, fdinfo_writes, first_path_fallback, holders_using, lsof_program_from,
+    parse_lsof_fields,
 };
 use super::*;
 
@@ -277,19 +278,61 @@ fn lsof_is_found_at_a_standard_location_then_on_path() {
         Ok(planted.clone()),
         "PATH is used when no standard location has an executable lsof"
     );
-    assert_eq!(
-        pick(
-            &[missing_s],
-            vec![std::path::PathBuf::from("toolchain/lsof")]
-        ),
-        Err(std::io::ErrorKind::NotFound),
-        "a relative PATH entry is never used"
-    );
     let error =
         lsof_program_from(&[missing_s, plain], vec![missing.clone()].into_iter()).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
     assert!(error.to_string().contains("no executable lsof"), "{error}");
     assert!(error.to_string().contains(missing_s), "{error}");
+}
+
+const RELATIVE_PATH_ENV: &str = "ARCHON_TEST_RELATIVE_PATH_LSOF";
+
+/// Issue 321: a relative PATH entry resolves against the working directory,
+/// so it is never used, even when an executable `lsof` sits right there.
+/// Run in a child test process whose cwd holds `toolchain/lsof`.
+#[test]
+fn a_relative_path_lsof_is_never_used() {
+    let cwd = tempfile::tempdir().unwrap();
+    fake_program(cwd.path(), "toolchain/lsof", "#!/bin/sh\nexit 1\n");
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "process_tree::tests::relative_path_lsof_child",
+            "--nocapture",
+        ])
+        .current_dir(cwd.path())
+        .env(RELATIVE_PATH_ENV, "1")
+        .status()
+        .unwrap();
+    assert!(status.success(), "the relative-PATH child failed: {status}");
+}
+
+#[test]
+#[ignore = "child process of a_relative_path_lsof_is_never_used"]
+fn relative_path_lsof_child() {
+    if std::env::var_os(RELATIVE_PATH_ENV).is_none() {
+        return;
+    }
+    let relative = std::path::PathBuf::from("toolchain/lsof");
+    assert!(relative.is_file(), "the cwd does not hold toolchain/lsof");
+    let missing = "/no/such/dir/lsof";
+    let found = lsof_program_from(&[missing], vec![relative].into_iter());
+    assert_eq!(
+        found.map_err(|e| e.kind()),
+        Err(std::io::ErrorKind::NotFound),
+        "a relative PATH entry is never used"
+    );
+}
+
+/// Issue 321: the PATH-fallback warning is logged once per process and path.
+#[test]
+fn a_path_fallback_warns_once_per_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a/lsof"), dir.path().join("b/lsof"));
+    assert!(first_path_fallback(&a));
+    assert!(!first_path_fallback(&a));
+    assert!(first_path_fallback(&b));
 }
 
 /// Issue 321, the production list: on a host with `lsof` at a standard

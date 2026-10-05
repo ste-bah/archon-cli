@@ -228,11 +228,13 @@ pub(crate) fn lsof_program_from(
     let mut on_path = on_path.filter(|path| path.is_absolute());
     match on_path.find(executable) {
         Some(found) => {
-            tracing::warn!(
-                lsof = %found.display(),
-                standard = ?standard,
-                "no executable lsof at a standard location; using the one PATH names"
-            );
+            if first_path_fallback(&found) {
+                tracing::warn!(
+                    lsof = %found.display(),
+                    standard = ?standard,
+                    "no executable lsof at a standard location; using the one PATH names"
+                );
+            }
             Ok(found)
         }
         None => Err(io::Error::new(
@@ -240,6 +242,17 @@ pub(crate) fn lsof_program_from(
             format!("no executable lsof at {} or on PATH", standard.join(", ")),
         )),
     }
+}
+
+/// Whether this process has not yet used `path` as a PATH fallback, so a
+/// probe that runs in a loop warns once per process and path.
+pub(crate) fn first_path_fallback(path: &Path) -> bool {
+    static WARNED: std::sync::Mutex<std::collections::BTreeSet<PathBuf>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    WARNED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(path.to_path_buf())
 }
 
 /// `lsof -F pan` output as (pid, path, held for writing): `p` starts a
