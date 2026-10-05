@@ -33,7 +33,7 @@ impl archon_workflow::WorkflowUiSink for FailStartedDelivery {
 }
 
 #[tokio::test]
-async fn round8_fixed_started_delivery_failure_is_closed_by_sibling_terminal_stop() {
+async fn round8_fixed_started_delivery_failure_is_closed_before_sibling_terminal_stop() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowStore::project(temp.path());
     let run = store
@@ -72,7 +72,11 @@ async fn round8_fixed_started_delivery_failure_is_closed_by_sibling_terminal_sto
     assert!(sink.failed.load(Ordering::SeqCst), "failure injected");
     let record = v2.load_call_record("fault").unwrap().unwrap();
     assert_eq!(record.status, WorkflowV2Status::NeedsReview, "{report}");
-    assert_eq!(record.result.data["interrupted"], "terminal_host_stop");
+    // Issue 303: closed at the failure, not left for the terminal stop.
+    assert_eq!(
+        record.result.data["interrupted"],
+        "notification_delivery_failed"
+    );
     assert!(
         v2.load_call_records()
             .unwrap()
@@ -164,3 +168,7 @@ async fn round8_fixed_script_failure_leaves_durable_failed_status() {
         assert!(finalization.terminal_event_committed);
     }
 }
+
+// Issue 303: mounted here; the run module is at its 500-line ceiling.
+#[path = "workflow_live_v2_started_record_tests.rs"]
+mod started_record_tests;

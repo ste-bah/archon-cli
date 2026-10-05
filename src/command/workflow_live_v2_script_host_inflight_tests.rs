@@ -301,3 +301,73 @@ async fn the_marker_is_refreshed_with_new_progress_and_keeps_its_dispatch_time()
     done.send(()).expect("send");
     work.await.expect("the call returns");
 }
+
+/// Issue 303: a `Running` record with no marker never dispatched; the next
+/// start closes it. One whose marker a live host still holds is left alone.
+#[tokio::test]
+async fn a_running_record_without_a_marker_is_closed_at_the_next_start() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = workflow_store.create_run(spec()).expect("run");
+    let v2_root = workflow_store.run_dir(&run.id).join("v2");
+    let v2_store = WorkflowV2ResultStore::new(v2_root.clone());
+    let running = |id: &str| {
+        WorkflowV2CallRecord::new(
+            run.id.clone(),
+            marker(id).call,
+            3,
+            "in-hash".to_string(),
+            WorkflowV2Result {
+                status: WorkflowV2Status::Running,
+                summary: "fixed decomposition call in flight".to_string(),
+                ..WorkflowV2Result::default()
+            },
+            Vec::new(),
+        )
+    };
+    let mut state = run.clone();
+    for id in ["unstarted", "live"] {
+        v2_store.save_call_record(&running(id)).expect("seed");
+        let mut stage = archon_workflow::run::StageState::pending(id);
+        stage.status = archon_workflow::StageStatus::Running;
+        state.stages.insert(id.to_string(), stage);
+    }
+    workflow_store.save_state(&state).expect("running stages");
+    // pid 1 always runs and is never this process: its call is its own.
+    let mut live = marker("live");
+    live.host_pid = 1;
+    let inflight = v2_root.join("inflight");
+    std::fs::create_dir_all(&inflight).expect("inflight dir");
+    std::fs::write(
+        inflight.join(marker_name("live")),
+        serde_json::to_vec(&live).expect("marker json"),
+    )
+    .expect("marker");
+
+    start_run(workflow_store.clone(), v2_store.clone(), &run.id).await;
+
+    let stages = workflow_store.load_state(&run.id).expect("state").stages;
+    assert_eq!(
+        stages["unstarted"].status,
+        archon_workflow::StageStatus::NeedsReview
+    );
+    assert_eq!(stages["live"].status, archon_workflow::StageStatus::Running);
+    let closed = v2_store
+        .load_call_record("unstarted")
+        .expect("lookup")
+        .expect("record");
+    assert_eq!(closed.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(closed.attempt, 3);
+    assert_eq!(closed.result.data["interrupted"], "dispatch_not_started");
+    assert_eq!(closed.result.data["inflight_marker"], false);
+    assert!(!closed.is_reusable_for(&closed.input_hash));
+    let kept = v2_store
+        .load_call_record("live")
+        .expect("lookup")
+        .expect("record");
+    assert_eq!(
+        kept.status,
+        WorkflowV2Status::Running,
+        "a live host owns it"
+    );
+}

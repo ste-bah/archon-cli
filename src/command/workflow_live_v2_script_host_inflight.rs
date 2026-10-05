@@ -134,6 +134,32 @@ async fn refresh_while<T>(
 /// The reason an orphaned call's record gives.
 pub(super) const ORPHANED_REASON: &str = "host_process_ended";
 
+/// The reason a call's record gives when its started record was saved and
+/// its dispatch never began (Issue 303).
+pub(super) const UNSTARTED_REASON: &str = "dispatch_not_started";
+
+/// Issue 303: the run stage of a call closed as interrupted leaves `Running`
+/// for `NeedsReview`, as its record did. A call the script never reaches
+/// again is in no summary, so no finalization would settle it.
+pub(super) fn settle_interrupted_stage(
+    locked: &WorkflowStore,
+    run_id: &str,
+    call_id: &str,
+) -> archon_workflow::WorkflowResult<()> {
+    let mut run = locked.load_state(run_id)?;
+    let Some(stage) = run
+        .stages
+        .get_mut(call_id)
+        .filter(|stage| stage.status == archon_workflow::StageStatus::Running)
+    else {
+        return Ok(());
+    };
+    stage.status = archon_workflow::StageStatus::NeedsReview;
+    stage.completed_at.get_or_insert_with(chrono::Utc::now);
+    run.mark_updated();
+    locked.save_state_preserving_control(&run)
+}
+
 fn marker_name(call_id: &str) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in call_id.as_bytes() {
@@ -205,7 +231,13 @@ impl WorkflowScriptHost {
     /// after its marker was written (the record finished later) only loses
     /// its stale marker; an earlier record of the same call is never
     /// overwritten, so no finished work is replaced by an orphan note.
+    /// Issue 303: then close what a host left `Running` with no marker.
     pub(crate) fn record_orphaned_calls(&self) {
+        self.record_marked_orphans();
+        self.close_unmarked_running_calls();
+    }
+
+    fn record_marked_orphans(&self) {
         let Ok(entries) = std::fs::read_dir(self.inflight_dir()) else {
             return;
         };
@@ -236,6 +268,85 @@ impl WorkflowScriptHost {
                 }
             }
         }
+    }
+
+    /// Issue 303: close every `Running` record that has no in-flight marker.
+    /// The marker is written before a call is dispatched, so such a record is
+    /// a call whose started record was saved and whose dispatch never began;
+    /// the executor that saved it is gone. Nothing ran, so it is closed as
+    /// interrupted and the script dispatches the call again when it reaches
+    /// it. A record with a marker is the marker's to settle (above).
+    fn close_unmarked_running_calls(&self) {
+        let records = match self.runner.v2_store.load_call_records() {
+            Ok(records) => records,
+            Err(error) => {
+                tracing::warn!(%error, "running call records not read at start");
+                return;
+            }
+        };
+        for record in records {
+            let marked = self
+                .inflight_dir()
+                .join(marker_name(&record.call.id))
+                .exists();
+            if record.status != WorkflowV2Status::Running || marked {
+                continue;
+            }
+            if let Err(error) = self.record_unstarted(&record) {
+                tracing::warn!(call_id = %record.call.id, %error, "unstarted call not closed");
+            }
+        }
+    }
+
+    fn record_unstarted(
+        &self,
+        running: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<()> {
+        let call_id = &running.call.id;
+        let summary = format!(
+            "workflow v2 call '{call_id}' was {UNSTARTED_REASON}: its started record (attempt {}, {}) was saved, but no in-flight marker shows a dispatch and its executor ended",
+            running.attempt, running.started_at
+        );
+        let result = WorkflowV2Result {
+            status: WorkflowV2Status::NeedsReview,
+            summary: summary.clone(),
+            evidence: vec![WorkflowV2Evidence::new(
+                WorkflowV2EvidenceKind::Blocker,
+                summary,
+            )],
+            data: serde_json::json!({
+                "call_id": call_id,
+                "interrupted": UNSTARTED_REASON,
+                "started_at": running.started_at,
+                "inflight_marker": false,
+            }),
+            ..WorkflowV2Result::default()
+        };
+        let record = WorkflowV2CallRecord::new(
+            self.runner.v2_store.run_id(),
+            running.call.clone(),
+            running.attempt,
+            running.input_hash.clone(),
+            result,
+            running.depends_on.clone(),
+        )
+        .with_source_metadata(running.source_fingerprint.clone(), None)
+        .with_scaffold_hash(Some(self.scaffold_hash.clone()));
+        // Issue 291: only the run's owner closes it. The projection's UI
+        // event is dropped: no script runs yet to show it to.
+        self.with_owned_run_lock(|locked| {
+            self.runner.v2_store.save_call_record(&record)?;
+            crate::command::workflow_decompose_state::project_fixed_call(
+                locked,
+                &self.runner.run_id,
+                &record,
+                crate::command::workflow_decompose_state::FixedCallProjectionKind::Interrupted,
+            )?;
+            self.forget_completed_call(call_id)?;
+            settle_interrupted_stage(locked, &self.runner.run_id, call_id)
+        })?;
+        self.emit_call_finished_event(&record);
+        Ok(())
     }
 
     fn record_orphan(&self, marker: &InflightMarker) -> archon_workflow::WorkflowResult<()> {

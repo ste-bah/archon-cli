@@ -41,6 +41,78 @@ pub(super) fn control_interruption_reason(err: &WorkflowError) -> Option<&'stati
 }
 
 impl WorkflowScriptHost {
+    /// Issue 303: the started record was saved, then publishing it failed, so
+    /// the call was never dispatched. Close the record as interrupted now, as
+    /// a failed dispatch delivery is, so no `Running` record outlives this
+    /// executor; nothing ran, so the next attempt dispatches the call afresh.
+    /// A record that cannot be closed keeps its ownership for a terminal stop,
+    /// and the next start closes what a crash left (`record_orphaned_calls`).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn close_unstarted_call(
+        &self,
+        execution: &WorkflowV2CallExecution,
+        attempt: u32,
+        input_hash: &str,
+        source_fingerprint: Option<String>,
+        generation: Option<u64>,
+        started: std::time::Instant,
+        err: &WorkflowError,
+    ) {
+        let id = &execution.call.id;
+        let saved = self
+            .runner
+            .v2_store
+            .load_call_record(id)
+            .is_ok_and(|record| {
+                record.is_some_and(|record| {
+                    record.status == WorkflowV2Status::Running && record.attempt == attempt
+                })
+            });
+        if !saved {
+            self.forget_unwritten_pending_call(id);
+            return;
+        }
+        let reason = if matches!(err, WorkflowError::NotificationDelivery(_)) {
+            NOTIFICATION_DELIVERY_REASON
+        } else {
+            super::workflow_live_v2_script_host_inflight::UNSTARTED_REASON
+        };
+        if let Err(save_err) = self
+            .save_interrupted_call_record(
+                execution,
+                reason,
+                err,
+                started.elapsed(),
+                attempt,
+                input_hash,
+                source_fingerprint,
+                generation,
+            )
+            .await
+        {
+            tracing::warn!(call_id = %id, %save_err, "unstarted call record not closed");
+            return;
+        }
+        // A delivery failure already decides the outcome (the bridge records
+        // it); any other error reaches the script, which may catch it, so the
+        // run must not end as if this call had answered. Not counted as
+        // executed: it never ran.
+        let mut acc = self.accumulator.lock().await;
+        if !acc.terminal_locked() {
+            acc.status = merge_v2_status(acc.status, WorkflowV2Status::NeedsReview);
+        }
+        drop(acc);
+        if let Err(stage_err) = self.with_owned_run_lock(|locked| {
+            super::workflow_live_v2_script_host_inflight::settle_interrupted_stage(
+                locked,
+                &self.runner.run_id,
+                id,
+            )
+        }) {
+            tracing::warn!(call_id = %id, %stage_err, "unstarted call stage not settled");
+        }
+    }
+
     /// Persist why a call stopped when a pause or cancel killed it mid-flight.
     ///
     /// Mirrors [`failed_v2_result`]'s shape but claims `NeedsReview`, not
