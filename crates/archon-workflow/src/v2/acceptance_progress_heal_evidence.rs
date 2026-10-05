@@ -41,9 +41,15 @@ pub(super) fn unreadable_evidence(
         .unwrap_or("");
     let stem = name.strip_suffix(EVIDENCE_SUFFIX).unwrap_or(name);
     let moved = path.with_file_name(format!("{stem}{DAMAGED_SUFFIX}"));
-    if !moved.is_file() {
-        tracing::warn!(path = %path.display(), %error, "quarantine evidence will not parse and its record never moved; the record is counted where it is");
-        return Ok(None);
+    // A file system that will not say whether the bytes moved is an I/O
+    // error the caller pauses on, never "they never moved".
+    match moved.try_exists() {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::warn!(path = %path.display(), %error, "quarantine evidence will not parse and its record never moved; the record is counted where it is");
+            return Ok(None);
+        }
+        Err(source) => return Err(crate::WorkflowError::io(&moved, source)),
     }
     let (Some(round_number), Some(attempt)) = (round_of(round), attempt_of(stem)) else {
         return Err(crate::WorkflowError::StateCorrupt(format!(

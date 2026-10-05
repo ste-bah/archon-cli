@@ -177,3 +177,23 @@ fn an_unreadable_quarantine_directory_is_an_io_error() {
         "{loaded:?}"
     );
 }
+
+/// Review A5: when the file system will not say whether the record's bytes
+/// moved (here a link that loops), the load is an I/O error the caller
+/// pauses on, never a record taken as never moved.
+#[cfg(unix)]
+#[test]
+fn an_unknowable_move_is_an_io_error_never_no_loss() {
+    let dir = tempfile::tempdir().unwrap();
+    let quarantined = quarantined_then_evidence_damaged(dir.path(), false);
+    let moved = dir.path().join(&quarantined.quarantined);
+    std::fs::rename(&moved, dir.path().join("kept.damaged")).unwrap();
+    std::os::unix::fs::symlink(&moved, &moved).unwrap();
+
+    let loaded = ProgressLedger::load_healing(dir.path());
+
+    assert!(
+        matches!(&loaded, Err(crate::WorkflowError::Io { .. })),
+        "{loaded:?}"
+    );
+}
