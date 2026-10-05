@@ -453,3 +453,33 @@ console.log(seq.map((n, i) => b.shouldContinue(i + 1, gaps(n))).join(","));"#
     );
     assert_eq!(run_budget_js(&driver), "true,true,true,true,true,false");
 }
+
+/// Round 3: progress is a new BEST, not a drop from the last attempt.
+/// Verdicts alternating 10 and 9 open gaps "closed" one every other attempt
+/// against the previous verdict and ran 200+ attempts; against the best (9)
+/// nothing after the first 9 is progress, so two attempts later it stops.
+#[test]
+fn verdicts_alternating_between_two_counts_stop_within_a_small_bound() {
+    let driver = format!(
+        r#"{GAPS_JS}
+const b = remediationBudget({{ baseAttempts: 2 }});
+let attempt = 1;
+while (attempt <= 200 && b.shouldContinue(attempt, gaps(attempt % 2 === 1 ? 10 : 9))) attempt += 1;
+console.log(attempt);"#
+    );
+    // 1: baseline 10; 2: 9 (new best); 3: 10 and 4: 9 are no new best.
+    assert_eq!(run_budget_js(&driver), "4");
+}
+
+/// Round 3: the noisy closer from review keeps going: 20 -> 14, a verdict
+/// naming no gap, then 13 and 12 are each a new best.
+#[test]
+fn a_noisy_closer_with_a_gap_less_verdict_keeps_going() {
+    let driver = format!(
+        r#"{GAPS_JS}
+const b = remediationBudget({{ baseAttempts: 2 }});
+const empty = {{ result: {{ residual_gaps: [] }} }};
+console.log([gaps(20), gaps(14), empty, gaps(13), gaps(12)].map((env, i) => b.shouldContinue(i + 1, env)).join(","));"#
+    );
+    assert_eq!(run_budget_js(&driver), "true,true,true,true,true");
+}

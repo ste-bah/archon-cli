@@ -138,7 +138,7 @@
       walk(env);
       return out;
     };
-    let lastRemaining = null;
+    let bestRemaining = null;
     let lastOpen = [];
     // Non-shrinking attempts in a row. Round 2: a plateau is TWO of them, the
     // same bound as the acceptance loop's ACCEPTANCE_STALL_LIMIT, so one noisy
@@ -165,7 +165,7 @@
           // becomes the baseline, however late: closing those is progress.
           const late = baseline !== null && ids.size > 0;
           baseline = ids;
-          lastRemaining = ids.size;
+          bestRemaining = ids.size;
           lastOpen = [...ids];
           stalls = 0;
           if (attempt < funded) return true;
@@ -184,16 +184,19 @@
         // either, so it still counts toward the plateau: a verifier that never
         // names a gap again still runs out.
         const measured = ids.size > 0 && !refundable;
-        const before = lastRemaining;
+        const before = bestRemaining;
         let stillClosing = false;
         if (measured) {
           lastOpen = [...baseline].filter((id) => ids.has(id));
-          // Recorded on EVERY measured call, including inside the base window.
-          // Updating it only after the base attempts made a flat set look like
+          // Tracked on EVERY measured call, including inside the base window.
+          // Tracking it only after the base attempts made a flat set look like
           // progress: the comparison fell back to the baseline size and read
-          // 3 -> 3 as 5 -> 3.
-          stillClosing = lastOpen.length < lastRemaining;
-          lastRemaining = lastOpen.length;
+          // 3 -> 3 as 5 -> 3. `bestRemaining` is the lowest count so far.
+          // Round 3: against the BEST count reached, not the last verdict.
+          // Measured against the last one, verdicts alternating 10 and 9
+          // "closed" a gap every other attempt and ran 200+ attempts.
+          stillClosing = lastOpen.length < bestRemaining;
+          if (stillClosing) bestRemaining = lastOpen.length;
         }
         stalls = stillClosing ? 0 : stalls + 1;
         if (attempt < funded) return true;
@@ -204,7 +207,7 @@
         if (stalls < PLATEAU_ATTEMPTS) return true;
         note(
           "remediationBudget: stopping after attempt " + attempt + ": no progress for " + stalls +
-          " attempts in a row (" + before + " -> " + lastRemaining + " of " + baseline.size +
+          " attempts in a row (best " + before + ", now " + lastOpen.length + " of " + baseline.size +
           " original gaps open: " + lastOpen.join(", ") + ")"
         );
         return false;
