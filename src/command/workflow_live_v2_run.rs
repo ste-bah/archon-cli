@@ -106,9 +106,8 @@ async fn run_v2_workflow_with_origin(
     super::workflow_run_end_snapshot::refuse_unaccepted_launch(store, plan.task_universe.as_ref())?;
     let run = store.create_run(plan.approval_metadata_spec())?;
     let lease = workflow_live_v2_run_lease::take(store, &run.id)?;
-    // Issue-55: the repository the task set was decomposed against is the
-    // run's first event, base commit and current HEAD both, so a HEAD that
-    // moved since the decomposition is on record before any stage runs.
+    // Issue-55: the decomposition's repository, base commit and HEAD are the
+    // run's first event, so a moved HEAD is on record before any stage runs.
     if let Some(binding) = &plan.repository_binding {
         let seq = store.next_event_seq(&run.id)?;
         WorkflowEventLog::new(store.clone()).emit(
@@ -126,6 +125,7 @@ async fn run_v2_workflow_with_origin(
     }
     WorkflowBundle::create_for_run(store, &run, &plan.harness_source, origin)?;
     save_generated_v2_metadata(store, &run.id, &plan, script_lifecycle)?;
+    super::workflow_run_end_snapshot::toolchain::warn(store, &run.id, &ui_sink).await;
     let run = match gate_live_approval(cwd, store, run, approval_mode, &ui_sink).await? {
         LiveApprovalOutcome::Proceed(run) => *run,
         LiveApprovalOutcome::Pending(message) | LiveApprovalOutcome::Denied(message) => {

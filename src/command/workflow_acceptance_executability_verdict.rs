@@ -26,6 +26,10 @@
 //!    in the tree (`./bin/tool`), or an interpreter given a script of the
 //!    tree (`bash scripts/new.sh`), is the deliverable not there yet: a
 //!    verdict;
+//!    A subcommand the check runs (`tool sub`) that is neither built into
+//!    its tool nor a program `tool-sub` on the search path, which the
+//!    tool rejected before any assertion ran, is the same: an environment
+//!    failure (Issue 331, `workflow_acceptance_executability_verdict_subcommand`);
 //! 2. no exit status: the run was killed before it reported anything;
 //! 3. the check crashed in its own code
 //!    ([`archon_workflow::acceptance_check_crash`]);
@@ -52,6 +56,10 @@ use archon_workflow::task_set_contract::{AcceptanceCheck, AcceptanceContract};
 use regex::Regex;
 
 use super::verdict_shell::{Simple, expands, simple_commands};
+
+#[path = "workflow_acceptance_executability_verdict_subcommand.rs"]
+mod subcommand;
+pub(crate) use subcommand::unresolved_on_path;
 
 /// Programs whose job is to compile or build: a compiler error they print
 /// is the tree's (rule 4). An interpreter compiles the source it imports.
@@ -98,8 +106,15 @@ impl Context {
 
     /// Whether `name` is a program on the search path.
     fn on_path(&self, name: &str) -> bool {
-        (self.path.as_deref())
-            .is_some_and(|path| std::env::split_paths(path).any(|dir| dir.join(name).is_file()))
+        self.find(name).is_some()
+    }
+
+    /// Where the program `name` is on the search path.
+    fn find(&self, name: &str) -> Option<std::path::PathBuf> {
+        let path = self.path.as_deref()?;
+        std::env::split_paths(path)
+            .map(|dir| dir.join(name))
+            .find(|program| program.is_file())
     }
 }
 
@@ -124,6 +139,11 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
             "it starts `{name}`, which is not on its search path (exit {code}): a tool or interpreter its environment lacks"
         ));
     }
+    if code != 0
+        && let Some(why) = subcommand::missing(&commands, &output(result), at)
+    {
+        return Some(why);
+    }
     if let CheckRunClass::ScriptDefect(defect) = classify_check_run(command, result) {
         return Some(format!(
             "it crashed in its own {} code ({}) before it asserted anything",
@@ -144,8 +164,8 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
     })
 }
 
-/// Whether `result` may have failed for its host (rules 1, 2, 4 without the
-/// check's text): such a run is never remembered as a verdict, so a retry
+/// Whether `result` may have failed for its host (rules 1, 2, 4 and a
+/// rejected subcommand, without the check's text): such a run is never remembered as a verdict, so a retry
 /// runs it again.
 pub(crate) fn may_be_host_failure(result: &CheckResult) -> bool {
     if result.operational_error.is_some() || super::baseline::passed(result) {
@@ -154,7 +174,10 @@ pub(crate) fn may_be_host_failure(result: &CheckResult) -> bool {
     match result.exit_code {
         None | Some(126 | 127) => true,
         Some(0) => false,
-        Some(_) => !compile_errors(&output(result)).is_empty(),
+        Some(_) => {
+            let output = output(result);
+            !compile_errors(&output).is_empty() || subcommand::rejected(&output)
+        }
     }
 }
 
