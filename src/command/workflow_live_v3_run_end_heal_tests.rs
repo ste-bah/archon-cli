@@ -416,3 +416,5 @@ async fn run_end_observation_findings_never_commit_accepted_and_pause_naming_the
 mod call_heal;
 #[path = "workflow_live_v3_run_end_record_heal_tests.rs"]
 mod record_heal;
+#[path = "workflow_live_v3_run_end_reopen_heal_tests.rs"]
+mod reopen_heal;
