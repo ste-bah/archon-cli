@@ -158,3 +158,7 @@ mod escalation_tests;
 #[cfg(test)]
 #[path = "v3_prelude_completion_tests.rs"]
 mod completion_tests;
+
+#[cfg(test)]
+#[path = "v3_prelude_units_tests.rs"]
+mod units_tests;

@@ -176,11 +176,15 @@ fn run_shared_declarative_floor(
     };
     Some(match evaluate_declarative_floor(&contract, &facts) {
         DeclarativeFloorEvaluation::Passed => ContractVerification::Passed,
-        DeclarativeFloorEvaluation::Failed { findings } => ContractVerification::Failed(
-            findings.into_iter().take(5).collect::<Vec<_>>().join("; "),
-        ),
+        DeclarativeFloorEvaluation::Failed { findings } => floor_failed(&findings),
         DeclarativeFloorEvaluation::Deferred { .. } => return None,
     })
+}
+
+/// Issue 219: every floor finding reaches the branch's demotion, none
+/// dropped (only the first five used to).
+fn floor_failed(findings: &[String]) -> ContractVerification {
+    ContractVerification::Failed(findings.join("; "))
 }
 
 fn stamp_contract_evaluator(

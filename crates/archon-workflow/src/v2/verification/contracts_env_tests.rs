@@ -187,3 +187,18 @@ async fn a_contract_verifier_cannot_write_the_project() {
         );
     }
 }
+
+/// Issue 219: a declarative floor with seven findings fails the branch
+/// naming all seven, never the first five.
+#[test]
+fn every_declarative_floor_finding_reaches_the_failure() {
+    let findings: Vec<String> = (1..=7).map(|n| format!("floor finding {n}")).collect();
+    match floor_failed(&findings) {
+        ContractVerification::Failed(detail) => {
+            for finding in &findings {
+                assert!(detail.contains(finding.as_str()), "{detail}");
+            }
+        }
+        _ => panic!("expected a failure"),
+    }
+}
