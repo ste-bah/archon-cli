@@ -235,6 +235,7 @@ mod verdict;
 #[path = "workflow_acceptance_executability_verdict_shell.rs"]
 mod verdict_shell;
 pub(crate) use mutation::CANNOT_FAIL;
+pub(crate) use verdict::unresolved_on_path;
 
 /// Sets the scratch observation's cancel flag when the probe is dropped (a
 /// pause or cancel of the round), so its teardown starts at once.

@@ -17,6 +17,9 @@ use archon_workflow::{
     RUN_END_OBSERVER_SNAPSHOT_SCHEMA_VERSION, RunEndAcceptanceObserverSnapshotV1, WorkflowStore,
 };
 
+#[path = "workflow_run_start_toolchain.rs"]
+pub(super) mod toolchain;
+
 pub(super) fn collect_run_end_observer_snapshot(
     store: &WorkflowStore,
     universe: &WorkflowV2TaskUniverse,
