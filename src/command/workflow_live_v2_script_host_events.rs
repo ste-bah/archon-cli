@@ -63,8 +63,11 @@ impl WorkflowScriptHost {
             source_metadata.source_task_graph.clone(),
         )
         .with_scaffold_hash(Some(self.scaffold_hash.clone()));
-        self.runner.v2_store.save_call_record(&record)?;
-        self.update_checkpoint(&record)?;
+        // Issue 291: recorded under the run lock, only by the owner.
+        self.with_owned_run_lock(|_| {
+            self.runner.v2_store.save_call_record(&record)?;
+            self.update_checkpoint(&record)
+        })?;
         self.mark_executed(&record, record.status).await;
         self.emit_call_finished_event(&record);
         self.result_view(&record)
@@ -145,6 +148,10 @@ impl WorkflowScriptHost {
     }
 
     pub(super) fn emit_v2_event(&self, kind: WorkflowEventKind, detail: serde_json::Value) {
+        // Issue 291: a stale session appends nothing (refusal logged).
+        if !self.may_emit_events() {
+            return;
+        }
         let Ok(seq) = self
             .runner
             .workflow_store

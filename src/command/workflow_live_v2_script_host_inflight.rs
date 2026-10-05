@@ -303,7 +303,8 @@ impl WorkflowScriptHost {
         )
         .with_scaffold_hash(Some(self.scaffold_hash.clone()))
         .with_agent_sessions(marker.agent_sessions.clone());
-        self.runner.v2_store.save_call_record(&record)?;
+        // Issue 291: only the run's owner records an orphan.
+        self.with_owned_run_lock(|_| self.runner.v2_store.save_call_record(&record))?;
         self.emit_call_finished_event(&record);
         Ok(())
     }

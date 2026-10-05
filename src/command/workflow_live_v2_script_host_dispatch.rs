@@ -75,13 +75,10 @@ impl WorkflowScriptHost {
             && (fixed_agent || execution.call.write_mode.is_none())
     }
 
-    /// The run generation a call is dispatched under, read just before it.
+    /// The run generation a call is dispatched under, read just before it,
+    /// only while this executor owns the run (Issue 291).
     pub(super) fn call_generation(&self) -> archon_workflow::WorkflowResult<u64> {
-        Ok(self
-            .runner
-            .workflow_store
-            .load_state(&self.runner.run_id)?
-            .generation)
+        self.owned_generation()
     }
 
     /// Issue-253 round 5: a restart, item restart or force-accept on the

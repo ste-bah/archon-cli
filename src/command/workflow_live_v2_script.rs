@@ -66,9 +66,6 @@ pub(super) struct WorkflowV2ScriptRunner {
         Option<Arc<dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor>>,
     raw_outcomes_allowed: bool,
     executor_lease: Option<Arc<crate::command::workflow_executor_lease::ExecutionLease>>,
-    /// The run generation this executor started under (`observe_start`):
-    /// what a control write it makes must still own (Issue 261).
-    start_generation: Option<u64>,
     /// Canonical task ids whose work RE-EXECUTED during THIS run, closed over
     /// the task universe's dependency edges.
     ///
@@ -117,7 +114,6 @@ impl WorkflowV2ScriptRunner {
             host_command_executor: None,
             raw_outcomes_allowed: false,
             executor_lease: None,
-            start_generation: None,
             reexecuted_task_closure: Arc::new(StdMutex::new(Default::default())),
             pending_calls: Arc::default(),
         }
@@ -149,11 +145,16 @@ impl WorkflowV2ScriptRunner {
         self
     }
 
+    /// The lease this executor holds, and the run generation it launched
+    /// at: its session dispatches and writes only while that executor owns
+    /// the run (Issue 291), the generation the finalizer fences on too.
     pub(super) fn with_executor_lease(
         mut self,
         lease: Arc<crate::command::workflow_executor_lease::ExecutionLease>,
+        generation: u64,
     ) -> Self {
         self.executor_lease = Some(lease);
+        self.v2_store.bind_session_executor(generation);
         self
     }
 
@@ -193,7 +194,11 @@ impl WorkflowV2ScriptRunner {
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
         // Issue-253: the generation a later control outcome must be past.
         let start = observe_start(&self.workflow_store, &self.run_id)?;
-        self.start_generation = start.generation();
+        // Issue 261/291: what every dispatch and write must still own. A
+        // launch binds its generation first; a later script keeps it.
+        if let Some(generation) = start.generation() {
+            self.v2_store.bind_session_executor(generation);
+        }
         self.initialize_repository_audit().await?;
         let script_args = self.script_args.clone();
         let host = Arc::new(WorkflowScriptHost {

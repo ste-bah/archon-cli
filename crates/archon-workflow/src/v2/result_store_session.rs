@@ -47,6 +47,9 @@ pub(super) struct SessionLedger {
     /// dispatched to an agent (Batch H): a later round of the unit is then
     /// asked about a fix no earlier session saw.
     dispatched: Mutex<BTreeSet<String>>,
+    /// The run generation the executor this session writes for started
+    /// under (Issue 291; `result_store_executor.rs`). Bound once.
+    pub(super) executor: std::sync::OnceLock<u64>,
 }
 
 impl WorkflowV2ResultStore {

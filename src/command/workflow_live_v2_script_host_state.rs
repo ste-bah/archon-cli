@@ -77,12 +77,8 @@ impl WorkflowScriptHost {
         if !self.fixed_decomposition_state_present() {
             return Ok(None);
         }
-        Ok(Some(
-            self.runner
-                .workflow_store
-                .load_state(&self.runner.run_id)?
-                .generation,
-        ))
+        // Issue 291: the generation now, never one a newer executor owns.
+        self.owned_generation().map(Some)
     }
 
     pub(super) fn require_fixed_generation_owned(

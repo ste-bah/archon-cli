@@ -363,7 +363,7 @@ async fn execute_generated_v2_run(
     )
     .with_frontier_resume(adopt_accepted_cache)
     .with_resume_completed_ids(resume_completed_ids)
-    .with_executor_lease(executor_lease);
+    .with_executor_lease(executor_lease, run.generation);
     // Decomposed-PRD runs default to the Rust lifecycle. v3 script mode
     // (ARCHON_SCRIPT_LIFECYCLE=1) instead AUTHORS a workflow.js from the
     // task universe and executes it — composition as code, no reducer relay.

@@ -9,9 +9,9 @@ async fn a_stale_executor_cannot_pause_a_run_a_newer_generation_owns() {
     let (_temp, store, run_id) = new_run();
     set_status(&store, &run_id, archon_workflow::RunStatus::Running);
     let bound = store.load_state(&run_id).unwrap().generation;
-    let (mut runner, _rx) = runner(&store, &run_id, Arc::new(PanicLlm), None, None);
+    let (runner, _rx) = runner(&store, &run_id, Arc::new(PanicLlm), None, None);
     // What `run` binds when the executor starts under `bound`.
-    runner.start_generation = Some(bound);
+    runner.v2_store.bind_session_executor(bound);
     let host = WorkflowScriptHost {
         scaffold_hash: String::new(),
         host_occurrences: Default::default(),
