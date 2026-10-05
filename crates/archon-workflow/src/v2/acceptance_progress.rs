@@ -238,6 +238,9 @@ pub fn earlier_rounds(run_dir: &Path, round: u32) -> Vec<AcceptanceRoundRecordV1
 }
 
 #[cfg(test)]
+#[path = "acceptance_progress_heal_evidence_tests.rs"]
+mod heal_evidence_tests;
+#[cfg(test)]
 #[path = "acceptance_progress_heal_tests.rs"]
 mod heal_tests;
 #[cfg(test)]

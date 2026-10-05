@@ -138,7 +138,12 @@ fn decide_locked(
     let unknown = healed.unknown();
     if !unknown.is_empty() {
         let names: Vec<String> = (unknown.iter())
-            .map(|lost| format!("{} (moved to {})", lost.original, lost.quarantined))
+            .map(|lost| {
+                format!(
+                    "{} (moved to {}: {})",
+                    lost.original, lost.quarantined, lost.reason
+                )
+            })
             .collect();
         let reason = format!(
             "acceptance record(s) {} would not parse and were quarantined; no copy of their failing state survives, so the rounds without progress cannot be counted exactly",
