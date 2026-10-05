@@ -23,6 +23,11 @@ pub(crate) mod diagnostics;
 use diagnostics::{child_environment, collect_diagnostics, drain, failure_context};
 
 const FLAG: &str = "--internal-native-observer";
+/// How long the guardian waits for its whole request line. The parent writes
+/// the line straight after spawn, so this only ends a parent that stalled
+/// mid-line. The clock starts when the guardian begins reading: process
+/// start-up never counts against it (Issue 302).
+const REQUEST_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
 /// Sidecar key on the request line that narrows an observation to a set of
 /// pinned check ids. Carried beside `Request` rather than inside it so the R2
 /// wire struct is byte-identical: the authored run's acceptance stage uses it
@@ -117,7 +122,9 @@ pub(crate) async fn entry() -> anyhow::Result<bool> {
 async fn serve() -> WorkflowResult<()> {
     let stdin = std::io::stdin();
     let mut reader = std::io::BufReader::new(stdin);
-    let line = read_request(&mut reader)?;
+    // Read the descriptor directly so BufReader prefetch cannot hide bytes
+    // from poll. The untouched reader subsequently owns the liveness pipe.
+    let line = read_request(reader.get_ref(), REQUEST_DEADLINE)?;
     let (request, selection) = parse_request_line(&line)?;
     let cancel = Arc::new(AtomicBool::new(false));
     let flag = cancel.clone();
@@ -271,9 +278,12 @@ pub(crate) async fn launch_selected(
     .map_err(Into::into)
 }
 #[cfg(unix)]
-fn read_request(reader: &mut std::io::BufReader<std::io::Stdin>) -> WorkflowResult<String> {
-    use std::os::fd::AsRawFd;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+fn read_request(
+    source: &impl std::os::fd::AsRawFd,
+    limit: std::time::Duration,
+) -> WorkflowResult<String> {
+    let deadline = std::time::Instant::now() + limit;
+    let fd = source.as_raw_fd();
     let mut bytes = Vec::new();
     loop {
         if std::time::Instant::now() >= deadline {
@@ -281,9 +291,6 @@ fn read_request(reader: &mut std::io::BufReader<std::io::Stdin>) -> WorkflowResu
                 "guardian request deadline exceeded".into(),
             ));
         }
-        // Read the descriptor directly so BufReader prefetch cannot hide bytes
-        // from poll. The untouched reader subsequently owns the liveness pipe.
-        let fd = reader.get_ref().as_raw_fd();
         let mut poll = libc::pollfd {
             fd,
             events: libc::POLLIN,
@@ -392,11 +399,15 @@ fn acquire_lease_observing_busy(
 /// The request pipe is read with `poll(2)`; there is no Windows guardian, as
 /// `acquire_lease` below already refuses the lock there.
 #[cfg(not(unix))]
-fn read_request(_reader: &mut std::io::BufReader<std::io::Stdin>) -> WorkflowResult<String> {
+fn read_request<T>(_source: &T, _limit: std::time::Duration) -> WorkflowResult<String> {
     Err(WorkflowError::SpecInvalid(
         "native observation guardian requires a Unix host".into(),
     ))
 }
+
+#[cfg(all(test, unix))]
+#[path = "acceptance_scratch_guardian_request_tests.rs"]
+mod request_tests;
 
 #[cfg(test)]
 mod tests {

@@ -361,10 +361,15 @@ async fn native_nested_verifier_executes_after_passing_prerequisites() {
     );
 }
 
+/// The guardian, given part of a request on an open pipe, ends itself and names
+/// the read deadline (proven in-process in `acceptance_scratch_guardian_request_
+/// tests`). The ceiling only fails a guardian that never exits; it covers binary
+/// start-up, which alone took over 3 s on macOS CI vs an old 8 s window (Issue 302).
 #[test]
 fn guardian_partial_request_cannot_wait_forever() {
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -374,24 +379,36 @@ fn guardian_partial_request_cannot_wait_forever() {
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let diagnostics = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stderr.read_to_string(&mut text);
+        text
+    });
+    // Held open to the end: the guardian must not see end-of-file.
     let mut pipe = child.stdin.take().unwrap();
     pipe.write_all(b"{").unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
-    loop {
+    let ceiling = Instant::now() + Duration::from_secs(60);
+    let status = loop {
         if let Some(status) = child.try_wait().unwrap() {
-            assert!(!status.success());
-            break;
+            break status;
         }
-        if std::time::Instant::now() >= deadline {
+        if Instant::now() >= ceiling {
             child.kill().unwrap();
             child.wait().unwrap();
-            panic!("guardian request reader exceeded deadline");
+            panic!("guardian never ended a partial request");
         }
-        std::thread::sleep(std::time::Duration::from_millis(25));
-    }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let diagnostics = diagnostics.join().unwrap();
+    assert!(!status.success());
+    assert!(
+        diagnostics.contains("guardian request deadline exceeded"),
+        "guardian ended for another reason:\n{diagnostics}"
+    );
 }
 
 #[test]
