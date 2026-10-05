@@ -318,7 +318,17 @@ impl WorkflowScriptHost {
             .persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
             .await
         {
-            self.forget_unwritten_pending_call(&execution.call.id);
+            // Issue 303: a saved started record never outlives this executor.
+            self.close_unstarted_call(
+                &execution,
+                attempt,
+                &input_hash,
+                source_metadata.source_fingerprint.clone(),
+                execution_generation,
+                dispatched_at,
+                &err,
+            )
+            .await;
             return Err(err);
         }
         let call_id = execution.call.id.clone();
