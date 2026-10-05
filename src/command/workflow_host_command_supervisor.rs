@@ -133,14 +133,26 @@ pub(crate) async fn supervise_process_group(
     // its checks a group of its own, and the session still holds those
     // (Issue 270). On Linux it also becomes the reaper of its orphans, so a
     // descendant that leaves the session as well stays its descendant.
+    // It inherits nothing but its stdio (Issue 334): a sibling's pipe that
+    // another thread had not yet made close-on-exec would otherwise outlive
+    // this exec, and a descendant holding it keeps that sibling's teardown
+    // from ever seeing end of file.
     #[cfg(unix)]
-    // SAFETY: setsid and prctl are async-signal-safe syscalls.
+    let ceiling =
+        archon_shell::process_tree::descriptor_ceiling().map_err(|source| WorkflowError::Io {
+            path: request.program.clone(),
+            source,
+        })?;
+    #[cfg(unix)]
+    // SAFETY: setsid, prctl, fcntl and close_range are async-signal-safe
+    // syscalls; the ceiling was read before the fork.
     unsafe {
-        command.pre_exec(|| {
+        command.pre_exec(move || {
             if libc::setsid() < 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            archon_shell::process_tree::become_subreaper()
+            archon_shell::process_tree::become_subreaper()?;
+            archon_shell::process_tree::inherit_only_stdio(ceiling)
         });
     }
     // Suspended until it is in the job `confine` makes (Issue 273), so that
