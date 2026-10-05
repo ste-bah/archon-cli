@@ -48,10 +48,17 @@ pub(crate) use scope::{validate_destination, validate_existing_parents};
 /// pin. Every host publisher of that chain — the whole-set acceptance freeze,
 /// the skeleton freeze and the per-check repair — holds it while it writes, so
 /// two of them never interleave. The OS releases it when the process ends, so
-/// a crash never leaves a stale lock behind. Acquiring it first settles any
-/// publish of the set a crash interrupted.
+/// a crash never leaves a stale lock behind, and dropping it unlocks the file
+/// at once, even while a forked child still shares it (Issue 330). Acquiring
+/// it first settles any publish of the set a crash interrupted.
 pub(crate) struct ChainLock {
-    _file: std::fs::File,
+    file: std::fs::File,
+}
+
+impl Drop for ChainLock {
+    fn drop(&mut self) {
+        crate::command::workflow_executor_lease::release_lock(&self.file);
+    }
 }
 
 impl ChainLock {
@@ -64,8 +71,9 @@ impl ChainLock {
                 path.display()
             )
         })?;
+        let lock = Self { file };
         recover_interrupted_publish(pin_path, tasks_root)?;
-        Ok(Self { _file: file })
+        Ok(lock)
     }
 
     /// Wait for the lock: a run's own publication outlasts a per-check repair
@@ -97,8 +105,9 @@ impl ChainLock {
                 }
             }
         }
+        let lock = Self { file };
         recover_interrupted_publish(pin_path, tasks_root)?;
-        Ok(Self { _file: file })
+        Ok(lock)
     }
 
     fn open(pin_path: &Path) -> Result<(std::fs::File, PathBuf)> {

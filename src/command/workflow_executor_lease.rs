@@ -56,12 +56,32 @@ impl LeaseRecord {
     }
 }
 
-/// The held lease. Dropping it closes the file, which releases the lock.
+/// The held lease. Dropping it unlocks the file, then closes it.
 #[derive(Debug)]
 pub(crate) struct ExecutionLease {
     file: File,
     holder: LeaseHolder,
     previous_executor: Option<LeaseHolder>,
+}
+
+impl Drop for ExecutionLease {
+    fn drop(&mut self) {
+        release_lock(&self.file);
+    }
+}
+
+/// Releases a held lock file at once (Issue 330). The lock belongs to the
+/// open file, and a child that any thread of this process forks shares that
+/// file until its `exec` closes the CLOEXEC descriptor. A close alone
+/// therefore leaves the lock held for as long as such a child waits to
+/// `exec`, which under load is long enough for a free run to be refused as
+/// live. An explicit unlock releases it for every copy of the open file.
+/// Only a holder that is done calls this, so it never frees a lock another
+/// live holder took; the kernel still releases a dead holder's lock.
+pub(crate) fn release_lock(file: &File) {
+    if let Err(error) = file.unlock() {
+        tracing::warn!(%error, "lock file could not be unlocked; it is released when closed");
+    }
 }
 
 impl ExecutionLease {
@@ -176,3 +196,7 @@ pub(crate) fn pid_running(pid: u32) -> Option<bool> {
         None
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_executor_lease_tests.rs"]
+mod tests;
