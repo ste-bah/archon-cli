@@ -146,6 +146,10 @@ mod tests;
 mod error_tests;
 
 #[cfg(test)]
+#[path = "v3_author_acceptance_stall_tests.rs"]
+mod stall_tests;
+
+#[cfg(test)]
 #[path = "v3_prelude_ordinal_tests.rs"]
 mod ordinal_tests;
 
