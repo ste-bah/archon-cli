@@ -60,3 +60,24 @@ fn a_lock_that_records_no_baseline_falls_back_to_the_freezes_own_rule_with_a_not
     assert_eq!(baseline.map(|b| b.commit), Some(run_base));
     assert!(note.is_some_and(|note| note.contains("the run's base commit")));
 }
+
+/// Without its git history a round still finds its recorded baseline, by
+/// id, so a proof recorded for that id is reused (Issues 219, 328).
+#[test]
+fn a_recorded_baseline_is_found_without_git() {
+    let trees = trees(&[("AC-1", "test -f feature.txt", TrustedCwd::RepoRoot)]);
+    let run_base = later(&trees.repo);
+    std::fs::rename(trees.repo.join(".git"), trees.repo.join("git-moved")).unwrap();
+    let (baseline, _) = Baseline::for_round(&trees.repo, &trees.set.tasks, Some(&run_base));
+    assert_eq!(baseline.map(|b| b.commit), Some(trees.base.clone()));
+    std::fs::remove_file(trees.set.tasks.join("repository.lock")).unwrap();
+    let (baseline, note) = Baseline::for_round(&trees.repo, &trees.set.tasks, Some(&run_base));
+    assert_eq!(baseline.map(|b| b.commit), Some(run_base));
+    assert!(note.is_some_and(|note| note.contains("the run's base commit")));
+    record(&trees.set.tasks, &trees.head);
+    let (baseline, note) = Baseline::for_round(&trees.repo, &trees.set.tasks, None);
+    assert_eq!(
+        (baseline.map(|b| b.commit), note),
+        (Some(trees.head.clone()), None)
+    );
+}

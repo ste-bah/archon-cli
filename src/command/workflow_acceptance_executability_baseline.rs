@@ -35,7 +35,7 @@
 use std::path::{Path, PathBuf};
 
 use super::repairs::{TreeRun, tree_results};
-use super::sites::resolves;
+use super::sites::{object_id, resolves};
 use super::*;
 
 /// The tree before any implementation, in the repository it belongs to.
@@ -69,7 +69,7 @@ impl Baseline {
     /// The commit the task set's frozen acceptance lock records as its
     /// freeze's baseline, when it names a commit of `repository`.
     pub(crate) fn recorded(repository: &Path, tasks_root: &Path) -> Option<Self> {
-        let commit = recorded_commit(tasks_root).filter(|commit| resolves(repository, commit))?;
+        let commit = recorded_commit(tasks_root).filter(|commit| usable(repository, commit))?;
         Some(Self {
             commit,
             repository: repository.to_path_buf(),
@@ -82,7 +82,7 @@ impl Baseline {
             .ok()
             .flatten()
             .map(|record| record.base_commit)
-            .filter(|commit| resolves(repository, commit))?;
+            .filter(|commit| usable(repository, commit))?;
         Some(Self {
             commit,
             repository: repository.to_path_buf(),
@@ -111,7 +111,7 @@ impl Baseline {
         };
         let (baseline, used) = match Self::decomposed(repository, tasks_root) {
             Some(baseline) => (Some(baseline), "the decomposition's recorded base commit"),
-            None => match run_base.filter(|commit| resolves(repository, commit)) {
+            None => match run_base.filter(|commit| usable(repository, commit)) {
                 Some(commit) => (
                     Some(Self {
                         commit: commit.to_string(),
@@ -149,6 +149,14 @@ impl Baseline {
         }
         baseline.map(|baseline| baseline.commit)
     }
+}
+
+/// Whether the recorded `commit` may stand as a baseline in `repository`:
+/// a full object id that is a commit there, or -- when `repository` is no
+/// git checkout to ask -- taken as recorded, so a proof already recorded
+/// for that id is still found without git.
+fn usable(repository: &Path, commit: &str) -> bool {
+    object_id(commit) && (resolves(repository, commit) || git_head(repository).is_none())
 }
 
 /// The baseline commit `tasks_root`'s acceptance lock records, if any.
