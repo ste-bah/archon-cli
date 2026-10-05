@@ -331,3 +331,34 @@ fn a_skeleton_candidate_that_is_not_json_is_tagged_as_the_authors_mistake() {
         "{error:#}"
     );
 }
+
+/// Issue 312: once the precheck accepts what the skeleton reader accepts, the
+/// rest of the freeze must too. Fields the reader ignores hold values a strict
+/// `Value` read refuses; the freeze stages without them, never failing.
+#[test]
+fn freeze_shape_ignored_fields_the_reader_accepts_reach_staging() {
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, _pin) = seed_frozen_acceptance(&temp);
+    let deep = format!("{}{}", "[".repeat(200), "]".repeat(200));
+    let candidate = [
+        br#"{"schema_version":1,"acceptance_digest":"d","zz":"#.as_slice(),
+        deep.as_bytes(),
+        br#","tasks":[{"task_id":"TASK-X-010","file_name":"TASK-X-010-body.md","#,
+        br#""implements":["AC-X-001"],"z1":"\ud800","z2":1e400,"z3":""#,
+        &[0xFF, 0xFE],
+        br#""}]}"#,
+    ]
+    .concat();
+    let prepared = prepare_skeleton_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &temp.path().join("prds/PRD-X.md"),
+        archon_core::config::GateMode::Observe,
+        candidate,
+    )
+    .expect("a candidate the reader accepts must stage");
+    let (_, outputs) = prepared.into_staged_parts();
+    let staged: serde_json::Value = serde_json::from_slice(&outputs[0].1).unwrap();
+    assert_eq!(staged["tasks"][0]["task_id"], "TASK-X-010");
+    assert!(staged.get("zz").is_none() && staged["tasks"][0].get("z1").is_none());
+}

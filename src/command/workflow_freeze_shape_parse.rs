@@ -1,8 +1,10 @@
-//! Preserve duplicate evidence that derived struct readers reject. Maps and
-//! ignored fields retain serde's behavior; acceptance uses Value end to end.
+//! Preserve duplicate evidence that derived struct readers reject. Maps keep
+//! serde's behavior. A field the derived reader ignores is skipped the same
+//! way, with `IgnoredAny`, so both accept the same documents (Issue 312).
+//! Acceptance uses Value end to end.
 use super::{Shape, pointer, shape_defect};
 use archon_workflow::defect::ValidationDefect;
-use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
+use serde::de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -38,7 +40,13 @@ impl<'de> DeserializeSeed<'de> for Seed<'_> {
         }
         match self.shape {
             Some(Shape::Object(_) | Shape::List(_) | Shape::Map(_)) => reader.deserialize_any(self),
-            _ => Value::deserialize(reader),
+            Some(_) => Value::deserialize(reader),
+            // No shape: the derived reader ignores this field (an unknown key)
+            // or refuses it before reading it (a denied key, an extra
+            // positional item). Skip it as serde skips it: JSON syntax only,
+            // no recursion limit, string or number check. Keep `null` so the
+            // walk still sees the key or the item.
+            None => IgnoredAny::deserialize(reader).map(|IgnoredAny| Value::Null),
         }
     }
 }
