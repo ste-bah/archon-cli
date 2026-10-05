@@ -69,7 +69,9 @@ pub(super) fn refuse_candidate_error(
 
 #[path = "workflow_freeze_shape.rs"]
 mod shape;
-pub(crate) use shape::{ENTRY_SHAPE, ElementShape, TASK_SHAPE, element_shape_defects};
+pub(crate) use shape::{
+    ENTRY_SHAPE, ElementShape, TASK_SHAPE, element_shape_defects, skeleton_document,
+};
 
 /// Refuses the candidate with every element shape defect, or `None` when
 /// every element has the required shape.
@@ -109,6 +111,10 @@ mod round13_tests;
 #[cfg(test)]
 #[path = "workflow_freeze_round14_tests.rs"]
 mod round14_tests;
+
+#[cfg(test)]
+#[path = "workflow_freeze_round15_tests.rs"]
+mod round15_tests;
 
 #[cfg(test)]
 mod tests {

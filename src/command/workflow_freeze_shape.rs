@@ -320,6 +320,14 @@ fn walk_tagged(
     }
 }
 
+/// The tasks document as the derived skeleton reader reads it (Issue 312):
+/// every read field in full, and every field the reader ignores skipped the
+/// way serde skips it and kept as `null`. Inspections of the same candidate
+/// read this, so they accept exactly the documents the reader accepts.
+pub(crate) fn skeleton_document(document: &[u8]) -> Result<Value, serde_json::Error> {
+    parse::parse(document, &Shape::Object(&schema::SKELETON), &mut Vec::new())
+}
+
 pub(crate) fn element_shape_defects(
     candidate: &[u8],
     shape: &ElementShape,

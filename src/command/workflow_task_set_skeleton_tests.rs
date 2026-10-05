@@ -331,3 +331,93 @@ fn a_skeleton_candidate_that_is_not_json_is_tagged_as_the_authors_mistake() {
         "{error:#}"
     );
 }
+
+/// Issue 312: once the precheck accepts what the skeleton reader accepts, the
+/// rest of the freeze must too. Fields the reader ignores hold values a strict
+/// `Value` read refuses; the freeze stages without them, never failing.
+#[test]
+fn freeze_shape_ignored_fields_the_reader_accepts_reach_staging() {
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, _pin) = seed_frozen_acceptance(&temp);
+    let deep = format!("{}{}", "[".repeat(200), "]".repeat(200));
+    let candidate = [
+        br#"{"schema_version":1,"acceptance_digest":"d","zz":"#.as_slice(),
+        deep.as_bytes(),
+        br#","tasks":[{"task_id":"TASK-X-010","file_name":"TASK-X-010-body.md","#,
+        br#""implements":["AC-X-001"],"z1":"\ud800","z2":1e400,"z3":""#,
+        &[0xFF, 0xFE],
+        br#""}]}"#,
+    ]
+    .concat();
+    let prepared = prepare_skeleton_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &temp.path().join("prds/PRD-X.md"),
+        archon_core::config::GateMode::Observe,
+        candidate,
+    )
+    .expect("a candidate the reader accepts must stage");
+    let (_, outputs) = prepared.into_staged_parts();
+    let staged: serde_json::Value = serde_json::from_slice(&outputs[0].1).unwrap();
+    assert_eq!(staged["tasks"][0]["task_id"], "TASK-X-010");
+    assert!(staged.get("zz").is_none() && staged["tasks"][0].get("z1").is_none());
+}
+
+fn prepare_candidate(candidate: &[u8]) -> Result<PreparedSkeletonFreeze> {
+    let temp = tempfile::tempdir().unwrap();
+    let (tasks, _pin) = seed_frozen_acceptance(&temp);
+    prepare_skeleton_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &temp.path().join("prds/PRD-X.md"),
+        archon_core::config::GateMode::Observe,
+        candidate.to_vec(),
+    )
+}
+
+/// Issue 312: the marker scan reads the skeleton document, and still refuses
+/// a marker in a field the freeze stages. The ignored lone surrogate beside it
+/// proves the scan read it that way: a strict `Value` read would fail untagged.
+#[test]
+fn freeze_shape_a_marker_in_a_read_field_is_still_refused() {
+    for (file_name, artifact_path) in [
+        ("<redacted>", "out/a.json"),
+        ("TASK-X-010-body.md", "out/ <redacted>"),
+    ] {
+        let candidate = format!(
+            r#"{{"schema_version":1,"acceptance_digest":"d","tasks":[{{
+              "task_id":"TASK-X-010","file_name":"{file_name}","implements":["AC-X-001"],
+              "zz":"\ud800","deliverable_contracts":[{{"kind":"file","artifact_path":"{artifact_path}"}}]}}]}}"#
+        );
+        let error = prepare_candidate(candidate.as_bytes())
+            .err()
+            .expect("a marker in a staged field must not freeze");
+        let text = format!("{error:#}");
+        assert!(
+            crate::command::workflow_task_set::CandidateRejected::caused(&error),
+            "{text}"
+        );
+        assert!(text.contains("log-redaction marker"), "{text}");
+    }
+}
+
+/// Issue 312: a marker only in a field the reader ignores is not staged, so
+/// the freeze accepts it and the staged skeleton does not hold it.
+#[test]
+fn freeze_shape_a_marker_only_in_an_ignored_field_is_not_staged() {
+    let candidate = br#"{"schema_version":1,"acceptance_digest":"d","tasks":[
+      {"task_id":"TASK-X-001","file_name":"TASK-X-001-base.md"},
+      {"task_id":"TASK-X-010","file_name":"TASK-X-010-body.md","implements":["AC-X-001"],
+       "depends_on":[{"task_id":"TASK-X-001","ordering_only":true,"zz":"<redacted>"}]}]}"#;
+    let prepared = prepare_candidate(candidate).expect("an ignored marker must stage");
+    let (_, outputs) = prepared.into_staged_parts();
+    let staged = &outputs[0].1;
+    let dependency =
+        &serde_json::from_slice::<serde_json::Value>(staged).unwrap()["tasks"][1]["depends_on"][0];
+    assert_eq!(dependency["task_id"], "TASK-X-001");
+    let text = String::from_utf8_lossy(staged);
+    assert!(
+        !text.contains("<redacted>") && !text.contains("zz"),
+        "{text}"
+    );
+}

@@ -31,6 +31,7 @@ mod workflow_cli_lint;
 mod workflow_decompose_cli;
 #[path = "workflow_freeze_cli.rs"]
 mod workflow_freeze_cli;
+pub(crate) use workflow_freeze_cli::skeleton_document;
 #[path = "workflow_staged_cli.rs"]
 mod workflow_staged_cli;
 #[cfg(test)]

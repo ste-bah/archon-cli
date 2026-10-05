@@ -89,8 +89,11 @@ pub(crate) fn prepare_skeleton_freeze_from_candidate(
         .clone_from(&pin.acceptance_digest);
     let mut defects =
         archon_workflow::task_skeleton::skeleton_defects(&skeleton, &pin.acceptance_digest);
-    let marker_value: serde_json::Value =
-        serde_json::from_slice(&candidate).context("candidate marker inspection")?;
+    // Read as the skeleton reader above read it (Issue 312): a field it
+    // ignores is never staged, and a strict `Value` read of it would turn a
+    // candidate the reader accepted into an operational failure.
+    let marker_value = crate::command::workflow::skeleton_document(&candidate)
+        .context("candidate marker inspection")?;
     defects.extend(crate::command::workflow_freeze_candidate::marker_defects(
         &marker_value,
         true,
