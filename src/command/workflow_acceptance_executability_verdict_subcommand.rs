@@ -318,3 +318,7 @@ mod tests_333;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_verdict_subcommand_333b_tests.rs"]
 mod tests_333b;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_verdict_subcommand_333c_tests.rs"]
+mod tests_333c;

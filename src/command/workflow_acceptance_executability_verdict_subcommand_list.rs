@@ -11,13 +11,17 @@
 //! pins and the tree's own aliases are listed, as at the site.
 //!
 //! A listing is stopped when it prints nothing for the site's stall bound
-//! (a no-progress bound) or prints more than [`MOST_OUTPUT`] (a tool that
-//! never stops). The tool leads its own process group, and the whole group
-//! is killed and the tool reaped on every way out. A tool is asked once per
+//! (a no-progress bound), prints more than [`MOST_OUTPUT`] (a tool that
+//! never stops: its output is read from pipes, never written to disk), or
+//! writes more than [`MOST_SCRATCH`] to its own directories. Each of those
+//! is no answer. The tool leads its own process group, and the whole group
+//! is killed and the tool reaped on every way out; the listing's directory
+//! is removed on every way out too. A tool is asked once per
 //! program (its resolved path, size and change time), environment and tree,
 //! whatever it answered; one that gave no answer is asked again next time.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -82,31 +86,60 @@ pub(super) fn prefetch(programs: &BTreeSet<PathBuf>, at: &Context) -> BTreeMap<P
     })
 }
 
-/// `program`'s listing; `Err` when it gave no answer.
+/// `program`'s listing; `Err` when it gave no answer. Its directory goes
+/// however the listing ends.
 fn list(program: &Path, at: &Context) -> Result<Listing, String> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
-    let root = std::env::temp_dir().join(format!(
-        "archon-command-list-{}-{}",
+    let root = Scratch(std::env::temp_dir().join(format!(
+        "{SCRATCH_PREFIX}{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::SeqCst)
-    ));
-    let listed = (|| {
-        let (home, tree) = (root.join("home"), root.join("tree"));
-        for dir in [&home, &tree] {
-            std::fs::create_dir_all(dir)
-                .map_err(|error| format!("no listing directory: {error}"))?;
-        }
-        if let Some(site) = &at.tree {
-            super::tree::materialize(site, &tree)?;
-        }
-        list_in(program, &home, &tree, at)
-    })();
-    let _ = std::fs::remove_dir_all(&root);
-    listed
+    )));
+    let (home, tree) = (root.0.join("home"), root.0.join("tree"));
+    for dir in [&home, &tree] {
+        std::fs::create_dir_all(dir).map_err(|error| format!("no listing directory: {error}"))?;
+    }
+    if let Some(site) = &at.tree {
+        super::tree::materialize(site, &tree)?;
+    }
+    list_in(program, &root.0, &home, &tree, at)
 }
 
-fn list_in(program: &Path, home: &Path, tree: &Path, at: &Context) -> Result<Listing, String> {
-    let (out, err) = (home.join(".list"), home.join(".list-errors"));
+/// The name every listing directory starts with.
+pub(super) const SCRATCH_PREFIX: &str = "archon-command-list-";
+/// The most a listing's HOME, TMPDIR and directory may hold.
+const MOST_SCRATCH: u64 = 16 << 20;
+
+/// A listing's own directory, removed when it is dropped.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// The bytes the files under `dir` hold.
+fn bytes_under(dir: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    (entries.flatten())
+        .map(|entry| match entry.file_type() {
+            Ok(kind) if kind.is_dir() => bytes_under(&entry.path()),
+            Ok(_) => entry.metadata().map_or(0, |meta| meta.len()),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+fn list_in(
+    program: &Path,
+    root: &Path,
+    home: &Path,
+    tree: &Path,
+    at: &Context,
+) -> Result<Listing, String> {
     let shown = program.display();
     let mut environment = at.environment.clone();
     environment.insert("PATH".into(), String::new());
@@ -122,8 +155,8 @@ fn list_in(program: &Path, home: &Path, tree: &Path, at: &Context) -> Result<Lis
             .env_clear()
             .envs(&environment)
             .stdin(Stdio::null())
-            .stdout(std::fs::File::create(&out)?)
-            .stderr(std::fs::File::create(&err)?);
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         #[cfg(unix)]
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
         command.spawn()
@@ -131,43 +164,88 @@ fn list_in(program: &Path, home: &Path, tree: &Path, at: &Context) -> Result<Lis
     // A program written a moment ago can be briefly unable to start while
     // another thread's child still holds it open.
     let mut failure = String::new();
-    let child = (0..3)
+    let mut child = (0..3)
         .find_map(|attempt| {
             std::thread::sleep(Duration::from_millis(50 * attempt));
             spawn().map_err(|error| failure = error.to_string()).ok()
         })
         .ok_or_else(|| format!("`{shown} --list` could not be started: {failure}"))?;
+    // The output is read from pipes, never kept on disk, and at most
+    // [`MOST_OUTPUT`] of it: past that the group is killed.
+    let (sender, received) = std::sync::mpsc::sync_channel::<(usize, Vec<u8>)>(16);
+    let pipes: [Option<Box<dyn std::io::Read + Send>>; 2] = [
+        child.stdout.take().map(|pipe| Box::new(pipe) as _),
+        child.stderr.take().map(|pipe| Box::new(pipe) as _),
+    ];
+    for (stream, pipe) in pipes.into_iter().enumerate() {
+        let (sender, Some(mut pipe)) = (sender.clone(), pipe) else {
+            continue;
+        };
+        std::thread::spawn(move || {
+            let mut chunk = vec![0; 64 << 10];
+            while let Ok(read @ 1..) = pipe.read(&mut chunk) {
+                if sender.send((stream, chunk[..read].to_vec())).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    drop(sender);
     let mut group = Group(Some(child));
-    let printed = || [&out, &err].map(|file| std::fs::metadata(file).map_or(0, |m| m.len()));
-    let (mut seen, mut since) = (printed(), Instant::now());
+    let (mut output, mut status) = ([Vec::new(), Vec::new()], None);
+    let (mut since, mut polls) = (Instant::now(), 0u64);
     loop {
-        if group
-            .exited()
-            .map_err(|error| format!("`{shown} --list`: {error}"))?
-        {
-            break;
+        match received.recv_timeout(Duration::from_millis(20)) {
+            Ok((stream, chunk)) => {
+                output[stream].extend_from_slice(&chunk);
+                since = Instant::now();
+                let printed = output.iter().map(|o| o.len() as u64).sum::<u64>();
+                if printed > MOST_OUTPUT {
+                    return Err(format!(
+                        "`{shown} --list` output exceeded {MOST_OUTPUT} bytes, so it was stopped"
+                    ));
+                }
+            }
+            // Every writer of the pipes is gone: the listing is complete.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) if status.is_some() => break,
+            // It closed its output but runs on.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
         }
-        let now = printed();
-        if now.iter().sum::<u64>() > MOST_OUTPUT {
+        polls += 1;
+        if polls % 10 == 0 && bytes_under(root) > MOST_SCRATCH {
             return Err(format!(
-                "`{shown} --list` printed more than {MOST_OUTPUT} bytes, so it was stopped"
+                "`{shown} --list` wrote more than {MOST_SCRATCH} bytes to its own directories, so it was stopped"
             ));
         }
-        if now != seen {
-            (seen, since) = (now, Instant::now());
-        } else if since.elapsed() >= at.list_stall {
+        if status.is_none()
+            && group
+                .exited()
+                .map_err(|e| format!("`{shown} --list`: {e}"))?
+        {
+            // What it left behind in its group goes now, so the pipes close.
+            status = Some(
+                group
+                    .end()
+                    .ok_or_else(|| format!("`{shown} --list` was not reaped"))?,
+            );
+            since = Instant::now();
+        }
+        if since.elapsed() >= at.list_stall {
+            if status.is_some() {
+                break;
+            }
             return Err(format!(
                 "`{shown} --list` printed nothing for {} ms, so it was stopped",
                 at.list_stall.as_millis()
             ));
         }
-        std::thread::sleep(Duration::from_millis(20));
     }
-    let status = group
-        .end()
-        .ok_or_else(|| format!("`{shown} --list` could not be reaped"))?;
-    let text = std::fs::read_to_string(&out).unwrap_or_default();
-    let commands: BTreeSet<String> = (text.lines())
+    let status = status.expect("the loop ends only once the tool is reaped");
+    let [out, err] = output.map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+    let commands: BTreeSet<String> = (out.lines())
         .filter(|line| line.starts_with(char::is_whitespace))
         .filter_map(|line| line.split_whitespace().next())
         .filter(|word| super::named(word))
@@ -176,8 +254,7 @@ fn list_in(program: &Path, home: &Path, tree: &Path, at: &Context) -> Result<Lis
     if status.success() && !commands.is_empty() {
         return Ok(Listing::Commands(commands));
     }
-    let errors = std::fs::read_to_string(&err).unwrap_or_default();
-    let said = (errors.lines().map(str::trim)).find(|line| !line.is_empty());
+    let said = (err.lines().map(str::trim)).find(|line| !line.is_empty());
     Ok(Listing::Unlisted(format!(
         "`{shown} --list`, run with the site's environment and an empty search path, {}{}",
         match status.code() {

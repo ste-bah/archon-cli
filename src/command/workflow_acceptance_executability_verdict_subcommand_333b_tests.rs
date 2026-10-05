@@ -200,7 +200,7 @@ fn a_listing_that_never_stops_printing_is_stopped() {
         started.elapsed()
     );
     assert!(
-        warned.len() == 1 && warned[0].contains("printed more than 1048576 bytes"),
+        warned.len() == 1 && warned[0].contains("output exceeded 1048576 bytes"),
         "{warned:?}"
     );
 }
