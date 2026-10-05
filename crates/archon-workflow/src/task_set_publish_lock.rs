@@ -199,21 +199,27 @@ impl PublishLockFile {
     /// read of a set no interrupted publish is left in. A journal found under
     /// the shared lock is settled by `settle` under the exclusive lock, taken
     /// only after the shared one is let go; the state is then read again
-    /// under a fresh shared lock. `settle` runs at most [`READ_ATTEMPTS`]
-    /// times; its error is the read's. The caller makes sure this thread
-    /// holds no publish lock of the set.
+    /// under a fresh shared lock, once more after the last settlement.
+    /// `settle` runs at most [`READ_ATTEMPTS`] times; its error is the
+    /// read's, and a journal still left after the last is `exhausted`'s. The
+    /// caller makes sure this thread holds no publish lock of the set.
     pub fn acquire_shared_settled<E>(
         pin_path: &Path,
         mut settle: impl FnMut() -> Result<(), E>,
         error: impl Fn(String) -> E,
+        exhausted: impl FnOnce(String) -> E,
     ) -> Result<Self, E> {
         let path = lock_path(pin_path);
-        for _ in 0..READ_ATTEMPTS {
+        for attempt in 0..=READ_ATTEMPTS {
             let shared = Self::acquire_shared(&path).map_err(&error)?;
             if !interrupted_publish_left(pin_path) {
                 return Ok(shared);
             }
             drop(shared);
+            // The state after the last settlement was read above: give up.
+            if attempt == READ_ATTEMPTS {
+                break;
+            }
             let exclusive = Self::acquire(&path).map_err(&error)?;
             // A writer may have finished between the two: check again.
             if interrupted_publish_left(pin_path) {
@@ -221,8 +227,8 @@ impl PublishLockFile {
             }
             drop(exclusive);
         }
-        Err(error(format!(
-            "a publish of the task set left {} again after each of {READ_ATTEMPTS} settlements; it is not read until its publishes stop being interrupted",
+        Err(exhausted(format!(
+            "a publish of the task set left {} again after {READ_ATTEMPTS} attempts to settle it; it is not read until its publishes stop being interrupted",
             journal_paths(pin_path)[0].display()
         )))
     }

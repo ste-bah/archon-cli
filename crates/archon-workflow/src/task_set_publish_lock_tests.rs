@@ -98,6 +98,7 @@ fn a_reader_settles_a_left_journal_under_the_exclusive_lock_then_reads_shared() 
             std::fs::remove_file(&journal).map_err(|error| error.to_string())
         },
         |error| error,
+        |exhausted| exhausted,
     )
     .unwrap();
     assert_eq!(seen, [Some(LockMode::Exclusive)]);
@@ -113,6 +114,7 @@ fn a_reader_whose_settlement_fails_reports_it_and_retries_on_the_next_read() {
         &pin,
         || Err("cleanup failed".to_string()),
         |error| error,
+        |exhausted| exhausted,
     );
     assert_eq!(failed.err().as_deref(), Some("cleanup failed"));
     assert!(!held_here(&lock_path(&pin)), "a failed read kept the lock");
@@ -124,6 +126,7 @@ fn a_reader_whose_settlement_fails_reports_it_and_retries_on_the_next_read() {
             std::fs::remove_file(&journal).map_err(|error| error.to_string())
         },
         |error| error,
+        |exhausted| exhausted,
     );
     assert!(read.is_ok());
     assert_eq!(calls, 1, "the next read retried the settlement");
@@ -139,4 +142,92 @@ fn a_repin_with_no_settlement_installed_refuses_a_left_journal() {
         .unwrap();
     assert!(refused.contains("was interrupted"), "{refused}");
     assert!(!held_here(&lock_path(&pin)));
+}
+
+#[test]
+fn a_reader_whose_settlements_run_out_reports_it_as_exhausted() {
+    let (_temp, pin) = pin();
+    let [journal, _] = journal_paths(&pin);
+    std::fs::write(&journal, b"{}").unwrap();
+    let mut calls = 0;
+    let failed = PublishLockFile::acquire_shared_settled(
+        &pin,
+        || {
+            // Each settlement "succeeds" but the journal is left again.
+            calls += 1;
+            Ok::<(), String>(())
+        },
+        |error| format!("lock: {error}"),
+        |exhausted| format!("exhausted: {exhausted}"),
+    );
+    let error = failed.err().unwrap();
+    assert!(error.starts_with("exhausted: "), "{error}");
+    assert!(error.contains("3 attempts"), "{error}");
+    assert_eq!(calls, READ_ATTEMPTS);
+    assert!(!held_here(&lock_path(&pin)));
+}
+
+#[test]
+fn a_reader_whose_last_settlement_succeeds_reads_on() {
+    let (_temp, pin) = pin();
+    let [journal, _] = journal_paths(&pin);
+    std::fs::write(&journal, b"{}").unwrap();
+    let mut calls = 0;
+    let read = PublishLockFile::acquire_shared_settled(
+        &pin,
+        || {
+            calls += 1;
+            if calls == READ_ATTEMPTS {
+                std::fs::remove_file(&journal).map_err(|error| error.to_string())?;
+            }
+            Ok(())
+        },
+        |error| error,
+        |exhausted| exhausted,
+    )
+    .expect("the read after the last settlement goes on");
+    assert_eq!(calls, READ_ATTEMPTS);
+    assert_eq!(read.mode(), LockMode::Shared);
+}
+
+#[test]
+fn of_two_readers_that_find_one_journal_only_one_settles_it() {
+    let (_temp, pin) = pin();
+    let [journal, _] = journal_paths(&pin);
+    std::fs::write(&journal, b"{}").unwrap();
+    // Both readers queue behind a writer, so both find the journal.
+    let writer = PublishLockFile::acquire(&lock_path(&pin)).unwrap();
+    let settled = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    let readers: Vec<_> = (0..2)
+        .map(|_| {
+            let (pin, journal) = (pin.clone(), journal.clone());
+            let (settled, barrier) = (settled.clone(), barrier.clone());
+            std::thread::spawn(move || {
+                barrier.wait();
+                let read = PublishLockFile::acquire_shared_settled(
+                    &pin,
+                    || {
+                        settled.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(100));
+                        std::fs::remove_file(&journal).map_err(|error| error.to_string())
+                    },
+                    |error| error,
+                    |exhausted| exhausted,
+                );
+                read.map(|read| read.mode())
+            })
+        })
+        .collect();
+    barrier.wait();
+    std::thread::sleep(BLOCKED);
+    drop(writer);
+    for reader in readers {
+        assert_eq!(reader.join().unwrap(), Ok(LockMode::Shared));
+    }
+    assert_eq!(
+        settled.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the second reader settled a journal the first had settled"
+    );
 }

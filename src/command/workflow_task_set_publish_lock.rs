@@ -52,12 +52,19 @@ impl PublishLock {
     /// journal left there settled first by `settle` under the exclusive lock
     /// (the shared one let go before it is taken). The pin's directory
     /// exists, and this thread holds no publish lock of the set.
+    /// A journal still left once the settlements run out is
+    /// [`UnsettledPublish`] too: the run pauses on it, never fails.
     pub(super) fn acquire_shared_settled(
         pin_path: &Path,
         settle: impl FnMut() -> Result<()>,
     ) -> Result<Self> {
-        let file =
-            PublishLockFile::acquire_shared_settled(pin_path, settle, |error| anyhow!(error))?;
+        let paths = JournalPaths::for_pin(pin_path);
+        let file = PublishLockFile::acquire_shared_settled(
+            pin_path,
+            settle,
+            |error| anyhow!(error),
+            |exhausted| anyhow::Error::new(UnsettledPublish::new(&paths, &anyhow!(exhausted))),
+        )?;
         Ok(Self { _file: file })
     }
 }
@@ -181,7 +188,7 @@ impl ChainRead {
 /// A set left with a journal no read can settle pauses the run with the
 /// evidence and the remedy (Issue 336): its cause is the host's environment,
 /// fixed by an operator, never the author's artifact nor a reason to fail.
-fn stage_error(error: anyhow::Error) -> WorkflowError {
+pub(super) fn stage_error(error: anyhow::Error) -> WorkflowError {
     if UnsettledPublish::is(&error) {
         tracing::warn!(error = %format!("{error:#}"), "pausing: the task set's interrupted publish could not be settled");
         WorkflowError::ControlPaused(format!("{error:#}"))

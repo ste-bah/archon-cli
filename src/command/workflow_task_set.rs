@@ -334,5 +334,7 @@ mod tests;
 #[cfg(test)]
 pub(crate) use publish::reader_test_step;
 #[cfg(test)]
+pub(crate) use publish::stick_next_commit;
+#[cfg(test)]
 #[path = "workflow_task_set_read_race_tests.rs"]
 mod read_race_tests;

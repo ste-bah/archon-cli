@@ -450,6 +450,8 @@ mod crash_tests;
 #[cfg(test)]
 #[path = "workflow_task_set_publish_shared_lock_tests.rs"]
 mod shared_lock_tests;
+#[cfg(test)]
+pub(crate) use shared_lock_tests::stick_next_commit;
 
 #[cfg(test)]
 pub(crate) fn reader_test_step(step: &str) {

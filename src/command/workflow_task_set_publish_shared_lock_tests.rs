@@ -226,3 +226,56 @@ fn a_journal_no_read_can_settle_pauses_the_run_and_heals_once_fixed() {
     assert!(!set.paths().journal.exists());
     assert_eq!(set.read_pin().freeze_event_id, "new");
 }
+
+/// Test support: the next publish this thread commits leaves its committed
+/// journal behind, as if its removal had failed, and the recovery log beside
+/// the pin cannot be written, so no read can settle it. Returns the
+/// operator's fix: the log made writable again.
+pub(crate) fn stick_next_commit(pin: &Path) -> impl FnOnce() + use<> {
+    use std::cell::{Cell, RefCell};
+    let paths = JournalPaths::for_pin(pin);
+    let (hook, saved, done) = (paths.clone(), RefCell::new(None), Cell::new(false));
+    super::journal::test_hooks::STEP.with(|step_hook| {
+        *step_hook.borrow_mut() = Some(Box::new(move |step: &str| match step {
+            _ if done.get() => {}
+            "committed" => *saved.borrow_mut() = std::fs::read(&hook.journal).ok(),
+            "cleaned" => {
+                if let Some(bytes) = saved.borrow_mut().take() {
+                    std::fs::write(&hook.journal, bytes).unwrap();
+                    let _ = std::fs::remove_file(&hook.log);
+                    std::fs::create_dir_all(&hook.log).unwrap();
+                    done.set(true);
+                }
+            }
+            _ => {}
+        }))
+    });
+    move || std::fs::remove_dir(&paths.log).unwrap()
+}
+
+#[test]
+fn a_read_whose_settlements_run_out_pauses_the_run_with_evidence() {
+    let set = Set::new();
+    set.crash_after_commit();
+    let mut calls = 0;
+    // Every settlement "succeeds" and leaves the journal.
+    let error = super::lock::PublishLock::acquire_shared_settled(&set.pin(), || {
+        calls += 1;
+        Ok(())
+    })
+    .err()
+    .expect("a journal left after every settlement is not read");
+    assert_eq!(calls, 3);
+    assert!(super::lock::UnsettledPublish::is(&error), "{error:#}");
+    let WorkflowError::ControlPaused(evidence) = super::lock::stage_error(error) else {
+        panic!("exhausted settlements failed the run instead of pausing it");
+    };
+    for needed in [
+        set.paths().journal.display().to_string(),
+        "state: committed".into(),
+        "3 attempts".into(),
+        "Operator remedy".into(),
+    ] {
+        assert!(evidence.contains(&needed), "{needed} missing: {evidence}");
+    }
+}

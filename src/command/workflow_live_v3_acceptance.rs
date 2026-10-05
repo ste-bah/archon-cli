@@ -331,7 +331,7 @@ async fn evaluate(
         record,
         base.as_deref(),
     )
-    .await
+    .await?
     else {
         return Ok(());
     };

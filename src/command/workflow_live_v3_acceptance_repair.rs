@@ -48,7 +48,7 @@ use archon_workflow::v2::acceptance_stage::{
     AcceptanceCheckRecordV1, AcceptanceCheckStatus, AcceptanceContractRepairV1,
     AcceptanceRoundRecordV1, REPAIR_TRIGGER_NOT_ACCEPTED, REPAIR_TRIGGER_SCRIPT_DEFECT,
 };
-use archon_workflow::{WorkflowLlmClient, WorkflowResult, WorkflowStore};
+use archon_workflow::{WorkflowError, WorkflowLlmClient, WorkflowResult, WorkflowStore};
 
 use super::exec::{self, StageContext};
 use crate::command::workflow_task_set::executability::{
@@ -184,6 +184,8 @@ pub(super) async fn repair_unaccepted(
 /// Repair the round's contract in place and record the attempt. Returns the
 /// checks that remain contract defects, or `None` when the repaired contract
 /// could not be reloaded (recorded as the round's operational error).
+/// `ControlPaused` when the republished set's interrupted publish cannot be
+/// settled (Issue 336): the run pauses; it is not the round's error.
 pub(super) async fn apply(
     llm: Option<&dyn WorkflowLlmClient>,
     context: &StageContext,
@@ -191,9 +193,9 @@ pub(super) async fn apply(
     chain_digest: &mut String,
     record: &mut AcceptanceRoundRecordV1,
     base: Option<&str>,
-) -> Option<Defects> {
+) -> WorkflowResult<Option<Defects>> {
     let Some((repair, defects)) = repair_unaccepted(llm, context, contract, base).await else {
-        return Some(Defects::new());
+        return Ok(Some(Defects::new()));
     };
     let repaired = repair.repaired;
     // A repair the host could not prove is the host's: the round records it
@@ -205,15 +207,16 @@ pub(super) async fn apply(
     if repaired {
         match exec::load_contract(context) {
             Ok((reloaded, digest, _)) => (*contract, *chain_digest) = (reloaded, digest),
+            Err(paused @ WorkflowError::ControlPaused(_)) => return Err(paused),
             Err(error) => {
                 record.operational_errors.push(format!(
                     "repaired acceptance contract is not usable: {error}"
                 ));
-                return None;
+                return Ok(None);
             }
         }
     }
-    Some(defects)
+    Ok(Some(defects))
 }
 
 /// Where the round ran its checks, for re-running a repaired one there.
@@ -309,11 +312,15 @@ pub(super) async fn repair_ran(
         Some(failed),
     )
     .await;
-    let reloaded = outcome.and_then(|result| {
-        exec::load_contract(round.context)
+    // Issue 336: a republished set whose interrupted publish cannot be
+    // settled pauses the run; it is never this repair's failure.
+    let reloaded = match outcome.map(|result| (result, exec::load_contract(round.context))) {
+        Ok((_, Err(paused @ WorkflowError::ControlPaused(_)))) => return Err(paused),
+        Ok((result, loaded)) => loaded
             .map(|(reloaded, digest, _)| (result, reloaded, digest))
-            .map_err(|error| anyhow!("the republished contract is not usable: {error}"))
-    });
+            .map_err(|error| anyhow!("the republished contract is not usable: {error}")),
+        Err(error) => Err(error),
+    };
     let (result, reloaded, digest) = match reloaded {
         Ok(reloaded) => reloaded,
         Err(error) => {
@@ -421,3 +428,6 @@ pub(super) fn defect_record(
 #[cfg(all(test, unix))]
 #[path = "workflow_live_v3_acceptance_repair_base_tests.rs"]
 mod base_tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_live_v3_acceptance_repair_pause_tests.rs"]
+mod pause_tests;
