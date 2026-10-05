@@ -111,6 +111,7 @@ fn world() -> World {
         blobs: BlobStore::at(dir.path().join("pins/blobs")),
         frozen: true,
         pin: None,
+        tasks_root: None,
     };
     let roots = Roots {
         repository: &repo,
@@ -330,6 +331,7 @@ async fn an_accepted_unit_test_change_goes_in_over_its_pin_though_the_file_moved
         blobs: BlobStore::at(dir.path().join("pins/blobs")),
         frozen: true,
         pin: None,
+        tasks_root: None,
     };
     let roots = Roots {
         repository: &repo,

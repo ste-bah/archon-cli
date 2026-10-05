@@ -313,8 +313,10 @@ fn a_frozen_check_source_repin_waits_for_a_consistent_read() {
     );
 }
 
+/// Issue 336: a run reading its check-source pins reads beside a consistent
+/// read (both hold the lock shared) and waits only for a publish.
 #[test]
-fn a_run_reading_its_check_source_pins_waits_for_a_consistent_read() {
+fn a_run_reading_its_check_source_pins_reads_beside_a_read_and_waits_for_a_publish() {
     let race = race();
     let (project, tasks) = (
         race.context.project_root.clone(),
@@ -322,24 +324,91 @@ fn a_run_reading_its_check_source_pins_waits_for_a_consistent_read() {
     );
     let run = race.context.run_staging_root.clone();
     std::fs::create_dir_all(&run).unwrap();
+    let load = {
+        let (project, tasks, run) = (project.clone(), tasks.clone(), run.clone());
+        move || {
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let (project, tasks, run) = (project.clone(), tasks.clone(), run.clone());
+            let reader = std::thread::spawn(move || {
+                let roots = archon_workflow::check_source_resolve::Roots {
+                    repository: &project,
+                    project: &project,
+                };
+                let loaded = archon_workflow::check_source_pins::load_for_run(
+                    &run, &project, &tasks, &roots,
+                );
+                done_tx.send(loaded.map(|loaded| loaded.is_some())).unwrap();
+            });
+            (reader, done_rx)
+        }
+    };
     let read = crate::command::workflow_task_set::ChainRead::begin(&race.pin, &tasks).unwrap();
-    let (done_tx, done_rx) = std::sync::mpsc::channel();
-    let reader = std::thread::spawn(move || {
-        let roots = archon_workflow::check_source_resolve::Roots {
-            repository: &project,
-            project: &project,
-        };
-        let loaded =
-            archon_workflow::check_source_pins::load_for_run(&run, &project, &tasks, &roots);
-        done_tx.send(loaded.map(|loaded| loaded.is_some())).unwrap();
-    });
+    let (reader, done_rx) = load();
+    assert!(
+        done_rx
+            .recv_timeout(FINISHES)
+            .expect("the pins were held back by another reader")
+            .unwrap()
+    );
+    reader.join().unwrap();
+    drop(read);
+    let publish = crate::command::workflow_task_set::begin_publish(
+        &race.pin,
+        &tasks,
+        &race.versions[0],
+        "test",
+        &[],
+    )
+    .unwrap();
+    let (reader, done_rx) = load();
     assert!(
         done_rx.recv_timeout(BLOCKED).is_err(),
-        "the pins were read mid-hold"
+        "the pins were read mid-publish"
     );
-    drop(read);
+    publish.commit().unwrap();
     assert!(done_rx.recv_timeout(FINISHES).unwrap().unwrap());
     reader.join().unwrap();
+}
+
+/// Issue 336: two consistent reads hold the publish lock at once; neither
+/// waits for the other.
+#[test]
+fn two_consistent_reads_hold_the_publish_lock_at_once() {
+    let race = race();
+    let tasks = race.context.task_root.clone();
+    let first = crate::command::workflow_task_set::ChainRead::begin(&race.pin, &tasks).unwrap();
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+    let (pin, other) = (race.pin.clone(), tasks.clone());
+    let second = std::thread::spawn(move || {
+        let _read = crate::command::workflow_task_set::ChainRead::begin(&pin, &other).unwrap();
+        held_tx.send(()).unwrap();
+        release_rx.recv().unwrap();
+    });
+    held_rx
+        .recv_timeout(FINISHES)
+        .expect("the second read waited for the first: readers serialize");
+    // Both hold it now; a writer waits for both.
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let (pin, files) = (race.pin.clone(), race.versions[1].clone());
+    let writer = std::thread::spawn(move || {
+        let _chain =
+            crate::command::workflow_task_set::ChainLock::acquire_waiting(&pin, &tasks).unwrap();
+        crate::command::workflow_task_set::publish_files_atomically(&pin, &tasks, &files, "test")
+            .unwrap();
+        done_tx.send(()).unwrap();
+    });
+    drop(first);
+    assert!(
+        done_rx.recv_timeout(BLOCKED).is_err(),
+        "the republish ran while a read was held"
+    );
+    release_tx.send(()).unwrap();
+    second.join().unwrap();
+    done_rx
+        .recv_timeout(FINISHES)
+        .expect("the republish ran once both reads ended");
+    writer.join().unwrap();
 }
 
 #[test]

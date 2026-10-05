@@ -30,6 +30,9 @@ use cli_args::Cli;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Issue 336: a check-source repin settles an interrupted task-set publish
+    // before it writes, by the host's recovery.
+    command::workflow_task_set::register_publish_settle();
     if command::acceptance_scratch_guardian::entry().await? {
         return Ok(());
     }

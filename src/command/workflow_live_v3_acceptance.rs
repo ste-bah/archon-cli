@@ -266,6 +266,7 @@ async fn evaluate(
     record.contract_present = true;
     let (mut contract, mut chain_digest, frozen) = match exec::load_contract(&context) {
         Ok(loaded) => loaded,
+        Err(paused @ WorkflowError::ControlPaused(_)) => return Err(paused),
         Err(error) => {
             record
                 .operational_errors
@@ -307,6 +308,7 @@ async fn evaluate(
         if added {
             match exec::load_contract(&context) {
                 Ok((reloaded, digest, _)) => (contract, chain_digest) = (reloaded, digest),
+                Err(paused @ WorkflowError::ControlPaused(_)) => return Err(paused),
                 Err(error) => {
                     record.operational_errors.push(format!(
                         "the extended acceptance contract is not usable: {error}"
@@ -329,7 +331,7 @@ async fn evaluate(
         record,
         base.as_deref(),
     )
-    .await
+    .await?
     else {
         return Ok(());
     };

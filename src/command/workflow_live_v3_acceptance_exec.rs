@@ -209,7 +209,8 @@ pub(super) fn resolve_context(
 
 /// Read the contract and, when a lock exists, hold it to the frozen chain.
 /// Returns the contract with its chain digest and whether it was verified
-/// frozen.
+/// frozen. `ControlPaused` when the set's interrupted publish cannot be
+/// settled (Issue 336): the round passes it on, pausing the run.
 pub(super) fn load_contract(
     context: &StageContext,
 ) -> WorkflowResult<(AcceptanceContract, String, bool)> {

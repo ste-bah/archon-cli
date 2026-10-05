@@ -77,10 +77,13 @@ pub(crate) struct JournalPaths {
 
 impl JournalPaths {
     pub(crate) fn for_pin(pin_path: &Path) -> Self {
+        // The lock and journal are named where `archon-workflow`'s repins and
+        // readers look for them too.
+        let [journal, _] = archon_workflow::task_set_publish_lock::journal_paths(pin_path);
         Self {
-            lock: pin_path.with_extension("publish.lock"),
+            lock: archon_workflow::task_set_publish_lock::lock_path(pin_path),
             chain_lock: pin_path.with_extension("chain.lock"),
-            journal: pin_path.with_extension("publish-journal"),
+            journal,
             log: pin_path.with_extension("publish-recovery.log"),
         }
     }

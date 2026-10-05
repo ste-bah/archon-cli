@@ -19,6 +19,9 @@ pub struct PinStore {
     pub frozen: bool,
     /// The acceptance pin that records the frozen sidecar's digest.
     pub pin: Option<PathBuf>,
+    /// The frozen task set's root, whose interrupted publish a repin settles
+    /// before it writes (Issue 336).
+    pub tasks_root: Option<PathBuf>,
 }
 
 impl PinStore {
@@ -35,6 +38,7 @@ impl PinStore {
             blobs: BlobStore::at(dir.join("blobs")),
             frozen: true,
             pin: dir.parent().map(|pins| pins.join(format!("{key}.json"))),
+            tasks_root: Some(tasks_root.to_path_buf()),
         }
     }
 
@@ -46,6 +50,7 @@ impl PinStore {
             blobs: BlobStore::at(dir.join("blobs")),
             frozen: false,
             pin: None,
+            tasks_root: None,
         }
     }
 
@@ -85,9 +90,14 @@ impl PinStore {
             _ => None,
         };
         // The pin and the sidecar change together under the publish lock the
-        // host's publishes and consistent readers hold (Issue 294).
+        // host's publishes and consistent readers hold (Issue 294), held
+        // exclusive, and only once a publish a crash interrupted is settled:
+        // never written over a half-applied set (Issue 336).
         let _publish = match (&self.pin, self.frozen) {
-            (Some(pin), true) => crate::task_set_publish_lock::PublishLockFile::hold(pin)?,
+            (Some(pin), true) => crate::task_set_publish_lock::PublishLockFile::hold(
+                pin,
+                self.tasks_root.as_deref(),
+            )?,
             _ => None,
         };
         if let (Some(pin_path), true) = (&self.pin, self.frozen)
@@ -207,9 +217,10 @@ pub fn load_for_run(
     roots: &Roots,
 ) -> Result<Option<(PinStore, CheckSourcePins)>, String> {
     // Issue 294: the contract, the pin and the sidecar are read as one
-    // version, never mid-republish (the publish lock every publisher holds).
+    // version, never mid-republish (the publish lock every publisher holds),
+    // held shared beside other readers (Issue 336).
     let _read = match &PinStore::frozen(project_root, tasks_root).pin {
-        Some(pin) => crate::task_set_publish_lock::PublishLockFile::hold(pin)?,
+        Some(pin) => crate::task_set_publish_lock::PublishLockFile::hold_shared(pin)?,
         None => None,
     };
     let path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);

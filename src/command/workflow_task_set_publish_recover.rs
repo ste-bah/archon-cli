@@ -14,6 +14,7 @@ use super::journal::{
     Journal, JournalPaths, PublishLock, Recovered, crash_point, recover_journal, remove_if_present,
     sync_parent,
 };
+use super::lock::UnsettledPublish;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RecoveryOutcome {
@@ -88,18 +89,20 @@ pub(crate) fn lock_and_recover(
     Ok((lock, report))
 }
 
-/// A reader's lock (Issue 294): the publish lock, with a journaled publish a
-/// crash left settled first. A read never walks every run's receipts when no
-/// journal is left; journal-less legacy debris is settled at launch, resume
-/// and the next publish, as before.
+/// A reader's lock (Issues 294, 336): the publish lock held shared, with a
+/// journaled publish a crash left settled first under the exclusive lock. A
+/// read never walks every run's receipts when no journal is left;
+/// journal-less legacy debris is settled at launch, resume and the next
+/// publish, as before. A journal that cannot be settled is
+/// [`UnsettledPublish`], retried by every read.
 pub(super) fn lock_for_read(pin_path: &Path, tasks_root: &Path) -> Result<PublishLock> {
     let paths = JournalPaths::for_pin(pin_path);
-    let lock = PublishLock::acquire(&paths)?;
-    if paths.journal.exists() || paths.journal_temp().exists() {
-        let scopes = publication_scopes(pin_path, tasks_root)?;
-        recover_locked(&paths, &scopes, pin_path, tasks_root)?;
-    }
-    Ok(lock)
+    PublishLock::acquire_shared_settled(pin_path, || {
+        publication_scopes(pin_path, tasks_root)
+            .and_then(|scopes| recover_locked(&paths, &scopes, pin_path, tasks_root))
+            .map(drop)
+            .map_err(|error| anyhow::Error::new(UnsettledPublish::new(&paths, &error)))
+    })
 }
 
 pub(super) fn publication_scopes(
