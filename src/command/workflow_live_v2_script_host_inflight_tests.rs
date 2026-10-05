@@ -240,12 +240,17 @@ fn interruption_progress_names_turns_last_call_and_touched_paths() {
     assert_eq!(progress["agent_progress"][0]["agent_id"], agent);
 }
 
+/// Issue 339: on every platform, a running other process owns its marker, and
+/// an ended one, this process and pid 0 do not.
 #[test]
 fn a_marker_of_a_live_host_is_not_an_orphan() {
     assert!(!host_alive(std::process::id()), "this process never counts");
     assert!(!host_alive(0));
-    #[cfg(unix)]
-    assert!(host_alive(1), "pid 1 is always alive");
+    let mut host = archon_test_support::live_process::LiveChild::spawn();
+    let pid = host.pid();
+    assert!(host_alive(pid), "a running host (pid {pid}) is alive");
+    host.end();
+    assert!(!host_alive(pid), "an ended host (pid {pid}) is not");
 }
 
 /// Issue-213 C5 (review): the refresh, for real. Under a paused clock the
@@ -333,9 +338,11 @@ async fn a_running_record_without_a_marker_is_closed_at_the_next_start() {
         state.stages.insert(id.to_string(), stage);
     }
     workflow_store.save_state(&state).expect("running stages");
-    // pid 1 always runs and is never this process: its call is its own.
+    // Issue 339: a running child is another live host on every platform (pid
+    // 1 is no process on Windows); its call is its own.
+    let host = archon_test_support::live_process::LiveChild::spawn();
     let mut live = marker("live");
-    live.host_pid = 1;
+    live.host_pid = host.pid();
     let inflight = v2_root.join("inflight");
     std::fs::create_dir_all(&inflight).expect("inflight dir");
     std::fs::write(
@@ -370,4 +377,5 @@ async fn a_running_record_without_a_marker_is_closed_at_the_next_start() {
         WorkflowV2Status::Running,
         "a live host owns it"
     );
+    drop(host);
 }

@@ -172,20 +172,7 @@ fn marker_name(call_id: &str) -> String {
 /// Whether another live process wrote the marker. This process's own pid
 /// never counts: a marker it finds at start is from an earlier run in it.
 fn host_alive(pid: u32) -> bool {
-    if pid == 0 || pid == std::process::id() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        // SAFETY: signal 0 only probes whether the process exists; EPERM
-        // means it exists and belongs to someone else.
-        let probed = unsafe { libc::kill(pid as libc::pid_t, 0) };
-        probed == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-    }
-    #[cfg(not(unix))]
-    {
-        false
-    }
+    pid != std::process::id() && archon_workflow::process_liveness::process_alive(pid)
 }
 
 impl WorkflowScriptHost {
