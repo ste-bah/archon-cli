@@ -370,6 +370,28 @@ async fn a_resume_replays_the_failed_author_call_before_the_pause_instead_of_re_
     assert_eq!(pause_events(&store, &run_id).len(), 1);
 }
 
+/// Issue 332: on a loaded machine the script thread waits for a core after
+/// its engine started. A wait longer than the whole JavaScript budget spends
+/// none of it: the fixed script runs as it does on an idle machine.
+#[tokio::test]
+async fn an_engine_start_stalled_past_the_script_budget_still_runs_the_fixed_script() {
+    let (temp, store, run_id, llm, host) = fixture();
+    workflow_live_v2_script_watchdog::ENGINE_START_STALLS
+        .lock()
+        .unwrap()
+        .insert(run_id.clone(), WORKFLOW_JS_WATCHDOG * 4);
+
+    let error = run_fixed(&temp, &store, &run_id, &llm, &host)
+        .await
+        .expect_err("the stalled body pauses the run, as it does without the stall");
+
+    assert!(
+        matches!(error, WorkflowError::ControlPaused(_)),
+        "{error:?}"
+    );
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 6);
+}
+
 #[path = "workflow_live_v2_script_pause_occurrence_tests.rs"]
 mod occurrences;
 #[path = "workflow_live_v2_script_pause_operational_tests.rs"]

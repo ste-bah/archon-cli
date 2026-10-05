@@ -21,7 +21,7 @@
 //! bridge and not to the v3 composition root.
 
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rquickjs::function::{Async, Func};
 use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Promise};
@@ -51,6 +51,7 @@ mod helpers_a;
 mod helpers_b;
 pub mod history_replay;
 mod host_command;
+pub mod js_cpu_clock;
 pub mod refused_landings;
 pub mod remediation_dispositions;
 pub mod remediation_escalation;

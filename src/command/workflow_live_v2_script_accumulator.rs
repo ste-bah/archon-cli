@@ -12,6 +12,8 @@ pub(super) struct WorkflowScriptAccumulator {
     pub(super) failed_call: Option<String>,
     pub(super) failed_result_path: Option<String>,
     pub(super) next_action: Option<String>,
+    /// Issue 332: the error text of a failed workflow.js.
+    pub(super) script_error: Option<String>,
     pub(super) terminal_host_stop: bool,
     /// Issue-285: a JavaScript script drives this host, so a terminal stop is
     /// sticky and refuses later calls. The native lifecycle driver is host code
@@ -63,6 +65,7 @@ impl Default for WorkflowScriptAccumulator {
             failed_call: None,
             failed_result_path: None,
             next_action: None,
+            script_error: None,
             terminal_host_stop: false,
             script_driven: false,
             never_started: NeverStartedStreak::default(),

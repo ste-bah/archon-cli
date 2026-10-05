@@ -88,6 +88,28 @@ pub(crate) fn scope_label(scope: archon_workflow::RemediationScope) -> &'static 
 /// first, then the control-character and `=` rules the log marker already
 /// applies to its own fields.
 pub(crate) fn log_field(value: &str) -> String {
+    log_text(value).chars().take(LOG_FIELD_CHARS).collect()
+}
+
+/// The most characters `log_field` keeps.
+pub(crate) const LOG_FIELD_CHARS: usize = 1024;
+
+/// Issue 332: `log_field`, but text over the bound ends in a mark that says
+/// how much was cut, inside the same bound, so a reader knows it is partial.
+pub(crate) fn bounded_log_field(value: &str) -> String {
+    let text = log_text(value);
+    let total = text.chars().count();
+    if total <= LOG_FIELD_CHARS {
+        return text;
+    }
+    let mark = |kept: usize| format!(" [truncated: {} more chars]", total - kept);
+    let kept = LOG_FIELD_CHARS - mark(0).chars().count();
+    let mut bounded: String = text.chars().take(kept).collect();
+    bounded.push_str(&mark(kept));
+    bounded
+}
+
+fn log_text(value: &str) -> String {
     let redacted =
         match archon_workflow::events::sanitize_value(serde_json::Value::String(value.to_string()))
         {
@@ -100,7 +122,6 @@ pub(crate) fn log_field(value: &str) -> String {
         .join(" ")
         .chars()
         .filter(|ch| !ch.is_control())
-        .take(1024)
         .collect()
 }
 

@@ -366,8 +366,7 @@ fn replaced_expected_chain_is_operational_failure_not_silence() {
     );
 }
 
-/// B2 (was: Completed beside the shadow): a failing floor never commits
-/// `Accepted`; with no acceptance stage to re-open, the run blocks naming it.
+/// B2: a failing floor never commits `Accepted`; with no acceptance stage to re-open, it blocks.
 #[tokio::test]
 async fn finalizer_blocks_a_finishing_run_on_a_real_observer_shadow_naming_the_check() {
     let fixture = frozen_fixture(vec![criterion("AC-X-001", floor("missing.json"))]);
@@ -464,6 +463,7 @@ fn finalizer_summary() -> WorkflowV2ScriptSummary {
         failed_call: None,
         failed_result_path: None,
         next_action: None,
+        script_error: None,
         script_result: None,
     }
 }

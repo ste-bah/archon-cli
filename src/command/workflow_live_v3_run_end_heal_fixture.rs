@@ -242,6 +242,7 @@ pub(super) async fn in_run_round(fixture: &Fixture) -> WorkflowV2ScriptSummary {
         failed_call: None,
         failed_result_path: None,
         next_action: None,
+        script_error: None,
         script_result: None,
     }
 }
