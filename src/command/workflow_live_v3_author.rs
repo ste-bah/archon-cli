@@ -10,6 +10,8 @@ use super::*;
 
 #[path = "workflow_script_rejections.rs"]
 mod rejections;
+#[path = "workflow_live_v3_author_stall.rs"]
+mod stall;
 
 /// How many times an authoring attempt may come back with a script the
 /// pre-flight rejects before the run gives up.
@@ -102,16 +104,36 @@ impl WorkflowV2ScriptRunner {
             // marker, attempt 2 was cancelled 33 seconds in without ever
             // producing a script, and the run died with its single retry
             // spent on a network blip.
-            let mut rejection: Option<(String, Option<String>)> = None;
+            // Issue 296: exhausting either budget pauses the run with its
+            // evidence. A resume goes on from the last recorded rejection with
+            // a new agent, numbering after the recorded attempts.
+            let generation = stall::authoring_generation(&self.workflow_store, &self.run_id)?;
+            let prior = stall::prior_rejections(&self.workflow_store, &self.run_id);
+            let mut rejection: Option<(String, Option<String>)> = prior.last;
             let mut defect_attempts = 0usize;
             let mut transport_attempts = 0usize;
+            let pause = |stalled: stall::AuthorStall, defects: usize, transports: usize| {
+                stall::pause_on_author_stall(
+                    &self.workflow_store,
+                    &self.run_id,
+                    generation,
+                    stalled,
+                    defects,
+                    transports,
+                    prior.attempts + defects,
+                )
+            };
             let source = loop {
                 let (feedback, draft) = match &rejection {
                     Some((reason, draft)) => (Some(reason.as_str()), draft.as_deref()),
                     None => (None, None),
                 };
                 let authored = self
-                    .author_workflow_source(feedback, draft, defect_attempts + transport_attempts)
+                    .author_workflow_source(
+                        feedback,
+                        draft,
+                        prior.attempts + defect_attempts + transport_attempts,
+                    )
                     .await;
                 match authored {
                     Ok(source) => match async {
@@ -129,22 +151,24 @@ impl WorkflowV2ScriptRunner {
                             rejections::record(
                                 &self.workflow_store,
                                 &self.run_id,
-                                defect_attempts,
+                                prior.attempts + defect_attempts,
                                 &reason,
                                 Some(&source),
                             )?;
                             if defect_attempts >= MAX_AUTHORING_DEFECT_ATTEMPTS {
-                                return Err(WorkflowError::SpecInvalid(format!(
-                                    "authored workflow failed its dry-run pre-flight {defect_attempts} times; last error: {reason}"
-                                )));
+                                let stalled = stall::AuthorStall::Defects { reason };
+                                return Err(pause(stalled, defect_attempts, transport_attempts));
                             }
                             rejection = Some((reason, Some(source)));
                         }
                     },
+                    Err(err) if stall::is_run_control(&err) => return Err(err),
                     Err(err) if is_transport_failure(&err) => {
                         transport_attempts += 1;
                         if transport_attempts >= MAX_AUTHORING_TRANSPORT_ATTEMPTS {
-                            return Err(err);
+                            let error = err.to_string();
+                            let stalled = stall::AuthorStall::Transport { error };
+                            return Err(pause(stalled, defect_attempts, transport_attempts));
                         }
                         // The prior rejection (if any) stands: this attempt
                         // produced nothing to learn from, so the next one asks
@@ -158,14 +182,13 @@ impl WorkflowV2ScriptRunner {
                         rejections::record(
                             &self.workflow_store,
                             &self.run_id,
-                            defect_attempts,
+                            prior.attempts + defect_attempts,
                             &reason,
                             None,
                         )?;
                         if defect_attempts >= MAX_AUTHORING_DEFECT_ATTEMPTS {
-                            return Err(WorkflowError::SpecInvalid(format!(
-                                "authored workflow failed its dry-run pre-flight {defect_attempts} times; last error: {reason}"
-                            )));
+                            let stalled = stall::AuthorStall::Defects { reason };
+                            return Err(pause(stalled, defect_attempts, transport_attempts));
                         }
                         // No usable script came back, so there is no draft to
                         // repair — the next attempt gets the reason alone.

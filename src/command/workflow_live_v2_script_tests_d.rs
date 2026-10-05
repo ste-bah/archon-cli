@@ -176,9 +176,9 @@ impl WorkflowLlmClient for CannedAuthorLlm {
     }
 }
 
-#[tokio::test]
-async fn authored_script_lifecycle_authors_persists_and_executes() {
-    let authored_script = r#"export const meta = {
+/// A script the dry-run pre-flight accepts, which runs to a NeedsReview end
+/// (its fixture has no task set, so its acceptance stage cannot evaluate).
+pub(super) const AUTHORED_DEMO_SCRIPT: &str = r#"export const meta = {
   name: 'authored-demo',
   description: 'authored by the canned planner',
   schema: 2,
@@ -220,6 +220,10 @@ export default async function workflow({ agent, phase, log, w }) {
   };
 }
 "#;
+
+#[tokio::test]
+async fn authored_script_lifecycle_authors_persists_and_executes() {
+    let authored_script = AUTHORED_DEMO_SCRIPT;
     let temp = tempfile::tempdir().expect("tempdir");
     let spec = test_spec();
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));

@@ -93,7 +93,9 @@ async fn assert_unfrozen_legacy_reaches_v3_author(mode: &str) {
     );
     let probe = Arc::new(LegacyAdmissionProbe::default());
     let (ui_sink, _rx) = crate::command::tui_workflow_ui_sink::bounded_workflow_ui_sink(32);
-    let error = run_live_action(
+    // Issue 296: the probe fails every authoring call; the spent author
+    // attempts pause the run (resumable, with evidence), never fail it.
+    let outcome = run_live_action(
         temp.path(),
         CommandAction::Run {
             task,
@@ -107,12 +109,11 @@ async fn assert_unfrozen_legacy_reaches_v3_author(mode: &str) {
         LiveApprovalMode::CliYes,
     )
     .await
-    .expect_err("probe must stop the v3 author path")
-    .to_string();
+    .expect("the probe stops the v3 author path with a pause, not a failure");
 
     assert!(
-        error.contains("R1_LEGACY_REACHED_V3_AUTHOR"),
-        "{mode}: {error}"
+        outcome.contains("Workflow paused") && outcome.contains("R1_LEGACY_REACHED_V3_AUTHOR"),
+        "{mode}: {outcome}"
     );
     assert!(
         probe.calls.load(Ordering::SeqCst) > 0,
