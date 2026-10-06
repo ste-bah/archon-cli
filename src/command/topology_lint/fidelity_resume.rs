@@ -1,26 +1,10 @@
 //! The set gate's fidelity audit across attempts (Issue 259).
 //!
-//! The host kills `task-set-lint` at its catalog wall clock. The audit's
-//! unit of work is one call batch: at most eight obligations of one cluster
-//! asked of the critic in one provider call, up to four in flight. Here:
-//!
-//! - a batch already answered is read from the [`VerdictStore`] (keyed by
-//!   its question, the binary and the critic) and never asked again;
-//! - each batch the critic answers is saved the moment it is answered;
-//! - before every critic call the staged gate's budget
-//!   (`workflow_freeze_budget`, read from the same catalog entry less its
-//!   safety margin) says how long the call may run; a call it would not
-//!   allow is not started, and a call it cut short is not an error;
-//! - when any batch is left without a verdict the audit ends with
-//!   [`LintIncomplete`] rather than an evaluation, and the staged gate exits
-//!   by the host's operational contract
-//!   (`workflow_host_command_operational`): the reason, then the progress
-//!   line, on stderr, and exit status 75. The executor retries the call while
-//!   the progress grows.
-//!
-//! Progress counts batches with a saved verdict for this call: those this
-//! attempt saved plus those it found saved. A progress line is written after
-//! each one, so even an attempt the host kills reports how far it got.
+//! Every critic call watches its own provider stream for no progress. Finished
+//! batches are saved immediately, and each durable batch reports progress to
+//! the host. A stalled call leaves every saved verdict intact and returns
+//! `LintIncomplete` (exit 75); retries reuse those batches. Neither the audit
+//! nor the host imposes a total deadline.
 
 use anyhow::Result;
 use archon_workflow::fidelity_audit::{
@@ -33,9 +17,7 @@ use super::fidelity_critic::{Asked, ask};
 use super::fidelity_store::VerdictStore;
 #[cfg(test)]
 use super::fidelity_store::{StoreIdentity, store_dir};
-use crate::command::workflow_freeze_budget::{
-    FREEZE_SAFETY_MARGIN_SECS, FreezeBudget, FreezeProgress, FreezeResume,
-};
+use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeProgress, FreezeResume};
 
 /// How every [`LintIncomplete`] text starts.
 pub(crate) const LINT_INCOMPLETE_RESUMABLE: &str =
@@ -55,29 +37,22 @@ pub(super) struct Resolved {
     pub(super) cached: usize,
 }
 
-/// The audit stopped for its time budget, with every answered batch saved.
+/// The audit stalled, with every answered batch saved.
 #[derive(Debug)]
 pub(crate) struct LintIncomplete {
     outer_secs: u64,
     saved: u64,
     reused: u64,
-    not_started: Vec<String>,
     stopped: Vec<String>,
     progress: String,
 }
 
 impl LintIncomplete {
-    fn new(
-        budget: &FreezeBudget,
-        progress: &FreezeProgress,
-        not_started: Vec<String>,
-        stopped: Vec<String>,
-    ) -> Self {
+    fn new(budget: &FreezeBudget, progress: &FreezeProgress, stopped: Vec<String>) -> Self {
         Self {
             outer_secs: budget.outer_secs(),
             saved: progress.saved_count(),
             reused: progress.reused_count(),
-            not_started,
             stopped,
             progress: progress.line(),
         }
@@ -97,14 +72,16 @@ impl LintIncomplete {
 
 impl std::fmt::Display for LintIncomplete {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let host = if self.outer_secs == 0 {
+            "no enclosing host call".to_string()
+        } else {
+            format!("{}s host no-progress window", self.outer_secs)
+        };
         write!(
             f,
-            "{LINT_INCOMPLETE_RESUMABLE}: the set gate stops its critic calls {FREEZE_SAFETY_MARGIN_SECS}s before its {}s host wall clock; {} call batch verdict(s) were saved by this attempt and {} reused from earlier ones; {} batch(es) were not started for lack of time ({}) and {} were stopped at that deadline with their call still running ({}). Retry the set gate with the same task set (resume the run): it continues from the saved verdicts",
-            self.outer_secs,
+            "{LINT_INCOMPLETE_RESUMABLE}: a critic call made no provider progress ({host}); {} call batch verdict(s) were saved by this attempt and {} reused from earlier ones; {} batch(es) stalled without a verdict ({}). Retry the set gate with the same task set (resume the run): it continues from the saved verdicts",
             self.saved,
             self.reused,
-            self.not_started.len(),
-            self.not_started.join(", "),
             self.stopped.len(),
             self.stopped.join(", ")
         )
@@ -125,10 +102,9 @@ pub(crate) fn resumable_exit(error: &anyhow::Error) -> Option<(String, i32)> {
     })
 }
 
-/// Resolve every batch of `inputs`: from `store`, else from the critic
-/// under `resume`'s budget, saving each answer as it arrives. A critic
-/// failure is an error, as before; a batch the budget left unasked makes
-/// the result [`LintIncomplete`].
+/// Resolve batches from the store or a critic stream, saving each answer as it
+/// arrives. A silent stream is resumable; no active batch is left unasked
+/// because of elapsed work in other batches.
 pub(super) async fn resolve(
     client: &dyn WorkflowLlmClient,
     store: &VerdictStore,
@@ -181,21 +157,18 @@ pub(super) async fn resolve(
         let ids: Vec<&str> = inputs[index].0.iter().map(|o| o.id.as_str()).collect();
         ids.join("+")
     };
-    let (mut not_started, mut stopped) = (Vec::new(), Vec::new());
+    let mut stopped = Vec::new();
     for (index, asked) in answered {
         match asked {
             Asked::Answered(verdicts) => resolved[index] = Some(verdicts),
-            Asked::NotStarted => not_started.push(index),
             Asked::Stopped => stopped.push(index),
         }
     }
-    if !(not_started.is_empty() && stopped.is_empty()) {
-        not_started.sort_unstable();
+    if !stopped.is_empty() {
         stopped.sort_unstable();
         return Err(LintIncomplete::new(
             &resume.budget,
             &resume.progress,
-            not_started.into_iter().map(name).collect(),
             stopped.into_iter().map(name).collect(),
         )
         .into());

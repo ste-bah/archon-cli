@@ -279,3 +279,6 @@ async fn abort_before_first_scan_kills_an_original_group_descendant() {
     let _ = task.await;
     assert_gone(pid, "abort before first scan").await;
 }
+
+#[path = "acceptance_scratch_idle_tests.rs"]
+mod idle;

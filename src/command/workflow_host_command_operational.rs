@@ -8,13 +8,11 @@
 //! * **Completed** - any exit status the command chose, except the two below.
 //!   Exit 0 goes on to publication; any other code is the command's own verdict
 //!   and reaches the script unchanged.
-//! * **Timed out** - the supervisor killed the process group at the catalog's
-//!   `timeout_secs` (`SupervisedProcessOutput::timed_out`).
+//! * **Timed out** - the supervisor stopped the tree after no child output
+//!   for the catalog's `timeout_secs` (`SupervisedProcessOutput::timed_out`).
 //! * **Incomplete, resumable** - the command exited with
 //!   [`EXIT_INCOMPLETE_RESUMABLE`] (75, `EX_TEMPFAIL` in `sysexits.h`). It
-//!   stopped before it finished, on an operational limit of its own (for
-//!   example an internal deadline set below the catalog wall clock) or on a
-//!   step that made no progress. Its stdout is ignored and nothing it staged
+//!   stopped before it finished because a step made no progress. Its stdout is ignored and nothing it staged
 //!   is published. Exit 75 does NOT by itself mean that work was saved:
 //!   - A command that saves its work persists what it finished OUTSIDE its
 //!     call staging directory, and a re-run of the same call continues from

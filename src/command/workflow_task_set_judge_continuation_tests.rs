@@ -364,3 +364,6 @@ async fn a_reply_past_the_byte_cap_is_incomplete() {
     assert!(JudgeIncomplete::caused(&error).is_some(), "{error:#}");
     assert_eq!(client.calls().len(), 2);
 }
+
+#[path = "workflow_task_set_judge_idle_tests.rs"]
+mod idle;

@@ -139,6 +139,30 @@ impl Job {
         active_processes(self.handle)
     }
 
+    /// Kernel CPU totals plus process creation/exit activity for the whole job.
+    pub fn activity_stamp(&self) -> io::Result<(i64, i64, u32, u32)> {
+        // SAFETY: zeroed accounting is valid output space, with exactly its size.
+        let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
+        let queried = unsafe {
+            QueryInformationJobObject(
+                self.handle,
+                JobObjectBasicAccountingInformation,
+                (&mut info as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                std::mem::size_of_val(&info) as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        if queried == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok((
+            info.TotalUserTime,
+            info.TotalKernelTime,
+            info.TotalProcesses,
+            info.ActiveProcesses,
+        ))
+    }
+
     /// Ask every process in the job to end. Does not wait.
     pub fn terminate(&self) -> io::Result<()> {
         // SAFETY: the handle is valid while `self` lives.

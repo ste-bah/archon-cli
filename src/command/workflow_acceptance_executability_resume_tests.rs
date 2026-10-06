@@ -1,6 +1,5 @@
 //! A freeze probe across attempts, on real trees (Issue 255): verdicts
-//! saved and reused, the budget ending a freeze resumable, and the
-//! per-check cap.
+//! saved and reused across elapsed totals, and the per-check idle window.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -11,9 +10,7 @@ use archon_workflow::task_set_contract::{AcceptanceCheck, AcceptanceContract, Tr
 
 use super::super::probe_tests::{Trees, trees};
 use super::super::{ExecutabilityProbe, HostProbe};
-use crate::command::workflow_freeze_budget::{
-    FREEZE_INCOMPLETE_RESUMABLE, FreezeBudget, FreezeResume,
-};
+use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeResume};
 
 const REPO: TrustedCwd = TrustedCwd::RepoRoot;
 
@@ -111,7 +108,7 @@ async fn saved_verdicts_are_reused_by_a_retry_and_never_after_their_inputs_chang
 }
 
 /// A clock that stands still for its first `reads` reads, then jumps a
-/// day: the budget is spent exactly when the freeze moves on to the base.
+/// day: the old total deadline would stop before the base observation.
 fn spent_after(reads: u64) -> crate::command::workflow_freeze_budget::Clock {
     let start = Instant::now();
     let count = Arc::new(AtomicU64::new(0));
@@ -122,41 +119,34 @@ fn spent_after(reads: u64) -> crate::command::workflow_freeze_budget::Clock {
 }
 
 #[tokio::test]
-async fn a_spent_budget_ends_the_freeze_resumable_with_its_progress_saved() {
+async fn issue356_elapsed_freeze_completes_with_its_progress_saved() {
     let runs = tempfile::tempdir().unwrap();
     let one = counted(runs.path(), "AC-D-001", "test -f feature.txt");
     let two = counted(runs.path(), "AC-D-002", "test -s feature.txt");
     let trees = trees(&[("AC-D-001", &one, REPO), ("AC-D-002", &two, REPO)]);
     let copies = tempfile::tempdir().unwrap();
-    // The budget's own start (one read), HEAD's copy (one) and its two
-    // checks (one each) fit; the base's copy does not.
+    // Cross the former total cutoff between HEAD and base observations.
     let budget = FreezeBudget::within(7_800, spent_after(4));
     let first = freeze(&trees, copies.path(), &saving(budget));
     let findings = first.script_defects(&trees.contract(), &trees.ids()).await;
-    let incomplete = first.incomplete().expect("the freeze ran out of budget");
-    let text = incomplete.to_string();
-    assert!(text.starts_with(FREEZE_INCOMPLETE_RESUMABLE), "{text}");
-    assert!(text.contains("2 probe result(s) were saved"), "{text}");
-    assert!(text.contains("AC-D-001, AC-D-002"), "{text}");
     assert!(
-        findings.is_empty(),
-        "nothing of a partial probe is final: {findings:?}"
+        first.incomplete().is_none(),
+        "elapsed totals cannot stop a freeze"
     );
-    assert_eq!(runs_of(runs.path(), "AC-D-001"), 1, "HEAD only");
-    assert_eq!(runs_of(runs.path(), "AC-D-002"), 1);
+    assert!(findings.is_empty(), "{findings:?}");
+    assert!(first.take_unproven().is_empty());
+    assert_eq!(first.resume.progress.saved_count(), 4);
+    assert_eq!(runs_of(runs.path(), "AC-D-001"), 2, "HEAD and base");
+    assert_eq!(runs_of(runs.path(), "AC-D-002"), 2);
 
     let retry = freeze(&trees, copies.path(), &saving(FreezeBudget::unlimited()));
     let findings = retry.script_defects(&trees.contract(), &trees.ids()).await;
     assert!(findings.is_empty(), "{findings:?}");
     assert!(retry.incomplete().is_none());
     assert!(retry.take_unproven().is_empty());
-    assert_eq!(
-        runs_of(runs.path(), "AC-D-001"),
-        2,
-        "HEAD reused; the base run"
-    );
+    assert_eq!(runs_of(runs.path(), "AC-D-001"), 2, "HEAD and base reused");
     assert_eq!(runs_of(runs.path(), "AC-D-002"), 2);
-    assert_eq!(retry.copies_made.load(SeqCst), 1, "only the base's copy");
+    assert_eq!(retry.copies_made.load(SeqCst), 0, "every verdict reused");
 }
 
 #[tokio::test]
@@ -198,9 +188,9 @@ async fn a_check_past_the_cap_is_unproven_timed_out_and_never_rerun() {
 
 /// The scratch site of a configured `[workflow.acceptance_execution]`, as
 /// the live freeze probes: verdicts are saved under its build cache, apart
-/// from every live root, and the budget stops it between observations.
+/// from every live root; elapsed totals cannot stop either observation.
 #[tokio::test]
-async fn a_scratch_freeze_saves_under_its_build_cache_and_resumes() {
+async fn issue356_elapsed_scratch_freeze_saves_and_reuses_all_results() {
     let runs = tempfile::tempdir().unwrap();
     let one = counted(runs.path(), "AC-S-001", "test -f feature.txt");
     let two = counted(runs.path(), "AC-S-002", "test -s feature.txt");
@@ -228,13 +218,10 @@ async fn a_scratch_freeze_saves_under_its_build_cache_and_resumes() {
     let budget = FreezeBudget::within(7_800, spent_after(4));
     let first = freeze(&trees, copies.path(), &saving(budget));
     first.script_defects(&trees.contract(), &trees.ids()).await;
-    let incomplete = first.incomplete().expect("the base was never observed");
-    assert!(
-        incomplete.to_string().contains("AC-S-001, AC-S-002"),
-        "{incomplete}"
-    );
-    assert_eq!(saved(), 2, "HEAD's two verdicts, under the build cache");
-    assert_eq!(runs_of(runs.path(), "AC-S-001"), 1);
+    assert!(first.incomplete().is_none(), "both trees were observed");
+    assert!(first.take_unproven().is_empty());
+    assert_eq!(saved(), 4, "both trees' verdicts, under the build cache");
+    assert_eq!(runs_of(runs.path(), "AC-S-001"), 2);
 
     let retry = freeze(&trees, copies.path(), &saving(FreezeBudget::unlimited()));
     let findings = retry.script_defects(&trees.contract(), &trees.ids()).await;
@@ -245,11 +232,7 @@ async fn a_scratch_freeze_saves_under_its_build_cache_and_resumes() {
     );
     assert!(retry.incomplete().is_none());
     assert!(retry.take_unproven().is_empty());
-    assert_eq!(
-        runs_of(runs.path(), "AC-S-001"),
-        2,
-        "HEAD reused, the base run"
-    );
+    assert_eq!(runs_of(runs.path(), "AC-S-001"), 2, "both trees reused");
     assert_eq!(runs_of(runs.path(), "AC-S-002"), 2);
     assert_eq!(saved(), 4);
     trees.assert_live_untouched(copies.path());

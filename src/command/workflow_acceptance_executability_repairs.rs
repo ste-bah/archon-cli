@@ -16,12 +16,10 @@
 //! repair record keeps it). Only what still gives no verdict after every
 //! repair becomes the author's finding, with the repair log attached.
 //!
-//! No probe repairs two outcomes (Issues 255, 323). A check that ran past
-//! its per-check bound is unproven, timed out, at once: running it again,
-//! let alone cold, only spends that bound again while the other checks
-//! wait. And once a freeze's budget has run out
-//! (`workflow_acceptance_executability_resume`) nothing runs again at all:
-//! the freeze stops, resumable.
+//! A no-progress stall is unproven at once: retrying it within the same
+//! attempt would only stall again while the other checks wait. Its saved
+//! neighbours remain reusable, and the freeze pauses resumably. A site's
+//! window never limits the total duration of an active check.
 
 use archon_workflow::acceptance_scratch::CHECK_TIMED_OUT;
 
@@ -54,7 +52,7 @@ impl TreeRun {
         match self.results.get(id) {
             Some(result) if result.operational_error.is_none() => None,
             Some(result) if timed_out(result) => Some(String::from(
-                "unproven (timed out): it ran past the probe's per-check time limit, so the host has no verdict for it; the check is not at fault",
+                "unproven (timed out): no output or process-tree activity within the probe's per-check window, so the host has no verdict for it; the check is not at fault",
             )),
             other => Some(
                 other
@@ -78,7 +76,7 @@ impl TreeRun {
     }
 }
 
-/// Whether `result` is a check stopped at its own time limit.
+/// Whether `result` is a check stopped at its own no-progress window.
 pub(super) fn timed_out(result: &CheckResult) -> bool {
     result.operational_error.as_deref() == Some(CHECK_TIMED_OUT)
 }

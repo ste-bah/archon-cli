@@ -51,7 +51,15 @@ pub(super) struct Confinement {
     abandoned: std::sync::Arc<std::sync::atomic::AtomicBool>,
     #[cfg(unix)]
     scanning: Option<tokio::task::JoinHandle<()>>,
+    #[cfg(windows)]
+    job: Option<std::sync::Arc<archon_shell::job_object::Job>>,
+    #[cfg(windows)]
+    last_activity: Option<(i64, i64, u32, u32)>,
+    activity_warned: std::sync::Arc<std::sync::atomic::AtomicBool>,
     armed: bool,
+    progress: archon_shell::progress::Progress,
+    #[cfg(unix)]
+    activity: std::sync::Arc<std::sync::Mutex<archon_shell::process_tree::Activity>>,
 }
 
 impl Confinement {
@@ -75,8 +83,33 @@ impl Confinement {
             abandoned: Default::default(),
             #[cfg(unix)]
             scanning: None,
+            #[cfg(windows)]
+            job: None,
+            #[cfg(windows)]
+            last_activity: None,
+            activity_warned: Default::default(),
             armed: true,
+            progress: archon_shell::progress::Progress::new(true),
+            #[cfg(unix)]
+            activity: Default::default(),
         }
+    }
+
+    #[cfg(windows)]
+    pub(super) fn adopt(&mut self, child: &mut tokio::process::Child) -> WorkflowResult<()> {
+        let job =
+            archon_shell::job_object::Job::create(None).map_err(|e| invalid(e.to_string()))?;
+        let (Some(handle), Some(pid)) = (child.raw_handle(), child.id()) else {
+            return Err(invalid("check has no handle to confine"));
+        };
+        job.adopt_suspended(handle, pid)
+            .map_err(|e| invalid(e.to_string()))?;
+        self.job = Some(std::sync::Arc::new(job));
+        Ok(())
+    }
+
+    pub(super) fn progress(&self) -> archon_shell::progress::Progress {
+        self.progress.clone()
     }
 
     /// Start one scan on a blocking thread unless one is still running, and
@@ -96,20 +129,55 @@ impl Confinement {
         {
             let tracker = self.tracker.clone();
             let abandoned = self.abandoned.clone();
+            let activity = self.activity.clone();
+            let progress = self.progress.clone();
+            let warned = self.activity_warned.clone();
             self.scanning = Some(tokio::task::spawn_blocking(move || {
                 let deadline = std::time::Instant::now() + SCAN_BUDGET;
-                let Ok(table) = archon_shell::process_tree::snapshot_until(deadline) else {
-                    return;
-                };
-                if abandoned.load(std::sync::atomic::Ordering::SeqCst) {
-                    return;
-                }
-                if let Ok(mut tracker) = archon_shell::process_tree::lock_until(&tracker, deadline)
-                    && !abandoned.load(std::sync::atomic::Ordering::SeqCst)
-                {
-                    let _ = tracker.absorb_until(&table, deadline);
+                let observed = (|| -> std::io::Result<bool> {
+                    let table = archon_shell::process_tree::snapshot_until(deadline)?;
+                    if abandoned.load(std::sync::atomic::Ordering::SeqCst) {
+                        return Ok(false);
+                    }
+                    let mut tracker = archon_shell::process_tree::lock_until(&tracker, deadline)?;
+                    if abandoned.load(std::sync::atomic::Ordering::SeqCst) {
+                        return Ok(false);
+                    }
+                    let pins = tracker.absorb_until(&table, deadline)?;
+                    let mut activity = activity.lock().map_err(|_| {
+                        std::io::Error::other("check activity sampler lock poisoned")
+                    })?;
+                    activity.observe(&pins, deadline)
+                })();
+                match observed {
+                    Ok(true) => progress.record(),
+                    Ok(false) => {}
+                    Err(error) => {
+                        if !warned.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                            tracing::warn!(%error, "check process activity is unreadable; no progress credited");
+                        }
+                    }
                 }
             }));
+        }
+        #[cfg(windows)]
+        if let Some(job) = &self.job {
+            match job.activity_stamp() {
+                Ok(stamp) => {
+                    if self.last_activity.is_some_and(|last| last != stamp) {
+                        self.progress.record();
+                    }
+                    self.last_activity = Some(stamp);
+                }
+                Err(error) => {
+                    if !self
+                        .activity_warned
+                        .swap(true, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        tracing::warn!(%error, "check job activity is unreadable; no progress credited");
+                    }
+                }
+            }
         }
     }
 
@@ -155,8 +223,21 @@ impl Confinement {
                 Err(error) => Err(format!("scratch teardown could not scan the tree: {error}")),
             }
         }
-        #[cfg(not(unix))]
-        Ok(())
+        #[cfg(windows)]
+        {
+            let job = self
+                .job
+                .clone()
+                .ok_or_else(|| "check job confinement missing".to_string())?;
+            let killed =
+                tokio::task::spawn_blocking(move || job.kill_and_confirm(Duration::from_secs(3)));
+            match tokio::time::timeout(Duration::from_secs(4), killed).await {
+                Ok(Ok(Ok(0))) => Ok(()),
+                other => Err(format!("check job teardown unverified: {other:?}")),
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        Err("check confinement unsupported on this platform".into())
     }
 
     /// Teardown confirmed the tree empty: nothing is left for the drop guard.

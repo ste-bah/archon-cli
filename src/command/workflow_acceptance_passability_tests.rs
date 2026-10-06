@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use super::findings::tests::outside_set;
 use super::*;
-use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeIncomplete, FreezeResume};
+use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeResume};
 
 /// Fails before any implementation because the product refuses the
 /// check's own fixture: no implementation can make it pass.
@@ -231,25 +231,19 @@ async fn a_retry_after_an_incomplete_freeze_reuses_the_saved_verdicts() {
         true,
     );
     let first = Arc::new(EvidenceJudge::default());
-    let error = freeze(project.path(), &tasks, &prd, &first, &short)
+    let initial = freeze(project.path(), &tasks, &prd, &first, &short)
         .await
-        .expect_err("too little time is left for the evidence pass");
-    assert!(FreezeIncomplete::caused(&error).is_some(), "{error:#}");
-    assert!(
-        format!("{error:#}")
-            .contains("no judge verdict on its pre-implementation output (AC-X-001)"),
-        "{error:#}"
-    );
+        .expect("active evidence judging is never deferred by a total");
     assert_eq!(first.plain.load(SeqCst), 1);
-    assert_eq!(first.evidence.load(SeqCst), 0);
+    assert_eq!(first.evidence.load(SeqCst), 1);
+    assert_eq!(cannot_pass(&initial, "AC-X-001").len(), 1);
 
     let second = Arc::new(EvidenceJudge::default());
     let resumed = freeze(project.path(), &tasks, &prd, &second, &saving())
         .await
-        .expect("the retry completes");
-    assert_eq!(second.plain.load(SeqCst), 0, "the saved batch is reused");
-    assert_eq!(second.evidence.load(SeqCst), 1);
-    assert_eq!(cannot_pass(&resumed, "AC-X-001").len(), 1);
+        .expect("saved verdicts are reused");
+    assert_eq!(second.plain.load(SeqCst), 0);
+    assert_eq!(second.evidence.load(SeqCst), 0);
 
     let third = Arc::new(EvidenceJudge::default());
     let again = freeze(project.path(), &tasks, &prd, &third, &saving())

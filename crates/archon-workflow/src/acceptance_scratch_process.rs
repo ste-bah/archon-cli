@@ -8,8 +8,9 @@ use std::sync::{
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 
-/// The operational error of a check stopped at its site's timeout.
-pub const CHECK_TIMED_OUT: &str = "native acceptance command timed out";
+/// The operational error of a check stopped at its site's no-progress window.
+pub const CHECK_TIMED_OUT: &str =
+    "native acceptance command timed out: no output or process-tree activity";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CheckResult {
@@ -24,12 +25,7 @@ pub struct CheckResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<crate::acceptance_check_crash::CheckClassification>,
 }
-/// The spawned check: a Unix process-group leader, or, on Windows, a child
-/// confined to a Job Object so its descendants can be reaped and teardown
-/// verified by waiting on the job (Issue-234).
-#[cfg(windows)]
-type RunChild = Box<dyn process_wrap::tokio::ChildWrapper>;
-#[cfg(not(windows))]
+/// The check's child, confined by the owned tracker or Job Object.
 type RunChild = tokio::process::Child;
 
 #[path = "acceptance_scratch_confine.rs"]
@@ -57,16 +53,11 @@ fn spawn_confined(mut process: tokio::process::Command, cwd: &Path) -> WorkflowR
     process.spawn().map_err(|e| WorkflowError::io(cwd, e))
 }
 #[cfg(windows)]
-fn spawn_confined(process: tokio::process::Command, cwd: &Path) -> WorkflowResult<RunChild> {
-    use process_wrap::tokio::{CommandWrap, JobObject, KillOnDrop};
-    let mut wrap = CommandWrap::from(process);
-    wrap.wrap(JobObject);
-    wrap.wrap(KillOnDrop);
-    wrap.spawn().map_err(|e| WorkflowError::io(cwd, e))
+fn spawn_confined(mut process: tokio::process::Command, cwd: &Path) -> WorkflowResult<RunChild> {
+    process.creation_flags(archon_shell::job_object::CREATE_SUSPENDED_FLAG);
+    process.spawn().map_err(|e| WorkflowError::io(cwd, e))
 }
 
-/// Take the child's three pipes, however it was spawned.
-#[cfg(not(windows))]
 fn take_pipes(
     child: &mut RunChild,
 ) -> (
@@ -80,26 +71,13 @@ fn take_pipes(
         child.stdin.take().unwrap(),
     )
 }
-#[cfg(windows)]
-fn take_pipes(
-    child: &mut RunChild,
-) -> (
-    tokio::process::ChildStdout,
-    tokio::process::ChildStderr,
-    tokio::process::ChildStdin,
-) {
-    (
-        child.stdout().take().unwrap(),
-        child.stderr().take().unwrap(),
-        child.stdin().take().unwrap(),
-    )
-}
 async fn drain(
     pipe: impl AsyncRead + Unpin,
     limit: usize,
     overflow: Arc<AtomicBool>,
+    progress: archon_shell::progress::Progress,
 ) -> std::io::Result<(Vec<u8>, bool)> {
-    let (retained, total) = drain_counted(pipe, limit, &overflow).await?;
+    let (retained, total) = drain_progress(pipe, limit, &overflow, Some(&progress)).await?;
     let truncated = total > retained.len() as u64;
     Ok((retained, truncated))
 }
@@ -108,9 +86,18 @@ async fn drain(
 /// how many bytes were read in all. `overflow` is set the moment a byte is
 /// dropped, so a caller watching it can stop the producer.
 pub(crate) async fn drain_counted(
+    pipe: impl AsyncRead + Unpin,
+    limit: usize,
+    overflow: &AtomicBool,
+) -> std::io::Result<(Vec<u8>, u64)> {
+    drain_progress(pipe, limit, overflow, None).await
+}
+
+async fn drain_progress(
     mut pipe: impl AsyncRead + Unpin,
     limit: usize,
     overflow: &AtomicBool,
+    progress: Option<&archon_shell::progress::Progress>,
 ) -> std::io::Result<(Vec<u8>, u64)> {
     let mut retained = Vec::new();
     let mut total = 0u64;
@@ -119,6 +106,9 @@ pub(crate) async fn drain_counted(
         let n = pipe.read(&mut buffer).await?;
         if n == 0 {
             return Ok((retained, total));
+        }
+        if let Some(progress) = progress {
+            progress.record();
         }
         total += n as u64;
         let keep = n.min(limit.saturating_sub(retained.len()));
@@ -165,6 +155,7 @@ pub struct CommandSite<'a> {
     pub audit_target: Option<&'a Path>,
     pub scratch_bytes: u64,
     pub output_bytes: usize,
+    /// No output or process-tree activity for this long stops the command.
     pub timeout_secs: u64,
     /// Redacts allowlisted host values from captured output. A direct site
     /// redacts nothing: with no policy it binds no credential-shaped name
@@ -234,10 +225,23 @@ pub async fn run_at(
     if let Some(root) = site.audit_root {
         super::cache::record_group(root, Some(leader as i32))?;
     }
+    #[cfg(windows)]
+    confinement.adopt(child)?;
     let (stdout_pipe, stderr_pipe, stdin_pipe) = take_pipes(child);
+    let progress = confinement.progress();
     let overflow = Arc::new(AtomicBool::new(false));
-    let mut stdout = tokio::spawn(drain(stdout_pipe, site.output_bytes, overflow.clone()));
-    let mut stderr = tokio::spawn(drain(stderr_pipe, site.output_bytes, overflow.clone()));
+    let mut stdout = tokio::spawn(drain(
+        stdout_pipe,
+        site.output_bytes,
+        overflow.clone(),
+        progress.clone(),
+    ));
+    let mut stderr = tokio::spawn(drain(
+        stderr_pipe,
+        site.output_bytes,
+        overflow.clone(),
+        progress.clone(),
+    ));
     let mut stdin = stdin_pipe;
     let bytes = command.bytes().to_vec();
     let writer = tokio::spawn(async move {
@@ -247,7 +251,7 @@ pub async fn run_at(
     });
     // A limit past the clock's range is no deadline at all (Issue 263),
     // never an overflow that panics the host.
-    let deadline = tokio::time::Instant::now().checked_add(Duration::from_secs(site.timeout_secs));
+    let window = Duration::from_secs(site.timeout_secs);
     let mut error = None;
     let mut quota_walk_count = 0;
     // A site with no audit root never walks a quota; the branch below stays
@@ -268,10 +272,11 @@ pub async fn run_at(
                 Ok(()) => None,
                 Err(e) => { stall = Some(format!("waiting for the scratch child failed: {e}")); None }
             },
-            _=until(deadline)=>{error=Some(CHECK_TIMED_OUT.into());break Some(terminate(child,confinement,&mut stall).await);},
+
             _=tokio::time::sleep(Duration::from_millis(25))=>{
                 if cancel.load(Ordering::SeqCst) {error=Some("observation parent closed or cancellation requested".into());break Some(terminate(child,confinement,&mut stall).await);}
                 if overflow.load(Ordering::SeqCst) {error=Some("native acceptance output limit exceeded".into());break Some(terminate(child,confinement,&mut stall).await);}
+                if progress.stalled(window) {error=Some(CHECK_TIMED_OUT.into());break Some(terminate(child,confinement,&mut stall).await);}
                 ticks += 1;
                 if ticks.is_multiple_of(SCAN_TICKS) { confinement.scan(); }
             }
@@ -373,14 +378,6 @@ pub async fn run_at(
     result.stderr = site.redact(&result.stderr, pipes.1.1);
     Ok(result)
 }
-/// Resolves at `deadline`, or never when there is none.
-async fn until(deadline: Option<tokio::time::Instant>) {
-    match deadline {
-        Some(deadline) => tokio::time::sleep_until(deadline).await,
-        None => std::future::pending().await,
-    }
-}
-
 #[cfg(all(test, unix))]
 #[path = "acceptance_scratch_process_tests.rs"]
 mod tests;

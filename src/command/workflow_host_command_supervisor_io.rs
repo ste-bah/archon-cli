@@ -36,6 +36,7 @@ pub(super) async fn drain_pipe(
     limit: u64,
     stream: &'static str,
     events: mpsc::UnboundedSender<SupervisorEvent>,
+    progress: archon_shell::progress::Progress,
 ) -> CapturedPipe {
     let mut retained = Vec::new();
     let mut total = 0u64;
@@ -47,6 +48,7 @@ pub(super) async fn drain_pipe(
         match pipe.read(&mut chunk).await {
             Ok(0) => break,
             Ok(read) => {
+                progress.record();
                 total = total.saturating_add(read as u64);
                 if retained.len() < keep {
                     let remaining = keep - retained.len();

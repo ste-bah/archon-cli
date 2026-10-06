@@ -1,9 +1,5 @@
-//! Issue 323: every probe site -- the scratch observation, the live direct
-//! site and the probe's own hermetic copy -- bounds each check by the one
-//! per-check bound (`probe_check_cap_secs`), and a freeze never gives one
-//! check its whole deadline. A check past its bound is unproven (timed
-//! out): the host's, resumable, and the other checks still run; timing out
-//! so again on the same base goes to its author (the Issue 328 strike).
+//! Every probe site uses the site's full no-progress window. A stalled check
+//! remains unproven across retries, and completed checks stay saved and reusable.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -88,11 +84,9 @@ async fn a_rounds_base_copy_bounds_each_check_by_the_same_bound() {
     assert!(elapsed < QUICK, "bounded in the copy: {elapsed:?}");
 }
 
-/// At the freeze's hermetic site: the slow check is unproven (timed out)
-/// and the others still proven; timing out so again on the same base is
-/// its author's to fix, never a retry that meets it forever.
+/// A real stall stays resumable on repeated attempts; the other verdicts survive.
 #[tokio::test]
-async fn a_hermetic_freeze_check_past_its_bound_is_unproven_then_its_authors_on_the_same_base() {
+async fn issue356_repeated_silent_check_stays_resumable() {
     let trees = trees(&[
         ("AC-B-005", SLOW, REPO),
         ("AC-B-006", "test -f feature.txt", REPO),
@@ -113,19 +107,31 @@ async fn a_hermetic_freeze_check_past_its_bound_is_unproven_then_its_authors_on_
     assert!(timed_out(&unproven, "AC-B-005"), "{unproven:?}");
     assert!(findings.is_empty(), "first time the host's: {findings:?}");
     assert!(!unproven.contains_key("AC-B-006"), "{unproven:?}");
-    assert!(first.incomplete().is_none(), "a timeout is no spent budget");
+    assert!(
+        first.incomplete().is_none(),
+        "the stall is local to its check"
+    );
+    assert!(
+        first.resume.progress.saved_count() > 0,
+        "the other check is durably saved"
+    );
     assert!(elapsed < QUICK, "{elapsed:?}");
 
     let retry = freeze();
     let findings = retry.script_defects(&trees.contract(), &trees.ids()).await;
     let unproven = retry.take_unproven();
-    let finding = findings.get("AC-B-005").expect("the author's now");
     assert!(
-        finding.contains(&format!("per-check bound of {BOUND}s"))
-            && finding.contains(&trees.base[..12]),
-        "{finding}"
+        findings.is_empty(),
+        "a repeated stall is never the author's defect: {findings:?}"
     );
-    assert!(unproven.is_empty(), "{unproven:?}");
+    assert!(
+        timed_out(&unproven, "AC-B-005"),
+        "still resumable: {unproven:?}"
+    );
+    assert!(
+        retry.resume.progress.reused_count() > 0,
+        "the saved check is reused"
+    );
     assert!(!findings.contains_key("AC-B-006"), "{findings:?}");
 }
 
@@ -135,11 +141,9 @@ fn allowance(probe: &HostProbe) -> CheckAllowance {
     (hooks.allowance.expect("a freeze is bounded"))()
 }
 
-/// The live freeze's wall clock (7200 s, 600 s kept back) with the
-/// operator's own 7200 s per-check limit: before, the first check was given
-/// all 6600 s left, cut, and the freeze deferred everything behind it.
+/// The configured site gets its entire no-progress window, without a share.
 #[test]
-fn a_freeze_gives_no_check_the_whole_deadline() {
+fn a_freeze_uses_the_full_site_no_progress_window() {
     let trees = trees(&[("AC-B-007", "true", REPO)]);
     super::cap_tests::configure(&trees, 7_200);
     let resume = FreezeResume::saving(FreezeBudget::within(7_200, Arc::new(Instant::now)), true);
@@ -149,15 +153,14 @@ fn a_freeze_gives_no_check_the_whole_deadline() {
     assert_eq!(
         allowance(&probe),
         CheckAllowance::Run {
-            timeout_secs: 1_650,
+            timeout_secs: 7_200,
             cut: false
         },
-        "a quarter of the 6600 s usable"
+        "the full per-site no-progress window"
     );
 }
 
-/// Unconfigured, every site's bound is the documented direct default; a
-/// freeze bounds it further by its quarter of the usable window.
+/// Unconfigured, every site uses the documented direct no-progress default.
 #[test]
 fn the_default_bound_when_unconfigured() {
     let trees = trees(&[("AC-B-008", "true", REPO)]);
@@ -185,7 +188,7 @@ fn the_default_bound_when_unconfigured() {
     assert_eq!(
         allowance(&hermetic),
         CheckAllowance::Run {
-            timeout_secs: 1_650,
+            timeout_secs: 1_800,
             cut: false
         }
     );

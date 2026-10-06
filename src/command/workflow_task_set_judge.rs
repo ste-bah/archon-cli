@@ -175,17 +175,8 @@ const JUDGE_ATTEMPTS: usize = 3;
 /// What the judge is asked when its reply was cut off by the output limit.
 pub(super) const CONTINUE_PROMPT: &str = "Your previous reply was cut off by the output limit. Continue it from exactly the next character: output only the remaining text, repeat nothing already written, and add no preamble, commentary or code fence.";
 
-/// Wall clock for ONE batched judge call, and the inner half of the freeze
-/// budget: `workflow_host_command_catalog` derives its capability timeout from
-/// this constant so the two cannot drift apart again.
-///
-/// 1_500 (25 minutes) was too short for this deployment. The judge asks the
-/// provider to assess the whole contract in a single batch — deliberately, since
-/// re-asking cannot widen a budget that truncated a reply — and on GLM-5.3-Flash
-/// that call does not fit 25 minutes. Run wf-78c31128 authored a contract in 78
-/// minutes, had it rejected on one finding, re-authored in 9, and then lost the
-/// second freeze here at exactly 25:00 with "acceptance judge timed out after
-/// 1500s". Nothing was wrong but the clock.
+/// No-progress window on one provider stream, including reasoning and pings.
+/// Every observed stream event renews it; a batch has no total time limit.
 pub(crate) const JUDGE_TIMEOUT_SECS: u64 = 7_200;
 
 /// Judge `contract` in one batch: a truncated reply is continued, a reply

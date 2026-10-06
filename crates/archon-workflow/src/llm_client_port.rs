@@ -230,6 +230,21 @@ pub trait WorkflowLlmClient: Send + Sync {
         )))
     }
 
+    /// Stream-aware explicit sampling. Nonstream clients stay silent until
+    /// completion; they cannot renew an idle window without observed activity.
+    async fn send_message_with_progress(
+        &self,
+        messages: Vec<serde_json::Value>,
+        system: Vec<serde_json::Value>,
+        tools: Vec<serde_json::Value>,
+        model: &str,
+        temperature: f64,
+        _progress: archon_shell::progress::Progress,
+    ) -> WorkflowResult<WorkflowAgentOutcome> {
+        self.send_message_with_temperature(messages, system, tools, model, temperature)
+            .await
+    }
+
     /// A full agent invocation, which the host may serve with a real
     /// tool-capable subagent.
     ///

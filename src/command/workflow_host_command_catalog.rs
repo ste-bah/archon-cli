@@ -10,7 +10,7 @@ use archon_workflow::{
     RemediationScope, StdinDelivery, WorkflowError, WorkflowResult,
 };
 
-const CATALOG_SCHEMA_VERSION: u32 = 1;
+const CATALOG_SCHEMA_VERSION: u32 = 2;
 const MIB: u64 = 1024 * 1024;
 
 #[path = "workflow_host_command_catalog_verify.rs"]
@@ -46,31 +46,12 @@ pub(crate) struct ResolvedHostCommand {
     pub(crate) remediation_scopes: BTreeSet<RemediationScope>,
 }
 
-/// Wall clock for the two freeze capabilities below.
-///
-/// NOT configurable, deliberately: `CommandCapabilityCatalog::recompute_digest`
-/// hashes the whole serialised catalog, `timeout_secs` included, and
-/// `workflow_decompose_resume.rs` compares that digest to detect runtime drift.
-/// Sourcing this from config would make the fixed runtime's identity depend on
-/// the operator's config file, so the same binary would fail to resume its own
-/// run after an unrelated config edit. A compile-time constant keeps identity a
-/// function of the binary alone.
-///
-/// 1_500 (25 minutes) was too short. Both capabilities judge a candidate
-/// artifact, and `freeze-acceptance` runs under
-/// `EnvironmentProfileId::FreezeProvider` — it makes its own provider calls, so
-/// it is model-paced work rather than a quick subprocess. A live run
-/// authored its acceptance contract in 34 minutes, then lost `freeze-acceptance`
-/// at exactly 25:00 with "acceptance returned no committed publication receipt"
-/// — nothing wrong but the clock.
-/// The capability's outer wall clock: the judge's own budget plus headroom.
-///
-/// It MUST exceed `JUDGE_TIMEOUT_SECS`. The inner timeout returns a precise,
-/// actionable error ("acceptance judge timed out after Ns; retry the freeze when
-/// the provider can complete the full batch"); the outer one just kills the
-/// subprocess. Equal values race, and the useful message is the one that loses.
-const FREEZE_CAPABILITY_TIMEOUT_SECS: u64 =
-    crate::command::workflow_task_set::judge::JUDGE_TIMEOUT_SECS + 600;
+/// No-progress window for provider-backed capabilities. Binary-only: the catalog
+/// digest includes the schema and window. Schema 2 interprets host timeouts as
+/// renewable no-progress windows rather than total clocks, refusing old resumes.
+/// The provider has its own shorter idle window so it can save/report a stall
+/// before the host tears down the child. Neither window limits active work.
+const FREEZE_CAPABILITY_TIMEOUT_SECS: u64 = 7_800;
 
 pub(crate) fn fixed_decomposition_catalog(
     starting_binary_revision: &str,

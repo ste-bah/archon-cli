@@ -8,7 +8,6 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use archon_workflow::acceptance_scratch::CheckAllowance;
 use archon_workflow::fidelity_audit::{
     ClaimedObligation, ClaimingTask, FidelityVerdict, SkeletonSummary, fidelity_prompt,
     parse_fidelity_response,
@@ -47,9 +46,7 @@ pub(super) fn request(
 /// What one batch's [`ask`] came to.
 pub(super) enum Asked {
     Answered(Vec<FidelityVerdict>),
-    /// Too little budget was left to start a call.
-    NotStarted,
-    /// A call was still running when the budget ran out.
+    /// A call stopped making provider progress.
     Stopped,
 }
 
@@ -57,9 +54,8 @@ pub(super) enum Asked {
 /// under `rejected/` in the cache directory — the operator who is told "no
 /// usable verdict" needs to see what the critic actually said.
 ///
-/// Each call runs under `budget` (Issue 259): a call the budget does not
-/// allow is [`Asked::NotStarted`], one it cut short [`Asked::Stopped`];
-/// neither is a verdict or an error. An unlimited budget changes nothing.
+/// Each stream gets the complete no-progress window. A stalled call is
+/// `Asked::Stopped`, never a verdict or a candidate defect.
 pub(super) async fn ask(
     client: &dyn WorkflowLlmClient,
     cache: &Path,
@@ -67,36 +63,28 @@ pub(super) async fn ask(
     obligations: &[ClaimedObligation],
     tasks: &[ClaimingTask],
     skeleton: &SkeletonSummary,
-    budget: &FreezeBudget,
+    _budget: &FreezeBudget,
 ) -> Result<Asked> {
     let request = request(obligations, tasks, skeleton);
     let mut last = String::from("never asked");
     for attempt in 1..=FIDELITY_ATTEMPTS {
-        let CheckAllowance::Run { timeout_secs, cut } =
-            budget.allowance(FIDELITY_CALL_TIMEOUT_SECS)
-        else {
-            return Ok(Asked::NotStarted);
-        };
-        let outcome = match tokio::time::timeout(
-            Duration::from_secs(timeout_secs),
-            client.send_message_with_temperature(
-                request.messages.clone(),
-                request.system.clone(),
-                request.tools.to_vec(),
-                &request.model,
-                CRITIC_TEMPERATURE,
-            ),
-        )
-        .await
+        let progress = archon_shell::progress::Progress::new(true);
+        let outcome = match progress
+            .bound(
+                Duration::from_secs(FIDELITY_CALL_TIMEOUT_SECS),
+                client.send_message_with_progress(
+                    request.messages.clone(),
+                    request.system.clone(),
+                    request.tools.to_vec(),
+                    &request.model,
+                    CRITIC_TEMPERATURE,
+                    progress.clone(),
+                ),
+            )
+            .await
         {
             Ok(outcome) => outcome.map_err(anyhow::Error::new)?,
-            // Cut short by the budget, not the call's own limit: no verdict.
-            Err(_) if cut => return Ok(Asked::Stopped),
-            Err(_) => {
-                return Err(anyhow!(
-                    "fidelity critic timed out after {FIDELITY_CALL_TIMEOUT_SECS}s"
-                ));
-            }
+            Err(_) => return Ok(Asked::Stopped),
         };
         // A truncated reply is not re-asked: the budget that cut it off has
         // not changed, and partial JSON is never repaired into a verdict.

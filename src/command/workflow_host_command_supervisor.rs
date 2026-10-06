@@ -87,8 +87,8 @@ impl HostCommandControl {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SupervisedProcessOutput {
     pub(crate) exit_code: Option<i32>,
-    /// Killed at the catalog wall clock: an operational limit the executor
-    /// classifies (`workflow_host_command_operational`), not a work failure.
+    /// Killed after no child output for the catalog's no-progress window.
+    /// An operational limit the executor classifies, never a work failure.
     pub(crate) timed_out: bool,
     pub(crate) stdout: Vec<u8>,
     pub(crate) stderr: Vec<u8>,
@@ -196,18 +196,21 @@ pub(crate) async fn supervise_process_group(
     let stderr = child.stderr.take().ok_or_else(|| {
         WorkflowError::StageFailed("host command stderr pipe was not created".to_string())
     })?;
+    let progress = archon_shell::progress::Progress::default();
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let stdout_task = tokio::spawn(drain_pipe(
         stdout,
         request.max_stdout_bytes,
         "stdout",
         event_tx.clone(),
+        progress.clone(),
     ));
     let stderr_task = tokio::spawn(drain_pipe(
         stderr,
         request.max_stderr_bytes,
         "stderr",
         event_tx.clone(),
+        progress.clone(),
     ));
     let stdin_task = match request.stdin.take() {
         Some(bytes) => {
@@ -232,7 +235,10 @@ pub(crate) async fn supervise_process_group(
         // torn down while the unreaped leader still holds its pid.
         let wait = leader_exit(child);
         tokio::pin!(wait);
-        let timeout = tokio::time::sleep(Duration::from_secs(request.timeout_secs));
+        let timeout = progress.bound(
+            Duration::from_secs(request.timeout_secs),
+            std::future::pending::<()>(),
+        );
         tokio::pin!(timeout);
         let control = control.wait();
         tokio::pin!(control);
