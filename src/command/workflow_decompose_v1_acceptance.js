@@ -52,6 +52,20 @@ function owedSupplementary() {
   return acceptanceRepairIds.owed;
 }
 
+// A supplementary check always covers exactly the requirement it is owed for
+// and never permits a gap: the host owns both fields and sets them before the
+// entry is validated, so the validator judges the entry that is kept and a
+// value the host overwrites never costs a repair (Issue 357).
+function setHostOwnedFields(entry) {
+  const sup = owedSupplementary().get(entry.id);
+  if (sup) {
+    const covers = Array.isArray(entry.covers) ? entry.covers.filter((c) => typeof c === "string") : [];
+    entry.covers = [sup.requirement, ...covers.filter((c) => c !== sup.requirement)];
+    entry.gap_permitted = false;
+  }
+  return entry;
+}
+
 // Issue 288: the author sees each completed entry without its host-owned
 // criterion and judgment (the criteria are listed separately; the judgment is
 // host text) -- one JSON line per entry holding its id, covers and its whole
@@ -96,7 +110,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
     tier: "planner", resultMode: "rawOutcome"
   });
   if (result.status !== "failed") state.roundAnswered += 1;
-  if (result.dry_run === true) return {entry:{id}};
+  if (result.dry_run === true) return {entry:setHostOwnedFields({id})};
   if (result.status === "failed") return {failure:result};
   if (result.stopReason === "end_turn" && result.content) {
     let entry;
@@ -104,12 +118,21 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
       entry = unwrapEntry(JSON.parse(extractJsonObject(result.content)), id);
     } catch (_) { /* This answered call made no progress. */ }
     if (entry && entry.id === id) {
-      // Native binding uses freeze's element_shape_defects with one entry.
-      // A missing binding or validator fault must propagate, never accept.
-      const defects = JSON.parse(__archonValidateAcceptanceEntry(JSON.stringify(entry)));
-      if (defects.length === 0) return {entry};
-      return {failure:{status:"failed",malformed:true,findings:defects,entryId:id,
-        summary:`acceptance entry ${id} was refused: ${defects.map(defect => defect.text).join("; ")}`}};
+      setHostOwnedFields(entry);
+      let serialized;
+      // QuickJS bounds JSON.stringify by its stack as it bounds JSON.parse: a
+      // reply nested past it is no entry, like one that does not parse.
+      try { serialized = JSON.stringify(entry); } catch (_) { /* no progress */ }
+      if (serialized !== undefined) {
+        // Native binding uses freeze's element_shape_defects with one entry;
+        // text it cannot parse (an unpaired surrogate, too deep) is its
+        // invalid_json refusal. A missing binding or a validator fault must
+        // propagate, never accept. Each text names the entry by its id.
+        const defects = JSON.parse(__archonValidateAcceptanceEntry(id, serialized));
+        if (defects.length === 0) return {entry};
+        return {failure:{status:"failed",malformed:true,findings:defects,entryId:id,
+          summary:defects.map(defect => defect.text).join("; ")}};
+      }
     }
   }
   return {failure:{status:"failed",malformed:true,summary:`acceptance entry ${id} returned no complete entry`}};
@@ -147,30 +170,22 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   const pending = all.filter(id => !state.entries.has(id) || state.retryIds === null || state.retryIds.has(id));
   const cap = authorBatchSize();
   const earlier = all.filter(id => state.entries.has(id) && !pending.includes(id)).map(id => state.entries.get(id));
-  const owe = (result) => {
-    const sup = result.entry && owedMap.get(result.entry.id);
-    if (sup) {
-      const covers = Array.isArray(result.entry.covers) ? result.entry.covers.filter((c) => typeof c === "string") : [];
-      result.entry.covers = [sup.requirement, ...covers.filter((c) => c !== sup.requirement)];
-      result.entry.gap_permitted = false;
-    }
-    return result;
-  };
   // Prefix window (Issue-247): entry i starts once entries 0..i-cap of this
   // round have settled, and sees exactly those (in order) after the entries of
   // earlier rounds. Its prompt depends on its index alone, so a resume reuses
   // the recorded call, and a slow entry delays only the entries behind it.
   const { settled } = await runBounded(pending.length, cap, true, (index, done) => {
     const prior = earlier.concat(done.slice(0, Math.max(0, index - cap + 1)).map(result => result.value.entry));
-    return authorOne(w, prompt, round, pending[index], textOf(pending[index]), prior, criteria, state).then(owe);
+    return authorOne(w, prompt, round, pending[index], textOf(pending[index]), prior, criteria, state);
   }, (result) => Boolean(result && result.failure));
-  // Every started call has settled. Only the entries before the first entry
-  // that did not succeed are kept, in input order: whether a later entry got
-  // to start or finish before the failure is a matter of timing, so keeping it
-  // would make the next round's prompts and call set depend on timing too.
-  const stop = settled.findIndex(result => !result || result.status !== "fulfilled" || result.value.failure);
-  const kept = stop < 0 ? settled.length : stop;
-  for (const result of settled.slice(0, kept)) {
+  // Every started call has settled. The window starts an index only while its
+  // fixed prefix holds no failure, so which entries ran depends on the replies
+  // alone, never on timing (runBounded). Every entry that succeeded is kept,
+  // in input order, the ones after a failure too: re-authoring a passed entry
+  // wastes its call and can bring back a finding it already repaired.
+  const succeeded = (result) => Boolean(result && result.status === "fulfilled" && !result.value.failure);
+  const stop = settled.findIndex(result => !succeeded(result));
+  for (const result of settled.filter(succeeded)) {
     const entry = result.value.entry;
     if (entry) {
       // A new entry is a new best; a changed rewrite of one the judge sent
@@ -192,7 +207,8 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   const first = settled[stop];
   // Unreachable unless the pool stopped without a failure: fail loudly.
   if (!first) throw new Error(`acceptance entry ${pending[stop]} was never authored`);
-  state.retryIds = new Set(pending.slice(stop));
+  // The failures and the indices never started are retried.
+  state.retryIds = new Set(pending.filter((_, index) => !succeeded(settled[index])));
   return first.value.failure;
 }
 

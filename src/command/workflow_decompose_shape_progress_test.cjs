@@ -20,7 +20,7 @@ const clean = () => ({publicationReceipt:{call_id:'freeze'}, postcondition:{sati
 
 async function run(sequence, {supplementary = false, wrapper = false, resumed = false, siblings = false} = {}) {
   const ctx = {args:{acceptanceCriteria:siblings ? {A:'a',B:'b'} : {A:'a'}, authorMaxParallelism:1, gateMode:'enforce'},
-    __archonValidateAcceptanceEntry: serialized => {
+    __archonValidateAcceptanceEntry: (_, serialized) => {
       const entry = JSON.parse(serialized);
       return JSON.stringify(entry.id === 'A' && supplementary ? [] : sequence(entry.version));
     }};
@@ -120,7 +120,7 @@ async function mixed() {
 // freeze, or on every freeze when `always`.
 async function refuted(sequence, {ids = ['A'], always = false, resumed = false} = {}) {
   const ctx = {args:{acceptanceCriteria:Object.fromEntries(ids.map(id => [id, id])),authorMaxParallelism:1,gateMode:'enforce'},
-    __archonValidateAcceptanceEntry: serialized => {
+    __archonValidateAcceptanceEntry: (_, serialized) => {
       const entry = JSON.parse(serialized);
       return JSON.stringify(entry.version === 1 ? [] : sequence(entry.version - 1));
     }};

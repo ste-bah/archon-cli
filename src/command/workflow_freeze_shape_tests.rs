@@ -118,7 +118,7 @@ fn workflow_host_command_each_floor_contract_field_is_its_own_identity() {
 
 // The real native binding and the embedded author, not a Node mock. Allow
 // replaying the old JS to demonstrate these regressions fail before the fix.
-fn script_source() -> String {
+pub(super) fn script_source() -> String {
     if let Ok(root) = std::env::var("ARCHON_TEST_SCRIPT_ROOT") {
         [
             "workflow_decompose_v1.js",
@@ -143,8 +143,9 @@ fn assert_author_shape_refusal(entry: Value) {
         install_entry_validator(&ctx).unwrap();
         ctx.eval::<(), _>(format!("const args = {{}};\n{source}")).unwrap();
         let candidate = serde_json::to_vec(&json!({"entries": [entry.clone()]})).unwrap();
+        // Each refusal names the entry (Issue 357 round 4), not `entries/0`.
         let expected: Vec<_> = element_shape_defects(&candidate, &ENTRY_SHAPE)
-            .into_iter().map(|defect| defect.message).collect();
+            .iter().map(|defect| super::entry_validator::refusal_text("A", defect)).collect();
         assert!(!expected.is_empty(), "test entry must be invalid");
         let script = format!(r#"(async () => {{
             const entry = {entry};

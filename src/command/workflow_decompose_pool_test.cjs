@@ -29,8 +29,8 @@ function clock() {
  return {sleep,drive,now:()=>now};
 }
 
-function context(args={}) {
- const ctx={args,console}; ctx.__archonValidateAcceptanceEntry = () => '[]';
+function context(args={}, validator=() => '[]') {
+ const ctx={args,console}; ctx.__archonValidateAcceptanceEntry = (_, serialized) => validator(serialized);
   vm.createContext(ctx); vm.runInContext(scriptSource(),ctx); return ctx;
 }
 
@@ -65,7 +65,7 @@ async function slowFirstCallBlocksOnlyCallsBehindIt() {
 function seeded(seed) { let s=seed; return ()=>{s=(s*1103515245+12345)%2147483648; return s/2147483648;}; }
 
 function acceptanceRun(seed, cap, criteria, state, options={}) {
- const c=clock(); const ctx=context({acceptanceCriteria:criteria,authorMaxParallelism:cap});
+ const c=clock(); const ctx=context({acceptanceCriteria:criteria,authorMaxParallelism:cap},options.validator);
  const random=seeded(seed); const prompts={},ends=[],starts=[]; let active=0,peak=0;
  const w={agent:async(_,opts)=>{
   const id=opts.task.match(/Author ONLY entry ([^:]+):/)[1];
@@ -108,11 +108,12 @@ async function promptsDependOnIndexAlone() {
  assert.deepEqual(priorIds(r.prompts['AC-9']),[...earlier,'AC-2','AC-5']);
 }
 
-// A failed entry stops new starts and started siblings settle. Only entries
-// before the first failure (by index) are kept; the failure and every later
-// index are retried, even one that finished. Two timings -- A ends before B
-// fails, so the window lets D start, or A ends after -- leave the same
-// entries and retry set, and the next round's prompts are identical.
+// Issue 357 round 4: a failed entry limits new starts to the indices whose
+// fixed prefix holds no failure, and every started sibling settles. Every
+// entry that succeeded is kept, the ones after the failure too; the failure
+// and the indices never started are retried. Two timings -- A ends before B
+// fails, or after -- start the same calls and leave the same entries and
+// retry set, so the next round's prompts are identical.
 async function failureStopsNewStartsAndSettlesSiblings() {
  const criteria={A:'a',B:'b',C:'c',D:'d',E:'e',F:'f'};
  const outcomes=[];
@@ -122,18 +123,49 @@ async function failureStopsNewStartsAndSettlesSiblings() {
   const r=acceptanceRun(1,3,criteria,state,{durations,fails:'B'});
   const out=await r.run;
   assert.equal(out.status,'failed');
-  const failedAt=r.ends.find(e=>e.id==='B').at;
-  assert(r.starts.every(s=>s.at<=failedAt),'nothing starts after the failure');
-  assert.deepEqual(r.starts.map(s=>s.id),aTakes<10?['A','B','C','D']:['A','B','C'],'the window let D start only when A ended first');
+  assert.deepEqual(r.starts.map(s=>s.id),['A','B','C','D'],'D (prefix A) starts in both timings; E (prefix A,B) never');
   assert.equal(r.active(),0,'started siblings settled before return');
   assert.equal(r.now(),30,'returned only after the slowest started sibling');
-  assert.deepEqual(Array.from(state.entries.keys()),['A'],'only entries before the first failure are kept');
-  assert.deepEqual(Array.from(state.retryIds),['B','C','D','E','F'],'the failure and every later index are retried');
+  assert.deepEqual(Array.from(state.entries.keys()),['A','C','D'],'every entry that succeeded is kept');
+  assert.deepEqual(Array.from(state.retryIds),['B','E','F'],'only the failure and the unstarted indices are retried');
   const next=acceptanceRun(2,3,criteria,state,{durations,round:2});
   assert.equal((await next.run).status,'accepted');
+  assert.deepEqual(Object.keys(next.prompts).sort(),['B','E','F']);
   outcomes.push(next.prompts);
  }
  assert.deepEqual(outcomes[0],outcomes[1],'the next round does not depend on the earlier timing');
+}
+
+// Issue 357 round 4 (F3): a shape refusal of one entry keeps the sibling that
+// passed beside it, whichever finished first. Several failures in one round
+// return the lowest index's failure and retry each of them.
+async function refusalKeepsPassedSiblings() {
+ const criteria={A:'a',B:'b',C:'c',D:'d'};
+ const refusal=id=>[{text:`acceptance entry '${id}' was refused: criterion is missing`,
+  deterministic_defect:{provenance:'host_validator',code:'invalid_candidate_shape',subject:'entries/0/criterion',location:'shape',stage:'shape'}}];
+ for(const [cap,refused,starts,kept,retry] of [
+  [2,['A'],['A','B'],['B'],['A','C','D']],
+  [3,['A','C'],['A','B','C'],['B'],['A','C','D']],
+  [3,['B'],['A','B','C','D'],['A','C','D'],['B']],
+ ]) {
+  const prompts=[];
+  for(const bTakes of [5,40]) {
+   const state={entries:new Map(),retryIds:null};
+   const validator=(serialized)=>JSON.stringify(refused.includes(JSON.parse(serialized).id)?refusal(JSON.parse(serialized).id):[]);
+   const r=acceptanceRun(1,cap,criteria,state,{durations:{A:20,B:bTakes,C:10,D:5},validator});
+   const out=await r.run;
+   assert.equal(out.status,'failed');
+   assert.equal(out.entryId,refused[0],'the lowest refused index is returned');
+   assert.deepEqual(r.starts.map(s=>s.id),starts,`cap ${cap} starts`);
+   assert.deepEqual(Array.from(state.entries.keys()),kept,`cap ${cap} refused ${refused} keeps passed siblings`);
+   assert.deepEqual(Array.from(state.retryIds),retry,`cap ${cap} refused ${refused} retries only the unfinished`);
+   const next=acceptanceRun(2,cap,criteria,state,{durations:{A:20,B:bTakes,C:10,D:5}});
+   assert.equal((await next.run).status,'accepted');
+   assert.deepEqual(Object.keys(next.prompts).sort(),retry,'a passed sibling is not re-authored');
+   prompts.push(Object.fromEntries(Object.entries(next.prompts).map(([k,v])=>[k,v.replace(/"seed":\d+/g,'')])));
+  }
+  assert.deepEqual(prompts[0],prompts[1],'retained siblings do not depend on timing');
+ }
 }
 
 // A stop raised inside one call (a pause or cancel the host observed) is
@@ -159,5 +191,5 @@ async function rejectionOutranksAFailedReply() {
 }
 
 makespanFollowsTheSchedule().then(slowFirstCallBlocksOnlyCallsBehindIt).then(promptsDependOnIndexAlone)
- .then(failureStopsNewStartsAndSettlesSiblings).then(rejectionSettlesSiblingsBeforeRaising).then(rejectionOutranksAFailedReply)
+ .then(failureStopsNewStartsAndSettlesSiblings).then(refusalKeepsPassedSiblings).then(rejectionSettlesSiblingsBeforeRaising).then(rejectionOutranksAFailedReply)
  .then(()=>console.log('bounded author pool passed')).catch(e=>{console.error(e);process.exitCode=1});

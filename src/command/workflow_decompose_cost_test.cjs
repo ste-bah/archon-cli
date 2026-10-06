@@ -49,10 +49,10 @@ async function failedEntry() {
  const state={entries:new Map(),retryIds:null};
  assert.equal((await context.authorAcceptanceEntries(w,'author',1,state)).status,'failed');
  assert.equal((await context.authorAcceptanceEntries(w,'author',2,state)).status,'accepted');
- // Entries before the first failure are kept; the failure and every later
- // index are retried, whether or not they had finished (Issue-247).
- // D, queued when A settled, is skipped at launch because B had failed.
- assert.deepEqual(calls,{A:1,B:2,C:2,D:1},'only entries before the first failure are kept');
+ // Every entry that succeeded is kept; only the failure is retried (Issue
+ // 357). D's fixed prefix (A) holds no failure, so it starts whatever the
+ // timing of B's failure, and its success is kept too.
+ assert.deepEqual(calls,{A:1,B:2,C:1,D:1},'every entry that succeeded is kept');
 }
 async function structuralRouting() {
  const ctx={};vm.createContext(ctx);vm.runInContext(scriptSource(),ctx);
@@ -68,7 +68,7 @@ async function invalidAuthor(value, envelope = false) {
  const invalid={...value};let validations=0;
  // Mock only the native boundary. The Rust shape corpus tests the validator;
  // these tests prove the author uses its refusal rather than accepting an id.
- ctx.__archonValidateAcceptanceEntry = serialized => {
+ ctx.__archonValidateAcceptanceEntry = (_, serialized) => {
   validations++;
   const entry=JSON.parse(serialized);
   return JSON.stringify(typeof entry.criterion === 'string' ? [] : [{

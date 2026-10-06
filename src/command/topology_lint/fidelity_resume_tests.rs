@@ -468,7 +468,7 @@ fn the_staged_set_gate_runs_on_its_catalog_wall_clock() {
 /// design: Issue 261 changes the fixed decomposition script, and Issue 288
 /// bounds its author prompts (a run launched on an older script cannot resume).
 /// Issue 357 moves it again: acceptance entries are shape-validated at their
-/// author call and a refused entry is measured in its own repair frontier.
+/// author call, measured in their own repair frontier, and kept when passed.
 #[test]
 fn the_catalog_and_script_digests_are_unchanged() {
     let catalog = crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("rev")
@@ -481,7 +481,7 @@ fn the_catalog_and_script_digests_are_unchanged() {
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "411fb902652790e3da9948d85376b94cadbd2c23ac21cad771ad2892ea7d9e08"
+        "885c49a6fdfd0a65409d5e1254500f5c72fa2adcac560c278544f90233bb49c3"
     );
 }
 
