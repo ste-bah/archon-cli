@@ -8,17 +8,54 @@
 //! `bash.exe`. Windows file names compare without case, which its file
 //! system already does. The splitting and naming are pure functions of
 //! their inputs, so both platforms' rules are tested everywhere.
+//!
+//! A check's program is resolved with its site's own variables, as the
+//! child started with them resolves it ([`variable`]): on Windows a
+//! variable's name compares without case, so the site's `Path` is its
+//! search path, and its `PATHEXT` (the default when it has none) names the
+//! extensions tried (Issue 333).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The extensions Windows tries when `PATHEXT` is unset.
 const DEFAULT_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
 
-/// Where the program `name` is on the search path `path`, on this platform.
+/// Where the program `name` is on the host's search path `path`, with the
+/// host's own `PATHEXT`, on this platform.
 pub(super) fn find(path: &str, name: &str) -> Option<PathBuf> {
-    let windows = cfg!(windows);
     let pathext = std::env::var("PATHEXT").ok();
-    let extensions = extensions(windows, pathext.as_deref());
+    find_on(path, pathext.as_deref(), name, cfg!(windows))
+}
+
+/// The value of `name` among `environment`, the variables a child is
+/// started with, as that child sees it. On `windows` a variable's name
+/// compares without case (`Path` is `PATH`), and of several spellings the
+/// last in the map's order is the one a child gets, as `Command::envs`
+/// applies them in that order and a later one replaces an earlier.
+pub(super) fn variable<'a>(
+    environment: &'a BTreeMap<String, String>,
+    name: &str,
+    windows: bool,
+) -> Option<&'a str> {
+    if !windows {
+        return environment.get(name).map(String::as_str);
+    }
+    (environment.iter())
+        .rfind(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+/// Where the program `name` is on the search path `path`, trying the
+/// extensions `pathext` lists, by `windows`'s rules or not: the one
+/// resolution every check's program gets.
+pub(super) fn find_on(
+    path: &str,
+    pathext: Option<&str>,
+    name: &str,
+    windows: bool,
+) -> Option<PathBuf> {
+    let extensions = extensions(windows, pathext);
     (search_dirs(path, windows).into_iter())
         .flat_map(|dir| {
             candidates(name, &extensions)
@@ -97,10 +134,10 @@ pub(super) fn candidates(name: &str, extensions: &[String]) -> Vec<String> {
 }
 
 /// A program file's name without the executable extension this platform
-/// adds (`cargo.exe` is `cargo` on Windows): the name its subcommands use.
-pub(super) fn bare_name(name: &str) -> String {
-    let pathext = std::env::var("PATHEXT").ok();
-    strip_extension(name, &extensions(cfg!(windows), pathext.as_deref()))
+/// adds (`cargo.exe` is `cargo` on Windows) of those `pathext` lists: the
+/// name its subcommands use.
+pub(super) fn bare_name(name: &str, pathext: Option<&str>) -> String {
+    strip_extension(name, &extensions(cfg!(windows), pathext))
 }
 
 /// `name` without the first of `extensions` it ends with (without case).
@@ -205,5 +242,41 @@ mod tests {
         assert_eq!(on_disk_name(asked.clone(), false), asked);
         let absent = dir.path().join("absent328.EXE");
         assert_eq!(on_disk_name(absent.clone(), true), absent);
+    }
+
+    #[test]
+    fn a_sites_variables_are_read_as_its_child_reads_them() {
+        let site: BTreeMap<String, String> =
+            [("PATH", "upper"), ("Path", "mixed"), ("PATHEXT", ".EXE")]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+        // Windows: names compare without case, and the last spelling wins.
+        assert_eq!(variable(&site, "PATH", true), Some("mixed"));
+        assert_eq!(variable(&site, "pathext", true), Some(".EXE"));
+        // Unix: only the exact name.
+        assert_eq!(variable(&site, "PATH", false), Some("upper"));
+        assert_eq!(variable(&site, "pathext", false), None);
+        let only: BTreeMap<String, String> = [("Path".to_string(), "C:\\bin".to_string())].into();
+        assert_eq!(variable(&only, "PATH", true), Some("C:\\bin"));
+        assert_eq!(variable(&only, "PATH", false), None);
+    }
+
+    #[test]
+    fn a_program_is_found_by_windows_rules_on_a_semicolon_path_with_pathext() {
+        let (empty, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        std::fs::write(bin.path().join("bash.exe"), "").unwrap();
+        let path = format!("{};\"{}\"", empty.path().display(), bin.path().display());
+        let found = find_on(&path, Some(".com;.exe"), "bash", true).expect("bash.exe");
+        assert_eq!(found.file_name().unwrap(), "bash.exe");
+        assert_eq!(
+            find_on(&path, Some(".com"), "bash", true),
+            None,
+            "only PATHEXT's"
+        );
+        assert_eq!(
+            strip_extension("bash.exe", &extensions(true, Some(".com;.exe"))),
+            "bash"
+        );
     }
 }

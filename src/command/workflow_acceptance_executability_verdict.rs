@@ -85,7 +85,10 @@ const RUNS_PRODUCT: &[&str] = &["test", "nextest", "run", "bench", "exec", "pyte
 /// path, where a program the check's path lacks may be installed.
 #[derive(Clone)]
 pub(crate) struct Context {
+    /// The site's search path and `PATHEXT`, as a child started with its
+    /// variables sees them (`verdict_which::variable`).
     path: Option<String>,
+    pathext: Option<String>,
     deliverables: Vec<String>,
     /// The variables a listing of a tool runs with (Issue 333), and the
     /// search path the check runs on among them. Only the site's own
@@ -138,8 +141,10 @@ impl Context {
     }
 
     fn at(environment: BTreeMap<String, String>, deliverables: Vec<String>) -> Self {
+        let windows = cfg!(windows);
         Self {
-            path: environment.get("PATH").cloned(),
+            path: which::variable(&environment, "PATH", windows).map(str::to_string),
+            pathext: which::variable(&environment, "PATHEXT", windows).map(str::to_string),
             deliverables,
             environment,
             host_path: subcommand::host_path(),
@@ -153,9 +158,15 @@ impl Context {
     }
 
     /// Where the program `name` is on the search path, as this platform's
-    /// launcher finds it (`verdict_which`).
+    /// launcher finds it with the site's own variables (`verdict_which`).
     fn find(&self, name: &str) -> Option<std::path::PathBuf> {
-        which::find(self.path.as_deref()?, name)
+        let path = self.path.as_deref()?;
+        which::find_on(path, self.pathext.as_deref(), name, cfg!(windows))
+    }
+
+    /// `name` without the executable extension the site's `PATHEXT` adds.
+    fn bare_name(&self, name: &str) -> String {
+        which::bare_name(name, self.pathext.as_deref())
     }
 }
 
@@ -174,7 +185,7 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
     };
     let commands = simple_commands(command);
     if matches!(code, 126 | 127)
-        && let Some(name) = missing_program(&commands, at)
+        && let Some(name) = missing_program(&commands, &output(result), at)
     {
         return Some(format!(
             "it starts `{name}`, which is not on its search path (exit {code}): a tool or interpreter its environment lacks"
@@ -231,15 +242,46 @@ fn output(result: &CheckResult) -> String {
 }
 
 /// The first program `commands` start that cannot start: a bare name not on
-/// the search path, or an absolute path that does not exist.
-fn missing_program(commands: &[Simple], at: &Context) -> Option<String> {
+/// the search path, or an absolute path that does not exist. A program
+/// that printed under its own name (`bash: scripts/x.sh: No such file or
+/// directory`) ran, whatever the search path says: exit 127 is then its
+/// own answer, such as a script it was given that is not there.
+fn missing_program(commands: &[Simple], output: &str, at: &Context) -> Option<String> {
     (commands.iter())
         .filter_map(|c| c.program.as_deref())
+        .filter(|program| !printed_by(output, program, at))
         .find(|program| match which::is_path(program) {
             true => which::is_absolute(program) && !Path::new(program).exists(),
             false => !at.on_path(program),
         })
         .map(str::to_string)
+}
+
+/// Whether a line of `output` is the program `program`'s own message: it
+/// starts with the program's name (by any path to it, with or without its
+/// executable extension), then `: `.
+fn printed_by(output: &str, program: &str, at: &Context) -> bool {
+    let name = |text: &str| {
+        let file = text.rsplit(['/', '\\']).next().unwrap_or(text);
+        at.bare_name(file)
+    };
+    let wanted = name(program);
+    (output.lines()).any(|line| {
+        let Some((speaker, said)) = line.trim_start().split_once(": ") else {
+            return false;
+        };
+        // `foo: command not found` (as tcsh says it) names what did not run.
+        let lacking = said.trim_start().to_ascii_lowercase();
+        let speaker = name(speaker.trim());
+        !lacking.starts_with("command not found")
+            && !lacking.starts_with("not found")
+            && !speaker.is_empty()
+            && !speaker.contains(char::is_whitespace)
+            && match cfg!(windows) {
+                true => speaker.eq_ignore_ascii_case(&wanted),
+                false => speaker == wanted,
+            }
+    })
 }
 
 /// The program's own name: a build tool whatever directory it is run from.

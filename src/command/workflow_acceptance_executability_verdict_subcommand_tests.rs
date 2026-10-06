@@ -80,6 +80,7 @@ impl Bin {
         site.insert("PATH".into(), self.path());
         Context {
             path: Some(self.path()),
+            pathext: None,
             deliverables: Vec::new(),
             environment: site,
             host_path: Some(self.host_path()),
