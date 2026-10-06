@@ -70,7 +70,8 @@ pub(super) fn refuse_candidate_error(
 #[path = "workflow_freeze_shape.rs"]
 mod shape;
 pub(crate) use shape::{
-    ENTRY_SHAPE, ElementShape, TASK_SHAPE, element_shape_defects, skeleton_document,
+    ENTRY_SHAPE, ElementShape, TASK_SHAPE, element_shape_defects, install_entry_validator,
+    skeleton_document,
 };
 
 /// Refuses the candidate with every element shape defect, or `None` when

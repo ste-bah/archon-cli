@@ -30,7 +30,8 @@ function clock() {
 }
 
 function context(args={}) {
- const ctx={args,console}; vm.createContext(ctx); vm.runInContext(scriptSource(),ctx); return ctx;
+ const ctx={args,console}; ctx.__archonValidateAcceptanceEntry = () => '[]';
+  vm.createContext(ctx); vm.runInContext(scriptSource(),ctx); return ctx;
 }
 
 // Pool 110 < prefix window 120 < barrier batches 130 for these durations, cap 2.

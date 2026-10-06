@@ -115,3 +115,69 @@ fn workflow_host_command_each_floor_contract_field_is_its_own_identity() {
     ];
     assert_converges(&ENTRY_SHAPE, candidate, &first, &repairs);
 }
+
+// The real native binding and the embedded author, not a Node mock. Allow
+// replaying the old JS to demonstrate these regressions fail before the fix.
+fn assert_author_shape_refusal(entry: Value) {
+    let source = if let Ok(root) = std::env::var("ARCHON_TEST_SCRIPT_ROOT") {
+        [
+            "workflow_decompose_v1.js",
+            "workflow_decompose_v1_acceptance.js",
+            "workflow_decompose_v1_set_gate.js",
+            "workflow_decompose_v1_progress.js",
+        ]
+        .iter()
+        .map(|name| std::fs::read_to_string(std::path::Path::new(&root).join(name)).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n")
+    } else {
+        crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE.to_string()
+    };
+    let runtime = rquickjs::Runtime::new().unwrap();
+    let context = rquickjs::Context::full(&runtime).unwrap();
+    context.with(|ctx| {
+        install_entry_validator(&ctx).unwrap();
+        ctx.eval::<(), _>(format!("const args = {{}};\n{source}")).unwrap();
+        let candidate = serde_json::to_vec(&json!({"entries": [entry.clone()]})).unwrap();
+        let expected: Vec<_> = element_shape_defects(&candidate, &ENTRY_SHAPE)
+            .into_iter().map(|defect| defect.message).collect();
+        assert!(!expected.is_empty(), "test entry must be invalid");
+        let script = format!(r#"(async () => {{
+            const entry = {entry};
+            const w = {{agent: async () => ({{status: 'accepted', stopReason: 'end_turn', content: JSON.stringify(entry)}})}};
+            const refused = await authorOne(w, 'author', 1, 'A', 'a', [], {{A:'a'}}, {{roundCalls:0, roundAnswered:0}});
+            entry.criterion = '';
+            entry.check = {{kind:'command', command:'test -f output', cwd:'project_root'}};
+            const repaired = await authorOne(w, 'repair', 2, 'A', 'a', [], {{A:'a'}}, {{roundCalls:0, roundAnswered:0}});
+            return JSON.stringify({{refused, repaired}});
+        }})()"#);
+        let promise: rquickjs::Promise = ctx.eval(script).unwrap();
+        let result: String = promise.finish().unwrap();
+        let result: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(result["refused"]["failure"]["malformed"], true, "{result}");
+        let summary = result["refused"]["failure"]["summary"].as_str().unwrap();
+        for message in expected { assert!(summary.contains(&message), "{summary}"); }
+        assert_eq!(result["repaired"]["entry"]["criterion"], "", "{result}");
+    });
+}
+
+#[test]
+fn acceptance_author_refuses_missing_criterion_with_freeze_validator() {
+    assert_author_shape_refusal(
+        json!({"id":"A", "check":{"kind":"command", "command":"test -f output", "cwd":"project_root"}}),
+    );
+}
+
+#[test]
+fn acceptance_author_refuses_null_criterion_with_freeze_validator() {
+    assert_author_shape_refusal(
+        json!({"id":"A", "criterion":null, "check":{"kind":"command", "command":"test -f output", "cwd":"project_root"}}),
+    );
+}
+
+#[test]
+fn acceptance_author_refuses_numeric_criterion_with_freeze_validator() {
+    assert_author_shape_refusal(
+        json!({"id":"A", "criterion":42, "check":{"kind":"command", "command":"test -f output", "cwd":"project_root"}}),
+    );
+}

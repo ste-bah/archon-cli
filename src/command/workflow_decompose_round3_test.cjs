@@ -8,6 +8,7 @@ const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js
   .map(name => fs.readFileSync(`${scriptRoot}/${name}`, 'utf8')).join('\n');
 function context(criteria = { A: 'a' }) {
   const ctx = { args: { acceptanceCriteria: criteria, gateMode: 'enforce', authorMaxParallelism: 1 } };
+  ctx.__archonValidateAcceptanceEntry = () => '[]';
   vm.createContext(ctx);
   vm.runInContext(source, ctx);
   return ctx;

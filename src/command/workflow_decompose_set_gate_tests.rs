@@ -18,6 +18,8 @@ const TASK_ROOT: &str = "/p/tasks";
 fn driver(args_json: &str, lint_rounds: &str, tail: &str) -> String {
     format!(
         r##"{FIXED_SCRIPT_SOURCE}
+// Scheduling fixture: the real native validator is tested by shape_tests.
+globalThis.__archonValidateAcceptanceEntry = () => "[]";
 globalThis.args = Object.assign({{
   projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "{TASK_ROOT}",
   gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "criterion" }},

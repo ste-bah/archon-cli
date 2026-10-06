@@ -316,6 +316,7 @@ async function authorCandidate(w, policy) {
       if (authored.malformed) {
         recordAnswered(progress, call, "entries", advanced, !measuredReplies);
         lastFindings = [authored.summary || "malformed replies"];
+        feedback = lastFindings.slice();
       } else {
         recordOperational(progress, call, authored.summary, advanced);
         lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
@@ -343,7 +344,7 @@ async function authorCandidate(w, policy) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = (outcome.gateEnvelope?.policy_findings || [])
         .filter(finding => policy.retryScopes.has(finding.remediation_scope));
-      authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt));
+      authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content));
     }
     // A committed artifact is not the finished one: repairable findings are
     // still fed back below in either mode. Every publication replaces the

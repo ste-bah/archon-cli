@@ -362,3 +362,27 @@ pub(crate) fn element_shape_defects(
     out.dedup_by(|a, b| a.identity == b.identity);
     out
 }
+
+/// Pure, synchronous author validation: exactly the freeze shape path, with
+/// the entry in the authored envelope. No publication or judge is invoked.
+pub(crate) fn install_entry_validator(ctx: &rquickjs::Ctx<'_>) -> rquickjs::Result<()> {
+    ctx.globals().set(
+        "__archonValidateAcceptanceEntry",
+        rquickjs::function::Func::from(|entry: String| -> rquickjs::Result<String> {
+            let entry: Value = serde_json::from_str(&entry).map_err(|error| {
+                rquickjs::Error::new_from_js_message("entry", "JSON", error.to_string())
+            })?;
+            let candidate =
+                serde_json::to_vec(&serde_json::json!({"entries": [entry]})).map_err(|error| {
+                    rquickjs::Error::new_from_js_message("entry", "JSON", error.to_string())
+                })?;
+            let defects: Vec<_> = element_shape_defects(&candidate, &ENTRY_SHAPE)
+                .into_iter()
+                .map(|defect| defect.message)
+                .collect();
+            serde_json::to_string(&defects).map_err(|error| {
+                rquickjs::Error::new_from_js_message("defects", "JSON", error.to_string())
+            })
+        }),
+    )
+}

@@ -2,8 +2,9 @@
 // Loaded after workflow_decompose_v1.js as one script: every declaration
 // here is hoisted into the same scope as `workflow`.
 
-// Completed entries survive a sibling's incomplete reply. Assembly and validation
-// belong to freeze-acceptance, not to a model or an unchecked JSON concatenation.
+// Completed entries survive a sibling's incomplete reply. The host validates
+// each authored entry with freeze's shape validator; freeze assembles and
+// judges the full contract. Neither step trusts model-side validation.
 // The reply SHOULD be a bare JSON object; sometimes it is fenced or preceded by
 // prose. A bare JSON.parse turns that formatting slip into a reply without
 // progress, and enough of them stop the entry while every reply carried a
@@ -98,10 +99,17 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   if (result.dry_run === true) return {entry:{id}};
   if (result.status === "failed") return {failure:result};
   if (result.stopReason === "end_turn" && result.content) {
+    let entry;
     try {
-      const entry = unwrapEntry(JSON.parse(extractJsonObject(result.content)), id);
-      if (entry && entry.id === id) return {entry};
+      entry = unwrapEntry(JSON.parse(extractJsonObject(result.content)), id);
     } catch (_) { /* This answered call made no progress. */ }
+    if (entry && entry.id === id) {
+      // Native binding uses freeze's element_shape_defects with one entry.
+      // A missing binding or validator fault must propagate, never accept.
+      const defects = JSON.parse(__archonValidateAcceptanceEntry(JSON.stringify(entry)));
+      if (defects.length === 0) return {entry};
+      return {failure:{status:"failed",malformed:true,summary:`acceptance entry ${id} was refused: ${defects.join("; ")}`}};
+    }
   }
   return {failure:{status:"failed",malformed:true,summary:`acceptance entry ${id} returned no complete entry`}};
 }
@@ -190,7 +198,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
 // Pre-judge validation can reject a candidate before any receipt exists. Its
 // check-local diagnostic still identifies which entries to repair; preserving
 // siblings here is not acceptance credit. The full gate runs again afterwards.
-function acceptanceRepairIds(findings, knownIds, published) {
+function acceptanceRepairIds(findings, knownIds, published, candidate) {
   const retry = new Set();
   // A supplementary check the host says is owed is known from then on.
   const supFinding = /^check '(SUP-(REQ-[A-Za-z0-9-]+))': PRD requirement \2 is covered by no acceptance check;[^:]*:\s*([\s\S]*)$/;
@@ -212,6 +220,16 @@ function acceptanceRepairIds(findings, knownIds, published) {
     const text = String(finding.text || "")
       .replace(/^candidate artifact was refused:\s*/, "")
       .replace(/^candidate artifact rejected:\s*/, "");
+    // Resolve against the submitted arrays, not sorted ids: supplementary
+    // entries have their own indices, and neither array is an id namespace.
+    const pointer = /^\/?(entries|supplementary)\/(0|[1-9]\d*)(?:\/[^\s]*)?(?=\s|$)/.exec(text);
+    if (pointer) {
+      const list = candidate?.[pointer[1]];
+      const id = Array.isArray(list) ? list[Number(pointer[2])]?.id : undefined;
+      if (typeof id !== "string" || !known.has(id)) return null;
+      retry.add(id);
+      continue;
+    }
     // A refuted check is never published (the host stages the envelope alone),
     // so its "was refuted" finding names the one entry to re-author.
     // A check that crashed, or passed before any implementation (the host's

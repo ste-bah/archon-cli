@@ -389,6 +389,8 @@ fn acceptance_entries_are_separate_calls_and_truncation_retries_only_one() {
         "{}\n{}",
         FIXED_SCRIPT_SOURCE,
         r#"
+// Scheduling fixture: the real native validator is tested by shape_tests.
+globalThis.__archonValidateAcceptanceEntry = () => '[]';
 globalThis.args = { projectRoot:'/p', repositoryRoot:'/r', prdPath:'/p/prd', prdDigest:'x', taskRoot:'/p/tasks', gateMode:'observe', acceptanceCriteria:{'AC-X-001':'first','AC-X-002':'second'} };
 let calls = [], freezes = [], failed = false;
 const w = {

@@ -23,6 +23,8 @@ use super::FIXED_SCRIPT_SOURCE;
 pub(crate) fn run(gate_mode: &str, scenario: &str, entry: &str) -> serde_json::Value {
     let driver = format!(
         r##"{FIXED_SCRIPT_SOURCE}
+// Scheduling fixture: the real native validator is tested by shape_tests.
+globalThis.__archonValidateAcceptanceEntry = () => "[]";
 const scenario = {scenario};
 globalThis.args = Object.assign({{
   projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "/p/tasks",
