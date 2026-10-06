@@ -155,7 +155,7 @@ async function refusalKeepsPassedSiblings() {
    const r=acceptanceRun(1,cap,criteria,state,{durations:{A:20,B:bTakes,C:10,D:5},validator});
    const out=await r.run;
    assert.equal(out.status,'failed');
-   assert.equal(out.entryId,refused[0],'the lowest refused index is returned');
+   assert.deepEqual(Array.from(out.refusals,r=>r.entryId),refused,'every refusal of the round is returned, in input order');
    assert.deepEqual(r.starts.map(s=>s.id),starts,`cap ${cap} starts`);
    assert.deepEqual(Array.from(state.entries.keys()),kept,`cap ${cap} refused ${refused} keeps passed siblings`);
    assert.deepEqual(Array.from(state.retryIds),retry,`cap ${cap} refused ${refused} retries only the unfinished`);

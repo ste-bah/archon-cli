@@ -84,7 +84,8 @@ fn run_js(driver: &str) -> String {
         // Issue 357: the per-entry shape-repair frontier.
         "newRepairEpisode",
         "openRepairEpisode",
-        "recordRepair",
+        "PASSED_MEASURE",
+        "recordRepairs",
         "recordStep",
         "recordAttempt",
         "recordAnswered",

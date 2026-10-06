@@ -91,7 +91,7 @@ fn assert_invalid_json(result: &Value) {
     assert_eq!(out["status"], "failed", "{result}");
     assert_eq!(out["malformed"], true, "{result}");
     assert_eq!(
-        out["entryId"], "A",
+        out["refusals"][0]["entryId"], "A",
         "measured in the frontier of its entry: {result}"
     );
     let findings = out["findings"].as_array().expect("findings");
@@ -111,9 +111,9 @@ fn assert_invalid_json(result: &Value) {
 // The round-3 binding re-parsed the entry with serde and threw, failing the run.
 #[test]
 fn unpaired_surrogates_are_an_invalid_json_refusal_not_a_throw() {
-    let surrogate_body = r#"'{"id":"A","criterion":"x\\ud800y","check":{"kind":"command","command":"test -f output","cwd":"project_root"}}'"#;
+    let surrogate_body = r#"'{"id":"A","criterion":"","check":{"kind":"command","command":"x\\ud800y","cwd":"project_root"}}'"#;
     let trailing = r#"'{"id":"A","criterion":"","check":{"kind":"command","command":"test -f \\udc00","cwd":"project_root"}}'"#;
-    let reversed = r#"'{"id":"A","criterion":"\\udc00\\ud800","check":{"kind":"command","command":"x","cwd":"project_root"}}'"#;
+    let reversed = r#"'{"id":"A","criterion":"","check":{"kind":"command","command":"x","cwd":"\\udc00\\ud800"}}'"#;
     let key = r#"'{"id":"A","\\ud800":1,"criterion":"","check":{"kind":"command","command":"x","cwd":"project_root"}}'"#;
     for content in [surrogate_body, trailing, reversed, key] {
         assert_invalid_json(&author_a(content));
@@ -148,16 +148,18 @@ fn deep_nesting_is_refused_never_thrown() {
 fn huge_replies_are_validated_and_refusals_stay_bounded() {
     let huge = "'x'.repeat(8 * 1024 * 1024)";
     let accepted = author_a(&format!(
-        "JSON.stringify({{id:'A', criterion:{huge}, check}})"
+        "JSON.stringify({{id:'A', check:{{...check, command:{huge}}}}})"
     ));
     assert_eq!(accepted["error"], Value::Null, "{accepted}");
     assert_eq!(accepted["out"]["status"], "accepted", "{accepted}");
     assert_eq!(
-        accepted["entries"]["A"]["criterion"].as_str().map(str::len),
+        accepted["entries"]["A"]["check"]["command"]
+            .as_str()
+            .map(str::len),
         Some(8 * 1024 * 1024)
     );
     let refused = author_a(&format!(
-        "JSON.stringify({{id:'A', criterion:42, note:{huge}, check:{{...check, command:[{huge}]}}}})"
+        "JSON.stringify({{id:'A', gap_permitted:42, note:{huge}, check:{{...check, command:[{huge}]}}}})"
     ));
     assert_eq!(
         refused["error"],
@@ -173,7 +175,7 @@ fn huge_replies_are_validated_and_refusals_stay_bounded() {
         );
     }
     let lone = author_a(&format!(
-        r#"JSON.stringify({{id:'A', criterion:{huge} + '\ud800', check}})"#
+        r#"JSON.stringify({{id:'A', check:{{...check, command:{huge} + '\ud800'}}}})"#
     ));
     assert_invalid_json(&lone);
 }
@@ -217,7 +219,7 @@ fn binding_refuses_non_utf8_text_and_faults_only_on_misuse() {
 #[test]
 fn surrogate_reply_is_repaired_at_its_author_call() {
     let result = run(r#"
-        const bad = '{"id":"A","criterion":"\\ud800","check":{"kind":"command","command":"x","cwd":"project_root"}}';
+        const bad = '{"id":"A","check":{"kind":"command","command":"\\ud800","cwd":"project_root"}}';
         return JSON.stringify(await loop({A:[bad, valid('A')]}, {A:'a'}));
     "#);
     assert_eq!(result["error"], Value::Null, "{result}");
@@ -231,7 +233,7 @@ fn refusal_texts(contents: &str, criteria: &str, owed: &str, id: &str) -> Vec<St
         "return JSON.stringify(await author({contents}, {criteria}, {owed}));"
     ));
     assert_eq!(result["error"], Value::Null, "{result}");
-    assert_eq!(result["out"]["entryId"], id, "{result}");
+    assert_eq!(result["out"]["refusals"][0]["entryId"], id, "{result}");
     let findings = result["out"]["findings"].as_array().expect("findings");
     for finding in findings {
         // The measurement identity keeps the native freeze pointer.
@@ -250,16 +252,15 @@ fn refusal_texts(contents: &str, criteria: &str, owed: &str, id: &str) -> Vec<St
 #[test]
 fn refusal_text_names_the_entry_not_a_positional_pointer() {
     let sup = refusal_texts(
-        r#"{A:valid('A'), 'SUP-REQ-X':JSON.stringify({id:'SUP-REQ-X', check})}"#,
+        r#"{A:valid('A'), 'SUP-REQ-X':JSON.stringify({id:'SUP-REQ-X', check:{...check, cwd:null}})}"#,
         "{A:'a'}",
         "[['SUP-REQ-X','REQ-X']]",
         "SUP-REQ-X",
     );
-    assert_eq!(
-        sup,
-        [
-            "acceptance entry 'SUP-REQ-X' was refused: criterion is missing or has an invalid type or value"
-        ]
+    assert_eq!(sup.len(), 1, "{sup:?}");
+    assert!(
+        sup[0].starts_with("acceptance entry 'SUP-REQ-X' was refused: check/cwd "),
+        "{sup:?}"
     );
     let nested = refusal_texts(
         r#"{A:JSON.stringify({id:'A', criterion:'', check:{...check, command:42}})}"#,
@@ -293,34 +294,48 @@ fn refusal_text_names_the_entry_not_a_positional_pointer() {
     }
 }
 
-// F2: a sibling authored after the refusal reads the id-named feedback.
+// Round 5: a refusal is shown to the entry it names and to no sibling.
 #[test]
-fn sibling_prompt_names_the_refused_entry() {
+fn each_entry_reads_only_its_own_refusal() {
     let result = run(r#"
-        const missing = JSON.stringify({id:'A', check});
+        const missing = JSON.stringify({id:'A', check:{...check, command:42}});
         return JSON.stringify(await loop({A:[missing, valid('A')], B:[valid('B')]}, {A:'a', B:'b'}));
     "#);
     assert_eq!(result["error"], Value::Null, "{result}");
     assert_eq!(result["freezes"], 1);
     let prompts = result["prompts"].as_array().unwrap();
-    let b = prompts.iter().find(|p| p["id"] == "B").expect("B authored");
-    let task = b["task"].as_str().unwrap();
+    let task = |id: &str, nth: usize| {
+        prompts
+            .iter()
+            .filter(|p| p["id"] == id)
+            .nth(nth)
+            .expect("authored")["task"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let repair = task("A", 1);
     assert!(
-        task.contains("acceptance entry 'A' was refused: criterion is missing"),
-        "{task}"
+        repair.contains("acceptance entry 'A' was refused: check/command "),
+        "{repair}"
     );
-    assert!(!task.contains("entries/0"), "{task}");
+    let sibling = task("B", 0);
+    assert!(!sibling.contains("was refused"), "{sibling}");
+    for text in [&repair, &sibling] {
+        assert!(!text.contains("entries/0"), "{text}");
+    }
 }
 
 /// Round-1 outcome of the owed supplementary entry `SUP-REQ-X` with `fields`.
 fn supplementary(fields: &str) -> Value {
     run(&format!(
-        "return JSON.stringify(await author({{A:valid('A'), 'SUP-REQ-X':JSON.stringify({{id:'SUP-REQ-X', criterion:'', check, {fields}}})}}, {{A:'a'}}, [['SUP-REQ-X','REQ-X']]));"
+        "return JSON.stringify(await author({{A:valid('A'), 'SUP-REQ-X':JSON.stringify({{id:'SUP-REQ-X', check, {fields}}})}}, {{A:'a'}}, [['SUP-REQ-X','REQ-X']]));"
     ))
 }
 
-// F4: a supplementary entry's covers and gap_permitted are host-owned and set
-// before validation, so a reply the host would overwrite costs no repair.
+// F4 and round 5 (P3-A): an entry's criterion, and a supplementary entry's
+// covers and gap_permitted, are host-owned and set before validation, so a
+// reply the host would overwrite costs no repair.
 #[test]
 fn host_owned_fields_are_set_before_validation() {
     for (fields, covers) in [
@@ -337,6 +352,18 @@ fn host_owned_fields_are_set_before_validation() {
         let entry = &result["entries"]["SUP-REQ-X"];
         assert_eq!(entry["covers"], covers, "{fields}");
         assert_eq!(entry["gap_permitted"], false, "{fields}");
+        assert_eq!(
+            entry["criterion"], "owed",
+            "{fields}: the owed requirement text"
+        );
+    }
+    // The R8 shape: no criterion, null, a number, or model text. Accepted on
+    // the first reply with the host criterion (the validator would refuse the
+    // first three, as freeze did before the host stamped it).
+    for criterion in ["", "criterion:null,", "criterion:42,", "criterion:'model',"] {
+        let result = author_a(&format!("JSON.stringify({{id:'A', {criterion} check}})"));
+        assert_eq!(result["out"]["status"], "accepted", "{criterion}: {result}");
+        assert_eq!(result["entries"]["A"]["criterion"], "a", "{criterion}");
     }
     // A field the host does not own is still validated as authored.
     let own = author_a(r#"JSON.stringify({id:'A', criterion:'', check, gap_permitted:'false'})"#);
@@ -414,10 +441,11 @@ fn native_author_shape_repairs_decrease_five_to_zero_without_pause() {
                     agent: async () => {{
                         if (++calls > 6) throw Error('bounded test exhausted');
                         return {{status:'accepted',stopReason:'end_turn',content:JSON.stringify({{
-                            id:'A',criterion:calls >= 2 ? '' : null,
-                            check:{{kind:'command',command:calls >= 3 ? 'test -f output' : 42,
-                                cwd:calls >= 4 ? 'project_root' : null}},
-                            gap_permitted:calls >= 5 ? false : 'false',covers:calls >= 6 ? [] : [42]
+                            id:'A',
+                            check:{{kind:'command',command:calls >= 2 ? 'test -f output' : 42,
+                                cwd:calls >= 3 ? 'project_root' : null}},
+                            gap_permitted:calls >= 4 ? false : 'false',
+                            covers:calls >= 6 ? [] : calls >= 5 ? ['REQ-Y', null] : [42, null]
                         }})}};
                     }},
                     hostCommand: async () => {{freezes++; return {{publicationReceipt:{{call_id:'freeze'}},

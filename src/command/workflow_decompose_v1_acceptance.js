@@ -52,12 +52,18 @@ function owedSupplementary() {
   return acceptanceRepairIds.owed;
 }
 
-// A supplementary check always covers exactly the requirement it is owed for
-// and never permits a gap: the host owns both fields and sets them before the
-// entry is validated, so the validator judges the entry that is kept and a
-// value the host overwrites never costs a repair (Issue 357).
-function setHostOwnedFields(entry) {
+// The host owns an entry's criterion: freeze stamps the exact acceptance
+// criterion over it, and a supplementary check's requirement text
+// (workflow_acceptance_preflight.rs). A supplementary check also always
+// covers exactly the requirement it is owed for and never permits a gap. The
+// host sets these fields before the entry is validated, so the validator
+// judges the entry that is kept and a value the host overwrites never costs a
+// repair (Issue 357). Every authored id is a criterion or an owed check, so
+// the host value is always known here.
+function setHostOwnedFields(entry, criteria) {
   const sup = owedSupplementary().get(entry.id);
+  if (Object.prototype.hasOwnProperty.call(criteria, entry.id)) entry.criterion = criteria[entry.id];
+  else if (sup) entry.criterion = sup.text;
   if (sup) {
     const covers = Array.isArray(entry.covers) ? entry.covers.filter((c) => typeof c === "string") : [];
     entry.covers = [sup.requirement, ...covers.filter((c) => c !== sup.requirement)];
@@ -105,12 +111,16 @@ function priorText(prior) {
 // id stride so replay of already-recorded rounds uses the same namespace.
 async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   state.roundCalls += 1;
+  // Each entry reads only its own shape refusal: a sibling's names another
+  // entry and is not this entry's repair.
+  const refused = state.refusals && state.refusals.get(id);
+  const own = refused ? `\nThe host refused this entry's previous reply. Repair exactly these findings:\n- ${refused.join("\n- ")}` : "";
   const result = await w.agent(`acceptance-author-${id}-${round * STALL_ATTEMPTS + 1}`, {
-    task: `${prompt}\nAuthor ONLY entry ${id}: ${text}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\n${priorText(prior)}`,
+    task: `${prompt}\nAuthor ONLY entry ${id}: ${text}${own}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\n${priorText(prior)}`,
     tier: "planner", resultMode: "rawOutcome"
   });
   if (result.status !== "failed") state.roundAnswered += 1;
-  if (result.dry_run === true) return {entry:setHostOwnedFields({id})};
+  if (result.dry_run === true) return {entry:setHostOwnedFields({id}, criteria)};
   if (result.status === "failed") return {failure:result};
   if (result.stopReason === "end_turn" && result.content) {
     let entry;
@@ -118,7 +128,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
       entry = unwrapEntry(JSON.parse(extractJsonObject(result.content)), id);
     } catch (_) { /* This answered call made no progress. */ }
     if (entry && entry.id === id) {
-      setHostOwnedFields(entry);
+      setHostOwnedFields(entry, criteria);
       let serialized;
       // QuickJS bounds JSON.stringify by its stack as it bounds JSON.parse: a
       // reply nested past it is no entry, like one that does not parse.
@@ -195,11 +205,23 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
       state.entries.set(entry.id, entry);
     }
   }
+  // Every refusal of the round is returned and measured, each against its own
+  // entry's best, and each entry is shown only its own refusal next round.
+  const refusals = settled.filter(result => result && result.status === "fulfilled" && result.value.failure?.findings)
+    .map(result => ({entryId:result.value.failure.entryId, findings:result.value.failure.findings}));
+  state.roundPassed = pending.filter((_, index) => succeeded(settled[index]));
+  state.refusals = state.refusals || new Map();
+  for (const id of state.roundPassed) state.refusals.delete(id);
+  for (const refusal of refusals) state.refusals.set(refusal.entryId, refusal.findings.map(progressText));
   // A thrown call (a pause or cancel the host observed, or a host error)
   // outranks a failed reply at any index: returned as a failed value it would
   // be retried as an operational failure and the stop would be lost.
   const rejected = settled.find(result => result && result.status === "rejected");
   if (rejected) throw rejected.reason;
+  // Issue 362: a clean round leaves nothing to re-author. Until the gate
+  // names entries again, a freeze retried after an operational outage reuses
+  // these entries and makes no author call.
+  if (stop < 0) state.retryIds = new Set();
   if (stop < 0) return {status:"accepted",stopReason:"end_turn",content:JSON.stringify({
     entries: ids.map(id => state.entries.get(id)),
     supplementary: owed.map(id => state.entries.get(id)).filter(Boolean)
@@ -209,7 +231,9 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   if (!first) throw new Error(`acceptance entry ${pending[stop]} was never authored`);
   // The failures and the indices never started are retried.
   state.retryIds = new Set(pending.filter((_, index) => !succeeded(settled[index])));
-  return first.value.failure;
+  if (refusals.length === 0) return first.value.failure;
+  const findings = refusals.flatMap(refusal => refusal.findings);
+  return {status:"failed", malformed:true, refusals, findings, summary:findings.map(progressText).join("; ")};
 }
 
 // Pre-judge validation can reject a candidate before any receipt exists. Its

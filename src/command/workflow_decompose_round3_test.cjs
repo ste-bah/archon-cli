@@ -68,7 +68,8 @@ async function partial(operational, replacing) {
 }
 async function unchangedReplacement() {
   const ctx = context({ A: 'a', B: 'b' });
-  const state = { entries: new Map([['A', { id: 'A', version: 0 }]]), retryIds: null };
+  // A kept entry always carries its host-owned criterion (Issue 357).
+  const state = { entries: new Map([['A', { id: 'A', version: 0, criterion: 'a' }]]), retryIds: null };
   const w = { agent: async id => id.includes('-A-')
     ? answer('{"version":0,"id":"A"}') : answer('malformed') };
   await ctx.authorAcceptanceEntries(w, 'author', 1, state);

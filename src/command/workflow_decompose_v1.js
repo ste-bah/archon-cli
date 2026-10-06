@@ -313,11 +313,11 @@ async function authorCandidate(w, policy) {
     // rewrite alone clears no defect; every failure shares the same window.
     const advanced = (authorState.added || 0) > addedBefore;
     if (authored.status === "failed") {
-      if (authored.findings) {
-        // An entry shape refusal is measured in its own repair frontier.
-        recordRepair(progress, call, authored.entryId, authored.findings, !measuredReplies, advanced);
+      if (authored.refusals) {
+        // Each refused entry is measured in its own repair frontier and reads
+        // its own refusal; the shared feedback stays the gate's findings.
+        recordRepairs(progress, call, authored.refusals, authorState.roundPassed, !measuredReplies, advanced);
         lastFindings = authored.findings.map(progressText);
-        feedback = lastFindings.slice();
       } else if (authored.malformed) {
         recordAnswered(progress, call, "entries", advanced, !measuredReplies);
         lastFindings = [authored.summary || "malformed replies"];

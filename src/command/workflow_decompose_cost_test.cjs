@@ -63,52 +63,76 @@ async function structuralRouting() {
  assert.equal(route("gap_policy disagrees; check 'A': invalid"),null);
  assert.equal(ctx.acceptanceRepairIds([{text:"check 'A': invalid"},{text:"missing acceptance id"}],known,false),null);
 }
-async function invalidAuthor(value, envelope = false) {
+// Issue 357: the stub refuses what the native validator refuses for an
+// author-owned field (check/command); the host-owned criterion is set first.
+const commandRefusal=entry=>JSON.stringify(typeof entry.check?.command === 'string' ? [] : [{
+ text:"acceptance entry 'A' was refused: check/command is missing or has an invalid type or value",
+ deterministic_defect:{provenance:'host_validator',code:'invalid_candidate_shape',
+  subject:'entries/0/check/command',location:'shape',stage:'shape'},
+}]);
+async function invalidAuthor(command, envelope = false) {
  const ctx={args:{acceptanceCriteria:{A:'a'},authorMaxParallelism:1,gateMode:'enforce'}};
- const invalid={...value};let validations=0;
+ let validations=0;
  // Mock only the native boundary. The Rust shape corpus tests the validator;
  // these tests prove the author uses its refusal rather than accepting an id.
- ctx.__archonValidateAcceptanceEntry = (_, serialized) => {
-  validations++;
-  const entry=JSON.parse(serialized);
-  return JSON.stringify(typeof entry.criterion === 'string' ? [] : [{
-   text:'candidate artifact was refused: criterion is missing or has an invalid type or value',
-   deterministic_defect:{provenance:'host_validator',code:'invalid_candidate_shape',
-    subject:'entries/0/criterion',location:'shape',stage:'shape'},
-  }]);
- };
+ ctx.__archonValidateAcceptanceEntry = (_, serialized) => {validations++; return commandRefusal(JSON.parse(serialized));};
  vm.createContext(ctx);vm.runInContext(scriptSource(),ctx);
  const state={entries:new Map(),retryIds:null};let calls=0;
- const w={agent:async(_, options)=>{
+ const check={kind:'command',cwd:'project_root',...command};
+ const w={agent:async()=>{
   calls++;
-  const entry={id:'A',check:{kind:'command',command:'test -f output',cwd:'project_root'},...value};
+  const entry={id:'A',criterion:'',check};
   return {status:'accepted',stopReason:'end_turn',content:JSON.stringify(envelope?{acceptance:[entry]}:entry)};
  }};
  const result=await ctx.authorAcceptanceEntries(w,'author',1,state);
  assert.equal(result.status,'failed','invalid shape is refused before freeze');
  assert.equal(result.malformed,true);
- assert.match(result.summary,/criterion/);
+ assert.match(result.summary,/check\/command/);
  assert.equal(state.entries.size,0);
  assert.deepEqual([...state.retryIds],['A']);
  assert.equal(validations,1,'exactly one host shape validation at author acceptance');
- value.criterion=''; // Empty host-owned placeholder is shape-valid at freeze.
+ check.command='test -f output';
  assert.equal((await ctx.authorAcceptanceEntries(w,'repair',2,state)).status,'accepted');
  assert.equal(calls,2);
  const prompts=[];let freezes=0;
  await ctx.authorCandidate({agent:async(_,options)=>{
   prompts.push(options.task);
-  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:'A',check:{kind:'command',command:'test -f output',cwd:'project_root'},...(prompts.length===1?invalid:{criterion:''})})};
+  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:'A',criterion:'',check:{kind:'command',cwd:'project_root',...(prompts.length===1?command:{command:'test -f output'})}})};
  },hostCommand:async()=>{
   freezes++;
   return {publicationReceipt:{call_id:'freeze'},postcondition:{satisfied:true},gateEnvelope:{policy_findings:[]}};
  }}, {phase:'acceptance',author:ctx.authorAcceptanceEntries,capability:'freeze-acceptance',prompt:()=> 'author',retryScopes:new Set(['candidate_artifact'])});
  assert.equal(prompts.length,2,'repair stays at its author call');
- assert.match(prompts[1],/criterion is missing or has an invalid type or value/);
+ assert.match(prompts[1],/check\/command is missing or has an invalid type or value/);
  assert.equal(freezes,1,'only the repaired entry reaches freeze');
+ // A clean round leaves nothing to author (Issue 362); name A to re-author it.
+ state.retryIds=new Set(['A']);
  ctx.__archonValidateAcceptanceEntry = () => {throw new Error('validator fault');};
  await assert.rejects(ctx.authorAcceptanceEntries(w,'repair',3,state),/validator fault/);
  delete ctx.__archonValidateAcceptanceEntry;
  await assert.rejects(ctx.authorAcceptanceEntries(w,'repair',4,state),/__archonValidateAcceptanceEntry is not defined/);
+}
+// Issue 357 round 5 (P3-A): the host owns the criterion and sets it before
+// validation, so a missing or mistyped model criterion costs no repair call.
+async function hostCriterion(value, envelope = false) {
+ const ctx={args:{acceptanceCriteria:{A:'the host criterion'},authorMaxParallelism:1,gateMode:'enforce'}};
+ const seen=[];
+ ctx.__archonValidateAcceptanceEntry = (_, serialized) => {
+  const entry=JSON.parse(serialized);seen.push(entry.criterion);
+  return JSON.stringify(typeof entry.criterion === 'string' ? [] : [{text:'criterion invalid',
+   deterministic_defect:{provenance:'host_validator',code:'invalid_candidate_shape',subject:'entries/0/criterion',location:'shape',stage:'shape'}}]);
+ };
+ vm.createContext(ctx);vm.runInContext(scriptSource(),ctx);
+ const state={entries:new Map(),retryIds:null};let calls=0;
+ const w={agent:async()=>{
+  calls++;
+  const entry={id:'A',check:{kind:'command',command:'test -f output',cwd:'project_root'},...value};
+  return {status:'accepted',stopReason:'end_turn',content:JSON.stringify(envelope?{acceptance:[entry]}:entry)};
+ }};
+ assert.equal((await ctx.authorAcceptanceEntries(w,'author',1,state)).status,'accepted');
+ assert.equal(calls,1,'no repair call for a host-owned field');
+ assert.deepEqual(seen,['the host criterion'],'the validator judges the host criterion');
+ assert.equal(state.entries.get('A').criterion,'the host criterion');
 }
 async function supplementaryPointer() {
  const ctx={args:{acceptanceCriteria:{A:'a'},authorMaxParallelism:1},__archonValidateAcceptanceEntry:()=> '[]'};
@@ -134,8 +158,11 @@ async function supplementaryPointer() {
 const tests=[
  ['existing selective retry',()=>run()],['existing global retry',()=>run(true)],
  ['existing structural retry',()=>run(false,true)],['failed entry',failedEntry],['structural routing',structuralRouting],
- ['author missing criterion',()=>invalidAuthor({})],['author null criterion',()=>invalidAuthor({criterion:null})],
- ['author numeric criterion in wrapper',()=>invalidAuthor({criterion:42},true)],
+ ['author missing command',()=>invalidAuthor({})],['author null command',()=>invalidAuthor({command:null})],
+ ['author numeric command in wrapper',()=>invalidAuthor({command:42},true)],
+ ['host criterion: missing',()=>hostCriterion({})],['host criterion: null',()=>hostCriterion({criterion:null})],
+ ['host criterion: numeric in wrapper',()=>hostCriterion({criterion:42},true)],
+ ['host criterion: model text replaced',()=>hostCriterion({criterion:'model text'})],
  ['entries pointer retry and unlocated full retry',async()=>{await run(false,false,'candidate artifact was refused: entries/4/criterion is missing or has an invalid type or value');await run(true,false,'candidate artifact was refused: invalid document');}],
  ['nested entries pointer retry',()=>run(false,false,'candidate artifact was refused: /entries/4/check/cwd is invalid')],
  ['supplementary pointer retry',supplementaryPointer],

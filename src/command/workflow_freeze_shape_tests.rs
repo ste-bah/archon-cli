@@ -151,7 +151,6 @@ fn assert_author_shape_refusal(entry: Value) {
             const entry = {entry};
             const w = {{agent: async () => ({{status: 'accepted', stopReason: 'end_turn', content: JSON.stringify(entry)}})}};
             const refused = await authorOne(w, 'author', 1, 'A', 'a', [], {{A:'a'}}, {{roundCalls:0, roundAnswered:0}});
-            entry.criterion = '';
             entry.check = {{kind:'command', command:'test -f output', cwd:'project_root'}};
             const repaired = await authorOne(w, 'repair', 2, 'A', 'a', [], {{A:'a'}}, {{roundCalls:0, roundAnswered:0}});
             return JSON.stringify({{refused, repaired}});
@@ -164,28 +163,31 @@ fn assert_author_shape_refusal(entry: Value) {
         assert_eq!(result["refused"]["failure"]["entryId"], "A", "{result}");
         let summary = result["refused"]["failure"]["summary"].as_str().unwrap();
         for message in expected { assert!(summary.contains(&message), "{summary}"); }
-        assert_eq!(result["repaired"]["entry"]["criterion"], "", "{result}");
+        // The host-owned criterion is stamped, never repaired (round 5).
+        assert_eq!(result["repaired"]["entry"]["criterion"], "a", "{result}");
     });
 }
 
+// Issue 357 round 5: criterion is host-owned (stamped before validation), so
+// these drive an author-owned field; the expected texts use the host value.
 #[test]
-fn acceptance_author_refuses_missing_criterion_with_freeze_validator() {
+fn acceptance_author_refuses_missing_command_with_freeze_validator() {
     assert_author_shape_refusal(
-        json!({"id":"A", "check":{"kind":"command", "command":"test -f output", "cwd":"project_root"}}),
+        json!({"id":"A", "criterion":"a", "check":{"kind":"command", "cwd":"project_root"}}),
     );
 }
 
 #[test]
-fn acceptance_author_refuses_null_criterion_with_freeze_validator() {
+fn acceptance_author_refuses_null_command_with_freeze_validator() {
     assert_author_shape_refusal(
-        json!({"id":"A", "criterion":null, "check":{"kind":"command", "command":"test -f output", "cwd":"project_root"}}),
+        json!({"id":"A", "criterion":"a", "check":{"kind":"command", "command":null, "cwd":"project_root"}}),
     );
 }
 
 #[test]
-fn acceptance_author_refuses_numeric_criterion_with_freeze_validator() {
+fn acceptance_author_refuses_numeric_command_with_freeze_validator() {
     assert_author_shape_refusal(
-        json!({"id":"A", "criterion":42, "check":{"kind":"command", "command":"test -f output", "cwd":"project_root"}}),
+        json!({"id":"A", "criterion":"a", "check":{"kind":"command", "command":42, "cwd":"project_root"}}),
     );
 }
 
@@ -207,10 +209,11 @@ fn native_refuted_entry_shape_repairs_decrease_five_to_zero_without_pause() {
                         if (++calls > 12) throw Error('bounded test exhausted');
                         const r = calls === 1 ? 6 : calls - 1;
                         return {{status:'accepted',stopReason:'end_turn',content:JSON.stringify({{
-                            id:'A',criterion:r >= 2 ? '' : null,
-                            check:{{kind:'command',command:r >= 3 ? 'test -f output' : 42,
-                                cwd:r >= 4 ? 'project_root' : null}},
-                            gap_permitted:r >= 5 ? false : 'false',covers:r >= 6 ? [] : [42]
+                            id:'A',
+                            check:{{kind:'command',command:r >= 2 ? 'test -f output' : 42,
+                                cwd:r >= 3 ? 'project_root' : null}},
+                            gap_permitted:r >= 4 ? false : 'false',
+                            covers:r >= 6 ? [] : r >= 5 ? ['REQ-Y', null] : [42, null]
                         }})}};
                     }},
                     hostCommand: async () => {{

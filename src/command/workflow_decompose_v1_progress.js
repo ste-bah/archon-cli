@@ -185,20 +185,48 @@ function recordAttempt(progress, call, findings, answered = true) {
   });
 }
 
-// Records an entry the author step refused for its shape, measured against
-// that entry's best in the current repair episode. A strictly better measure
-// restores the window to where the episode opened; `advanced` (a previously
-// missing entry was completed) is progress as in recordAnswered.
-function recordRepair(progress, call, subject, findings, answered = true, advanced = false) {
-  if (typeof subject !== "string" || subject.length === 0) throw new Error("an entry shape refusal names no entry");
+// The measure of an entry that passed the author step: better than any refusal.
+const PASSED_MEASURE = { tier: JUDGED_TIER, stage: PASSED_STAGE, count: 0 };
+
+// Records one author round that refused entries for their shape. Each refused
+// entry is measured against its own best in the current repair episode (a
+// first measure beats nothing), and each measured entry that passed this round
+// beats its best. The round is progress when at least one entry beat its own
+// best. An entry worse than its best does not cancel another entry's
+// progress: each best only improves, over a finite measure (tier, stage, a
+// defect count >= 0; a pass is terminal), so an episode holds finitely many
+// improvements and the loop stays bounded, while a stuck or worse entry keeps
+// reading its own refusal. Progress restores the window to where the episode
+// opened; `advanced` (a previously missing entry was completed) is progress
+// as in recordAnswered. `worse` is kept per entry as evidence.
+function recordRepairs(progress, call, refusals, passed = [], answered = true, advanced = false) {
   if (answered) progress.answered += 1;
-  const measure = attemptMeasure(findings);
   const episode = progress.repair;
-  const better = isBetter(measure, episode.bests.get(subject));
-  if (better) episode.bests.set(subject, measure);
+  let better = false;
+  const entries = [], measures = [];
+  for (const { entryId, findings } of refusals) {
+    if (typeof entryId !== "string" || entryId.length === 0) throw new Error("an entry shape refusal names no entry");
+    const measure = attemptMeasure(findings);
+    const best = episode.bests.get(entryId);
+    const improved = isBetter(measure, best);
+    const regressed = Boolean(best) && isBetter(best, measure);
+    if (improved) episode.bests.set(entryId, measure);
+    better = better || improved;
+    measures.push(measure);
+    entries.push({ subject: entryId, findings: measure.count, progress: improved, worse: regressed });
+  }
+  for (const id of passed) {
+    if (!episode.bests.has(id) || !isBetter(PASSED_MEASURE, episode.bests.get(id))) continue;
+    episode.bests.set(id, PASSED_MEASURE);
+    better = true;
+    entries.push({ subject: id, findings: 0, progress: true, worse: false });
+  }
+  const tier = Math.min(...measures.map(measure => measure.tier));
+  const stage = Math.min(...measures.map(measure => measure.stage));
   const entry = {
-    call, kind: ["packaging", "refused", "judged"][measure.tier], subject,
-    stage: DEFECT_STAGES[measure.stage] || "passed", findings: measure.count, progress: better || advanced
+    call, kind: ["packaging", "refused", "judged"][tier], subject: refusals.map(refusal => refusal.entryId).join(", "),
+    stage: DEFECT_STAGES[stage] || "passed", findings: measures.reduce((sum, measure) => sum + measure.count, 0),
+    progress: better || advanced, entries
   };
   if (advanced || !better) return recordStep(progress, entry);
   progress.stalled = Math.min(progress.stalled, episode.stalled);
