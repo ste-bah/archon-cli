@@ -14,6 +14,15 @@
 // free-text findings are not measured at all: they neither credit nor block.
 // A stall PAUSES the run and resume opens a fresh window while preserving the
 // best measure reconstructed by replay.
+//
+// Issue 357: an entry the author step refuses for its shape is measured in its
+// own repair frontier, not against the candidate best: a judged candidate is a
+// higher tier than any entry shape refusal, so every shape repair after a
+// refutation used to measure as a regression. Each candidate measure opens a
+// repair episode (per-entry bests, and the window as that measure left it). An
+// entry's strictly better shape measure cancels only the no-progress attempts
+// of its episode; attempts before the episode still count, so a candidate
+// that keeps coming back refuted still pauses.
 
 // Consecutive attempts without progress that end a loop: every kind counts,
 // an outage, an incomplete reply and a judged repeat alike.
@@ -126,6 +135,7 @@ function findingKey(finding) {
 function newProgress(_seed) {
   return {
     best: null,
+    repair: newRepairEpisode(0, 0),
     history: [],
     stalled: 0,
     stalledOperational: 0,
@@ -134,10 +144,22 @@ function newProgress(_seed) {
   };
 }
 
+function newRepairEpisode(stalled, stalledOperational) {
+  return { bests: new Map(), stalled, stalledOperational };
+}
+
+// Opens the repair episode that follows a measured candidate.
+function openRepairEpisode(progress) {
+  progress.repair = newRepairEpisode(progress.stalled, progress.stalledOperational);
+}
+
 function recordStep(progress, entry) {
   if (entry.progress) {
     progress.stalled = 0;
     progress.stalledOperational = 0;
+    // Real progress empties the window, so no episode may restore it.
+    progress.repair.stalled = 0;
+    progress.repair.stalledOperational = 0;
   } else {
     progress.stalled += 1;
     if (entry.kind === "operational") progress.stalledOperational += 1;
@@ -161,6 +183,28 @@ function recordAttempt(progress, call, findings, answered = true) {
     findings: measure.count,
     progress: better
   });
+}
+
+// Records an entry the author step refused for its shape, measured against
+// that entry's best in the current repair episode. A strictly better measure
+// restores the window to where the episode opened; `advanced` (a previously
+// missing entry was completed) is progress as in recordAnswered.
+function recordRepair(progress, call, subject, findings, answered = true, advanced = false) {
+  if (typeof subject !== "string" || subject.length === 0) throw new Error("an entry shape refusal names no entry");
+  if (answered) progress.answered += 1;
+  const measure = attemptMeasure(findings);
+  const episode = progress.repair;
+  const better = isBetter(measure, episode.bests.get(subject));
+  if (better) episode.bests.set(subject, measure);
+  const entry = {
+    call, kind: ["packaging", "refused", "judged"][measure.tier], subject,
+    stage: DEFECT_STAGES[measure.stage] || "passed", findings: measure.count, progress: better || advanced
+  };
+  if (advanced || !better) return recordStep(progress, entry);
+  progress.stalled = Math.min(progress.stalled, episode.stalled);
+  progress.stalledOperational = Math.min(progress.stalledOperational, episode.stalledOperational);
+  progress.history.push(entry);
+  return true;
 }
 
 // Records an attempt the provider answered but nothing measured: an
@@ -233,6 +277,9 @@ async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra
   await pauseLoop(w, subject, { ...loopEvidence(progress, reason, lastFindings), ...(extra || {}) });
   progress.stalled = 0;
   progress.stalledOperational = 0;
+  // The fresh window is also the episode's floor; its per-entry bests stay.
+  progress.repair.stalled = 0;
+  progress.repair.stalledOperational = 0;
 }
 
 // Issue 288: what an author prompt shows of earlier attempts. Every attempt's

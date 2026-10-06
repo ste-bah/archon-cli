@@ -467,6 +467,8 @@ fn the_staged_set_gate_runs_on_its_catalog_wall_clock() {
 /// (eb67988b7) before this change. The script digest moved twice since, by
 /// design: Issue 261 changes the fixed decomposition script, and Issue 288
 /// bounds its author prompts (a run launched on an older script cannot resume).
+/// Issue 357 moves it again: acceptance entries are shape-validated at their
+/// author call and a refused entry is measured in its own repair frontier.
 #[test]
 fn the_catalog_and_script_digests_are_unchanged() {
     let catalog = crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("rev")
@@ -479,7 +481,7 @@ fn the_catalog_and_script_digests_are_unchanged() {
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "5564154c6205773b215bb3b54b390c981166e41e3384cfdd53b7f13b4b31f5a4"
+        "411fb902652790e3da9948d85376b94cadbd2c23ac21cad771ad2892ea7d9e08"
     );
 }
 

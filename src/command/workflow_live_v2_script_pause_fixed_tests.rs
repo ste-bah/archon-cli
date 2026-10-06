@@ -44,7 +44,7 @@ impl WorkflowLlmClient for CountingLlm {
             ));
         }
         let content = if request.task.contains("Author ONLY entry AC-X-001") {
-            serde_json::json!({"id": "AC-X-001"}).to_string()
+            super::super::authored_entry(serde_json::json!({"id": "AC-X-001"}))
         } else if self.repeat_body.load(Ordering::SeqCst)
             && request.task.contains("Author the complete TASK body")
         {

@@ -41,7 +41,7 @@ impl WorkflowLlmClient for BatchLlm {
             .and_then(|line| line.split(':').next())
             .unwrap_or("unused");
         Ok(WorkflowAgentOutcome {
-            content: serde_json::json!({"id":id}).to_string(),
+            content: super::super::authored_entry(serde_json::json!({"id":id})),
             stop_reason: Some("end_turn".into()),
             ..Default::default()
         })
@@ -217,7 +217,7 @@ impl WorkflowLlmClient for WindowLlm {
             .unwrap()
             .push(("end", id.clone(), String::new()));
         Ok(WorkflowAgentOutcome {
-            content: serde_json::json!({"id":id}).to_string(),
+            content: super::super::authored_entry(serde_json::json!({"id":id})),
             stop_reason: Some("end_turn".into()),
             ..Default::default()
         })

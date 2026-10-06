@@ -1,4 +1,5 @@
-// Issue 357 round 2: author shape repairs use the freeze progress measure.
+// Issue 357 rounds 2-3: author shape repairs use the freeze progress measure,
+// within the repair episode of the entry they repair.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -113,24 +114,76 @@ async function mixed() {
   assert.deepEqual(Array.from(out.pauses[0].progress_history, step => step.progress), [true,false,false,false]);
 }
 
-// A native shape refusal must not credit a lower tier after the freeze reached
-// a judge. This is the same tier ordering as the parent freeze path.
-async function afterJudge() {
-  const ctx = {args:{acceptanceCriteria:{A:'a'},authorMaxParallelism:1,gateMode:'enforce'}};
-  let calls = 0, gates = 0, paused;
-  ctx.__archonValidateAcceptanceEntry = () => JSON.stringify(calls === 1 ? [] : defects(7 - calls));
+// Round 3: a judged refutation opens a repair episode for each refuted entry.
+// Version 1 of every entry is shape-valid and reaches the judge; `sequence(n)`
+// gives the shape defects of repair n. The judge refutes `ids` on the first
+// freeze, or on every freeze when `always`.
+async function refuted(sequence, {ids = ['A'], always = false, resumed = false} = {}) {
+  const ctx = {args:{acceptanceCriteria:Object.fromEntries(ids.map(id => [id, id])),authorMaxParallelism:1,gateMode:'enforce'},
+    __archonValidateAcceptanceEntry: serialized => {
+      const entry = JSON.parse(serialized);
+      return JSON.stringify(entry.version === 1 ? [] : sequence(entry.version - 1));
+    }};
   vm.createContext(ctx); vm.runInContext(source, ctx);
-  await assert.rejects(ctx.authorCandidate({
-    agent: async () => {calls++; return accepted({id:'A',criterion:''});},
-    hostCommand: async () => {gates++; return {...clean(),gateEnvelope:{policy_findings:[{
-      text:"check 'A': repair",subject:'A',remediation_scope:'candidate_artifact'}]}};},
-    pause: async (_, evidence) => {paused = evidence; throw new Error('paused');},
-  }, {phase:'acceptance',prompt:()=> 'author',author:ctx.authorAcceptanceEntries,
-    capability:'freeze-acceptance',retryScopes:new Set(['candidate_artifact'])}), /paused/);
-  assert.equal(calls, 4);
-  assert.equal(gates, 1);
-  assert.deepEqual(Array.from(paused.progress_history, step => [step.kind,step.stage,step.progress]),
-    [['judged','passed',true],['refused','shape',false],['refused','shape',false],['refused','shape',false]]);
+  let calls = 0, gates = 0, error;
+  const versions = new Map(), pauses = [];
+  try {
+    await ctx.authorCandidate({
+      agent: async (_, options) => {
+        if (++calls > 60) throw new Error('bounded test exhausted');
+        const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
+        const version = (versions.get(id) || 0) + 1; versions.set(id, version);
+        return accepted({id,version,criterion:'c'});
+      },
+      hostCommand: async () => {
+        gates++;
+        if (gates > 1 && !always) return clean();
+        return {...clean(),gateEnvelope:{policy_findings:ids.map(id => ({
+          text:`check '${id}' was refuted: repair`,subject:id,remediation_scope:'candidate_artifact'}))}};
+      },
+      pause: async (_, evidence) => {
+        pauses.push(evidence);
+        if (!resumed || pauses.length > 1) throw new Error('paused');
+      },
+    }, {phase:'acceptance',prompt:()=> 'author',author:ctx.authorAcceptanceEntries,
+      capability:'freeze-acceptance',retryScopes:new Set(['candidate_artifact'])});
+  } catch (e) { error = e.message; }
+  const steps = n => Array.from(pauses[n].progress_history, step => [step.kind,step.stage,step.findings,step.progress]);
+  return {calls,gates,error,pauses,steps};
+}
+const fiveToZero = n => defects(Math.max(6 - n, 0));
+const judged = (progress) => ['judged','passed',0,progress];
+const refused = (count, progress) => ['refused','shape',count,progress];
+
+async function afterJudgeShrinks() {
+  const out = await refuted(fiveToZero);
+  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
+  assert.equal(out.calls, 7, 'one judged candidate, then 5 -> 4 -> 3 -> 2 -> 1 -> 0');
+  assert.equal(out.gates, 2, 'only the shape-valid repair reaches the second freeze');
+}
+
+async function afterJudgeTwoEntries() {
+  const out = await refuted(fiveToZero, {ids:['A','B']});
+  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
+  assert.equal(out.calls, 14, 'each refuted entry has its own frontier: A then B repair 5 -> 0');
+  assert.equal(out.gates, 2);
+}
+
+async function afterJudgeStalls(sequence, history, resumed = false) {
+  const out = await refuted(sequence, {resumed});
+  assert.equal(out.error, 'paused', 'a repair that stops improving pauses');
+  assert.equal(out.gates, 1, 'no false publication');
+  assert.equal(out.pauses[0].reason, 'no_progress');
+  assert.deepEqual(out.steps(out.pauses.length - 1), history);
+}
+
+async function refutedLoop() {
+  const out = await refuted(n => defects(2 - (n - 1) % 3), {always:true}); // each episode 2 -> 1 -> 0
+  assert.equal(out.error, 'paused', 'repair credit never erases the repeated refutations');
+  assert.equal(out.gates, 4);
+  assert.equal(out.calls, 10);
+  const episode = [refused(2,true),refused(1,true)];
+  assert.deepEqual(out.steps(0), [judged(true),...episode,judged(false),...episode,judged(false),...episode,judged(false)]);
 }
 
 const tests = [
@@ -140,7 +193,16 @@ const tests = [
   ['shape repairs continue across missing siblings',siblings],
   ...['same','reworded','duplicates'].map(kind => [`unchanged shape ${kind} pauses`,()=>unchanged(kind)]),
   ['shape oscillation preserves best',oscillating],['shape resume preserves best',resume],
-  ['shape and operational failures share a window',mixed],['shape cannot regress judged tier',afterJudge],
+  ['shape and operational failures share a window',mixed],
+  ['refuted entry shape repairs decrease 5 to 0',afterJudgeShrinks],
+  ['two refuted entries each repair 5 to 0',afterJudgeTwoEntries],
+  ['refuted entry unchanged shape pauses',()=>afterJudgeStalls(() => defects(2),
+    [judged(true),refused(2,true),refused(2,false),refused(2,false),refused(2,false)])],
+  ['refuted entry oscillating shape pauses',()=>afterJudgeStalls(n => defects(n % 2 ? 3 : 2),
+    [judged(true),refused(3,true),refused(2,true),refused(3,false),refused(2,false),refused(3,false)])],
+  ['refuted entry resume preserves its best',()=>afterJudgeStalls(() => defects(2),
+    [judged(true),refused(2,true),...Array(6).fill(refused(2,false))], true)],
+  ['repeated refutations pause despite shape repairs',refutedLoop],
 ];
 module.exports = tests;
 if (require.main === module) (async () => {

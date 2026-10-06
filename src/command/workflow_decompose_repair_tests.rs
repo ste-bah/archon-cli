@@ -5,11 +5,31 @@
 
 use super::FIXED_SCRIPT_SOURCE;
 
+/// The embedded script, or the same files under `ARCHON_TEST_SCRIPT_ROOT` (the
+/// override the Node suites honour), so a script can be tested before it is
+/// embedded and an old script replayed to show a test fails before its fix.
+fn script_source() -> std::borrow::Cow<'static, str> {
+    let Ok(root) = std::env::var("ARCHON_TEST_SCRIPT_ROOT") else {
+        return FIXED_SCRIPT_SOURCE.into();
+    };
+    [
+        "workflow_decompose_v1.js",
+        "workflow_decompose_v1_acceptance.js",
+        "workflow_decompose_v1_set_gate.js",
+        "workflow_decompose_v1_progress.js",
+    ]
+    .iter()
+    .map(|name| std::fs::read_to_string(std::path::Path::new(&root).join(name)).unwrap())
+    .collect::<Vec<_>>()
+    .join("\n")
+    .into()
+}
+
 /// Slice one top-level `function NAME(...) { ... }` or `const NAME = ...;` out
-/// of the embedded script. Top-level declarations end at a closing brace in
-/// column zero, so no brace counting is needed.
+/// of the script. Top-level declarations end at a closing brace in column
+/// zero, so no brace counting is needed.
 fn decl(name: &str) -> String {
-    let source = FIXED_SCRIPT_SOURCE;
+    let source = script_source();
     for marker in [
         format!("async function {name}("),
         format!("function {name}("),
@@ -61,6 +81,10 @@ fn run_js(driver: &str) -> String {
         "attemptMeasure",
         "isBetter",
         "newProgress",
+        // Issue 357: the per-entry shape-repair frontier.
+        "newRepairEpisode",
+        "openRepairEpisode",
+        "recordRepair",
         "recordStep",
         "recordAttempt",
         "recordAnswered",

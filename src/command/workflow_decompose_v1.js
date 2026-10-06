@@ -312,12 +312,10 @@ async function authorCandidate(w, policy) {
     // a previously missing entry lowers the outstanding-entry count. A
     // rewrite alone clears no defect; every failure shares the same window.
     const advanced = (authorState.added || 0) > addedBefore;
-    // Completing a missing entry advances the outstanding-entry frontier.
-    // Its sibling's shape count is a new baseline; judged bests never reset.
-    if (advanced && progress.best && progress.best.tier < JUDGED_TIER) progress.best = null;
     if (authored.status === "failed") {
       if (authored.findings) {
-        recordAttempt(progress, call, authored.findings, !measuredReplies);
+        // An entry shape refusal is measured in its own repair frontier.
+        recordRepair(progress, call, authored.entryId, authored.findings, !measuredReplies, advanced);
         lastFindings = authored.findings.map(progressText);
         feedback = lastFindings.slice();
       } else if (authored.malformed) {
@@ -370,6 +368,7 @@ async function authorCandidate(w, policy) {
     feedback = routed.retry;
     lastFindings = routed.retry.slice();
     recordAttempt(progress, call, routed.retryFindings, !measuredReplies);
+    openRepairEpisode(progress);
   }
 }
 
