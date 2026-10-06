@@ -187,13 +187,17 @@ impl FixedHostCommandExecutor {
                         {
                             Some(HostCommandSignal::Cancelled)
                         }
-                        // Issue 337: a deliberate stop of this generation.
-                        _ if archon_workflow::control_pause::terminal_stop_in_force(&store, &run)
-                            .is_some() =>
-                        {
-                            Some(HostCommandSignal::Cancelled)
-                        }
-                        _ => None,
+                        // Issue 337: a deliberate stop of this generation
+                        // cancels the call; an unreadable record pauses the run.
+                        _ => match archon_workflow::control_pause::require_no_terminal_stop(
+                            &store,
+                            &run,
+                            "a host command in flight",
+                        ) {
+                            Ok(()) => None,
+                            Err(WorkflowError::ControlPaused(_)) => Some(HostCommandSignal::Paused),
+                            Err(_) => Some(HostCommandSignal::Cancelled),
+                        },
                     };
                     if let Some(signal) = signal {
                         handle.signal(signal)?;
@@ -428,7 +432,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         );
         let (receipt, subjects, postcondition) = store.with_run_lock(&run_id, |locked| {
             // A sibling stopped by a pause reports "paused", not "cancelled".
-            crate::command::workflow_host_command_operational::require_run_owned(
+            crate::command::workflow_host_command_operational::require_run_owned_locked(
                 locked,
                 &run_id,
                 expected_generation,

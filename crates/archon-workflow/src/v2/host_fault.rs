@@ -29,6 +29,29 @@ pub const HOST_FAULT_NO_VERDICT_MARKER: &str = "host_fault_no_verdict";
 /// primitives cannot see.
 pub const NO_VERDICT_REFUND_MARKER: &str = "transport_failure_no_verdict";
 
+/// Issue 337: the marker on EVERY result the host made from a dispatch error
+/// (a provider, transport or host fault): the call returned no answer of its
+/// own. Such a record is history, never a verdict a resume may replay.
+pub const HOST_DISPATCH_ERROR_MARKER: &str = "host_dispatch_error";
+
+/// Does this recorded result carry no verdict on the work: a dispatch error,
+/// a never-ran fault, or a refunded no-verdict attempt?
+pub fn result_carries_no_verdict(result: &WorkflowV2Result) -> bool {
+    [
+        HOST_DISPATCH_ERROR_MARKER,
+        HOST_FAULT_NO_VERDICT_MARKER,
+        NO_VERDICT_REFUND_MARKER,
+    ]
+    .iter()
+    .any(|marker| {
+        result
+            .data
+            .get(*marker)
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+    })
+}
+
 /// Did this error end the call before anything could produce a verdict?
 ///
 /// True only for the host failing on its own state. Everything a dispatched
@@ -46,6 +69,12 @@ pub fn is_never_started_fault(error: &WorkflowError) -> bool {
 /// charged for one that did not happen.
 pub fn v2_result_for_call_error(call_id: &str, error: &WorkflowError) -> WorkflowV2Result {
     let mut result = failed_v2_result(call_id, error);
+    if let Some(object) = result.data.as_object_mut() {
+        object.insert(
+            HOST_DISPATCH_ERROR_MARKER.to_string(),
+            serde_json::Value::Bool(true),
+        );
+    }
     // Batch G2: the host's own operational error produced no verdict on the
     // work: refunded like a dropped transport and typed `execution`, so the
     // script retries it without spending a round and no task is charged.

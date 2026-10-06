@@ -1,9 +1,11 @@
 //! Issue 337: the pause a fixed script's host takes on an unplanned error
-//! covers the attempts the run recorded, exactly as a `w.pause` does. A
-//! resume replays each covered answer verbatim, whatever its verdict -- an
-//! unpublished gate refusal, a failed raw author call -- while its slot
-//! still holds that attempt and the call asks with the input it was recorded
-//! with. Re-asking would let a judge replace its authoritative answer.
+//! covers the VERDICTS the run recorded, exactly as a `w.pause` covers its
+//! attempts. A resume replays each covered verdict verbatim -- an
+//! unpublished gate refusal too -- while its own slot still holds that
+//! attempt and the call asks with the input it was recorded with: re-asking
+//! would let a judge replace its authoritative answer. A failed dispatch
+//! (a provider or host fault) carries no verdict and is asked again. One
+//! covered call that changed never voids the replay of the others.
 
 use super::*;
 
@@ -11,9 +13,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor;
 
-/// Answers every gate with an unpublished refusal: exit 1, no receipt.
+/// Answers every gate with an unpublished refusal (exit 1, no receipt) and
+/// logs the command it ran.
 struct RefusingGate {
-    calls: Arc<AtomicUsize>,
+    ran: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 #[async_trait::async_trait]
@@ -34,10 +37,14 @@ impl WorkflowHostCommandExecutor for RefusingGate {
 
     async fn execute(
         &self,
-        _request: archon_workflow::HostCommandRequest,
+        request: archon_workflow::HostCommandRequest,
         _expected_generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
-        let answer = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        let answer = {
+            let mut ran = self.ran.lock().unwrap();
+            ran.push(request.command_id.clone());
+            ran.len()
+        };
         Ok(archon_workflow::HostCommandResult {
             exit_code: Some(1),
             stdout: format!("refusal {answer}"),
@@ -97,8 +104,14 @@ impl WorkflowLlmClient for FailingAuthor {
 }
 
 struct Counters {
-    gate: Arc<AtomicUsize>,
+    gate: Arc<std::sync::Mutex<Vec<String>>>,
     author: Arc<AtomicUsize>,
+}
+
+impl Counters {
+    fn ran(&self) -> Vec<String> {
+        self.gate.lock().unwrap().clone()
+    }
 }
 
 fn fixed_runner(
@@ -133,21 +146,24 @@ fn fixed_runner(
         Some(args),
     )
     .with_host_command_executor(Arc::new(RefusingGate {
-        calls: counters.gate.clone(),
+        ran: counters.gate.clone(),
     }))
     .with_raw_outcomes(true);
     (runner, ui)
 }
 
 /// The gate answers, a raw author call fails, then the script crashes.
-const GATE_AUTHOR_CRASH: &str = r#"
+/// Two gates answer, a raw author call fails to dispatch, then the script
+/// crashes.
+const GATES_AUTHOR_CRASH: &str = r#"
 async function workflow(w) {
-  const gate = await w.hostCommand("task-set-lint", { stdin: null });
+  const first = await w.hostCommand("task-set-lint", { stdin: args.first });
+  const second = await w.hostCommand("task-set-gate", { stdin: null });
   const authored = await w.agent("acceptance-author-1", {
-    task: args.task, tier: "planner", resultMode: "rawOutcome"
+    task: "Author the contract", tier: "planner", resultMode: "rawOutcome"
   });
-  if (args.crash) throw new Error("progress delivery failed after the gate answered");
-  return JSON.stringify({ gate: gate.stdout, author: authored.status });
+  if (args.crash) throw new Error("progress delivery failed after the gates answered");
+  return JSON.stringify({ first: first.stdout, second: second.stdout, author: authored.status });
 }
 "#;
 
@@ -161,19 +177,29 @@ fn resume(store: &WorkflowStore, run_id: &str) {
         .expect("resume");
 }
 
-async fn crash(store: &WorkflowStore, run_id: &str, counters: &Counters, task: &str) {
-    let (runner, _ui) = fixed_runner(
-        store,
-        run_id,
-        counters,
-        serde_json::json!({"crash": true, "task": task}),
-    );
-    let error = runner.run(GATE_AUTHOR_CRASH).await.unwrap_err();
+fn args(crash: bool, first: &str) -> serde_json::Value {
+    serde_json::json!({"crash": crash, "first": first})
+}
+
+async fn crash(store: &WorkflowStore, run_id: &str, counters: &Counters) {
+    let (runner, _ui) = fixed_runner(store, run_id, counters, args(true, "candidate one"));
+    let error = runner.run(GATES_AUTHOR_CRASH).await.unwrap_err();
     assert!(
         matches!(error, WorkflowError::ControlPaused(_)),
         "{error:?}"
     );
     resume(store, run_id);
+}
+
+async fn finish(
+    store: &WorkflowStore,
+    run_id: &str,
+    counters: &Counters,
+    first: &str,
+) -> serde_json::Value {
+    let (runner, _ui) = fixed_runner(store, run_id, counters, args(false, first));
+    let summary = runner.run(GATES_AUTHOR_CRASH).await.expect("resumed run");
+    script_result(&summary)
 }
 
 /// The object the script returned (its result is the JSON of the string).
@@ -192,79 +218,106 @@ fn counters() -> Counters {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_crash_resume_replays_the_unpublished_refusal_and_the_failed_author_call() {
+fn setup() -> (tempfile::TempDir, WorkflowStore, String, Counters) {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowStore::new(temp.path().join("workflows"));
     let run_id = new_run(&store);
-    let counters = counters();
-    crash(&store, &run_id, &counters, "Author the contract").await;
-    assert_eq!(counters.gate.load(Ordering::SeqCst), 1);
-    let authored = counters.author.load(Ordering::SeqCst);
-
-    let (runner, _ui) = fixed_runner(
-        &store,
-        &run_id,
-        &counters,
-        serde_json::json!({"crash": false, "task": "Author the contract"}),
-    );
-    let summary = runner.run(GATE_AUTHOR_CRASH).await.expect("resumed run");
-
-    assert_eq!(
-        counters.gate.load(Ordering::SeqCst),
-        1,
-        "the judge answered once; its refusal is replayed, never re-asked"
-    );
-    assert_eq!(
-        counters.author.load(Ordering::SeqCst),
-        authored,
-        "the failed author call is replayed, never re-asked"
-    );
-    assert_eq!(summary.reused, 2, "{summary:?}");
-    let result = script_result(&summary);
-    assert_eq!(result["gate"], "refusal 1", "{result}");
-    assert_eq!(result["author"], "failed", "{result}");
+    (temp, store, run_id, counters())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_crash_resume_replays_nothing_asked_differently_or_invalidated() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = WorkflowStore::new(temp.path().join("workflows"));
-    let run_id = new_run(&store);
-    let counters = counters();
-    crash(&store, &run_id, &counters, "Author the contract").await;
+async fn a_crash_resume_replays_the_refusals_and_reasks_the_failed_dispatch() {
+    let (_temp, store, run_id, counters) = setup();
+    crash(&store, &run_id, &counters).await;
+    assert_eq!(counters.ran(), ["task-set-lint", "task-set-gate"]);
     let authored = counters.author.load(Ordering::SeqCst);
+    assert!(authored >= 1);
 
-    // Asked with another input: the author runs live; the gate, asked the
-    // same, is replayed. The script crashes again.
-    crash(&store, &run_id, &counters, "Author a different contract").await;
+    let result = finish(&store, &run_id, &counters, "candidate one").await;
+
     assert_eq!(
-        counters.gate.load(Ordering::SeqCst),
-        1,
-        "the gate refusal is replayed"
+        counters.ran(),
+        ["task-set-lint", "task-set-gate"],
+        "each judge answered once; its refusal is replayed, never re-asked"
     );
+    assert_eq!(result["first"], "refusal 1", "{result}");
+    assert_eq!(result["second"], "refusal 2", "{result}");
     assert!(
         counters.author.load(Ordering::SeqCst) > authored,
-        "a changed input is a new question"
+        "a failed dispatch carries no verdict: it is asked again"
     );
+}
 
-    // A restart invalidated the refusal: it is asked again.
-    let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run_id).join("v2"));
-    v2_store
-        .invalidate_call_and_dependents(&[], "host-command:task-set-lint:fixed")
-        .unwrap();
-    let (runner, _ui) = fixed_runner(
-        &store,
-        &run_id,
-        &counters,
-        serde_json::json!({"crash": false, "task": "Author a different contract"}),
-    );
-    let summary = runner.run(GATE_AUTHOR_CRASH).await.expect("resumed run");
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_changed_first_call_never_voids_the_replay_of_a_later_one() {
+    let (_temp, store, run_id, counters) = setup();
+    crash(&store, &run_id, &counters).await;
+
+    // The first gate is asked with another candidate: a new question, run
+    // live. The second gate, asked the same, still replays.
+    let result = finish(&store, &run_id, &counters, "candidate two").await;
+
     assert_eq!(
-        counters.gate.load(Ordering::SeqCst),
-        2,
-        "an invalidated answer is never replayed"
+        counters.ran(),
+        ["task-set-lint", "task-set-gate", "task-set-lint"],
+        "only the changed call runs again"
     );
-    let result = script_result(&summary);
-    assert_eq!(result["gate"], "refusal 2", "{result}");
+    assert_eq!(result["first"], "refusal 3", "{result}");
+    assert_eq!(result["second"], "refusal 2", "{result}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_invalidated_call_runs_again_and_the_others_still_replay() {
+    let (_temp, store, run_id, counters) = setup();
+    crash(&store, &run_id, &counters).await;
+    // A restart invalidated the second refusal only.
+    WorkflowV2ResultStore::new(store.run_dir(&run_id).join("v2"))
+        .invalidate_call_and_dependents(&[], "host-command:task-set-gate:fixed")
+        .unwrap();
+
+    let result = finish(&store, &run_id, &counters, "candidate one").await;
+
+    assert_eq!(
+        counters.ran(),
+        ["task-set-lint", "task-set-gate", "task-set-gate"],
+        "an invalidated answer is asked again; the first is replayed"
+    );
+    assert_eq!(result["first"], "refusal 1", "{result}");
+    assert_eq!(result["second"], "refusal 3", "{result}");
+}
+
+const STOP_ON_REFUSAL: &str = r#"
+async function workflow(w) {
+  const gate = await w.hostCommand("task-set-lint", { stdin: null });
+  if (gate.exitCode !== 0) {
+    await __archonHost("terminalStop", JSON.stringify({ schemaVersion: 1, reason: "refused: " + gate.stdout }));
+  }
+  return "accepted";
+}
+"#;
+
+/// Round 3 (review finding 2): the stop was recorded, then the executor died
+/// before its finalization (or the finalization failed). Stale-owner recovery
+/// moved the run on and paused it. A resume replays the verdict that decided
+/// the stop and reaches the same stop; the judge is never asked again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stop_whose_finalization_was_lost_replays_its_verdict_on_resume() {
+    let (_temp, store, run_id, counters) = setup();
+    let (runner, _ui) = fixed_runner(&store, &run_id, &counters, serde_json::json!({}));
+    let summary = runner.run(STOP_ON_REFUSAL).await.expect("deliberate stop");
+    assert_eq!(summary.status, WorkflowV2Status::Failed);
+    assert_eq!(summary.script_error.as_deref(), Some("refused: refusal 1"));
+    // No finalization: the process died. Stale-owner recovery's transition.
+    let mut run = store.load_state(&run_id).unwrap();
+    run.generation += 1;
+    run.status = archon_workflow::RunStatus::Paused;
+    store.save_state(&run).unwrap();
+    resume(&store, &run_id);
+
+    let (runner, _ui) = fixed_runner(&store, &run_id, &counters, serde_json::json!({}));
+    let summary = runner.run(STOP_ON_REFUSAL).await.expect("the same stop");
+
+    assert_eq!(counters.ran(), ["task-set-lint"], "the verdict is replayed");
+    assert_eq!(summary.status, WorkflowV2Status::Failed);
+    assert_eq!(summary.script_error.as_deref(), Some("refused: refusal 1"));
 }

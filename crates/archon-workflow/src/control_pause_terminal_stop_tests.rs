@@ -122,6 +122,18 @@ fn a_stale_stop_or_a_run_end_pause_is_not_refused() {
     std::fs::create_dir_all(store.run_dir(&run_id).join("v2")).unwrap();
     std::fs::write(store.run_dir(&run_id).join("v2/terminal-stop.json"), b"{").unwrap();
     pause_with_evidence(&store, &run_id, generation, serde_json::json!({}))
-        .expect("an unreadable stop record refuses nothing")
+        .expect("an unreadable stop record refuses no pause")
         .unwrap();
+    // Round 3: it is set aside once, kept as evidence, and named in the pause.
+    let v2 = store.run_dir(&run_id).join("v2");
+    assert!(!v2.join("terminal-stop.json").exists());
+    assert!(
+        std::fs::read_dir(&v2).unwrap().flatten().any(|entry| entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("terminal-stop.json.unreadable")),
+        "the unreadable record is kept"
+    );
+    let events = std::fs::read_to_string(store.events_path(&run_id)).unwrap();
+    assert!(events.contains("terminal_stop_unreadable"), "{events}");
 }

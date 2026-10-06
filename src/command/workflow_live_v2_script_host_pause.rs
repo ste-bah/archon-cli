@@ -112,10 +112,11 @@ impl WorkflowScriptHost {
             self.runner.v2_store.require_session_restart_epoch()?;
             self.runner.v2_store.require_session_executor(&run)?;
             // Issue 337: a sibling of a deliberate stop pauses nothing.
-            archon_workflow::control_pause::refuse_after_terminal_stop(
+            let unreadable_stop = archon_workflow::control_pause::terminal_stop_before_pause(
                 locked,
                 &run,
                 &format!("pause '{pause_id}'"),
+                false,
             )?;
             // Coverage and the grant share the lock with run control and
             // generation-owned persistence: no slot may change between them.
@@ -161,6 +162,7 @@ impl WorkflowScriptHost {
                 "generation": run.generation,
                 "evidence": evidence,
                 "resume": resume,
+                "terminal_stop_unreadable": unreadable_stop,
             });
             let kind = if joined {
                 WorkflowEventKind::StageStalled
@@ -176,6 +178,7 @@ impl WorkflowScriptHost {
                 event_seq: event,
                 generation: run.generation,
                 covered,
+                host_taken: false,
             };
             if let Err(error) = locked.write_run_json(run_id, &record_path, &record) {
                 // Not recorded means a resume asks again and pauses once more:

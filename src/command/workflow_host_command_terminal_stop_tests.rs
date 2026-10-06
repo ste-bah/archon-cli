@@ -280,3 +280,112 @@ fn a_terminal_stop_refuses_the_operational_pauses_of_its_generation() {
     );
     assert_eq!(store.load_state(&run.id).unwrap().status, RunStatus::Paused);
 }
+
+fn write_unreadable_stop(store: &WorkflowStore, run_id: &str) {
+    let dir = store.run_dir(run_id).join("v2");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("terminal-stop.json"), b"{").unwrap();
+}
+
+fn set_aside(store: &WorkflowStore, run_id: &str) -> Vec<String> {
+    std::fs::read_dir(store.run_dir(run_id).join("v2"))
+        .unwrap()
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name.starts_with("terminal-stop.json.unreadable"))
+        .collect()
+}
+
+fn pause_events(store: &WorkflowStore, run_id: &str) -> usize {
+    std::fs::read_to_string(store.events_path(run_id))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| event["kind"] == "paused")
+        .count()
+}
+
+/// Round 3 (review finding 5): a stop record that cannot be read may be a
+/// stop. The writer never continues past it: the run pauses once with that
+/// evidence, and the record is set aside (kept) so a resume is not refused
+/// again and no later reader reports it again.
+#[test]
+fn an_unreadable_stop_record_pauses_the_writer_once_and_is_set_aside() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let run = new_run(&store);
+    let mut running = store.load_state(&run.id).unwrap();
+    running.status = RunStatus::Running;
+    store.save_state(&running).unwrap();
+    write_unreadable_stop(&store, &run.id);
+
+    let first = super::workflow_host_command_operational::require_run_owned(
+        &store,
+        &run.id,
+        running.generation,
+    );
+    assert!(
+        matches!(&first, Err(WorkflowError::ControlPaused(message)) if message.contains("terminal stop record")),
+        "{first:?}"
+    );
+    assert_eq!(store.load_state(&run.id).unwrap().status, RunStatus::Paused);
+    assert!(
+        !store
+            .run_dir(&run.id)
+            .join("v2/terminal-stop.json")
+            .exists()
+    );
+    assert_eq!(set_aside(&store, &run.id).len(), 1, "kept as evidence");
+
+    let again = super::workflow_host_command_operational::require_run_owned(
+        &store,
+        &run.id,
+        running.generation,
+    );
+    assert!(
+        matches!(again, Err(WorkflowError::ControlPaused(_))),
+        "{again:?}"
+    );
+    assert_eq!(pause_events(&store, &run.id), 1, "one pause, one report");
+}
+
+#[tokio::test]
+async fn an_unreadable_stop_record_pauses_the_inflight_supervisor() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    let store = WorkflowStore::project(&context.project_root);
+    let run = new_run(&store);
+    let started = Arc::new(tokio::sync::Notify::new());
+    let executor = Arc::new(FixedHostCommandExecutor::with_process(
+        fixed_decomposition_catalog("rev-1").unwrap(),
+        context,
+        store.run_dir(&run.id),
+        Arc::new(WaitingProcess {
+            started: started.clone(),
+        }),
+    ));
+    let generation = run.generation;
+    let task = tokio::spawn(async move {
+        executor
+            .execute(
+                HostCommandRequest::new("task-set-lint", None).unwrap(),
+                Some(generation),
+            )
+            .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), started.notified())
+        .await
+        .expect("the process starts");
+    write_unreadable_stop(&store, &run.id);
+
+    let error = tokio::time::timeout(std::time::Duration::from_secs(2), task)
+        .await
+        .expect("an unreadable stop record reaches the supervisor")
+        .unwrap()
+        .unwrap_err();
+    assert!(
+        matches!(error, WorkflowError::ControlPaused(_)),
+        "{error:?}"
+    );
+    assert_eq!(store.load_state(&run.id).unwrap().status, RunStatus::Paused);
+    assert_eq!(pause_events(&store, &run.id), 1);
+}

@@ -38,6 +38,11 @@ pub(super) struct ScriptPauseRecord {
     /// The run's generation once this pause was in force.
     pub(super) generation: u64,
     pub(super) covered: Vec<CoveredAttempt>,
+    /// Issue 337: taken by the host ([`HostPauseCoverage`]), never passed.
+    /// Each covered attempt replays while IT stands; one changed slot never
+    /// voids the replay of the others.
+    #[serde(default)]
+    pub(super) host_taken: bool,
 }
 
 /// The attempts `records` (the store's slots) hold that a pause covers.
@@ -118,16 +123,17 @@ pub(super) fn pause_records(
     Ok(records)
 }
 
-/// Issue 337: what a pause the HOST takes on an unplanned error of a fixed
-/// script (a crash, or a fault at the run boundary) covers: the snapshot a
-/// `w.pause` records, written as one more pause record, so a resume replays
-/// every covered answer through [`WorkflowScriptHost::replay_covered_attempt`]
-/// -- an unpublished refusal or a failed author call too, which no other
-/// reuse path answers -- under the same input and standing guards. Taken
-/// before the pause transitions; recorded once the pause is in force, under
-/// a name no script pause id maps to (`pause_record_path` always ends in a
-/// 16-hex digest). Such a record is never "passed": only a `w.pause` request
-/// reads its own record for that.
+/// Issue 337: what a pause or a terminal stop the HOST takes for a fixed
+/// script (a crash, a fault at the run boundary, a deliberate stop) covers:
+/// the snapshot a `w.pause` records, less every record that carries no
+/// verdict (a dispatch error or a never-ran fault, which a resume asks again,
+/// so a host fault never replays into the same pause). Written as one more
+/// pause record, so a resume replays every covered verdict -- an unpublished
+/// refusal too, which no other reuse path answers -- through
+/// [`WorkflowScriptHost::replay_covered_attempt`], each while its own slot
+/// still holds it under the same input. Taken before the transition, recorded
+/// once it is in force, under a name no script pause id maps to
+/// (`pause_record_path` always ends in a 16-hex digest); never "passed".
 pub(in super::super::super) struct HostPauseCoverage(Vec<CoveredAttempt>);
 
 impl HostPauseCoverage {
@@ -135,7 +141,14 @@ impl HostPauseCoverage {
         Self(
             v2_store
                 .load_call_records()
-                .map(|records| covered_attempts(&records))
+                .map(|mut records| {
+                    // A dispatch error or a never-ran fault is no answer:
+                    // a resume asks it again (Issue 337 round 3).
+                    records.retain(|record| {
+                        !archon_workflow::v2::host_fault::result_carries_no_verdict(&record.result)
+                    });
+                    covered_attempts(&records)
+                })
                 .unwrap_or_else(|error| {
                     tracing::warn!(%error, "host pause covers no recorded attempt");
                     Vec::new()
@@ -170,6 +183,7 @@ impl HostPauseCoverage {
             event_seq,
             generation,
             covered: self.0,
+            host_taken: true,
         };
         if let Err(error) = store.write_run_json(run_id, &path, &record) {
             tracing::warn!(%error, run_id, "host pause coverage not recorded");
@@ -202,9 +216,11 @@ impl WorkflowScriptHost {
             return Ok(None);
         }
         let slots = self.runner.v2_store.load_call_records()?;
-        let covered = pauses
-            .iter()
-            .any(|pause| pause.covered.contains(&wanted) && credit_holds(pause, &slots));
+        // The wanted attempt stands (it is the slot's record, asked with its
+        // input, not invalidated); a `w.pause` also needs its whole credit.
+        let covered = pauses.iter().any(|pause| {
+            pause.covered.contains(&wanted) && (pause.host_taken || credit_holds(pause, &slots))
+        });
         if !covered {
             return Ok(None);
         }

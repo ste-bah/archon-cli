@@ -2,9 +2,15 @@
 //! Only the privileged fixed-script host accepts this versioned request. Its
 //! owned, recorded stop is sticky even if JS catches or rewrites the rejection;
 //! throwing an identical object or message cannot create that host evidence.
-//! Issue 337: the stop is also recorded under the run lock
-//! (`control_pause::record_terminal_stop`), so a sibling call still in flight
-//! can neither pause the run nor publish into it, and its supervisor ends it.
+//! Issue 337: every host terminal stop of a fixed script -- this request, and
+//! a call that ends the script (an unsatisfied final report or human gate) --
+//! is persisted the same way, under the run lock ([`persist_terminal_stop`]):
+//! the stop record, so a sibling call still in flight can neither pause the
+//! run nor publish into it and its supervisor ends it; and the coverage of
+//! the verdicts the run holds, so when the finalization is lost (the process
+//! dies, or finalizing fails) and stale-owner recovery pauses the run, a
+//! resume replays the verdict that decided the stop and reaches the same
+//! stop, instead of asking the judge again.
 
 use super::*;
 
@@ -61,7 +67,7 @@ impl WorkflowScriptHost {
             // Issue 337: recorded durably first, under the lock every
             // sibling's pause and publication take, so from here no call of
             // this generation can pause the run or publish into it.
-            archon_workflow::control_pause::record_terminal_stop(locked, &run, &reason)?;
+            self.persist_terminal_stop(locked, &run, &reason)?;
             let detail = serde_json::json!({
                 "event": "script_terminal_stop",
                 "schema_version": request.schema_version,
@@ -93,5 +99,45 @@ impl WorkflowScriptHost {
             Ok(())
         })?;
         Err(WorkflowError::TerminalHostCall(reason))
+    }
+}
+
+impl WorkflowScriptHost {
+    /// Persists a terminal stop of `run` (its lock held, ownership checked):
+    /// the coverage snapshot, then the stop record. The record is the
+    /// authority; the coverage is replay evidence and never fails the stop.
+    fn persist_terminal_stop(
+        &self,
+        locked: &WorkflowStore,
+        run: &archon_workflow::WorkflowRun,
+        reason: &str,
+    ) -> archon_workflow::WorkflowResult<()> {
+        let coverage = HostPauseCoverage::snapshot(&self.runner.v2_store);
+        archon_workflow::control_pause::record_terminal_stop(locked, run, reason)?;
+        coverage.record(locked, &run.id, "terminal-stop", None);
+        Ok(())
+    }
+
+    /// The terminal stop a call's own status made (`mark_terminal`), for the
+    /// fixed host only, like `terminalStop`. A stop that cannot be persisted
+    /// is reported; the in-memory stop still ends this script as before.
+    pub(super) fn persist_call_terminal_stop(&self, record: &WorkflowV2CallRecord) {
+        if !self.runner.raw_outcomes_allowed {
+            return;
+        }
+        let reason = format!("{} ended with {:?}", record.call.id, record.status);
+        let persisted = self.with_owned_run_lock(|locked| {
+            let run = locked.load_state(&self.runner.run_id)?;
+            if !matches!(
+                run.status,
+                archon_workflow::RunStatus::Planned | archon_workflow::RunStatus::Running
+            ) {
+                return Ok(());
+            }
+            self.persist_terminal_stop(locked, &run, &reason)
+        });
+        if let Err(error) = persisted {
+            tracing::warn!(%error, run_id = %self.runner.run_id, "terminal stop not persisted");
+        }
     }
 }

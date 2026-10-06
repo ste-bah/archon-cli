@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor;
 use crate::command::workflow_host_command_operational::{
-    OperationalAttempt, OperationalReport, pause_run, require_run_owned,
+    OperationalAttempt, OperationalReport, pause_run, require_run_owned_locked,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +30,8 @@ struct SiblingAfterStop {
     run_id: String,
     mode: Sibling,
     published: Arc<AtomicBool>,
+    /// The event that says the host recorded the stop.
+    stop_event: &'static str,
 }
 
 impl SiblingAfterStop {
@@ -39,7 +41,7 @@ impl SiblingAfterStop {
         loop {
             let events =
                 std::fs::read_to_string(self.store.events_path(&self.run_id)).unwrap_or_default();
-            if events.contains("script_terminal_stop") {
+            if events.contains(self.stop_event) {
                 return Ok(self.store.load_state(&self.run_id)?.generation);
             }
             if std::time::Instant::now() > deadline {
@@ -101,7 +103,7 @@ impl WorkflowHostCommandExecutor for SiblingAfterStop {
             Sibling::Publication => {
                 // The parent publication's own check, under the run lock.
                 self.store.with_run_lock(&self.run_id, |locked| {
-                    require_run_owned(locked, &self.run_id, generation)
+                    require_run_owned_locked(locked, &self.run_id, generation)
                 })?;
                 self.published.store(true, Ordering::SeqCst);
                 Err(WorkflowError::StageFailed(
@@ -131,6 +133,18 @@ async function workflow(w) {
 
 async fn race(
     mode: Sibling,
+) -> (
+    archon_workflow::WorkflowResult<WorkflowV2ScriptSummary>,
+    archon_workflow::RunStatus,
+    bool,
+) {
+    race_with(mode, STOP_WITH_SIBLING_IN_FLIGHT, "script_terminal_stop").await
+}
+
+async fn race_with(
+    mode: Sibling,
+    script: &str,
+    stop_event: &'static str,
 ) -> (
     archon_workflow::WorkflowResult<WorkflowV2ScriptSummary>,
     archon_workflow::RunStatus,
@@ -167,9 +181,10 @@ async fn race(
         run_id: run_id.clone(),
         mode,
         published: published.clone(),
+        stop_event,
     }))
     .with_raw_outcomes(true)
-    .run(STOP_WITH_SIBLING_IN_FLIGHT)
+    .run(script)
     .await;
     let status = store.load_state(&run_id).unwrap().status;
     (outcome, status, published.load(Ordering::SeqCst))
@@ -198,4 +213,30 @@ async fn a_sibling_in_flight_never_turns_a_deliberate_stop_into_a_pause() {
         "{outcome:?}"
     );
     assert_eq!(status, archon_workflow::RunStatus::Paused);
+}
+
+const FINAL_REPORT_WITH_SIBLING_IN_FLIGHT: &str = r#"
+async function workflow(w) {
+  const sibling = w.hostCommand("task-set-lint", { stdin: null });
+  const report = w.finalReport("stopped", { status: "needs_review", inputs: {}, task: "Stop for review" });
+  await Promise.allSettled([sibling, report]);
+}
+"#;
+
+/// Round 3 (review finding 3): a host terminal stop by a call (an unsatisfied
+/// final report or human gate) is persisted through the same record, so a
+/// sibling in flight cannot turn it into a resumable pause either.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_sibling_in_flight_never_pauses_a_run_its_final_report_stopped() {
+    for mode in [Sibling::OperationalPause, Sibling::Publication] {
+        let (outcome, status, published) =
+            race_with(mode, FINAL_REPORT_WITH_SIBLING_IN_FLIGHT, "script_stopped").await;
+        let summary = outcome.unwrap_or_else(|error| {
+            panic!("{mode:?}: the final report's stop is the outcome: {error:?}")
+        });
+        assert_eq!(summary.status, WorkflowV2Status::NeedsReview, "{mode:?}");
+        assert_eq!(summary.failed_call.as_deref(), Some("stopped"), "{mode:?}");
+        assert_ne!(status, archon_workflow::RunStatus::Paused, "{mode:?}");
+        assert!(!published, "{mode:?}: nothing publishes after the stop");
+    }
 }
