@@ -84,7 +84,7 @@ async fn a_damaged_failed_reexecution_is_never_judged_on_a_stale_round() {
     failed.status = WorkflowV2Status::Failed;
     failed.result = archon_workflow::v2::script::failed_v2_result(
         id,
-        &WorkflowError::HostOperational("stage errored before its round".into()),
+        WorkflowError::HostOperational("stage errored before its round".into()),
     );
     let bytes = serde_json::to_vec(&failed).unwrap();
     damage_call(&fixture, &summary, &bytes[..bytes.len() / 2]);

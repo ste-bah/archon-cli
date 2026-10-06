@@ -68,11 +68,14 @@ struct StaleFixture {
     host: WorkflowScriptHost,
     store: WorkflowStore,
     run_id: String,
-    before: (Vec<u8>, Vec<u8>, Vec<String>),
+    before: Snapshot,
 }
 
+/// The bytes of state.json and events.jsonl, and every file under v2/.
+type Snapshot = (Vec<u8>, Vec<u8>, Vec<String>);
+
 /// state.json, events.jsonl and every file under v2/.
-fn snapshot(store: &WorkflowStore, run_id: &str) -> (Vec<u8>, Vec<u8>, Vec<String>) {
+fn snapshot(store: &WorkflowStore, run_id: &str) -> Snapshot {
     let mut v2 = Vec::new();
     let root = store.run_dir(run_id).join("v2");
     let mut stack = vec![root];
@@ -128,7 +131,7 @@ async fn a_stale_executor_dispatches_and_writes_nothing_after_a_resume() {
         calls: AtomicUsize::new(0),
     });
     let (runner, _rx) = runner(&store, &run_id, llm.clone(), None, None);
-    let taken: Arc<std::sync::Mutex<Option<(Vec<u8>, Vec<u8>, Vec<String>)>>> = Arc::default();
+    let taken: Arc<std::sync::Mutex<Option<Snapshot>>> = Arc::default();
     let (hook_store, hook_id, hook_taken) = (store.clone(), run_id.clone(), taken.clone());
     // B takes the run over while A's first call is in flight.
     crate::command::workflow_live::workflow_live_v2::workflow_live_v2_fixed_persistence::publication_hook::install(
