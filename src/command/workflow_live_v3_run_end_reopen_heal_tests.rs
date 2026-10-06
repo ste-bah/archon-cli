@@ -28,8 +28,13 @@ async fn reentered_round_written(fixture: &Fixture) -> std::path::PathBuf {
 }
 
 fn read_back(fixture: &Fixture) -> WorkflowResult<String> {
-    super::super::reopen::reentered_round(&fixture.store, &fixture.run_id, REENTERED)
-        .map(|(record, _)| format!("round {} attempt {}", record.round, record.attempt))
+    super::super::reopen::reentered_round(
+        &fixture.store,
+        &fixture.run_id,
+        REENTERED,
+        archon_workflow::control_pause::PauseOwner::Unfenced,
+    )
+    .map(|(record, _)| format!("round {} attempt {}", record.round, record.attempt))
 }
 
 /// The files of the re-entered round's quarantine, by name.

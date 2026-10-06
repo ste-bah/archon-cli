@@ -265,7 +265,7 @@ pub(super) async fn run_at(
         execution,
         &fixture.store,
         &fixture.run_id,
-        generation,
+        archon_workflow::control_pause::PauseOwner::Generation(generation),
         Some(&fixture.universe),
         None,
     )

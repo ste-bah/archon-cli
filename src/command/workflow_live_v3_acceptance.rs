@@ -107,14 +107,14 @@ fn parse_request(execution: &WorkflowV2CallExecution) -> WorkflowResult<StageReq
     })
 }
 
-/// Run one acceptance round and record it, under the `generation` its executor
-/// dispatched it at while it owned the run, never one read now (Issue 316).
+/// Run one acceptance round and record it for `owner`: the generation the host
+/// dispatched it at, or the executor of a run end (Issue 316).
 pub(super) async fn run_acceptance_stage(
     runtime: &WorkflowV2ScriptRuntime,
     execution: &WorkflowV2CallExecution,
     store: &WorkflowStore,
     run_id: &str,
-    generation: u64,
+    owner: archon_workflow::control_pause::PauseOwner,
     task_universe: Option<&WorkflowV2TaskUniverse>,
     llm: Option<&dyn archon_workflow::WorkflowLlmClient>,
 ) -> WorkflowResult<WorkflowV2Result> {
@@ -177,7 +177,7 @@ pub(super) async fn run_acceptance_stage(
     // Issue 320: without a task set, a context that will not resolve is final.
     let task_set = task_universe.is_some();
     let ledger::Decided { decision, path } =
-        ledger::record_and_decide(store, run_id, generation, &run_dir, &mut record, task_set)?;
+        ledger::record_and_decide(store, run_id, owner, &run_dir, &mut record, task_set)?;
     // Issue 262: a stall (or the runaway guard) pauses the run with the
     // round's record as evidence; it never ends the loop or fails the run.
     if let Some(cause) = decision.pause {
@@ -185,7 +185,7 @@ pub(super) async fn run_acceptance_stage(
         return Err(result::pause_on_stall(
             store,
             run_id,
-            generation,
+            owner,
             &record,
             &record_path,
             &decision,

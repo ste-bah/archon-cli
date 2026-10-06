@@ -21,6 +21,8 @@ mod fixture;
 use fixture::{Fixture, fixture, in_run_round, snapshot};
 #[path = "workflow_live_v3_run_end_generation_tests.rs"]
 mod generation_tests;
+#[path = "workflow_live_v3_run_end_window_tests.rs"]
+mod window_tests;
 
 /// R6's run-end failure, as the observer raised it.
 const CHAIN_MOVED: &str = "native observer chain differs from launch pin";

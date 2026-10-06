@@ -58,7 +58,7 @@ pub(super) async fn execute_v2_live_call(
             &execution,
             store_for_control,
             run_id,
-            dispatch_generation,
+            archon_workflow::control_pause::PauseOwner::Generation(dispatch_generation),
             task_universe,
             Some(client.llm.as_ref()),
         ))

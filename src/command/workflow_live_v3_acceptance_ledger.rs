@@ -14,6 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
+use archon_workflow::control_pause::PauseOwner;
 use archon_workflow::v2::acceptance_stage::progress::{
     self, LoopDecision, ProgressLedger, QUARANTINE_DIR, QuarantinedRecordV1,
 };
@@ -55,8 +56,9 @@ impl From<WorkflowError> for Halt {
 /// executor's round lands nothing, and when another writer took this
 /// round's attempt the record takes the next free one, decided on the
 /// history that includes the other record. The owner never pauses for a
-/// number. `generation` is the one the executor dispatched the round under
-/// while it owned the run, never re-sampled after (review B2).
+/// number. `owner` is the generation the host dispatched the round at, or
+/// the executor of a run end (Issue 316); each check of it is made under the
+/// run lock with what it guards.
 ///
 /// Issue 320: a round whose stage context could not be resolved (no
 /// execution recorded) in a run with no task set (`task_set` false) has
@@ -67,7 +69,7 @@ impl From<WorkflowError> for Halt {
 pub(super) fn record_and_decide(
     store: &WorkflowStore,
     run_id: &str,
-    generation: u64,
+    owner: PauseOwner,
     run_dir: &Path,
     record: &mut AcceptanceRoundRecordV1,
     task_set: bool,
@@ -77,7 +79,7 @@ pub(super) fn record_and_decide(
         let (decision, ledger) = decide_locked(
             store,
             run_id,
-            generation,
+            owner,
             run_dir,
             record,
             task_set,
@@ -87,7 +89,7 @@ pub(super) fn record_and_decide(
         if let Some(hook) = BEFORE_LAND.with(|hook| hook.borrow_mut().take()) {
             hook();
         }
-        land_owned(store, run_id, generation, record, landing)?;
+        land_owned(store, run_id, owner, record, landing)?;
         // The ledger is a copy (the records are authoritative); a copy
         // that did not save costs only the rebuild of a record damaged
         // later. Saved under the order lock, so copies land in record
@@ -99,7 +101,7 @@ pub(super) fn record_and_decide(
     });
     progress::record_quarantine_events(store, run_id, &quarantined);
     let pause = |record: &AcceptanceRoundRecordV1, reason: String, quarantined| {
-        pause_on_history(store, run_id, generation, record, &reason, quarantined)
+        pause_on_history(store, run_id, owner, record, &reason, quarantined)
     };
     let (path, decision) = match landed {
         Ok(landed) => landed,
@@ -137,13 +139,13 @@ thread_local! {
 fn land_owned(
     store: &WorkflowStore,
     run_id: &str,
-    generation: u64,
+    owner: PauseOwner,
     record: &AcceptanceRoundRecordV1,
     landing: &mut RoundLanding<'_>,
 ) -> Result<PathBuf, Halt> {
     let landed = store.with_run_lock(run_id, |locked| {
         let run = locked.load_state(run_id)?;
-        if let Err(refused) = archon_workflow::control_pause::require_executor(&run, generation) {
+        if let Err(refused) = owner.require_writer(&run) {
             return Ok(Err(refused));
         }
         landing.land(record).map(Ok)
@@ -161,7 +163,7 @@ fn land_owned(
 fn decide_locked(
     store: &WorkflowStore,
     run_id: &str,
-    generation: u64,
+    owner: PauseOwner,
     run_dir: &Path,
     record: &mut AcceptanceRoundRecordV1,
     task_set: bool,
@@ -172,7 +174,7 @@ fn decide_locked(
             "the run state could not be read to check that this round still owns the run ({error})"
         ))
     })?;
-    archon_workflow::control_pause::require_executor(&run, generation).map_err(Halt::Stop)?;
+    owner.require_writer(&run).map_err(Halt::Stop)?;
     let healed = ProgressLedger::load_healing(run_dir).map_err(|error| {
         Halt::Pause(format!(
             "the acceptance history could not be read ({error})"
@@ -216,7 +218,7 @@ fn decide_locked(
 fn pause_on_history(
     store: &WorkflowStore,
     run_id: &str,
-    generation: u64,
+    owner: PauseOwner,
     record: &AcceptanceRoundRecordV1,
     reason: &str,
     quarantined: &[QuarantinedRecordV1],
@@ -241,7 +243,7 @@ fn pause_on_history(
         "quarantined": quarantined,
         "resume": resume,
     });
-    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
+    match super::super::workflow_live_v3_run_end::owned_pause::pause(store, run_id, owner, detail) {
         Ok(event) => {
             if let Err(error) = event {
                 tracing::warn!(%error, "acceptance history pause event not recorded");

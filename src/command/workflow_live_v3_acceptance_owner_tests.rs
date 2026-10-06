@@ -63,7 +63,7 @@ fn record(
     super::super::ledger::record_and_decide(
         &fixture.store,
         &fixture.run_id,
-        generation,
+        archon_workflow::control_pause::PauseOwner::Generation(generation),
         &run_dir,
         record,
         true,

@@ -224,7 +224,7 @@ pub(super) async fn in_run_round(fixture: &Fixture) -> WorkflowV2ScriptSummary {
         &execution,
         &fixture.store,
         &fixture.run_id,
-        generation,
+        archon_workflow::control_pause::PauseOwner::Generation(generation),
         Some(&fixture.universe),
         None,
     )
