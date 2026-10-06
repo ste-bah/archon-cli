@@ -410,8 +410,17 @@ async fn a_journal_no_read_can_settle_pauses_the_wave_and_the_work_lands_once_fi
         } else {
             "committed"
         };
+        // The landing policy canonicalizes the project (including Windows
+        // short names) and removes its verbatim prefix before locating pins.
+        // Canonicalize the existing root: the journal itself is absent when
+        // only its temp is left.
+        let project = archon_shell::paths::canonicalize(project_root(&f)).unwrap();
+        let pin = PinStore::frozen(&project, &tasks).pin.unwrap();
+        let expected_journal = archon_workflow::task_set_publish_lock::journal_paths(&pin)[0]
+            .display()
+            .to_string();
         for needed in [
-            journal(&f, &tasks, false).display().to_string(),
+            expected_journal,
             format!("state: {state}"),
             "stuck".into(),
             "Operator remedy".into(),
