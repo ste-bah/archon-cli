@@ -26,7 +26,7 @@
 //! the host only [`DEFAULT_BOUND`] (locale, time zone, terminal type, user
 //! name, temporary directory, the Rust toolchain's homes and build directory,
 //! and the non-secret locators of other toolchains and certificate bundles)
-//! and [`PROXY_VARIABLES`] whose value carries no `user:pass@`, never a
+//! and [`PROXY_VARIABLES`] whose value is a bare address, never a
 //! credential-shaped name ([`credential_shaped`]); the toolchain homes a
 //! tool finds under the host's home are named outright. It forwards nothing
 //! else: an operator variable a check needs is named in
@@ -131,8 +131,8 @@ pub const DEFAULT_BOUND: &[&str] = &[
 ];
 
 /// Proxy addresses the default policy binds, when the host has them and the
-/// value carries no `user:pass@`: an address without credentials is no
-/// secret, and a check that downloads behind a proxy needs it.
+/// value is a bare address ([`bare_proxy`]): an address without credentials
+/// is no secret, and a check that downloads behind a proxy needs it.
 pub const PROXY_VARIABLES: &[&str] = &[
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -153,10 +153,46 @@ pub fn credential_shaped(name: &str) -> bool {
             .any(|suffix| upper.ends_with(suffix))
 }
 
-/// Whether a proxy value names a user or password (`scheme://user:pass@host`).
-fn carries_credentials(value: &str) -> bool {
+/// Whether proxy variable `name`'s `value` is a bare address: no `@` (a
+/// `user:pass@`), `?` or `#` anywhere (a query or fragment can carry a
+/// token), and for a proxy URL no path but `/`. A `NO_PROXY` list is hosts
+/// and CIDR blocks (`10.0.0.0/8`), so it has no path rule.
+fn bare_proxy(name: &str, value: &str) -> bool {
+    if value.contains(['@', '?', '#']) {
+        return false;
+    }
+    if name.eq_ignore_ascii_case("NO_PROXY") {
+        return true;
+    }
     let rest = value.split_once("://").map_or(value, |(_, rest)| rest);
-    rest.split('/').next().unwrap_or_default().contains('@')
+    rest.split_once('/').is_none_or(|(_, path)| path.is_empty())
+}
+
+/// Windows variables that name the machine or its user: kept for a check,
+/// never part of a build identity, which must not be one machine's.
+pub const MACHINE_VARIABLES: &[&str] = &["USERNAME", "COMPUTERNAME"];
+
+/// The Windows profile variables of a site with its own `home` (a scratch, a
+/// probe's copy): USERPROFILE, APPDATA and LOCALAPPDATA are `home`, and
+/// HOMEDRIVE and HOMEPATH split it, so no tool falls back to the operator's
+/// profile. None outside Windows.
+pub fn profile_bindings(home: &Path) -> Vec<(&'static str, std::path::PathBuf)> {
+    if !cfg!(windows) {
+        return Vec::new();
+    }
+    let mut bindings: Vec<(&'static str, std::path::PathBuf)> =
+        ["USERPROFILE", "APPDATA", "LOCALAPPDATA"]
+            .into_iter()
+            .map(|name| (name, home.to_path_buf()))
+            .collect();
+    if let Some(std::path::Component::Prefix(prefix)) = home.components().next() {
+        let drive = std::path::PathBuf::from(prefix.as_os_str());
+        if let Ok(rest) = home.strip_prefix(&drive) {
+            bindings.push(("HOMEPATH", rest.to_path_buf()));
+        }
+        bindings.push(("HOMEDRIVE", drive));
+    }
+    bindings
 }
 
 /// Variables a shell sets for itself: never withheld, whatever the host has.
@@ -187,7 +223,7 @@ impl CheckPolicy {
     pub fn default_for(host: &BTreeMap<String, String>) -> Self {
         let proxies = (PROXY_VARIABLES.iter())
             .filter_map(|name| lookup(host, name))
-            .filter(|(_, value)| !carries_credentials(value));
+            .filter(|(name, value)| bare_proxy(name, value));
         let mut bound: BTreeMap<String, String> = (DEFAULT_BOUND.iter())
             .filter_map(|name| lookup(host, name))
             .chain(proxies)

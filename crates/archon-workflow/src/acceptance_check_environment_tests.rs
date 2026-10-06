@@ -150,6 +150,15 @@ fn only_a_forwardable_variable_said_missing_makes_a_failure_no_verdict() {
         "KeyError: 'MY_SERVICE_TOKEN'",
         "missing environment variable MY_SERVICE_TOKEN",
         "thread 'main' panicked: MY_SERVICE_TOKEN must be set: NotPresent",
+        // Library messages as they are printed (the review's table).
+        "MY_SERVICE_TOKEN environment variable is not set",
+        "django.core.exceptions.ImproperlyConfigured: Set the MY_SERVICE_TOKEN environment variable",
+        "openai.OpenAIError: The api_key client option must be set either by passing api_key to the client or by setting the MY_SERVICE_TOKEN environment variable",
+        "decouple.UndefinedValueError: MY_SERVICE_TOKEN not found. Declare it as envvar or define a default value.",
+        "❌ Invalid environment variables: { MY_SERVICE_TOKEN: [ 'Required' ] }",
+        "pydantic_core._pydantic_core.ValidationError: 1 validation error for Settings\nMY_SERVICE_TOKEN\n  Field required [type=missing, input_value={}, input_type=dict]",
+        "Please export MY_SERVICE_TOKEN and retry",
+        "MY_SERVICE_TOKEN is empty",
     ] {
         let error = withheld_error(&[said.as_bytes()], &withheld).expect(said);
         assert!(error.contains("MY_SERVICE_TOKEN") && error.contains("environment_allowlist"));
@@ -165,6 +174,11 @@ fn only_a_forwardable_variable_said_missing_makes_a_failure_no_verdict() {
         "PYTHONPATH is not set",
         "MY_SERVICE_TOKENS is not set",
         "uses MY_SERVICE_TOKEN; assertion failed",
+        "note: MY_SERVICE_TOKEN=abc was used\nassertion failed: left == right",
+        "Set the MY_PAT environment variable",
+        "PYTHONPATH not found",
+        // No name in the text: undetectable, so a verdict (see `says_missing`).
+        "thread 'main' panicked: called `Result::unwrap()` on an `Err` value: NotPresent",
         "exit 1",
     ] {
         assert_eq!(
@@ -277,4 +291,40 @@ fn windows_system_variables_are_kept_at_every_site() {
         }
         assert!(!environment.contains_key("MY_PAT"));
     }
+}
+
+/// A proxy value is bound only as a bare address: no credentials, query or
+/// fragment, and no path but `/`; a NO_PROXY list keeps its CIDR blocks.
+#[test]
+fn only_a_bare_proxy_address_is_bound() {
+    let bound = |name: &str, value: &str| {
+        let host = host(&[("PATH", "/bin"), (name, value)]);
+        CheckPolicy::default_for(&host).bound.contains_key(name)
+    };
+    assert!(bound("HTTPS_PROXY", "http://proxy.internal:3128"));
+    assert!(bound("HTTPS_PROXY", "http://proxy.internal:3128/"));
+    assert!(bound("NO_PROXY", "localhost,10.0.0.0/8"));
+    for value in [
+        "http://alice:s3cret@proxy.internal:3128",
+        "http://proxy.internal:3128/?access_token=tok",
+        "http://proxy.internal:3128?token=tok",
+        "http://proxy.internal:3128/#tok",
+        "http://proxy.internal:3128/token/tok",
+    ] {
+        assert!(!bound("HTTPS_PROXY", value), "{value}");
+    }
+    assert!(!bound("no_proxy", "alice@host"));
+}
+
+/// Windows: a site with its own home points the profile variables at it.
+#[cfg(windows)]
+#[test]
+fn windows_profile_variables_point_at_the_site_home() {
+    let home = Path::new(r"D:\scratch\home");
+    let bindings: BTreeMap<&str, PathBuf> = profile_bindings(home).into_iter().collect();
+    for name in ["USERPROFILE", "APPDATA", "LOCALAPPDATA"] {
+        assert_eq!(bindings[name], home, "{name}");
+    }
+    assert_eq!(bindings["HOMEDRIVE"], PathBuf::from("D:"));
+    assert_eq!(bindings["HOMEPATH"], PathBuf::from(r"\scratch\home"));
 }

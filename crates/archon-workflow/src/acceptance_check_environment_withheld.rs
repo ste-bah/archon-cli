@@ -26,12 +26,30 @@ pub fn withheld(
         .collect()
 }
 
-/// Whether `output` says the variable `name` is missing or unset: `NAME is
-/// not set` (and unset, not defined, undefined, missing, required, must be
-/// set, the shells' `unbound variable` and `parameter not set`),
-/// `environment variable NAME`, `missing NAME`, or Python's `KeyError:
-/// 'NAME'`. The name's case is ignored only on Windows, as [`withheld`]
-/// ignores it there.
+/// Whether `output` says the variable `name` is missing or unset:
+/// - `NAME is not set` (and unset, not defined, undefined, missing,
+///   required, must be set, the shells' `unbound variable` and `parameter
+///   not set`);
+/// - `NAME environment variable` (`X environment variable is not set`),
+///   `environment variable NAME`, `missing NAME`;
+/// - `set` / `setting` / `export` / `provide` `(the) NAME` (django-environ's
+///   "Set the X environment variable", the OpenAI SDK's "by setting the X
+///   environment variable");
+/// - `NAME` then, within 80 characters on its line, not found, is empty, not
+///   provided or required (python-decouple's "X not found. Declare it as
+///   envvar", zod/t3-env's `{ X: [ 'Required' ] }`);
+/// - `NAME` on one line and `Field required` or `Required` on the next
+///   (pydantic);
+/// - Python's `KeyError: 'NAME'`.
+///
+/// The name's case is ignored only on Windows, as [`withheld`] ignores it
+/// there. A message that does not name the variable -- Rust's
+/// `env::var(..)` error `NotPresent`, Go's empty `os.Getenv` -- cannot be
+/// told from a product failure, so it stays a verdict. Nothing later
+/// catches it either: the freeze's passability judge (Issue 275) is shown
+/// that baseline output, but it refutes only a check whose own setup breaks
+/// a rule the product enforces, and accepts ambiguous output. Such a check
+/// needs its variable named in `environment_allowlist`.
 fn says_missing(name: &str, output: &str) -> bool {
     let escaped = regex::escape(name);
     let name = if cfg!(windows) {
@@ -44,6 +62,12 @@ fn says_missing(name: &str, output: &str) -> bool {
             r#"\b{name}\b['"`]?\s*:?\s*(?:is\s+)?(?:not\s+set|unset|not\s+defined|undefined|missing|required|must\s+be\s+set|unbound\s+variable|parameter\s+(?:null\s+or\s+)?not\s+set)"#
         ),
         format!(r#"(?:environment\s+variable|env\s+var|missing)\s*:?\s*['"`$]?\b{name}\b"#),
+        format!(r#"\b{name}\b['"`]?\s+env(?:ironment)?\s+var(?:iable)?"#),
+        format!(
+            r#"\b(?:set(?:ting)?|export(?:ing)?|provid(?:e|ing))\s+(?:the\s+)?['"`$]?\b{name}\b"#
+        ),
+        format!(r#"\b{name}\b[^\n]{{0,80}}(?:not\s+found|is\s+empty|not\s+provided|required)"#),
+        format!(r#"\b{name}\b[^\n]*\n[^\n]*\b(?:field\s+)?required\b"#),
         format!(r#"KeyError:\s*['"]{name}['"]"#),
     ];
     patterns.iter().any(|pattern| {

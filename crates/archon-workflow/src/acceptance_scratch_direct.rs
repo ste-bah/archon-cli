@@ -22,7 +22,7 @@
 use super::process::CommandSite;
 use super::*;
 use crate::acceptance_check_environment::{
-    CheckPolicy, check_environment, withheld, withheld_error,
+    CheckPolicy, check_environment, profile_bindings, withheld, withheld_error,
 };
 use crate::acceptance_world::{FrozenCommandRef, resolve_command};
 use crate::task_set_contract::AcceptanceContract;
@@ -120,6 +120,10 @@ impl DirectSite {
                 .as_deref()
                 .map(|target| ("CARGO_TARGET_DIR", target)),
         );
+        // Windows: a fresh home is the profile too; the live checkout keeps
+        // the host's profile.
+        let profile = home.map(profile_bindings).unwrap_or_default();
+        site.extend(profile.iter().map(|(name, path)| (*name, path.as_path())));
         let environment = check_environment(&self.host, &policy, &site).map_err(invalid)?;
         let withheld = withheld(&self.host, &environment);
         Ok((environment, withheld))

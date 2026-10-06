@@ -410,22 +410,22 @@ impl ScratchRoots {
     /// rule, `acceptance_check_environment`): the policy's, and this
     /// scratch's own HOME, TMPDIR, CARGO_HOME and build directory.
     pub fn environment(&self, policy: &ScratchPolicy) -> BTreeMap<String, String> {
-        use crate::acceptance_check_environment::{CheckPolicy, host_environment, site_variables};
+        use crate::acceptance_check_environment as rule;
         let (home, tmp, cargo) = (
             self.root.join("home"),
             self.root.join("tmp"),
             self.root.join("cargo-home"),
         );
-        site_variables(
-            &host_environment(),
-            &CheckPolicy::configured(policy),
-            &[
-                ("HOME", &home),
-                ("TMPDIR", &tmp),
-                ("CARGO_HOME", &cargo),
-                ("CARGO_TARGET_DIR", &self.target),
-            ],
-        )
+        // Windows: the profile variables point at this scratch's home too.
+        let profile = rule::profile_bindings(&home);
+        let mut site: Vec<(&str, &Path)> = vec![("HOME", &home), ("TMPDIR", &tmp)];
+        site.extend([
+            ("CARGO_HOME", cargo.as_path()),
+            ("CARGO_TARGET_DIR", &self.target),
+        ]);
+        site.extend(profile.iter().map(|(name, path)| (*name, path.as_path())));
+        let policy = rule::CheckPolicy::configured(policy);
+        rule::site_variables(&rule::host_environment(), &policy, &site)
     }
     pub(super) fn command_environment(&self, policy: &ScratchPolicy) -> BTreeMap<String, String> {
         let mut env = self.environment(policy);
