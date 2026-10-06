@@ -89,3 +89,34 @@ impl FixedHostCommandExecutor {
         fixed_subject_is_terminal(&self.run_root, &request.command_id, &outcome)
     }
 }
+
+impl FixedHostCommandExecutor {
+    /// Issue 337: an unpublished outcome answers the inputs it was asked
+    /// about while the call's identity, which binds what it judged, is
+    /// unchanged: a candidate's bytes (its stdin) or, for a set gate, the
+    /// task set's content manifest, with the PRD digest and the paths. A
+    /// command without either reads disk content its identity does not bind
+    /// (a frozen-chain verify): its answer may be stale after a repair, so it
+    /// never replays; it runs again, as any host read can.
+    pub(super) fn answers_current_inputs(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> WorkflowResult<bool> {
+        let Some(request) = record.call.options.host_command.as_ref() else {
+            return Ok(false);
+        };
+        if request.stdin.is_none()
+            && !crate::command::workflow_host_command_catalog::is_set_gate_command(
+                &request.command_id,
+            )
+        {
+            return Ok(false);
+        }
+        Ok(
+            crate::command::workflow_host_command_occurrence::record_identity_matches(
+                record,
+                &self.call_identity(request)?,
+            ),
+        )
+    }
+}

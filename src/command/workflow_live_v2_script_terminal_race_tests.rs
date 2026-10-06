@@ -240,3 +240,52 @@ async fn a_sibling_in_flight_never_pauses_a_run_its_final_report_stopped() {
         assert!(!published, "{mode:?}: nothing publishes after the stop");
     }
 }
+
+/// Round 4 (review finding 5): a call's terminal stop that cannot be
+/// persisted fails safe, as `terminalStop` does: the run pauses with the
+/// refusal as evidence instead of ending on an in-memory stop alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unpersisted_final_report_stop_pauses_with_its_refusal() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let spec = test_spec();
+    let run_id = store.create_run(spec.clone()).unwrap().id;
+    // The stop record's path is taken by a directory: the write fails.
+    std::fs::create_dir_all(store.run_dir(&run_id).join("v2/terminal-stop.json/held")).unwrap();
+    let (ui_sink, _ui) = default_workflow_ui_sink();
+    let client = LiveV2AgentClient::new(
+        Arc::new(PanicLlm),
+        ui_sink,
+        Vec::new(),
+        run_id.clone(),
+        None,
+        None,
+    );
+    let outcome = WorkflowV2ScriptRunner::new(
+        "unpersisted stop".to_string(),
+        test_runtime(&spec),
+        WorkflowV2AgentAdapter::new(),
+        client,
+        WorkflowV2ResultStore::new(store.run_dir(&run_id).join("v2")),
+        store.clone(),
+        run_id.clone(),
+        true,
+        None,
+        None,
+    )
+    .with_raw_outcomes(true)
+    .run(r#"async function workflow(w) {
+      await w.finalReport("stopped", { status: "needs_review", inputs: {}, task: "Stop for review" });
+    }"#)
+    .await;
+    assert!(
+        matches!(outcome, Err(WorkflowError::ControlPaused(_))),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        store.load_state(&run_id).unwrap().status,
+        archon_workflow::RunStatus::Paused
+    );
+    let events = std::fs::read_to_string(store.events_path(&run_id)).unwrap();
+    assert!(events.contains("terminal_stop_unpersisted"), "{events}");
+}

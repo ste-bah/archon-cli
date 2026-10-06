@@ -158,7 +158,21 @@ pub fn pause_owned(
     store: &WorkflowStore,
     run_id: &str,
     owner: PauseOwner,
+    detail: serde_json::Value,
+) -> WorkflowResult<WorkflowResult<u64>> {
+    pause_owned_then(store, run_id, owner, detail, |_, _| {})
+}
+
+/// [`pause_owned`], then `in_force` in the SAME run-lock section once the
+/// pause is in force (Issue 337): what the pause leaves for a resume (its
+/// replay coverage) is written before any resume can take the run. It gets
+/// the locked store and the evidence event's sequence.
+pub fn pause_owned_then(
+    store: &WorkflowStore,
+    run_id: &str,
+    owner: PauseOwner,
     mut detail: serde_json::Value,
+    in_force: impl FnOnce(&WorkflowStore, Option<u64>),
 ) -> WorkflowResult<WorkflowResult<u64>> {
     let owned = store.with_run_lock(run_id, |locked| {
         let mut run = locked.load_state(run_id)?;
@@ -186,7 +200,9 @@ pub fn pause_owned(
             }
         }
         // The run is paused from here whatever happens to the evidence.
-        Ok(emit(locked, run_id, detail))
+        let event = emit(locked, run_id, detail);
+        in_force(locked, event.as_ref().ok().copied());
+        Ok(event)
     });
     if let Err(refused) = &owned {
         tracing::warn!(

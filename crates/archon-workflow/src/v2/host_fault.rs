@@ -34,8 +34,14 @@ pub const NO_VERDICT_REFUND_MARKER: &str = "transport_failure_no_verdict";
 /// own. Such a record is history, never a verdict a resume may replay.
 pub const HOST_DISPATCH_ERROR_MARKER: &str = "host_dispatch_error";
 
+/// The marker on a result this build made from a call's own answer that
+/// failed validation: the model answered, wrongly, so it IS a verdict. It
+/// keeps such a result apart from the unmarked legacy dispatch-error shape.
+pub const INVALID_ANSWER_MARKER: &str = "invalid_answer";
+
 /// Does this recorded result carry no verdict on the work: a dispatch error,
-/// a never-ran fault, or a refunded no-verdict attempt?
+/// a never-ran fault, or a refunded no-verdict attempt -- marked, or in the
+/// unmarked shape an older binary wrote for a dispatch error?
 pub fn result_carries_no_verdict(result: &WorkflowV2Result) -> bool {
     [
         HOST_DISPATCH_ERROR_MARKER,
@@ -49,7 +55,34 @@ pub fn result_carries_no_verdict(result: &WorkflowV2Result) -> bool {
             .get(*marker)
             .and_then(serde_json::Value::as_bool)
             == Some(true)
-    })
+    }) || legacy_dispatch_error(result)
+}
+
+/// A dispatch error as a binary before [`HOST_DISPATCH_ERROR_MARKER`] wrote
+/// it ([`failed_v2_result`] unmarked): Failed, data exactly `{"error": ...}`,
+/// and the failed-call summary. A run started on such a binary may resume on
+/// this one, so its fault records must not replay as verdicts.
+fn legacy_dispatch_error(result: &WorkflowV2Result) -> bool {
+    result.status == crate::v2::WorkflowV2Status::Failed
+        && result
+            .data
+            .as_object()
+            .is_some_and(|data| data.len() == 1 && data.contains_key("error"))
+        && result.summary.starts_with("workflow v2 call '")
+        && result.summary.contains("' failed: ")
+}
+
+/// The result for a call whose own answer failed validation: failed, and
+/// marked as the answer it is ([`INVALID_ANSWER_MARKER`]).
+pub fn invalid_answer_result(call_id: &str, error: WorkflowError) -> WorkflowV2Result {
+    let mut result = failed_v2_result(call_id, error);
+    if let Some(object) = result.data.as_object_mut() {
+        object.insert(
+            INVALID_ANSWER_MARKER.to_string(),
+            serde_json::Value::Bool(true),
+        );
+    }
+    result
 }
 
 /// Did this error end the call before anything could produce a verdict?

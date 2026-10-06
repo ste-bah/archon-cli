@@ -406,8 +406,8 @@ mod workflow_live_v2_script_host_call;
 use workflow_live_v2_script_host_call::ScriptHostCallBridge;
 
 use archon_workflow::v2::host_fault::{
-    NeverStartedStreak, is_never_started_fault, result_reports_never_started,
-    v2_result_for_call_error,
+    NeverStartedStreak, invalid_answer_result, is_never_started_fault,
+    result_reports_never_started, v2_result_for_call_error,
 };
 
 // The workflow.js script bridge — payload parsing, source composition, the
@@ -417,9 +417,9 @@ use archon_workflow::v2::host_fault::{
 // siblings into one namespace every child inherited through `use super::*`.
 use archon_workflow::v2::script::{
     ScriptEnvelopeShape, ScriptHostRequest, V3_AUTHOR_BOOTSTRAP, completion_evidence_from_result,
-    compose_author_brief, evidence_snapshot_hash, failed_v2_result,
-    frontier_resume_record_reusable, is_reusable_status, mark_unresolved_dependency_metadata,
-    merge_v2_status, next_action_for_terminal_call, normalize_and_attach_review_findings,
+    compose_author_brief, evidence_snapshot_hash, frontier_resume_record_reusable,
+    is_reusable_status, mark_unresolved_dependency_metadata, merge_v2_status,
+    next_action_for_terminal_call, normalize_and_attach_review_findings,
     parse_host_command_request, parse_script_options, record_tasks_all_completed,
     render_author_waves, result_view_json_shaped, reusable_record_has_required_completion_evidence,
     run_terminal_status_contribution, sanitize_v2_gap_id, script_envelope_shape, script_source,

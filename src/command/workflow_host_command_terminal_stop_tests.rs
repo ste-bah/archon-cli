@@ -389,3 +389,61 @@ async fn an_unreadable_stop_record_pauses_the_inflight_supervisor() {
     assert_eq!(store.load_state(&run.id).unwrap().status, RunStatus::Paused);
     assert_eq!(pause_events(&store, &run.id), 1);
 }
+
+/// Round 4 (review finding 2): an unpublished outcome may answer its call
+/// again only while the identity binding what it judged is unchanged; a host
+/// read binds no content it read, so it never does.
+#[test]
+fn an_unpublished_outcome_answers_only_inputs_its_identity_binds() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    let store = WorkflowStore::project(&context.project_root);
+    let run = new_run(&store);
+    let executor = FixedHostCommandExecutor::with_process(
+        fixed_decomposition_catalog("rev-1").unwrap(),
+        context,
+        store.run_dir(&run.id),
+        Arc::new(WaitingProcess {
+            started: Arc::new(tokio::sync::Notify::new()),
+        }),
+    );
+    let record = |request: HostCommandRequest, id: String| {
+        let mut options = archon_workflow::WorkflowV2HostOptions::default();
+        options.host_command = Some(request);
+        archon_workflow::WorkflowV2CallRecord::new(
+            &run.id,
+            archon_workflow::WorkflowV2HostCall {
+                id,
+                method: archon_workflow::WorkflowV2HostMethod::HostCommand,
+                write_mode: None,
+                options,
+            },
+            1,
+            "input".into(),
+            Default::default(),
+            Vec::new(),
+        )
+    };
+    let lint = HostCommandRequest::new("task-set-lint", None).unwrap();
+    let identity = executor.call_identity(&lint).unwrap();
+    assert!(
+        executor
+            .record_answers_current_inputs(&record(lint.clone(), identity))
+            .unwrap(),
+        "a set gate's identity binds the task set's content"
+    );
+    assert!(
+        !executor
+            .record_answers_current_inputs(&record(lint, "host-command:stale".into()))
+            .unwrap(),
+        "an identity that no longer matches answers nothing"
+    );
+    let verify = HostCommandRequest::new("verify-frozen-skeleton", None).unwrap();
+    let identity = executor.call_identity(&verify).unwrap();
+    assert!(
+        !executor
+            .record_answers_current_inputs(&record(verify, identity))
+            .unwrap(),
+        "a host read binds no content it read: it runs again"
+    );
+}

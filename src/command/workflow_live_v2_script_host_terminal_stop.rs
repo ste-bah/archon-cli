@@ -120,7 +120,9 @@ impl WorkflowScriptHost {
 
     /// The terminal stop a call's own status made (`mark_terminal`), for the
     /// fixed host only, like `terminalStop`. A stop that cannot be persisted
-    /// is reported; the in-memory stop still ends this script as before.
+    /// fails safe, as `terminalStop` does: the run PAUSES with the refusal as
+    /// evidence (a stored pause outranks this session's in-memory stop), so
+    /// no sibling can end it unrecorded and a resume decides again.
     pub(super) fn persist_call_terminal_stop(&self, record: &WorkflowV2CallRecord) {
         if !self.runner.raw_outcomes_allowed {
             return;
@@ -136,8 +138,34 @@ impl WorkflowScriptHost {
             }
             self.persist_terminal_stop(locked, &run, &reason)
         });
-        if let Err(error) = persisted {
-            tracing::warn!(%error, run_id = %self.runner.run_id, "terminal stop not persisted");
+        let Err(error) = persisted else {
+            return;
+        };
+        let run_id = &self.runner.run_id;
+        let refusal = format!(
+            "the terminal stop of call {} could not be persisted ({error}); run {run_id} is paused, not ended: repair the run store, then archon workflow resume --live --yes {run_id}",
+            record.call.id
+        );
+        tracing::warn!(run_id, "{refusal}");
+        let paused = self
+            .runner
+            .workflow_store
+            .load_state(run_id)
+            .and_then(|run| {
+                archon_workflow::control_pause::pause_with_evidence(
+                    &self.runner.workflow_store,
+                    run_id,
+                    run.generation,
+                    serde_json::json!({
+                        "event": "terminal_stop_unpersisted",
+                        "call_id": record.call.id,
+                        "status": record.status,
+                        "refusal": refusal,
+                    }),
+                )
+            });
+        if let Err(error) = paused {
+            tracing::warn!(%error, run_id, "the unpersisted terminal stop could not pause the run");
         }
     }
 }

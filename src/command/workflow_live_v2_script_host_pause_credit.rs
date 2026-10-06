@@ -85,9 +85,11 @@ fn stands(covered: &CoveredAttempt, slots: &[WorkflowV2CallRecord]) -> bool {
     })
 }
 
-/// A pause's credit holds while every attempt it covers still stands.
+/// A pause's credit holds while every attempt it covers still stands. A
+/// host-taken record is never passed: each covered attempt replays while IT
+/// stands (the replay checks that), so one changed slot voids no other.
 pub(super) fn credit_holds(record: &ScriptPauseRecord, slots: &[WorkflowV2CallRecord]) -> bool {
-    record.covered.iter().all(|covered| stands(covered, slots))
+    record.host_taken || record.covered.iter().all(|covered| stands(covered, slots))
 }
 
 /// Every pause record of the run, unreadable ones skipped (evidence only: a
@@ -216,15 +218,61 @@ impl WorkflowScriptHost {
             return Ok(None);
         }
         let slots = self.runner.v2_store.load_call_records()?;
-        // The wanted attempt stands (it is the slot's record, asked with its
-        // input, not invalidated); a `w.pause` also needs its whole credit.
-        let covered = pauses.iter().any(|pause| {
-            pause.covered.contains(&wanted) && (pause.host_taken || credit_holds(pause, &slots))
-        });
+        let covered = pauses
+            .iter()
+            .any(|pause| pause.covered.contains(&wanted) && credit_holds(pause, &slots));
         if !covered {
+            return Ok(None);
+        }
+        // Issue 337: a covered answer replays only while it is still one.
+        if !self
+            .covered_answer_holds(&record, &pauses, &wanted, &slots)
+            .await?
+        {
             return Ok(None);
         }
         self.mark_reused(&record, generation).await?;
         Ok(Some(self.result_view(&record)?))
+    }
+}
+
+impl WorkflowScriptHost {
+    /// Issue 337: whether a covered record may still answer its call. A
+    /// `w.pause` whose credit holds keeps its contract: its covered attempts
+    /// replay verbatim, failed calls too. A HOST-taken record answers only by
+    /// the checks every other reuse path applies. A record without a verdict
+    /// (a dispatch error or a never-ran fault, marked or in an older binary's
+    /// shape) never replays. A host command's PUBLISHED outcome replays only
+    /// while it is still what is on disk (`record_is_live`); an unpublished
+    /// one only while it still answers the inputs as they are now
+    /// (`record_answers_current_inputs`), so a crash a disk state caused
+    /// heals once the disk is repaired. Any other call passes the audit
+    /// admission of a cached answer.
+    async fn covered_answer_holds(
+        &self,
+        record: &WorkflowV2CallRecord,
+        pauses: &[ScriptPauseRecord],
+        wanted: &CoveredAttempt,
+        slots: &[WorkflowV2CallRecord],
+    ) -> archon_workflow::WorkflowResult<bool> {
+        if pauses.iter().any(|pause| {
+            !pause.host_taken && pause.covered.contains(wanted) && credit_holds(pause, slots)
+        }) {
+            return Ok(true);
+        }
+        if archon_workflow::v2::host_fault::result_carries_no_verdict(&record.result) {
+            return Ok(false);
+        }
+        if record.call.method != WorkflowV2HostMethod::HostCommand {
+            return self.refresh_audit_for_cache(record).await;
+        }
+        let Some(executor) = self.runner.host_command_executor.as_ref() else {
+            return Ok(false);
+        };
+        if record.result.data["publicationReceipt"].is_null() {
+            executor.record_answers_current_inputs(record)
+        } else {
+            executor.record_is_live(record)
+        }
     }
 }

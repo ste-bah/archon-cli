@@ -153,20 +153,22 @@ impl WorkflowScriptHost {
             "record_path": SCRIPT_ERROR_PAUSE_RECORD,
             "resume": resume,
         });
-        match archon_workflow::control_pause::pause_with_evidence(
+        // The coverage is written in the pause's own lock section, so no
+        // resume can take the run before its replay record exists.
+        match archon_workflow::control_pause::pause_owned_then(
             store,
             run_id,
-            run.generation,
+            archon_workflow::control_pause::PauseOwner::Generation(run.generation),
             detail,
+            |locked, seq| {
+                if let Some(coverage) = coverage {
+                    coverage.record(locked, run_id, "script-error", seq);
+                }
+            },
         ) {
             Ok(event) => {
-                let seq = event
-                    .inspect_err(|error| {
-                        tracing::warn!(%error, run_id, "script error pause event not recorded");
-                    })
-                    .ok();
-                if let Some(coverage) = coverage {
-                    coverage.record(store, run_id, "script-error", seq);
+                if let Err(error) = event {
+                    tracing::warn!(%error, run_id, "script error pause event not recorded");
                 }
             }
             Err(

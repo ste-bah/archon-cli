@@ -15,24 +15,6 @@ use super::*;
 use remediation::asks_the_same;
 
 impl WorkflowScriptHost {
-    async fn fixed_host_record_reusable(
-        &self,
-        record: &WorkflowV2CallRecord,
-    ) -> archon_workflow::WorkflowResult<bool> {
-        if record.call.method != WorkflowV2HostMethod::HostCommand {
-            return self.refresh_audit_for_cache(record).await;
-        }
-        self.runner
-            .host_command_executor
-            .as_ref()
-            .ok_or_else(|| {
-                WorkflowError::PolicyDenied(
-                    "HostCommand reuse requires the trusted fixed executor".to_string(),
-                )
-            })?
-            .record_is_reusable(record)
-    }
-
     /// One host call, once the session's control refusal gate has passed
     /// (`execute`, `workflow_live_v2_script_host_control_refusal.rs`).
     pub(super) async fn execute_host_call(
@@ -427,7 +409,9 @@ impl WorkflowScriptHost {
         mark_unresolved_dependency_metadata(&execution, &source_metadata, &mut result);
         let result = match result.validate() {
             Ok(()) => result,
-            Err(err) => failed_v2_result(&call_id, WorkflowError::SpecInvalid(err.to_string())),
+            Err(err) => {
+                invalid_answer_result(&call_id, WorkflowError::SpecInvalid(err.to_string()))
+            }
         };
         if let Some(graph) = source_metadata.source_task_graph.take() {
             source_metadata.source_task_graph = Some(complete_source_task_graph(graph, &result));

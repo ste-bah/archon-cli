@@ -71,20 +71,14 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
             // Issue 337: this pause covers what the run recorded, as any
             // script-error pause of a fixed script does.
             let coverage = super::workflow_live_v2_script::HostPauseCoverage::snapshot(&v2_store);
-            let paused = archon_workflow::control_pause::pause_owned(
+            // Written in the pause's own lock section (no resume between).
+            let paused = archon_workflow::control_pause::pause_owned_then(
                 store,
                 &run.id,
                 archon_workflow::control_pause::PauseOwner::Executor(execution_generation),
                 serde_json::json!({"event":"fixed_host_error_pause","error":text}),
+                |locked, seq| coverage.record(locked, &run.id, "boundary-error", seq),
             );
-            if let Ok(event) = &paused {
-                coverage.record(
-                    store,
-                    &run.id,
-                    "boundary-error",
-                    event.as_ref().ok().copied(),
-                );
-            }
             match paused {
                 Ok(Ok(_)) => {
                     return Ok(format!(
@@ -256,6 +250,9 @@ pub(super) fn persist_fixed_start(
 #[cfg(test)]
 #[path = "workflow_live_v2_fixed_error_pause_tests.rs"]
 mod error_pause_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_fixed_replay_guard_tests.rs"]
+mod replay_guard_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_fixed_start_tests.rs"]
 mod start_tests;

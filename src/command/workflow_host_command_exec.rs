@@ -41,6 +41,12 @@ use super::workflow_host_secrets::{HostSecrets, utf8};
 #[async_trait]
 pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn call_identity(&self, request: &HostCommandRequest) -> WorkflowResult<String>;
+    /// Issue 337: whether an UNPUBLISHED recorded outcome still answers the
+    /// call's inputs as they are now, so a covered replay may give it again.
+    /// Defaults to the reuse test.
+    fn record_answers_current_inputs(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        self.record_is_reusable(record)
+    }
 
     fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool>;
     /// Whether the record's landed outcome is still exactly what is on disk,
@@ -249,6 +255,10 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
 
     fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
         self.record_is_reusable_live(record, false)
+    }
+
+    fn record_answers_current_inputs(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        self.answers_current_inputs(record)
     }
 
     fn record_is_live(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
