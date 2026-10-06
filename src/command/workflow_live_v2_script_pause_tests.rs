@@ -304,3 +304,6 @@ mod owner;
 
 #[path = "workflow_live_v2_script_tool_stall_tests.rs"]
 mod tool_stall;
+
+#[path = "workflow_decompose_seed_e2e_tests.rs"]
+mod phase_seed_e2e;

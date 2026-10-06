@@ -94,6 +94,21 @@ async fn resume_upgraded(component: &str) {
         .filter(|e: &serde_json::Value| e["detail"]["event"] == "decomposition_runtime_upgrade")
         .collect();
     assert_eq!(upgrades.len(), 1, "one durable event per transition");
+    // Issue 360: the transition's phase seed, derived once and visible.
+    let seeded = events
+        .lines()
+        .filter(|l| l.contains(crate::command::workflow_decompose_seed::SEED_EVENT))
+        .count();
+    assert_eq!(seeded, 1, "{component}: one seed event per transition");
+    let status = crate::command::workflow_decompose_status::render(&store, &run_id)
+        .unwrap()
+        .unwrap();
+    assert!(
+        status.contains(
+            "phase_seed: transition=0 record=decomposition/phase-seeds/transition-0.json"
+        ),
+        "{status}"
+    );
     assert_eq!(
         upgrades[0]["detail"]["old"]["script_digest"],
         state.identity.script_digest

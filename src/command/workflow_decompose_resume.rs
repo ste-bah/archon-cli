@@ -340,16 +340,28 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             .await
             .map_err(|error| anyhow!("reporting the runtime transition: {error}"))?;
     }
+    // Issue 360: after an upgrade the script starts from the phase seed.
+    let criteria = expected_arguments["acceptanceCriteria"]
+        .as_object()
+        .map(|criteria| criteria.keys().cloned().collect())
+        .unwrap_or_default();
+    let seed = crate::command::workflow_decompose_seed::current_seed(
+        &store, run_id, &log_path, &criteria,
+    )?;
+    let script_arguments = crate::command::workflow_decompose_seed::seeded_arguments(
+        &expected_arguments,
+        seed.as_ref(),
+    );
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,
-        Some(&expected_arguments),
+        Some(&script_arguments),
     )
     .await?;
     let plan = super::super::workflow_live::workflow_live_planner::WorkflowScriptPlan::fixed(
         compiled_spec,
         FIXED_SCRIPT_SOURCE,
         calls,
-        expected_arguments,
+        script_arguments,
     );
     if cancellation_requested
         .is_some_and(|requested| requested.load(std::sync::atomic::Ordering::SeqCst))

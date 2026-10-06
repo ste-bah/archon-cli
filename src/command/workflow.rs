@@ -36,6 +36,8 @@ pub(crate) use workflow_freeze_cli::skeleton_document;
 mod workflow_staged_cli;
 #[cfg(test)]
 pub(crate) use workflow_cli_lint::lint_from_slash_args;
+// Issue 360: the phase seed's entry check is freeze's own.
+pub(crate) use workflow_freeze_cli::{ENTRY_SHAPE, element_shape_defects};
 
 pub(crate) struct WorkflowHandler;
 

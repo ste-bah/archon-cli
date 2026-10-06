@@ -407,3 +407,7 @@ mod tests;
 #[cfg(test)]
 #[path = "workflow_freeze_cli_baseline_tests.rs"]
 pub(crate) mod baseline_tests;
+
+// Issue 360: a resume checks every carried acceptance entry with this
+// build's freeze entry validator before it carries it.
+pub(crate) use defects::{ENTRY_SHAPE, element_shape_defects};

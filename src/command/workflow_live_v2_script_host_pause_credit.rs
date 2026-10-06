@@ -155,9 +155,18 @@ impl WorkflowScriptHost {
             return Ok(None);
         }
         let slots = self.runner.v2_store.load_call_records()?;
-        let covered = pauses
-            .iter()
-            .any(|pause| pause.covered.contains(&wanted) && credit_holds(pause, &slots));
+        // Issue 360: a run seeded after an upgrade replays none of the history
+        // before it, so a pause taken then credits nothing now.
+        let floor = self
+            .runner
+            .script_args
+            .as_ref()
+            .and_then(|args| args["phaseSeed"]["pause_generation_floor"].as_u64());
+        let covered = pauses.iter().any(|pause| {
+            floor.is_none_or(|floor| pause.generation > floor)
+                && pause.covered.contains(&wanted)
+                && credit_holds(pause, &slots)
+        });
         if !covered || !self.outcome_limits_hold(&record)? {
             return Ok(None);
         }

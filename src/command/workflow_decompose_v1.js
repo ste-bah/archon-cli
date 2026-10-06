@@ -92,6 +92,7 @@ const PACKAGING_REFUSAL = "candidate artifact was refused: the reply is not a JS
 
 async function workflow(w) {
   requireFixedArgs();
+  if (args.phaseSeed) applySeedOrdinals(); // Issue 360: after an upgrade, start from the phase seed.
   const frozen = frozenChain();
 
   // A stage the launcher found frozen and verified is not re-authored: the
@@ -283,6 +284,10 @@ async function authorCandidate(w, policy) {
   let lastFindings = feedback.slice();
   const progress = newProgress(feedback);
   const authorState = { entries: new Map(), retryIds: null };
+  // Issue 360: after an upgrade, start from the latest durable candidate (workflow_decompose_v1_seed.js).
+  const seeded = args.phaseSeed ? seedAuthorLoop(policy, authorState) : null;
+  if (seeded) [feedback, lastFindings] = [seeded.feedback.slice(), seeded.feedback.slice()];
+  let carried = seeded ? seeded.carried : null;
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
@@ -292,12 +297,12 @@ async function authorCandidate(w, policy) {
       if (stall !== "operational_no_progress" && args.gateMode === "observe" && lastCommitted) return lastCommitted;
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
     }
-    call += 1;
-    progress.calls += 1;
-    AUTHOR_CALLS.set(policy.phase, call);
+    const carry = carried;
+    carried = null;
+    if (carry === null) { call += 1; progress.calls += 1; AUTHOR_CALLS.set(policy.phase, call); }
     const addedBefore = authorState.added || 0;
     const prompt = authorPrompt(policy.prompt(), attempt + 1, feedback, history);
-    const authored = policy.author
+    const authored = carry !== null ? { status: "accepted", stopReason: "end_turn", content: carry } : policy.author
       ? await policy.author(w, prompt, call, authorState)
       : await w.agent(`${policy.phase}-author-${call}`, {
           task: prompt, tier: "planner", resultMode: "rawOutcome",
