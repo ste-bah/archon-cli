@@ -229,3 +229,36 @@ async fn a_loss_quarantined_before_a_crash_still_pauses_the_next_execution() {
         .await
         .expect("acknowledged by the pause: a resume goes on");
 }
+
+/// Issue 317: a record of unknown state was quarantined (the process died
+/// before it paused), then its quarantine evidence was damaged too, and the
+/// saved ledger is a legacy one. The lost record is never ignored and the
+/// legacy ledger never stands in for it: the round pauses on the loss with
+/// the reason, the damaged evidence bytes are kept, and the resume goes on.
+#[tokio::test]
+async fn damaged_quarantine_evidence_pauses_on_the_lost_record() {
+    use archon_workflow::v2::acceptance_stage::progress::ProgressLedger;
+    let fixture = fixture_with(true, "test -f missing");
+    run(&fixture, &execution(1, 3, &[])).await.unwrap();
+    let ledger = run_dir(&fixture).join("v2/acceptance/progress-ledger.json");
+    std::fs::write(&ledger, r#"{"seen":[["AC-OTHER"]],"revisits":1}"#).unwrap();
+    std::fs::write(first_record(&fixture), "{\"round\":").unwrap();
+    let healed = ProgressLedger::load_healing(&run_dir(&fixture)).unwrap();
+    let moved = run_dir(&fixture).join(&healed.quarantined[0].quarantined);
+    let stem = moved.file_name().unwrap().to_str().unwrap();
+    let evidence = moved.with_file_name(stem.replace(".damaged", ".evidence.json"));
+    std::fs::write(&evidence, "{\"event\":").unwrap();
+
+    let second = run(&fixture, &execution(2, 3, &[])).await;
+
+    let message = assert_paused(&fixture, &second);
+    assert!(message.contains("evidence"), "{message}");
+    assert!(has_event(&fixture, "acceptance_history_pause"));
+    let kept = (std::fs::read_dir(moved.parent().unwrap()).unwrap())
+        .any(|entry| std::fs::read(entry.unwrap().path()).unwrap() == b"{\"event\":");
+    assert!(kept, "the damaged evidence bytes are kept");
+    resume(&fixture);
+    run(&fixture, &execution(2, 3, &[]))
+        .await
+        .expect("acknowledged by the pause: a resume goes on");
+}

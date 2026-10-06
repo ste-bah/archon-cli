@@ -37,6 +37,8 @@ mod call;
 #[path = "workflow_live_v3_run_end_gate.rs"]
 mod gate;
 use gate::{GateRecord, gate_of, read_acceptance_gate};
+#[path = "workflow_live_v3_owned_pause.rs"]
+pub(super) mod owned_pause;
 #[path = "workflow_live_v3_run_end_reopen.rs"]
 mod reopen;
 #[path = "workflow_live_v3_run_end_stop.rs"]
@@ -117,7 +119,9 @@ pub(super) async fn finalize_run_observed(
     };
     let reopen = reentry
         .filter(|_| run_kind == WorkflowRunKind::AuthoredTaskWorkflow)
-        .map(|reentry| reopen::AcceptanceReopen::new(store, run_id, reentry));
+        .map(|reentry| {
+            reopen::AcceptanceReopen::new(store, run_id, reentry, (expected_generation, v2_store))
+        });
     let finalized = super::workflow_live_v2_finalizer::finalize_summary_with_gate(
         store,
         run_id,
@@ -133,6 +137,14 @@ pub(super) async fn finalize_run_observed(
             .map(|reopen| reopen as &dyn super::workflow_live_v2_finalizer::RunEndReopen),
     )
     .await;
+    // Issue 316: a refused pause is never written as a cancellation.
+    let finalized = match finalized {
+        Err(archon_workflow::WorkflowError::ControlCancelled(message)) => Err(
+            stop_control::refused_while_owned(store, run_id, expected_generation, &message)
+                .unwrap_or(archon_workflow::WorkflowError::ControlCancelled(message)),
+        ),
+        other => other,
+    };
     match finalized {
         Ok(summary) => Ok(summary),
         // Re-entered acceptance honours run control: the run stops resumable.
@@ -268,21 +280,20 @@ pub(super) fn apply_authored_run_outcome(
     )
 }
 
-/// Pauses `run_id`, owned by its current generation, because the final gate
-/// found residual gaps that stand only for want of progress.
+/// Pauses `run_id` for `owner` because the final gate found residual gaps
+/// that stand only for want of progress. The owner is checked with the pause
+/// under the run lock (Issue 316): a stale executor never pauses the new
+/// owner's run.
 fn pause_on_residual_stall(
     store: &WorkflowStore,
     run_id: &str,
+    owner: archon_workflow::control_pause::PauseOwner,
     stalled: &[String],
 ) -> archon_workflow::WorkflowError {
-    let generation = match store.load_state(run_id) {
-        Ok(run) => run.generation,
-        Err(error) => return error,
-    };
     let detail = serde_json::json!({
         "event": "residual_gate_stall_pause", "cause": "no_progress", "stalled": stalled,
     });
-    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
+    match owned_pause::pause(store, run_id, owner, detail) {
         Ok(event) => {
             if let Err(error) = event {
                 tracing::warn!(%error, "residual gate pause event not recorded");
@@ -358,7 +369,13 @@ pub(super) fn apply_authored_run_outcome_with(
     // passes stopped making progress pause the run, with the evidence, and
     // the resume plans the stalled pass again (rule A).
     if !residual.stalled.is_empty() && summary.failed_call.is_none() {
-        return Err(pause_on_residual_stall(store, run_id, &residual.stalled));
+        let owner = call::session_owner(v2_store);
+        return Err(pause_on_residual_stall(
+            store,
+            run_id,
+            owner,
+            &residual.stalled,
+        ));
     }
     let outcome = authored_run_terminal_status_with(
         &AuthoredRunFacts {

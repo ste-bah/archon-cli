@@ -209,11 +209,11 @@ pub(super) fn result_for(
 /// `record` (or hit its runaway guard), and returns the control error the
 /// round ends with. The round's record is the evidence; a resume runs the
 /// round again, as the next attempt, on whatever changed meanwhile. Only
-/// `generation`, the one the round started under, may pause the run.
+/// `owner` may pause the run, checked with the pause under the run lock.
 pub(super) fn pause_on_stall(
     store: &archon_workflow::WorkflowStore,
     run_id: &str,
-    generation: u64,
+    owner: archon_workflow::control_pause::PauseOwner,
     record: &AcceptanceRoundRecordV1,
     record_path: &str,
     decision: &LoopDecision,
@@ -259,9 +259,9 @@ pub(super) fn pause_on_stall(
         "record_path": record_path,
         "resume": resume,
     });
-    // Owned by the generation the round started under: a round an operator
-    // pause and resume made obsolete stops instead of pausing the new owner.
-    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
+    // Owned by the round's owner (Issue 316): a round an operator pause and
+    // resume made obsolete stops instead of pausing the new owner.
+    match super::super::workflow_live_v3_run_end::owned_pause::pause(store, run_id, owner, detail) {
         Ok(event) => {
             if let Err(error) = event {
                 tracing::warn!(%error, "acceptance stall pause event not recorded");

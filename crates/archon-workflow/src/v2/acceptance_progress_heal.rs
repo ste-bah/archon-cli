@@ -27,6 +27,8 @@
 //!
 //! A record or log the file system will not hand over is no damage: that
 //! I/O error is returned for the caller to pause on, and nothing moves.
+//! Issue 317: evidence that will not parse is never skipped: its record is
+//! a loss of unknown state, reported like any other.
 
 use std::path::{Path, PathBuf};
 
@@ -34,6 +36,10 @@ use serde::{Deserialize, Serialize};
 
 use super::order::{Recorded, in_recorded_order};
 use super::{ACCEPTANCE_RECORDS_DIR, AcceptanceRoundRecordV1, ObservedState, ProgressLedger};
+use evidence::{keep_unreadable_evidence, unreadable_evidence};
+
+#[path = "acceptance_progress_heal_evidence.rs"]
+mod evidence;
 
 /// Where a round's damaged records go, under its round directory.
 pub const QUARANTINE_DIR: &str = "quarantine";
@@ -311,12 +317,22 @@ fn read_quarantine(
         evidence_files.sort();
         for path in evidence_files {
             let bytes = std::fs::read(&path).map_err(|e| crate::WorkflowError::io(&path, e))?;
-            let Ok(evidence) = serde_json::from_slice::<QuarantinedRecordV1>(&bytes) else {
-                tracing::warn!(path = %path.display(), "quarantine evidence will not parse");
-                continue;
+            let evidence = match serde_json::from_slice::<QuarantinedRecordV1>(&bytes) {
+                Ok(evidence) => evidence,
+                Err(error) => match unreadable_evidence(run_dir, &round, &path, &error)? {
+                    Some(lost) => lost,
+                    None => continue,
+                },
             };
             let key = (evidence.round, evidence.attempt);
-            if !run_dir.join(&evidence.quarantined).is_file() || !seen.insert(key) {
+            // Evidence whose bytes never moved is ignored; a file system
+            // that will not say whether they moved is an I/O error the
+            // caller pauses on, never "they never moved".
+            let moved = run_dir.join(&evidence.quarantined);
+            let moved = moved
+                .try_exists()
+                .map_err(|e| crate::WorkflowError::io(&moved, e))?;
+            if !moved || !seen.insert(key) {
                 continue;
             }
             found.any = true;
@@ -361,6 +377,7 @@ pub fn acknowledge_quarantined(
             })?;
         let dir = moved.parent().unwrap_or(run_dir).to_path_buf();
         let evidence_path = dir.join(format!("{name}{EVIDENCE_SUFFIX}"));
+        keep_unreadable_evidence(&evidence_path, &dir, name)?;
         let acknowledged = QuarantinedRecordV1 {
             acknowledged_at: Some(at.clone()),
             ..record.clone()

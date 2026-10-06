@@ -14,6 +14,7 @@
 //! `workflow_live_v2_script_host_exec.rs`), and its new round and new call
 //! record heal the run.
 
+use archon_workflow::control_pause::PauseOwner;
 use archon_workflow::v2::acceptance_stage::relative_record_path;
 use archon_workflow::v2::{QuarantinedCallRecordV1, WorkflowV2CallSlot};
 use archon_workflow::{
@@ -38,7 +39,13 @@ pub(super) fn acceptance_call_record(
         Err(error @ WorkflowError::Io { .. }) => {
             let named = relative_record_path(&run_dir, &v2_store.result_path(&call.id));
             let reason = format!("the acceptance call record {named} cannot be read ({error})");
-            return Err(pause(store, run_id, &named, &reason));
+            return Err(pause(
+                store,
+                run_id,
+                session_owner(v2_store),
+                &named,
+                &reason,
+            ));
         }
         Err(error) => return Err(error),
     };
@@ -48,7 +55,19 @@ pub(super) fn acceptance_call_record(
         "the acceptance call record {named} is damaged ({}); it is quarantined at {}",
         evidence.reason, evidence.quarantined
     );
-    Err(pause(store, run_id, &named, &reason))
+    Err(pause(
+        store,
+        run_id,
+        session_owner(v2_store),
+        &named,
+        &reason,
+    ))
+}
+
+/// Who a run end's own pause is for: the executor this session's store is
+/// bound to (unbound: unfenced), never a generation (Issue 316).
+pub(super) fn session_owner(v2_store: &WorkflowV2ResultStore) -> PauseOwner {
+    PauseOwner::of_executor(v2_store.session_executor())
 }
 
 /// Records the quarantine in the run's events (best effort: the evidence
@@ -65,24 +84,23 @@ fn quarantined(store: &WorkflowStore, run_id: &str, evidence: &QuarantinedCallRe
     }
 }
 
-/// Pauses `run_id`, owned by its current generation, because the final
-/// gate cannot be judged (`reason`, about the record at `named`); the error
-/// the finalization ends with. The resume runs the acceptance stage again.
+/// Pauses `run_id` for `owner` because the final gate cannot be judged
+/// (`reason`, about the record at `named`); the error the finalization ends
+/// with. The owner is checked with the pause under the run lock (Issue 316):
+/// a stale executor never pauses the new owner's run. The resume runs the
+/// acceptance stage again.
 pub(super) fn pause(
     store: &WorkflowStore,
     run_id: &str,
+    owner: PauseOwner,
     named: &str,
     reason: &str,
 ) -> WorkflowError {
-    let generation = match store.load_state(run_id) {
-        Ok(run) => run.generation,
-        Err(error) => return error,
-    };
     let resume = format!("archon workflow resume --live --yes {run_id}");
     let detail = serde_json::json!({
         "event": "acceptance_gate_pause", "record_path": named, "reason": reason, "resume": resume,
     });
-    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
+    match super::owned_pause::pause(store, run_id, owner, detail) {
         Ok(event) => {
             if let Err(error) = event {
                 tracing::warn!(%error, run_id, "acceptance gate pause event not recorded");

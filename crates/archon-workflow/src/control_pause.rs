@@ -23,7 +23,12 @@ pub fn require_generation(
     run_id: &str,
     generation: u64,
 ) -> WorkflowResult<()> {
-    let run = store.load_state(run_id)?;
+    generation_owns(&store.load_state(run_id)?, generation)
+}
+
+/// [`require_generation`] on a loaded `run`.
+fn generation_owns(run: &WorkflowRun, generation: u64) -> WorkflowResult<()> {
+    let run_id = &run.id;
     match run.status {
         RunStatus::Paused => Err(WorkflowError::ControlPaused(format!(
             "run {run_id} is paused; generation {generation} stops"
@@ -77,6 +82,61 @@ pub fn apply_pause(run: &mut WorkflowRun) {
     run.mark_updated();
 }
 
+/// Who pauses a run, and the ownership the pause requires (Issue 316).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseOwner {
+    /// Exactly this generation still owns the run: any change since -- an
+    /// edit too -- supersedes the caller, which stops. For a script-host
+    /// call, which re-dispatches a call an edit superseded.
+    Generation(u64),
+    /// The executor launched at this generation still owns the run
+    /// ([`require_executor`]). An edit that kept the executor (a restart of
+    /// a stage or item, a force-accept) moved the generation on but refuses
+    /// nothing; a resume that replaced the executor refuses. The pause takes
+    /// the run's generation at the pause. For the run end of an executor.
+    Executor(u64),
+    /// No executor to check (an unbound session): the run's generation at
+    /// the pause.
+    Unfenced,
+}
+
+impl PauseOwner {
+    /// The owner of a session bound to `executor` (unbound: [`Self::Unfenced`]).
+    pub fn of_executor(executor: Option<u64>) -> Self {
+        executor.map_or(Self::Unfenced, Self::Executor)
+    }
+
+    /// Fails unless this owner may still write for `run`: its executor owns
+    /// the run (a generation owner, the executor it was dispatched under).
+    pub fn require_writer(&self, run: &WorkflowRun) -> WorkflowResult<()> {
+        match *self {
+            Self::Generation(generation) | Self::Executor(generation) => {
+                require_executor(run, generation)
+            }
+            Self::Unfenced => Ok(()),
+        }
+    }
+
+    /// Fails unless this owner may pause `run` now: the run is running and
+    /// owned as the variant requires.
+    pub fn require_pauser(&self, run: &WorkflowRun) -> WorkflowResult<()> {
+        if let Self::Generation(generation) = *self {
+            return generation_owns(run, generation);
+        }
+        match run.status {
+            RunStatus::Paused => Err(WorkflowError::ControlPaused(format!(
+                "run {} is paused; {self:?} stops",
+                run.id
+            ))),
+            RunStatus::Cancelled => Err(WorkflowError::ControlCancelled(format!(
+                "run {} is cancelled; {self:?} stops",
+                run.id
+            ))),
+            _ => self.require_writer(run),
+        }
+    }
+}
+
 /// Pauses `run_id`, owned by `generation`, with `detail` as the evidence its
 /// `Paused` event carries. The outer result is the transition (an error when
 /// `generation` no longer owns the run, and nothing changed); the inner one
@@ -85,17 +145,34 @@ pub fn pause_with_evidence(
     store: &WorkflowStore,
     run_id: &str,
     generation: u64,
+    detail: serde_json::Value,
+) -> WorkflowResult<WorkflowResult<u64>> {
+    pause_owned(store, run_id, PauseOwner::Generation(generation), detail)
+}
+
+/// [`pause_with_evidence`] for `owner` (Issue 316): the ownership check and
+/// the pause in ONE run-lock critical section, so no change of owner or
+/// generation falls between them. A pause owned by an executor takes the
+/// run's generation at the pause.
+pub fn pause_owned(
+    store: &WorkflowStore,
+    run_id: &str,
+    owner: PauseOwner,
     mut detail: serde_json::Value,
 ) -> WorkflowResult<WorkflowResult<u64>> {
     let owned = store.with_run_lock(run_id, |locked| {
-        require_generation(locked, run_id, generation)?;
         let mut run = locked.load_state(run_id)?;
+        owner.require_pauser(&run)?;
+        let paused_by = run.generation;
         apply_pause(&mut run);
         locked.save_state(&run)?;
         if let Some(object) = detail.as_object_mut() {
             object.insert("action".into(), "pause".into());
             object.insert("generation".into(), run.generation.into());
-            object.insert("paused_by_generation".into(), generation.into());
+            object.insert("paused_by_generation".into(), paused_by.into());
+            if let PauseOwner::Executor(executor) = owner {
+                object.insert("paused_by_executor".into(), executor.into());
+            }
         }
         // The run is paused from here whatever happens to the evidence.
         Ok(emit(locked, run_id, detail))
@@ -103,9 +180,9 @@ pub fn pause_with_evidence(
     if let Err(refused) = &owned {
         tracing::warn!(
             run_id,
-            generation,
+            ?owner,
             %refused,
-            "stall pause refused: the generation that observed it no longer owns the run"
+            "stall pause refused: its owner no longer owns the run"
         );
     }
     owned

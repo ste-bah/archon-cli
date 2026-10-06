@@ -27,6 +27,7 @@ pub(super) async fn execute_v2_live_call(
     task_universe: Option<&WorkflowV2TaskUniverse>,
     source_task_graph: Option<&archon_workflow::WorkflowV2SourceTaskGraph>,
     raw_outcomes_allowed: bool,
+    dispatch_generation: u64,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
     regression_slot::prepare(runtime, &execution, v2_store, task_universe, client).await?;
     if matches!(
@@ -57,6 +58,7 @@ pub(super) async fn execute_v2_live_call(
             &execution,
             store_for_control,
             run_id,
+            archon_workflow::control_pause::PauseOwner::Generation(dispatch_generation),
             task_universe,
             Some(client.llm.as_ref()),
         ))

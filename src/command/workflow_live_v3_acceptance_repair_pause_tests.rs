@@ -41,6 +41,9 @@ async fn run_last_round(
         &last_round(),
         &run.store,
         &run.run_id,
+        archon_workflow::control_pause::PauseOwner::Generation(
+            run.store.load_state(&run.run_id).unwrap().generation,
+        ),
         Some(&run.universe),
         Some(client),
     )

@@ -336,48 +336,69 @@ fn highest_round(run_dir: &Path) -> Option<u32> {
         .max()
 }
 
-/// Persist a round record as the next attempt of its round, returning the
-/// path written. Append-only: an existing attempt is never touched. The
-/// record lands whole or not at all (staged, synced, renamed), and the
-/// directories that hold it are synced, so a system crash cannot leave a
-/// torn record or lose a written one. Whether the attempt is free is
-/// decided under the recording-order lock, held until the record has
-/// landed: of two writers of one attempt, the second is refused.
+/// Persist a round record as exactly its own attempt, returning the path
+/// written. Append-only: an existing attempt is never touched. The record
+/// lands whole or not at all (staged, synced, renamed), and the directories
+/// that hold it are synced, so a system crash cannot leave a torn record or
+/// lose a written one. Whether the attempt is free is decided under the
+/// recording-order lock, held until the record has landed: of two writers
+/// of one attempt, the second is refused. The stage records a round with
+/// [`record_round`], which never refuses a taken number.
 pub fn write_round_record(
     run_dir: &Path,
     record: &AcceptanceRoundRecordV1,
 ) -> WorkflowResult<PathBuf> {
     let dir = round_dir(run_dir, record.round);
     std::fs::create_dir_all(&dir).map_err(|source| WorkflowError::io(&dir, source))?;
-    let path = dir.join(attempt_file_name(record.attempt));
-    let bytes = serde_json::to_vec_pretty(record)?;
     progress::under_order_lock(run_dir, || {
-        let taken = path
-            .try_exists()
-            .map_err(|source| WorkflowError::io(&path, source))?
-            || progress::quarantined_attempt(&dir, record.attempt)?;
-        if taken {
+        if attempt_taken(&dir, record.attempt)? {
             return Err(WorkflowError::StateCorrupt(format!(
                 "acceptance record {} already exists (or was quarantined); round records are append-only",
-                path.display()
+                dir.join(attempt_file_name(record.attempt)).display()
             )));
         }
-        // The order entry first, synced: a record never exists without its
-        // place in the recording order unless the log itself failed.
-        progress::note_recorded_locked(run_dir, record.round, record.attempt);
-        // The staging name is never an `attempt-*.json`: a crash before the
-        // rename leaves no record.
-        let staging = dir.join(format!(
-            ".{}.{}.tmp",
-            attempt_file_name(record.attempt),
-            uuid::Uuid::new_v4()
-        ));
-        if let Err(error) = crate::store::write_atomic(&staging, &path, &bytes) {
-            let _ = std::fs::remove_file(&staging);
-            return Err(error);
-        }
-        sync_record_dirs(run_dir, &dir)
-    })?;
+        land_locked(run_dir, &dir, record)
+    })
+}
+
+#[path = "acceptance_round_landing.rs"]
+mod round_landing;
+pub use round_landing::{RoundLanding, record_round};
+
+/// Whether `attempt` of the round directory `dir` is taken: recorded, or
+/// quarantined. The caller holds the order lock.
+fn attempt_taken(dir: &Path, attempt: u32) -> WorkflowResult<bool> {
+    let path = dir.join(attempt_file_name(attempt));
+    Ok(path
+        .try_exists()
+        .map_err(|source| WorkflowError::io(&path, source))?
+        || progress::quarantined_attempt(dir, attempt)?)
+}
+
+/// Lands `record` as its attempt of `dir`. The caller holds the order lock
+/// and has checked the attempt is free.
+fn land_locked(
+    run_dir: &Path,
+    dir: &Path,
+    record: &AcceptanceRoundRecordV1,
+) -> WorkflowResult<PathBuf> {
+    let path = dir.join(attempt_file_name(record.attempt));
+    let bytes = serde_json::to_vec_pretty(record)?;
+    // The order entry first, synced: a record never exists without its
+    // place in the recording order unless the log itself failed.
+    progress::note_recorded_locked(run_dir, record.round, record.attempt);
+    // The staging name is never an `attempt-*.json`: a crash before the
+    // rename leaves no record.
+    let staging = dir.join(format!(
+        ".{}.{}.tmp",
+        attempt_file_name(record.attempt),
+        uuid::Uuid::new_v4()
+    ));
+    if let Err(error) = crate::store::write_atomic(&staging, &path, &bytes) {
+        let _ = std::fs::remove_file(&staging);
+        return Err(error);
+    }
+    sync_record_dirs(run_dir, dir)?;
     Ok(path)
 }
 
@@ -416,6 +437,9 @@ pub fn relative_record_path(run_dir: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
+#[cfg(test)]
+#[path = "acceptance_record_round_tests.rs"]
+mod record_round_tests;
 #[cfg(test)]
 #[path = "acceptance_stage_tests.rs"]
 mod tests;

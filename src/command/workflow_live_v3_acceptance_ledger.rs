@@ -14,10 +14,11 @@
 
 use std::path::{Path, PathBuf};
 
+use archon_workflow::control_pause::PauseOwner;
 use archon_workflow::v2::acceptance_stage::progress::{
-    self, LoopDecision, QUARANTINE_DIR, QuarantinedRecordV1,
+    self, LoopDecision, ProgressLedger, QUARANTINE_DIR, QuarantinedRecordV1,
 };
-use archon_workflow::v2::acceptance_stage::{AcceptanceRoundRecordV1, write_round_record};
+use archon_workflow::v2::acceptance_stage::{AcceptanceRoundRecordV1, RoundLanding, record_round};
 use archon_workflow::{WorkflowError, WorkflowStore};
 
 /// The loop's decision after the round, and where its record was written.
@@ -26,10 +27,38 @@ pub(super) struct Decided {
     pub(super) path: PathBuf,
 }
 
+/// Why a round's record did not land.
+enum Halt {
+    /// The history or the record could not be read or written: the run
+    /// pauses with the reason.
+    Pause(String),
+    /// Records quarantined with no copy of their state: the run pauses on
+    /// the loss, and the pause acknowledges it.
+    Lost(String, Vec<QuarantinedRecordV1>),
+    /// Issue 316: this round's executor no longer owns the run (a resume
+    /// replaced it). It stops and changes nothing; the newer owner records.
+    Stop(WorkflowError),
+}
+
+impl From<WorkflowError> for Halt {
+    fn from(error: WorkflowError) -> Self {
+        Self::Pause(format!("the round record could not be written ({error})"))
+    }
+}
+
 /// Decides the loop after `record` from the healed history, then writes the
 /// record and the ledger. `Err` is the control error the round ends with:
 /// a pause of the run (or, for a round an operator pause and resume made
-/// obsolete, the refusal to pause the newer generation).
+/// obsolete, the refusal to pause or write for the newer generation).
+///
+/// Issue 316: the decision and the write happen under the recording-order
+/// lock ([`record_round`]), fenced by executor ownership: an obsolete
+/// executor's round lands nothing, and when another writer took this
+/// round's attempt the record takes the next free one, decided on the
+/// history that includes the other record. The owner never pauses for a
+/// number. `owner` is the generation the host dispatched the round at, or
+/// the executor of a run end (Issue 316); each check of it is made under the
+/// run lock with what it guards.
 ///
 /// Issue 320: a round whose stage context could not be resolved (no
 /// execution recorded) in a run with no task set (`task_set` false) has
@@ -40,41 +69,133 @@ pub(super) struct Decided {
 pub(super) fn record_and_decide(
     store: &WorkflowStore,
     run_id: &str,
-    generation: u64,
+    owner: PauseOwner,
     run_dir: &Path,
     record: &mut AcceptanceRoundRecordV1,
     task_set: bool,
 ) -> Result<Decided, WorkflowError> {
+    let mut quarantined = Vec::new();
+    let landed = record_round(run_dir, record, |record, landing| {
+        let (decision, ledger) = decide_locked(
+            store,
+            run_id,
+            owner,
+            run_dir,
+            record,
+            task_set,
+            &mut quarantined,
+        )?;
+        #[cfg(test)]
+        if let Some(hook) = BEFORE_LAND.with(|hook| hook.borrow_mut().take()) {
+            hook();
+        }
+        land_owned(store, run_id, owner, record, landing)?;
+        // The ledger is a copy (the records are authoritative); a copy
+        // that did not save costs only the rebuild of a record damaged
+        // later. Saved under the order lock, so copies land in record
+        // order and never share a staging file.
+        if let Err(error) = ledger.save(run_dir) {
+            tracing::warn!(%error, run_id, "acceptance progress ledger copy not saved");
+        }
+        Ok(decision)
+    });
+    progress::record_quarantine_events(store, run_id, &quarantined);
     let pause = |record: &AcceptanceRoundRecordV1, reason: String, quarantined| {
-        pause_on_history(store, run_id, generation, record, &reason, quarantined)
+        pause_on_history(store, run_id, owner, record, &reason, quarantined)
     };
-    let healed = match progress::ProgressLedger::load_healing(run_dir) {
-        Ok(healed) => healed,
-        Err(error) => {
-            let reason = format!("the acceptance history could not be read ({error})");
-            return Err(pause(record, reason, &[]));
+    let (path, decision) = match landed {
+        Ok(landed) => landed,
+        Err(Halt::Stop(refused)) => return Err(refused),
+        Err(Halt::Pause(reason)) => return Err(pause(record, reason, &quarantined)),
+        Err(Halt::Lost(reason, lost)) => {
+            let paused = pause(record, reason, &lost);
+            // Round 9: acknowledged only once the pause is recorded, so a
+            // death before it leaves the next execution to pause again.
+            if matches!(paused, WorkflowError::ControlPaused(_))
+                && let Err(error) = progress::acknowledge_quarantined(run_dir, &lost)
+            {
+                tracing::warn!(%error, run_id, "the reported loss of quarantined acceptance records was not acknowledged; the next resume pauses on it again");
+            }
+            return Err(paused);
         }
     };
-    progress::record_quarantine_events(store, run_id, &healed.quarantined);
+    Ok(Decided { decision, path })
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Runs once between the decision and the landing: where a resume
+    /// would race the landing (the Issue 316 review, B1).
+    pub(super) static BEFORE_LAND: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Issue 316 (review B1): the owner check and the landing under one run
+/// lock, inside the order lock. A resume hands the run to a newer executor
+/// under the run lock, so no change of owner falls between them. The
+/// nesting cannot deadlock: only this stage takes the order lock
+/// (`record_round`, from the async round, which never runs inside the
+/// synchronous run-lock closure), so no holder of the run lock waits on it.
+fn land_owned(
+    store: &WorkflowStore,
+    run_id: &str,
+    owner: PauseOwner,
+    record: &AcceptanceRoundRecordV1,
+    landing: &mut RoundLanding<'_>,
+) -> Result<PathBuf, Halt> {
+    let landed = store.with_run_lock(run_id, |locked| {
+        let run = locked.load_state(run_id)?;
+        if let Err(refused) = owner.require_writer(&run) {
+            return Ok(Err(refused));
+        }
+        landing.land(record).map(Ok)
+    });
+    match landed {
+        Ok(Ok(path)) => Ok(path),
+        Ok(Err(refused)) => Err(Halt::Stop(refused)),
+        Err(error) => Err(Halt::from(error)),
+    }
+}
+
+/// Under the order lock: turns away a writer that no longer owns the run
+/// before it heals anything, heals the history and decides the loop after
+/// `record`. `quarantined` gets what the load moved, for its events.
+fn decide_locked(
+    store: &WorkflowStore,
+    run_id: &str,
+    owner: PauseOwner,
+    run_dir: &Path,
+    record: &mut AcceptanceRoundRecordV1,
+    task_set: bool,
+    quarantined: &mut Vec<QuarantinedRecordV1>,
+) -> Result<(LoopDecision, ProgressLedger), Halt> {
+    let run = (store.load_state(run_id)).map_err(|error| {
+        Halt::Pause(format!(
+            "the run state could not be read to check that this round still owns the run ({error})"
+        ))
+    })?;
+    owner.require_writer(&run).map_err(Halt::Stop)?;
+    let healed = ProgressLedger::load_healing(run_dir).map_err(|error| {
+        Halt::Pause(format!(
+            "the acceptance history could not be read ({error})"
+        ))
+    })?;
+    quarantined.clone_from(&healed.quarantined);
     let unknown = healed.unknown();
     if !unknown.is_empty() {
         let names: Vec<String> = (unknown.iter())
-            .map(|lost| format!("{} (moved to {})", lost.original, lost.quarantined))
+            .map(|lost| {
+                format!(
+                    "{} (moved to {}: {})",
+                    lost.original, lost.quarantined, lost.reason
+                )
+            })
             .collect();
         let reason = format!(
             "acceptance record(s) {} would not parse and were quarantined; no copy of their failing state survives, so the rounds without progress cannot be counted exactly",
             names.join(", ")
         );
-        let lost: Vec<QuarantinedRecordV1> = unknown.into_iter().cloned().collect();
-        let paused = pause(record, reason, &lost);
-        // Round 9: acknowledged only once the pause is recorded, so a death
-        // before it leaves the next execution to pause on the loss again.
-        if matches!(paused, WorkflowError::ControlPaused(_))
-            && let Err(error) = progress::acknowledge_quarantined(run_dir, &lost)
-        {
-            tracing::warn!(%error, run_id, "the reported loss of quarantined acceptance records was not acknowledged; the next resume pauses on it again");
-        }
-        return Err(paused);
+        return Err(Halt::Lost(reason, unknown.into_iter().cloned().collect()));
     }
     let mut ledger = healed.ledger;
     let decision = if !task_set && record.execution.is_none() {
@@ -89,19 +210,7 @@ pub(super) fn record_and_decide(
         progress::decide_with(&mut ledger, record)
     };
     record.final_round = decision.final_round;
-    let path = match write_round_record(run_dir, record) {
-        Ok(path) => path,
-        Err(error) => {
-            let reason = format!("the round record could not be written ({error})");
-            return Err(pause(record, reason, &healed.quarantined));
-        }
-    };
-    // The ledger is a copy (the records are authoritative); a copy that
-    // did not save costs only the rebuild of a record damaged later.
-    if let Err(error) = ledger.save(run_dir) {
-        tracing::warn!(%error, run_id, "acceptance progress ledger copy not saved");
-    }
-    Ok(Decided { decision, path })
+    Ok((decision, ledger))
 }
 
 /// Pauses the run because its acceptance history could not be read or
@@ -109,7 +218,7 @@ pub(super) fn record_and_decide(
 fn pause_on_history(
     store: &WorkflowStore,
     run_id: &str,
-    generation: u64,
+    owner: PauseOwner,
     record: &AcceptanceRoundRecordV1,
     reason: &str,
     quarantined: &[QuarantinedRecordV1],
@@ -134,7 +243,7 @@ fn pause_on_history(
         "quarantined": quarantined,
         "resume": resume,
     });
-    match archon_workflow::control_pause::pause_with_evidence(store, run_id, generation, detail) {
+    match super::super::workflow_live_v3_run_end::owned_pause::pause(store, run_id, owner, detail) {
         Ok(event) => {
             if let Err(error) = event {
                 tracing::warn!(%error, "acceptance history pause event not recorded");

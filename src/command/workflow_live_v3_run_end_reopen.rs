@@ -10,11 +10,13 @@
 //! the re-entry wrote, exactly as the last in-run round was. A round that
 //! reads back damaged or unreadable pauses the run (Issue 326).
 
+use archon_workflow::control_pause::PauseOwner;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::acceptance_stage::{AcceptanceRoundRecordV1, progress};
 use archon_workflow::v2::script::is_acceptance_stage_call;
 use archon_workflow::{
     WorkflowError, WorkflowLlmClient, WorkflowResult, WorkflowStore, WorkflowV2CallExecution,
+    WorkflowV2ResultStore,
 };
 
 use super::super::WorkflowV2ScriptRuntime;
@@ -35,6 +37,9 @@ pub(super) struct AcceptanceReopen<'a> {
     runtime: &'a WorkflowV2ScriptRuntime,
     llm: Option<&'a dyn WorkflowLlmClient>,
     universe: Option<&'a WorkflowV2TaskUniverse>,
+    /// The executor's launch generation, when the finalizer was given it.
+    generation: Option<u64>,
+    v2_store: &'a WorkflowV2ResultStore,
 }
 
 impl<'a> AcceptanceReopen<'a> {
@@ -42,6 +47,7 @@ impl<'a> AcceptanceReopen<'a> {
         store: &'a WorkflowStore,
         run_id: &'a str,
         (runtime, llm, universe): AcceptanceReentry<'a>,
+        (generation, v2_store): (Option<u64>, &'a WorkflowV2ResultStore),
     ) -> Self {
         Self {
             store,
@@ -49,7 +55,25 @@ impl<'a> AcceptanceReopen<'a> {
             runtime,
             llm,
             universe,
+            generation,
+            v2_store,
         }
+    }
+
+    /// Issue 316: who the re-entered round, and the run end's own pauses,
+    /// run for: this executor -- the finalizer's launch generation, else the
+    /// session's executor (unbound: unfenced). Never a generation: an edit
+    /// that kept the executor moves the run on while the round runs, and a
+    /// pause owned by a generation would be refused and end the run
+    /// Cancelled. Each pause and write checks the executor under the run
+    /// lock; this early check spares a stale executor the round.
+    fn owner(&self) -> WorkflowResult<PauseOwner> {
+        let owner = match self.generation {
+            Some(launch) => PauseOwner::Executor(launch),
+            None => PauseOwner::of_executor(self.v2_store.session_executor()),
+        };
+        owner.require_writer(&self.store.load_state(self.run_id)?)?;
+        Ok(owner)
     }
 }
 
@@ -69,11 +93,13 @@ impl RunEndReopen for AcceptanceReopen<'_> {
             input: serde_json::json!({}),
             depends_on: Vec::new(),
         };
+        let owner = self.owner()?;
         let result = super::super::workflow_live_v3_acceptance::run_acceptance_stage(
             self.runtime,
             &execution,
             self.store,
             self.run_id,
+            owner,
             self.universe,
             self.llm,
         )
@@ -90,7 +116,7 @@ impl RunEndReopen for AcceptanceReopen<'_> {
                 ))
             })?
             .to_string();
-        let (record, path) = reentered_round(self.store, self.run_id, &relative)?;
+        let (record, path) = reentered_round(self.store, self.run_id, &relative, owner)?;
         let gate = super::gate_of(&run_dir, &record, &path);
         let (summary, gate) =
             super::hold_to_round(self.run_id, summary.clone(), gate, &record, &path);
@@ -114,10 +140,11 @@ pub(super) fn reentered_round(
     store: &WorkflowStore,
     run_id: &str,
     relative: &str,
+    owner: PauseOwner,
 ) -> WorkflowResult<(AcceptanceRoundRecordV1, std::path::PathBuf)> {
     let run_dir = store.run_dir(run_id);
     let path = run_dir.join(relative);
-    let pause = |reason: String| super::call::pause(store, run_id, relative, &reason);
+    let pause = |reason: String| super::call::pause(store, run_id, owner, relative, &reason);
     let why = match std::fs::read(&path) {
         Ok(bytes) => match serde_json::from_slice(&bytes) {
             Ok(record) => return Ok((record, path)),

@@ -30,6 +30,9 @@ impl WorkflowScriptHost {
                 .await
                 .map(Some);
         }
+        // Issue 316: the round's owner is the generation sampled at
+        // dispatch, while this executor owned the run; never one read later.
+        let dispatch_generation = call_generation.map_or_else(|| self.call_generation(), Ok)?;
         // Boxed (#246): the race below would otherwise hold a second copy.
         let work = Box::pin(execute_v2_live_call(
             &self.runner.task,
@@ -44,6 +47,7 @@ impl WorkflowScriptHost {
             self.runner.task_universe.as_ref(),
             source_task_graph,
             self.runner.raw_outcomes_allowed,
+            dispatch_generation,
         ));
         if !self.call_fenced(execution) {
             return work.await.map(Some);

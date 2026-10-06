@@ -117,6 +117,9 @@ pub(super) async fn stage(
         &round_one(),
         &run.store,
         &run.run_id,
+        archon_workflow::control_pause::PauseOwner::Generation(
+            run.store.load_state(&run.run_id).unwrap().generation,
+        ),
         Some(&run.universe),
         Some(client),
     )

@@ -87,11 +87,12 @@ pub(super) fn read_acceptance_gate(
         return Ok(None);
     };
     let path = run_dir.join(named);
+    let owner = super::call::session_owner(v2_store);
     let record = match read_bound(&path) {
         Bound::Whole(record) => *record,
         Bound::Unreadable(error) => {
             let reason = format!("the bound acceptance record {named} cannot be read ({error})");
-            return Err(super::call::pause(store, run_id, named, &reason));
+            return Err(super::call::pause(store, run_id, owner, named, &reason));
         }
         Bound::Lost(why) => match rebuild(&run_dir, run_id, &call.id, named, &result.data) {
             Ok(record) => {
@@ -102,7 +103,7 @@ pub(super) fn read_acceptance_gate(
                 let reason = format!(
                     "the bound acceptance record {named} is lost: {why}; the acceptance call's result is no whole copy of the round ({missing})"
                 );
-                return Err(super::call::pause(store, run_id, named, &reason));
+                return Err(super::call::pause(store, run_id, owner, named, &reason));
             }
         },
     };
