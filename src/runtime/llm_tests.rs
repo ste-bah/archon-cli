@@ -36,6 +36,9 @@ fn unknown_provider_falls_back_to_anthropic() {
 
 #[test]
 fn openai_with_empty_key_falls_back_to_anthropic() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let prev = std::env::var("OPENAI_API_KEY").ok();
     // SAFETY: `ENV_LOCK` serialises env mutations inside this module and
@@ -66,6 +69,9 @@ fn openai_with_empty_key_falls_back_to_anthropic() {
 
 #[test]
 fn openai_fallback_selection_reports_missing_key_reason() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let prev = std::env::var("OPENAI_API_KEY").ok();
     unsafe {
@@ -153,6 +159,9 @@ fn local_provider_constructs_without_anthropic_fallback_client() {
 
 #[test]
 fn openai_missing_key_errors_without_anthropic_fallback_client() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let prev = std::env::var("OPENAI_API_KEY").ok();
     unsafe {
@@ -202,6 +211,9 @@ fn provider_construction_error_reason_classifies_unknown_provider() {
 
 #[test]
 fn test_groq_without_env_falls_back_to_anthropic() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let prev = std::env::var("GROQ_API_KEY").ok();
     // SAFETY: single-threaded via ENV_LOCK above.

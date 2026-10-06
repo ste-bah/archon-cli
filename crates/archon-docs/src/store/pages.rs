@@ -50,15 +50,16 @@ pub fn list_pages_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<Page
     let mut params = BTreeMap::new();
     params.insert("did".into(), DataValue::from(document_id));
 
-    let result = db
-        .run_script(
-            "?[page_id, document_id, page_number, text_hash, image_hash, width, height, provenance_record_id] \
-             := *doc_pages{page_id, document_id, page_number, text_hash, image_hash, width, height, provenance_record_id}, \
-             document_id = $did",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list pages failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[page_id, document_id, page_number, text_hash, image_hash, width, height, provenance_record_id] \
+         := *doc_pages{page_id, document_id, page_number, text_hash, image_hash, width, height, provenance_record_id}, \
+         document_id = $did",
+        params,
+        ScriptMutability::Immutable,
+        "list pages for doc",
+    )
+    .map_err(|e| anyhow::anyhow!("list pages failed: {e}"))?;
 
     Ok(result
         .rows

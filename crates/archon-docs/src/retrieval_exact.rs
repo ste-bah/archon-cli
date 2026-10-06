@@ -106,15 +106,16 @@ pub(crate) fn list_chunks_for_exact_fallback(
     }
     let mut params = BTreeMap::new();
     params.insert("limit".to_string(), DataValue::from(max_chunks as i64));
-    let result = db
-        .run_script(
-            "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] \
-             := *doc_chunks{chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status} \
-             :limit $limit",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| DocsError::Retrieval {
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] \
+         := *doc_chunks{chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status} \
+         :limit $limit",
+        params,
+        ScriptMutability::Immutable,
+        "list chunks for exact fallback",
+    )
+    .map_err(|e| DocsError::Retrieval {
             message: format!("list chunks for bounded exact fallback failed: {e}"),
         })?;
     Ok(result.rows.iter().map(|row| chunk_from_row(row)).collect())
@@ -170,11 +171,16 @@ fn fts_search(db: &DbInstance, query: &str, top_k: usize) -> Result<Vec<SearchRe
         } \
         :order -score";
 
-    let result = db
-        .run_script(script, params, ScriptMutability::Immutable)
-        .map_err(|e| DocsError::Retrieval {
-            message: format!("FTS search failed: {e}"),
-        })?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        script,
+        params,
+        ScriptMutability::Immutable,
+        "fts search",
+    )
+    .map_err(|e| DocsError::Retrieval {
+        message: format!("FTS search failed: {e}"),
+    })?;
 
     let max_score = result
         .rows

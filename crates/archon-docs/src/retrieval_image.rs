@@ -63,7 +63,13 @@ pub fn search_images(
             ef: 50,
             bind_distance: distance
         }";
-    let result = match db.run_script(script, params, ScriptMutability::Immutable) {
+    let result = match crate::cozo_retry::run_script_guarded(
+        db,
+        script,
+        params,
+        ScriptMutability::Immutable,
+        "search images",
+    ) {
         Ok(r) => r,
         Err(e) => {
             // No image has ever been embedded → vec_page_images doesn't exist yet. Treat this
@@ -118,7 +124,13 @@ fn resolve_page(db: &DbInstance, page_id: &str) -> (String, u32) {
     params.insert("pid".to_string(), DataValue::from(lookup));
     let script = "?[document_id, page_number] := \
                   *doc_pages{page_id, document_id, page_number}, page_id = $pid";
-    match db.run_script(script, params, ScriptMutability::Immutable) {
+    match crate::cozo_retry::run_script_guarded(
+        db,
+        script,
+        params,
+        ScriptMutability::Immutable,
+        "resolve page",
+    ) {
         Ok(r) => r
             .rows
             .first()

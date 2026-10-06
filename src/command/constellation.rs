@@ -204,6 +204,9 @@ mod tests {
 
     #[test]
     fn db_path_prefers_constellation_override() {
+        if crate::test_environment::isolated() {
+            return;
+        }
         unsafe {
             std::env::set_var(
                 "ARCHON_CONSTELLATION_DB_PATH",

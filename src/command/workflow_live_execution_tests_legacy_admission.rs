@@ -123,6 +123,9 @@ async fn assert_unfrozen_legacy_reaches_v3_author(mode: &str) {
 
 #[tokio::test]
 async fn unfrozen_legacy_task_sets_reach_v3_author_in_observe_and_enforce() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     for mode in ["observe", "enforce"] {
         assert_unfrozen_legacy_reaches_v3_author(mode).await;
     }

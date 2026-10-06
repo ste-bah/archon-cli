@@ -35,15 +35,16 @@ pub fn insert_artifact(db: &DbInstance, art: &ArtifactRecord) -> Result<()> {
 pub fn list_artifacts_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<ArtifactRecord>> {
     let mut params = BTreeMap::new();
     params.insert("did".into(), DataValue::from(document_id));
-    let result = db
-        .run_script(
-            "?[artifact_id, document_id, artifact_type, content_hash, created_at, provenance_record_id] \
-             := *doc_artifacts{artifact_id, document_id, artifact_type, content_hash, created_at, provenance_record_id}, \
-             document_id = $did",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list artifacts failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[artifact_id, document_id, artifact_type, content_hash, created_at, provenance_record_id] \
+         := *doc_artifacts{artifact_id, document_id, artifact_type, content_hash, created_at, provenance_record_id}, \
+         document_id = $did",
+        params,
+        ScriptMutability::Immutable,
+        "list artifacts for doc",
+    )
+    .map_err(|e| anyhow::anyhow!("list artifacts failed: {e}"))?;
     Ok(result
         .rows
         .iter()
@@ -96,15 +97,16 @@ pub fn list_provenance_from(
     let mut params = BTreeMap::new();
     params.insert("faid".into(), DataValue::from(from_artifact_id));
 
-    let result = db
-        .run_script(
-            "?[edge_id, from_artifact_id, to_artifact_id, edge_type, created_at] \
-             := *doc_provenance_edges{edge_id, from_artifact_id, to_artifact_id, edge_type, created_at}, \
-             from_artifact_id = $faid",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list provenance edges failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[edge_id, from_artifact_id, to_artifact_id, edge_type, created_at] \
+         := *doc_provenance_edges{edge_id, from_artifact_id, to_artifact_id, edge_type, created_at}, \
+         from_artifact_id = $faid",
+        params,
+        ScriptMutability::Immutable,
+        "list provenance from",
+    )
+    .map_err(|e| anyhow::anyhow!("list provenance edges failed: {e}"))?;
 
     Ok(result
         .rows
@@ -123,15 +125,16 @@ pub fn list_provenance_to(db: &DbInstance, to_artifact_id: &str) -> Result<Vec<P
     let mut params = BTreeMap::new();
     params.insert("taid".into(), DataValue::from(to_artifact_id));
 
-    let result = db
-        .run_script(
-            "?[edge_id, from_artifact_id, to_artifact_id, edge_type, created_at] \
-             := *doc_provenance_edges{edge_id, from_artifact_id, to_artifact_id, edge_type, created_at}, \
-             to_artifact_id = $taid",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list provenance to failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[edge_id, from_artifact_id, to_artifact_id, edge_type, created_at] \
+         := *doc_provenance_edges{edge_id, from_artifact_id, to_artifact_id, edge_type, created_at}, \
+         to_artifact_id = $taid",
+        params,
+        ScriptMutability::Immutable,
+        "list provenance to",
+    )
+    .map_err(|e| anyhow::anyhow!("list provenance to failed: {e}"))?;
 
     Ok(result
         .rows

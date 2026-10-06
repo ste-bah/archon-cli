@@ -18,6 +18,9 @@ const FIRST_INHERITED: libc::c_int = 3;
 /// [`inherit_only_stdio`]. Read before the fork: nothing that reads it is
 /// async-signal safe.
 pub fn descriptor_ceiling() -> io::Result<libc::c_int> {
+    if let Some(ceiling) = crate::process_nofile::ceiling() {
+        return Ok(ceiling);
+    }
     let mut limit = libc::rlimit {
         rlim_cur: 0,
         rlim_max: 0,
@@ -97,7 +100,7 @@ pub fn inherit_only_stdio(ceiling: libc::c_int) -> io::Result<()> {
             )
         };
         if flagged == 0 {
-            return Ok(());
+            return crate::process_nofile::restore();
         }
         // An older kernel: the loop below does the same, one by one.
     }
@@ -112,7 +115,7 @@ pub fn inherit_only_stdio(ceiling: libc::c_int) -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
     }
-    Ok(())
+    crate::process_nofile::restore()
 }
 
 #[cfg(test)]

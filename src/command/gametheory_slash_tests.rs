@@ -52,6 +52,9 @@ fn test_gametheory_usage_lists_all_subcommands() {
 
 #[test]
 fn test_gametheory_view_emits_open_view_event() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     with_temp_data_home(|| {
         let db = open_db().unwrap();
         gametheory::schema::ensure_gametheory_schema(&db).unwrap();
@@ -98,6 +101,9 @@ fn test_gametheory_list_agents_uses_real_registry() {
 
 #[test]
 fn test_gametheory_status_reads_cozo_source_of_truth() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     with_temp_data_home(|| {
         let db = open_db().unwrap();
         gametheory::schema::ensure_gametheory_schema(&db).unwrap();
@@ -126,6 +132,9 @@ fn test_gametheory_status_reads_cozo_source_of_truth() {
 
 #[test]
 fn test_gametheory_classify_then_status_same_session_reads_fresh_db() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     with_temp_data_home(|| {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()

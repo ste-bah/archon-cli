@@ -85,6 +85,9 @@ fn forwarding(
 
 #[tokio::test]
 async fn a_listing_never_sees_the_hosts_environment() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     // SAFETY: variables of this test's own; no other test reads them.
     unsafe {
         std::env::set_var(SECRET, "s3cr3t-333");

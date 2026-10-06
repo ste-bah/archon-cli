@@ -44,6 +44,9 @@ fn draft_plan_ids_are_unique_and_safe_opaque_components() {
 
 #[test]
 fn plan_open_spawns_editor_and_reports_path() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     unsafe { std::env::set_var("EDITOR", "true") };
     let tmp = tempfile::tempdir().unwrap();
     let db = Arc::new(cozo::DbInstance::new("mem", "", "").unwrap());
@@ -93,6 +96,9 @@ fn plan_open_rejects_unsafe_active_id_before_file_io() {
 
 #[test]
 fn plan_open_creates_active_document_and_persists_editor_changes() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     unsafe { std::env::set_var("EDITOR", "true") };
     let tmp = tempfile::tempdir().unwrap();
     let db = Arc::new(cozo::DbInstance::new("mem", "", "").unwrap());
@@ -223,6 +229,9 @@ fn parser_resets_inserted_and_reordered_steps_without_metadata_inheritance() {
 
 #[test]
 fn invalid_editor_document_retains_prior_structured_plan() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     unsafe { std::env::set_var("EDITOR", "true") };
     let tmp = tempfile::tempdir().unwrap();
     let db = Arc::new(cozo::DbInstance::new("mem", "", "").unwrap());

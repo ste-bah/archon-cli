@@ -274,3 +274,6 @@ pub mod process_liveness;
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+#[cfg(unix)]
+pub mod process_nofile;

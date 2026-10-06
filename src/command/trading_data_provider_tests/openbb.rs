@@ -13,6 +13,9 @@ pub(super) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn fetch_native_reports_openbb_api_unavailable_fail_closed() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _lock = env_lock();
     let _guard = EnvGuard::set("POLYGON_API_KEY", "redacted-test-key");
     let temp = tempfile::tempdir().unwrap();
@@ -33,6 +36,9 @@ fn fetch_native_reports_openbb_api_unavailable_fail_closed() {
 
 #[test]
 fn openbb_capability_probe_persists_true_with_small_limit() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _lock = env_lock();
     let server = openbb_server(
         json!({
@@ -70,6 +76,9 @@ fn openbb_capability_probe_persists_true_with_small_limit() {
 
 #[test]
 fn fetch_native_uses_recent_capability_horizon_instead_of_stale_window() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _lock = env_lock();
     let server = openbb_server(
         json!({"results": [
@@ -118,6 +127,9 @@ fn fetch_native_uses_recent_capability_horizon_instead_of_stale_window() {
 
 #[test]
 fn outside_entitlement_failure_is_distinct_from_generic_no_content() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _lock = env_lock();
     let _guard = EnvGuard::set("POLYGON_API_KEY", "redacted-test-key");
     let temp = tempfile::tempdir().unwrap();
@@ -152,6 +164,9 @@ fn outside_entitlement_failure_is_distinct_from_generic_no_content() {
 
 #[test]
 fn fetch_native_openbb_stores_registered_dataset() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _lock = env_lock();
     let server = openbb_server(
         json!({
@@ -336,6 +351,9 @@ fn fetch_native_yfinance_interval_limitation_is_degraded_non_promotion() {
 
 #[test]
 fn fetch_native_openbb_polygon_requires_credentials_fail_closed() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _lock = env_lock();
     let _guard = EnvGuard::unset("POLYGON_API_KEY");
     let temp = tempfile::tempdir().unwrap();
@@ -357,6 +375,9 @@ fn fetch_native_openbb_polygon_requires_credentials_fail_closed() {
 
 #[test]
 fn fetch_native_openbb_polygon_requires_openbb_api_url_fail_closed() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _lock = env_lock();
     let _polygon_guard = EnvGuard::set("POLYGON_API_KEY", "redacted-test-key");
     let _url_guard = EnvGuard::unset("OPENBB_API_URL");

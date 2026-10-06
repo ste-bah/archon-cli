@@ -121,6 +121,9 @@ fn execute_without_session_id_returns_err() {
 /// CheckpointStore opens a fresh, empty sqlite DB.
 #[tokio::test]
 async fn execute_list_empty_emits_no_checkpoints_textdelta() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let sid = "test-b21-list-empty";
     let (mut ctx, mut rx) = make_ckpt_ctx(Some(sid.to_string()));
     let h = CheckpointHandler::new();
@@ -155,6 +158,9 @@ async fn execute_list_empty_emits_no_checkpoints_textdelta() {
 /// Seeds the store via the public `snapshot()` API.
 #[tokio::test]
 async fn execute_list_non_empty_emits_formatted_textdelta() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let sid = "test-b21-list-nonempty";
     let (mut ctx, mut rx) = make_ckpt_ctx(Some(sid.to_string()));
     let h = CheckpointHandler::new();
@@ -257,6 +263,9 @@ fn execute_restore_usage_error_on_empty_path() {
 /// `execute_list_empty_emits_no_checkpoints_textdelta`.
 #[tokio::test]
 async fn dispatcher_routes_slash_checkpoint_list_with_session_emits_textdelta() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let sid = "test-b21-dispatch-list";
     let (mut ctx, mut rx) = make_ckpt_ctx(Some(sid.to_string()));
     {

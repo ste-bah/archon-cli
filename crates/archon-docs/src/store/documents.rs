@@ -33,15 +33,16 @@ pub fn get_doc_source(db: &DbInstance, document_id: &str) -> Result<Option<Sourc
     let mut params = BTreeMap::new();
     params.insert("did".into(), DataValue::from(document_id));
 
-    let result = db
-        .run_script(
-            "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
-             := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}, \
-             document_id = $did",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get doc_sources failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
+         := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}, \
+         document_id = $did",
+        params,
+        ScriptMutability::Immutable,
+        "get doc source",
+    )
+    .map_err(|e| anyhow::anyhow!("get doc_sources failed: {e}"))?;
 
     if result.rows.is_empty() {
         return Ok(None);
@@ -58,14 +59,15 @@ pub fn get_doc_source(db: &DbInstance, document_id: &str) -> Result<Option<Sourc
 }
 
 pub fn list_doc_sources(db: &DbInstance) -> Result<Vec<SourceDocument>> {
-    let result = db
-        .run_script(
-            "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
-             := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}",
-            Default::default(),
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list doc_sources failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
+         := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}",
+        Default::default(),
+        ScriptMutability::Immutable,
+        "list doc sources",
+    )
+    .map_err(|e| anyhow::anyhow!("list doc_sources failed: {e}"))?;
 
     Ok(result
         .rows
@@ -142,15 +144,16 @@ fn with_reservation_lock_held<T>(
 pub fn get_doc_by_hash(db: &DbInstance, content_hash: &str) -> Result<Option<SourceDocument>> {
     let mut params = BTreeMap::new();
     params.insert("ch".into(), DataValue::from(content_hash));
-    let result = db
-        .run_script(
-            "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
-             := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}, \
-             content_hash = $ch",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get doc by hash failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
+         := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}, \
+         content_hash = $ch",
+        params,
+        ScriptMutability::Immutable,
+        "get doc by hash",
+    )
+    .map_err(|e| anyhow::anyhow!("get doc by hash failed: {e}"))?;
     if result.rows.is_empty() {
         return Ok(None);
     }
@@ -205,13 +208,14 @@ pub fn assign_document_to_kb(db: &DbInstance, kb_id: &str, document_id: &str) ->
 pub fn list_kb_document_ids(db: &DbInstance, kb_id: &str) -> Result<Vec<String>> {
     let mut params = BTreeMap::new();
     params.insert("kid".into(), DataValue::from(kb_id));
-    let result = db
-        .run_script(
-            "?[document_id] := *doc_kb_memberships{kb_id, document_id}, kb_id = $kid",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list kb documents failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[document_id] := *doc_kb_memberships{kb_id, document_id}, kb_id = $kid",
+        params,
+        ScriptMutability::Immutable,
+        "list kb document ids",
+    )
+    .map_err(|e| anyhow::anyhow!("list kb documents failed: {e}"))?;
     Ok(result
         .rows
         .iter()
@@ -284,15 +288,16 @@ pub fn update_ocr_run_completion(
 fn list_ocr_runs_for_ocr_id(db: &DbInstance, ocr_run_id: &str) -> Result<Vec<OcrRun>> {
     let mut params = BTreeMap::new();
     params.insert("oid".into(), DataValue::from(ocr_run_id));
-    let result = db
-        .run_script(
-            "?[ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms] \
-             := *doc_ocr_runs{ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms}, \
-             ocr_run_id = $oid",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list ocr_runs by id failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms] \
+         := *doc_ocr_runs{ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms}, \
+         ocr_run_id = $oid",
+        params,
+        ScriptMutability::Immutable,
+        "list ocr runs for ocr id",
+    )
+    .map_err(|e| anyhow::anyhow!("list ocr_runs by id failed: {e}"))?;
     Ok(result
         .rows
         .iter()
@@ -323,15 +328,16 @@ pub fn list_ocr_runs_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<O
     let mut params = BTreeMap::new();
     params.insert("did".into(), DataValue::from(document_id));
 
-    let result = db
-        .run_script(
-            "?[ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms] \
-             := *doc_ocr_runs{ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms}, \
-             document_id = $did",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list ocr_runs failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms] \
+         := *doc_ocr_runs{ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms}, \
+         document_id = $did",
+        params,
+        ScriptMutability::Immutable,
+        "list ocr runs for doc",
+    )
+    .map_err(|e| anyhow::anyhow!("list ocr_runs failed: {e}"))?;
 
     Ok(result
         .rows

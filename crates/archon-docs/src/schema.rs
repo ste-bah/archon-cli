@@ -451,13 +451,14 @@ fn ensure_vec_page_images(db: &DbInstance, dim: usize) -> Result<()> {
 /// Best-effort read of the embedding dimension of an existing `vec_page_images` relation via
 /// `::columns`. Returns `None` if the relation doesn't exist or the type can't be parsed.
 fn existing_vec_page_images_dim(db: &DbInstance) -> Option<usize> {
-    let result = db
-        .run_script(
-            "::columns vec_page_images",
-            Default::default(),
-            ScriptMutability::Immutable,
-        )
-        .ok()?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "::columns vec_page_images",
+        Default::default(),
+        ScriptMutability::Immutable,
+        "existing vec page images dim",
+    )
+    .ok()?;
     for row in &result.rows {
         for cell in row {
             let Some(text) = cell.get_str() else { continue };

@@ -62,10 +62,12 @@ pub fn get_status_summary(db: &DbInstance) -> Result<DocStatusSummary> {
 }
 
 fn count_pages(db: &DbInstance) -> Result<usize> {
-    let result = db.run_script(
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
         "?[count(page_id)] := *doc_pages{page_id}",
         Default::default(),
         cozo::ScriptMutability::Immutable,
+        "count pages",
     );
     match result {
         Ok(result) => Ok(result
@@ -86,14 +88,15 @@ fn count_pages(db: &DbInstance) -> Result<usize> {
 
 /// Get all processing jobs.
 pub fn list_processing_jobs(db: &DbInstance) -> Result<Vec<ProcessingJob>> {
-    let result = db
-        .run_script(
-            "?[job_id, document_id, job_type, status, started_at, completed_at, error_message] \
-             := *doc_processing_jobs{job_id, document_id, job_type, status, started_at, completed_at, error_message}",
-            Default::default(),
-            cozo::ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list processing jobs failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[job_id, document_id, job_type, status, started_at, completed_at, error_message] \
+         := *doc_processing_jobs{job_id, document_id, job_type, status, started_at, completed_at, error_message}",
+        Default::default(),
+        cozo::ScriptMutability::Immutable,
+        "list processing jobs",
+    )
+    .map_err(|e| anyhow::anyhow!("list processing jobs failed: {e}"))?;
 
     Ok(result
         .rows

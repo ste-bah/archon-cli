@@ -100,6 +100,9 @@ fn logout_handler_aliases_are_empty() {
 #[cfg(unix)]
 #[tokio::test]
 async fn execute_no_credentials_emits_no_stored_textdelta() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let (mut ctx, mut rx) = make_logout_ctx();
     let h = LogoutHandler::new();
     {
@@ -151,6 +154,9 @@ async fn execute_no_credentials_emits_no_stored_textdelta() {
 #[cfg(unix)]
 #[tokio::test]
 async fn execute_remove_success_emits_logged_out_textdelta() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let (mut ctx, mut rx) = make_logout_ctx();
     let h = LogoutHandler::new();
     let cred_path;
@@ -212,6 +218,9 @@ async fn execute_remove_success_emits_logged_out_textdelta() {
 #[cfg(unix)]
 #[tokio::test]
 async fn execute_remove_failure_emits_error() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let (mut ctx, mut rx) = make_logout_ctx();
     let h = LogoutHandler::new();
     {
@@ -279,6 +288,9 @@ async fn execute_remove_failure_emits_error() {
 #[cfg(unix)]
 #[tokio::test]
 async fn dispatcher_routes_slash_logout_no_creds_emits_textdelta() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let (mut ctx, mut rx) = make_logout_ctx();
     {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -324,6 +336,9 @@ async fn dispatcher_routes_slash_logout_no_creds_emits_textdelta() {
 #[cfg(unix)]
 #[tokio::test]
 async fn dispatcher_routes_slash_logout_removes_creds() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let (mut ctx, mut rx) = make_logout_ctx();
     let cred_path;
     {

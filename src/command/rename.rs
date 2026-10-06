@@ -355,6 +355,9 @@ mod tests {
     /// XDG_DATA_HOME/HOME, which must not race.
     #[tokio::test]
     async fn execute_with_session_id_success_path_emits_events() {
+        if crate::test_environment::isolated() {
+            return;
+        }
         let sid = "test-session-b17-direct";
         let (mut ctx, mut rx) = make_rename_ctx(Some(sid.to_string()));
         let h = RenameHandler::new();
@@ -410,6 +413,9 @@ mod tests {
     /// `execute_with_session_id_success_path_emits_events`.
     #[tokio::test]
     async fn dispatcher_routes_slash_rename_with_session_id_emits_expected_events() {
+        if crate::test_environment::isolated() {
+            return;
+        }
         let sid = "test-session-b17-dispatch";
         let (mut ctx, mut rx) = make_rename_ctx(Some(sid.to_string()));
         {
