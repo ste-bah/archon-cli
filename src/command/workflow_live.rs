@@ -14,7 +14,9 @@ use crate::command::tui_workflow_ui_sink::TuiWorkflowUiSink;
 #[path = "workflow_live_action.rs"]
 mod action;
 use crate::command::workflow::{load_spec_file, load_template, run_action};
-use action::{run_live_action, run_live_action_with_policy};
+#[cfg(test)]
+use action::run_live_action;
+use action::run_live_action_with_policy;
 #[cfg(test)]
 #[path = "workflow_live_planner_repair_tests.rs"]
 mod planner_repair_tests;
@@ -74,9 +76,7 @@ pub(crate) mod workflow_script_tools;
 #[path = "workflow_v2_live_tests.rs"]
 mod workflow_v2_live_tests;
 
-use workflow_live_config_layers::{
-    live_policy, load_generated_workflow_config, load_learning_config,
-};
+use workflow_live_config_layers::{live_policy, load_learning_config};
 use workflow_live_planner::{WorkflowScriptPlan, plan_live, render_live_plan};
 use workflow_live_runner::PipelineWorkflowRunner;
 use workflow_live_shape_apply::{apply_generated_shape, live_task_class};
@@ -99,7 +99,10 @@ pub(crate) fn spawn_live_workflow(
     llm: Arc<dyn WorkflowLlmClient>,
     ui_sink: SharedWorkflowUiSink,
     config_path: Option<PathBuf>,
-) {
+    config: ArchonConfig,
+) -> Result<()> {
+    let check_policy =
+        crate::command::acceptance_check_policy::for_config_action(&action, &config)?;
     archon_observability::spawn_named("dynamic-workflow-run", async move {
         if let Err(error) = ui_sink
             .emit(WorkflowUiEvent::Text(live_start_message(&action)))
@@ -108,8 +111,8 @@ pub(crate) fn spawn_live_workflow(
             tracing::error!(%error, "workflow start notification delivery failed");
             return;
         }
-        let generated_config = load_generated_workflow_config(&cwd, config_path.as_deref());
-        let result = run_live_action(
+        let generated_config = config.workflow.generated.clone();
+        let result = run_live_action_with_policy(
             &cwd,
             action,
             llm,
@@ -118,6 +121,7 @@ pub(crate) fn spawn_live_workflow(
             generated_config,
             true,
             LiveApprovalMode::InteractiveSurface,
+            check_policy,
         )
         .await;
         match result {
@@ -141,6 +145,7 @@ pub(crate) fn spawn_live_workflow(
             }
         }
     });
+    Ok(())
 }
 
 pub(crate) async fn run_live_cli_action(

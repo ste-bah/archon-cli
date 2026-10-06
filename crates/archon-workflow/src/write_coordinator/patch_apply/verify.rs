@@ -52,11 +52,17 @@ pub fn run_wave_verify(
             }
         })?;
     let duration_ms = start.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
+    let mut stderr_tail = utf8_safe_tail(&output.stderr, TAIL_BYTES);
+    if !output.status.success()
+        && let Some(note) = environment.note(&[&output.stdout, &output.stderr])
+    {
+        stderr_tail.push_str(&format!("\n{note}"));
+    }
     let result = VerifyResult {
         exit: output.status.code().unwrap_or(-1),
         command: Some(cmd.to_string()),
         stdout_tail: utf8_safe_tail(&output.stdout, TAIL_BYTES),
-        stderr_tail: utf8_safe_tail(&output.stderr, TAIL_BYTES),
+        stderr_tail,
         duration_ms,
     };
     persist_verify(run_root, stage_id, wave_id, &result)?;

@@ -143,11 +143,17 @@ pub(crate) fn run_verify_command_capture(
     {
         return Err(reason);
     }
+    let mut stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if !output.status.success()
+        && let Some(note) = environment.note(&[&output.stdout, &output.stderr])
+    {
+        stderr.push_str(&format!("\n{note}"));
+    }
     Ok(Some(VerifyCommandReport {
         command: command.to_string(),
         exit_code: output.status.code(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        stderr,
     }))
 }
 

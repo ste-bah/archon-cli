@@ -390,15 +390,23 @@ impl CommandEnvironment {
             .map(|(_, home)| ("HOME", Path::new(home)))
             .into_iter()
             .collect();
-        let default;
-        let policy = match policy {
-            Some(policy) => policy,
-            None => {
-                default = CheckPolicy::default_for(host);
-                &default
+        // Host verifiers share the leased machine toolchains. A data allowlist
+        // must not select a cold cache. Start with the builder's approved host
+        // bindings, then apply explicit operator/dispatch bindings. Scratch
+        // environments still use their own site bindings and directory homes.
+        let mut effective = CheckPolicy::default_for(host);
+        if let Some(policy) = policy {
+            effective.toolchain_path = policy.toolchain_path.clone();
+            for (name, value) in &policy.bound {
+                while let Some((previous, _)) = lookup(&effective.bound, name) {
+                    let previous = previous.clone();
+                    effective.bound.remove(&previous);
+                }
+                effective.bound.insert(name.clone(), value.clone());
             }
-        };
-        let variables = check_environment(host, policy, &site)
+            effective.forwarded = policy.forwarded.clone();
+        }
+        let variables = check_environment(host, &effective, &site)
             .map_err(|reason| format!("check command environment could not be built: {reason}"))?;
         Ok(Self {
             withheld: withheld(host, &variables),
@@ -428,6 +436,12 @@ impl CommandEnvironment {
     /// allowlist cannot forward never converts a failure to an environment error.
     pub fn failure(&self, outputs: &[&[u8]]) -> Option<String> {
         withheld::withheld_error_with_remedy(outputs, &self.withheld, self.remedy)
+    }
+
+    /// Ambiguous mentions retain the real verdict; callers can attach this
+    /// separate note to captured output as well as the visible diagnostic.
+    pub fn note(&self, outputs: &[&[u8]]) -> Option<String> {
+        withheld::withheld_note(outputs, &self.withheld)
     }
 }
 

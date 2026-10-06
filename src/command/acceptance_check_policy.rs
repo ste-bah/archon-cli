@@ -1,8 +1,11 @@
 //! Operator configuration for host verifiers, independent of observer eligibility.
 
+#[cfg(test)]
 use std::path::Path;
 
-use anyhow::{Context, Result};
+#[cfg(test)]
+use anyhow::Context;
+use anyhow::Result;
 use archon_core::config::{AcceptanceExecutionConfig, ArchonConfig};
 use archon_workflow::acceptance_check_environment::{CheckPolicy, validate_operator_bindings};
 
@@ -44,6 +47,7 @@ pub(crate) fn for_config_action(
 }
 
 /// Resume/status consume the launch record, not current configuration.
+#[cfg(test)]
 pub(crate) fn for_new_plan(
     action: &archon_workflow::CommandAction,
     cwd: &Path,
@@ -60,6 +64,7 @@ pub(crate) fn for_new_plan(
 
 /// Unlike other optional workflow knobs, unreadable/malformed policy layers
 /// cannot be skipped: that would silently change which data a verifier gets.
+#[cfg(test)]
 pub(crate) fn load(cwd: &Path, config_path: Option<&Path>) -> Result<Option<CheckPolicy>> {
     use archon_core::config_layers::{deep_merge_toml, discover_config_paths};
     let mut merged = toml::Value::Table(Default::default());
@@ -89,3 +94,7 @@ pub(crate) fn load(cwd: &Path, config_path: Option<&Path>) -> Result<Option<Chec
         })
         .transpose()
 }
+
+#[cfg(test)]
+#[path = "acceptance_check_policy_r3_tests.rs"]
+mod round_three;

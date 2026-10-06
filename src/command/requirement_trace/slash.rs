@@ -37,18 +37,14 @@ impl CommandHandler for RequirementsHandler {
             }
         };
         let mut options = options_from_slash_args(rest)?;
-        // Same embedder the index was built with (#148). `CommandContext`
-        // carries the config *path* rather than the config, so this re-reads it
-        // — one file read on a command that then walks a PRD and a task
-        // directory, and the alternative is querying an index with vectors from
-        // a different model, which produces confident nonsense rather than a
-        // visible error. A context with no path (test fixtures) keeps the
-        // default.
-        if let Some(path) = ctx.config_path.clone() {
-            let config = archon_core::config::load_config_from(path)?;
-            options.embedding = config.memory.open_spec().embedding;
-            options.check_policy = super::check_policy::from_config(&config)?;
-        }
+        // The startup resolution owns layer filtering and settings overrides.
+        // Re-reading a file here would select a different forwarding authority.
+        let config = ctx
+            .workflow_config
+            .as_ref()
+            .ok_or_else(|| anyhow!("requirements requires resolved operator configuration"))?;
+        options.embedding = config.memory.open_spec().embedding;
+        options.check_policy = super::check_policy::from_config(config)?;
         let mode = ctx.gate_mode.unwrap_or_default();
         let disposition = crate::command::workflow_gate::run_sync_gate(
             &cwd,

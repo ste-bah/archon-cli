@@ -2,6 +2,7 @@
 
 use super::*;
 
+#[cfg(test)]
 pub(super) async fn run_live_action(
     cwd: &Path,
     action: CommandAction,
@@ -12,6 +13,11 @@ pub(super) async fn run_live_action(
     workspace_boundary_supported: bool,
     approval_mode: LiveApprovalMode,
 ) -> Result<String> {
+    let captured = crate::command::acceptance_check_policy::for_new_plan(
+        &action,
+        cwd,
+        config_path.as_deref(),
+    )?;
     run_live_action_with_policy(
         cwd,
         action,
@@ -21,7 +27,7 @@ pub(super) async fn run_live_action(
         generated_config,
         workspace_boundary_supported,
         approval_mode,
-        None,
+        captured,
     )
     .await
 }
@@ -38,14 +44,9 @@ pub(super) async fn run_live_action_with_policy(
     captured_policy: Option<Option<archon_workflow::acceptance_check_environment::CheckPolicy>>,
 ) -> Result<String> {
     let store = WorkflowStore::project(cwd);
-    let check_policy = match captured_policy {
-        Some(policy) => Some(policy),
-        None => crate::command::acceptance_check_policy::for_new_plan(
-            &action,
-            cwd,
-            config_path.as_deref(),
-        )?,
-    };
+    // Every new production launch supplies the startup-resolved binding.
+    // Resume/status use the launch record downstream, never current files.
+    let check_policy = captured_policy;
     let policy = live_policy(cwd, config_path.as_deref());
     let learning = load_learning_config(cwd, config_path.as_deref());
     // The one place a generated run's limits are decided. SONA is consulted

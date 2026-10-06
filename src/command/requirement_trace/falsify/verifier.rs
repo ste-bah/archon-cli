@@ -189,8 +189,16 @@ pub(super) fn run_with_policy(
     {
         return Ran::NotLaunchable { reason };
     }
+    let note = status
+        .as_ref()
+        .filter(|status| !status.success())
+        .and_then(|_| environment.note(&[stdout.as_bytes(), stderr.as_bytes()]));
     let mut output = stdout;
     output.push_str(&stderr);
+    if let Some(note) = note {
+        output.push('\n');
+        output.push_str(&note);
+    }
 
     match status {
         None => Ran::TimedOut {

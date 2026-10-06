@@ -83,26 +83,13 @@ fn load_config(
         .setting_sources
         .as_ref()
         .map(|sources| crate::setup::parse_layer_filter(sources));
-    let loaded = archon_core::config_layers::load_layered_config(
+    // A failed resolution cannot authorise commands using a default policy.
+    Ok(archon_core::config_layers::load_layered_config(
         Some(&config_path),
         working_dir,
         cli.settings.as_deref(),
         layer_filter.as_deref(),
-    );
-    match loaded {
-        Ok(config) => Ok(config),
-        Err(error)
-            if ["repository_audit", "cache_root", "scratch_root"]
-                .iter()
-                .any(|key| error.to_string().contains(key)) =>
-        {
-            Err(error.into())
-        }
-        Err(error) => {
-            eprintln!("warning: failed to load config, using defaults: {error}");
-            Ok(archon_core::config::ArchonConfig::default())
-        }
-    }
+    )?)
 }
 
 fn apply_cli_logging_and_model_overrides(

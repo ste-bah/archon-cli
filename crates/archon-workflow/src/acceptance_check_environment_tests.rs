@@ -403,3 +403,6 @@ ordinary_output_case!(
     review349_quoted_missing,
     "expected 'missing FIXTURE_API_KEY' in stderr"
 );
+
+#[path = "acceptance_check_environment_r3_tests.rs"]
+mod round_three;

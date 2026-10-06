@@ -157,7 +157,7 @@ pub fn discover_config_paths(
 /// (highest priority). The `filter` parameter, when `Some`, restricts which
 /// layers are included.
 ///
-/// Invalid TOML in any layer file is logged as a warning and skipped.
+/// Errors in selected layers propagate. Excluded layers are never read.
 pub fn load_layered_config(
     user_config: Option<&Path>,
     work_dir: &Path,
@@ -179,47 +179,26 @@ pub fn load_layered_config(
     let mut merged = Value::Table(toml::map::Map::new());
     let mut audit_sources = std::collections::BTreeMap::new();
 
+    // Every selected layer is authority. Discarding a parse failure could
+    // silently erase an environment allowlist and launch with another policy.
     for info in &active_layers {
-        match read_and_parse_toml(&info.path) {
-            Ok(value) => {
-                validate_audit_layer(&info.path, &value)?;
-                crate::config::record_audit_sources(
-                    &value,
-                    &info.path,
-                    &info.layer.to_string(),
-                    &mut audit_sources,
-                );
-                merged = deep_merge_toml(merged, value);
-            }
-            Err(e) => {
-                reject_invalid_audit_layer(&info.path, &e)?;
-                tracing::warn!(
-                    layer = %info.layer,
-                    path = %info.path.display(),
-                    "skipping config layer due to parse error: {e}"
-                );
-            }
-        }
+        let value = read_and_parse_toml(&info.path)?;
+        validate_audit_layer(&info.path, &value)?;
+        crate::config::record_audit_sources(
+            &value,
+            &info.path,
+            &info.layer.to_string(),
+            &mut audit_sources,
+        );
+        merged = deep_merge_toml(merged, value);
     }
 
-    // Settings overlay (highest priority)
-    if let Some(path) = settings_path
-        && path.exists()
-    {
-        match read_and_parse_toml(path) {
-            Ok(value) => {
-                validate_audit_layer(path, &value)?;
-                crate::config::record_audit_sources(&value, path, "settings", &mut audit_sources);
-                merged = deep_merge_toml(merged, value);
-            }
-            Err(e) => {
-                reject_invalid_audit_layer(path, &e)?;
-                tracing::warn!(
-                    path = %path.display(),
-                    "skipping settings overlay due to parse error: {e}"
-                );
-            }
-        }
+    // An explicitly selected overlay must exist and parse; no silent fallback.
+    if let Some(path) = settings_path {
+        let value = read_and_parse_toml(path)?;
+        validate_audit_layer(path, &value)?;
+        crate::config::record_audit_sources(&value, path, "settings", &mut audit_sources);
+        merged = deep_merge_toml(merged, value);
     }
 
     // Deserialize the merged value into ArchonConfig
@@ -238,22 +217,18 @@ pub fn load_layered_config(
 
 /// Read a file and parse it as a TOML `Value`.
 fn read_and_parse_toml(path: &Path) -> Result<Value, ConfigError> {
-    let content = fs::read_to_string(path)?;
-    let value: Value = content.parse().map_err(ConfigError::ParseError)?;
-    Ok(value)
-}
-
-// Keep legacy skip behavior for unrelated layers, but never discard a stated
-// audit policy. This check runs only when TOML parsing has already failed.
-fn reject_invalid_audit_layer(path: &Path, error: &ConfigError) -> Result<(), ConfigError> {
-    let content = fs::read_to_string(path)?;
-    if content.contains("repository_audit") {
-        return Err(ConfigError::ValidationError(format!(
-            "workflow.repository_audit in {} could not be loaded: {error}",
+    let content = fs::read_to_string(path).map_err(|error| {
+        ConfigError::ValidationError(format!(
+            "configuration at {} could not be read: {error}",
             path.display()
-        )));
-    }
-    Ok(())
+        ))
+    })?;
+    content.parse().map_err(|error: toml::de::Error| {
+        ConfigError::ValidationError(format!(
+            "configuration at {} could not be parsed: {error}",
+            path.display()
+        ))
+    })
 }
 
 fn validate_audit_layer(path: &Path, value: &Value) -> Result<(), ConfigError> {

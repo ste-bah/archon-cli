@@ -54,6 +54,12 @@ impl LeannCodeSearch {
             &guard,
         )
         .map_err(|e| anyhow!("opening code index at {}: {e}", db_path.display()))?;
+        #[cfg(test)]
+        if let Some(embedder) =
+            TEST_EMBEDDERS.with(|providers| providers.borrow().get(db_path).cloned())
+        {
+            return Ok(Self::with_embedder(db, embedder));
+        }
         let embedder = create_provider(&embedding)
             .map_err(|e| anyhow!("embedding provider unavailable for requirement trace: {e}"))?;
         Ok(Self::with_embedder(db, embedder))
@@ -105,3 +111,38 @@ impl CodeSearch for LeannCodeSearch {
 
 #[cfg(test)]
 mod tests;
+
+// Tests replace only the external embedding dependency, scoped to this thread
+// and exact fixture database. The real slash handler, read-only index adapter,
+// policy resolution and child verifier remain in the path.
+#[cfg(test)]
+thread_local! {
+    static TEST_EMBEDDERS: std::cell::RefCell<std::collections::BTreeMap<std::path::PathBuf,
+        std::sync::Arc<dyn archon_memory::embedding::EmbeddingProvider>>> = Default::default();
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_embedder<T>(
+    path: &Path,
+    embedder: std::sync::Arc<dyn archon_memory::embedding::EmbeddingProvider>,
+    test: impl FnOnce() -> T,
+) -> T {
+    struct Reset(std::path::PathBuf);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            TEST_EMBEDDERS.with(|providers| {
+                providers.borrow_mut().remove(&self.0);
+            });
+        }
+    }
+    TEST_EMBEDDERS.with(|providers| {
+        assert!(
+            providers
+                .borrow_mut()
+                .insert(path.into(), embedder)
+                .is_none()
+        );
+    });
+    let _reset = Reset(path.into());
+    test()
+}

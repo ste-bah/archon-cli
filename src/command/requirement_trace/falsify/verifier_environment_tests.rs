@@ -13,6 +13,8 @@ fn operator(case: &str, path: bool, check: impl FnOnce(&Path)) {
         .args([case, "--nocapture"])
         .env_clear()
         .env("ISSUE_349_CASE", case)
+        .env("CARGO_BUILD_JOBS", "2")
+        .env("RUST_TEST_THREADS", "4")
         .env("HOME", root.path())
         .env("JAVA_HOME", root.path())
         .env("LANG", "C")
@@ -20,7 +22,7 @@ fn operator(case: &str, path: bool, check: impl FnOnce(&Path)) {
         .env("FIXTURE_API_KEY", "hidden-data")
         .env("HTTPS_PROXY", "https://user:password@proxy.invalid");
     if path {
-        child.env("PATH", "/usr/bin:/bin");
+        child.env("PATH", std::env::var_os("PATH").unwrap());
     }
     let output = child.output().unwrap();
     assert!(
@@ -211,3 +213,79 @@ fn review349_falsify_consumes_operator_config() {
         ));
     });
 }
+
+verdict_case!(
+    r3_falsify_setup_success,
+    "echo 'setup: set FIXTURE_API_KEY successfully'; exit 3"
+);
+verdict_case!(
+    r3_falsify_export_success,
+    "echo 'setup: export FIXTURE_API_KEY successfully'; exit 3"
+);
+verdict_case!(
+    r3_falsify_escaped_expectation,
+    r#"printf '%s\n' 'expected "error \"FIXTURE_API_KEY environment variable is not set\"" in stderr'; exit 3"#
+);
+
+macro_rules! missing_case {
+    ($id:ident, $script:literal) => {
+        #[test]
+        fn $id() {
+            operator(stringify!($id), true, |root| {
+                match run_script(root, $script) {
+                    Ran::NotLaunchable { reason } => assert!(reason.contains("FIXTURE_API_KEY")),
+                    _ => panic!("a missing host variable became a mutant kill"),
+                }
+            });
+        }
+    };
+}
+missing_case!(
+    r3_falsify_rust_err_string,
+    "echo 'called Result::unwrap() on an Err value: \"FIXTURE_API_KEY environment variable is not set\"'; exit 3"
+);
+missing_case!(
+    r3_falsify_json_error,
+    "echo '{\"error\":\"FIXTURE_API_KEY environment variable is not set\"}'; exit 3"
+);
+missing_case!(
+    r3_falsify_json_message,
+    "echo '{\"message\":\"missing environment variable FIXTURE_API_KEY\"}'; exit 3"
+);
+
+macro_rules! noted_case {
+    ($id:ident, $message:literal) => {
+        #[test]
+        fn $id() {
+            operator(stringify!($id), true, |root| {
+                let script = format!("printf '%s\\n' '{}'; exit 3", $message);
+                match run_script(root, &script) {
+                    Ran::Finished {
+                        code: Some(3),
+                        success: false,
+                        output,
+                    } => {
+                        assert!(
+                            output.contains("withheld variable")
+                                && output.contains("FIXTURE_API_KEY"),
+                            "ambiguous evidence lacked a visible note: {output}"
+                        );
+                    }
+                    _ => panic!("ambiguous evidence changed the verifier result"),
+                }
+            });
+        }
+    };
+}
+noted_case!(
+    r3_falsify_note_optional,
+    "FIXTURE_API_KEY environment variable is optional"
+);
+noted_case!(
+    r3_falsify_note_affirmative,
+    "environment variable FIXTURE_API_KEY is set"
+);
+noted_case!(
+    r3_falsify_note_unknown_quote,
+    "actual text: \"FIXTURE_API_KEY is not set\""
+);

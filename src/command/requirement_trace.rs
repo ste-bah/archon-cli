@@ -37,6 +37,8 @@ mod evaluation;
 mod evidence;
 mod falsify;
 mod leann_source;
+#[cfg(test)]
+pub(crate) use leann_source::with_test_embedder;
 mod persist;
 mod render;
 mod slash;
