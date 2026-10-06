@@ -108,7 +108,8 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
       // A missing binding or validator fault must propagate, never accept.
       const defects = JSON.parse(__archonValidateAcceptanceEntry(JSON.stringify(entry)));
       if (defects.length === 0) return {entry};
-      return {failure:{status:"failed",malformed:true,summary:`acceptance entry ${id} was refused: ${defects.join("; ")}`}};
+      return {failure:{status:"failed",malformed:true,findings:defects,
+        summary:`acceptance entry ${id} was refused: ${defects.map(defect => defect.text).join("; ")}`}};
     }
   }
   return {failure:{status:"failed",malformed:true,summary:`acceptance entry ${id} returned no complete entry`}};

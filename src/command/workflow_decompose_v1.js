@@ -312,8 +312,15 @@ async function authorCandidate(w, policy) {
     // a previously missing entry lowers the outstanding-entry count. A
     // rewrite alone clears no defect; every failure shares the same window.
     const advanced = (authorState.added || 0) > addedBefore;
+    // Completing a missing entry advances the outstanding-entry frontier.
+    // Its sibling's shape count is a new baseline; judged bests never reset.
+    if (advanced && progress.best && progress.best.tier < JUDGED_TIER) progress.best = null;
     if (authored.status === "failed") {
-      if (authored.malformed) {
+      if (authored.findings) {
+        recordAttempt(progress, call, authored.findings, !measuredReplies);
+        lastFindings = authored.findings.map(progressText);
+        feedback = lastFindings.slice();
+      } else if (authored.malformed) {
         recordAnswered(progress, call, "entries", advanced, !measuredReplies);
         lastFindings = [authored.summary || "malformed replies"];
         feedback = lastFindings.slice();

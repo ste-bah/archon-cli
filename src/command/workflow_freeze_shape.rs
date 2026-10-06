@@ -378,11 +378,113 @@ pub(crate) fn install_entry_validator(ctx: &rquickjs::Ctx<'_>) -> rquickjs::Resu
                 })?;
             let defects: Vec<_> = element_shape_defects(&candidate, &ENTRY_SHAPE)
                 .into_iter()
-                .map(|defect| defect.message)
+                .map(|defect| {
+                    serde_json::json!({
+                        "text": format!("candidate artifact was refused: {}", defect.message),
+                        "deterministic_defect": defect.identity,
+                    })
+                })
                 .collect();
             serde_json::to_string(&defects).map_err(|error| {
                 rquickjs::Error::new_from_js_message("defects", "JSON", error.to_string())
             })
         }),
     )
+}
+
+#[cfg(test)]
+mod author_validator_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn preserves(entry: Value) {
+        let runtime = rquickjs::Runtime::new().unwrap();
+        let context = rquickjs::Context::full(&runtime).unwrap();
+        context.with(|ctx| {
+            install_entry_validator(&ctx).unwrap();
+            let native: rquickjs::Function = ctx
+                .globals()
+                .get("__archonValidateAcceptanceEntry")
+                .unwrap();
+            let actual: String = native.call((entry.to_string(),)).unwrap();
+            let actual: Value = serde_json::from_str(&actual).unwrap();
+            let candidate = serde_json::to_vec(&json!({"entries":[entry]})).unwrap();
+            let expected: Vec<_> = element_shape_defects(&candidate, &ENTRY_SHAPE)
+                .into_iter()
+                .map(|defect| {
+                    json!({
+                        "text":format!("candidate artifact was refused: {}", defect.message),
+                        "deterministic_defect":defect.identity,
+                    })
+                })
+                .collect();
+            assert!(!expected.is_empty());
+            assert_eq!(
+                actual,
+                json!(expected),
+                "author must preserve freeze identities and stages"
+            );
+        });
+    }
+
+    #[test]
+    fn author_validator_preserves_missing_criterion() {
+        preserves(
+            json!({"id":"A","check":{"kind":"command","command":"test -f output","cwd":"project_root"}}),
+        );
+    }
+
+    #[test]
+    fn author_validator_preserves_nested_command_fields() {
+        preserves(
+            json!({"id":"A","criterion":"","check":{"kind":"command","command":42,"cwd":null}}),
+        );
+    }
+
+    #[test]
+    fn author_validator_preserves_gap_and_covers_elements() {
+        preserves(
+            json!({"id":"A","criterion":"","gap_permitted":"false","covers":[42,null],
+            "check":{"kind":"command","command":"test -f output","cwd":"project_root"}}),
+        );
+    }
+
+    #[test]
+    fn native_author_shape_repairs_decrease_five_to_zero_without_pause() {
+        let runtime = rquickjs::Runtime::new().unwrap();
+        let context = rquickjs::Context::full(&runtime).unwrap();
+        context.with(|ctx| {
+            install_entry_validator(&ctx).unwrap();
+            let script = format!(
+                r#"const args = {{acceptanceCriteria:{{A:'a'}},authorMaxParallelism:1,gateMode:'enforce'}};
+                {source}
+                (async () => {{
+                    let calls = 0, freezes = 0;
+                    const w = {{
+                        agent: async () => {{
+                            if (++calls > 6) throw Error('bounded test exhausted');
+                            return {{status:'accepted',stopReason:'end_turn',content:JSON.stringify({{
+                                id:'A',criterion:calls >= 2 ? '' : null,
+                                check:{{kind:'command',command:calls >= 3 ? 'test -f output' : 42,
+                                    cwd:calls >= 4 ? 'project_root' : null}},
+                                gap_permitted:calls >= 5 ? false : 'false',covers:calls >= 6 ? [] : [42]
+                            }})}};
+                        }},
+                        hostCommand: async () => {{freezes++; return {{publicationReceipt:{{call_id:'freeze'}},
+                            postcondition:{{satisfied:true}},gateEnvelope:{{policy_findings:[]}}}};}},
+                        pause: async () => {{throw Error('unexpected pause');}}
+                    }};
+                    await authorCandidate(w, {{phase:'acceptance',prompt:()=> 'author',
+                        author:authorAcceptanceEntries,capability:'freeze-acceptance',
+                        retryScopes:new Set(['candidate_artifact'])}});
+                    return JSON.stringify({{calls,freezes}});
+                }})()"#,
+                source = crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE,
+            );
+            let promise: rquickjs::Promise = ctx.eval(script).unwrap();
+            let result: String = promise.finish().unwrap();
+            let result: Value = serde_json::from_str(&result).unwrap();
+            assert_eq!(result, json!({"calls":6,"freezes":1}));
+        });
+    }
 }

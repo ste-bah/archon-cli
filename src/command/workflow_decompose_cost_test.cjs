@@ -71,7 +71,11 @@ async function invalidAuthor(value, envelope = false) {
  ctx.__archonValidateAcceptanceEntry = serialized => {
   validations++;
   const entry=JSON.parse(serialized);
-  return JSON.stringify(typeof entry.criterion === 'string' ? [] : ['criterion is missing or has an invalid type or value']);
+  return JSON.stringify(typeof entry.criterion === 'string' ? [] : [{
+   text:'candidate artifact was refused: criterion is missing or has an invalid type or value',
+   deterministic_defect:{provenance:'host_validator',code:'invalid_candidate_shape',
+    subject:'entries/0/criterion',location:'shape',stage:'shape'},
+  }]);
  };
  vm.createContext(ctx);vm.runInContext(scriptSource(),ctx);
  const state={entries:new Map(),retryIds:null};let calls=0;
@@ -135,6 +139,7 @@ const tests=[
  ['entries pointer retry and unlocated full retry',async()=>{await run(false,false,'candidate artifact was refused: entries/4/criterion is missing or has an invalid type or value');await run(true,false,'candidate artifact was refused: invalid document');}],
  ['nested entries pointer retry',()=>run(false,false,'candidate artifact was refused: /entries/4/check/cwd is invalid')],
  ['supplementary pointer retry',supplementaryPointer],
+ ...require('./workflow_decompose_shape_progress_test.cjs'),
 ];
 (async()=>{
  let failed=0;
