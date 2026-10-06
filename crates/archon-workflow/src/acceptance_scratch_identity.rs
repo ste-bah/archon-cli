@@ -82,7 +82,13 @@ pub(super) fn capture(
         source: roots.source_inventory()?,
         target: object(&roots.target())?,
         cwd_targets: targets,
-        environment: roots.environment(policy),
+        // Never one machine's: its user and computer names stay out.
+        environment: (roots.environment(policy).into_iter())
+            .filter(|(name, _)| {
+                !(crate::acceptance_check_environment::MACHINE_VARIABLES.iter())
+                    .any(|machine| machine.eq_ignore_ascii_case(name))
+            })
+            .collect(),
         tools,
         cargo_configuration: config,
     })

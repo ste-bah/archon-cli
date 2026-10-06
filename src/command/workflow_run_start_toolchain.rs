@@ -102,7 +102,8 @@ pub(crate) async fn warn(store: &WorkflowStore, run_id: &str, ui_sink: &SharedWo
     };
     // The site is read here, then its tools are listed on a blocking
     // thread: a slow one never holds an async worker (Issue 333).
-    let at = CheckSite::for_scratch(&binding.policy);
+    let host = archon_workflow::acceptance_check_environment::host_environment();
+    let at = CheckSite::for_scratch(&binding.policy, &host);
     let path = binding.policy.toolchain_path;
     let found = match tokio::task::spawn_blocking(move || unresolved(&contract, &path, &at)).await {
         Ok(Some(found)) => found,

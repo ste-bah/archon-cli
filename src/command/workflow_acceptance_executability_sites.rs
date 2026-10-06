@@ -5,6 +5,7 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
+use archon_workflow::acceptance_check_environment as check_env;
 use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, ObserveHooks, observe_commands_hooked};
 
 use super::hermetic::{Unrun, data_digest};
@@ -288,94 +289,67 @@ pub(super) fn git_head(repository: &std::path::Path) -> Option<String> {
         .filter(|head| object_id(head))
 }
 
-/// The environment the probe's site gives a check, and the names its
-/// policy forwards from the host.
+/// The environment the probe's site gives a check, but the HOME each check
+/// gets (the host's, or a fresh one in the probe's copy), and the names its policy forwards from the host: the one
+/// check-environment rule (Issue 345,
+/// `archon_workflow::acceptance_check_environment`) applied to the probe's
+/// host environment. A site with no policy has the default one; the probe's
+/// copy builds into its own warm target.
 pub(super) fn site_environment(probe: &HostProbe) -> (BTreeMap<String, String>, Vec<String>) {
+    let default = || check_env::CheckPolicy::default_for(&probe.host);
     match &probe.site {
         Site::Scratch(binding) => (
-            scratch_environment(&binding.policy),
+            scratch_environment(&binding.policy, &probe.host),
             binding.policy.environment_allowlist.clone(),
         ),
-        _ => (hermetic::probe_environment(None), Vec::new()),
+        Site::Hermetic => {
+            let target = hermetic::warm_target(&probe.copy_parent, &probe.repository);
+            let site = [("CARGO_TARGET_DIR", target.as_path())];
+            (
+                check_env::site_variables(&probe.host, &default(), &site),
+                Vec::new(),
+            )
+        }
+        Site::Direct | Site::Unavailable(_) => (
+            check_env::site_variables(&probe.host, &default(), &[]),
+            Vec::new(),
+        ),
     }
 }
 
 /// The variables a check's tool is listed with at `probe`'s site (Issue
-/// 333), from that site's own context only. A scratch site's are what it
-/// gives every check: its bound and forwarded variables, never the rest of
-/// the host's (Issue 282). Another site runs its checks on the host's
-/// environment, so its listing gets only the variables a tool needs to
-/// find itself and its toolchain ([`LISTING_VARIABLES`]), and the
-/// toolchain homes under the site's HOME, never HOME itself: the listing
-/// is given a fresh one.
+/// 333), from that site's own context only: exactly what the site gives
+/// every check, its bound and forwarded variables, never the rest of the
+/// host's (Issues 282, 345). The listing is given a fresh HOME.
 pub(super) fn listing_environment(probe: &HostProbe) -> BTreeMap<String, String> {
-    let (environment, _) = site_environment(probe);
-    match &probe.site {
-        Site::Scratch(_) => environment,
-        Site::Direct | Site::Hermetic | Site::Unavailable(_) => narrowed(&environment),
-    }
-}
-
-/// The variables of a site that runs on the host's environment which a
-/// listing keeps: where programs are, the locale, and the toolchains.
-const LISTING_VARIABLES: &[&str] = &[
-    "PATH",
-    "PATHEXT",
-    "LANG",
-    "LANGUAGE",
-    "LC_ALL",
-    "LC_CTYPE",
-    "LC_MESSAGES",
-    "TERM",
-    "SYSTEMROOT",
-    "WINDIR",
-    "COMSPEC",
-    "PROGRAMFILES",
-    "PROGRAMFILES(X86)",
-    "PROGRAMW6432",
-    "PROGRAMDATA",
-    "CARGO_HOME",
-    "RUSTUP_HOME",
-    "RUSTUP_TOOLCHAIN",
-];
-
-/// `environment` with only [`LISTING_VARIABLES`], and the toolchain homes
-/// a tool would find under its HOME named outright.
-pub(super) fn narrowed(environment: &BTreeMap<String, String>) -> BTreeMap<String, String> {
-    let mut kept: BTreeMap<String, String> = (environment.iter())
-        .filter(|(name, _)| {
-            LISTING_VARIABLES
-                .iter()
-                .any(|kept| kept.eq_ignore_ascii_case(name))
-        })
-        .map(|(name, value)| (name.clone(), value.clone()))
-        .collect();
-    if let Some(home) = environment.get("HOME") {
-        for (name, under) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
-            let dir = Path::new(home).join(under);
-            if dir.is_dir() {
-                kept.entry(name.into())
-                    .or_insert_with(|| dir.to_string_lossy().into_owned());
-            }
-        }
-    }
-    kept
+    site_environment(probe).0
 }
 
 /// The variables a scratch site of `policy` gives every check, besides its
 /// own fresh HOME, TMPDIR and build directories: those its policy binds,
-/// its toolchain PATH, and the host values it forwards.
+/// its toolchain PATH, and the values it forwards from `host`. A forwarded
+/// variable `host` lacks fails the scratch's own preparation, naming it;
+/// this record of the site is made without it.
 pub(super) fn scratch_environment(
     policy: &archon_workflow::acceptance_scratch::ScratchPolicy,
+    host: &BTreeMap<String, String>,
 ) -> BTreeMap<String, String> {
-    let mut env = policy.environment.clone();
-    env.insert("PATH".into(), policy.toolchain_path.clone());
+    let mut env = check_env::site_variables(host, &check_env::CheckPolicy::configured(policy), &[]);
     for name in &policy.environment_allowlist {
-        if let Ok(value) = std::env::var(name) {
-            env.insert(name.clone(), value);
+        if let Ok(value) = check_env::forwarded_values(host, std::slice::from_ref(name)) {
+            env.extend(value);
         }
     }
     env
+}
+
+impl HostProbe {
+    /// This probe with `host` as the host's environment.
+    #[cfg(test)]
+    pub(crate) fn with_host_environment(mut self, host: BTreeMap<String, String>) -> Self {
+        self.host = host;
+        self
+    }
 }
 
 /// Captured once per freeze, using the check site's PATH and forwarded values.
@@ -416,3 +390,7 @@ fn runtime_identity(probe: &HostProbe) -> &serde_json::Value {
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_identity_tests.rs"]
 mod identity_tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_environment_tests.rs"]
+mod environment_tests;

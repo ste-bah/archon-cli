@@ -166,8 +166,10 @@ pub struct CommandSite<'a> {
     pub scratch_bytes: u64,
     pub output_bytes: usize,
     pub timeout_secs: u64,
-    /// Redacts allowlisted host values from captured output; a direct site
-    /// forwards the host environment unredacted, as agent shells do.
+    /// Redacts allowlisted host values from captured output. A direct site
+    /// redacts nothing: with no policy it binds no credential-shaped name
+    /// (Issue 345), and under a configured policy it runs only the host's
+    /// own floor predicates, which get the policy's forwarded values.
     pub(super) redactor: Option<&'a ScratchRoots>,
 }
 impl CommandSite<'_> {

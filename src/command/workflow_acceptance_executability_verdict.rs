@@ -132,9 +132,12 @@ impl Context {
     }
 
     /// A scratch site of `policy`, as it gives every check the variables
-    /// its policy binds and forwards (no declared deliverables).
-    pub(crate) fn for_scratch(policy: &archon_workflow::acceptance_scratch::ScratchPolicy) -> Self {
-        Self::at(super::sites::scratch_environment(policy), Vec::new())
+    /// its policy binds and forwards from `host` (no declared deliverables).
+    pub(crate) fn for_scratch(
+        policy: &archon_workflow::acceptance_scratch::ScratchPolicy,
+        host: &BTreeMap<String, String>,
+    ) -> Self {
+        Self::at(super::sites::scratch_environment(policy, host), Vec::new())
     }
 
     fn at(environment: BTreeMap<String, String>, deliverables: Vec<String>) -> Self {
