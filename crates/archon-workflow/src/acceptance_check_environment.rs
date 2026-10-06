@@ -15,26 +15,30 @@
 //!    (`archon_shell::data_environment::check_data_variable`) and be set on
 //!    the host, else the check does not run and the error names it
 //!    ([`forwarded_values`]);
-//! 3. the site's own directories (a fresh `HOME`, a scratch's `TMPDIR`,
+//! 3. the site's own directories (its `HOME` -- the host's at the direct
+//!    site, which has no filesystem sandbox to make a fresh one a boundary,
+//!    a fresh one at a probe's copy and a scratch --, a scratch's `TMPDIR`,
 //!    `CARGO_HOME` and build directory), which nothing above displaces.
 //!
 //! A configured `[workflow.acceptance_execution]` section is the policy of
 //! its sites ([`CheckPolicy::configured`]). A site with no section has the
 //! default policy ([`CheckPolicy::default_for`]): the host's `PATH`, and from
 //! the host only [`DEFAULT_BOUND`] (locale, time zone, terminal type, user
-//! name, temporary directory and the Rust toolchain's homes and build
-//! directory), with the toolchain homes a tool finds under the host's home
-//! named outright, because the check is given a fresh one. It forwards
-//! nothing else: an operator variable a check needs is named in
+//! name, temporary directory, the Rust toolchain's homes and build directory,
+//! and the non-secret locators of other toolchains and certificate bundles)
+//! and [`PROXY_VARIABLES`] whose value carries no `user:pass@`, never a
+//! credential-shaped name ([`credential_shaped`]); the toolchain homes a
+//! tool finds under the host's home are named outright. It forwards nothing
+//! else: an operator variable a check needs is named in
 //! `environment_allowlist`, and never reaches a check by default.
 //!
 //! Before Issue 345 a site with no section gave a check every host variable
-//! but Archon's own keys. A check that read one of them now fails; when its
-//! text or output names a host variable the site withheld ([`withheld`]),
-//! that failure is no verdict but an operational error naming the variable
+//! but Archon's own keys. A check that read one of them now fails; when that
+//! variable could be forwarded and the check's output says it is missing or
+//! unset, the failure is no verdict but an operational error naming it
 //! ([`withheld_error`]).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::acceptance_scratch::ScratchPolicy;
@@ -55,15 +59,28 @@ pub const SYSTEM_VARIABLES: &[&str] = if cfg!(windows) {
         "ProgramW6432",
         "ProgramData",
         "CommonProgramFiles",
+        "CommonProgramFiles(x86)",
+        "CommonProgramW6432",
         "NUMBER_OF_PROCESSORS",
         "PROCESSOR_ARCHITECTURE",
         "OS",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "USERNAME",
+        "COMPUTERNAME",
+        "PSModulePath",
+        "ALLUSERSPROFILE",
     ]
 } else {
     &[]
 };
 
-/// Host variables the default policy binds, when the host has them.
+/// Host variables the default policy binds, when the host has them. None is
+/// a secret: each names a locale, a user, a directory, a toolchain version or
+/// a certificate bundle's path, never a credential.
 pub const DEFAULT_BOUND: &[&str] = &[
     "LANG",
     "LANGUAGE",
@@ -89,7 +106,58 @@ pub const DEFAULT_BOUND: &[&str] = &[
     "RUSTUP_HOME",
     "RUSTUP_TOOLCHAIN",
     "CARGO_TARGET_DIR",
+    // Python: the active virtual or conda environment's directory, the module
+    // search path, pyenv's root directory and its selected version.
+    "VIRTUAL_ENV",
+    "CONDA_PREFIX",
+    "PYTHONPATH",
+    "PYENV_ROOT",
+    "PYENV_VERSION",
+    // Node: nvm's directory and the module search path.
+    "NVM_DIR",
+    "NODE_PATH",
+    // Go: the workspace, the toolchain root and the module cache directory.
+    "GOPATH",
+    "GOROOT",
+    "GOMODCACHE",
+    // JVM: the JDK's directory and Gradle's cache directory.
+    "JAVA_HOME",
+    "GRADLE_USER_HOME",
+    // Certificate bundles: paths to public CA certificates, never keys.
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
 ];
+
+/// Proxy addresses the default policy binds, when the host has them and the
+/// value carries no `user:pass@`: an address without credentials is no
+/// secret, and a check that downloads behind a proxy needs it.
+pub const PROXY_VARIABLES: &[&str] = &[
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+];
+
+/// Whether `name` is shaped like a credential: a name Issue 282's data rule
+/// accepts (a documented data suffix) or one ending in a secret's suffix.
+/// The default policy never binds one.
+pub fn credential_shaped(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    archon_shell::data_environment::check_data_variable(name).is_ok()
+        || ["_TOKEN", "_KEY", "_SECRET", "_PASSWORD", "_PAT"]
+            .iter()
+            .any(|suffix| upper.ends_with(suffix))
+}
+
+/// Whether a proxy value names a user or password (`scheme://user:pass@host`).
+fn carries_credentials(value: &str) -> bool {
+    let rest = value.split_once("://").map_or(value, |(_, rest)| rest);
+    rest.split('/').next().unwrap_or_default().contains('@')
+}
 
 /// Variables a shell sets for itself: never withheld, whatever the host has.
 const SHELL_OWN: &[&str] = &["PWD", "OLDPWD", "SHLVL", "_"];
@@ -117,9 +185,13 @@ impl CheckPolicy {
 
     /// The policy of a site with no section, read from `host`.
     pub fn default_for(host: &BTreeMap<String, String>) -> Self {
-        let mut bound: BTreeMap<String, String> = DEFAULT_BOUND
-            .iter()
+        let proxies = (PROXY_VARIABLES.iter())
             .filter_map(|name| lookup(host, name))
+            .filter(|(_, value)| !carries_credentials(value));
+        let mut bound: BTreeMap<String, String> = (DEFAULT_BOUND.iter())
+            .filter_map(|name| lookup(host, name))
+            .chain(proxies)
+            .filter(|(name, _)| !credential_shaped(name))
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect();
         let home_name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
@@ -141,7 +213,7 @@ impl CheckPolicy {
 
 /// `name` in `environment`: exactly, and ignoring ASCII case on Windows,
 /// where `Path` is PATH.
-fn lookup<'a>(
+pub(crate) fn lookup<'a>(
     environment: &'a BTreeMap<String, String>,
     name: &str,
 ) -> Option<(&'a String, &'a String)> {
@@ -228,36 +300,9 @@ pub fn check_environment(
     Ok(environment)
 }
 
-/// The host variables a check given `environment` does not get.
-pub fn withheld(
-    host: &BTreeMap<String, String>,
-    environment: &BTreeMap<String, String>,
-) -> BTreeSet<String> {
-    (host.keys())
-        .filter(|name| !SHELL_OWN.contains(&name.as_str()) && lookup(environment, name).is_none())
-        .cloned()
-        .collect()
-}
-
-/// The operational error of a check that failed and whose text or output
-/// names a host variable the site withheld, naming it; `None` when it names
-/// none. Names are matched as whole words, so `MY_PAT` is not `MY_PATH`.
-pub fn withheld_error(texts: &[&[u8]], withheld: &BTreeSet<String>) -> Option<String> {
-    let texts: Vec<String> = (texts.iter())
-        .map(|text| String::from_utf8_lossy(text).into_owned())
-        .collect();
-    let named: BTreeSet<&str> = (texts.iter())
-        .flat_map(|text| text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')))
-        .filter_map(|word| withheld.get(word).map(String::as_str))
-        .collect();
-    if named.is_empty() {
-        return None;
-    }
-    let list = named.into_iter().collect::<Vec<_>>().join(", ");
-    Some(format!(
-        "the check failed and names the host variable(s) {list}, which this acceptance site does not give a check (Issue 345: a check gets PATH, the locale, the toolchain homes and only the host variables its policy forwards), so the failure is no verdict. If the check needs them, name them in [workflow.acceptance_execution] environment_allowlist; otherwise the check must not read them"
-    ))
-}
+#[path = "acceptance_check_environment_withheld.rs"]
+mod withheld;
+pub use withheld::{withheld, withheld_error};
 
 #[cfg(test)]
 #[path = "acceptance_check_environment_tests.rs"]

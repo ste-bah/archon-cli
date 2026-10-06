@@ -8,8 +8,10 @@
 //! run's own agents ran theirs — in the target repository checkout, with the
 //! environment the one check-environment rule gives every site
 //! (`acceptance_check_environment`, Issue 345): built from the host
-//! environment the caller hands over, never that environment itself, with a
-//! fresh HOME per check -- through the SAME bounded process-group runner the
+//! environment the caller hands over, never that environment itself, with
+//! the host's HOME in the live checkout (no filesystem sandbox makes a fresh
+//! one a boundary there) and a fresh one per check in a probe's copy --
+//! through the SAME bounded process-group runner the
 //! scratch observer uses. There is one runner; this is the second place it
 //! is pointed at.
 //!
@@ -44,6 +46,9 @@ pub struct DirectSite {
     pub policy: Option<CheckPolicy>,
     /// The site's own build directory, when it has one (a probe's copy).
     pub target: Option<PathBuf>,
+    /// A fresh HOME per check (a probe's copy), else the host's (the live
+    /// checkout, where a check can read the host's home by path anyway).
+    pub fresh_home: bool,
     pub timeout_secs: u64,
     pub output_bytes: usize,
 }
@@ -57,6 +62,7 @@ impl std::fmt::Debug for DirectSite {
             .field("host", &self.host.keys().collect::<Vec<_>>())
             .field("policy", &self.policy.as_ref().map(|p| &p.forwarded))
             .field("target", &self.target)
+            .field("fresh_home", &self.fresh_home)
             .field("timeout_secs", &self.timeout_secs)
             .field("output_bytes", &self.output_bytes)
             .finish()
@@ -96,14 +102,19 @@ impl DirectSite {
         Ok(())
     }
 
-    /// A check's environment here, given its fresh `home`, and the host
-    /// variables it is not given.
+    /// A check's environment here, with `home` as its fresh HOME (else the
+    /// host's), and the host variables it is not given.
     pub fn check_environment(
         &self,
-        home: &Path,
+        home: Option<&Path>,
     ) -> WorkflowResult<(BTreeMap<String, String>, BTreeSet<String>)> {
         let policy = (self.policy.clone()).unwrap_or_else(|| CheckPolicy::default_for(&self.host));
-        let mut site: Vec<(&str, &Path)> = vec![("HOME", home)];
+        let host_home = (self.host.get("HOME")).map(Path::new);
+        let mut site: Vec<(&str, &Path)> = home
+            .or(host_home)
+            .map(|h| ("HOME", h))
+            .into_iter()
+            .collect();
         site.extend(
             self.target
                 .as_deref()
@@ -112,6 +123,25 @@ impl DirectSite {
         let environment = check_environment(&self.host, &policy, &site).map_err(invalid)?;
         let withheld = withheld(&self.host, &environment);
         Ok((environment, withheld))
+    }
+
+    /// One check's environment: its fresh HOME, if the site gives one (held
+    /// until the check ends), the variables, and what is withheld.
+    fn prepare(
+        &self,
+    ) -> WorkflowResult<(
+        Option<FreshHome>,
+        BTreeMap<String, String>,
+        BTreeSet<String>,
+    )> {
+        let home = if self.fresh_home {
+            Some(FreshHome::new()?)
+        } else {
+            None
+        };
+        let (environment, withheld) =
+            self.check_environment(home.as_ref().map(|h| h.0.as_path()))?;
+        Ok((home, environment, withheld))
     }
 
     fn command_site(&self, environment: BTreeMap<String, String>) -> CommandSite<'_> {
@@ -141,24 +171,18 @@ pub async fn run_check_direct(
 ) -> WorkflowResult<CheckResult> {
     site.validate()?;
     let command = resolve_command(contract, chain_digest, reference)?;
-    let home = FreshHome::new()?;
-    let (environment, withheld) = site.check_environment(&home.0)?;
+    let (_home, environment, withheld) = site.prepare()?;
     let at = site.command_site(environment);
     let result =
         super::observe::execute_check_at(&at, contract, reference, &command, cancel).await?;
-    Ok(unless_withheld(result, command.bytes(), &withheld))
+    Ok(unless_withheld(result, &withheld))
 }
 
-/// `result`, or, when it failed naming a host variable the site withheld,
-/// the operational error that names it (no verdict).
-fn unless_withheld(
-    mut result: CheckResult,
-    command: &[u8],
-    withheld: &BTreeSet<String>,
-) -> CheckResult {
+/// `result`, or, when it failed saying a withheld variable the allowlist
+/// could forward is missing, the operational error naming it (no verdict).
+fn unless_withheld(mut result: CheckResult, withheld: &BTreeSet<String>) -> CheckResult {
     if result.exit_code != Some(0) && result.operational_error.is_none() {
-        result.operational_error =
-            withheld_error(&[command, &result.stdout, &result.stderr], withheld);
+        result.operational_error = withheld_error(&[&result.stdout, &result.stderr], withheld);
     }
     result
 }
@@ -203,11 +227,10 @@ pub async fn evaluate_floor_direct(
                 &site.project,
                 floor,
             )?;
-            let home = FreshHome::new()?;
-            let (environment, withheld) = site.check_environment(&home.0)?;
+            let (_home, environment, withheld) = site.prepare()?;
             let at = site.command_site(environment);
             let result = super::process::run_at(&at, acceptance_id, &generated, cancel).await?;
-            Ok(unless_withheld(result, generated.bytes(), &withheld))
+            Ok(unless_withheld(result, &withheld))
         }
     }
 }
@@ -288,6 +311,7 @@ mod tests {
             host: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
             policy: None,
             target: None,
+            fresh_home: false,
             timeout_secs: 20,
             output_bytes: 4096,
         }

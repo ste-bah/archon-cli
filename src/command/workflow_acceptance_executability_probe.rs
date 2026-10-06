@@ -81,6 +81,7 @@ impl HostProbe {
                     host: self.host.clone(),
                     policy: None,
                     target: None,
+                    fresh_home: false,
                     // Issue 323: the probe's one per-check bound.
                     timeout_secs: self.check_bound_secs(),
                     output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,

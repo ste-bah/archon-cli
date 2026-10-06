@@ -14,7 +14,11 @@ const SECRETS: &[(&str, &str)] = &[
     ("ANTHROPIC_API_KEY", "engine-secret-value-345"),
 ];
 
-/// This process's PATH (read, never set) with the locale and the secrets.
+/// The host's HOME in these tests.
+const HOST_HOME: &str = "/nonexistent-host-home-345";
+
+/// This process's PATH (read, never set) with the locale, a HOME and the
+/// secrets.
 fn host() -> BTreeMap<String, String> {
     let mut host: BTreeMap<String, String> = (SECRETS.iter())
         .map(|(name, value)| (name.to_string(), value.to_string()))
@@ -22,6 +26,7 @@ fn host() -> BTreeMap<String, String> {
     host.insert("PATH".into(), std::env::var("PATH").unwrap());
     host.insert("LANG".into(), "en_GB.UTF-8".into());
     host.insert("TZ".into(), "UTC".into());
+    host.insert("HOME".into(), HOST_HOME.into());
     host
 }
 
@@ -89,7 +94,10 @@ async fn a_direct_check_gets_the_allowlist_and_no_operator_secret() {
     assert_eq!(env["PATH"], host()["PATH"]);
     assert_eq!(env["LANG"], "en_GB.UTF-8");
     assert_eq!(env["TZ"], "UTC");
-    assert!(env["HOME"].contains("archon-check-home-"), "{env:?}");
+    assert_eq!(
+        env["HOME"], HOST_HOME,
+        "the direct site keeps the host's HOME"
+    );
     // What the site records of itself (listing, identity, redaction) is the
     // same allowlist.
     let listed = listing_environment(&probe);

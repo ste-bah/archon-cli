@@ -67,8 +67,9 @@ fn assert_no_secret(result: &CheckResult) {
 }
 
 /// A direct site with no policy: secrets absent; PATH, the locale, the
-/// host's build directory and the toolchain home under the host's home
-/// present; HOME a fresh directory, never the host's.
+/// host's build directory, the toolchain home under the host's home and the
+/// host's HOME present (the live checkout has no filesystem sandbox, so a
+/// fresh HOME would be no boundary), and the non-secret locators too.
 #[tokio::test]
 async fn a_direct_check_gets_the_allowlist_and_no_operator_secret() {
     let repo = tempfile::tempdir().unwrap();
@@ -76,9 +77,29 @@ async fn a_direct_check_gets_the_allowlist_and_no_operator_secret() {
     std::fs::create_dir_all(home.path().join(".cargo")).unwrap();
     let mut site = site(repo.path(), repo.path());
     site.host = host_with_secrets(home.path());
+    for (name, value) in [
+        ("VIRTUAL_ENV", "/venv-345"),
+        ("GOPATH", "/go-345"),
+        ("SSL_CERT_FILE", "/certs-345.pem"),
+        ("HTTPS_PROXY", "http://proxy.internal:3128"),
+        (
+            "HTTP_PROXY",
+            "http://alice:proxy-secret-345@proxy.internal:3128",
+        ),
+    ] {
+        site.host.insert(name.into(), value.into());
+    }
     let result = run(&site, "env").await.unwrap();
     assert_no_secret(&result);
     let env = printed(&result);
+    assert_eq!(env["VIRTUAL_ENV"], "/venv-345");
+    assert_eq!(env["GOPATH"], "/go-345");
+    assert_eq!(env["SSL_CERT_FILE"], "/certs-345.pem");
+    assert_eq!(env["HTTPS_PROXY"], "http://proxy.internal:3128");
+    assert!(
+        !String::from_utf8_lossy(&result.stdout).contains("proxy-secret-345"),
+        "a proxy address with credentials is withheld"
+    );
     assert_eq!(env["PATH"], "/usr/bin:/bin");
     assert_eq!(env["LANG"], "en_GB.UTF-8");
     assert_eq!(env["TZ"], "UTC");
@@ -87,16 +108,11 @@ async fn a_direct_check_gets_the_allowlist_and_no_operator_secret() {
         PathBuf::from(&env["CARGO_HOME"]),
         home.path().join(".cargo")
     );
-    assert_ne!(PathBuf::from(&env["HOME"]), home.path());
-    assert!(env["HOME"].contains("archon-check-home-"), "{env:?}");
-    assert!(
-        !Path::new(&env["HOME"]).exists(),
-        "the fresh home is removed after the check"
-    );
+    assert_eq!(PathBuf::from(&env["HOME"]), home.path());
 }
 
-/// A probe-copy shaped site (its own build directory): the same rule, and
-/// its build directory displaces the host's.
+/// A probe-copy shaped site (its own build directory, a fresh HOME): the
+/// same rule, and its directories displace the host's.
 #[tokio::test]
 async fn a_hermetic_shaped_check_gets_its_own_build_directory_and_no_secret() {
     let repo = tempfile::tempdir().unwrap();
@@ -104,9 +120,16 @@ async fn a_hermetic_shaped_check_gets_its_own_build_directory_and_no_secret() {
     let mut site = site(repo.path(), repo.path());
     site.host = host_with_secrets(home.path());
     site.target = Some(repo.path().join("warm-target"));
+    site.fresh_home = true;
     let result = run(&site, "env").await.unwrap();
     assert_no_secret(&result);
     let env = printed(&result);
+    assert_ne!(PathBuf::from(&env["HOME"]), home.path());
+    assert!(env["HOME"].contains("archon-check-home-"), "{env:?}");
+    assert!(
+        !Path::new(&env["HOME"]).exists(),
+        "the fresh home is removed after the check"
+    );
     assert_eq!(
         PathBuf::from(&env["CARGO_TARGET_DIR"]),
         repo.path().join("warm-target")
@@ -139,8 +162,9 @@ async fn a_forwarded_variable_is_present_and_a_missing_one_is_named() {
     assert!(error.contains("'POLYGON_API_KEY' is absent"), "{error}");
 }
 
-/// A check that fails reading a variable the site withheld gives no
-/// verdict but the operational error naming it; a failure naming none stays
+/// A check that fails saying a withheld variable the allowlist could
+/// forward is unset gives no verdict but the operational error naming it; a
+/// failure naming none, one the allowlist refuses, or a bare mention stays
 /// the check's verdict.
 #[tokio::test]
 async fn a_failure_reading_a_withheld_variable_is_an_operational_error() {
@@ -148,11 +172,44 @@ async fn a_failure_reading_a_withheld_variable_is_an_operational_error() {
     let home = tempfile::tempdir().unwrap();
     let mut site = site(repo.path(), repo.path());
     site.host = host_with_secrets(home.path());
-    let result = run(&site, "test -n \"$MY_PAT\"").await.unwrap();
+    site.host
+        .insert("MY_SERVICE_TOKEN".into(), "service-secret-value-345".into());
+    let result = run(
+        &site,
+        "printf 'error: %s is not set\\n' MY_SERVICE_TOKEN >&2; exit 1",
+    )
+    .await
+    .unwrap();
     let error = result.operational_error.as_deref().expect("no verdict");
-    assert!(error.contains("MY_PAT"), "{error}");
-    assert!(!error.contains("pat-secret-value-345"), "{error}");
-    let result = run(&site, "test -f absent").await.unwrap();
-    assert_eq!(result.exit_code, Some(1), "{result:?}");
+    assert!(error.contains("MY_SERVICE_TOKEN"), "{error}");
+    assert!(!error.contains("service-secret-value-345"), "{error}");
+    for verdict in [
+        "test -f absent",
+        // MY_PAT has no data suffix: the allowlist could never forward it.
+        "printf 'error: %s is not set\\n' MY_PAT >&2; exit 1",
+    ] {
+        let result = run(&site, verdict).await.unwrap();
+        assert_ne!(result.exit_code, Some(0), "{result:?}");
+        assert!(result.operational_error.is_none(), "{verdict}: {result:?}");
+    }
+}
+
+/// RUST_BACKTRACE exported on the host and a panicking test: every Rust
+/// panic names it ("run with `RUST_BACKTRACE=1`"), and the failure is the
+/// check's verdict, never an operational error.
+#[tokio::test]
+async fn a_rust_panic_with_rust_backtrace_exported_is_a_verdict() {
+    let repo = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let mut site = site(repo.path(), repo.path());
+    site.host = host_with_secrets(home.path());
+    site.host.insert("RUST_BACKTRACE".into(), "1".into());
+    let panic = "printf '%s\\n' \"thread 'tests::adds' panicked at src/lib.rs:9:9:\" 'assertion failed: add(2, 2) == 5' 'note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace' 'test tests::adds ... FAILED' >&2; exit 101";
+    let result = run(&site, panic).await.unwrap();
+    assert_eq!(result.exit_code, Some(101), "{result:?}");
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("RUST_BACKTRACE=1"),
+        "{result:?}"
+    );
     assert!(result.operational_error.is_none(), "{result:?}");
 }

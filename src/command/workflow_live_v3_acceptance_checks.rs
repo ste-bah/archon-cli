@@ -38,6 +38,7 @@ fn direct_site(context: &StageContext) -> DirectSite {
             archon_workflow::acceptance_check_environment::CheckPolicy::configured(&binding.policy)
         }),
         target: None,
+        fresh_home: false,
         timeout_secs: context.binding.as_ref().map_or(
             archon_workflow::acceptance_scratch::DIRECT_DEFAULT_TIMEOUT_SECS,
             |binding| binding.policy.timeout_secs,

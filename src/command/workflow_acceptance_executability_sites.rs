@@ -289,8 +289,8 @@ pub(super) fn git_head(repository: &std::path::Path) -> Option<String> {
         .filter(|head| object_id(head))
 }
 
-/// The environment the probe's site gives a check, but the fresh HOME each
-/// check gets, and the names its policy forwards from the host: the one
+/// The environment the probe's site gives a check, but the HOME each check
+/// gets (the host's, or a fresh one in the probe's copy), and the names its policy forwards from the host: the one
 /// check-environment rule (Issue 345,
 /// `archon_workflow::acceptance_check_environment`) applied to the probe's
 /// host environment. A site with no policy has the default one; the probe's

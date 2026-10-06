@@ -2,6 +2,7 @@
 //! `acceptance_scratch_direct_env_tests` and the bin's probe tests.
 
 use super::*;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 fn host(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -28,7 +29,7 @@ fn the_default_policy_binds_only_the_allowlist() {
         ("TZ", "UTC"),
         ("RUSTUP_TOOLCHAIN", "stable"),
         ("CARGO_HOME", "/cargo"),
-        ("PYTHONPATH", "/py"),
+        ("NODE_OPTIONS", "--require=x"),
         ("SSH_AUTH_SOCK", "/tmp/agent"),
     ];
     pairs.extend_from_slice(SECRETS);
@@ -51,14 +52,14 @@ fn the_default_policy_binds_only_the_allowlist() {
             "{name}"
         );
     }
-    for name in ["PYTHONPATH", "SSH_AUTH_SOCK"]
+    for name in ["NODE_OPTIONS", "SSH_AUTH_SOCK"]
         .into_iter()
         .chain(SECRETS.iter().map(|(name, _)| *name))
     {
         assert!(!environment.contains_key(name), "{name} leaked");
     }
     let withheld = withheld(&host, &environment);
-    assert!(withheld.contains("MY_PAT") && withheld.contains("PYTHONPATH"));
+    assert!(withheld.contains("MY_PAT") && withheld.contains("NODE_OPTIONS"));
     assert!(!withheld.contains("PATH") && !withheld.contains("LANG"));
 }
 
@@ -133,14 +134,110 @@ fn a_host_without_path_is_an_error_naming_path() {
     assert!(error.contains("no PATH"), "{error}");
 }
 
-/// Only a whole-word name the site withheld makes a failure no verdict.
+/// A failure is no verdict only when its output says a withheld variable
+/// the allowlist can forward is missing; a bare mention (Rust's backtrace
+/// hint), a name the allowlist refuses, or a look-alike name is a verdict.
 #[test]
-fn a_withheld_name_is_matched_as_a_whole_word() {
-    let withheld = BTreeSet::from(["MY_PAT".to_string()]);
-    let error = withheld_error(&[b"test -n \"$MY_PAT\""], &withheld).expect("named");
-    assert!(error.contains("MY_PAT") && error.contains("environment_allowlist"));
-    assert_eq!(withheld_error(&[b"echo $MY_PATH MY_PATS"], &withheld), None);
-    assert_eq!(withheld_error(&[b"exit 1"], &withheld), None);
+fn only_a_forwardable_variable_said_missing_makes_a_failure_no_verdict() {
+    let withheld: BTreeSet<String> = ["MY_SERVICE_TOKEN", "RUST_BACKTRACE", "MY_PAT", "PYTHONPATH"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    for said in [
+        "sh: 1: MY_SERVICE_TOKEN: parameter not set",
+        "bash: line 1: MY_SERVICE_TOKEN: unbound variable",
+        "Error: MY_SERVICE_TOKEN is not set",
+        "KeyError: 'MY_SERVICE_TOKEN'",
+        "missing environment variable MY_SERVICE_TOKEN",
+        "thread 'main' panicked: MY_SERVICE_TOKEN must be set: NotPresent",
+    ] {
+        let error = withheld_error(&[said.as_bytes()], &withheld).expect(said);
+        assert!(error.contains("MY_SERVICE_TOKEN") && error.contains("environment_allowlist"));
+        assert!(
+            !error.contains("MY_PAT") && !error.contains("PYTHONPATH"),
+            "{error}"
+        );
+    }
+    for verdict in [
+        "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+        "RUST_BACKTRACE is not set",
+        "MY_PAT is not set",
+        "PYTHONPATH is not set",
+        "MY_SERVICE_TOKENS is not set",
+        "uses MY_SERVICE_TOKEN; assertion failed",
+        "exit 1",
+    ] {
+        assert_eq!(
+            withheld_error(&[verdict.as_bytes()], &withheld),
+            None,
+            "{verdict}"
+        );
+    }
+}
+
+/// The non-secret locators reach a check at a site with no policy; a proxy
+/// address carrying credentials does not, and neither does any
+/// credential-shaped name.
+#[test]
+fn locators_and_credential_free_proxies_are_bound_and_nothing_credential_shaped() {
+    let host = host(&[
+        ("PATH", "/bin"),
+        ("VIRTUAL_ENV", "/venv"),
+        ("PYTHONPATH", "/py"),
+        ("NVM_DIR", "/nvm"),
+        ("GOPATH", "/go"),
+        ("JAVA_HOME", "/jdk"),
+        ("SSL_CERT_FILE", "/certs.pem"),
+        ("NODE_EXTRA_CA_CERTS", "/extra.pem"),
+        ("HTTPS_PROXY", "http://proxy.internal:3128"),
+        ("http_proxy", "http://alice:s3cret@proxy.internal:3128"),
+        ("NO_PROXY", "localhost,127.0.0.1"),
+        ("RUST_BACKTRACE", "1"),
+    ]);
+    let bound = CheckPolicy::default_for(&host).bound;
+    for name in [
+        "VIRTUAL_ENV",
+        "PYTHONPATH",
+        "NVM_DIR",
+        "GOPATH",
+        "JAVA_HOME",
+        "SSL_CERT_FILE",
+        "NODE_EXTRA_CA_CERTS",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+    ] {
+        assert_eq!(bound.get(name), host.get(name), "{name}");
+    }
+    assert!(
+        !bound.contains_key("http_proxy"),
+        "a proxy with credentials"
+    );
+    assert!(!bound.contains_key("RUST_BACKTRACE"));
+    for name in DEFAULT_BOUND.iter().chain(PROXY_VARIABLES) {
+        assert!(!credential_shaped(name), "{name} is credential-shaped");
+    }
+    for name in [
+        "GITHUB_TOKEN",
+        "SERVICE_API_KEY",
+        "DB_PASSWORD",
+        "MY_PAT",
+        "AWS_SECRET",
+    ] {
+        assert!(credential_shaped(name), "{name}");
+    }
+}
+
+/// Windows: a withheld name is matched ignoring case, as `withheld` and the
+/// lookup ignore it there.
+#[cfg(windows)]
+#[test]
+fn windows_withheld_names_match_ignoring_case() {
+    let host = host(&[("Path", r"C:\Windows"), ("My_Service_Token", "t")]);
+    let environment = check_environment(&host, &CheckPolicy::default_for(&host), &[]).unwrap();
+    let withheld = withheld(&host, &environment);
+    assert!(withheld.contains("My_Service_Token"));
+    let error = withheld_error(&[b"MY_SERVICE_TOKEN is not set"], &withheld).expect("matched");
+    assert!(error.contains("My_Service_Token"), "{error}");
 }
 
 /// The site's own directories are never displaced by the policy.

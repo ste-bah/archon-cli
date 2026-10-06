@@ -355,6 +355,7 @@ pub(super) async fn run_in_copy(
         host: probe.host.clone(),
         policy: None,
         target: Some(target),
+        fresh_home: true,
         // Issue 323: the probe's one per-check bound, as at every site.
         timeout_secs: probe.check_bound_secs(),
         output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,
