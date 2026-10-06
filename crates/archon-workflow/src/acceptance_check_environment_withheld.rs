@@ -35,12 +35,17 @@ pub fn withheld(
 /// - `set` / `setting` / `export` / `provide` `(the) NAME` (django-environ's
 ///   "Set the X environment variable", the OpenAI SDK's "by setting the X
 ///   environment variable");
-/// - `NAME` then, within 80 characters on its line, not found, is empty, not
-///   provided or required (python-decouple's "X not found. Declare it as
-///   envvar", zod/t3-env's `{ X: [ 'Required' ] }`);
-/// - `NAME` on one line and `Field required` or `Required` on the next
-///   (pydantic);
+/// - `NAME` then, with only spaces, quotes, colons or brackets between, not
+///   found, is empty, not provided or required (python-decouple's "X not
+///   found. Declare it as envvar", zod/t3-env's `{ X: [ 'Required' ] }`);
+/// - `NAME` alone on a line and `Field required` (alone, or before
+///   `[type=missing`) on the next (pydantic);
 /// - Python's `KeyError: 'NAME'`.
+///
+/// The first and fourth forms never match a name that opens a quoted
+/// phrase (`expected 'X is required' in stderr` is a check's expectation,
+/// not a missing variable); a quoted name alone (`'X' is required`) still
+/// matches.
 ///
 /// The name's case is ignored only on Windows, as [`withheld`] ignores it
 /// there. A message that does not name the variable -- Rust's
@@ -57,21 +62,25 @@ fn says_missing(name: &str, output: &str) -> bool {
     } else {
         format!("(?-i:{escaped})")
     };
+    // The name, never as the opening of a quoted phrase.
+    let named = format!(r#"(?:(?:^|[^'"`\w]){name}\b['"`]?|['"`]{name}['"`])"#);
     let patterns = [
         format!(
-            r#"\b{name}\b['"`]?\s*:?\s*(?:is\s+)?(?:not\s+set|unset|not\s+defined|undefined|missing|required|must\s+be\s+set|unbound\s+variable|parameter\s+(?:null\s+or\s+)?not\s+set)"#
+            r#"{named}\s*:?\s*(?:is\s+)?(?:not\s+set|unset|not\s+defined|undefined|missing|required|must\s+be\s+set|unbound\s+variable|parameter\s+(?:null\s+or\s+)?not\s+set)\b"#
         ),
         format!(r#"(?:environment\s+variable|env\s+var|missing)\s*:?\s*['"`$]?\b{name}\b"#),
         format!(r#"\b{name}\b['"`]?\s+env(?:ironment)?\s+var(?:iable)?"#),
         format!(
             r#"\b(?:set(?:ting)?|export(?:ing)?|provid(?:e|ing))\s+(?:the\s+)?['"`$]?\b{name}\b"#
         ),
-        format!(r#"\b{name}\b[^\n]{{0,80}}(?:not\s+found|is\s+empty|not\s+provided|required)"#),
-        format!(r#"\b{name}\b[^\n]*\n[^\n]*\b(?:field\s+)?required\b"#),
+        format!(r#"{named}['"`:\[\]{{}} \t]*(?:not\s+found|is\s+empty|not\s+provided|required)\b"#),
+        format!(
+            r#"^[ \t]*{name}[ \t]*\r?\n[ \t]*field[ \t]+required(?:[ \t]*\r?$|[ \t]+\[type=missing)"#
+        ),
         format!(r#"KeyError:\s*['"]{name}['"]"#),
     ];
     patterns.iter().any(|pattern| {
-        Regex::new(&format!("(?i){pattern}")).is_ok_and(|regex| regex.is_match(output))
+        Regex::new(&format!("(?im){pattern}")).is_ok_and(|regex| regex.is_match(output))
     })
 }
 
@@ -92,6 +101,6 @@ pub fn withheld_error(outputs: &[&[u8]], withheld: &BTreeSet<String>) -> Option<
     }
     let list = named.join(", ");
     Some(format!(
-        "the check failed saying the host variable(s) {list} are missing, and this acceptance site does not give a check them (Issue 345: a check gets PATH, the locale, the toolchain locators and only the host variables its policy forwards), so the failure is no verdict. If the check needs them, name them in [workflow.acceptance_execution] environment_allowlist; otherwise the check must not read them"
+        "the check failed saying the host variable(s) {list} are missing, and this acceptance site does not give a check them (Issue 345: a check gets PATH, the locale, the toolchain locators and only the host variables its policy forwards), so the failure is no verdict. If the check needs them, name them in [workflow.acceptance_execution] environment_allowlist; a run with no such section must add the section to forward a variable, and that moves its checks to the scratch site. If the check tests the missing-variable message itself, unset {list} in the environment archon starts with instead. Otherwise the check must not read them"
     ))
 }

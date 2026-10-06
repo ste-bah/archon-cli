@@ -161,7 +161,12 @@ fn only_a_forwardable_variable_said_missing_makes_a_failure_no_verdict() {
         "MY_SERVICE_TOKEN is empty",
     ] {
         let error = withheld_error(&[said.as_bytes()], &withheld).expect(said);
-        assert!(error.contains("MY_SERVICE_TOKEN") && error.contains("environment_allowlist"));
+        assert!(
+            error.contains("MY_SERVICE_TOKEN")
+                && error.contains("environment_allowlist")
+                && error.contains("moves its checks to the scratch site")
+                && error.contains("unset MY_SERVICE_TOKEN")
+        );
         assert!(
             !error.contains("MY_PAT") && !error.contains("PYTHONPATH"),
             "{error}"
@@ -175,6 +180,11 @@ fn only_a_forwardable_variable_said_missing_makes_a_failure_no_verdict() {
         "MY_SERVICE_TOKENS is not set",
         "uses MY_SERVICE_TOKEN; assertion failed",
         "note: MY_SERVICE_TOKEN=abc was used\nassertion failed: left == right",
+        // Loose matches the review found (round 3).
+        "INFO loaded MY_SERVICE_TOKEN (len 40); 1 failed: user not found",
+        "MY_SERVICE_TOKEN=abc GET /x 404 Not Found",
+        "expected 'MY_SERVICE_TOKEN is required' in stderr",
+        "using MY_SERVICE_TOKEN from .env\n  required: true",
         "Set the MY_PAT environment variable",
         "PYTHONPATH not found",
         // No name in the text: undetectable, so a verdict (see `says_missing`).
