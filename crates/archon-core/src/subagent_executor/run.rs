@@ -1,4 +1,5 @@
 use super::*;
+use futures_util::FutureExt;
 
 impl AgentSubagentExecutor {
     pub(super) async fn run_subagent_to_completion(
@@ -144,7 +145,7 @@ impl AgentSubagentExecutor {
     ) -> Result<String, ExecutorError> {
         self.fire_subagent_start_hooks(&ids.manager_id, &request, ctx.nested)
             .await;
-        let (runner, context, _tool_cancellation) = if let Some(context) = &ids.resume_context {
+        let (mut runner, context, _tool_cancellation) = if let Some(context) = &ids.resume_context {
             let built = self
                 .restored_runner(ids, context, &cancel, ctx.cancel_parent.as_ref())
                 .await?;
@@ -178,11 +179,21 @@ impl AgentSubagentExecutor {
         let activity_agent_type = context.activity_agent_type();
         let activity_model = runner.model().to_string();
 
+        runner.set_activity_sink(row.scoped_sink());
         row.started(activity_agent_type, &activity_model);
-        let runner_result =
-            archon_tools::host_timeout::scope(context.host_timeout, runner.run(&request.prompt))
-                .await;
-        let inner_result = runner_result.map_err(|e| format!("Subagent failed: {e}"));
+        let runner_result = std::panic::AssertUnwindSafe(archon_tools::host_timeout::scope(
+            context.host_timeout,
+            runner.run(&request.prompt),
+        ))
+        .catch_unwind()
+        .await;
+        let inner_result = match runner_result {
+            Ok(result) => result.map_err(|e| format!("Subagent failed: {e}")),
+            Err(payload) => Err(format!(
+                "Subagent panicked: {}",
+                super::activity::panic_message(payload.as_ref())
+            )),
+        };
         row.finished(activity_agent_type, &activity_model, &inner_result);
 
         inner_result.map_err(ExecutorError::Internal)
@@ -426,3 +437,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "run_followup_tests.rs"]
+mod followup_tests;

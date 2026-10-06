@@ -82,6 +82,7 @@ fn round(checks: Vec<AcceptanceCheckRecordV1>) -> AcceptanceRoundRecordV1 {
         call_id: "acceptance-contract-run-1".into(),
         round: 1,
         attempt: 1,
+        progress_frontier: None,
         max_rounds: 3,
         contract_present: true,
         requested_check_ids: Vec::new(),

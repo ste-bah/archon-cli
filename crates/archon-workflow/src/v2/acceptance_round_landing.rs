@@ -45,20 +45,7 @@ pub fn record_round<T, E: From<WorkflowError>>(
                 "another writer took this acceptance attempt; the record takes the next free one"
             );
         }
-        let mut landing = RoundLanding {
-            run_dir,
-            dir: &dir,
-            attempt: record.attempt,
-            landed: None,
-        };
-        let acted = act(record, &mut landing)?;
-        let path = landing.landed.ok_or_else(|| {
-            WorkflowError::StateCorrupt(format!(
-                "acceptance round {} attempt {} was decided but never landed",
-                record.round, record.attempt
-            ))
-        })?;
-        Ok((path, acted))
+        land_at_locked(run_dir, &dir, record, act)
     })
 }
 
@@ -84,4 +71,26 @@ impl RoundLanding<'_> {
         self.landed = Some(path.clone());
         Ok(path)
     }
+}
+
+pub(super) fn land_at_locked<T, E: From<WorkflowError>>(
+    run_dir: &Path,
+    dir: &Path,
+    record: &mut AcceptanceRoundRecordV1,
+    act: impl FnOnce(&mut AcceptanceRoundRecordV1, &mut RoundLanding<'_>) -> Result<T, E>,
+) -> Result<(PathBuf, T), E> {
+    let mut landing = RoundLanding {
+        run_dir,
+        dir,
+        attempt: record.attempt,
+        landed: None,
+    };
+    let acted = act(record, &mut landing)?;
+    let path = landing.landed.ok_or_else(|| {
+        WorkflowError::StateCorrupt(format!(
+            "acceptance round {} attempt {} was decided but never landed",
+            record.round, record.attempt
+        ))
+    })?;
+    Ok((path, acted))
 }

@@ -488,7 +488,7 @@ pub use records::{
 use records::{delivered, in_flight_owns, log, objects_dir, sanitize, store_object};
 #[path = "input_tripwire_scope.rs"]
 mod scope;
-pub use scope::{LandingSection, landing_section, watch, watch_exempting, watch_sync};
+pub use scope::{LandingSection, landing_section, watch, watch_exempting, watch_owned, watch_sync};
 
 #[cfg(test)]
 #[path = "input_tripwire_tests.rs"]

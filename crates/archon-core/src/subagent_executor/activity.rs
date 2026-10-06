@@ -19,6 +19,7 @@ pub(super) struct ActivityRow {
     session_id: String,
     provider: String,
     subagent_id: String,
+    instance_id: String,
     /// The agent type and model of the open row; `None` while none is open.
     open: Option<(String, String)>,
 }
@@ -125,6 +126,7 @@ impl ActivityRow {
                 message,
             )
             .with_subagent_id(self.subagent_id.clone())
+            .with_agent_id(self.instance_id.clone())
             .with_agent_key(agent_type.to_string())
             .with_subagent_type(agent_type.to_string())
             .with_provider_model(self.provider.clone(), model.to_string()),
@@ -149,7 +151,42 @@ impl AgentSubagentExecutor {
             session_id: self.session_id.clone(),
             provider: self.client.name().to_string(),
             subagent_id: subagent_id.to_string(),
+            instance_id: format!("call-instance:{}", uuid::Uuid::new_v4()),
             open: None,
         }
     }
+}
+
+/// A runner and its tools report under the same call instance as its row.
+impl ActivityRow {
+    pub(super) fn scoped_sink(&self) -> Option<Arc<dyn archon_observability::AgentActivitySink>> {
+        self.sink.as_ref().map(|sink| {
+            Arc::new(CallSink {
+                sink: Arc::clone(sink),
+                subagent_id: self.subagent_id.clone(),
+                instance_id: self.instance_id.clone(),
+            }) as Arc<dyn archon_observability::AgentActivitySink>
+        })
+    }
+}
+#[derive(Debug)]
+struct CallSink {
+    sink: Arc<dyn archon_observability::AgentActivitySink>,
+    subagent_id: String,
+    instance_id: String,
+}
+impl archon_observability::AgentActivitySink for CallSink {
+    fn emit(&self, mut event: archon_observability::AgentActivityEvent) {
+        if event.subagent_id.as_deref() == Some(&self.subagent_id) {
+            event.agent_id = Some(self.instance_id.clone());
+        }
+        self.sink.emit(event);
+    }
+}
+pub(super) fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .unwrap_or("non-string panic payload")
 }

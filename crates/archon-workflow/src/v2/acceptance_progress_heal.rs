@@ -64,6 +64,8 @@ pub struct QuarantinedRecordV1 {
     /// Its failing state, from the progress ledger's copy; `None` when no
     /// copy held it.
     pub state: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress_frontier: Option<u64>,
     /// The record's file time, epoch nanoseconds: its place when the order
     /// log has no entry for it.
     pub written_nanos: u64,
@@ -110,20 +112,32 @@ impl ProgressLedger {
     /// quarantined, keeps the saved ledger (a run from before the records).
     /// An I/O error is returned, never healed.
     pub fn load_healing(run_dir: &Path) -> crate::WorkflowResult<HealedLedger> {
-        let saved = Self::saved(run_dir);
+        let saved_read = Self::saved(run_dir);
+        if matches!(saved_read, Err(crate::WorkflowError::Io { .. })) {
+            return Err(saved_read.unwrap_err());
+        }
+        let saved = saved_read.as_ref().ok().and_then(|saved| saved.as_ref());
         let (mut history, damaged) = scan(run_dir)?;
         let mut quarantined = Vec::new();
         for record in damaged {
-            let state = saved
-                .as_ref()
-                .and_then(|s| s.state_of(record.round, record.attempt));
-            quarantined.extend(quarantine(run_dir, record, state.cloned())?);
+            let state = saved.and_then(|s| s.state_of(record.round, record.attempt));
+            let frontier = saved
+                .and_then(|s| {
+                    s.observed
+                        .iter()
+                        .find(|o| (o.round, o.attempt) == (record.round, record.attempt))
+                })
+                .and_then(|o| o.progress_frontier);
+            quarantined.extend(quarantine(run_dir, record, state.cloned(), frontier)?);
         }
-        let found = read_quarantine(run_dir, saved.as_ref())?;
+        let found = read_quarantine(run_dir, saved)?;
         history.extend(found.known);
         let ledger = if history.is_empty() && !found.any {
-            saved.unwrap_or_default()
+            saved_read?.unwrap_or_default()
         } else {
+            if let Err(error) = &saved_read {
+                tracing::warn!(%error, "damaged ledger rebuilt from authoritative records");
+            }
             Self::from_states(in_recorded_order(run_dir, history)?)
         };
         Ok(HealedLedger {
@@ -204,6 +218,7 @@ fn scan(run_dir: &Path) -> crate::WorkflowResult<(Vec<Recorded<ObservedState>>, 
                     ObservedState {
                         round: record.round,
                         attempt: record.attempt,
+                        progress_frontier: record.progress_frontier,
                         state: super::state_key(&record),
                     },
                 )),
@@ -240,6 +255,7 @@ fn quarantine(
     run_dir: &Path,
     record: Damaged,
     state: Option<Vec<String>>,
+    frontier: Option<u64>,
 ) -> crate::WorkflowResult<Option<QuarantinedRecordV1>> {
     let round_dir = record.path.parent().unwrap_or(run_dir).to_path_buf();
     let dir = round_dir.join(QUARANTINE_DIR);
@@ -259,6 +275,11 @@ fn quarantine(
         quarantined: relative(run_dir, &moved),
         reason: record.reason,
         state,
+        progress_frontier: frontier.or(super::super::reservation::frontier(
+            run_dir,
+            record.round,
+            record.attempt,
+        )?),
         written_nanos: u64::try_from(record.written).unwrap_or(u64::MAX),
         quarantined_at: chrono::Utc::now().to_rfc3339(),
         acknowledged_at: None,
@@ -345,6 +366,13 @@ fn read_quarantine(
                     ObservedState {
                         round: key.0,
                         attempt: key.1,
+                        progress_frontier: evidence.progress_frontier.or_else(|| {
+                            saved
+                                .and_then(|s| {
+                                    s.observed.iter().find(|o| (o.round, o.attempt) == key)
+                                })
+                                .and_then(|o| o.progress_frontier)
+                        }),
                         state,
                     },
                 )),
@@ -413,27 +441,6 @@ pub(in crate::v2::acceptance_stage) fn highest_quarantined_attempt(dir: &Path) -
         .max()
 }
 
-/// Records one `acceptance_record_quarantined` event per record in the
-/// run's events, under the run lock. Best effort: the evidence file beside
-/// the bytes is the durable record.
-pub fn record_quarantine_events(
-    store: &crate::WorkflowStore,
-    run_id: &str,
-    quarantined: &[QuarantinedRecordV1],
-) {
-    for record in quarantined {
-        let detail = serde_json::to_value(record).unwrap_or_default();
-        let emitted = store.with_run_lock(run_id, |locked| {
-            let seq = locked.next_event_seq(run_id)?;
-            crate::WorkflowEventLog::new(locked.clone()).emit(
-                run_id,
-                seq,
-                crate::WorkflowEventKind::AcceptanceRecordQuarantined,
-                detail.clone(),
-            )
-        });
-        if let Err(error) = emitted {
-            tracing::warn!(%error, record = %record.original, "quarantine event not recorded");
-        }
-    }
-}
+#[path = "acceptance_progress_heal_events.rs"]
+mod events;
+pub use events::{record_quarantine_events, record_quarantine_events_owned};

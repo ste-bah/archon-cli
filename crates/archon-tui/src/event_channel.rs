@@ -14,12 +14,16 @@ use tokio::sync::mpsc::error::SendError;
 use crate::event_framing::ContentFrames;
 use crate::events::TuiEvent;
 
+#[path = "event_channel_activity.rs"]
+mod activity;
+
 pub const TUI_EVENT_CHANNEL_CAPACITY: usize = 1024;
 pub const MAX_COALESCED_CONTENT_BYTES: usize = 64 * 1024;
 
 #[derive(Debug)]
 struct Inner {
     queue: std::sync::Mutex<VecDeque<TuiEvent>>,
+    activity: std::sync::Mutex<activity::ActivityState>,
     capacity: usize,
     notify: Notify,
     not_full: Notify,
@@ -109,6 +113,9 @@ impl TuiEventSender {
     // error size is inherent to the contract.
     #[allow(clippy::result_large_err)]
     pub fn send(&self, event: TuiEvent) -> Result<(), SendError<TuiEvent>> {
+        if matches!(event, TuiEvent::AgentActivity(_)) {
+            return self.try_send_frame(event);
+        }
         let mut frames = ContentFrames::new(event.clone());
         if frames.frame_count() == 1 {
             let frame = frames.next().expect("single frame");
@@ -160,16 +167,42 @@ impl TuiEventSender {
             }
         }
 
+        let mut activity = self
+            .inner
+            .activity
+            .lock()
+            .expect("activity reconciliation lock");
+        let is_activity = matches!(event, TuiEvent::AgentActivity(_));
         {
             let mut queue = self.inner.queue.lock().expect("tui event queue lock");
             if self.inner.closed.load(Ordering::Acquire) {
                 crate::observability::record_tui_event_closed_send_failure();
                 return Err(SendError(event));
             }
+            if let TuiEvent::AgentActivity(update) = &event {
+                let terminal =
+                    crate::agent_activity::is_terminal_non_parent(update.role, update.status);
+                if frame_is_oversized(&event) && !terminal {
+                    crate::observability::record_tui_event_oversized_rejected();
+                    return Err(SendError(event));
+                }
+                activity.observe(update);
+                if frame_is_oversized(&event) {
+                    // Removal needs only the id; never retain oversized detail.
+                    activity.dirty = true;
+                    self.inner.notify.notify_one();
+                    return Ok(());
+                }
+            }
             let Some(event) = coalesce_with_metrics(&mut queue, event) else {
                 return Ok(());
             };
             if queue.len() >= self.inner.capacity {
+                if is_activity {
+                    activity.dirty = true;
+                    self.inner.notify.notify_one();
+                    return Ok(());
+                }
                 crate::observability::record_tui_event_full_send_failure();
                 return Err(SendError(event));
             }
@@ -183,6 +216,9 @@ impl TuiEventSender {
     }
 
     pub async fn send_async(&self, event: TuiEvent) -> Result<(), SendError<TuiEvent>> {
+        if matches!(event, TuiEvent::AgentActivity(_)) {
+            return self.send(event);
+        }
         for frame in ContentFrames::new(event) {
             if frame_is_oversized(&frame) {
                 crate::observability::record_tui_event_oversized_rejected();
@@ -194,6 +230,9 @@ impl TuiEventSender {
     }
 
     pub async fn send_atomic_async(&self, event: TuiEvent) -> Result<(), SendError<TuiEvent>> {
+        if matches!(event, TuiEvent::AgentActivity(_)) {
+            return self.send(event);
+        }
         let frames = ContentFrames::new(event).collect::<Vec<_>>();
         if let Some(frame) = frames.iter().find(|frame| frame_is_oversized(frame)) {
             crate::observability::record_tui_event_oversized_rejected();
@@ -330,7 +369,30 @@ impl TuiEventReceiver {
     }
 
     pub fn try_recv(&mut self) -> Result<TuiEvent, tokio::sync::mpsc::error::TryRecvError> {
+        let mut activity = self
+            .inner
+            .activity
+            .lock()
+            .expect("activity reconciliation lock");
         let mut queue = self.inner.queue.lock().expect("tui event queue lock");
+        if activity.dirty {
+            // This snapshot supersedes every queued activity update. Deliver
+            // it even while other traffic keeps the queue occupied, and do
+            // not replay old activity afterwards to resurrect a finished row.
+            queue.retain(|event| {
+                if matches!(event, TuiEvent::AgentActivity(_)) {
+                    crate::observability::record_tui_event_discarded(
+                        crate::event_payload_size::heap_bytes(event),
+                    );
+                    false
+                } else {
+                    true
+                }
+            });
+            activity.dirty = false;
+            self.inner.not_full.notify_waiters();
+            return Ok(TuiEvent::AgentActivitySnapshot(activity.rows.clone()));
+        }
         if let Some(event) = queue.pop_front() {
             let bytes = crate::event_payload_size::heap_bytes(&event);
             crate::observability::record_tui_event_dequeued(bytes);
@@ -364,6 +426,7 @@ pub fn bounded_tui_event_channel_with_capacity(
     let inner = Arc::new(Inner {
         queue: std::sync::Mutex::new(VecDeque::with_capacity(capacity)),
         capacity,
+        activity: std::sync::Mutex::new(activity::ActivityState::default()),
         notify: Notify::new(),
         not_full: Notify::new(),
         closed: AtomicBool::new(false),
@@ -401,68 +464,9 @@ fn frame_is_oversized(event: &TuiEvent) -> bool {
     retained_event_bytes(event) > MAX_COALESCED_CONTENT_BYTES
 }
 
-fn coalesce_with_metrics(queue: &mut VecDeque<TuiEvent>, event: TuiEvent) -> Option<TuiEvent> {
-    let previous_bytes = queue
-        .back()
-        .map(crate::event_payload_size::heap_bytes)
-        .unwrap_or(0);
-    let event = enqueue_or_coalesce_content_delta(queue, event);
-    if event.is_none() {
-        let current_bytes = queue
-            .back()
-            .map(crate::event_payload_size::heap_bytes)
-            .unwrap_or(0);
-        crate::observability::record_tui_event_coalesced_bytes(
-            current_bytes.saturating_sub(previous_bytes),
-        );
-    }
-    event
-}
-
-fn enqueue_or_coalesce_content_delta(
-    queue: &mut VecDeque<TuiEvent>,
-    event: TuiEvent,
-) -> Option<TuiEvent> {
-    match event {
-        TuiEvent::TextDelta(text) => {
-            if let Some(TuiEvent::TextDelta(previous)) = queue.back_mut()
-                && previous.len().saturating_add(text.len()) <= MAX_COALESCED_CONTENT_BYTES
-            {
-                let mut combined = String::with_capacity(previous.len() + text.len());
-                combined.push_str(previous);
-                combined.push_str(&text);
-                *previous = combined;
-                return None;
-            }
-            Some(TuiEvent::TextDelta(text))
-        }
-        TuiEvent::ThinkingDelta(text) => {
-            if let Some(TuiEvent::ThinkingDelta(previous)) = queue.back_mut()
-                && previous.len().saturating_add(text.len()) <= MAX_COALESCED_CONTENT_BYTES
-            {
-                let mut combined = String::with_capacity(previous.len() + text.len());
-                combined.push_str(previous);
-                combined.push_str(&text);
-                *previous = combined;
-                return None;
-            }
-            Some(TuiEvent::ThinkingDelta(text))
-        }
-        TuiEvent::TransientThinkingDelta(text) => {
-            if let Some(TuiEvent::TransientThinkingDelta(previous)) = queue.back_mut()
-                && previous.len().saturating_add(text.len()) <= MAX_COALESCED_CONTENT_BYTES
-            {
-                let mut combined = String::with_capacity(previous.len() + text.len());
-                combined.push_str(previous);
-                combined.push_str(&text);
-                *previous = combined;
-                return None;
-            }
-            Some(TuiEvent::TransientThinkingDelta(text))
-        }
-        event => Some(event),
-    }
-}
+#[path = "event_channel_coalesce.rs"]
+mod coalesce;
+use coalesce::coalesce_with_metrics;
 
 #[cfg(test)]
 #[path = "event_channel_tests.rs"]
@@ -471,3 +475,7 @@ mod tests;
 #[cfg(test)]
 #[path = "event_channel_payload_tests.rs"]
 mod payload_tests;
+
+#[cfg(test)]
+#[path = "event_channel_activity_tests.rs"]
+mod activity_followups;

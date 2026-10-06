@@ -216,6 +216,13 @@ fn activity_status(event: &archon_observability::AgentActivityEvent) -> AgentAct
 }
 
 fn activity_id(event: &archon_observability::AgentActivityEvent) -> String {
+    // Legacy agent_id values identify an actor, not a call. Only an
+    // explicitly scoped call-instance identity changes the rail's key.
+    if let (Some(subagent), Some(instance)) = (&event.subagent_id, &event.agent_id)
+        && instance.starts_with("call-instance:")
+    {
+        return format!("subagent:{subagent}:call:{instance}");
+    }
     event
         .subagent_id
         .clone()

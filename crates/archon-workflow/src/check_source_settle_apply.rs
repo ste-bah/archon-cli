@@ -50,6 +50,19 @@ pub(super) fn accept(
     proposed: Option<&[u8]>,
     reason: &str,
 ) -> Result<bool, ApplyError> {
+    crate::stage_write::mapped(
+        || accept_owned(ctx, pins, request, proposed, reason),
+        |error| ApplyError::Failed(error.to_string()),
+    )
+}
+
+fn accept_owned(
+    ctx: &Settle<'_>,
+    pins: &mut CheckSourcePins,
+    request: &SourceChangeRequest,
+    proposed: Option<&[u8]>,
+    reason: &str,
+) -> Result<bool, ApplyError> {
     let mut applied = false;
     if request.origin == ORIGIN_LANDING {
         let bytes = match &request.item {
@@ -210,6 +223,17 @@ fn repin(
 /// tree is put back to its pinned bytes (removed, when it was not pinned or
 /// pinned absent).
 pub(super) fn refuse(
+    ctx: &Settle<'_>,
+    request: &SourceChangeRequest,
+    pinned: Option<Option<Vec<u8>>>,
+) -> Result<bool, String> {
+    crate::stage_write::mapped(
+        || refuse_owned(ctx, request, pinned),
+        |error| error.to_string(),
+    )
+}
+
+fn refuse_owned(
     ctx: &Settle<'_>,
     request: &SourceChangeRequest,
     pinned: Option<Option<Vec<u8>>>,

@@ -235,3 +235,20 @@ pub(super) fn in_recorded_order<T>(
 #[cfg(test)]
 #[path = "acceptance_record_order_tests.rs"]
 mod tests;
+
+/// The frontier a newly started round observes, under the order lock.
+pub(in crate::v2::acceptance_stage) fn frontier_locked(
+    run_dir: &Path,
+) -> crate::WorkflowResult<u64> {
+    let path = log_path(run_dir);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(crate::WorkflowError::io(&path, error)),
+    };
+    let next = next_seq(&String::from_utf8_lossy(&bytes));
+    if next == u64::MAX {
+        return Err(crate::WorkflowError::StateCorrupt("acceptance recording-order sequence exhausted; cannot distinguish observation frontiers".into()));
+    }
+    Ok(next - 1)
+}

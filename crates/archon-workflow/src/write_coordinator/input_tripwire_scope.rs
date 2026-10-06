@@ -29,6 +29,56 @@ pub async fn watch<T>(
     watch_inner(run_root, label, &[], work).await
 }
 
+/// A stage's tripwire mutations use its owner even on the blocking pool.
+/// A refused arm or check stops the stage; it is never an unwatched success.
+pub fn watch_owned<T>(
+    writer: crate::stage_write::StageWriter,
+    run_root: Option<&Path>,
+    label: &str,
+    work: impl std::future::Future<Output = T>,
+) -> impl std::future::Future<Output = crate::WorkflowResult<(T, Option<EnvironmentViolation>)>> {
+    // Box before entering the async frame, as the run-control race does.
+    watch_owned_inner(
+        writer,
+        run_root.map(Path::to_path_buf),
+        label.to_string(),
+        Box::pin(work),
+    )
+}
+
+async fn watch_owned_inner<T>(
+    writer: crate::stage_write::StageWriter,
+    root: Option<PathBuf>,
+    label: String,
+    work: std::pin::Pin<Box<impl std::future::Future<Output = T>>>,
+) -> crate::WorkflowResult<(T, Option<EnvironmentViolation>)> {
+    let arm_writer = writer.clone();
+    let tripwire = tokio::task::spawn_blocking(move || {
+        crate::stage_write::with_writer(&arm_writer, || {
+            crate::WorkflowResult::Ok(root.as_deref().and_then(InputTripwire::arm))
+        })
+    })
+    .await
+    .map_err(|error| {
+        crate::WorkflowError::HostOperational(format!("input tripwire could not arm: {error}"))
+    })??;
+    let out = crate::stage_write::scope(writer.clone(), work).await;
+    let owned = label.to_string();
+    let violation = tokio::task::spawn_blocking(move || {
+        crate::stage_write::with_writer(&writer, || {
+            crate::WorkflowResult::Ok(tripwire.and_then(|tripwire| tripwire.check(&owned)))
+        })
+    })
+    .await
+    .map_err(|error| {
+        crate::WorkflowError::HostOperational(format!("input tripwire could not check: {error}"))
+    })??;
+    if let Some(violation) = &violation {
+        eprintln!("{label}: {}", violation.message());
+    }
+    Ok((out, violation))
+}
+
 /// [`watch`] for a write-capable call, whose changes under `own` (its
 /// working tree and stamped deliveries) are its work
 /// ([`InputTripwire::exempting`]).

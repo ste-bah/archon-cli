@@ -99,6 +99,10 @@ pub(crate) fn extend_and_republish(
     request: ReauthorRequest<'_>,
     extension: &Extension,
 ) -> Result<ReauthorResult> {
+    archon_workflow::stage_write::mapped(|| extend_owned(request, extension), anyhow::Error::from)
+}
+
+fn extend_owned(request: ReauthorRequest<'_>, extension: &Extension) -> Result<ReauthorResult> {
     let tasks_root = request.tasks_root;
     let _lock = ChainLock::acquire(
         &acceptance_pin_path(request.project_root, tasks_root),
@@ -162,7 +166,7 @@ pub(crate) fn extend_and_republish(
         }
     }
     repaired.prd.digest = prd_digest;
-    super::publish_chain(&request, verified, repaired, Vec::new(), Some(extension))
+    super::publish_chain_owned(&request, verified, repaired, Vec::new(), Some(extension))
 }
 
 #[cfg(test)]

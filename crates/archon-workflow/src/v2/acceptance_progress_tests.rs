@@ -32,6 +32,7 @@ fn round(n: u32, checks: Vec<AcceptanceCheckRecordV1>) -> AcceptanceRoundRecordV
         call_id: format!("acceptance-contract-run-{n}"),
         round: n,
         attempt: 1,
+        progress_frontier: None,
         max_rounds: ACCEPTANCE_MAX_ROUNDS,
         contract_present: true,
         requested_check_ids: Vec::new(),
@@ -318,7 +319,11 @@ fn names_entry(line: &str, round: u32, attempt: u32) -> bool {
     fields.get(..2) == Some(&[round.to_string().as_str(), attempt.to_string().as_str()][..])
 }
 
-pub(super) fn set(n: u32, attempt: u32, id: &str) -> AcceptanceRoundRecordV1 {
+pub(in crate::v2::acceptance_stage) fn set(
+    n: u32,
+    attempt: u32,
+    id: &str,
+) -> AcceptanceRoundRecordV1 {
     let mut record = round(n, vec![failed(id, "x")]);
     record.attempt = attempt;
     record

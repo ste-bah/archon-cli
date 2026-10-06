@@ -49,18 +49,23 @@ pub(crate) mod extend;
 /// freeze-time judge and cleared the executability probe, both gates allow publication under the mode their stage
 /// was frozen in, and — checked inside the publish transaction, just before its
 /// first rename — the chain on disk is still the one verified before the
-/// author ran. The chain lock is held throughout.
+/// author ran. Verification and publication each hold the chain lock;
+/// authoring holds no lock across its await.
 pub(crate) async fn reauthor_and_republish(
     client: &dyn WorkflowLlmClient,
     request: ReauthorRequest<'_>,
     scope: &AuthorScope,
 ) -> Result<ReauthorResult> {
-    let tasks_root = request.tasks_root;
-    let _lock = ChainLock::acquire(
-        &acceptance_pin_path(request.project_root, tasks_root),
-        tasks_root,
+    let verified = archon_workflow::stage_write::mapped(
+        || {
+            let _lock = ChainLock::acquire(
+                &acceptance_pin_path(request.project_root, request.tasks_root),
+                request.tasks_root,
+            )?;
+            verify(&request)
+        },
+        anyhow::Error::from,
     )?;
-    let verified = verify(&request)?;
     // Re-judge with the model the freeze-time judge recorded, so a repaired
     // check is held to the same judge as every check kept as it was.
     let (judge_model, provider) = verified.judge.clone();
@@ -102,6 +107,26 @@ pub(crate) async fn reauthor_and_republish(
 /// lineage link, one atomic transaction. `extension` (ACC-A7) adds checks and
 /// may rebind the contract to the PRD as it is now (`republish_extend`).
 fn publish_chain(
+    request: &ReauthorRequest<'_>,
+    verified: verify::Verified,
+    repaired: AcceptanceContract,
+    diagnostics: Vec<String>,
+    extension: Option<&extend::Extension>,
+) -> Result<ReauthorResult> {
+    archon_workflow::stage_write::mapped(
+        || {
+            let _lock = ChainLock::acquire(
+                &acceptance_pin_path(request.project_root, request.tasks_root),
+                request.tasks_root,
+            )?;
+            publish_chain_owned(request, verified, repaired, diagnostics, extension)
+        },
+        anyhow::Error::from,
+    )
+}
+
+// Caller holds the chain lock inside the stage write fence.
+fn publish_chain_owned(
     request: &ReauthorRequest<'_>,
     verified: verify::Verified,
     repaired: AcceptanceContract,

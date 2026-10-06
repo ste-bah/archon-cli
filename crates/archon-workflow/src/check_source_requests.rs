@@ -128,6 +128,10 @@ pub fn blobs(run_root: &Path) -> BlobStore {
 /// Record `new`, write-once: the same proposal from the same origin and
 /// branch is the same request (a resumed branch records nothing twice).
 pub fn record(run_root: &Path, new: NewRequest<'_>) -> Result<SourceChangeRequest, String> {
+    crate::stage_write::mapped(|| record_owned(run_root, new), |error| error.to_string())
+}
+
+fn record_owned(run_root: &Path, new: NewRequest<'_>) -> Result<SourceChangeRequest, String> {
     let store = blobs(run_root);
     // The proposal is only recorded once its bytes are: a request naming
     // bytes nobody kept could never be judged.
@@ -295,6 +299,13 @@ pub fn pending(run_root: &Path) -> Result<Vec<SourceChangeRequest>, String> {
 
 /// Record how `request` was settled. Write-once.
 pub fn settle_record(run_root: &Path, resolution: &RequestResolution) -> Result<(), String> {
+    crate::stage_write::mapped(
+        || settle_record_owned(run_root, resolution),
+        |error| error.to_string(),
+    )
+}
+
+fn settle_record_owned(run_root: &Path, resolution: &RequestResolution) -> Result<(), String> {
     let path = requests_dir(run_root).join(format!("{}.resolved.json", resolution.request_id));
     if path.exists() {
         return Ok(());

@@ -24,6 +24,26 @@ pub(super) fn publish_fresh(
     contract: &AcceptanceContract,
     baseline_commit: Option<String>,
 ) -> Result<String, Refused> {
+    archon_workflow::stage_write::with_write(|| {
+        archon_workflow::WorkflowResult::Ok(publish_fresh_owned(
+            context,
+            prd_path,
+            contract,
+            baseline_commit,
+        ))
+    })
+    .map_err(|error| Refused {
+        findings: Vec::new(),
+        error: error.to_string(),
+    })?
+}
+
+fn publish_fresh_owned(
+    context: &StageContext,
+    prd_path: &Path,
+    contract: &AcceptanceContract,
+    baseline_commit: Option<String>,
+) -> Result<String, Refused> {
     use crate::command::workflow_gate::{GateEvaluation, GateId, run_sync_gate};
     let refused = |error: anyhow::Error| Refused {
         findings: Vec::new(),

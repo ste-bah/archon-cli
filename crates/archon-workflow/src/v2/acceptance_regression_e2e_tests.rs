@@ -98,6 +98,7 @@ async fn a_regression_in_an_undeclared_file_reaches_its_author_with_the_file_gra
         call_id: "acceptance-contract-run-1".into(),
         round: 1,
         attempt: 1,
+        progress_frontier: None,
         max_rounds: 3,
         contract_present: true,
         requested_check_ids: Vec::new(),

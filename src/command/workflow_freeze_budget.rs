@@ -20,7 +20,8 @@
 //! and after the saved judge verdicts, so even a freeze the host kills
 //! reports how far it got. Everything it saves lives outside the call's
 //! staging directory, which the executor clears before each retry. An
-//! unstaged freeze has no host deadline and never produces it.
+//! unstaged freeze has no host deadline, but an unsaved incomplete step also
+//! exits 75; its retry starts over rather than resuming saved results.
 //!
 //! The budget and the progress counter are not the freeze's alone: the
 //! staged set gate (`task-set-lint`, Issue 259) runs its critic calls under

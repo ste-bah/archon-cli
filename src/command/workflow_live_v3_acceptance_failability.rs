@@ -117,13 +117,8 @@ fn load(path: &Path, base: &str) -> Proofs {
 /// Written whole (temporary file, then rename); a write that fails only
 /// costs a later round the probe again.
 fn save(path: &Path, proofs: &Proofs) {
-    let Some(parent) = path.parent() else { return };
-    let Ok(bytes) = serde_json::to_vec_pretty(proofs) else {
-        return;
-    };
-    let temporary = path.with_extension("json.tmp");
-    if std::fs::create_dir_all(parent).is_ok() && std::fs::write(&temporary, bytes).is_ok() {
-        let _ = std::fs::rename(&temporary, path);
+    if let Ok(bytes) = serde_json::to_vec_pretty(proofs) {
+        archon_workflow::stage_write::best_effort_bytes(path, &bytes);
     }
 }
 

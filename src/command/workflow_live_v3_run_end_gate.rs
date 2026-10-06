@@ -177,6 +177,7 @@ fn rebuild(
         call_id: call_id.to_string(),
         round,
         attempt,
+        progress_frontier: None,
         max_rounds: field(data, "max_rounds").unwrap_or_default(),
         contract_present: field(data, "contract_present")?,
         requested_check_ids: Vec::new(),

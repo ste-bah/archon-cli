@@ -218,3 +218,23 @@ fn an_unknowable_move_of_readable_evidence_is_an_io_error() {
         "{loaded:?}"
     );
 }
+
+#[test]
+fn gc_missing_damaged_bytes_do_not_hide_unreadable_evidence() {
+    let mut refused = Vec::new();
+    for with_copy in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let lost = quarantined_then_evidence_damaged(dir.path(), with_copy);
+        std::fs::remove_file(dir.path().join(&lost.quarantined)).unwrap();
+        refused.push(ProgressLedger::load_healing(dir.path()).is_err());
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let quarantine = round_dir(dir.path(), 1).join("quarantine");
+    std::fs::create_dir_all(&quarantine).unwrap();
+    std::fs::write(quarantine.join("attempt-01.json.lost.evidence.json"), b"{").unwrap();
+    refused.push(ProgressLedger::load_healing(dir.path()).is_err());
+    assert!(
+        refused.iter().all(|refused| *refused),
+        "missing bytes hid evidence damage: {refused:?}"
+    );
+}
