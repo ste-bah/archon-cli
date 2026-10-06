@@ -197,3 +197,24 @@ fn an_unknowable_move_is_an_io_error_never_no_loss() {
         "{loaded:?}"
     );
 }
+
+/// The same for evidence that parses: whether its record's bytes moved is
+/// read with the error passed up, never taken as "never moved".
+#[cfg(unix)]
+#[test]
+fn an_unknowable_move_of_readable_evidence_is_an_io_error() {
+    let dir = tempfile::tempdir().unwrap();
+    write_round_record(dir.path(), &set(1, 1, "AC-X")).unwrap();
+    std::fs::write(round_dir(dir.path(), 1).join(attempt_file_name(1)), "{").unwrap();
+    let first = ProgressLedger::load_healing(dir.path()).unwrap();
+    let moved = dir.path().join(&first.quarantined[0].quarantined);
+    std::fs::rename(&moved, dir.path().join("kept.damaged")).unwrap();
+    std::os::unix::fs::symlink(&moved, &moved).unwrap();
+
+    let loaded = ProgressLedger::load_healing(dir.path());
+
+    assert!(
+        matches!(&loaded, Err(crate::WorkflowError::Io { .. })),
+        "{loaded:?}"
+    );
+}

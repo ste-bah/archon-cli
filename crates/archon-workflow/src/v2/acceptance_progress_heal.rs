@@ -325,7 +325,14 @@ fn read_quarantine(
                 },
             };
             let key = (evidence.round, evidence.attempt);
-            if !run_dir.join(&evidence.quarantined).is_file() || !seen.insert(key) {
+            // Evidence whose bytes never moved is ignored; a file system
+            // that will not say whether they moved is an I/O error the
+            // caller pauses on, never "they never moved".
+            let moved = run_dir.join(&evidence.quarantined);
+            let moved = moved
+                .try_exists()
+                .map_err(|e| crate::WorkflowError::io(&moved, e))?;
+            if !moved || !seen.insert(key) {
                 continue;
             }
             found.any = true;
