@@ -173,7 +173,13 @@ pub(crate) fn command(
     run_root: Option<&Path>,
     writable: &[PathBuf],
 ) -> Result<(std::process::Command, BoundaryGuard, CommandEnvironment), String> {
-    let environment = CommandEnvironment::capture()?;
+    let policy = crate::acceptance_check_environment::policy_for_run(run_root)?;
+    let environment =
+        CommandEnvironment::capture(policy.as_ref())?.with_remedy(if run_root.is_some() {
+            crate::acceptance_check_environment::RUN_POLICY_REMEDY
+        } else {
+            crate::acceptance_check_environment::NO_RUN_POLICY_REMEDY
+        });
     let (command, boundary) = bounded_command(program, run_root, writable, &environment)?;
     Ok((command, boundary, environment))
 }

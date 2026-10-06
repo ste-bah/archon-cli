@@ -69,7 +69,16 @@ const VERIFIER_TIMEOUT: Duration = Duration::from_secs(900);
 /// Progress goes to stderr because the report goes to stdout: this can take
 /// tens of minutes, and a caller piping the report to a file should still see
 /// what is being mutated while it happens.
+#[cfg(test)]
 pub(crate) fn execute_plans(cwd: &Path, report: &mut TraceReport) {
+    execute_plans_with_policy(cwd, report, None);
+}
+
+pub(crate) fn execute_plans_with_policy(
+    cwd: &Path,
+    report: &mut TraceReport,
+    policy: Option<&archon_workflow::acceptance_check_environment::CheckPolicy>,
+) {
     for row in &mut report.rows {
         for verdict in &mut row.anchors {
             let Ok(plan) = verdict.falsification.clone() else {
@@ -79,7 +88,8 @@ pub(crate) fn execute_plans(cwd: &Path, report: &mut TraceReport) {
                 "falsify {}: breaking {}:{}-{}, then `{}`",
                 plan.requirement_id, plan.file_path, plan.line_start, plan.line_end, plan.command
             );
-            let outcome = attempt(cwd, &plan).unwrap_or_else(FalsificationOutcome::Refused);
+            let outcome = attempt_with_policy(cwd, &plan, policy)
+                .unwrap_or_else(FalsificationOutcome::Refused);
             eprintln!("  {}", outcome.describe());
             verdict.level = outcome.level_after(verdict.level);
             verdict.falsification_outcome = Some(outcome);
@@ -89,9 +99,18 @@ pub(crate) fn execute_plans(cwd: &Path, report: &mut TraceReport) {
 }
 
 /// One experiment. `Err` is a refusal made before anything was written.
+#[cfg(test)]
 fn attempt(
     cwd: &Path,
     plan: &FalsificationPlan,
+) -> std::result::Result<FalsificationOutcome, RefusedToRun> {
+    attempt_with_policy(cwd, plan, None)
+}
+
+fn attempt_with_policy(
+    cwd: &Path,
+    plan: &FalsificationPlan,
+    policy: Option<&archon_workflow::acceptance_check_environment::CheckPolicy>,
 ) -> std::result::Result<FalsificationOutcome, RefusedToRun> {
     let language = mutate::language_for_path(&plan.file_path).ok_or_else(no_mutation(plan))?;
     let replacement = plan
@@ -131,7 +150,7 @@ fn attempt(
 
     refuse_if_dirty(cwd, &plan.file_path)?;
 
-    match verifier::run(cwd, &argv, VERIFIER_TIMEOUT) {
+    match verifier::run_with_policy(cwd, &argv, VERIFIER_TIMEOUT, policy) {
         verifier::Ran::NotLaunchable { reason } => {
             return Ok(FalsificationOutcome::Inconclusive(
                 Inconclusive::VerifierNotLaunchable { reason },
@@ -160,7 +179,7 @@ fn attempt(
                 reason: format!("could not install the mutation: {err}"),
             }
         })?;
-    let mutated = verifier::run(cwd, &argv, VERIFIER_TIMEOUT);
+    let mutated = verifier::run_with_policy(cwd, &argv, VERIFIER_TIMEOUT, policy);
     // Explicit, so the restore happens before the outcome is reported rather
     // than at the end of the enclosing scope. `Drop` remains the net.
     if let Err(err) = installed.restore() {

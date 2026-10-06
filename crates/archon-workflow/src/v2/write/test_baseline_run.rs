@@ -1,7 +1,7 @@
 //! Running one declared focused test command in a branch worktree, bounded.
 //!
 //! The command is the task's own declared string, fed to the POSIX shell
-//! with the worktree as its working directory, the default check environment
+//! with the worktree as its working directory, the operator check environment
 //! plus filtered toolchain/cache locators from the dispatch port (the leased
 //! build cache, so the run builds where the coder's will and never inside
 //! the worktree or the shared tree). Timeout and output are bounded, the
@@ -43,6 +43,20 @@ pub(crate) async fn run_in_worktree(
     command: &str,
     run_root: Option<&Path>,
 ) -> CommandRun {
+    let policy = match crate::acceptance_check_environment::policy_for_run(run_root) {
+        Ok(policy) => policy,
+        Err(error) => {
+            return CommandRun {
+                error: Some(error),
+                ..CommandRun::default()
+            };
+        }
+    };
+    let remedy = if run_root.is_some() {
+        crate::acceptance_check_environment::RUN_POLICY_REMEDY
+    } else {
+        crate::acceptance_check_environment::NO_RUN_POLICY_REMEDY
+    };
     let label = format!(
         "host-run test command `{command}` in {}",
         worktree.display()
@@ -50,7 +64,7 @@ pub(crate) async fn run_in_worktree(
     let (mut run, violation) = crate::write_coordinator::input_tripwire::watch(
         run_root,
         &label,
-        run_unwatched(dispatch, worktree, command),
+        run_unwatched(dispatch, worktree, command, policy.as_ref(), remedy),
     )
     .await;
     if let Some(violation) = violation {
@@ -64,29 +78,29 @@ async fn run_unwatched(
     dispatch: &dyn WorkflowAgentDispatch,
     worktree: &Path,
     command: &str,
+    policy: Option<&crate::acceptance_check_environment::CheckPolicy>,
+    remedy: &'static str,
 ) -> CommandRun {
     let started = Instant::now();
     let env = dispatch.host_command_env(worktree).await;
-    let mut host = crate::acceptance_check_environment::host_environment();
-    for (name, value) in &env.vars {
-        // Match std's Windows case-insensitive replacement before applying policy.
-        while let Some((previous, _)) = crate::acceptance_check_environment::lookup(&host, name) {
-            let previous = previous.clone();
-            host.remove(&previous);
+    let host = crate::acceptance_check_environment::host_environment();
+    let mut policy = policy
+        .cloned()
+        .unwrap_or_else(|| crate::acceptance_check_environment::CheckPolicy::default_for(&host));
+    policy.bind_dispatch(&env.vars);
+    let environment = match crate::acceptance_check_environment::CommandEnvironment::from_host(
+        &host,
+        Some(&policy),
+    ) {
+        Ok(environment) => environment.with_remedy(remedy),
+        Err(error) => {
+            return CommandRun {
+                error: Some(error),
+                duration_ms: elapsed_ms(started),
+                ..CommandRun::default()
+            };
         }
-        host.insert(name.clone(), value.clone());
-    }
-    let environment =
-        match crate::acceptance_check_environment::CommandEnvironment::from_host(&host) {
-            Ok(environment) => environment,
-            Err(error) => {
-                return CommandRun {
-                    error: Some(error),
-                    duration_ms: elapsed_ms(started),
-                    ..CommandRun::default()
-                };
-            }
-        };
+    };
     let mut process = environment.tokio_command(archon_shell::resolve_posix_shell());
     process
         .arg("-c")

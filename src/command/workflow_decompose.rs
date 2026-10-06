@@ -178,12 +178,13 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         permissions: Default::default(),
         learning_hooks: Vec::new(),
     };
-    let plan = super::workflow_live::workflow_live_planner::WorkflowScriptPlan::fixed(
+    let mut plan = super::workflow_live::workflow_live_planner::WorkflowScriptPlan::fixed(
         spec,
         FIXED_SCRIPT_SOURCE,
         calls,
         arguments.clone(),
     );
+    plan.check_policy = Some(super::acceptance_check_policy::from_config(config)?);
 
     let store = WorkflowStore::project(&project_root);
     let mut approval_spec = plan.approval_metadata_spec();

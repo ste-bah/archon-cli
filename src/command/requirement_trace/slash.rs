@@ -44,10 +44,10 @@ impl CommandHandler for RequirementsHandler {
         // a different model, which produces confident nonsense rather than a
         // visible error. A context with no path (test fixtures) keeps the
         // default.
-        if let Some(path) = ctx.config_path.clone()
-            && let Ok(config) = archon_core::config::load_config_from(path)
-        {
+        if let Some(path) = ctx.config_path.clone() {
+            let config = archon_core::config::load_config_from(path)?;
             options.embedding = config.memory.open_spec().embedding;
+            options.check_policy = super::check_policy::from_config(&config)?;
         }
         let mode = ctx.gate_mode.unwrap_or_default();
         let disposition = crate::command::workflow_gate::run_sync_gate(

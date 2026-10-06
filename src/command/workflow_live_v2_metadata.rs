@@ -25,6 +25,10 @@ pub(crate) fn script_lifecycle_from_env() -> bool {
 
 pub(super) const GENERATED_V2_METADATA_PATH: &str = "v2/generated-metadata.json";
 
+#[cfg(test)]
+#[path = "workflow_live_v2_metadata_policy_tests.rs"]
+mod policy_tests;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct GeneratedV2Metadata {
     pub(super) schema_version: String,
@@ -115,7 +119,7 @@ pub(super) fn save_generated_v2_metadata(
         // Only task-universe runs can enter the authored-script lifecycle.
         script_lifecycle: Some(script_lifecycle && plan.task_universe.is_some()),
     };
-    store.write_run_json(run_id, GENERATED_V2_METADATA_PATH, &metadata)
+    persist_with_check_policy(store, run_id, plan, &metadata)
 }
 
 pub(crate) fn save_fixed_decomposition_metadata(
@@ -140,7 +144,21 @@ pub(crate) fn save_fixed_decomposition_metadata(
         shape_decisions: Vec::new(),
         script_lifecycle: Some(true),
     };
-    store.write_run_json(run_id, GENERATED_V2_METADATA_PATH, &metadata)
+    persist_with_check_policy(store, run_id, plan, &metadata)
+}
+
+fn persist_with_check_policy(
+    store: &WorkflowStore,
+    run_id: &str,
+    plan: &WorkflowScriptPlan,
+    metadata: &GeneratedV2Metadata,
+) -> archon_workflow::WorkflowResult<()> {
+    let mut value = serde_json::to_value(metadata).expect("generated metadata serializes");
+    if let Some(binding) = &plan.check_policy {
+        value["check_environment_policy"] =
+            serde_json::to_value(binding).expect("check policy serializes");
+    }
+    store.write_run_json(run_id, GENERATED_V2_METADATA_PATH, &value)
 }
 
 pub(super) fn load_generated_v2_metadata(

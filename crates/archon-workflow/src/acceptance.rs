@@ -97,7 +97,16 @@ pub fn mutated_targets(before: &TargetFingerprints, after: &TargetFingerprints) 
 /// Run the stage verification command in `root`. Returns `Ok(())` on exit 0,
 /// otherwise an error describing the failure. `None` command always passes.
 pub fn run_verify_command(root: &Path, command: Option<&str>) -> Result<(), String> {
-    let Some(report) = run_verify_command_capture(root, command)? else {
+    run_verify_command_with_policy(root, command, None)
+}
+
+/// Execute with a policy supplied by the operator's configuration boundary.
+pub fn run_verify_command_with_policy(
+    root: &Path,
+    command: Option<&str>,
+    policy: Option<&crate::acceptance_check_environment::CheckPolicy>,
+) -> Result<(), String> {
+    let Some(report) = run_verify_command_capture(root, command, policy)? else {
         return Ok(());
     };
     if report.success() {
@@ -111,6 +120,7 @@ pub fn run_verify_command(root: &Path, command: Option<&str>) -> Result<(), Stri
 pub(crate) fn run_verify_command_capture(
     root: &Path,
     command: Option<&str>,
+    policy: Option<&crate::acceptance_check_environment::CheckPolicy>,
 ) -> Result<Option<VerifyCommandReport>, String> {
     let Some(command) = command else {
         return Ok(None);
@@ -119,7 +129,8 @@ pub(crate) fn run_verify_command_capture(
     if command.is_empty() {
         return Ok(None);
     }
-    let environment = crate::acceptance_check_environment::CommandEnvironment::capture()?;
+    let environment = crate::acceptance_check_environment::CommandEnvironment::capture(policy)?
+        .with_remedy("Supply an operator-owned CheckPolicy (with the needed names in forwarded) to run_verify_command_with_policy or evaluate_with_policy; those APIs consume the explicit policy, not a project config file");
     let output = environment
         .command(shell_program())
         .arg("-c")
@@ -199,6 +210,18 @@ pub fn evaluate(
     after: &TargetFingerprints,
     verify_command: Option<&str>,
 ) -> AcceptanceOutcome {
+    evaluate_with_policy(root, targets, _before, after, verify_command, None)
+}
+
+/// Stage acceptance with explicit operator check policy.
+pub fn evaluate_with_policy(
+    root: &Path,
+    targets: &[String],
+    _before: &TargetFingerprints,
+    after: &TargetFingerprints,
+    verify_command: Option<&str>,
+    policy: Option<&crate::acceptance_check_environment::CheckPolicy>,
+) -> AcceptanceOutcome {
     if targets.is_empty() {
         return AcceptanceOutcome::Rejected(
             "implementation stage declared no expected_target_files".to_string(),
@@ -211,7 +234,7 @@ pub fn evaluate(
             missing.join(", ")
         ));
     }
-    match run_verify_command(root, verify_command) {
+    match run_verify_command_with_policy(root, verify_command, policy) {
         Ok(()) => AcceptanceOutcome::Accepted,
         Err(reason) => AcceptanceOutcome::Rejected(reason),
     }

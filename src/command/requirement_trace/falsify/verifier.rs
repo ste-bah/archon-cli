@@ -123,10 +123,20 @@ pub(super) enum Ran {
 /// promptly, long enough that polling costs nothing next to a compile.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
+#[cfg(test)]
 pub(super) fn run(cwd: &Path, argv: &[String], timeout: Duration) -> Ran {
+    run_with_policy(cwd, argv, timeout, None)
+}
+
+pub(super) fn run_with_policy(
+    cwd: &Path,
+    argv: &[String],
+    timeout: Duration,
+    policy: Option<&archon_workflow::acceptance_check_environment::CheckPolicy>,
+) -> Ran {
     let environment =
-        match archon_workflow::acceptance_check_environment::CommandEnvironment::capture() {
-            Ok(environment) => environment,
+        match archon_workflow::acceptance_check_environment::CommandEnvironment::capture(policy) {
+            Ok(environment) => environment.with_remedy("Name the needed variables in [workflow.acceptance_execution] environment_allowlist in the operator configuration consumed by requirements trace, then retry --falsify"),
             Err(reason) => return Ran::NotLaunchable { reason },
         };
     let spawned = environment

@@ -31,8 +31,12 @@ pub fn run_wave_verify(
         persist_verify(run_root, stage_id, wave_id, &result)?;
         return Ok(result);
     };
-    let environment = crate::acceptance_check_environment::CommandEnvironment::capture()
+    let policy = crate::acceptance_check_environment::policy_for_run(Some(run_root))
         .map_err(ApplyError::VerifyEnvironment)?;
+    let environment =
+        crate::acceptance_check_environment::CommandEnvironment::capture(policy.as_ref())
+            .map_err(ApplyError::VerifyEnvironment)?
+            .with_remedy(crate::acceptance_check_environment::RUN_POLICY_REMEDY);
     let start = SystemTime::now();
     let output = environment
         .command(crate::acceptance::shell_program())

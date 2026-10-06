@@ -139,3 +139,108 @@ fn stage_bare_mentions_and_forbidden_names_stay_product_failures() {
         },
     );
 }
+
+fn recorded_policy(root: &std::path::Path, allowlist: &[&str]) {
+    std::fs::create_dir_all(root.join("v2")).unwrap();
+    std::fs::write(
+        root.join("v2/generated-metadata.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "observer_snapshot": {"native_execution": {"policy": {
+                "repository": root, "project": root, "task_root": root.join("tasks"),
+                "scratch_parent": root.join("scratch"), "project_inputs": [], "combined": true,
+                "toolchain_path": "/usr/bin:/bin", "environment": {"LANG": "C"},
+                "environment_allowlist": allowlist, "cargo_seed": null,
+                "timeout_secs": 10, "output_bytes": 1024, "scratch_bytes": 1024
+            }}}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn review349_wave_consumes_recorded_data_policy() {
+    operator(
+        "review349_wave_consumes_recorded_data_policy",
+        true,
+        |root| {
+            recorded_policy(root, &["FIXTURE_API_KEY"]);
+            run_wave_verify(root, Some("test \"$FIXTURE_API_KEY\" = data-secret && test -z \"${OPERATOR_SECRET-}${HTTPS_PROXY-}\" && test \"$LANG\" = C"), 1, root, "stage").unwrap();
+        },
+    );
+}
+
+#[test]
+fn review349_wave_missing_allowlisted_data_refuses_before_launch() {
+    operator(
+        "review349_wave_missing_allowlisted_data_refuses_before_launch",
+        true,
+        |root| {
+            recorded_policy(root, &["ABSENT_API_KEY"]);
+            let error = run_wave_verify(root, Some("touch launched"), 1, root, "stage")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("ABSENT_API_KEY"), "{error}");
+            assert!(!root.join("launched").exists());
+        },
+    );
+}
+
+#[test]
+fn review349_wave_malformed_policy_never_falls_back() {
+    operator(
+        "review349_wave_malformed_policy_never_falls_back",
+        true,
+        |root| {
+            std::fs::create_dir_all(root.join("v2")).unwrap();
+            for broken in [
+                "{bad",
+                "[]",
+                r#"{"observer_snapshot":"bad"}"#,
+                r#"{"observer_snapshot":{"native_execution":{"capture_error":"invalid operator policy"}}}"#,
+                r#"{"observer_snapshot":{"native_execution":{}}}"#,
+            ] {
+                std::fs::write(root.join("v2/generated-metadata.json"), broken).unwrap();
+                let error = run_wave_verify(root, Some("touch launched"), 1, root, "stage")
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    error.contains("policy") && error.contains("generated-metadata.json"),
+                    "{error}"
+                );
+                assert!(!root.join("launched").exists());
+            }
+        },
+    );
+}
+
+#[test]
+fn review349_stage_explicit_policy_reaches_verifier() {
+    operator(
+        "review349_stage_explicit_policy_reaches_verifier",
+        true,
+        |root| {
+            let host = archon_workflow::acceptance_check_environment::host_environment();
+            let mut policy =
+                archon_workflow::acceptance_check_environment::CheckPolicy::default_for(&host);
+            policy.forwarded = vec!["FIXTURE_API_KEY".into()];
+            archon_workflow::acceptance::run_verify_command_with_policy(
+                root,
+                Some("test \"$FIXTURE_API_KEY\" = data-secret && test -z \"${OPERATOR_SECRET-}\""),
+                Some(&policy),
+            )
+            .unwrap();
+            for name in ["ABSENT_API_KEY", "BASH_ENV", "NODE_OPTIONS"] {
+                policy.forwarded = vec![name.into()];
+                let error = archon_workflow::acceptance::run_verify_command_with_policy(
+                    root,
+                    Some("touch launched"),
+                    Some(&policy),
+                )
+                .unwrap_err();
+                assert!(error.contains(name), "{error}");
+                assert!(!root.join("launched").exists());
+            }
+        },
+    );
+}

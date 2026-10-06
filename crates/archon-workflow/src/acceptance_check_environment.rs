@@ -201,7 +201,8 @@ pub fn profile_bindings(home: &Path) -> Vec<(&'static str, std::path::PathBuf)> 
 const SHELL_OWN: &[&str] = &["PWD", "OLDPWD", "SHLVL", "_"];
 
 /// What a site's policy gives a check.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CheckPolicy {
     /// `PATH`; `None` only when the host itself has no PATH (default policy).
     pub toolchain_path: Option<String>,
@@ -218,6 +219,33 @@ impl CheckPolicy {
             toolchain_path: Some(policy.toolchain_path.clone()),
             bound: policy.environment.clone(),
             forwarded: policy.environment_allowlist.clone(),
+        }
+    }
+
+    /// Approved dispatch locators supersede config/host locators for this lease.
+    /// Unknown variables remain withheld; a dispatch overlay cannot forward data.
+    pub fn bind_dispatch(&mut self, overrides: &[(String, String)]) {
+        for (name, value) in overrides {
+            let approved = DEFAULT_BOUND
+                .iter()
+                .copied()
+                .chain(archon_tools::build_cache_env::toolchain_cache_env_keys())
+                .any(|key| {
+                    if cfg!(windows) {
+                        key.eq_ignore_ascii_case(name)
+                    } else {
+                        key == name
+                    }
+                });
+            if name == "PATH" || (cfg!(windows) && name.eq_ignore_ascii_case("PATH")) {
+                self.toolchain_path = Some(value.clone());
+            } else if approved && !credential_shaped(name) {
+                while let Some((previous, _)) = lookup(&self.bound, name) {
+                    let previous = previous.clone();
+                    self.bound.remove(&previous);
+                }
+                self.bound.insert(name.clone(), value.clone());
+            }
         }
     }
 
@@ -338,32 +366,51 @@ pub fn check_environment(
     Ok(environment)
 }
 
-/// The default check environment for an agent-authored host verifier.
+/// The policy-selected check environment for an agent-authored host verifier.
 /// Uses the same builder as direct/scratch acceptance, with the host HOME.
 /// Environment construction must succeed before a command can be built.
 pub struct CommandEnvironment {
     variables: BTreeMap<String, String>,
     withheld: BTreeSet<String>,
+    remedy: &'static str,
 }
 
 impl CommandEnvironment {
-    pub fn capture() -> Result<Self, String> {
-        Self::from_host(&host_environment())
+    pub fn capture(policy: Option<&CheckPolicy>) -> Result<Self, String> {
+        Self::from_host(&host_environment(), policy)
     }
 
-    /// `host` may include host-selected toolchain/cache locator overrides.
-    /// Those overrides pass through the default policy too, never around it.
-    pub fn from_host(host: &BTreeMap<String, String>) -> Result<Self, String> {
+    /// The policy is operator-owned, never taken from verifier/task text.
+    /// `None` means the operator configured no policy.
+    pub fn from_host(
+        host: &BTreeMap<String, String>,
+        policy: Option<&CheckPolicy>,
+    ) -> Result<Self, String> {
         let site: Vec<(&str, &Path)> = lookup(host, "HOME")
             .map(|(_, home)| ("HOME", Path::new(home)))
             .into_iter()
             .collect();
-        let variables = check_environment(host, &CheckPolicy::default_for(host), &site)
+        let default;
+        let policy = match policy {
+            Some(policy) => policy,
+            None => {
+                default = CheckPolicy::default_for(host);
+                &default
+            }
+        };
+        let variables = check_environment(host, policy, &site)
             .map_err(|reason| format!("check command environment could not be built: {reason}"))?;
         Ok(Self {
             withheld: withheld(host, &variables),
+            remedy: "Supply the needed names in the operator-owned CheckPolicy.forwarded passed to this verifier",
             variables,
         })
+    }
+
+    /// Describe the actual operator policy source this runner consumes.
+    pub fn with_remedy(mut self, remedy: &'static str) -> Self {
+        self.remedy = remedy;
+        self
     }
 
     /// Every child still passes through the process-wide spawn boundary.
@@ -380,9 +427,15 @@ impl CommandEnvironment {
     /// Call only for a failed verifier: a bare mention or a name the data
     /// allowlist cannot forward never converts a failure to an environment error.
     pub fn failure(&self, outputs: &[&[u8]]) -> Option<String> {
-        withheld_error(outputs, &self.withheld)
+        withheld::withheld_error_with_remedy(outputs, &self.withheld, self.remedy)
     }
 }
+
+#[path = "acceptance_check_environment_policy.rs"]
+mod policy;
+pub use policy::{
+    NO_RUN_POLICY_REMEDY, RUN_POLICY_REMEDY, policy_for_run, validate_operator_bindings,
+};
 
 #[path = "acceptance_check_environment_withheld.rs"]
 mod withheld;

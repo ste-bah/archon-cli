@@ -49,6 +49,9 @@ use archon_workflow::v2::plan_metadata::{
 
 #[derive(Debug, Clone)]
 pub(crate) struct WorkflowScriptPlan {
+    /// Host-owned launch binding; the inner None records no configured policy.
+    pub(crate) check_policy:
+        Option<Option<archon_workflow::acceptance_check_environment::CheckPolicy>>,
     pub(super) name: String,
     pub(super) task: String,
     pub(super) target_repository_root: Option<String>,
@@ -112,6 +115,7 @@ impl WorkflowScriptPlan {
         let repository = resolve_target_repository(task, task_universe.as_ref())?;
         let learning_hooks = derive_learning_hooks(task, task_universe.as_ref(), learning);
         Ok(Self {
+            check_policy: None,
             name: workflow_name_from_task(task),
             task: task.to_string(),
             target_repository_root: repository.target_repository_root,
@@ -136,6 +140,7 @@ impl WorkflowScriptPlan {
         calls: Vec<WorkflowV2HostCall>,
     ) -> Self {
         Self {
+            check_policy: None,
             name: spec.name,
             task: spec.task,
             target_repository_root: spec.target_repository_root,

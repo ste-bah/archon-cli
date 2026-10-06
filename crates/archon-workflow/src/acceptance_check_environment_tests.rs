@@ -338,3 +338,68 @@ fn windows_profile_variables_point_at_the_site_home() {
     assert_eq!(bindings["HOMEDRIVE"], PathBuf::from("D:"));
     assert_eq!(bindings["HOMEPATH"], PathBuf::from(r"\scratch\home"));
 }
+
+macro_rules! ordinary_output_case {
+    ($test:ident, $message:literal) => {
+        #[test]
+        fn $test() {
+            let withheld = BTreeSet::from(["FIXTURE_API_KEY".into()]);
+            assert_eq!(
+                withheld_error(&[$message.as_bytes()], &withheld),
+                None,
+                "{}",
+                $message
+            );
+            assert!(
+                withheld_error(
+                    &[b"FIXTURE_API_KEY environment variable is not set"],
+                    &withheld
+                )
+                .is_some()
+            );
+            for ordinary in [
+                "we set FIXTURE_API_KEY successfully",
+                "we export FIXTURE_API_KEY",
+                "we provide FIXTURE_API_KEY",
+                "expected 'FIXTURE_API_KEY is not set' in stderr",
+                "expected 'FIXTURE_API_KEY not found' in stderr",
+                "expected '{ FIXTURE_API_KEY: [Required] }' in stderr",
+                "expected '\nFIXTURE_API_KEY\n  Field required [type=missing]\n' in stderr",
+            ] {
+                assert_eq!(
+                    withheld_error(&[ordinary.as_bytes()], &withheld),
+                    None,
+                    "{ordinary}"
+                );
+            }
+        }
+    };
+}
+ordinary_output_case!(
+    review349_optional_mention,
+    "FIXTURE_API_KEY environment variable is optional"
+);
+ordinary_output_case!(
+    review349_affirmative_mention,
+    "environment variable FIXTURE_API_KEY is set"
+);
+ordinary_output_case!(
+    review349_quoted_suffix,
+    "expected 'FIXTURE_API_KEY environment variable is not set' in stderr"
+);
+ordinary_output_case!(
+    review349_quoted_prefix,
+    "expected \"environment variable FIXTURE_API_KEY is missing\" in stderr"
+);
+ordinary_output_case!(
+    review349_quoted_instruction,
+    "expected `Set the FIXTURE_API_KEY environment variable` in stderr"
+);
+ordinary_output_case!(
+    review349_quoted_keyerror,
+    "expected \"KeyError: 'FIXTURE_API_KEY'\" in stderr"
+);
+ordinary_output_case!(
+    review349_quoted_missing,
+    "expected 'missing FIXTURE_API_KEY' in stderr"
+);
