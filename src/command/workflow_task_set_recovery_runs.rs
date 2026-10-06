@@ -12,7 +12,8 @@ pub(super) fn store(pin: &Path) -> Result<WorkflowStore> {
 /// Use the surviving, archived contract rather than directory ordering to
 /// select a no-prior-pin template. Older receipts can use their captured
 /// skeleton or a surviving launch preimage instead. Select only before
-/// completion; verification must use the source the completion recorded.
+/// completion. Verification authenticates the recorded source with
+/// `completed_anchor`, rather than reselecting from surviving preimages.
 pub(super) fn anchor(
     record: &Recovery,
     pin: &Path,
@@ -38,10 +39,14 @@ pub(super) fn anchor(
             let Some(bytes) = history.get(digest)? else {
                 continue;
             };
-            if let Some(skeleton) = &record.skeleton
-                && serde_json::from_slice::<TaskSkeleton>(&bytes)? != *skeleton
-            {
-                continue;
+            if let Some(skeleton) = &record.skeleton {
+                let mut candidate: TaskSkeleton = serde_json::from_slice(&bytes)?;
+                // Recovery re-binds only the contract digest; task fields must
+                // match the authenticated skeleton captured by recovery.
+                candidate.acceptance_digest = skeleton.acceptance_digest.clone();
+                if candidate != *skeleton {
+                    continue;
+                }
             }
         } else if record.skeleton.is_some() {
             continue;

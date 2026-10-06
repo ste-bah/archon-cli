@@ -172,3 +172,6 @@ async fn round8_fixed_script_failure_leaves_durable_failed_status() {
 // Issue 303: mounted here; the run module is at its 500-line ceiling.
 #[path = "workflow_live_v2_started_record_tests.rs"]
 mod started_record_tests;
+
+#[path = "workflow_live_v2_issue304_tests.rs"]
+mod issue304_tests;

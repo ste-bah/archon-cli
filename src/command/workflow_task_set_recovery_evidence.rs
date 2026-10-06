@@ -99,6 +99,24 @@ pub(super) fn capture(pin: &Path, tasks: &Path, record: &mut Recovery) -> Result
             } else {
                 record.skeleton = serde_json::from_slice(&bytes).ok();
             }
+        } else if name == TASK_SKELETON_FILE {
+            // A changed serialization has no named digest. Authenticate its
+            // entire shape against launch preimages before choosing a source;
+            // directory ordering cannot select an incompatible older skeleton.
+            let live = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+            for anchor in &anchors {
+                let Some(digest) = &anchor.skeleton_digest else {
+                    continue;
+                };
+                let Some(preimage) = history.get(digest)? else {
+                    continue;
+                };
+                let archived: serde_json::Value = serde_json::from_slice(&preimage)?;
+                if live.as_ref() == Some(&archived) {
+                    record.skeleton = Some(serde_json::from_slice(&preimage)?);
+                    break;
+                }
+            }
         }
     }
     Ok(())
@@ -128,7 +146,14 @@ pub(super) fn validate(record: &Recovery, pin: &Path, tasks: &Path) -> Result<()
     let mut anchor = record.clone();
     anchor.completed = None;
     let expected = serde_json::to_value(&anchor)?;
-    let log = std::fs::read_to_string(pin.with_extension("publish-recovery.log"))?;
+    let log_path = pin.with_extension("publish-recovery.log");
+    let log = std::fs::read_to_string(&log_path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            missing(&log_path)
+        } else {
+            anyhow!("reading recovery evidence {}: {error}", log_path.display())
+        }
+    })?;
     let logged = log
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
@@ -237,4 +262,81 @@ pub(crate) fn refreeze_base(
         return Ok(None);
     };
     Ok(Some(serde_json::from_slice(&bytes)?))
+}
+
+/// A named refusal keeps evidence loss actionable while still failing closed.
+pub(super) fn missing(path: &Path) -> anyhow::Error {
+    anyhow!(
+        "recovery evidence file {} is missing; restore the recovery evidence from backup, or re-freeze the task set and start a new run",
+        path.display()
+    )
+}
+
+/// The anchor authenticates archived skeleton bytes even when the interrupted
+/// publish changed or removed the live copy. Never invent a skeleton-less hop.
+pub(super) fn bound_skeleton(
+    record: &Recovery,
+    anchor: &PortableAcceptanceIdentityV1,
+    pin: &Path,
+    tasks: &Path,
+) -> Result<Option<TaskSkeleton>> {
+    let Some(digest) = &anchor.skeleton_digest else {
+        return Ok(None);
+    };
+    let bytes = ChainHistory::for_pin(pin).get(digest)?
+        .ok_or_else(|| anyhow!("launch-bound recovery skeleton {digest} is missing; restore its archived preimage or re-freeze and start a new run"))?;
+    let skeleton: TaskSkeleton = serde_json::from_slice(&bytes)?;
+    if skeleton.acceptance_digest != anchor.acceptance_digest {
+        return Err(anyhow!(
+            "chain check skeleton_changed failed: archived skeleton does not bind its launch contract"
+        ));
+    }
+    let live_path = tasks.join(TASK_SKELETON_FILE);
+    let live = match std::fs::read(&live_path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("reading recovery skeleton {}", live_path.display()));
+        }
+    };
+    if let Some(live) = live {
+        let digest = content_digest(&live);
+        let authorized = record
+            .prior
+            .iter()
+            .map(AcceptancePin::identity)
+            .chain(record.runs.values().cloned())
+            .any(|launch| launch.skeleton_digest.as_ref() == Some(&digest));
+        if !authorized {
+            let mut live: serde_json::Value = serde_json::from_slice(&live)
+                .context("chain check skeleton_changed failed: invalid live recovery skeleton")?;
+            let expected: serde_json::Value = serde_json::from_slice(&bytes)?;
+            let binding = live.get_mut("acceptance_digest").ok_or_else(|| {
+                anyhow!(
+                    "chain check skeleton_changed failed: live skeleton has no contract binding"
+                )
+            })?;
+            let bound_contract = binding.as_str().is_some_and(|digest| {
+                record
+                    .prior
+                    .iter()
+                    .map(AcceptancePin::identity)
+                    .chain(record.runs.values().cloned())
+                    .any(|launch| launch.acceptance_digest == digest)
+            });
+            if !bound_contract {
+                return Err(anyhow!(
+                    "chain check skeleton_changed failed: live skeleton contract binding is not authenticated by a captured launch"
+                ));
+            }
+            *binding = expected["acceptance_digest"].clone();
+            if live != expected {
+                return Err(anyhow!(
+                    "chain check skeleton_changed failed: live skeleton changes are not bound by a captured launch"
+                ));
+            }
+        }
+    }
+    Ok(Some(skeleton))
 }

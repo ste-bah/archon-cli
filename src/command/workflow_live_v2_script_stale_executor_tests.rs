@@ -260,3 +260,56 @@ async fn a_stale_executor_saves_no_interruption_record() {
     assert_stale(&saved);
     assert_eq!(snapshot(&fixture.store, &fixture.run_id), fixture.before);
 }
+
+#[tokio::test]
+async fn issue291_lifecycle_marker_text_without_host_stop_is_failed() {
+    for error in [
+        WorkflowError::StageFailed(TERMINAL_HOST_CALL_MARKER.into()),
+        WorkflowError::SpecInvalid(format!("provider echoed {TERMINAL_HOST_CALL_MARKER}")),
+        WorkflowError::TerminalHostCall("unrecorded typed stop".into()),
+    ] {
+        let (_temp, store, run_id) = new_run();
+        set_status(&store, &run_id, RunStatus::Running);
+        let (mut runner, _rx) = runner(&store, &run_id, Arc::new(PanicLlm), None, None);
+        runner.initialize_repository_audit().await.unwrap();
+        let host = host_of(runner);
+        let summary = host.finish_lifecycle(Err(error)).await.unwrap();
+        assert_eq!(summary.status, WorkflowV2Status::Failed);
+        assert_eq!(summary.failed_call.as_deref(), Some("workflow.js"));
+    }
+}
+
+#[tokio::test]
+async fn issue291_lifecycle_recorded_host_stop_survives_unrelated_error_text() {
+    let (_temp, store, run_id) = new_run();
+    set_status(&store, &run_id, RunStatus::Running);
+    let (mut runner, _rx) = runner(&store, &run_id, Arc::new(PanicLlm), None, None);
+    runner.initialize_repository_audit().await.unwrap();
+    let host = host_of(runner);
+    let mut stop = record(&run_id, "gate");
+    stop.status = WorkflowV2Status::NeedsReview;
+    stop.result.status = WorkflowV2Status::NeedsReview;
+    host.mark_terminal(&stop, "gate/result.json".into(), "review".into())
+        .await;
+    let summary = host
+        .finish_lifecycle(Err(WorkflowError::StageFailed(
+            "unrelated driver error".into(),
+        )))
+        .await
+        .unwrap();
+    assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(summary.failed_call.as_deref(), Some("gate"));
+}
+
+#[tokio::test]
+async fn issue291_stale_lifecycle_cannot_decide_terminal_status() {
+    let fixture = stale_host(Arc::new(PanicLlm));
+    for outcome in [
+        Err(WorkflowError::StageFailed("failure".into())),
+        Err(WorkflowError::StageFailed(TERMINAL_HOST_CALL_MARKER.into())),
+        Ok(()),
+    ] {
+        assert_stale(&fixture.host.finish_lifecycle(outcome).await);
+    }
+    assert_eq!(snapshot(&fixture.store, &fixture.run_id), fixture.before);
+}

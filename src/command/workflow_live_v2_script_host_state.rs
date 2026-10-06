@@ -391,31 +391,6 @@ impl WorkflowScriptHost {
     ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
         Ok(v2_result_for_call_error(call_id, &error))
     }
-
-    pub(super) async fn mark_terminal(
-        &self,
-        record: &WorkflowV2CallRecord,
-        result_path: String,
-        next_action: String,
-    ) {
-        let mut acc = self.accumulator.lock().await;
-        if acc.terminal_locked() {
-            return;
-        }
-        acc.terminal_host_stop = true;
-        if record.call.method == WorkflowV2HostMethod::FinalReport {
-            acc.status = record.status;
-        } else {
-            acc.status = merge_v2_status(
-                acc.status,
-                run_terminal_status_contribution(record, record.status),
-            );
-        }
-        acc.failed_call = Some(record.call.id.clone());
-        acc.failed_result_path = Some(result_path);
-        acc.next_action = Some(next_action);
-    }
-
     pub(crate) async fn mark_script_failure(&self, error: &str) -> WorkflowV2ScriptSummary {
         let next_action =
             "fix the workflow.js/runtime error, then resume or start a fresh workflow".to_string();

@@ -92,3 +92,34 @@ impl WorkflowScriptAccumulator {
                 .is_some_and(|refusal| refusal.called_again)
     }
 }
+
+impl WorkflowScriptHost {
+    pub(super) async fn mark_terminal(
+        &self,
+        record: &WorkflowV2CallRecord,
+        result_path: String,
+        next_action: String,
+    ) {
+        let mut acc = self.accumulator.lock().await;
+        if acc.terminal_locked() {
+            return;
+        }
+        acc.terminal_host_stop = true;
+        if record.call.method == WorkflowV2HostMethod::FinalReport {
+            acc.status = record.status;
+        } else {
+            acc.status = merge_v2_status(
+                acc.status,
+                run_terminal_status_contribution(record, record.status),
+            );
+        }
+        acc.failed_call = Some(record.call.id.clone());
+        acc.failed_result_path = Some(result_path);
+        acc.next_action = Some(next_action);
+        drop(acc);
+        #[cfg(test)]
+        super::super::workflow_live_v2_run::terminal_test_support::stop(
+            self.runner.workflow_store.run_dir(&self.runner.run_id),
+        );
+    }
+}

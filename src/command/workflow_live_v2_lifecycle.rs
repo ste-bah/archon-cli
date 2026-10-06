@@ -120,10 +120,20 @@ impl WorkflowV2ScriptRunner {
         } else {
             driver.run().await
         };
+        host.finish_lifecycle(outcome).await
+    }
+}
+
+impl WorkflowScriptHost {
+    pub(super) async fn finish_lifecycle(
+        &self,
+        outcome: archon_workflow::WorkflowResult<()>,
+    ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+        self.owned_generation()?;
         match outcome {
             Ok(()) => {
-                host.runner
-                    .finalize_repository_audit(host.summary().await)
+                self.runner
+                    .finalize_repository_audit(self.summary().await)
                     .await
             }
             Err(err) => {
@@ -134,13 +144,13 @@ impl WorkflowV2ScriptRunner {
                     return Err(err);
                 }
                 let error = err.to_string();
-                if error.contains(TERMINAL_HOST_CALL_MARKER) {
-                    return host
+                if self.accumulator.lock().await.terminal_host_stop {
+                    return self
                         .runner
-                        .finalize_repository_audit(host.summary().await)
+                        .finalize_repository_audit(self.summary().await)
                         .await;
                 }
-                let summary = host.mark_script_failure(&error).await;
+                let summary = self.mark_script_failure(&error).await;
                 Ok(summary)
             }
         }

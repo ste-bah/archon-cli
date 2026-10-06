@@ -18,8 +18,8 @@ use super::lock::UnsettledPublish;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RecoveryOutcome {
-    /// The interrupted publish never reached its commit point: the complete
-    /// old set is live again.
+    /// Rollback restored the journal's old set or the legacy targets its
+    /// transaction-local evidence authorizes, preserving later publications.
     RolledBack,
     /// Legacy staging never reached the rename phase; live files are intact.
     Discarded,
@@ -27,6 +27,8 @@ pub(crate) enum RecoveryOutcome {
     VerificationPending,
     /// The publish had passed its commit point: the complete new set is live.
     RolledForward,
+    /// No transaction-bound written bytes survive: preserve existing targets.
+    Preserved,
     /// Legacy debris left a chain that does not verify: its locks and pin
     /// were moved aside so the workflow re-freezes the set.
     Unfrozen,
@@ -39,6 +41,7 @@ impl RecoveryOutcome {
             Self::Discarded => "discarded incomplete legacy staging",
             Self::VerificationPending => "legacy rollback debris consumed; verification pending",
             Self::RolledForward => "rolled forward",
+            Self::Preserved => "preserved live targets; unbound legacy backups discarded",
             Self::Unfrozen => "unfrozen for re-freeze",
         }
     }
@@ -250,6 +253,29 @@ pub(super) fn record_with_authority(
     event: &RecoveryEvent,
     authority: Option<serde_json::Value>,
 ) -> Result<()> {
+    record_details(paths, event, authority, None)
+}
+
+/// The recovery decision's file evidence survives removal of its marker.
+pub(super) fn record_legacy_decision(
+    paths: &JournalPaths,
+    event: &RecoveryEvent,
+    evidence: Option<&std::collections::BTreeMap<PathBuf, Option<String>>>,
+) -> Result<()> {
+    record_details(
+        paths,
+        event,
+        None,
+        evidence.map(serde_json::to_value).transpose()?,
+    )
+}
+
+fn record_details(
+    paths: &JournalPaths,
+    event: &RecoveryEvent,
+    authority: Option<serde_json::Value>,
+    file_evidence: Option<serde_json::Value>,
+) -> Result<()> {
     super::journal::crash_point("before-recovery-log");
     let files = event
         .files
@@ -272,6 +298,7 @@ pub(super) fn record_with_authority(
         "files": files,
         "detail": event.detail,
         "authority": authority,
+        "file_evidence": file_evidence,
     });
     // A delimiter also keeps a retry's event readable after a torn append.
     super::scope::validate_destination(

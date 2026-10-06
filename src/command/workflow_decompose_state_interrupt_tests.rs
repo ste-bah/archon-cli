@@ -365,5 +365,61 @@ fn successful_body_resume(recover_projection: bool) {
         project(&store, &run_id, &landed, FixedCallProjectionKind::Executed);
         let rendered = status(&store, &run_id);
         assert!(rendered.contains("land-task-body=failed"), "{rendered}");
+        assert_eq!(
+            state(&store, &run_id).dispositions.get("land-task-body"),
+            Some(&SubjectDisposition::Failed),
+            "durable projection retains another call's failure"
+        );
+    }
+}
+
+#[test]
+fn issue291_projection_keeps_other_landings_failure_on_execution_reuse_and_interrupt() {
+    for kind in [
+        FixedCallProjectionKind::Executed,
+        FixedCallProjectionKind::Reused,
+        FixedCallProjectionKind::Interrupted,
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let (store, run_id) = fixed_run(&temp, RunStatus::Running);
+        let mut failed = host_record(&run_id);
+        failed.call.id = "failed-unbound-landing".into();
+        failed.call.options.host_command =
+            Some(HostCommandRequest::new("land-task-body", Some("candidate-a".into())).unwrap());
+        failed.status = WorkflowV2Status::Failed;
+        failed.result.status = WorkflowV2Status::Failed;
+        failed.result.data = serde_json::Value::Null;
+        save(&store, &run_id, &failed);
+        project(&store, &run_id, &failed, FixedCallProjectionKind::Executed);
+        let mut other = host_record(&run_id);
+        other.call.id = "different-landing".into();
+        other.call.options.host_command =
+            Some(HostCommandRequest::new("land-task-body", Some("candidate-b".into())).unwrap());
+        other.result.data["subjects"] =
+            serde_json::json!([{ "taskId": "TASK-X-010", "fileName": "TASK-X-010.md" }]);
+        if kind == FixedCallProjectionKind::Interrupted {
+            other.status = WorkflowV2Status::NeedsReview;
+            other.result.status = WorkflowV2Status::NeedsReview;
+            other.result.data = serde_json::json!({"interrupted":"paused"});
+        }
+        save(&store, &run_id, &other);
+        project(&store, &run_id, &other, kind);
+        assert_eq!(
+            state(&store, &run_id).dispositions.get("land-task-body"),
+            Some(&SubjectDisposition::Failed),
+            "{kind:?}"
+        );
+        // Only a replacement of the failed call itself clears that failure.
+        failed.status = WorkflowV2Status::Accepted;
+        failed.result = host_record(&run_id).result;
+        failed.result.data["subjects"] =
+            serde_json::json!([{ "taskId": "TASK-X-011", "fileName": "TASK-X-011.md" }]);
+        save(&store, &run_id, &failed);
+        project(&store, &run_id, &failed, FixedCallProjectionKind::Executed);
+        assert!(
+            !state(&store, &run_id)
+                .dispositions
+                .contains_key("land-task-body")
+        );
     }
 }

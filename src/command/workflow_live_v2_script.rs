@@ -31,7 +31,8 @@ use archon_workflow::v2::source_graph::{
     complete_source_task_graph, dynamic_wave_source_metadata, input_hash_with_source_fingerprint,
 };
 
-// The native lifecycle still consumes the port marker through this module.
+// Only tests exercise forged marker text; production uses host evidence.
+#[cfg(test)]
 use archon_workflow::TERMINAL_HOST_CALL_MARKER;
 
 #[derive(Debug, Clone)]

@@ -241,7 +241,8 @@ impl PreparedAcceptanceFreeze {
             return Ok(());
         };
         let mut files = Vec::new();
-        if let Some(skeleton) = &record.skeleton {
+        let skeleton = evidence::bound_skeleton(record, &from, &pin_path, &self.tasks_root)?;
+        if let Some(skeleton) = &skeleton {
             let mut skeleton = skeleton.clone();
             skeleton.acceptance_digest = self.pin.acceptance_digest.clone();
             let bytes = serde_json::to_vec_pretty(&skeleton)?;
@@ -330,7 +331,14 @@ pub(crate) fn verify(
     {
         return Ok(None);
     }
-    let (records, _) = read(pin_path)?;
+    let (records, receipt_digest) = read(pin_path)?;
+    if receipt_digest.is_none() {
+        return Err(anyhow!(
+            "{}; recovery also requires the durable unfreeze log {}",
+            evidence::missing(&path(pin_path)),
+            pin_path.with_extension("publish-recovery.log").display()
+        ));
+    }
     let root = tasks.canonicalize().map(archon_shell::paths::plain)?;
     for record in records.iter().rev() {
         let Some(done) = &record.completed else {
