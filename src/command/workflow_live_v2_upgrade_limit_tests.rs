@@ -1,11 +1,13 @@
-//! Issue 358 round 2: limits are not in a host command's reuse key, but an
-//! outcome a limit cut short is never replayed across a limit change; a
-//! catalog schema this build cannot read names no key at all.
+//! Issue 358: limits are not in a host command's reuse key, but an outcome a
+//! limit cut short replays only under the limits it ran under (its own stamp);
+//! a catalog schema this build cannot read names no key at all.
 use super::*;
 
-/// A cut-short freeze replays while its limits hold, and runs again once an
-/// upgrade changed them; the landed freeze after it is reused throughout.
-async fn cut_short_freeze(stdin: &str, change: &str) {
+/// A cut-short freeze, first run by the launch build (`ran_under` "launch")
+/// or by an upgrade, then resumed by each of `phases` (an upgrade, and how
+/// many calls it must run): it replays while the limits it ran under hold
+/// and runs again once they change. The landed freeze after it is reused.
+async fn cut_short_freeze(stdin: &str, ran_under: &str, phases: &[(&str, usize)]) {
     let temp = tempfile::tempdir().unwrap();
     let spec = test_spec();
     let store = WorkflowStore::new(temp.path().join("workflows"));
@@ -63,11 +65,13 @@ async fn cut_short_freeze(stdin: &str, change: &str) {
         await w.hostCommand("freeze-skeleton", {{stdin: "fast"}});
     }}"#
     );
-    assert_eq!(
-        runner(first.clone()).run(&script).await.unwrap().executed,
-        2
-    );
-    for (change, rerun) in [("none", 0), (change, 1)] {
+    let ran = if ran_under == "launch" {
+        first
+    } else {
+        upgraded(ran_under)
+    };
+    assert_eq!(runner(ran).run(&script).await.unwrap().executed, 2);
+    for &(change, rerun) in phases {
         let second = upgraded(change);
         let summary = runner(second.clone()).run(&script).await.unwrap();
         assert_eq!(summary.executed, rerun, "{stdin}/{change}");
@@ -78,15 +82,27 @@ async fn cut_short_freeze(stdin: &str, change: &str) {
 
 #[tokio::test]
 async fn upgrade_358_timed_out_freeze_reruns_after_a_timeout_change() {
-    cut_short_freeze("slow", "timeout").await;
+    cut_short_freeze("slow", "launch", &[("none", 0), ("timeout", 1)]).await;
 }
 #[tokio::test]
 async fn upgrade_358_truncated_freeze_reruns_after_an_output_limit_change() {
-    cut_short_freeze("loud", "stdout_limit").await;
+    cut_short_freeze("loud", "launch", &[("none", 0), ("stdout_limit", 1)]).await;
 }
 #[tokio::test]
 async fn upgrade_358_timed_out_freeze_reruns_after_a_limit_schema_bump() {
-    cut_short_freeze("slow", "schema").await;
+    cut_short_freeze("slow", "launch", &[("none", 0), ("schema", 1)]).await;
+}
+
+/// N1: cut short under the upgrade's own limits and superseded, then
+/// resumed again on that build: history, replayed. A later limit change runs
+/// it again; the stamp, not the launch catalog, says what cut it short.
+#[tokio::test]
+async fn upgrade_358_cut_short_under_the_upgrade_replays_under_it() {
+    cut_short_freeze("slow", "timeout", &[("timeout", 0), ("timeout_again", 1)]).await;
+}
+#[tokio::test]
+async fn upgrade_358_cut_short_under_a_schema_bump_replays_under_it() {
+    cut_short_freeze("loud", "schema", &[("schema", 0), ("none", 1)]).await;
 }
 
 fn host_record(command: &str, data: serde_json::Value) -> WorkflowV2CallRecord {
@@ -142,6 +158,33 @@ fn upgrade_358_limits_hold_only_for_outcomes_no_limit_cut_short() {
             .outcome_limits_hold(&host_record("verify-frozen-acceptance", stopped.clone()))
             .unwrap()
     );
+    // A stamped record is judged by its own stamp, not the launch limits.
+    let stamp = upgraded
+        .limits_fingerprint(
+            &archon_workflow::HostCommandRequest::new("freeze-skeleton", None).unwrap(),
+        )
+        .unwrap()
+        .expect("a declared capability has limits");
+    let mut stamped = stopped.clone();
+    stamped["limitsFingerprint"] = stamp.clone();
+    assert!(
+        upgraded
+            .outcome_limits_hold(&host_record("freeze-skeleton", stamped.clone()))
+            .unwrap()
+    );
+    let mut launch_stamped = stopped.clone();
+    launch_stamped["limitsFingerprint"] =
+        FixedHostCommandExecutor::new(launch.clone(), context.clone(), temp.path().join("run"))
+            .limits_fingerprint(
+                &archon_workflow::HostCommandRequest::new("freeze-skeleton", None).unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+    assert!(
+        !upgraded
+            .outcome_limits_hold(&host_record("freeze-skeleton", launch_stamped))
+            .unwrap()
+    );
     // A command this build no longer declares has no limits to hold.
     let mut removed = launch.clone();
     removed.capabilities.remove("freeze-skeleton");
@@ -184,4 +227,28 @@ fn upgrade_358_unreadable_launch_catalog_schema_names_no_key() {
             ),
         }
     }
+}
+
+/// N3: a catalog schema bump cannot pass until someone decides what the new
+/// schema means for reuse and lists it.
+#[test]
+fn upgrade_358_every_built_catalog_schema_is_known() {
+    use crate::command::workflow_host_command_exec::identity::{
+        KNOWN_CATALOG_SCHEMAS, catalog_schema_readable,
+    };
+    let current = crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("any")
+        .unwrap()
+        .schema_version;
+    for schema in 1..=current {
+        assert!(
+            KNOWN_CATALOG_SCHEMAS
+                .iter()
+                .any(|(known, _)| *known == schema),
+            "catalog schema {schema} is built but not in KNOWN_CATALOG_SCHEMAS: decide its reuse meaning"
+        );
+        assert!(catalog_schema_readable(schema, current));
+    }
+    // Unknown, and newer than this build: refused.
+    assert!(!catalog_schema_readable(0, current));
+    assert!(!catalog_schema_readable(current + 1, current));
 }

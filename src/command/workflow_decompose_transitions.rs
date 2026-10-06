@@ -47,6 +47,11 @@ pub(crate) struct RuntimeTransition {
     /// The seq of the visible event, once it is written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) event_id: Option<u64>,
+    /// When an executor on this runtime first started, after every resume
+    /// check passed. Absent, the runtime was admitted and never executed: a
+    /// later check (provider, read scope, task root) refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) started_at: Option<String>,
 }
 
 /// Same script, catalog, template and binary revision. Root identity is
@@ -74,6 +79,7 @@ impl RuntimeTransition {
             old,
             new,
             event_id: None,
+            started_at: None,
         }
     }
 
@@ -133,12 +139,15 @@ pub(crate) fn status_lines(store: &WorkflowStore, run_id: &str) -> String {
     match serde_json::from_slice::<RuntimeTransitions>(&raw) {
         Ok(record) => match record.transitions.last() {
             Some(last) => format!(
-                "runtime_transitions: {}\ncurrent_runtime: template_version={} binary_revision={} script_digest={} catalog_digest={}\n",
+                "runtime_transitions: {}\nlast_runtime: template_version={} binary_revision={} script_digest={} catalog_digest={} started={}\n",
                 record.transitions.len(),
                 last.new.template_version,
                 last.new.starting_binary_revision,
                 last.new.script_digest,
                 last.new.catalog_digest,
+                last.started_at
+                    .as_deref()
+                    .unwrap_or("never (admitted, not executed)"),
             ),
             None => String::new(),
         },

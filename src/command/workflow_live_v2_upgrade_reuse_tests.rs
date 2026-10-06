@@ -108,6 +108,12 @@ impl WorkflowHostCommandExecutor for CatalogHost {
     ) -> archon_workflow::WorkflowResult<bool> {
         self.keys.outcome_limits_hold(record)
     }
+    fn limits_fingerprint(
+        &self,
+        request: &archon_workflow::HostCommandRequest,
+    ) -> archon_workflow::WorkflowResult<Option<serde_json::Value>> {
+        self.keys.limits_fingerprint(request)
+    }
     async fn execute(
         &self,
         request: archon_workflow::HostCommandRequest,
@@ -152,6 +158,7 @@ fn changed(
     match change {
         "none" => {}
         "timeout" => capability.timeout_secs += 600,
+        "timeout_again" => capability.timeout_secs += 1200,
         "stdout_limit" => capability.max_stdout_bytes += 1,
         "schema" => {
             catalog.schema_version += 1;

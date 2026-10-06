@@ -3,6 +3,34 @@
 use super::*;
 
 impl WorkflowScriptHost {
+    /// Issue 358: `data` with the limits the host command `call` ran under,
+    /// so a resume replays an outcome a limit cut short only under the same
+    /// limits. Other calls, and executors that apply no limits, are unchanged.
+    pub(super) fn stamp_host_limits(
+        &self,
+        call: &archon_workflow::WorkflowV2HostCall,
+        mut data: serde_json::Value,
+    ) -> archon_workflow::WorkflowResult<serde_json::Value> {
+        if call.method != WorkflowV2HostMethod::HostCommand {
+            return Ok(data);
+        }
+        let (Some(executor), Some(request)) = (
+            self.runner.host_command_executor.as_ref(),
+            call.options.host_command.as_ref(),
+        ) else {
+            return Ok(data);
+        };
+        if let (Some(stamp), Some(map)) =
+            (executor.limits_fingerprint(request)?, data.as_object_mut())
+        {
+            map.insert(
+                crate::command::workflow_host_command_exec::identity::LIMITS_FINGERPRINT.into(),
+                stamp,
+            );
+        }
+        Ok(data)
+    }
+
     pub(super) async fn execute_host_command(
         &self,
         execution: &WorkflowV2CallExecution,
@@ -41,7 +69,7 @@ impl WorkflowScriptHost {
                 "host command '{}' completed with exit {:?}",
                 execution.call.id, outcome.exit_code
             ),
-            data: serde_json::to_value(&outcome)?,
+            data: self.stamp_host_limits(&execution.call, serde_json::to_value(&outcome)?)?,
             ..WorkflowV2Result::default()
         };
         result.evidence.push(WorkflowV2Evidence::new(

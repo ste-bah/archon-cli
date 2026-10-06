@@ -125,26 +125,27 @@ fn validate_call_directory(
 /// record (`workflow_decompose_transitions`), never from the event log, so a
 /// rollback is a transition too and a torn event line blocks nothing. A run
 /// without the record reads its launch identity as the last runtime. Launch
-/// identity and bundle are never replaced. Returns the transition this call
-/// recorded, if any.
+/// identity and bundle are never replaced. A transition is recorded once every
+/// launch-bound input has been verified; it is marked started only when an
+/// executor takes the run ([`mark_started`]). Returns the transitions whose
+/// event this call wrote, for the operator.
 pub(super) fn record_upgrade(
     store: &WorkflowStore,
     run_id: &str,
     log_path: &Path,
     launch: &FixedRunIdentityV1,
     current: &FixedRunIdentityV1,
-) -> Result<Option<RuntimeTransition>> {
+) -> Result<Vec<RuntimeTransition>> {
     let mut record = read_transitions(store, run_id)?.unwrap_or_default();
     let previous = record
         .transitions
         .last()
         .map_or_else(|| launch.clone(), |last| last.new.clone());
-    let changed = !transitions::same_runtime(&previous, current);
-    if changed {
+    if !transitions::same_runtime(&previous, current) {
         record
             .transitions
             .push(RuntimeTransition::new(previous, current.clone()));
-        store.write_run_json(run_id, transitions::TRANSITIONS_PATH, &record)?;
+        write_transitions(store, run_id, &record)?;
     }
     // The visible copies of every transition, each written once: normally
     // only the last one lacks any, after a crash cut its recording short.
@@ -153,16 +154,23 @@ pub(super) fn record_upgrade(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(error.into()),
     };
+    // A line torn by any writer must not swallow the next one.
+    let mut torn_tail = !log.is_empty() && !log.ends_with('\n');
+    let mut shown = Vec::new();
     for index in 0..record.transitions.len() {
         let seq = match record.transitions[index].event_id {
             Some(seq) => seq,
             None => {
-                let seq = match emitted_seq(store, run_id, &record.transitions[index], index)? {
+                let transition = &record.transitions[index];
+                let seq = match emitted_seq(store, run_id, transition, index)? {
                     Some(seq) => seq,
-                    None => emit_transition(store, run_id, &record.transitions[index], index)?,
+                    None => {
+                        shown.push(transition.clone());
+                        emit_transition(store, run_id, transition, index)?
+                    }
                 };
                 record.transitions[index].event_id = Some(seq);
-                store.write_run_json(run_id, transitions::TRANSITIONS_PATH, &record)?;
+                write_transitions(store, run_id, &record)?;
                 seq
             }
         };
@@ -172,15 +180,43 @@ pub(super) fn record_upgrade(
             .lines()
             .any(|line| line == key || line.starts_with(&format!("{key} ")))
         {
+            let line = transition.log_line(seq);
             crate::command::workflow_decompose_log::append_nofollow_line(
                 log_path,
-                &transition.log_line(seq),
+                &if torn_tail { format!("\n{line}") } else { line },
             )?;
+            torn_tail = false;
         }
     }
-    Ok(changed
-        .then(|| record.transitions.last().cloned())
-        .flatten())
+    Ok(shown)
+}
+
+/// Marks the last transition started: every resume check passed and this
+/// process is the run's executor.
+pub(super) fn mark_started(store: &WorkflowStore, run_id: &str) -> Result<()> {
+    let Some(mut record) = read_transitions(store, run_id)? else {
+        return Ok(());
+    };
+    match record.transitions.last_mut() {
+        Some(last) if last.started_at.is_none() => {
+            last.started_at = Some(chrono::Utc::now().to_rfc3339());
+            write_transitions(store, run_id, &record)
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The record, replaced atomically and durably: the rename is synced into
+/// its directory.
+fn write_transitions(
+    store: &WorkflowStore,
+    run_id: &str,
+    record: &RuntimeTransitions,
+) -> Result<()> {
+    store.write_run_json(run_id, transitions::TRANSITIONS_PATH, record)?;
+    crate::command::workflow_task_set::sync_parent(
+        &store.run_dir(run_id).join(transitions::TRANSITIONS_PATH),
+    )
 }
 
 /// The kind stays `BinaryRevisionDrift`, which every reader of the event log
@@ -258,6 +294,10 @@ fn emitted_seq(
         .find(|event| {
             event["detail"]["event"] == transition.label.as_str()
                 && event["detail"]["transition_index"] == serde_json::json!(index)
+                // The same transition, not another one at the same index
+                // whose record was lost: the runtime it moved to matches.
+                && serde_json::from_value::<FixedRunIdentityV1>(event["detail"]["new"].clone())
+                    .is_ok_and(|new| transitions::same_runtime(&new, &transition.new))
         })
         .and_then(|event| event["seq"].as_u64()))
 }

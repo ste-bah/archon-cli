@@ -6,30 +6,46 @@
 //! Limits (the timeout and the stdin, stdout and stderr bounds) decide only
 //! whether a call is cut short, so they are not in the key: a completed result
 //! that no limit cut short stays reusable across a limit change. A result that
-//! a limit did cut short is never replayed across one ([`outcome_limits_hold`]).
+//! a limit did cut short is replayed only under the limits it recorded
+//! ([`FixedHostCommandExecutor::outcome_limits_hold_for`]).
 use super::*;
 use archon_workflow::CommandCapability;
 
-/// Whether this build reads a catalog of `schema`. Every schema so far has the
-/// same layout; a schema that changes the layout must narrow this.
+/// Every catalog schema this build knows, with the schema whose meaning of
+/// the non-limit fields (argv, stdin, environment, writes, policy) it carries.
+/// A schema that only changes how limits are read keeps its predecessor's
+/// meaning, so completed results stay keyed as they were; one that changes any
+/// other meaning maps to a new value and re-keys the calls it touches. A
+/// schema bump without an entry here fails `upgrade_358_every_built_catalog_schema_is_known`.
+pub(crate) const KNOWN_CATALOG_SCHEMAS: &[(u32, u32)] = &[
+    (1, 1),
+    // Schema 2 reads host timeouts as renewable no-progress windows: limits only.
+    (2, 1),
+];
+
+/// Whether this build reads a catalog of `schema`: a known schema no newer
+/// than the build's own. Every known schema so far has the same layout.
 pub(crate) fn catalog_schema_readable(schema: u32, current: u32) -> bool {
-    (1..=current).contains(&schema)
+    schema <= current
+        && KNOWN_CATALOG_SCHEMAS
+            .iter()
+            .any(|(known, _)| *known == schema)
 }
 
-/// The schema whose meaning of the non-limit fields a catalog of `schema`
-/// has. Every readable schema so far gives argv, stdin, environment, writes
-/// and policy the same meaning (a schema bump so far changed only how limits
-/// are read), so all map to 1. A bump that changes any of those meanings must
-/// map its schemas to a new value here; that re-keys every call it touches.
 fn reuse_schema(schema: u32, current: u32) -> WorkflowResult<u32> {
-    if catalog_schema_readable(schema, current) {
-        Ok(1)
-    } else {
-        Err(WorkflowError::SpecInvalid(format!(
-            "host command catalog schema {schema} is not readable by this build, which reads schemas 1..={current}"
-        )))
-    }
+    KNOWN_CATALOG_SCHEMAS
+        .iter()
+        .find(|(known, _)| *known == schema && schema <= current)
+        .map(|(_, meaning)| *meaning)
+        .ok_or_else(|| {
+            WorkflowError::SpecInvalid(format!(
+                "host command catalog schema {schema} is not readable by this build, which reads the known schemas up to {current}"
+            ))
+        })
 }
+
+/// Where a host command's outcome records the limits it ran under.
+pub(crate) const LIMITS_FINGERPRINT: &str = "limitsFingerprint";
 
 /// What a capability does, without the limits that only cut it short.
 fn semantic(capability: &CommandCapability) -> CommandCapability {
@@ -129,13 +145,25 @@ impl FixedHostCommandExecutor {
         ))
     }
 
+    /// The limits a call of `request` runs under here, stamped into its
+    /// outcome ([`LIMITS_FINGERPRINT`]).
+    pub(super) fn limits_fingerprint_for(
+        &self,
+        request: &HostCommandRequest,
+    ) -> WorkflowResult<Option<serde_json::Value>> {
+        Ok(self
+            .catalog
+            .capabilities
+            .get(&request.command_id)
+            .map(|capability| serde_json::json!(limits(self.catalog.schema_version, capability))))
+    }
+
     /// Whether a recorded outcome may answer again under this build's limits.
     /// One that no limit cut short does not depend on them. One that a limit
-    /// cut short may answer only while the limits (and the schema that reads
-    /// them) are the launch's: a pre-upgrade binary ran only the launch
-    /// catalog, so that is what every such record was cut by. A record cut by
-    /// the limits of a later upgrade that has since been undone is judged by
-    /// the launch limits.
+    /// cut short may answer only under the limits it ran under: its own
+    /// stamp. An unstamped record was written before outcomes carried one, by
+    /// a binary that could run only the launch catalog, so the launch limits
+    /// are what cut it short.
     pub(super) fn outcome_limits_hold_for(
         &self,
         record: &WorkflowV2CallRecord,
@@ -145,23 +173,24 @@ impl FixedHostCommandExecutor {
         {
             return Ok(true);
         }
-        let Some(launch) = &self.launch_catalog else {
-            return Ok(true);
-        };
         let request = record.call.options.host_command.as_ref().ok_or_else(|| {
             WorkflowError::StateCorrupt("persisted HostCommand record has no typed request".into())
         })?;
-        Ok(
-            match (
-                self.catalog.capabilities.get(&request.command_id),
-                launch.capabilities.get(&request.command_id),
-            ) {
-                (Some(current), Some(launched)) => {
-                    limits(self.catalog.schema_version, current)
-                        == limits(launch.schema_version, launched)
+        let Some(current) = self.limits_fingerprint_for(request)? else {
+            return Ok(false);
+        };
+        Ok(match record.result.data.get(LIMITS_FINGERPRINT) {
+            Some(stamp) => *stamp == current,
+            None => match &self.launch_catalog {
+                None => true,
+                Some(launch) => {
+                    launch
+                        .capabilities
+                        .get(&request.command_id)
+                        .map(|launched| serde_json::json!(limits(launch.schema_version, launched)))
+                        == Some(current)
                 }
-                _ => false,
             },
-        )
+        })
     }
 }

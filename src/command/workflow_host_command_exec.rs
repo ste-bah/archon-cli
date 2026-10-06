@@ -54,6 +54,13 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn outcome_limits_hold(&self, _record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
         Ok(true)
     }
+    /// The limits a call of `request` runs under, stamped into its outcome.
+    fn limits_fingerprint(
+        &self,
+        _request: &HostCommandRequest,
+    ) -> WorkflowResult<Option<serde_json::Value>> {
+        Ok(None)
+    }
 
     async fn execute(
         &self,
@@ -248,6 +255,13 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
 
     fn outcome_limits_hold(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
         self.outcome_limits_hold_for(record)
+    }
+
+    fn limits_fingerprint(
+        &self,
+        request: &HostCommandRequest,
+    ) -> WorkflowResult<Option<serde_json::Value>> {
+        self.limits_fingerprint_for(request)
     }
 
     async fn execute(

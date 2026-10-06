@@ -327,14 +327,14 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     }
     // Verify readable execution state before any provider or lifecycle change.
     upgrade::validate_result_state(&store, run_id)?;
-    let transition = upgrade::record_upgrade(
+    let transitions = upgrade::record_upgrade(
         &store,
         run_id,
         &log_path,
         &state.identity,
         &current_identity,
     )?;
-    for line in transition.iter().flat_map(|t| t.summary()) {
+    for line in transitions.iter().flat_map(|t| t.summary()) {
         ui_sink
             .emit(WorkflowUiEvent::Text(line))
             .await
@@ -429,6 +429,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     super::claim::reclaim_released_task_root(&store, run_id)?;
     // Every check has passed: from here this process executes the run.
     execution_lease.record_executor()?;
+    upgrade::mark_started(&store, run_id)?;
     let lifecycle = archon_workflow::LifecycleController::new(store.clone());
     let run = lifecycle
         .apply(run_id, archon_workflow::LifecycleAction::Resume)

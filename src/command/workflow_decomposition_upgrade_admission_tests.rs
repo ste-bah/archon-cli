@@ -217,9 +217,17 @@ async fn upgrade_358_crash_before_the_event_is_completed_once() {
     store
         .write_run_json(&run_id, TRANSITIONS_PATH, &record)
         .unwrap();
-    for _ in 0..2 {
-        let (message, _) = resume_as(project.path(), &store, &run_id, "upgraded-rev").await;
+    for attempt in 0..2 {
+        let (message, printed) = resume_as(project.path(), &store, &run_id, "upgraded-rev").await;
         assert!(message.contains("barrier observed"), "{message}");
+        // The completing resume shows the transition it completed, once.
+        assert_eq!(
+            printed
+                .iter()
+                .any(|line| line.starts_with("Binary revision drift:")),
+            attempt == 0,
+            "{printed:?}"
+        );
     }
     let record = transitions(&store, &run_id);
     assert_eq!(record.transitions.len(), 1);
@@ -395,3 +403,6 @@ async fn upgrade_358_unreadable_state_recovers_the_dead_owner() {
         }
     }
 }
+
+#[path = "workflow_decomposition_upgrade_visible_tests.rs"]
+mod visible;
