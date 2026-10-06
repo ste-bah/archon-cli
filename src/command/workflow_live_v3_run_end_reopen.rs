@@ -36,7 +36,7 @@ pub(super) struct AcceptanceReopen<'a> {
     runtime: &'a WorkflowV2ScriptRuntime,
     llm: Option<&'a dyn WorkflowLlmClient>,
     universe: Option<&'a WorkflowV2TaskUniverse>,
-    /// The executor's own generation, when the finalizer was given it.
+    /// The executor's launch generation, when the finalizer was given it.
     generation: Option<u64>,
     v2_store: &'a WorkflowV2ResultStore,
 }
@@ -59,16 +59,18 @@ impl<'a> AcceptanceReopen<'a> {
         }
     }
 
-    /// Issue 316 (review B2): the generation the re-entered round runs
-    /// under is this executor's own -- the one the finalizer holds, else the
-    /// run's now, read only while this session's executor owns the run --
-    /// never a newer owner's adopted.
+    /// Issue 316: the generation the re-entered round runs under, read once
+    /// here, at its dispatch, and only while this executor owns the run (the
+    /// finalizer's launch generation, else this session's executor), as the
+    /// script host reads a call's. Never the launch generation itself: an
+    /// edit that kept the executor moved the run on, and a pause under the
+    /// launch generation would be refused and end the run Cancelled.
     fn owned_generation(&self) -> WorkflowResult<u64> {
-        if let Some(generation) = self.generation {
-            return Ok(generation);
-        }
         let run = self.store.load_state(self.run_id)?;
-        self.v2_store.require_session_executor(&run)?;
+        match self.generation {
+            Some(launch) => archon_workflow::control_pause::require_executor(&run, launch)?,
+            None => self.v2_store.require_session_executor(&run)?,
+        }
         Ok(run.generation)
     }
 }

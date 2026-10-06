@@ -94,11 +94,9 @@ pub(super) async fn observe_before_commit(
         "run_end_acceptance_observer_started",
         serde_json::json!({"authority": "observe_only", "before_terminal_commit": true}),
     )?;
-    // Only the generation that started this finalization may pause the run.
-    let generation = match pc.expected_generation {
-        Some(generation) => generation,
-        None => pc.store.load_state(pc.run_id)?.generation,
-    };
+    // Unfenced (no launch generation), only the generation that started
+    // this finalization may pause the run.
+    let started = pc.store.load_state(pc.run_id)?.generation;
     // Re-entries a paused or interrupted finalization already made count.
     let mut ledger = state::ReopenLedger::load(pc.store, pc.run_id)?;
     if !ledger.reopens.is_empty() {
@@ -161,7 +159,7 @@ pub(super) async fn observe_before_commit(
         if ledger.revisits >= REOPEN_STALL_LIMIT {
             return Err(pause_reentry(
                 pc,
-                generation,
+                pause_generation(pc, started)?,
                 record,
                 (&reason, &situation),
                 "no_progress",
@@ -202,6 +200,22 @@ pub(super) async fn observe_before_commit(
         block_by_name(pc, &mut summary, record, refusal, &why)?;
         return Ok(summary);
     }
+}
+
+/// Issue 316: the generation this finalization pauses the run under. A
+/// fenced executor (`expected_generation`, its launch generation) reads it
+/// now, only while it owns the run: never the launch generation itself, as
+/// an edit that kept the executor (a restart of a stage or item, a
+/// force-accept) moved the run on, and a pause under the launch generation
+/// would be refused and end the run Cancelled. A stall pauses, never
+/// cancels. Unfenced, it is the generation the finalization `started` at.
+fn pause_generation(pc: &PreCommit<'_>, started: u64) -> WorkflowResult<u64> {
+    let Some(launch) = pc.expected_generation else {
+        return Ok(started);
+    };
+    let run = pc.store.load_state(pc.run_id)?;
+    archon_workflow::control_pause::require_executor(&run, launch)?;
+    Ok(run.generation)
 }
 
 /// Re-entry stopped making progress (Issue 262): the run is paused with the

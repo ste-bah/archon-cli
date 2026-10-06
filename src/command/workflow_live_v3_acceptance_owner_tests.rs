@@ -232,3 +232,73 @@ async fn a_round_dispatched_before_a_resume_never_adopts_the_new_owner() {
     assert!(on_disk(&fixture, 1).is_none(), "nothing landed");
     assert_not_paused(&fixture);
 }
+
+struct NoLlm;
+
+#[async_trait::async_trait]
+impl archon_workflow::WorkflowLlmClient for NoLlm {
+    async fn send_message(
+        &self,
+        _: Vec<serde_json::Value>,
+        _: Vec<serde_json::Value>,
+        _: Vec<serde_json::Value>,
+        _: &str,
+    ) -> WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
+        panic!("unexpected LLM request")
+    }
+}
+
+/// The script host's dispatch (`execute_v2_live_call`, which the host calls
+/// with the call generation it sampled while it owned the run) runs the
+/// round under that generation. Dispatched before a resume, it lands
+/// nothing; dispatched by the new owner, it records.
+#[tokio::test]
+async fn the_host_dispatch_runs_the_round_under_its_dispatch_generation() {
+    use super::super::super::{LiveV2AgentClient, execute_v2_live_call};
+    let fixture = fixture(true);
+    let dispatched = generation(&fixture);
+    pause_and_resume(&fixture);
+    let (ui_sink, _receiver) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
+    let client = LiveV2AgentClient::new(
+        std::sync::Arc::new(NoLlm),
+        ui_sink,
+        vec![],
+        fixture.run_id.clone(),
+        None,
+        None,
+    );
+    let v2 = archon_workflow::WorkflowV2ResultStore::new(
+        fixture.store.run_dir(&fixture.run_id).join("v2"),
+    );
+    let dispatch = |generation| {
+        execute_v2_live_call(
+            "acceptance",
+            &fixture.runtime,
+            execution(1, 3, &[]),
+            archon_workflow::WorkflowV2AgentAdapter::new(),
+            &client,
+            &v2,
+            &fixture.store,
+            &fixture.run_id,
+            true,
+            Some(&fixture.universe),
+            None,
+            false,
+            generation,
+        )
+    };
+
+    let stale = dispatch(dispatched).await;
+
+    assert!(
+        matches!(stale, Err(WorkflowError::ControlCancelled(_))),
+        "the replaced executor's dispatch stops: {:?}",
+        stale.as_ref().map(|result| &result.status)
+    );
+    assert!(on_disk(&fixture, 1).is_none(), "nothing landed");
+    dispatch(generation(&fixture))
+        .await
+        .expect("the new owner's dispatch records");
+    assert!(on_disk(&fixture, 1).is_some());
+    assert_not_paused(&fixture);
+}
