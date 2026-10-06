@@ -10,7 +10,8 @@ cozo.workspace = true
 archon-cozo = { path = "../archon-cozo" }
 archon-reasoning-quality = { path = "../archon-reasoning-quality" }
 archon-policy = { path = "../archon-policy" }
-libc = "0.2"
+# Issue 342: the shared pid liveness probe the daemon lock reclaims on.
+archon-shell = { path = "../archon-shell" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -20,3 +21,5 @@ tempfile.workspace = true
 
 [dev-dependencies]
 toml.workspace = true
+# Issue 342: `LiveChild`, a real process the daemon lock tests hold a lock with.
+archon-test-support = { path = "../archon-test-support" }

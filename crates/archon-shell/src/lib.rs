@@ -262,6 +262,11 @@ pub mod process_tree;
 #[cfg(windows)]
 pub mod job_object;
 
+// Issues 339/342: whether a pid names a running process, on every platform.
+// Here, in the leaf, because lock and marker owners in archon-workflow,
+// archon-tools, archon-cognitive and archon-world-model all reclaim on it.
+pub mod process_liveness;
+
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;

@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anyhow::Result;
+use archon_workflow::process_liveness::process_alive;
 
 use crate::cli_args::DocsIndexDaemonAction;
 
@@ -26,7 +27,7 @@ pub(crate) async fn handle_index_daemon(action: DocsIndexDaemonAction) -> Result
 
 fn start(batch_size: usize, window_size: usize, poll_secs: u64) -> Result<()> {
     if let Some(pid) = read_pid()?
-        && process_running(pid)
+        && process_alive(pid)
     {
         anyhow::bail!("docs index daemon already running with pid {pid}");
     }
@@ -65,7 +66,7 @@ fn stop() -> Result<()> {
         println!("Docs index daemon is not running.");
         return Ok(());
     };
-    if !process_running(pid) {
+    if !process_alive(pid) {
         fs::remove_file(pid_path()).ok();
         println!("Removed stale docs index daemon pid file for pid {pid}.");
         return Ok(());
@@ -78,7 +79,7 @@ fn stop() -> Result<()> {
 
 fn status() -> Result<()> {
     match read_pid()? {
-        Some(pid) if process_running(pid) => {
+        Some(pid) if process_alive(pid) => {
             println!("Docs index daemon: running pid {pid}");
             println!("Log: {}", log_path().display());
         }
@@ -137,22 +138,6 @@ fn read_pid() -> Result<Option<u32>> {
     }
     let text = fs::read_to_string(path)?;
     Ok(text.trim().parse::<u32>().ok())
-}
-
-// `pid` is read only by the unix branch; the windows branch cannot use it.
-fn process_running(#[allow(unused_variables)] pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-    #[cfg(not(unix))]
-    {
-        false
-    }
 }
 
 fn terminate_process(pid: u32) -> Result<()> {

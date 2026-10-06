@@ -1,11 +1,9 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-// Used only by `cfg(unix)` code below. See #136.
-#[cfg(unix)]
-use std::process::Command;
 
 use anyhow::Result;
+use archon_workflow::process_liveness::process_alive;
 
 pub(crate) struct DocsIndexLock {
     path: PathBuf,
@@ -50,6 +48,8 @@ fn lock_path() -> PathBuf {
     run_dir().join("docs-index.lock")
 }
 
+/// Whether the lock at `path` names a writer that is no longer running.
+/// A lock whose pid cannot be read is not proven stale, so it stays.
 fn stale_lock(path: &PathBuf) -> bool {
     fs::read_to_string(path)
         .ok()
@@ -58,21 +58,9 @@ fn stale_lock(path: &PathBuf) -> bool {
                 .strip_prefix("pid=")
                 .and_then(|pid| pid.parse().ok())
         })
-        .is_some_and(|pid| !process_running(pid))
+        .is_some_and(|pid| !process_alive(pid))
 }
 
-fn process_running(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        true
-    }
-}
+#[cfg(test)]
+#[path = "docs_index_lock_tests.rs"]
+mod tests;

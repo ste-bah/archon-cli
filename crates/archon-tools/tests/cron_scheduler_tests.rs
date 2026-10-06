@@ -1,5 +1,6 @@
 //! Tests for TASK-CLI-311: CronScheduler — jitter, PID lock, cron validation.
 
+use archon_test_support::live_process::LiveChild;
 use archon_tools::cron_scheduler::{CronJitterConfig, CronScheduler, validate_cron_expression};
 use archon_tools::cron_task::CronTask;
 use tempfile::TempDir;
@@ -138,6 +139,59 @@ fn pid_lock_with_own_pid_succeeds() {
     assert!(result.is_ok());
     // Our own PID → lock is "ours"
     assert!(result.unwrap());
+}
+
+/// Issue 342: the lock holder's liveness was probed only on Linux; every
+/// other platform (macOS included) answered "dead", so a running scheduler's
+/// lock was taken over.
+#[test]
+fn pid_lock_held_by_a_running_process_is_not_taken_over() {
+    let dir = TempDir::new().unwrap();
+    let lock_path = dir.path().join("scheduled_tasks.lock");
+    let holder = LiveChild::spawn();
+    std::fs::write(&lock_path, holder.pid().to_string()).unwrap();
+
+    let acquired = archon_tools::cron_scheduler::try_acquire_pid_lock(&lock_path).unwrap();
+
+    assert!(
+        !acquired,
+        "pid {} still runs and holds the lock",
+        holder.pid()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&lock_path).unwrap(),
+        holder.pid().to_string(),
+        "the live holder's lock must be left as it was"
+    );
+}
+
+#[test]
+fn pid_lock_held_by_a_reaped_process_is_taken_over() {
+    let dir = TempDir::new().unwrap();
+    let lock_path = dir.path().join("scheduled_tasks.lock");
+    let mut holder = LiveChild::spawn();
+    std::fs::write(&lock_path, holder.pid().to_string()).unwrap();
+    holder.end();
+
+    let acquired = archon_tools::cron_scheduler::try_acquire_pid_lock(&lock_path).unwrap();
+
+    assert!(acquired, "pid {} was killed and reaped", holder.pid());
+    assert_eq!(
+        std::fs::read_to_string(&lock_path).unwrap(),
+        std::process::id().to_string()
+    );
+}
+
+#[test]
+fn pid_lock_is_refused_while_its_holder_runs_and_taken_once_it_ends() {
+    let dir = TempDir::new().unwrap();
+    let lock_path = dir.path().join("scheduled_tasks.lock");
+    let mut holder = LiveChild::spawn();
+    std::fs::write(&lock_path, holder.pid().to_string()).unwrap();
+
+    assert!(!archon_tools::cron_scheduler::try_acquire_pid_lock(&lock_path).unwrap());
+    holder.end();
+    assert!(archon_tools::cron_scheduler::try_acquire_pid_lock(&lock_path).unwrap());
 }
 
 // ---------------------------------------------------------------------------

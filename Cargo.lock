@@ -412,10 +412,11 @@ dependencies = [
  "archon-cozo",
  "archon-policy",
  "archon-reasoning-quality",
+ "archon-shell",
+ "archon-test-support",
  "blake3",
  "chrono",
  "cozo-ce",
- "libc",
  "serde",
  "serde_json",
  "tempfile",
@@ -1064,6 +1065,7 @@ dependencies = [
 name = "archon-shell"
 version = "1.9.3"
 dependencies = [
+ "archon-test-support",
  "libc",
  "tempfile",
  "tracing",
@@ -1100,6 +1102,7 @@ dependencies = [
  "archon-pty",
  "archon-session",
  "archon-shell",
+ "archon-test-support",
  "archon-write-plan",
  "async-lsp",
  "async-trait",
@@ -1323,6 +1326,8 @@ dependencies = [
  "archon-llm",
  "archon-memory",
  "archon-permissions",
+ "archon-shell",
+ "archon-test-support",
  "async-trait",
  "candle-core",
  "candle-nn",

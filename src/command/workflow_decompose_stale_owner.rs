@@ -13,9 +13,10 @@
 
 use std::path::Path;
 
+use archon_workflow::process_liveness::process_alive;
 use archon_workflow::{RunStatus, WorkflowEventKind, WorkflowEventLog, WorkflowStore};
 
-use super::workflow_executor_lease::{ExecutionLease, LEASE, pid_running};
+use super::workflow_executor_lease::{ExecutionLease, LEASE};
 use super::workflow_host_command_groups::HostCommandGroupRecord;
 
 /// Where the v2 script host keeps one marker per call in flight.
@@ -46,14 +47,15 @@ impl StaleOwnerRecovery {
     }
 }
 
-/// How the previous executor's pid looks now. Evidence only.
+/// How the previous executor's pid looks now. Evidence only: the OS can give
+/// a dead owner's pid to an unrelated process, so a running pid never means
+/// "owner".
 fn owner_state(pid: Option<u32>) -> &'static str {
-    match pid.map(pid_running) {
+    match pid {
         None => "unrecorded",
-        Some(Some(false)) => "exited",
         // The lock is free, so whatever runs under this pid is not the owner.
-        Some(Some(true)) => "pid_reused",
-        Some(None) => "unknown",
+        Some(pid) if process_alive(pid) => "pid_reused",
+        Some(_) => "exited",
     }
 }
 
@@ -111,7 +113,7 @@ fn recover(
             "previous_owner_acquired_at": previous.as_ref().map(|holder| holder.acquired_at.clone()),
             // Evidence only: a reused pid can be running and still not be
             // the owner; the free kernel lock is what proves the owner dead.
-            "previous_owner_pid_running": previous_pid.and_then(pid_running),
+            "previous_owner_pid_running": previous_pid.map(process_alive),
             "orphaned_inflight_markers": marker_count,
             "inflight_host_pids": host_pids,
             "ended_host_command_groups": ended_groups,

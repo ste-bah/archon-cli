@@ -2,8 +2,10 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 
+use archon_shell::process_liveness::process_alive;
+
 use crate::CognitiveError;
-use crate::daemon::state::{DaemonPaths, heartbeat_is_stale, is_pid_alive};
+use crate::daemon::state::{DaemonPaths, heartbeat_is_stale};
 
 pub struct DaemonLock {
     path: PathBuf,
@@ -45,7 +47,7 @@ fn clear_stale_lock(paths: &DaemonPaths, stale_ms: u64) -> Result<(), CognitiveE
             "daemon lock exists without readable state",
         )));
     };
-    if heartbeat_is_stale(&state, stale_ms) || !is_pid_alive(state.pid) {
+    if heartbeat_is_stale(&state, stale_ms) || !process_alive(state.pid) {
         std::fs::remove_file(&paths.lock_path)?;
     }
     Ok(())
