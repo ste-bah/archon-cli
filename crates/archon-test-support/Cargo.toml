@@ -14,9 +14,11 @@ anyhow.workspace = true
 tempfile.workspace = true
 # TASK-AGS-008 fix (2026-04-11): archon-memory is required so
 # `MockMemoryTrait` can implement the real `archon_memory::MemoryTrait`
-# (12-method, object-safe). No production graph leak: every crate that
-# dev-depends on archon-test-support already has archon-memory in its
-# production dep tree.
+# (12-method, object-safe). No production graph leak: this crate is only
+# ever a dev-dependency. Most crates that dev-depend on it already have
+# archon-memory in their production tree; archon-shell and archon-cognitive
+# (Issue 342, for `live_process::LiveChild`) do not, so for them it adds
+# test build time only.
 archon-memory = { path = "../archon-memory" }
 
 # TASK-AGS-014: insta is available as a dev-dep so downstream phase-4

@@ -1,5 +1,5 @@
 use std::fs::{self, OpenOptions};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -27,7 +27,7 @@ pub(crate) async fn handle_index_daemon(action: DocsIndexDaemonAction) -> Result
 
 fn start(batch_size: usize, window_size: usize, poll_secs: u64) -> Result<()> {
     if let Some(pid) = read_pid()?
-        && process_alive(pid)
+        && pid_owner(pid) == PidOwner::Ours
     {
         anyhow::bail!("docs index daemon already running with pid {pid}");
     }
@@ -62,24 +62,40 @@ fn start(batch_size: usize, window_size: usize, poll_secs: u64) -> Result<()> {
 }
 
 fn stop() -> Result<()> {
-    let Some(pid) = read_pid()? else {
-        println!("Docs index daemon is not running.");
-        return Ok(());
-    };
-    if !process_alive(pid) {
-        fs::remove_file(pid_path()).ok();
-        println!("Removed stale docs index daemon pid file for pid {pid}.");
-        return Ok(());
-    }
-    terminate_process(pid)?;
-    fs::remove_file(pid_path()).ok();
-    println!("Stopped docs index daemon pid {pid}.");
+    println!("{}", stop_pid_file(&pid_path())?);
     Ok(())
+}
+
+/// Stops the daemon the pid file at `path` names, or removes the file when
+/// that pid no longer names the daemon. Returns the line to print.
+fn stop_pid_file(path: &Path) -> Result<String> {
+    let Some(pid) = read_pid_at(path)? else {
+        return Ok("Docs index daemon is not running.".to_string());
+    };
+    match pid_owner(pid) {
+        PidOwner::Gone => {
+            fs::remove_file(path).ok();
+            Ok(format!(
+                "Removed stale docs index daemon pid file for pid {pid}."
+            ))
+        }
+        PidOwner::Foreign => {
+            fs::remove_file(path).ok();
+            Ok(format!(
+                "Removed stale docs index daemon pid file for pid {pid}: that pid now names another user's process, so no signal was sent."
+            ))
+        }
+        PidOwner::Ours => {
+            terminate_process(pid)?;
+            fs::remove_file(path).ok();
+            Ok(format!("Stopped docs index daemon pid {pid}."))
+        }
+    }
 }
 
 fn status() -> Result<()> {
     match read_pid()? {
-        Some(pid) if process_alive(pid) => {
+        Some(pid) if pid_owner(pid) == PidOwner::Ours => {
             println!("Docs index daemon: running pid {pid}");
             println!("Log: {}", log_path().display());
         }
@@ -132,12 +148,64 @@ fn log_path() -> PathBuf {
 }
 
 fn read_pid() -> Result<Option<u32>> {
-    let path = pid_path();
+    read_pid_at(&pid_path())
+}
+
+fn read_pid_at(path: &Path) -> Result<Option<u32>> {
     if !path.exists() {
         return Ok(None);
     }
     let text = fs::read_to_string(path)?;
     Ok(text.trim().parse::<u32>().ok())
+}
+
+/// What a recorded daemon pid names now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PidOwner {
+    /// No process has the pid.
+    Gone,
+    /// A process this user may signal: the daemon this user started.
+    Ours,
+    /// A live process this user may not signal. The daemon runs as the user
+    /// who started it, so the OS gave its pid to another user's process.
+    Foreign,
+}
+
+/// Issue 342: liveness alone is not enough here. The shared probe counts a
+/// process another user owns as running, which is right for a lock, but the
+/// daemon is never another user's process, and `stop` must not signal one.
+fn pid_owner(pid: u32) -> PidOwner {
+    if !process_alive(pid) {
+        return PidOwner::Gone;
+    }
+    signal_access(pid)
+}
+
+#[cfg(unix)]
+fn signal_access(pid: u32) -> PidOwner {
+    // `process_alive` already answered "not running" for a pid that does not
+    // fit `pid_t`.
+    let Ok(raw) = libc::pid_t::try_from(pid) else {
+        return PidOwner::Gone;
+    };
+    // SAFETY: signal 0 delivers nothing; it only checks whether this process
+    // may signal `raw`.
+    if unsafe { libc::kill(raw, 0) } == 0 {
+        return PidOwner::Ours;
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(libc::EPERM) => PidOwner::Foreign,
+        // It exited after the liveness probe.
+        Some(libc::ESRCH) => PidOwner::Gone,
+        // Any other error proves nothing; `terminate_process` then fails
+        // with the real error instead of a guess here.
+        _ => PidOwner::Ours,
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_access(_pid: u32) -> PidOwner {
+    PidOwner::Ours
 }
 
 fn terminate_process(pid: u32) -> Result<()> {
@@ -157,3 +225,7 @@ fn terminate_process(pid: u32) -> Result<()> {
         anyhow::bail!("docs index daemon stop is not implemented on this platform")
     }
 }
+
+#[cfg(test)]
+#[path = "docs_index_daemon_tests.rs"]
+mod tests;
