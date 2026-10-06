@@ -306,16 +306,20 @@ fn printed_by(output: &str, program: &str, at: &Context) -> bool {
         {
             return false;
         }
-        !not_found(said, program, &wanted, &same)
+        // The program a report names, by its file name without extension
+        // (`/opt/x/sh`, `bash.exe`) or as the check gave it.
+        let itself = |named: &str| same(named, program) || same(&name(named), &wanted);
+        !not_found(said, &itself)
     })
 }
 
-/// Whether `said`, the rest of a line after its speaker, reports that the
-/// program -- by its bare name `bare` or as the check gave it, `given` --
-/// was not found: `[line N: ]prog: command not found`, `[N: ]prog: not
-/// found`, `prog: No such file or directory`, `command not found: prog`,
-/// or (as tcsh says it of itself) just `command not found`.
-fn not_found(said: &str, given: &str, bare: &str, same: &dyn Fn(&str, &str) -> bool) -> bool {
+/// Whether `said`, the rest of a line after its speaker, reports that a
+/// program `itself` names was not found: `[line N: ]prog: command not
+/// found`, `[N: ]prog: not found` or `prog: No such file or directory`.
+/// A rest that starts with `command not found` or `not found` -- tcsh's
+/// `foo: Command not found.`, zsh's `command not found: foo` -- is never a
+/// program's own message either, whatever it names.
+fn not_found(said: &str, itself: &dyn Fn(&str) -> bool) -> bool {
     let mut rest = said.trim_start();
     if let Some(after) = rest.strip_prefix("line ") {
         rest = after;
@@ -326,25 +330,20 @@ fn not_found(said: &str, given: &str, bare: &str, same: &dyn Fn(&str, &str) -> b
     {
         rest = after;
     }
-    let lower = rest.to_ascii_lowercase();
     const REPORTS: [&str; 3] = [
         "command not found",
         "not found",
         "no such file or directory",
     ];
+    let lower = rest.to_ascii_lowercase();
     if REPORTS[..2].iter().any(|report| lower.starts_with(report)) {
         return true;
-    }
-    if let Some(named) = lower.strip_prefix("command not found:") {
-        let named = named.trim();
-        return same(named, &given.to_ascii_lowercase()) || same(named, &bare.to_ascii_lowercase());
     }
     let Some((named, report)) = rest.split_once(": ") else {
         return false;
     };
     let report = report.trim().to_ascii_lowercase();
-    (same(named.trim(), given) || same(named.trim(), bare))
-        && REPORTS.iter().any(|known| report.starts_with(known))
+    itself(named.trim()) && REPORTS.iter().any(|known| report.starts_with(known))
 }
 
 /// The program's own name: a build tool whatever directory it is run from.

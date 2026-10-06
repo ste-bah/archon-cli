@@ -341,6 +341,10 @@ fn a_directory_left_behind_is_never_a_listings_own() {
     let left: Vec<PathBuf> = (super::list::next_scratch(8).into_iter())
         .filter(|dir| std::fs::create_dir(dir).is_ok())
         .collect();
+    assert!(
+        !left.is_empty(),
+        "some directory was left behind to test with"
+    );
     for dir in &left {
         std::fs::create_dir(dir.join("home")).unwrap();
         std::fs::write(dir.join("home/left-behind"), "x").unwrap();

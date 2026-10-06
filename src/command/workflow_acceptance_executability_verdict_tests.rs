@@ -282,6 +282,13 @@ fn only_the_programs_own_message_proves_it_ran() {
         ("bash scripts/x.sh", "sh: bash: not found", false),
         ("bash scripts/x.sh", "sh: 1: bash: not found", false),
         ("bash scripts/x.sh", "zsh: command not found: bash", false),
+        // The program's file name, by another path, is the program.
+        (
+            "sh x.sh",
+            "/bin/sh: line 1: /opt/x/sh: No such file or directory",
+            false,
+        ),
+        ("sh x.sh", "sh: /opt/x/sh: No such file or directory", false),
         // Its own message: it ran, and 127 is its answer.
         (
             "bash scripts/three.sh",
@@ -348,6 +355,15 @@ fn a_sites_path_and_pathext_alone_decide_whether_a_program_is_there() {
         ("PATHEXT", ".exe"),
     ];
     assert!(no_verdict(command, &ran, &site_by_rules(&elsewhere, true)).is_some());
+    // A Windows shell's report that the program, by its file name with an
+    // extension, was not found is no proof that it ran.
+    let shell = run(
+        Some(127),
+        "",
+        "C:\\Git\\usr\\bin\\bash.exe: line 1: bash.exe: command not found\n",
+    );
+    let why = no_verdict("bash x", &shell, &site_by_rules(&elsewhere, true));
+    assert!(why.is_some_and(|why| why.contains("not on its search path")));
     // A Windows program's own message, by its drive path, proves it ran.
     let own = run(
         Some(127),
