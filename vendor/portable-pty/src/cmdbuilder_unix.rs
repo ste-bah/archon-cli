@@ -103,7 +103,7 @@ impl CommandBuilder {
         let shell = self.get_shell();
 
         let mut cmd = if self.is_default_prog() {
-            let mut cmd = std::process::Command::new(&shell);
+            let mut cmd = archon_shell::spawn::command(&shell);
 
             // Run the shell as a login shell by prefixing the shell's
             // basename with `-` and setting that as argv0
@@ -112,7 +112,7 @@ impl CommandBuilder {
             cmd
         } else {
             let resolved = self.search_path(&self.args[0], dir)?;
-            let mut cmd = std::process::Command::new(&resolved);
+            let mut cmd = archon_shell::spawn::command(&resolved);
             cmd.arg0(&self.args[0]);
             cmd.args(&self.args[1..]);
             cmd
@@ -130,6 +130,9 @@ impl CommandBuilder {
              }| (preferred_key.as_os_str(), value.as_os_str()),
         ));
 
+        // envs above replaces the helper's initial inherited flags. Sanitize
+        // again at the launch boundary, including explicit builder overrides.
+        archon_shell::jobserver::sanitize_environment(&mut cmd);
         Ok(cmd)
     }
 

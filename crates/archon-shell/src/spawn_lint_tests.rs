@@ -189,8 +189,7 @@ fn production_lines(source: &str) -> Vec<(usize, &str)> {
     kept
 }
 
-fn violations() -> Vec<String> {
-    let root = workspace_root();
+fn workspace_rust_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     rust_files(&root.join("src"), &mut files);
     if let Ok(crates) = std::fs::read_dir(root.join("crates")) {
@@ -198,6 +197,13 @@ fn violations() -> Vec<String> {
             rust_files(&krate.path().join("src"), &mut files);
         }
     }
+    rust_files(&root.join("vendor/portable-pty/src"), &mut files);
+    files
+}
+
+fn violations() -> Vec<String> {
+    let root = workspace_root();
+    let files = workspace_rust_files(&root);
     // A wrong root would scan nothing and pass.
     assert!(root.join(HELPER).is_file(), "workspace root not found");
     assert!(files.len() > 100, "only {} files scanned", files.len());
@@ -214,16 +220,24 @@ fn violations() -> Vec<String> {
         let Ok(source) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let masked = lex::code(&source);
-        let all_lines: Vec<&str> = masked.lines().collect();
-        for (number, line) in production_lines(&source) {
-            let code = all_lines[number - 1];
-            // A raw fork that execs must sweep before it does.
-            let raw_fork = code.contains("libc::fork(") && !function_sweeps(&all_lines, number - 1);
-            if forbidden_call(code) || alias_call(code, &masked) || hiding_rename(code) || raw_fork
-            {
-                found.push(format!("{relative}:{number}: {}", line.trim()));
-            }
+        found.extend(source_violations(&relative, &source));
+    }
+    found
+}
+
+fn source_violations(relative: &str, source: &str) -> Vec<String> {
+    if relative == HELPER || is_test_path(relative) {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    let masked = lex::code(source);
+    let all_lines: Vec<&str> = masked.lines().collect();
+    for (number, line) in production_lines(source) {
+        let code = all_lines[number - 1];
+        // A raw fork that execs must sweep before it does.
+        let raw_fork = code.contains("libc::fork(") && !function_sweeps(&all_lines, number - 1);
+        if forbidden_call(code) || alias_call(code, &masked) || hiding_rename(code) || raw_fork {
+            found.push(format!("{relative}:{number}: {}", line.trim()));
         }
     }
     found
@@ -332,3 +346,6 @@ fn multiline_raw_string_cannot_change_test_item_depth() {
         vec![8]
     );
 }
+
+#[path = "spawn_lint_vendor_tests.rs"]
+mod vendor_tests;

@@ -118,9 +118,9 @@ const RESERVATION_CONTEXT: &str = "reserve document content hash";
 
 /// Run `reserve` with exclusive access to the backing database.
 ///
-/// The blocking write-lock variant, not the fail-fast one: losing this race is
-/// not recoverable by retrying, because the whole point is that the read and the
-/// write must not be interleaved. It is re-entrant, so a reservation nested
+/// The blocking write lock keeps the read and write in one exclusive window.
+/// Acquisition expiry returns retryable `StoreBusy`; the caller can restart
+/// the reservation without interleaving its read and write. It is re-entrant, so a reservation nested
 /// inside an already-guarded mutable operation on the same database runs inline
 /// rather than blocking on the lock its own thread holds.
 ///

@@ -193,6 +193,14 @@ fn get_base_env() -> BTreeMap<OsString, EnvEntry> {
         }
     }
 
+    // Numeric jobserver endpoints cannot survive the stdio-only child policy.
+    // Sanitize after platform environment discovery, including Windows registry values.
+    for entry in env.values_mut() {
+        entry.value = archon_shell::jobserver::sanitize_variable(
+            &entry.preferred_key,
+            std::mem::take(&mut entry.value),
+        );
+    }
     env
 }
 
@@ -302,7 +310,7 @@ impl CommandBuilder {
         V: AsRef<OsStr>,
     {
         let key: OsString = key.as_ref().into();
-        let value: OsString = value.as_ref().into();
+        let value = archon_shell::jobserver::sanitize_variable(&key, value.as_ref().into());
         self.envs.insert(
             EnvEntry::map_key(key.clone()),
             EnvEntry {

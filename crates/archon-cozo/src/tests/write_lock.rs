@@ -236,7 +236,7 @@ fn a_waiting_guard_queues_where_a_fail_fast_guard_would_not() {
 }
 
 #[test]
-fn blocking_write_lock_reports_a_stuck_holder_instead_of_hanging() {
+fn blocking_write_lock_returns_busy_without_claiming_the_holder_is_stuck() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("stuck.lock");
     let file = OpenOptions::new()
@@ -263,9 +263,9 @@ fn blocking_write_lock_reports_a_stuck_holder_instead_of_hanging() {
         message.contains("still held after waiting 50ms"),
         "{message}"
     );
-    // A wedged holder is not a busy database: retrying it for another 19s of
-    // backoff would only delay the diagnosis.
-    assert!(!is_retryable_cozo_error(&message), "{message}");
+    // Elapsed time gives no evidence of a wedged holder. The caller can resume.
+    assert!(error.is::<StoreBusy>());
+    assert!(is_retryable_cozo_error(&message), "{message}");
 }
 
 #[test]

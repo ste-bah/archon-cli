@@ -257,12 +257,9 @@ pub(crate) fn with_write_lock<T>(
 
 /// The phrase every bounded acquire failure carries, whichever layer expired.
 ///
-/// A wedged holder is deliberately *not* a retryable busy signal -- we already
-/// waited the whole budget, so another 19s of backoff would only delay the
-/// diagnosis. But a caller that can degrade (skip one file rather than abandon
-/// a walk) still has to tell "lost the store" apart from "the schema is wrong",
-/// and it should not do that by re-spelling this sentence at the call site.
-/// [`crate::is_store_contention`] matches on this constant instead.
+/// Retained for classification of legacy error strings. Acquisition expiry
+/// now returns `StoreBusy`: without a holder heartbeat, a deadline gives no
+/// evidence that the holder stopped progressing.
 pub(crate) const WRITE_LOCK_WAIT_EXPIRED: &str = "was still held";
 
 /// Run `run` while holding the write lock for `path`, waiting up to `wait` for
@@ -276,9 +273,9 @@ pub(crate) const WRITE_LOCK_WAIT_EXPIRED: &str = "was still held";
 ///
 /// Three properties matter here:
 ///
-/// * **Bounded.** A holder that never releases (a crashed peer that leaked the
-///   OS lock, a wedged writer) surfaces as an error naming the lock file rather
-///   than as a hang. `wait` is a ceiling on the acquire, not on `run`.
+/// * **Resumable.** An acquisition window that expires returns retryable
+///   `StoreBusy`, naming the lock file, without claiming the holder is stuck.
+///   `wait` bounds one acquisition call, never the operation or `run`.
 /// * **Re-entrant.** On Windows `LockFileEx` byte-range locks conflict between
 ///   handles *within one process*, so a thread that already owns this lock and
 ///   re-enters would block on itself forever. The thread-local ownership set
@@ -328,14 +325,20 @@ pub(crate) fn with_write_lock_blocking<T>(
                 return run();
             }
             Err(error) => {
+                if error.kind() != std::io::ErrorKind::WouldBlock {
+                    return Err(error.into());
+                }
                 let Some(remaining) = deadline
                     .checked_duration_since(Instant::now())
                     .filter(|remaining| !remaining.is_zero())
                 else {
-                    return Err(anyhow!(
-                        "{context}: Cozo write lock at {} was still held after waiting {}ms: {error}",
-                        path.display(),
-                        wait.as_millis()
+                    return Err(crate::busy::lock_window_busy(
+                        context,
+                        format!(
+                            "Cozo write lock at {} was still held after waiting {}ms: {error}",
+                            path.display(),
+                            wait.as_millis()
+                        ),
                     ));
                 };
                 std::thread::sleep(backoff.min(remaining));
@@ -369,10 +372,13 @@ fn acquire_process_lock<'a>(
             .checked_duration_since(Instant::now())
             .filter(|remaining| !remaining.is_zero())
         else {
-            return Err(anyhow!(
-                "{context}: Cozo write lock at {} was still held by this process after waiting {}ms",
-                path.display(),
-                wait.as_millis()
+            return Err(crate::busy::lock_window_busy(
+                context,
+                format!(
+                    "Cozo write lock at {} was still held by this process after waiting {}ms",
+                    path.display(),
+                    wait.as_millis()
+                ),
             ));
         };
         std::thread::sleep(backoff.min(remaining));

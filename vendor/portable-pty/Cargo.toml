@@ -96,5 +96,5 @@ features = [
 [target."cfg(windows)".dependencies.winreg]
 version = "0.10"
 
-[target.'cfg(unix)'.dependencies.archon-shell]
+[dependencies.archon-shell]
 path = "../../crates/archon-shell"

@@ -5,7 +5,23 @@ const CHILD: &str = "ARCHON_ISOLATED_ENV_TEST";
 pub(crate) fn isolated() -> bool {
     let thread = std::thread::current();
     let name = thread.name().expect("test harness names each test thread");
-    if std::env::var(CHILD).as_deref() == Ok(name) {
+    isolated_named(name)
+}
+
+/// Isolate a fixture even when another test calls it directly. An inherited
+/// marker alone cannot authorize mutation from a different harness test.
+pub(crate) fn isolated_named(name: &str) -> bool {
+    let thread = std::thread::current();
+    let args: Vec<_> = std::env::args_os().collect();
+    let exact = args
+        .windows(2)
+        .any(|pair| pair[0] == "--exact" && pair[1] == name);
+    let single_thread = args.iter().any(|arg| arg == "--test-threads=1");
+    if exact
+        && single_thread
+        && thread.name() == Some(name)
+        && std::env::var(CHILD).as_deref() == Ok(name)
+    {
         std::fs::write(
             std::env::var("ARCHON_ISOLATED_ENV_MARKER").expect("child marker"),
             b"ran",

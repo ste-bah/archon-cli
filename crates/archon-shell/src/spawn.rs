@@ -41,6 +41,7 @@ use std::process::Command;
 /// A `std` command for `program` whose child inherits only its stdio.
 pub fn command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
+    crate::jobserver::inherit(&mut command);
     stdio_only(&mut command);
     command
 }
@@ -57,6 +58,7 @@ pub fn tokio_command(program: impl AsRef<OsStr>) -> tokio::process::Command {
 /// that reads it is async-signal safe. If it cannot be read, the spawn fails
 /// with that error rather than run a child that may inherit anything.
 pub fn stdio_only(command: &mut Command) -> &mut Command {
+    crate::jobserver::sanitize_environment(command);
     // Apple only: see the module documentation for why not Linux.
     #[cfg(target_vendor = "apple")]
     {

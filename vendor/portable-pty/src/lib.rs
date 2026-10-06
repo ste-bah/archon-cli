@@ -405,3 +405,7 @@ pub fn native_pty_system() -> Box<dyn PtySystem + Send> {
 pub type NativePtySystem = unix::UnixPtySystem;
 #[cfg(windows)]
 pub type NativePtySystem = win::conpty::ConPtySystem;
+
+#[cfg(all(test, unix))]
+#[path = "jobserver_tests.rs"]
+mod jobserver_tests;

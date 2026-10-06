@@ -1,12 +1,17 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 
+#[cfg(feature = "test-support")]
+mod busy_observer;
+#[cfg(feature = "test-support")]
+pub use busy_observer::with_busy_observer;
+mod busy;
+pub use busy::StoreBusy;
 mod guard_registry;
 mod in_memory_identity;
 mod locking;
@@ -19,21 +24,15 @@ use locking::{
 };
 use panic_guard::catch_guarded_operation;
 pub use retry::{is_retryable_cozo_error, is_store_contention, render_cozo_error};
-use retry::{normalized_attempts, retry_backoff};
+mod guarded_run;
+pub use guarded_run::{run_guarded, run_guarded_async};
 
 #[cfg(test)]
 use retry::cumulative_backoff_budget;
 
-/// How long [`with_write_lock_blocking`] waits before declaring the holder stuck.
-///
-/// Sized for the worst realistic queue rather than the common case. Every
-/// guarded mutable Cozo operation in the workspace funnels through this lock,
-/// several of them now holding it across a whole `multi_transaction` rather
-/// than a single `:put`, and the fail-fast path already spends up to 19s of
-/// cumulative backoff before it gives up (`cumulative_backoff_budget`). A
-/// ceiling at or below that would report a timeout while the system is merely
-/// busy. This exists to turn a wedged or leaked lock into a diagnosable error,
-/// not to police contention.
+/// Default acquisition window for [`with_write_lock_blocking`]. Expiry
+/// returns retryable [`StoreBusy`]; elapsed time alone cannot prove the holder
+/// is stuck. It never caps the operation once the lock has been acquired.
 pub const DEFAULT_WRITE_LOCK_WAIT: Duration = Duration::from_secs(60);
 
 const DEFAULT_MAX_ATTEMPTS: usize = 20;
@@ -43,6 +42,8 @@ const DEFAULT_MAX_BACKOFF_MS: u64 = 2_000;
 
 #[derive(Clone, Debug)]
 pub struct CozoGuardConfig {
+    /// Busy observations per call before returning retryable `StoreBusy`.
+    /// This is a response window, not a lifetime limit on a caller's operation.
     pub max_attempts: usize,
     pub initial_backoff: Duration,
     pub max_backoff: Duration,
@@ -272,77 +273,6 @@ pub async fn run_script_guarded_async(
             .map_err(|error| anyhow!("{error}"))
     })
     .await
-}
-
-pub fn run_guarded<T>(
-    context: &str,
-    mutability: ScriptMutability,
-    config: &CozoGuardConfig,
-    mut run: impl FnMut() -> Result<T>,
-) -> Result<T> {
-    let attempts = normalized_attempts(config);
-
-    for attempt in 0..attempts {
-        match run_guarded_once(context, mutability, config, &mut run) {
-            Ok(value) => return Ok(value),
-            Err(error) => {
-                let last_error = format!("{error:#}");
-                if let Some(backoff) =
-                    retry_backoff(context, config, attempt, attempts, &last_error)
-                {
-                    thread::sleep(backoff);
-                    continue;
-                }
-                return Err(anyhow!("{context}: {last_error}"));
-            }
-        }
-    }
-
-    unreachable!("a guarded retry loop always returns from an attempt")
-}
-
-pub async fn run_guarded_async<T, Run>(
-    context: &str,
-    mutability: ScriptMutability,
-    config: &CozoGuardConfig,
-    run: Run,
-) -> Result<T>
-where
-    T: Send + 'static,
-    Run: FnMut() -> Result<T> + Send + 'static,
-{
-    let attempts = normalized_attempts(config);
-    let context = context.to_string();
-    let config = config.clone();
-    let mut run = run;
-
-    for attempt in 0..attempts {
-        let attempt_context = context.clone();
-        let attempt_config = config.clone();
-        let attempt_result = tokio::task::spawn_blocking(move || {
-            let result = run_guarded_once(&attempt_context, mutability, &attempt_config, &mut run);
-            (run, result)
-        })
-        .await
-        .map_err(|error| anyhow!("{context}: guarded operation task failed: {error}"))?;
-        run = attempt_result.0;
-
-        match attempt_result.1 {
-            Ok(value) => return Ok(value),
-            Err(error) => {
-                let last_error = format!("{error:#}");
-                if let Some(backoff) =
-                    retry_backoff(&context, &config, attempt, attempts, &last_error)
-                {
-                    tokio::time::sleep(backoff).await;
-                    continue;
-                }
-                return Err(anyhow!("{context}: {last_error}"));
-            }
-        }
-    }
-
-    unreachable!("a guarded retry loop always returns from an attempt")
 }
 
 /// Make every guarded Cozo operation **on the calling thread** panic until
