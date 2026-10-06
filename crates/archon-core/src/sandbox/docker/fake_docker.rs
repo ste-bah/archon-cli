@@ -92,7 +92,7 @@ fn dispatcher() -> &'static Path {
 fn warm_up(script: &Path) -> std::process::ExitStatus {
     let mut attempts = 0;
     loop {
-        match std::process::Command::new(script).status() {
+        match archon_shell::spawn::command(script).status() {
             Err(error) if error.raw_os_error() == Some(libc::ETXTBSY) && attempts < 50 => {
                 attempts += 1;
                 std::thread::sleep(Duration::from_millis(20));
