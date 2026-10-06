@@ -336,9 +336,17 @@ fn a_similar_name_cargo_suggests_never_takes_its_rejection_away() {
 
 #[test]
 fn a_directory_left_behind_is_never_a_listings_own() {
-    let left: Vec<PathBuf> = super::list::next_scratch(8);
+    // Only names no running listing took first: a listing on another
+    // thread may make the same name a moment before this does.
+    let left: Vec<PathBuf> = (super::list::next_scratch(8).into_iter())
+        .filter(|dir| std::fs::create_dir(dir).is_ok())
+        .collect();
+    assert!(
+        !left.is_empty(),
+        "some directory was left behind to test with"
+    );
     for dir in &left {
-        std::fs::create_dir_all(dir.join("home")).unwrap();
+        std::fs::create_dir(dir.join("home")).unwrap();
         std::fs::write(dir.join("home/left-behind"), "x").unwrap();
     }
     let records = tempfile::tempdir().unwrap();

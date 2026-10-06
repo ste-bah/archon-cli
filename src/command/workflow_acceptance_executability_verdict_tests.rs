@@ -190,3 +190,209 @@ fn a_crash_in_the_checks_own_code_gives_no_verdict() {
     assert!(why.is_some_and(|why| why.contains("crashed in its own python")));
     assert!(!may_be_host_failure(&result), "a crash is the check's own");
 }
+
+/// A site whose only variables are `variables`.
+fn site(variables: &[(&str, &str)]) -> Context {
+    let contract: AcceptanceContract = serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "prd": {"path": "p.md", "digest": "d"},
+        "gap_policy": {"permitted_acceptance_ids": [], "forbidden_phrases": [], "required_fields": []},
+        "acceptance": [], "supplementary": []
+    }))
+    .unwrap();
+    let environment = (variables.iter())
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect();
+    Context::new(environment, &contract)
+}
+
+/// Issue 333 (CI on Windows): `bash` ran -- it printed under its own name
+/// -- and exited 127 because the script it was given is not there. That is
+/// its check's failure (a verdict), never a program missing from the path.
+#[cfg(unix)]
+#[test]
+fn a_program_that_ran_and_exited_127_for_a_missing_script_is_a_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = std::process::Command::new("/bin/sh")
+        .args(["-c", "bash scripts/three.sh"])
+        .current_dir(dir.path())
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    let result = run(
+        out.status.code(),
+        &String::from_utf8_lossy(&out.stdout),
+        &String::from_utf8_lossy(&out.stderr),
+    );
+    assert_eq!(result.exit_code, Some(127), "{result:?}");
+    let command = "bash scripts/three.sh";
+    assert_eq!(
+        no_verdict(command, &result, &site(&[("PATH", "/usr/bin:/bin")])),
+        None
+    );
+    // Even where the resolver would not find it: what it printed proves it ran.
+    assert_eq!(
+        no_verdict(command, &result, &site(&[("PATH", "/nowhere")])),
+        None
+    );
+    // A program that never ran is still missing.
+    let absent = run(Some(127), "", "sh: archon-333-absent: command not found\n");
+    let why = no_verdict(
+        "archon-333-absent x",
+        &absent,
+        &site(&[("PATH", "/nowhere")]),
+    );
+    assert!(why.is_some_and(|why| why.contains("not on its search path")));
+    let tcsh = run(Some(127), "", "archon-333-absent: Command not found.\n");
+    assert!(no_verdict("archon-333-absent x", &tcsh, &site(&[("PATH", "/nowhere")])).is_some());
+}
+
+/// Issue 333: a shell that runs the check may have the check's program's
+/// own name; its report that the program was not found never proves the
+/// program ran. Only the program's own message does.
+#[cfg(unix)]
+#[test]
+fn only_the_programs_own_message_proves_it_ran() {
+    let nowhere = site(&[("PATH", "/nowhere")]);
+    let given = "/usr/local/bin/sh";
+    let cases: &[(&str, &str, bool)] = &[
+        (
+            "sh scripts/x.sh",
+            "/bin/sh: line 1: sh: command not found",
+            false,
+        ),
+        (
+            "bash scripts/x.sh",
+            "/bin/bash: line 1: bash: command not found",
+            false,
+        ),
+        ("bash scripts/x.sh", "bash: bash: command not found", false),
+        ("dash x", "/bin/dash: 1: dash: not found", false),
+        (
+            "/usr/local/bin/sh x",
+            "/bin/sh: line 1: /usr/local/bin/sh: No such file or directory",
+            false,
+        ),
+        (
+            "bash scripts/x.sh",
+            "env: bash: No such file or directory",
+            false,
+        ),
+        ("bash scripts/x.sh", "sh: bash: not found", false),
+        ("bash scripts/x.sh", "sh: 1: bash: not found", false),
+        ("bash scripts/x.sh", "zsh: command not found: bash", false),
+        // The program's file name, by another path, is the program.
+        (
+            "sh x.sh",
+            "/bin/sh: line 1: /opt/x/sh: No such file or directory",
+            false,
+        ),
+        ("sh x.sh", "sh: /opt/x/sh: No such file or directory", false),
+        // Its own message: it ran, and 127 is its answer.
+        (
+            "bash scripts/three.sh",
+            "bash: scripts/three.sh: No such file or directory",
+            true,
+        ),
+        (
+            "bash scripts/three.sh",
+            "/bin/bash: scripts/three.sh: No such file or directory",
+            true,
+        ),
+        (
+            "bash scripts/three.sh",
+            "/bin/bash: line 0: scripts/three.sh: No such file or directory",
+            true,
+        ),
+    ];
+    for (command, stderr, verdict) in cases {
+        if command.starts_with(given) && std::path::Path::new(given).exists() {
+            continue;
+        }
+        let result = run(Some(127), "", &format!("{stderr}\n"));
+        let why = no_verdict(command, &result, &nowhere);
+        assert_eq!(why.is_none(), *verdict, "{command} / {stderr}: {why:?}");
+        if !verdict {
+            assert!(why.unwrap().contains("not on its search path"), "{stderr}");
+        }
+    }
+}
+
+/// A site that resolves programs by Windows's rules (or not), whatever
+/// this platform is, with only `variables`.
+fn site_by_rules(variables: &[(&str, &str)], windows: bool) -> Context {
+    let environment = (variables.iter())
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect();
+    Context::by_rules(environment, Vec::new(), windows)
+}
+
+/// Issue 333 (CI on Windows): only the site's `Path` and `PATHEXT` decide
+/// whether a program that exited 127 without naming itself was there. By
+/// Windows's rules `Path` is the search path, split on `;`, and the
+/// program is found with `PATHEXT`'s `.exe`: a verdict. Read as Unix reads
+/// it, `Path` is no search path at all: no verdict.
+#[test]
+fn a_sites_path_and_pathext_alone_decide_whether_a_program_is_there() {
+    let (empty, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::write(bin.path().join("archon333tool.exe"), "").unwrap();
+    let path = format!("{};{}", empty.path().display(), bin.path().display());
+    let variables = [("Path", path.as_str()), ("PATHEXT", ".com;.exe")];
+    let ran = run(Some(127), "", "missing input file\n");
+    let command = "archon333tool --in data.csv";
+    assert_eq!(
+        no_verdict(command, &ran, &site_by_rules(&variables, true)),
+        None
+    );
+    let why = no_verdict(command, &ran, &site_by_rules(&variables, false));
+    assert!(why.is_some_and(|why| why.contains("not on its search path")));
+    // Without `.exe` among PATHEXT's, or without the directory, it is not there.
+    let no_exe = [("Path", path.as_str()), ("PATHEXT", ".com")];
+    assert!(no_verdict(command, &ran, &site_by_rules(&no_exe, true)).is_some());
+    let elsewhere = [
+        ("Path", empty.path().to_str().unwrap()),
+        ("PATHEXT", ".exe"),
+    ];
+    assert!(no_verdict(command, &ran, &site_by_rules(&elsewhere, true)).is_some());
+    // A Windows shell's report that the program, by its file name with an
+    // extension, was not found is no proof that it ran.
+    let shell = run(
+        Some(127),
+        "",
+        "C:\\Git\\usr\\bin\\bash.exe: line 1: bash.exe: command not found\n",
+    );
+    let why = no_verdict("bash x", &shell, &site_by_rules(&elsewhere, true));
+    assert!(why.is_some_and(|why| why.contains("not on its search path")));
+    // A Windows program's own message, by its drive path, proves it ran.
+    let own = run(
+        Some(127),
+        "",
+        "C:\\Git\\bin\\archon333tool.exe: scripts/three.sh: No such file or directory\n",
+    );
+    assert_eq!(
+        no_verdict(command, &own, &site_by_rules(&elsewhere, true)),
+        None
+    );
+}
+
+/// Issue 333 (CI on Windows): the site's `Path` is its search path, split
+/// on `;`, and `bash` is found as `bash.exe` by the site's `PATHEXT`. The
+/// program's message does not name it, so only those variables decide.
+#[cfg(windows)]
+#[test]
+fn a_windows_sites_path_and_pathext_resolve_as_its_child_does() {
+    let (empty, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::write(bin.path().join("bash.exe"), "").unwrap();
+    let path = format!("{};{}", empty.path().display(), bin.path().display());
+    let unnamed = run(Some(127), "", "missing input file\n");
+    let at = site(&[("Path", path.as_str()), ("PATHEXT", ".COM;.EXE")]);
+    assert_eq!(no_verdict("bash scripts/three.sh", &unnamed, &at), None);
+    let at = site(&[
+        ("Path", empty.path().to_str().unwrap()),
+        ("PATHEXT", ".COM;.EXE"),
+    ]);
+    assert!(no_verdict("bash scripts/three.sh", &unnamed, &at).is_some());
+    let absent = run(Some(127), "", "sh: bash: command not found\n");
+    assert!(no_verdict("bash scripts/three.sh", &absent, &at).is_some());
+}

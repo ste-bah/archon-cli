@@ -130,7 +130,7 @@ pub(super) fn missing(commands: &[Simple], output: &str, at: &Context) -> Option
     }
     let programs: Vec<String> = (commands.iter())
         .filter_map(|command| command.program.as_deref())
-        .map(|program| which::bare_name(program.rsplit('/').next().unwrap_or(program)))
+        .map(|program| at.bare_name(program.rsplit(['/', '\\']).next().unwrap_or(program)))
         .collect();
     commands.iter().find_map(|command| {
         let (tool, program) = tool(command, at)?;
@@ -338,7 +338,7 @@ fn tool(command: &Simple, at: &Context) -> Option<(String, PathBuf)> {
     }
     let path = Path::new(program);
     let name = path.file_name()?.to_str()?;
-    let name = which::bare_name(name);
+    let name = at.bare_name(name);
     (which::is_absolute(program) && path.is_file()).then(|| (name, path.to_path_buf()))
 }
 
