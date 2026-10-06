@@ -1,8 +1,8 @@
 //! Running one declared focused test command in a branch worktree, bounded.
 //!
 //! The command is the task's own declared string, fed to the POSIX shell
-//! with the worktree as its working directory, the host process environment
-//! plus whatever the dispatch port adds for a host-run command (the leased
+//! with the worktree as its working directory, the default check environment
+//! plus filtered toolchain/cache locators from the dispatch port (the leased
 //! build cache, so the run builds where the coder's will and never inside
 //! the worktree or the shared tree). Timeout and output are bounded, the
 //! whole process group is killed on timeout so a runner's children do not
@@ -67,12 +67,31 @@ async fn run_unwatched(
 ) -> CommandRun {
     let started = Instant::now();
     let env = dispatch.host_command_env(worktree).await;
-    let mut process = archon_shell::spawn::tokio_command(archon_shell::resolve_posix_shell());
+    let mut host = crate::acceptance_check_environment::host_environment();
+    for (name, value) in &env.vars {
+        // Match std's Windows case-insensitive replacement before applying policy.
+        while let Some((previous, _)) = crate::acceptance_check_environment::lookup(&host, name) {
+            let previous = previous.clone();
+            host.remove(&previous);
+        }
+        host.insert(name.clone(), value.clone());
+    }
+    let environment =
+        match crate::acceptance_check_environment::CommandEnvironment::from_host(&host) {
+            Ok(environment) => environment,
+            Err(error) => {
+                return CommandRun {
+                    error: Some(error),
+                    duration_ms: elapsed_ms(started),
+                    ..CommandRun::default()
+                };
+            }
+        };
+    let mut process = environment.tokio_command(archon_shell::resolve_posix_shell());
     process
         .arg("-c")
         .arg(command)
         .current_dir(worktree)
-        .envs(env.vars.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -108,6 +127,11 @@ async fn run_unwatched(
     drop(group);
     let out = stdout.await.ok().flatten().unwrap_or_default();
     let err = stderr.await.ok().flatten().unwrap_or_default();
+    let environment_error = if !timed_out && status.as_ref().is_ok_and(|status| !status.success()) {
+        environment.failure(&[out.as_bytes(), err.as_bytes()])
+    } else {
+        None
+    };
     drop(env);
     let mut output = out;
     if !err.is_empty() {
@@ -116,7 +140,7 @@ async fn run_unwatched(
         }
         output.push_str(&err);
     }
-    let (exit_code, error) = match (status, timed_out) {
+    let (mut exit_code, mut error) = match (status, timed_out) {
         (_, true) => (
             None,
             Some(format!(
@@ -130,6 +154,12 @@ async fn run_unwatched(
             Some(format!("baseline command could not be waited on: {error}")),
         ),
     };
+    if error.is_none()
+        && let Some(reason) = environment_error
+    {
+        exit_code = None;
+        error = Some(reason);
+    }
     CommandRun {
         exit_code,
         timed_out,

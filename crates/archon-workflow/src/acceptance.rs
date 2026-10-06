@@ -119,12 +119,19 @@ pub(crate) fn run_verify_command_capture(
     if command.is_empty() {
         return Ok(None);
     }
-    let output = archon_shell::spawn::command(shell_program())
+    let environment = crate::acceptance_check_environment::CommandEnvironment::capture()?;
+    let output = environment
+        .command(shell_program())
         .arg("-c")
         .arg(command)
         .current_dir(root)
         .output()
         .map_err(|err| format!("verify_command failed to launch: {err}"))?;
+    if !output.status.success()
+        && let Some(reason) = environment.failure(&[&output.stdout, &output.stderr])
+    {
+        return Err(reason);
+    }
     Ok(Some(VerifyCommandReport {
         command: command.to_string(),
         exit_code: output.status.code(),

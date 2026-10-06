@@ -282,12 +282,16 @@ pub(super) async fn run_contract_verifier_for(
     // Issue-227/234: `boundary` lives until the verifier has been reaped, then
     // `finish` restores and names any change to a sealed root on a host with no
     // kernel boundary (a no-op where the kernel refused the write live).
-    let (mut process, boundary) = match crate::write_coordinator::host_sandbox::command(
+    let (mut process, boundary, environment) = match crate::write_coordinator::host_sandbox::command(
         archon_shell::resolve_posix_shell(),
         run_root,
         &[],
     ) {
-        Ok((command, boundary)) => (tokio::process::Command::from(command), boundary),
+        Ok((command, boundary, environment)) => (
+            tokio::process::Command::from(command),
+            boundary,
+            environment,
+        ),
         Err(reason) => return ContractVerification::Unavailable(reason),
     };
     process
@@ -364,6 +368,11 @@ pub(super) async fn run_contract_verifier_for(
         .filter_map(verdict_failure)
         .flatten()
         .collect();
+    if (!output.status.success() || !failures.is_empty())
+        && let Some(reason) = environment.failure(&[&output.stdout, &output.stderr])
+    {
+        return ContractVerification::Unavailable(reason);
+    }
     if !failures.is_empty() || cut.is_some() {
         return ContractVerification::Failed(failures.into_iter().chain(cut).collect());
     }

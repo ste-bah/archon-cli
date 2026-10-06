@@ -74,6 +74,7 @@ pub enum ApplyError {
         exit: i32,
         stderr_tail: String,
     },
+    VerifyEnvironment(String),
     PersistFailed {
         source: std::io::Error,
     },
@@ -116,6 +117,7 @@ impl std::fmt::Display for ApplyError {
             Self::VerifyFailed { exit, stderr_tail } => {
                 write!(f, "wave verify failed (exit {exit}): {stderr_tail}")
             }
+            Self::VerifyEnvironment(reason) => write!(f, "wave verify environment: {reason}"),
             Self::PersistFailed { source } => write!(f, "persist failed: {source}"),
             Self::Isolation(e) => write!(f, "isolation error: {e}"),
             Self::WaveCommitFailed { stderr } => {

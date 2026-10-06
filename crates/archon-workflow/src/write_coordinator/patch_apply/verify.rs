@@ -31,8 +31,11 @@ pub fn run_wave_verify(
         persist_verify(run_root, stage_id, wave_id, &result)?;
         return Ok(result);
     };
+    let environment = crate::acceptance_check_environment::CommandEnvironment::capture()
+        .map_err(ApplyError::VerifyEnvironment)?;
     let start = SystemTime::now();
-    let output = archon_shell::spawn::command(crate::acceptance::shell_program())
+    let output = environment
+        .command(crate::acceptance::shell_program())
         .arg("-c")
         .arg(cmd)
         .current_dir(canonical_root)
@@ -54,6 +57,9 @@ pub fn run_wave_verify(
     };
     persist_verify(run_root, stage_id, wave_id, &result)?;
     if result.exit != 0 {
+        if let Some(reason) = environment.failure(&[&output.stdout, &output.stderr]) {
+            return Err(ApplyError::VerifyEnvironment(reason));
+        }
         return Err(ApplyError::VerifyFailed {
             exit: result.exit,
             stderr_tail: result.stderr_tail.clone(),

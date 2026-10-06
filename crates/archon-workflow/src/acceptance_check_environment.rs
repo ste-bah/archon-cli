@@ -39,6 +39,8 @@
 //! ([`withheld_error`]).
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::path::Path;
 
 use crate::acceptance_scratch::ScratchPolicy;
@@ -334,6 +336,52 @@ pub fn check_environment(
     let mut environment = site_variables(host, policy, site);
     environment.extend(forwarded_values(host, &policy.forwarded)?);
     Ok(environment)
+}
+
+/// The default check environment for an agent-authored host verifier.
+/// Uses the same builder as direct/scratch acceptance, with the host HOME.
+/// Environment construction must succeed before a command can be built.
+pub struct CommandEnvironment {
+    variables: BTreeMap<String, String>,
+    withheld: BTreeSet<String>,
+}
+
+impl CommandEnvironment {
+    pub fn capture() -> Result<Self, String> {
+        Self::from_host(&host_environment())
+    }
+
+    /// `host` may include host-selected toolchain/cache locator overrides.
+    /// Those overrides pass through the default policy too, never around it.
+    pub fn from_host(host: &BTreeMap<String, String>) -> Result<Self, String> {
+        let site: Vec<(&str, &Path)> = lookup(host, "HOME")
+            .map(|(_, home)| ("HOME", Path::new(home)))
+            .into_iter()
+            .collect();
+        let variables = check_environment(host, &CheckPolicy::default_for(host), &site)
+            .map_err(|reason| format!("check command environment could not be built: {reason}"))?;
+        Ok(Self {
+            withheld: withheld(host, &variables),
+            variables,
+        })
+    }
+
+    /// Every child still passes through the process-wide spawn boundary.
+    pub fn command(&self, program: impl AsRef<OsStr>) -> std::process::Command {
+        let mut command = archon_shell::spawn::command(program);
+        command.env_clear().envs(&self.variables);
+        command
+    }
+
+    pub fn tokio_command(&self, program: impl AsRef<OsStr>) -> tokio::process::Command {
+        tokio::process::Command::from(self.command(program))
+    }
+
+    /// Call only for a failed verifier: a bare mention or a name the data
+    /// allowlist cannot forward never converts a failure to an environment error.
+    pub fn failure(&self, outputs: &[&[u8]]) -> Option<String> {
+        withheld_error(outputs, &self.withheld)
+    }
 }
 
 #[path = "acceptance_check_environment_withheld.rs"]

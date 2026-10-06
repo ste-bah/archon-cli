@@ -124,7 +124,13 @@ pub(super) enum Ran {
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 pub(super) fn run(cwd: &Path, argv: &[String], timeout: Duration) -> Ran {
-    let spawned = archon_shell::spawn::command(&argv[0])
+    let environment =
+        match archon_workflow::acceptance_check_environment::CommandEnvironment::capture() {
+            Ok(environment) => environment,
+            Err(reason) => return Ran::NotLaunchable { reason },
+        };
+    let spawned = environment
+        .command(&argv[0])
         .args(&argv[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -165,8 +171,16 @@ pub(super) fn run(cwd: &Path, argv: &[String], timeout: Duration) -> Ran {
         std::thread::sleep(POLL_INTERVAL);
     };
 
-    let mut output = out_reader.join().unwrap_or_default();
-    output.push_str(&err_reader.join().unwrap_or_default());
+    let stdout = out_reader.join().unwrap_or_default();
+    let stderr = err_reader.join().unwrap_or_default();
+
+    if status.as_ref().is_some_and(|status| !status.success())
+        && let Some(reason) = environment.failure(&[stdout.as_bytes(), stderr.as_bytes()])
+    {
+        return Ran::NotLaunchable { reason };
+    }
+    let mut output = stdout;
+    output.push_str(&stderr);
 
     match status {
         None => Ran::TimedOut {
@@ -191,3 +205,7 @@ fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> String {
     let _ = pipe.read_to_end(&mut raw);
     String::from_utf8_lossy(&raw).into_owned()
 }
+
+#[cfg(test)]
+#[path = "verifier_environment_tests.rs"]
+mod environment_tests;
