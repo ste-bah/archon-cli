@@ -31,7 +31,6 @@ use std::time::Duration;
 
 use serde_json::json;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 
 use crate::tool::{
     PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
@@ -122,7 +121,7 @@ impl Tool for MonitorTool {
 async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolResult {
     #[cfg(unix)]
     let mut cmd = {
-        let mut c = Command::new("/bin/sh");
+        let mut c = archon_shell::spawn::tokio_command("/bin/sh");
         c.arg("-c").arg(command);
         c
     };
@@ -131,7 +130,7 @@ async fn run_monitor(command: &str, timeout_ms: u64, ctx: &ToolContext) -> ToolR
         // Fall back to the system shell on non-unix; the tool's tests
         // are #[cfg(unix)] so this branch is exercised only in prod
         // builds on Windows.
-        let mut c = Command::new("cmd");
+        let mut c = archon_shell::spawn::tokio_command("cmd");
         c.arg("/C").arg(command);
         c
     };

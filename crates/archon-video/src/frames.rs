@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
-use tokio::process::Command;
 
 use crate::errors::VideoError;
 
@@ -108,7 +107,7 @@ async fn extract_mode_ffmpeg(
     } else {
         format!("fps=1/{}", opts.interval_secs.max(0.1))
     };
-    let output = Command::new(ffmpeg_bin(&opts.ffmpeg_bin))
+    let output = archon_shell::spawn::tokio_command(ffmpeg_bin(&opts.ffmpeg_bin))
         .arg("-hide_banner")
         .arg("-nostdin")
         .arg("-y")

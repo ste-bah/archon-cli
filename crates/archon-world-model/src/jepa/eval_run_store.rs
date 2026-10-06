@@ -360,6 +360,11 @@ impl JepaEvalRunStore {
                     .ok_or_else(|| anyhow::anyhow!("non-UTF-8 log path"))?,
             )?;
 
+            // Read before the fork: the worker inherits only its stdio
+            // (Issue 340), and nothing that reads the ceiling is
+            // async-signal safe.
+            let ceiling = archon_shell::process_tree::descriptor_ceiling()?;
+
             // SAFETY: standard double-fork + setsid daemonisation pattern.
             // After the first fork the child calls setsid() then forks again;
             // the grandchild execs the worker.  The first child exits
@@ -397,6 +402,13 @@ impl JepaEvalRunStore {
                                     libc::close(logfd);
                                 }
 
+                                // Any other descriptor, such as a pipe another
+                                // thread had not yet made close-on-exec, would
+                                // stay open in the worker for its whole life.
+                                if archon_shell::process_tree::inherit_only_stdio(ceiling).is_err()
+                                {
+                                    libc::_exit(1);
+                                }
                                 libc::execv(exe_c.as_ptr(), c_ptrs.as_ptr());
                                 // execv only returns on failure.
                                 libc::_exit(1);

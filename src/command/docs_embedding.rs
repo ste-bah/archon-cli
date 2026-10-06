@@ -227,7 +227,7 @@ fn check_hnsw_index(db: &DbInstance) -> Result<bool> {
 fn pdfimages_status() -> String {
     let bin = std::env::var_os("ARCHON_PDFIMAGES_BIN").unwrap_or_else(|| "pdfimages".into());
     let display = std::path::PathBuf::from(&bin).display().to_string();
-    match std::process::Command::new(&bin).arg("-v").output() {
+    match archon_shell::spawn::command(&bin).arg("-v").output() {
         Ok(output) if output.status.success() || !output.stderr.is_empty() => {
             format!("available ({display})")
         }

@@ -29,7 +29,7 @@
 //! [`super::guard::MutationGuard`] says so rather than reporting a clean run.
 
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use archon_knowledge::traceability::RefusedToRun;
@@ -124,7 +124,7 @@ pub(super) enum Ran {
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 pub(super) fn run(cwd: &Path, argv: &[String], timeout: Duration) -> Ran {
-    let spawned = Command::new(&argv[0])
+    let spawned = archon_shell::spawn::command(&argv[0])
         .args(&argv[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())

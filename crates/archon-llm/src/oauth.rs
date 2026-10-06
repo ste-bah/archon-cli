@@ -267,7 +267,7 @@ pub async fn login(
     let auth_url = build_auth_url(&challenge, &state, port);
 
     tracing::info!("Opening browser for OAuth login...");
-    if let Err(e) = open::that(&auth_url) {
+    if let Err(e) = archon_shell::spawn::run_first_launcher(open::commands(&auth_url)) {
         tracing::warn!("Failed to open browser: {e}");
         eprintln!("\nOpen this URL in your browser to log in:\n{auth_url}\n");
     }

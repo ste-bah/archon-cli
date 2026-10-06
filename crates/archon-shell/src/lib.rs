@@ -250,6 +250,10 @@ pub mod paths;
 // (archon-workflow) and the host-command environment (the bin) all apply it.
 pub mod data_environment;
 
+// Issue 340: the one way any crate builds a child process, so every child
+// inherits only its stdio. Here, in the leaf, because every crate spawns.
+pub mod spawn;
+
 // Issue-270: every process a supervised child started, past its first
 // process group: here, in the leaf, because the host-command supervisor and
 // archon-workflow's check runner both confine their children with it.

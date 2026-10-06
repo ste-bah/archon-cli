@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use archon_permissions::sandbox::{SandboxCommandRequest, SandboxScope};
-use tokio::process::Command as TokioCommand;
 
 use super::DockerConfig;
 use super::exec::{ContainerKind, docker_exec_args, docker_pool_create_args};
@@ -255,7 +254,7 @@ impl ContainerPool {
             &name,
             self.config.container_max_age_secs,
         );
-        let output = TokioCommand::new(&self.binary)
+        let output = archon_shell::spawn::tokio_command(&self.binary)
             .args(args)
             .stdin(Stdio::null())
             .output()
@@ -299,7 +298,7 @@ impl ContainerPool {
     }
 
     async fn is_running(&self, name: &str) -> bool {
-        TokioCommand::new(&self.binary)
+        archon_shell::spawn::tokio_command(&self.binary)
             .args(["inspect", "-f", "{{.State.Running}}", name])
             .stdin(Stdio::null())
             .output()
@@ -310,7 +309,7 @@ impl ContainerPool {
     }
 
     async fn destroy(&self, name: &str) {
-        let _ = TokioCommand::new(&self.binary)
+        let _ = archon_shell::spawn::tokio_command(&self.binary)
             .args(["rm", "--force", name])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -343,7 +342,7 @@ impl Drop for ContainerPool {
             .map(|(_, held)| held.name)
             .collect();
         for name in names {
-            let _ = std::process::Command::new(&self.binary)
+            let _ = archon_shell::spawn::command(&self.binary)
                 .args(["rm", "--force", &name])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())

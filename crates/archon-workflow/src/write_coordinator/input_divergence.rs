@@ -18,7 +18,6 @@
 //! older commit legitimately sees older tracked copies.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::Serialize;
 
@@ -66,7 +65,7 @@ fn short(state: &str) -> &str {
 }
 
 fn git(repository: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(repository)
         .args(args)

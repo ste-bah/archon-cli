@@ -125,7 +125,7 @@ pub(crate) fn reclaim_with_liveness(
 }
 
 fn no_other_archon_process() -> Result<()> {
-    let output = std::process::Command::new("ps")
+    let output = archon_shell::spawn::command("ps")
         .args(["-Ao", "pid=,comm="])
         .output()
         .context("cannot verify executor liveness; reclaim refused")?;

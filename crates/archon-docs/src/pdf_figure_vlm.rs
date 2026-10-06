@@ -15,7 +15,6 @@ use std::io::Cursor;
 use std::path::Path;
 
 use cozo::DbInstance;
-use tokio::process::Command;
 
 use archon_ingest_ext::chunk::FigureRegion;
 
@@ -132,23 +131,24 @@ async fn render_page_png(pdf_path: &Path, page: u32) -> Result<Vec<u8>, DocsErro
     let dir = std::env::temp_dir().join(format!("archon-figure-page-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir)?;
     let prefix = dir.join("page");
-    let output = Command::new(command_path("pdftoppm", "ARCHON_PDFTOPPM_BIN"))
-        .arg("-png")
-        .arg("-r")
-        .arg(FIGURE_RENDER_DPI.to_string())
-        .arg("-f")
-        .arg(page.to_string())
-        .arg("-l")
-        .arg(page.to_string())
-        .arg("-singlefile")
-        .arg(pdf_path)
-        .arg(&prefix)
-        .output()
-        .await
-        .map_err(|e| DocsError::OcrApi {
-            message: format!("pdftoppm figure render failed to start: {e}"),
-            status_code: None,
-        })?;
+    let output =
+        archon_shell::spawn::tokio_command(command_path("pdftoppm", "ARCHON_PDFTOPPM_BIN"))
+            .arg("-png")
+            .arg("-r")
+            .arg(FIGURE_RENDER_DPI.to_string())
+            .arg("-f")
+            .arg(page.to_string())
+            .arg("-l")
+            .arg(page.to_string())
+            .arg("-singlefile")
+            .arg(pdf_path)
+            .arg(&prefix)
+            .output()
+            .await
+            .map_err(|e| DocsError::OcrApi {
+                message: format!("pdftoppm figure render failed to start: {e}"),
+                status_code: None,
+            })?;
     if !output.status.success() {
         let _ = std::fs::remove_dir_all(&dir);
         return Err(DocsError::OcrApi {

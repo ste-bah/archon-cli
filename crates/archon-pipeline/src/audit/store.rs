@@ -286,7 +286,7 @@ fn write_text_atomic(path: &Path, text: &str) -> Result<()> {
 }
 
 fn git_head() -> Result<String> {
-    let out = std::process::Command::new("git")
+    let out = archon_shell::spawn::command("git")
         .args(["rev-parse", "HEAD"])
         .output()?;
     if !out.status.success() {
@@ -296,7 +296,7 @@ fn git_head() -> Result<String> {
 }
 
 fn git_dirty() -> Result<bool> {
-    let out = std::process::Command::new("git")
+    let out = archon_shell::spawn::command("git")
         .args(["status", "--porcelain"])
         .output()?;
     if !out.status.success() {

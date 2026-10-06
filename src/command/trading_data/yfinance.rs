@@ -106,7 +106,7 @@ pub(super) fn fetch_native(
 }
 
 fn fetch_chart_response(url: &str) -> Result<(u16, Vec<u8>)> {
-    let response = std::process::Command::new("python3")
+    let response = archon_shell::spawn::command("python3")
         .arg("-c")
         .arg(
             r#"import sys, urllib.request

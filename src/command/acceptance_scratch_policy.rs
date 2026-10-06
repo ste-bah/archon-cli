@@ -72,7 +72,7 @@ pub(crate) fn capture(project: &Path, tasks: &Path) -> WorkflowResult<Option<Nat
             })
     };
     let repository = canonical(&config.repository)?;
-    let output = std::process::Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(&repository)
         .args(["rev-parse", "HEAD"])
@@ -160,7 +160,7 @@ pub(crate) fn record_final_source(
         }
         value
     } else {
-        let output = std::process::Command::new("git")
+        let output = archon_shell::spawn::command("git")
             .arg("-C")
             .arg(&repo)
             .args(["rev-parse", "HEAD"])

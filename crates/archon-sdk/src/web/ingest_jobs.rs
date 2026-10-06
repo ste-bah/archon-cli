@@ -1,6 +1,6 @@
 use std::{path::Path, sync::Arc};
 
-use tokio::{process::Command, sync::Mutex};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use super::{
@@ -116,7 +116,7 @@ pub(crate) fn command_args(request: &WebIngestRunRequest) -> Result<Vec<String>,
 }
 
 async fn run_archon_command(cwd: &Path, args: &[String]) -> std::io::Result<std::process::Output> {
-    Command::new(std::env::current_exe()?)
+    archon_shell::spawn::tokio_command(std::env::current_exe()?)
         .args(args)
         .current_dir(cwd)
         .output()

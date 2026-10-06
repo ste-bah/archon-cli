@@ -6,7 +6,6 @@
 //! - **OrphanDetectionGate** (REQ-IMPROVE-008): every new file must be referenced
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 use super::compilation_gate::{CleanupOutcome, CommandExecution, CommandSpec, TreeTermination};
@@ -442,7 +441,7 @@ impl TestsRunGate {
             Language::TypeScript => ("npm", vec!["test"]),
         };
 
-        let output = Command::new(cmd)
+        let output = archon_shell::spawn::command(cmd)
             .args(&args)
             .current_dir(project_root)
             .output();
@@ -535,7 +534,7 @@ impl E2ESmokeTestGate {
             };
         }
 
-        let output = Command::new(parts[0])
+        let output = archon_shell::spawn::command(parts[0])
             .args(&parts[1..])
             .current_dir(project_root)
             .output();

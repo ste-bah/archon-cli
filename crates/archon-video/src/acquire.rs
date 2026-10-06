@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 use archon_policy::{EffectivePolicy, VideoPolicy};
 use async_trait::async_trait;
-use tokio::process::Command;
 
 use crate::errors::VideoError;
 use crate::source::AcquisitionMethod;
@@ -60,7 +59,7 @@ impl AcquisitionAdapter for ExternalDownloaderAdapter {
         std::fs::create_dir_all(&output_dir).map_err(|e| VideoError::AcquisitionFailed {
             message: format!("create video download directory: {e}"),
         })?;
-        let mut cmd = Command::new(&self.bin);
+        let mut cmd = archon_shell::spawn::tokio_command(&self.bin);
         if opts.audio_only {
             cmd.args(["-x", "--audio-format", "wav"]);
         } else {

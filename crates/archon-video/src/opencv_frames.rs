@@ -1,7 +1,5 @@
 use std::path::Path;
 
-use tokio::process::Command;
-
 use crate::errors::VideoError;
 use crate::frames::{ExtractedFrame, FrameExtractionOpts, collect_frames};
 
@@ -21,7 +19,7 @@ pub(crate) async fn extract_with_opencv(
     opts: &FrameExtractionOpts,
     prefix: &str,
 ) -> Result<Vec<ExtractedFrame>, VideoError> {
-    let output = Command::new(python_bin())
+    let output = archon_shell::spawn::tokio_command(python_bin())
         .arg("-c")
         .arg(OPENCV_EXTRACTOR)
         .arg(video_path)

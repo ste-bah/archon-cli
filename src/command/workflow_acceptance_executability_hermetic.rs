@@ -104,7 +104,7 @@ impl Drop for HermeticCopy {
 }
 
 fn git(args: &[&std::ffi::OsStr]) -> Result<(), Unrun> {
-    let output = std::process::Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .args(["-c", "core.hooksPath=/dev/null"])
         .args(args)
         .output()

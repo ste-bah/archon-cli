@@ -1,6 +1,5 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::process::Command;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -124,7 +123,10 @@ pub struct OpenShellDoctorReport {
 }
 
 pub fn probe_openshell(binary: &str) -> OpenShellProbe {
-    match Command::new(binary).arg("--version").output() {
+    match archon_shell::spawn::command(binary)
+        .arg("--version")
+        .output()
+    {
         Ok(output) => {
             let version = crate::sandbox::first_non_empty_line(&output.stdout)
                 .or_else(|| crate::sandbox::first_non_empty_line(&output.stderr))
@@ -356,7 +358,7 @@ impl OpenShellSandboxBackend {
                 };
             }
         };
-        let mut cmd = TokioCommand::new(&self.config.binary);
+        let mut cmd = archon_shell::spawn::tokio_command(&self.config.binary);
         cmd.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

@@ -290,6 +290,7 @@ dependencies = [
 name = "archon-accel"
 version = "1.9.3"
 dependencies = [
+ "archon-shell",
  "serde",
  "sysinfo",
 ]
@@ -412,6 +413,7 @@ dependencies = [
  "archon-cozo",
  "archon-policy",
  "archon-reasoning-quality",
+ "archon-shell",
  "blake3",
  "chrono",
  "cozo-ce",
@@ -590,6 +592,7 @@ dependencies = [
  "archon-llm",
  "archon-policy",
  "archon-provenance",
+ "archon-shell",
  "async-trait",
  "base64 0.22.1",
  "blake3",
@@ -625,6 +628,7 @@ version = "1.9.3"
 dependencies = [
  "archon-lanham",
  "archon-llm",
+ "archon-shell",
  "fancy-regex",
  "regex",
  "serde",
@@ -729,6 +733,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "archon-observability",
+ "archon-shell",
  "async-trait",
  "aws-credential-types",
  "aws-sigv4",
@@ -772,6 +777,7 @@ version = "1.9.3"
 dependencies = [
  "anyhow",
  "archon-observability",
+ "archon-shell",
  "archon-tools",
  "async-trait",
  "axum",
@@ -1013,6 +1019,7 @@ dependencies = [
  "archon-memory",
  "archon-permissions",
  "archon-pty",
+ "archon-shell",
  "archon-tools",
  "archon-workflow",
  "async-trait",
@@ -1043,6 +1050,7 @@ dependencies = [
  "anyhow",
  "archon-completion",
  "archon-cozo",
+ "archon-shell",
  "chrono",
  "cozo-ce",
  "dirs",
@@ -1066,6 +1074,7 @@ version = "1.9.3"
 dependencies = [
  "libc",
  "tempfile",
+ "tokio",
  "tracing",
  "which",
  "windows-sys 0.59.0",
@@ -1182,6 +1191,7 @@ dependencies = [
  "archon-observability",
  "archon-permissions",
  "archon-session",
+ "archon-shell",
  "archon-tools",
  "archon-trading",
  "async-trait",
@@ -1249,6 +1259,7 @@ dependencies = [
  "archon-knowledge",
  "archon-llm",
  "archon-policy",
+ "archon-shell",
  "async-trait",
  "chrono",
  "cozo-ce",
@@ -1323,6 +1334,7 @@ dependencies = [
  "archon-llm",
  "archon-memory",
  "archon-permissions",
+ "archon-shell",
  "async-trait",
  "candle-core",
  "candle-nn",

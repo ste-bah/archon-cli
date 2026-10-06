@@ -231,21 +231,21 @@ pub(crate) struct SystemClipboardRunner;
 
 impl ClipboardRunner for SystemClipboardRunner {
     fn detect_tool(&self) -> &'static str {
-        if std::process::Command::new("which")
+        if archon_shell::spawn::command("which")
             .arg("xclip")
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
         {
             "xclip"
-        } else if std::process::Command::new("which")
+        } else if archon_shell::spawn::command("which")
             .arg("clip.exe")
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
         {
             "clip.exe"
-        } else if std::process::Command::new("which")
+        } else if archon_shell::spawn::command("which")
             .arg("pbcopy")
             .output()
             .map(|o| o.status.success())
@@ -260,7 +260,7 @@ impl ClipboardRunner for SystemClipboardRunner {
     fn copy_to_clipboard(&self, tool: &str, content: &str) -> bool {
         match tool {
             "xclip" => {
-                let mut child = std::process::Command::new("xclip")
+                let mut child = archon_shell::spawn::command("xclip")
                     .arg("-selection")
                     .arg("clipboard")
                     .stdin(std::process::Stdio::piped())
@@ -276,7 +276,7 @@ impl ClipboardRunner for SystemClipboardRunner {
                 }
             }
             "clip.exe" => {
-                let mut child = std::process::Command::new("clip.exe")
+                let mut child = archon_shell::spawn::command("clip.exe")
                     .stdin(std::process::Stdio::piped())
                     .spawn();
                 if let Ok(ref mut c) = child {
@@ -290,7 +290,7 @@ impl ClipboardRunner for SystemClipboardRunner {
                 }
             }
             "pbcopy" => {
-                let mut child = std::process::Command::new("pbcopy")
+                let mut child = archon_shell::spawn::command("pbcopy")
                     .stdin(std::process::Stdio::piped())
                     .spawn();
                 if let Ok(ref mut c) = child {

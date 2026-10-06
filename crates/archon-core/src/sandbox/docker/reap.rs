@@ -15,8 +15,6 @@
 
 use std::process::Stdio;
 
-use tokio::process::Command as TokioCommand;
-
 use super::pool::{OWNED_LABEL, OWNER_LABEL, PID_LABEL, owner_id};
 
 /// Remove every Archon sandbox container whose creating process is gone.
@@ -46,7 +44,7 @@ pub(super) async fn reap_orphans(binary: String) {
             owner = %candidate.owner,
             "sandbox: removing a container left behind by a dead Archon process"
         );
-        let _ = TokioCommand::new(&binary)
+        let _ = archon_shell::spawn::tokio_command(&binary)
             .args(["rm", "--force", &candidate.name])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -63,7 +61,7 @@ pub(super) struct Orphan {
 }
 
 async fn list_owned(binary: &str) -> Result<Vec<Orphan>, String> {
-    let output = TokioCommand::new(binary)
+    let output = archon_shell::spawn::tokio_command(binary)
         .args([
             "ps",
             "--all",

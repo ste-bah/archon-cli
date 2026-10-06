@@ -199,7 +199,7 @@ pub async fn run_at(
         crate::task_set_contract::TrustedCwd::ProjectRoot => site.project,
         crate::task_set_contract::TrustedCwd::RepoRoot => site.repository,
     };
-    let mut process = tokio::process::Command::new(archon_shell::resolve_posix_shell());
+    let mut process = archon_shell::spawn::tokio_command(archon_shell::resolve_posix_shell());
     process
         .arg("-s")
         .current_dir(cwd)

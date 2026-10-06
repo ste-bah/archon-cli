@@ -29,7 +29,6 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -102,7 +101,7 @@ pub fn write_repository_record(
 /// `git rev-parse --show-toplevel` from `path`, when `path` is inside a
 /// git working tree.
 pub fn git_toplevel(path: &Path) -> Option<PathBuf> {
-    let output = Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(path)
         .args(["rev-parse", "--show-toplevel"])
@@ -125,7 +124,7 @@ pub fn is_git_checkout(path: &Path) -> bool {
 /// [`UNBORN_BASE_COMMIT`] when the repository has no commit yet. An error
 /// means the path is not a repository git can read.
 pub fn git_head(repository_root: &Path) -> WorkflowResult<String> {
-    let output = Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(repository_root)
         .args(["rev-parse", "--verify", "-q", "HEAD"])
@@ -197,7 +196,7 @@ impl RepositoryTree {
         }
         let mut at_base = BTreeSet::new();
         if record.base_commit != UNBORN_BASE_COMMIT {
-            let output = Command::new("git")
+            let output = archon_shell::spawn::command("git")
                 .arg("-C")
                 .arg(&root)
                 .args([

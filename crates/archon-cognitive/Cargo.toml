@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+# Issue 340: every child is built through `archon_shell::spawn`.
+archon-shell = { path = "../archon-shell" }
 blake3.workspace = true
 chrono.workspace = true
 cozo.workspace = true

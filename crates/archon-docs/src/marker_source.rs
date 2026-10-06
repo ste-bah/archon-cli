@@ -426,7 +426,7 @@ async fn run_sidecar(
     env: &[(String, String)],
     page_range: Option<(u32, u32)>,
 ) -> Result<String, SidecarError> {
-    let mut cmd = tokio::process::Command::new(python);
+    let mut cmd = archon_shell::spawn::tokio_command(python);
     cmd.arg(script).arg(pdf_path);
     if let Some(dev) = device {
         cmd.arg("--device").arg(dev);

@@ -1,6 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -36,7 +36,7 @@ fn start(batch_size: usize, window_size: usize, poll_secs: u64) -> Result<()> {
         .create(true)
         .append(true)
         .open(log_path())?;
-    let child = Command::new(std::env::current_exe()?)
+    let child = archon_shell::spawn::command(std::env::current_exe()?)
         .args([
             "docs",
             "index-daemon",
@@ -143,7 +143,7 @@ fn read_pid() -> Result<Option<u32>> {
 fn process_running(#[allow(unused_variables)] pid: u32) -> bool {
     #[cfg(unix)]
     {
-        Command::new("kill")
+        archon_shell::spawn::command("kill")
             .args(["-0", &pid.to_string()])
             .status()
             .map(|status| status.success())
@@ -158,7 +158,7 @@ fn process_running(#[allow(unused_variables)] pid: u32) -> bool {
 fn terminate_process(pid: u32) -> Result<()> {
     #[cfg(unix)]
     {
-        let status = Command::new("kill")
+        let status = archon_shell::spawn::command("kill")
             .args(["-TERM", &pid.to_string()])
             .status()?;
         if !status.success() {

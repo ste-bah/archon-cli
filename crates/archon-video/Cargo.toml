@@ -10,6 +10,8 @@ default = []
 whisper-rs = ["dep:whisper-rs"]
 
 [dependencies]
+# Issue 340: every child is built through `archon_shell::spawn`.
+archon-shell = { path = "../archon-shell" }
 archon-docs = { path = "../archon-docs" }
 archon-llm = { path = "../archon-llm" }
 archon-policy = { path = "../archon-policy" }

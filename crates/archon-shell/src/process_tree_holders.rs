@@ -169,7 +169,7 @@ fn open_paths(
     let program = lsof()?;
     // SAFETY: getuid cannot fail and touches no memory.
     let uid = unsafe { libc::getuid() };
-    let mut command = std::process::Command::new(program);
+    let mut command = crate::spawn::command(program);
     command
         .args(["-nP", "-w", "-Fpan", "-u"])
         .arg(uid.to_string());

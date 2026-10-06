@@ -138,7 +138,7 @@ fn inside_scope_roots(roots: &[String], path: &str) -> bool {
 /// whitespace: the landing drops such a change (Issue-13) rather than
 /// judging it. A new, deleted or unreadable file is a real change.
 fn whitespace_only_against_head(root: &std::path::Path, path: &str) -> bool {
-    let Ok(base) = std::process::Command::new("git")
+    let Ok(base) = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(root)
         .args(["show", &format!("HEAD:{path}")])

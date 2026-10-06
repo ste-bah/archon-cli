@@ -33,7 +33,7 @@ pub use tracker::{ReapToken, Tracker};
 mod cleanup;
 pub use cleanup::{drain_cleanup, lock_until, register_cleanup};
 #[path = "process_tree_descriptors.rs"]
-mod descriptors;
+pub(crate) mod descriptors;
 pub use descriptors::{descriptor_ceiling, inherit_only_stdio};
 
 /// How long [`snapshot`] may take.

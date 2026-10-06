@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use serde_json::json;
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 
 use crate::tool::{
     PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult, WorkingTreeEffect,
@@ -62,7 +61,7 @@ impl Tool for PowerShellTool {
         // Build sanitized environment (same as BashTool)
         let env_vars = crate::bash::host_env();
 
-        let mut cmd = Command::new(shell);
+        let mut cmd = archon_shell::spawn::tokio_command(shell);
         cmd.arg("-Command")
             .arg(command)
             .current_dir(&ctx.working_dir)
@@ -142,7 +141,7 @@ impl Tool for PowerShellTool {
 }
 
 fn which_pwsh() -> bool {
-    std::process::Command::new("which")
+    archon_shell::spawn::command("which")
         .arg("pwsh")
         .stdout(Stdio::null())
         .stderr(Stdio::null())

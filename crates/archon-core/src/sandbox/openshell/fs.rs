@@ -28,7 +28,6 @@ use std::sync::Arc;
 
 use archon_permissions::sandbox::SandboxCommandRequest;
 use archon_tools::filesystem::{FileSystem, LocalFs};
-use tokio::process::Command as TokioCommand;
 
 use super::exec::{openshell_create_args, remote_workdir};
 use super::{OpenShellConfig, OpenShellSandboxBackend, apply_openshell_env_policy};
@@ -88,7 +87,7 @@ impl RemoteExec for OpenShellTransport {
     async fn run(&self, script: &str, stdin: &[u8]) -> io::Result<RemoteOutput> {
         let args = openshell_fs_args(&self.config, &self.working_dir, script)
             .map_err(|error| io::Error::other(format!("openshell sandbox: {error}")))?;
-        let mut cmd = TokioCommand::new(&self.config.binary);
+        let mut cmd = archon_shell::spawn::tokio_command(&self.config.binary);
         cmd.args(args);
         apply_openshell_env_policy(&mut cmd, &self.config);
         run_transport_process(cmd, stdin, REMOTE_FS_TIMEOUT_MS, "openshell").await

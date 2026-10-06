@@ -85,7 +85,7 @@ async fn extract_image_with_tesseract(
 ) -> Result<OcrExtractResult, DocsError> {
     let started = Instant::now();
     let mut command =
-        tokio::process::Command::new(command_path("tesseract", "ARCHON_TESSERACT_BIN"));
+        archon_shell::spawn::tokio_command(command_path("tesseract", "ARCHON_TESSERACT_BIN"));
     command.arg(path).arg("stdout");
     if let Some(language) = language_hint.filter(|s| !s.trim().is_empty()) {
         command.arg("-l").arg(language);
@@ -155,7 +155,7 @@ async fn extract_pdf_native(path: &Path) -> Result<OcrExtractResult, DocsError> 
 
     // Try pdftotext (from poppler-utils) first — bounded like the other OCR-path subprocesses.
     let mut command =
-        tokio::process::Command::new(command_path("pdftotext", "ARCHON_PDFTOTEXT_BIN"));
+        archon_shell::spawn::tokio_command(command_path("pdftotext", "ARCHON_PDFTOTEXT_BIN"));
     command
         .arg("-layout")
         .arg(&path_str)
@@ -256,7 +256,8 @@ async fn extract_scanned_pdf(
 
 async fn render_pdf_pages(path: &Path, render_dir: &Path) -> Result<Vec<PathBuf>, DocsError> {
     let prefix = render_dir.join("page");
-    let mut command = tokio::process::Command::new(command_path("pdftoppm", "ARCHON_PDFTOPPM_BIN"));
+    let mut command =
+        archon_shell::spawn::tokio_command(command_path("pdftoppm", "ARCHON_PDFTOPPM_BIN"));
     command
         .arg("-png")
         .arg(path)

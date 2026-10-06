@@ -7,7 +7,7 @@
 //! Feature-gated: only compiled when `--features terminal-panel`.
 
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 // ---------------------------------------------------------------------------
 // TerminalPanelConfig
@@ -146,7 +146,7 @@ impl TerminalPanel {
     ///
     /// Result is not cached here — callers who need caching should wrap externally.
     pub fn is_tmux_available() -> bool {
-        Command::new("tmux")
+        archon_shell::spawn::command("tmux")
             .arg("-V")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -186,7 +186,7 @@ impl TerminalPanel {
     /// Spawns `tmux -L <socket> kill-server` as a detached process (fire-and-forget).
     pub fn schedule_cleanup(&self) {
         let args = self.config.tmux_kill_server_args();
-        let _ = Command::new("tmux")
+        let _ = archon_shell::spawn::command("tmux")
             .args(&args[..])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -204,7 +204,9 @@ impl TerminalPanel {
             if !session_exists {
                 // Create new detached tmux session
                 let new_args = self.config.tmux_new_session_args(shell);
-                let status = Command::new("tmux").args(&new_args[..]).status()?;
+                let status = archon_shell::spawn::command("tmux")
+                    .args(&new_args[..])
+                    .status()?;
 
                 if !status.success() {
                     return Err(std::io::Error::new(
@@ -215,11 +217,15 @@ impl TerminalPanel {
 
                 // Bind Meta+J → detach-client
                 let bind_args = self.config.tmux_bind_metaj_args();
-                let _ = Command::new("tmux").args(&bind_args[..]).status();
+                let _ = archon_shell::spawn::command("tmux")
+                    .args(&bind_args[..])
+                    .status();
 
                 // Set status bar hint
                 let hint_args = self.config.tmux_status_hint_args();
-                let _ = Command::new("tmux").args(&hint_args[..]).status();
+                let _ = archon_shell::spawn::command("tmux")
+                    .args(&hint_args[..])
+                    .status();
             }
 
             self.initialized = true;
@@ -228,14 +234,18 @@ impl TerminalPanel {
         // Attach — blocks until user presses Meta+J (detach-client)
         let attach_args = self.config.tmux_attach_args();
         self.open = true;
-        let _ = Command::new("tmux").args(&attach_args[..]).status()?;
+        let _ = archon_shell::spawn::command("tmux")
+            .args(&attach_args[..])
+            .status()?;
         self.open = false;
         Ok(())
     }
 
     fn toggle_with_shell_fallback(&mut self, shell: &str) -> std::io::Result<()> {
         self.open = true;
-        let _ = Command::new(shell).args(["-i", "-l"]).status()?;
+        let _ = archon_shell::spawn::command(shell)
+            .args(["-i", "-l"])
+            .status()?;
         self.open = false;
         Ok(())
     }
@@ -243,7 +253,7 @@ impl TerminalPanel {
     fn tmux_session_exists(&self) -> bool {
         // `tmux -L <socket> has-session -t panel` exits 0 if session exists
         let socket = self.config.socket_name();
-        Command::new("tmux")
+        archon_shell::spawn::command("tmux")
             .args(["-L", &socket, "has-session", "-t", Self::SESSION_NAME])
             .stdout(Stdio::null())
             .stderr(Stdio::null())

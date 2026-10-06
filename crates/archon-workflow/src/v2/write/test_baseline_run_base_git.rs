@@ -4,7 +4,7 @@
 use std::path::Path;
 
 fn git(repository_root: &Path, args: &[&std::ffi::OsStr]) -> bool {
-    std::process::Command::new("git")
+    archon_shell::spawn::command("git")
         .arg("-C")
         .arg(repository_root)
         .args(args)

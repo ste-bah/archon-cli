@@ -173,7 +173,7 @@ pub(crate) fn command(
 ) -> Result<(std::process::Command, BoundaryGuard), String> {
     let unbounded = || {
         Ok((
-            std::process::Command::new(program),
+            archon_shell::spawn::command(program),
             BoundaryGuard::default(),
         ))
     };
@@ -206,7 +206,7 @@ pub(crate) fn command(
                 .collect();
             let sandbox =
                 LandlockSandbox::build(&sealed, writable, &temps).map_err(|r| refused(&r))?;
-            let mut command = std::process::Command::new(program);
+            let mut command = archon_shell::spawn::command(program);
             #[cfg(target_os = "linux")]
             sandbox.install_std(&mut command);
             if let Some(dir) = sandbox.private_temp() {
@@ -230,7 +230,7 @@ pub(crate) fn command(
             excluded.extend(super::sealed_roots::user_host_stores());
             let snapshot = SnapshotBoundary::capture(&sealed, &excluded);
             Ok((
-                std::process::Command::new(program),
+                archon_shell::spawn::command(program),
                 BoundaryGuard::snapshot(snapshot),
             ))
         }
@@ -240,7 +240,7 @@ pub(crate) fn command(
 /// `program` under `sandbox-exec` with `profile`, once a probe shows this
 /// process can apply it.
 fn sandbox_exec(program: &Path, profile: String) -> Result<std::process::Command, String> {
-    let probe = std::process::Command::new(SANDBOX_EXEC)
+    let probe = archon_shell::spawn::command(SANDBOX_EXEC)
         .arg("-p")
         .arg(&profile)
         .arg("/usr/bin/true")
@@ -255,7 +255,7 @@ fn sandbox_exec(program: &Path, profile: String) -> Result<std::process::Command
             String::from_utf8_lossy(&probe.stderr).trim()
         ));
     }
-    let mut command = std::process::Command::new(SANDBOX_EXEC);
+    let mut command = archon_shell::spawn::command(SANDBOX_EXEC);
     command.arg("-p").arg(profile).arg(program);
     Ok(command)
 }

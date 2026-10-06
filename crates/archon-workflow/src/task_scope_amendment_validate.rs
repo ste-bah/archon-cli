@@ -230,7 +230,7 @@ fn finish(
 /// Whether the repository's git ignores `path` (and so its patch would skip
 /// it). Not a git repository, or git unavailable: not ignored.
 fn git_ignores(repository_root: &Path, path: &str) -> bool {
-    std::process::Command::new("git")
+    archon_shell::spawn::command("git")
         .arg("-C")
         .arg(repository_root)
         .args(["check-ignore", "-q", "--"])

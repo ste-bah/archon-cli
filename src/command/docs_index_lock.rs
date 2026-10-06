@@ -3,8 +3,6 @@ use std::io::Write;
 use std::path::PathBuf;
 // Used only by `cfg(unix)` code below. See #136.
 #[cfg(unix)]
-use std::process::Command;
-
 use anyhow::Result;
 
 pub(crate) struct DocsIndexLock {
@@ -64,7 +62,7 @@ fn stale_lock(path: &PathBuf) -> bool {
 fn process_running(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        Command::new("kill")
+        archon_shell::spawn::command("kill")
             .args(["-0", &pid.to_string()])
             .status()
             .map(|status| status.success())

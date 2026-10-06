@@ -8,7 +8,6 @@
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
-use tokio::process::Command;
 
 use crate::tool::{ToolContext, ToolResult};
 
@@ -17,7 +16,7 @@ pub async fn run_archon(args: Vec<String>, ctx: &ToolContext) -> ToolResult {
         Ok(bin) => bin,
         Err(e) => return ToolResult::error(e),
     };
-    let mut command = Command::new(bin);
+    let mut command = archon_shell::spawn::tokio_command(bin);
     command.args(&args).env("ARCHON_TOOL_CHILD", "1");
     if !ctx.working_dir.as_os_str().is_empty() {
         command.current_dir(&ctx.working_dir);

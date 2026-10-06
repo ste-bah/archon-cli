@@ -16,6 +16,8 @@ cuda = ["candle", "candle-core/cuda"]
 mlx-metal = ["dep:mlx-rs"]
 
 [dependencies]
+# Issue 340: every child is built through `archon_shell::spawn`.
+archon-shell = { path = "../archon-shell" }
 anyhow.workspace = true
 archon-completion = { path = "../archon-completion" }
 archon-permissions = { path = "../archon-permissions" }

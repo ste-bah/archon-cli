@@ -3,7 +3,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Instant;
 
 use anyhow::{Result, bail};
@@ -75,9 +74,7 @@ impl JepaTrainingConfig {
         if self.context_window_rows == 0 || self.target_window_rows == 0 {
             bail!("jepa context_window_rows and target_window_rows must be greater than zero");
         }
-        if self.prediction_horizons.is_empty()
-            || self.prediction_horizons.contains(&0)
-        {
+        if self.prediction_horizons.is_empty() || self.prediction_horizons.contains(&0) {
             bail!("jepa prediction_horizons must contain positive horizons");
         }
         for (name, value) in [
@@ -362,7 +359,7 @@ fn build_commit_sha() -> String {
 }
 
 fn runtime_git_sha() -> Option<String> {
-    let output = Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
@@ -400,4 +397,3 @@ fn observed_backend_device_name(backend: BackendKind) -> Option<String> {
         BackendKind::Auto => None,
     }
 }
-

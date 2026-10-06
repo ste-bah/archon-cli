@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::process::Command;
 
 /// Git repository info extracted from the working directory.
 #[derive(Debug, Clone)]
@@ -13,7 +12,7 @@ pub struct GitInfo {
 /// Returns None if not in a git repo or if git is not available.
 pub fn detect_git_info(dir: &Path) -> Option<GitInfo> {
     // Check if in a git repo
-    let status = Command::new("git")
+    let status = archon_shell::spawn::command("git")
         .args(["rev-parse", "--is-inside-work-tree"])
         .current_dir(dir)
         .output()
@@ -35,7 +34,7 @@ pub fn detect_git_info(dir: &Path) -> Option<GitInfo> {
 }
 
 fn detect_branch(dir: &Path) -> Option<String> {
-    let output = Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .args(["branch", "--show-current"])
         .current_dir(dir)
         .output()
@@ -45,7 +44,7 @@ fn detect_branch(dir: &Path) -> Option<String> {
 
     if branch.is_empty() {
         // Detached HEAD -- get short hash
-        let hash_output = Command::new("git")
+        let hash_output = archon_shell::spawn::command("git")
             .args(["rev-parse", "--short", "HEAD"])
             .current_dir(dir)
             .output()
@@ -62,7 +61,7 @@ fn detect_branch(dir: &Path) -> Option<String> {
 
 fn detect_repo_name(dir: &Path) -> Option<String> {
     // Try remote origin URL
-    let output = Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .args(["remote", "get-url", "origin"])
         .current_dir(dir)
         .output()
@@ -77,7 +76,7 @@ fn detect_repo_name(dir: &Path) -> Option<String> {
     }
 
     // Fall back to directory name
-    let toplevel = Command::new("git")
+    let toplevel = archon_shell::spawn::command("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(dir)
         .output()
@@ -90,7 +89,7 @@ fn detect_repo_name(dir: &Path) -> Option<String> {
 }
 
 fn detect_dirty(dir: &Path) -> bool {
-    Command::new("git")
+    archon_shell::spawn::command("git")
         .args(["diff", "--quiet", "HEAD"])
         .current_dir(dir)
         .output()

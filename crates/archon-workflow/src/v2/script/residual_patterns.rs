@@ -52,7 +52,7 @@ pub fn tree_files(root: &Path, commit: Option<&str>) -> Arc<BTreeSet<String>> {
 }
 
 fn git_out(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let out = std::process::Command::new("git")
+    let out = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(root)
         .args(args)

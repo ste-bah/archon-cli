@@ -8,6 +8,8 @@ edition.workspace = true
 test-support = []
 
 [dependencies]
+# Issue 340: every child is built through `archon_shell::spawn`.
+archon-shell = { path = "../archon-shell" }
 archon-cozo = { path = "../archon-cozo" }
 archon-completion = { path = "../archon-completion" }
 serde.workspace = true

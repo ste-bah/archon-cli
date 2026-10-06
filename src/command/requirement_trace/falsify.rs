@@ -208,7 +208,7 @@ fn classify(language: &str, ran: verifier::Ran) -> FalsificationOutcome {
 /// committed original is indistinguishable, to the person reading the diff
 /// afterwards, from work they had not saved.
 fn refuse_if_dirty(cwd: &Path, file_path: &str) -> std::result::Result<(), RefusedToRun> {
-    let output = std::process::Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(cwd)
         .args(["status", "--porcelain", "--"])
