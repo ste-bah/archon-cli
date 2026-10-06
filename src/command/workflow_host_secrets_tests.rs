@@ -274,7 +274,7 @@ impl super::super::workflow_host_command_exec::HostCommandProcessAdapter for Ech
 
 #[test]
 fn host_command_result_never_holds_an_allowlisted_value() {
-    let status = std::process::Command::new(std::env::current_exe().unwrap())
+    let status = archon_shell::spawn::command(std::env::current_exe().unwrap())
         .args([
             "--ignored",
             "--exact",

@@ -33,26 +33,28 @@ impl ProcessGroupGuard {
         }
     }
 
-    pub(super) fn hold_record(
-        &mut self,
-        record: Option<GroupRecordGuard>,
-    ) -> archon_workflow::WorkflowResult<()> {
+    pub(super) fn hold_record(&mut self, record: Option<GroupRecordGuard>) {
         self.tree.evidence = record.as_ref().and_then(GroupRecordGuard::evidence);
         self.record = record;
+    }
+
+    pub(super) async fn install_recorder(&self) -> archon_workflow::WorkflowResult<()> {
         #[cfg(unix)]
         if let Some(evidence) = self.tree.evidence.clone() {
-            self.tree
-                .tracker
-                .lock()
-                .map_err(|_| {
-                    archon_workflow::WorkflowError::HostOperational(
-                        "tree tracker lock poisoned".into(),
-                    )
-                })?
-                .set_recorder(Box::new(evidence))
+            let tracker = self.tree.tracker.clone();
+            let progress = archon_shell::teardown_progress::Progress::new(super::REAP_DEADLINE);
+            let work = tokio::task::spawn_blocking(move || {
+                let deadline = std::time::Instant::now() + super::REAP_DEADLINE;
+                archon_shell::process_tree::lock_until(&tracker, deadline)?
+                    .set_recorder(Box::new(evidence))
+            });
+            progress
+                .watch(work)
+                .await
+                .and_then(|result| result)
                 .map_err(|error| {
                     archon_workflow::WorkflowError::HostOperational(format!(
-                        "recording host command identities failed: {error}"
+                        "recording host command identities stalled: {error}"
                     ))
                 })?;
         }
@@ -66,9 +68,31 @@ impl ProcessGroupGuard {
 
     /// Settle what teardown established. Returns the evidence of a stall, or
     /// `None` when the tree is confirmed empty.
-    pub(super) fn settle(&mut self, teardown: Teardown) -> Option<String> {
+    pub(super) async fn settle(
+        &mut self,
+        teardown: Teardown,
+    ) -> archon_workflow::WorkflowResult<Option<String>> {
         self.settled = true;
-        settle_record(self.record.take(), teardown)
+        let record = self.record.take();
+        // Ordinary queued cleanup stays supervised. A stalled checkpoint
+        // returns HostOperational directly, so the executor pauses without
+        // retrying or synchronously locking the owner registry on this thread.
+        let files = record
+            .as_ref()
+            .map(|record| {
+                record
+                    .paths()
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            })
+            .unwrap_or_default();
+        let progress = archon_shell::teardown_progress::Progress::new(super::REAP_DEADLINE);
+        let work = tokio::task::spawn_blocking(move || settle_record(record, teardown));
+        progress.watch(work).await.map_err(|error| archon_workflow::WorkflowError::HostOperational(
+            format!("settling host command survivor evidence stalled ({files}); repair the host I/O and recheck these records on resume: {error}")
+        ))
     }
 }
 
@@ -109,8 +133,8 @@ impl Drop for ProcessGroupGuard {
         }
         self.settled = true;
         let tree = self.tree.clone();
-        // A queued drop worker must not leave apparently complete evidence.
-        let persistence = tree.evidence.as_ref().and_then(|e| e.begin().err());
+        // Registration already left incomplete evidence; checkpoint admission
+        // and I/O belong to the watched worker, never this Drop caller.
         // Shared, so a thread that cannot start still leaves the record to
         // settle here: kept, as "unknown survivors".
         let record = std::sync::Arc::new(std::sync::Mutex::new(self.record.take()));
@@ -120,10 +144,6 @@ impl Drop for ProcessGroupGuard {
             .name("archon-host-command-teardown".into())
             .spawn(move || {
                 let teardown = kill_blocking(&tree, !reaped);
-                let teardown = match persistence {
-                    Some(error) => teardown.and_stalled(format!("recording teardown intent failed: {error}")),
-                    None => teardown,
-                };
                 #[cfg(unix)]
                 let teardown = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
                     Ok(runtime) => match runtime.block_on(super::termination::reap(&mut child)) {

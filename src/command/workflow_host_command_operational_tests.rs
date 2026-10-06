@@ -491,3 +491,7 @@ mod unsettled_tests;
 #[cfg(unix)]
 #[path = "workflow_host_command_registration_tests.rs"]
 mod registration_tests;
+
+#[cfg(unix)]
+#[path = "workflow_host_checkpoint_r3_tests.rs"]
+mod checkpoint_r3_tests;

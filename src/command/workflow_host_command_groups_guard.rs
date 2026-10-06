@@ -241,23 +241,60 @@ impl GroupEvidence {
             .map_err(|_| "survivor marker lock unavailable")?;
         state.write(bytes).map_err(|error| error.to_string())
     }
+    #[cfg(test)]
+    pub(crate) fn contend(&self, duration: std::time::Duration) -> std::thread::JoinHandle<()> {
+        let evidence = self.clone();
+        let (ready, acquired) = std::sync::mpsc::sync_channel(0);
+        let thread = std::thread::spawn(move || {
+            let _lock = evidence.0.lock().unwrap();
+            ready.send(()).unwrap();
+            std::thread::sleep(duration);
+        });
+        acquired.recv().unwrap();
+        thread
+    }
     pub(crate) fn failure(&self) -> Option<String> {
         self.0.try_lock().ok().and_then(|state| state.fault.clone())
     }
+    #[cfg(test)]
     pub(crate) fn begin(&self) -> std::io::Result<()> {
-        let mut state = self
-            .0
-            .lock()
-            .map_err(|_| std::io::Error::other("survivor marker lock unavailable"))?;
+        self.begin_observed(&archon_shell::teardown_progress::Progress::new(
+            std::time::Duration::from_secs(2),
+        ))
+    }
+    fn lock_observed(
+        &self,
+        progress: &archon_shell::teardown_progress::Progress,
+    ) -> std::io::Result<std::sync::MutexGuard<'_, Evidence>> {
+        loop {
+            progress.check()?;
+            match self.0.try_lock() {
+                Ok(state) => return Ok(state),
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err(std::io::Error::other("survivor marker lock poisoned"));
+                }
+                Err(std::sync::TryLockError::WouldBlock) => std::thread::sleep(
+                    std::time::Duration::from_millis(1).min(progress.remaining()),
+                ),
+            }
+        }
+    }
+    pub(crate) fn begin_observed(
+        &self,
+        progress: &archon_shell::teardown_progress::Progress,
+    ) -> std::io::Result<()> {
+        let mut state = self.lock_observed(progress)?;
         state.record.survivors_unknown = true;
         state.record.teardown_complete = false;
-        state.checkpoint()
+        state.checkpoint()?;
+        progress.check()?;
+        progress.advance();
+        Ok(())
     }
     pub(crate) fn complete(&self, survivors: &[(u32, u64)]) -> std::io::Result<()> {
-        let mut state = self
-            .0
-            .lock()
-            .map_err(|_| std::io::Error::other("survivor marker lock unavailable"))?;
+        let mut state = self.lock_observed(&archon_shell::teardown_progress::Progress::new(
+            std::time::Duration::from_secs(2),
+        ))?;
         state.record.survivors = survivors.to_vec();
         state.record.survivors_unknown = state.failed;
         state.record.teardown_complete = !state.failed;
@@ -270,10 +307,9 @@ impl GroupEvidence {
         Ok(())
     }
     pub(crate) fn remember(&self, identities: &[(u32, u64)]) -> std::io::Result<()> {
-        let mut state = self
-            .0
-            .lock()
-            .map_err(|_| std::io::Error::other("survivor marker lock unavailable"))?;
+        let mut state = self.lock_observed(&archon_shell::teardown_progress::Progress::new(
+            std::time::Duration::from_secs(2),
+        ))?;
         // The tracker's complete pin set only forgets proven exits/reuse.
         // Replace it instead of accumulating an unbounded history of dead pids.
         state.record.survivors = identities.to_vec();

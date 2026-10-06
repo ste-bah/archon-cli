@@ -42,12 +42,28 @@ enum Child {
     TypedSecret,
     OperationalTypedSecret,
     JsonOutput,
+    Scalar,
+    ScalarOperational,
+    ScalarFailed,
+    ScalarVersion,
 }
 
 struct SecretPrintingProcess(Child);
 
 fn envelope(child: Child, secret: &str) -> Vec<u8> {
     let value = match child {
+        Child::Scalar | Child::ScalarOperational | Child::ScalarFailed => {
+            let scalar: serde_json::Value = serde_json::from_str(secret).unwrap();
+            serde_json::json!({"schema_version": 1,
+                "report": {"nested": [scalar, {"pin": scalar}]},
+                "operational_error": if child == Child::ScalarOperational {
+                    Some(serde_json::json!({"kind": "probe", "text": "retry"}))
+                } else { None }
+            })
+        }
+        Child::ScalarVersion => serde_json::json!({
+            "schema_version": secret.parse::<u32>().unwrap(), "report": "probe"
+        }),
         Child::Malformed => return format!("not an envelope {secret}").into_bytes(),
         Child::OperationalTypedSecret => serde_json::json!({
             "schema_version": 1, "report": "probe", "operational_error": {"kind": secret, "text": "failure"}
@@ -168,7 +184,11 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
         .unwrap();
         let stderr = format!("warning: key {secret} in use").into_bytes();
         Ok(SupervisedProcessOutput {
-            exit_code: Some(if self.0 == Child::Failed { 1 } else { 0 }),
+            exit_code: Some(if matches!(self.0, Child::Failed | Child::ScalarFailed) {
+                1
+            } else {
+                0
+            }),
             timed_out: false,
             stdout_bytes: stdout.len() as u64,
             stderr_bytes: stderr.len() as u64,
@@ -455,3 +475,6 @@ async fn ascii_json_output_is_redacted_at_the_host_result_boundary() {
 
 #[path = "workflow_host_envelope_r2_tests.rs"]
 mod r2_tests;
+
+#[path = "workflow_host_envelope_r3_tests.rs"]
+mod r3_tests;

@@ -131,3 +131,6 @@ fn windows_scratch_fixtures_use_shared_spawn() {
         .contains("tokio::process::Command::new")
     );
 }
+
+#[path = "workflow_host_spawn_r3_tests.rs"]
+mod spawn_r3_tests;

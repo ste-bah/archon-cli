@@ -116,6 +116,31 @@ impl HostSecrets {
         envelope
     }
 
+    /// Verify only child-owned data, including serialized scalar values.
+    /// Schema keys and closed enum spellings are deliberately excluded.
+    pub(crate) fn envelope_holds_secret(&self, envelope: &GateEnvelopeV1) -> bool {
+        let mut strings = Vec::new();
+        for finding in &envelope.policy_findings {
+            strings.extend([&finding.text, &finding.subject]);
+            if let Some(defect) = &finding.deterministic_defect {
+                strings.extend([&defect.code, &defect.subject, &defect.location]);
+            }
+            if let Some(path) = &finding.source_path {
+                strings.push(path);
+            }
+        }
+        if let Some(error) = &envelope.operational_error {
+            strings.extend([&error.text, &error.kind]);
+        }
+        (envelope.schema_version != archon_workflow::GATE_ENVELOPE_SCHEMA_VERSION
+            && self.holds_secret(envelope.schema_version.to_string().as_bytes()))
+            || strings
+                .into_iter()
+                .any(|text| self.holds_secret(text.as_bytes()))
+            || serde_json::to_vec(&envelope.report)
+                .map_or(true, |bytes| self.holds_serialized_secret(&bytes))
+    }
+
     pub(crate) fn strings(&self, value: &mut serde_json::Value) {
         match value {
             serde_json::Value::String(text) => *text = self.text(text),
@@ -140,7 +165,14 @@ impl HostSecrets {
                     fields.insert(key, field);
                 }
             }
-            _ => {}
+            // JSON scalars are child-controlled evidence too. A credential
+            // can be a number, boolean or null; changing its type is safer
+            // than preserving clear credential bytes in a valid report.
+            scalar => {
+                if self.holds_serialized_secret(scalar.to_string().as_bytes()) {
+                    *scalar = serde_json::Value::String(self.text(&scalar.to_string()));
+                }
+            }
         }
     }
 }

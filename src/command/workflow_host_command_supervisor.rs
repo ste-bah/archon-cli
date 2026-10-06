@@ -208,7 +208,7 @@ pub(crate) async fn supervise_process_group(
             let child = &mut child;
             let teardown = terminate_and_reap(child, &group_guard.tree).await;
             group_guard.reaped();
-            if let Some(evidence) = group_guard.settle(teardown) {
+            if let Some(evidence) = group_guard.settle(teardown).await? {
                 return Err(WorkflowError::HostOperational(format!(
                     "host command registration failed: {error}; teardown stalled: {evidence}"
                 )));
@@ -217,8 +217,11 @@ pub(crate) async fn supervise_process_group(
             return Err(error);
         }
     };
-    group_guard.hold_record(record)?;
+    group_guard.hold_record(record);
+    // The durable incomplete child record now owns crash protection. Clear
+    // the launch barrier before yielding to recorder admission.
     launch.clear()?;
+    group_guard.install_recorder().await?;
     #[cfg(unix)]
     let child = &mut *group_guard.child;
     // Borrowed on every platform, as the Unix guard hands it out.
@@ -329,7 +332,7 @@ pub(crate) async fn supervise_process_group(
             {
                 teardown = teardown.and_stalled(evidence.clone());
             }
-            if let Some(evidence) = group_guard.settle(teardown) {
+            if let Some(evidence) = group_guard.settle(teardown).await? {
                 return Ok(stalled_output(&evidence, pipes.ok(), false));
             }
             // Every error above is part of a stall that was settled; this arm
@@ -365,7 +368,7 @@ pub(crate) async fn supervise_process_group(
                 Ok(_) => teardown,
                 Err(evidence) => teardown.and_stalled(evidence.clone()),
             };
-            if let Some(evidence) = group_guard.settle(teardown) {
+            if let Some(evidence) = group_guard.settle(teardown).await? {
                 return Ok(stalled_output(&evidence, pipes.ok(), true));
             }
             let (stdout, stderr) = pipes.map_err(WorkflowError::StageFailed)?;
@@ -396,7 +399,7 @@ pub(crate) async fn supervise_process_group(
                 Ok(_) => teardown,
                 Err(evidence) => teardown.and_stalled(evidence),
             };
-            if let Some(evidence) = group_guard.settle(teardown) {
+            if let Some(evidence) = group_guard.settle(teardown).await? {
                 tracing::warn!(%evidence, "host command teardown stalled after a control interruption");
             }
             Err(match signal {
@@ -428,7 +431,7 @@ pub(crate) async fn supervise_process_group(
             };
             // A stall outranks the failure: the tree is not gone, and only a
             // resumable outcome keeps the run from ending on it.
-            if let Some(evidence) = group_guard.settle(teardown) {
+            if let Some(evidence) = group_guard.settle(teardown).await? {
                 let evidence = format!("{error}; {evidence}");
                 return Ok(stalled_output(&evidence, pipes.ok(), false));
             }
@@ -436,3 +439,6 @@ pub(crate) async fn supervise_process_group(
         }
     }
 }
+
+#[cfg(all(test, unix))]
+pub(crate) use termination::checkpoint_contention;

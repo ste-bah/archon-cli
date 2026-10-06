@@ -6,7 +6,6 @@
 use std::sync::Arc;
 
 use archon_shell::job_object::Job;
-use archon_shell::teardown_progress::Progress;
 use archon_workflow::{WorkflowError, WorkflowResult};
 
 use super::super::REAP_DEADLINE;
@@ -68,77 +67,11 @@ pub(in super::super) async fn leader_exit(
     child.wait().await.map(drop)
 }
 
-/// Terminate the job and wait until it is empty, within [`REAP_DEADLINE`].
-fn kill_job(
-    job: &Job,
-    evidence: Option<&super::super::super::workflow_host_command_groups::GroupEvidence>,
-    progress: &Progress,
-) -> Teardown {
-    let persistence = evidence.and_then(|evidence| evidence.begin().err());
-    let before = job.process_identities_observed(progress);
-    let recorded = match (&before, evidence) {
-        (Ok(pins), Some(evidence)) => evidence.remember(pins),
-        _ => Ok(()),
-    };
-    let killed = job.kill_and_confirm_observed(progress);
-    let survivors = job.process_identities_observed(progress);
-    let successful = killed.is_ok();
-    let teardown = match killed {
-        Ok(0) => Teardown::Confirmed,
-        Ok(active) => Teardown::Stalled {
-            evidence: format!(
-                "host command job object still has {active} active process(es) after termination"
-            ),
-            survivors: survivors
-                .as_ref()
-                .ok()
-                .filter(|pins| !pins.is_empty())
-                .cloned(),
-        },
-        Err(error) => {
-            Teardown::stalled(format!("terminating the host command job failed: {error}"))
-        }
-    };
-    if let Some(error) = persistence.or_else(|| recorded.err()) {
-        return teardown.and_stalled(format!("recording job identities failed: {error}"));
-    }
-    if successful
-        && let Some(evidence) = evidence
-        && let Ok(pins) = &survivors
-    {
-        if let Err(error) = evidence.complete(pins) {
-            return teardown.and_stalled(format!("recording job identities failed: {error}"));
-        }
-    }
-    teardown
-}
-
 async fn kill_job_off_thread(tree: &Tree) -> Teardown {
     let Some(job) = tree.job.clone() else {
         return Teardown::Confirmed;
     };
-    let evidence = tree.evidence.clone();
-    // Intent is durable before admission to the blocking pool. Initial evidence
-    // is already incomplete, so even a failure before invalidation stays closed.
-    let persistence = evidence.as_ref().and_then(|e| e.begin().err());
-    let progress = Progress::new(REAP_DEADLINE);
-    let worker_progress = progress.clone();
-    let work = tokio::task::spawn_blocking(move || {
-        let teardown = kill_job(&job, evidence.as_ref(), &worker_progress);
-        match persistence {
-            Some(error) => {
-                teardown.and_stalled(format!("recording teardown intent failed: {error}"))
-            }
-            None => teardown,
-        }
-    });
-    // Identity reads and decreasing accounting reset this same inactivity clock.
-    match progress.watch(work).await {
-        Ok(teardown) => teardown,
-        Err(error) => {
-            Teardown::stalled(format!("job teardown stalled; survivors unknown: {error}"))
-        }
-    }
+    super::job::kill_job_off_thread(job, tree.evidence.clone(), REAP_DEADLINE).await
 }
 
 pub(in super::super) async fn terminate_and_reap(
@@ -163,7 +96,15 @@ pub(in super::super) async fn terminate_completed_group(tree: &Tree) -> Teardown
 /// with a bound on inactivity: the guard runs it on a dedicated thread, never
 /// on the async runtime, and keeps the resume record until it reports.
 pub(in super::super) fn kill_blocking(tree: &Tree, _leader_unreaped: bool) -> Teardown {
-    tree.job.as_deref().map_or(Teardown::Confirmed, |job| {
-        kill_job(job, tree.evidence.as_ref(), &Progress::new(REAP_DEADLINE))
-    })
+    match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => {
+            let teardown = runtime.block_on(kill_job_off_thread(tree));
+            runtime.shutdown_background();
+            teardown
+        }
+        Err(error) => Teardown::stalled(format!("drop job teardown runtime unavailable: {error}")),
+    }
 }

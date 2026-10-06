@@ -100,7 +100,7 @@ fn seal_bytes(raw: &[u8], secrets: &HostSecrets) -> WorkflowResult<Vec<u8>> {
     // credential happens to have the same spelling (for example "body").
     if let Ok(envelope) = serde_json::from_value::<GateEnvelopeV1>(value.clone()) {
         let verified = secrets.envelope(envelope.clone());
-        if verified != envelope {
+        if verified != envelope || secrets.envelope_holds_secret(&envelope) {
             return refusal_envelope();
         }
         return if changed {

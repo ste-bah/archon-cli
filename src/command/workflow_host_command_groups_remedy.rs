@@ -15,13 +15,46 @@ pub(super) fn known_refusal(record: &HostCommandGroupRecord, run: &str, others: 
         );
     }
     #[cfg(unix)]
-    let live: Vec<_> = record
+    let mut live: Vec<_> = record
         .survivors
         .iter()
         .filter(|(pid, start)| {
             archon_shell::process_tree::identity_of(*pid).ok().flatten() == Some(*start)
         })
+        .copied()
         .collect();
+    // Legacy evidence may name only the session. A nested runner can move
+    // to another group after the original group has ended.
+    #[cfg(unix)]
+    if live.is_empty() {
+        let scope = archon_shell::process_tree::Scope {
+            groups: vec![record.pgid],
+            sessions: record.session.into_iter().collect(),
+        };
+        let identities = scope.members().and_then(|members| {
+            let mut pins = Vec::new();
+            for pid in members {
+                if let Some(start) = archon_shell::process_tree::identity_of(pid)? {
+                    pins.push((pid, start));
+                }
+            }
+            Ok(pins)
+        });
+        match identities {
+            Ok(pins) => live.extend(pins),
+            Err(error) => {
+                return format!(
+                    "fixed decomposition {run} cannot resume: host command '{}' membership cannot be read ({error}); verify its processes, then remove {} and resume again",
+                    record.command_id,
+                    record
+                        .file
+                        .as_ref()
+                        .map(|path| super::refusal_files(path))
+                        .unwrap_or_default()
+                );
+            }
+        }
+    }
     #[cfg(windows)]
     let live: Vec<_> = record
         .survivors
@@ -29,9 +62,10 @@ pub(super) fn known_refusal(record: &HostCommandGroupRecord, run: &str, others: 
         .filter(|(pid, start)| {
             archon_shell::job_object::identity_of(*pid).ok().flatten() == Some(*start)
         })
+        .copied()
         .collect();
     #[cfg(not(any(unix, windows)))]
-    let live: Vec<&(u32, u64)> = Vec::new();
+    let live: Vec<(u32, u64)> = Vec::new();
     let remedy = if !live.is_empty() {
         let targets = live
             .iter()
@@ -49,10 +83,9 @@ pub(super) fn known_refusal(record: &HostCommandGroupRecord, run: &str, others: 
         format!("stop the recorded live survivors: {targets}, then resume again")
     } else {
         #[cfg(unix)]
-        let action = format!(
-            "stop the recorded group (kill -TERM -{}) and resume again",
-            record.pgid
-        );
+        let action =
+            "the membership changed during this check; resume again to recheck the recorded scope"
+                .to_string();
         #[cfg(windows)]
         let action = format!(
             "stop the remaining members of Windows Job Object {:?} and resume again",

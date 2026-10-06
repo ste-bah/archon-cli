@@ -293,3 +293,6 @@ async fn supervision_fixture() {
 
 #[path = "workflow_host_command_evidence_r2_tests.rs"]
 mod r2_tests;
+
+#[path = "workflow_host_command_remedy_r3_tests.rs"]
+mod remedy_r3_tests;

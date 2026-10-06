@@ -201,30 +201,31 @@ impl Tree {
         self.abandoned.store(true, Ordering::SeqCst);
         let evidence = self.evidence.clone();
         let tracker = self.tracker.clone();
-        let deadline = Instant::now() + bound;
-        let persistence = evidence
-            .as_ref()
-            .and_then(|evidence| evidence.begin().err());
+        let progress = archon_shell::teardown_progress::Progress::new(bound);
+        let worker_progress = progress.clone();
         let task = tokio::task::spawn_blocking(move || {
+            // Admission, lock contention and checkpoint I/O are all watched.
+            // Initial durable evidence is incomplete even before this runs.
+            let persistence = evidence
+                .as_ref()
+                .and_then(|e| e.begin_observed(&worker_progress).err());
+            if let Some(error) = persistence {
+                return Teardown::stalled(format!("recording teardown identities failed: {error}"));
+            }
+            let deadline = Instant::now() + worker_progress.remaining();
             let teardown = match lock_until(&tracker, deadline) {
                 Ok(mut tracker) => work(&mut tracker, deadline),
                 Err(error) => {
                     Teardown::stalled(format!("host command tree tracker unavailable: {error}"))
                 }
             };
-            match persistence {
-                Some(error) => {
-                    teardown.and_stalled(format!("recording teardown identities failed: {error}"))
-                }
-                None => teardown,
-            }
+            teardown
         });
-        match tokio::time::timeout(bound, task).await {
-            Ok(Ok(teardown)) => teardown,
-            Ok(Err(error)) => Teardown::stalled(format!("teardown task failed: {error}")),
-            Err(_) => {
-                Teardown::stalled("host command teardown deadline exceeded; survivors unknown")
-            }
+        match progress.watch(task).await {
+            Ok(teardown) => teardown,
+            Err(error) => Teardown::stalled(format!(
+                "host command teardown stalled; survivors unknown: {error}"
+            )),
         }
     }
 }
@@ -326,30 +327,20 @@ pub(super) async fn terminate_completed_group(tree: &Tree) -> Teardown {
 /// the survivors are unknown.
 #[cfg(unix)]
 pub(super) fn kill_blocking(tree: &Tree, leader_unreaped: bool) -> Teardown {
-    tree.abandoned.store(true, Ordering::SeqCst);
     if !leader_unreaped {
         tree.leader_reaped();
     }
-    let persistence = tree
-        .evidence
-        .as_ref()
-        .and_then(|evidence| evidence.begin().err());
-    let deadline = Instant::now() + REAP_DEADLINE;
-    let teardown = match lock_until(&tree.tracker, deadline) {
-        Ok(mut tracker) => kill_tracked(
-            &mut tracker,
-            deadline.saturating_duration_since(Instant::now()),
-            tree.evidence.as_ref(),
-        ),
-        Err(error) => Teardown::stalled(format!(
-            "the tree was unavailable when supervision stopped: {error}"
-        )),
-    };
-    match persistence {
-        Some(error) => {
-            teardown.and_stalled(format!("recording teardown identities failed: {error}"))
+    match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => {
+            let teardown = runtime.block_on(terminate_completed_group(tree));
+            // A stuck filesystem worker must not block runtime destruction.
+            runtime.shutdown_background();
+            teardown
         }
-        None => teardown,
+        Err(error) => Teardown::stalled(format!("drop teardown runtime unavailable: {error}")),
     }
 }
 
@@ -363,4 +354,72 @@ pub(super) async fn reap(
         Ok(Err(error)) => Err(format!("host command process reap failed: {error}")),
         Err(_) => Err("host command process reap exceeded cleanup deadline".to_string()),
     }
+}
+
+#[cfg(any(windows, test))]
+#[path = "workflow_host_command_termination_job.rs"]
+mod job;
+
+#[cfg(all(test, unix))]
+pub(crate) async fn checkpoint_contention(
+    records: &std::path::Path,
+    mode: u32,
+) -> super::SupervisedProcessOutput {
+    use super::super::workflow_host_command_groups::record_group;
+    let mut command = archon_shell::spawn::tokio_command("true");
+    // SAFETY: setsid is async-signal-safe and confines the fixture's child.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+    let mut child = command.spawn().unwrap();
+    let tree = confine(&mut child).unwrap();
+    let id = tree.leader().unwrap();
+    let guard = record_group(records, id, id, Some(id), None, "cmd").unwrap();
+    let mut group = super::guard::ProcessGroupGuard::new(tree, child);
+    group.hold_record(Some(guard));
+    group.install_recorder().await.unwrap();
+    let evidence = group.tree.evidence.clone().unwrap();
+    if mode == 1 {
+        evidence
+            .remember(&[(
+                std::process::id(),
+                archon_shell::process_tree::identity_of(std::process::id())
+                    .unwrap()
+                    .unwrap(),
+            )])
+            .unwrap();
+    }
+    if mode == 2 {
+        evidence.begin().unwrap();
+    }
+    let blocker = evidence.contend(Duration::from_secs(3));
+    let started = Instant::now();
+    let outcome = terminate_completed_group(&group.tree).await;
+    let elapsed = started.elapsed();
+    // Release the fixture's blocking worker before returning even on failure.
+    tokio::task::spawn_blocking(move || blocker.join().unwrap())
+        .await
+        .unwrap();
+    assert!(
+        elapsed < Duration::from_millis(2600),
+        "async teardown blocked for {elapsed:?}"
+    );
+    assert!(
+        matches!(outcome, Teardown::Stalled { .. }),
+        "contended checkpoint falsely confirmed"
+    );
+    let note = group
+        .settle(outcome)
+        .await
+        .unwrap()
+        .expect("stall evidence");
+    group.child.wait().await.unwrap();
+    group.reaped();
+    super::guard::stalled_output(&note, None, false)
 }
