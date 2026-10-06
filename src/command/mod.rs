@@ -371,6 +371,8 @@ mod workflow_host_command_publication_tests;
 pub(crate) mod workflow_host_command_publish;
 pub(crate) mod workflow_host_command_supervisor;
 #[cfg(test)]
+mod workflow_host_command_terminal_stop_tests;
+#[cfg(test)]
 mod workflow_host_command_tests;
 #[cfg(test)]
 mod workflow_host_command_verify_tests;

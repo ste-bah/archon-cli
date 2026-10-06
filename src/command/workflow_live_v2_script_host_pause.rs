@@ -111,6 +111,12 @@ impl WorkflowScriptHost {
             // gave the run to a newer executor.
             self.runner.v2_store.require_session_restart_epoch()?;
             self.runner.v2_store.require_session_executor(&run)?;
+            // Issue 337: a sibling of a deliberate stop pauses nothing.
+            archon_workflow::control_pause::refuse_after_terminal_stop(
+                locked,
+                &run,
+                &format!("pause '{pause_id}'"),
+            )?;
             // Coverage and the grant share the lock with run control and
             // generation-owned persistence: no slot may change between them.
             let credit = self.pause_credit(&record_path, &pause_id)?;

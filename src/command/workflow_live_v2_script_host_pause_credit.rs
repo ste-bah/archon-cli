@@ -118,6 +118,65 @@ pub(super) fn pause_records(
     Ok(records)
 }
 
+/// Issue 337: what a pause the HOST takes on an unplanned error of a fixed
+/// script (a crash, or a fault at the run boundary) covers: the snapshot a
+/// `w.pause` records, written as one more pause record, so a resume replays
+/// every covered answer through [`WorkflowScriptHost::replay_covered_attempt`]
+/// -- an unpublished refusal or a failed author call too, which no other
+/// reuse path answers -- under the same input and standing guards. Taken
+/// before the pause transitions; recorded once the pause is in force, under
+/// a name no script pause id maps to (`pause_record_path` always ends in a
+/// 16-hex digest). Such a record is never "passed": only a `w.pause` request
+/// reads its own record for that.
+pub(in super::super::super) struct HostPauseCoverage(Vec<CoveredAttempt>);
+
+impl HostPauseCoverage {
+    pub(in super::super::super) fn snapshot(v2_store: &WorkflowV2ResultStore) -> Self {
+        Self(
+            v2_store
+                .load_call_records()
+                .map(|records| covered_attempts(&records))
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "host pause covers no recorded attempt");
+                    Vec::new()
+                }),
+        )
+    }
+
+    /// Records the coverage of the pause `cause` took. Losing it costs the
+    /// replay only: a resume then asks those calls again, as before.
+    pub(in super::super::super) fn record(
+        self,
+        store: &WorkflowStore,
+        run_id: &str,
+        cause: &str,
+        event_seq: Option<u64>,
+    ) {
+        let generation = match store.load_state(run_id) {
+            Ok(run) => run.generation,
+            Err(error) => {
+                tracing::warn!(%error, run_id, "host pause coverage not recorded");
+                return;
+            }
+        };
+        let pause_id = format!("host-{cause}-g{generation}");
+        let path = format!(
+            "{}/{pause_id}.json",
+            super::workflow_live_v2_script_host_pause::SCRIPT_PAUSE_DIR
+        );
+        let record = ScriptPauseRecord {
+            pause_id,
+            joined: false,
+            event_seq,
+            generation,
+            covered: self.0,
+        };
+        if let Err(error) = store.write_run_json(run_id, &path, &record) {
+            tracing::warn!(%error, run_id, "host pause coverage not recorded");
+        }
+    }
+}
+
 impl WorkflowScriptHost {
     /// The recorded answer to `execution` when a pause whose credit holds
     /// covers the attempt its slot holds, asked with the same input.

@@ -20,6 +20,12 @@
 //! the same point, the pause says so: it counts the recurrences and tells
 //! the operator that a resume alone re-runs it unchanged. The run stays
 //! paused (never failed, never resumed by itself), so nothing loops.
+//!
+//! Issue 337: a fixed script's pause here (and the fixed run boundary's)
+//! records the attempts it covers exactly as a `w.pause` does
+//! (`HostPauseCoverage`), so a resume replays every recorded answer of that
+//! script verbatim -- refusals and failed calls too -- and only the work
+//! after the crash runs again.
 
 use super::*;
 
@@ -102,6 +108,14 @@ impl WorkflowScriptHost {
         if let Err(refused) = self.runner.v2_store.require_session_executor(&run) {
             return Some(refused);
         }
+        // Issue 337: a fixed script's crash pause covers what the run
+        // recorded, as a `w.pause` does, so a resume replays a judge's
+        // refusal or a failed author call verbatim instead of re-asking it.
+        // A v3 script keeps its Issue 335 contract: failed calls run again.
+        let coverage = self
+            .runner
+            .raw_outcomes_allowed
+            .then(|| HostPauseCoverage::snapshot(&self.runner.v2_store));
         // An unreadable record is evidence lost, not state: counted afresh.
         let prior = std::fs::read(store.run_dir(run_id).join(SCRIPT_ERROR_PAUSE_RECORD))
             .ok()
@@ -146,8 +160,13 @@ impl WorkflowScriptHost {
             detail,
         ) {
             Ok(event) => {
-                if let Err(error) = event {
-                    tracing::warn!(%error, run_id, "script error pause event not recorded");
+                let seq = event
+                    .inspect_err(|error| {
+                        tracing::warn!(%error, run_id, "script error pause event not recorded");
+                    })
+                    .ok();
+                if let Some(coverage) = coverage {
+                    coverage.record(store, run_id, "script-error", seq);
                 }
             }
             Err(

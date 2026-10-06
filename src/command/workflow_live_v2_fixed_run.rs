@@ -68,12 +68,23 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
             }
             let text =
                 crate::command::workflow_decompose_events::bounded_log_field(&error.to_string());
+            // Issue 337: this pause covers what the run recorded, as any
+            // script-error pause of a fixed script does.
+            let coverage = super::workflow_live_v2_script::HostPauseCoverage::snapshot(&v2_store);
             let paused = archon_workflow::control_pause::pause_owned(
                 store,
                 &run.id,
                 archon_workflow::control_pause::PauseOwner::Executor(execution_generation),
                 serde_json::json!({"event":"fixed_host_error_pause","error":text}),
             );
+            if let Ok(event) = &paused {
+                coverage.record(
+                    store,
+                    &run.id,
+                    "boundary-error",
+                    event.as_ref().ok().copied(),
+                );
+            }
             match paused {
                 Ok(Ok(_)) => {
                     return Ok(format!(

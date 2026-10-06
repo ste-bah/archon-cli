@@ -398,6 +398,7 @@ use workflow_live_v2_script_control::{
 
 #[path = "workflow_live_v2_script_host.rs"]
 mod workflow_live_v2_script_host;
+pub(super) use workflow_live_v2_script_host::HostPauseCoverage;
 use workflow_live_v2_script_host::*;
 
 #[path = "workflow_live_v2_script_host_call.rs"]

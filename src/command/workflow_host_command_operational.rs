@@ -236,7 +236,12 @@ pub(crate) fn require_run_owned(
                 run.generation
             )))
         }
-        _ => Ok(()),
+        // Issue 337: a deliberate stop of this generation ended the run.
+        _ => archon_workflow::control_pause::refuse_after_terminal_stop(
+            store,
+            &run,
+            &format!("fixed HostCommand generation {expected_generation}"),
+        ),
     }
 }
 

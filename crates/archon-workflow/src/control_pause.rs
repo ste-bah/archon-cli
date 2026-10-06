@@ -163,6 +163,11 @@ pub fn pause_owned(
     let owned = store.with_run_lock(run_id, |locked| {
         let mut run = locked.load_state(run_id)?;
         owner.require_pauser(&run)?;
+        // Issue 337: a call of the generation a deliberate stop ended never
+        // pauses it; a run end, after its script settled, still may.
+        if !matches!(owner, PauseOwner::Executor(_)) {
+            refuse_after_terminal_stop(locked, &run, "its pause")?;
+        }
         let paused_by = run.generation;
         apply_pause(&mut run);
         locked.save_state(&run)?;
@@ -188,6 +193,81 @@ pub fn pause_owned(
     owned
 }
 
+/// Where a run's validated terminal stop is recorded, relative to its run
+/// directory (Issue 337).
+pub const TERMINAL_STOP_RECORD: &str = "v2/terminal-stop.json";
+
+/// A deliberate terminal stop the script host validated, recorded under the
+/// run lock at the generation it ended (Issue 337).
+///
+/// The run stays `Running`, at that generation, until the stopping executor
+/// finalizes it, so the run state alone cannot tell a call still in flight
+/// that the run has ended. This record does: while it binds the run's
+/// generation, no call of that generation pauses the run (a pause would leave
+/// the deliberate verdict resumable), no host command publishes into it, and
+/// a host command supervisor ends its process. A lifecycle edit -- an
+/// operator's pause or cancel -- moves the generation and outranks it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TerminalStopRecord {
+    pub generation: u64,
+    pub reason: String,
+}
+
+/// Records `reason` as the terminal stop of `run` at its generation. The
+/// caller holds the run lock and has checked that it owns the run.
+pub fn record_terminal_stop(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    reason: &str,
+) -> WorkflowResult<()> {
+    let record = TerminalStopRecord {
+        generation: run.generation,
+        reason: reason.to_string(),
+    };
+    store.write_run_json(&run.id, TERMINAL_STOP_RECORD, &record)
+}
+
+/// The terminal stop that binds `run` now: recorded at its current
+/// generation while it still runs. An unreadable record binds nothing; it is
+/// reported, and a pause stays possible (a stall pauses, never fails).
+pub fn terminal_stop_in_force(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+) -> Option<TerminalStopRecord> {
+    if !matches!(run.status, RunStatus::Planned | RunStatus::Running) {
+        return None;
+    }
+    let path = store.run_dir(&run.id).join(TERMINAL_STOP_RECORD);
+    let read = match std::fs::read(&path) {
+        Ok(raw) => serde_json::from_slice::<TerminalStopRecord>(&raw).map_err(|e| e.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => Err(error.to_string()),
+    };
+    match read {
+        Ok(record) => (record.generation == run.generation).then_some(record),
+        Err(error) => {
+            tracing::warn!(run_id = %run.id, %error, "terminal stop record unreadable; it binds nothing");
+            None
+        }
+    }
+}
+
+/// Refuses `caller`, as a cancel of the caller, while a terminal stop binds
+/// `run`; nothing changes.
+pub fn refuse_after_terminal_stop(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    caller: &str,
+) -> WorkflowResult<()> {
+    match terminal_stop_in_force(store, run) {
+        Some(stop) => Err(WorkflowError::ControlCancelled(format!(
+            "run {} stopped terminally at generation {}: {}; {caller} stops",
+            run.id, stop.generation, stop.reason
+        ))),
+        None => Ok(()),
+    }
+}
+
 fn emit(store: &WorkflowStore, run_id: &str, detail: serde_json::Value) -> WorkflowResult<u64> {
     let seq = store.next_event_seq(run_id)?;
     WorkflowEventLog::new(store.clone()).emit(
@@ -199,6 +279,9 @@ fn emit(store: &WorkflowStore, run_id: &str, detail: serde_json::Value) -> Workf
     Ok(seq)
 }
 
+#[cfg(test)]
+#[path = "control_pause_terminal_stop_tests.rs"]
+mod terminal_stop_tests;
 #[cfg(test)]
 #[path = "control_pause_tests.rs"]
 mod tests;

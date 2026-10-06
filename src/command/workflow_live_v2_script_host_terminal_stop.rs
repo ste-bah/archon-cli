@@ -2,6 +2,9 @@
 //! Only the privileged fixed-script host accepts this versioned request. Its
 //! owned, recorded stop is sticky even if JS catches or rewrites the rejection;
 //! throwing an identical object or message cannot create that host evidence.
+//! Issue 337: the stop is also recorded under the run lock
+//! (`control_pause::record_terminal_stop`), so a sibling call still in flight
+//! can neither pause the run nor publish into it, and its supervisor ends it.
 
 use super::*;
 
@@ -55,6 +58,10 @@ impl WorkflowScriptHost {
                 }
                 _ => {}
             }
+            // Issue 337: recorded durably first, under the lock every
+            // sibling's pause and publication take, so from here no call of
+            // this generation can pause the run or publish into it.
+            archon_workflow::control_pause::record_terminal_stop(locked, &run, &reason)?;
             let detail = serde_json::json!({
                 "event": "script_terminal_stop",
                 "schema_version": request.schema_version,
@@ -63,12 +70,17 @@ impl WorkflowScriptHost {
                 "call_id": "workflow.js",
                 "status": WorkflowV2Status::Failed,
             });
-            WorkflowEventLog::new(locked.clone()).emit(
-                &run.id,
-                locked.next_event_seq(&run.id)?,
-                WorkflowEventKind::StageFailed,
-                detail,
-            )?;
+            // Evidence only: the record above is the authority.
+            if let Err(error) = locked.next_event_seq(&run.id).and_then(|seq| {
+                WorkflowEventLog::new(locked.clone()).emit(
+                    &run.id,
+                    seq,
+                    WorkflowEventKind::StageFailed,
+                    detail,
+                )
+            }) {
+                tracing::warn!(%error, run_id = %run.id, "terminal stop event not recorded");
+            }
             // Only this host-validated side effect authorizes terminal script
             // failure. An error's shape, code, name and text are irrelevant.
             acc.terminal_host_stop = true;

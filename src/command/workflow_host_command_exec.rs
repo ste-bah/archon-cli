@@ -187,6 +187,12 @@ impl FixedHostCommandExecutor {
                         {
                             Some(HostCommandSignal::Cancelled)
                         }
+                        // Issue 337: a deliberate stop of this generation.
+                        _ if archon_workflow::control_pause::terminal_stop_in_force(&store, &run)
+                            .is_some() =>
+                        {
+                            Some(HostCommandSignal::Cancelled)
+                        }
                         _ => None,
                     };
                     if let Some(signal) = signal {
