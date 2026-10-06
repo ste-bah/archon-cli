@@ -85,3 +85,87 @@ async fn obstructed_registration_pauses() {
 async fn obstructed_parent_registration_pauses() {
     registration_failure("missing-parent").await;
 }
+
+async fn no_unrecorded_execution(mode: &str) {
+    use crate::command::workflow_host_command_groups::{
+        GROUP_RECORDS_DIR, REGISTER_DELAY, require_no_running_groups,
+    };
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    std::fs::create_dir_all(&dir).unwrap();
+    match mode {
+        "readonly" => {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap()
+        }
+        "obstruction" => {
+            std::fs::remove_dir(&dir).unwrap();
+            std::fs::write(&dir, b"blocked").unwrap();
+        }
+        _ => {
+            std::fs::remove_dir(&dir).unwrap();
+            std::fs::remove_dir(dir.parent().unwrap()).unwrap();
+            std::fs::write(dir.parent().unwrap(), b"blocked").unwrap();
+        }
+    }
+    let request = ResolvedHostCommand {
+        command_id: "fixture".into(), program: "python3".into(),
+        args: vec!["-c".into(), "import subprocess,time; p=subprocess.Popen(['sleep','30'],start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); open('escaped','w').write(str(p.pid)); time.sleep(30)".into()],
+        cwd: run.path().into(), environment: std::env::vars_os().filter_map(|(key, value)| key.into_string().ok().map(|key| (key, value))).collect(),
+        stdin: None, timeout_secs: 30, max_stdout_bytes: 4096, max_stderr_bytes: 4096,
+        declared_write_set: Vec::new(), remediation_scopes: Default::default(),
+    };
+    let (control, _handle) = HostCommandControl::new();
+    REGISTER_DELAY.with(|delay| delay.set(true));
+    let result = crate::command::workflow_host_command_supervisor::supervise_process_group(
+        request,
+        control,
+        Some(&dir),
+    )
+    .await;
+    REGISTER_DELAY.with(|delay| delay.set(false));
+    let executed = run.path().join("escaped").exists();
+    if executed {
+        let pid: u32 = std::fs::read_to_string(run.path().join("escaped"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        if let Ok(Some(start)) = archon_shell::process_tree::identity_of(pid) {
+            archon_shell::process_tree::deliver(
+                archon_shell::process_tree::Pinned { pid, start },
+                libc::SIGKILL,
+            );
+        }
+    }
+    match mode {
+        "readonly" => {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap()
+        }
+        "obstruction" => {
+            std::fs::remove_file(&dir).unwrap();
+            std::fs::create_dir(&dir).unwrap();
+        }
+        _ => {
+            std::fs::remove_file(dir.parent().unwrap()).unwrap();
+            std::fs::create_dir_all(&dir).unwrap();
+        }
+    }
+    assert!(result.is_err());
+    assert!(require_no_running_groups(run.path(), "run").is_ok());
+    assert!(
+        !executed,
+        "{mode}: an unregistered child escaped before the registration failure paused"
+    );
+}
+
+#[tokio::test]
+async fn readonly_directory_prevents_unrecorded_execution() {
+    no_unrecorded_execution("readonly").await;
+}
+#[tokio::test]
+async fn obstructed_directory_prevents_unrecorded_execution() {
+    no_unrecorded_execution("obstruction").await;
+}
+#[tokio::test]
+async fn obstructed_parent_prevents_unrecorded_execution() {
+    no_unrecorded_execution("parent").await;
+}

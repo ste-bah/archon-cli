@@ -9,7 +9,7 @@ use super::*;
 /// A `cmd` that starts a detached background `ping` (the descendant that
 /// outlives a direct-child kill) and then waits on a foreground one.
 fn spawn_in(job: &Job) -> std::process::Child {
-    let child = std::process::Command::new("cmd")
+    let child = crate::spawn::command("cmd")
         .args([
             "/C",
             "start /B ping -n 30 127.0.0.1 >NUL & ping -n 30 127.0.0.1 >NUL",

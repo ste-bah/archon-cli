@@ -202,10 +202,10 @@ impl Tree {
         let evidence = self.evidence.clone();
         let tracker = self.tracker.clone();
         let deadline = Instant::now() + bound;
+        let persistence = evidence
+            .as_ref()
+            .and_then(|evidence| evidence.begin().err());
         let task = tokio::task::spawn_blocking(move || {
-            let persistence = evidence
-                .as_ref()
-                .and_then(|evidence| evidence.begin().err());
             let teardown = match lock_until(&tracker, deadline) {
                 Ok(mut tracker) => work(&mut tracker, deadline),
                 Err(error) => {
@@ -275,10 +275,12 @@ fn kill_tracked(
 /// [`REAP_DEADLINE`]. The leader is still unreaped during the kill.
 #[cfg(unix)]
 pub(super) async fn terminate_and_reap(child: &mut tokio::process::Child, tree: &Tree) -> Teardown {
-    let _ = tree
+    let term = tree
         .run(SCAN_BUDGET, |tracker, deadline| {
-            let _ = tracker.signal(libc::SIGTERM, deadline);
-            Teardown::Confirmed
+            match tracker.signal(libc::SIGTERM, deadline) {
+                Ok(_) => Teardown::Confirmed,
+                Err(error) => Teardown::stalled(format!("host command TERM scan failed: {error}")),
+            }
         })
         .await;
     tokio::time::sleep(CLEANUP_GRACE).await;
@@ -292,6 +294,10 @@ pub(super) async fn terminate_and_reap(child: &mut tokio::process::Child, tree: 
             )
         })
         .await;
+    let teardown = match term {
+        Teardown::Confirmed => teardown,
+        Teardown::Stalled { evidence, .. } => teardown.and_stalled(evidence),
+    };
     match reap(child).await {
         Ok(_) => teardown,
         Err(evidence) => teardown.and_stalled(evidence),

@@ -4,14 +4,14 @@ use super::*;
 
 /// A pgid no live process carries, as after the command's leader exited.
 fn ended_group() -> u32 {
-    let child = std::process::Command::new("true").spawn().unwrap();
+    let child = archon_shell::spawn::command("true").spawn().unwrap();
     let id = child.id();
     drop(child.wait_with_output());
     id
 }
 
 fn sleeper() -> (std::process::Child, (u32, u64)) {
-    let child = std::process::Command::new("sleep")
+    let child = archon_shell::spawn::command("sleep")
         .arg("30")
         .spawn()
         .unwrap();
@@ -129,7 +129,7 @@ fn an_unreadable_retained_survivor_cannot_be_treated_as_dead() {
 /// A live process-group leader that is not any command's: a stranger.
 fn group_leader() -> (std::process::Child, (u32, u64)) {
     use std::os::unix::process::CommandExt;
-    let child = std::process::Command::new("sleep")
+    let child = archon_shell::spawn::command("sleep")
         .arg("30")
         .process_group(0)
         .spawn()
@@ -179,12 +179,14 @@ fn a_live_sibling_is_not_a_stall_but_a_kept_one_is() {
 #[test]
 fn a_crashed_owners_record_ends_with_its_group_and_session() {
     // The executor died mid-command: no teardown will ever settle its
-    // record. Once its owner is gone and its group and session have ended,
-    // the record ends too; it does not wait for someone to remove it.
+    // record. Explicitly completed evidence heals after owner and scope exit;
+    // initial incomplete evidence cannot prove that nobody escaped.
     let run = tempfile::tempdir().unwrap();
     let dir = run.path().join(GROUP_RECORDS_DIR);
     let pgid = ended_group();
-    std::mem::forget(record_group(&dir, pgid, pgid, Some(pgid), None, "cmd").unwrap());
+    let guard = record_group(&dir, pgid, pgid, Some(pgid), None, "cmd").unwrap();
+    guard.evidence().unwrap().complete(&[]).unwrap();
+    std::mem::forget(guard);
     owned_by(&dir, ended_group());
     let resumed = require_no_running_groups(run.path(), "run");
     assert!(resumed.is_ok(), "{resumed:?}");

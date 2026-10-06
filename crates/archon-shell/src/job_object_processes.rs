@@ -1,8 +1,6 @@
 //! Job membership plus process creation times, retained across job-handle close.
-use std::{
-    io,
-    time::{Duration, Instant},
-};
+use crate::teardown_progress::Progress;
+use std::io;
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_INVALID_PARAMETER, ERROR_MORE_DATA, FILETIME, HANDLE, WAIT_FAILED,
     WAIT_OBJECT_0,
@@ -71,17 +69,11 @@ fn identity_in(pid: u32, job: Option<HANDLE>) -> io::Result<Option<u64>> {
     result
 }
 
-pub(super) fn in_job(handle: HANDLE, bound: Duration) -> io::Result<Vec<(u32, u64)>> {
-    let deadline = Instant::now() + bound;
+pub(super) fn in_job(handle: HANDLE, progress: &Progress) -> io::Result<Vec<(u32, u64)>> {
     let offset = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList);
     let mut capacity = 32usize;
     loop {
-        if Instant::now() >= deadline {
-            return Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "job process enumeration exceeded its deadline",
-            ));
-        }
+        progress.check()?;
         let bytes = offset
             .checked_add(
                 capacity
@@ -137,16 +129,13 @@ pub(super) fn in_job(handle: HANDLE, bound: Duration) -> io::Result<Vec<(u32, u6
         };
         let mut identities = Vec::new();
         for &pid in pids {
-            if Instant::now() >= deadline {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "job identity reads exceeded their deadline",
-                ));
-            }
+            progress.check()?;
             let pid = u32::try_from(pid).map_err(|_| io::Error::other("invalid job process id"))?;
             if let Some(start) = identity_in(pid, Some(handle))? {
                 identities.push((pid, start));
             }
+            // A proven exit is also a completed identity read.
+            progress.advance();
         }
         return Ok(identities);
     }

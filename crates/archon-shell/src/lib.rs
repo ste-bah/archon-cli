@@ -274,3 +274,6 @@ pub mod process_liveness;
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+/// Shared inactivity bounds for job enumeration and teardown watchdogs.
+pub mod teardown_progress;

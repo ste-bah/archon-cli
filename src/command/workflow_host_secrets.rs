@@ -45,7 +45,7 @@ impl HostSecrets {
             )
             .filter_map(|name| environment.get(name)?.to_str().map(str::to_string))
             .collect::<Vec<_>>();
-        let mut secrets = SecretValues::new(values.iter().map(String::as_str));
+        let mut secrets = SecretValues::for_evidence(values.iter().map(String::as_str));
         for name in &context.acceptance_environment_allowlist {
             if let Some(value) = environment.get(name).and_then(|value| value.to_str()) {
                 secrets = secrets.with_url_credentials(value);

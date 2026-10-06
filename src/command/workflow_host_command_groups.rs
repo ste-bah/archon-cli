@@ -40,6 +40,10 @@ pub(crate) struct HostCommandGroupRecord {
     /// written down): the record runs until someone verifies the tree.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(crate) survivors_unknown: bool,
+    /// Only a synced teardown checkpoint can prove an empty Windows job after
+    /// its name disappears. Legacy supervision markers carry no such proof.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) teardown_complete: bool,
     pub(crate) command_id: String,
     pub(crate) host_pid: u32,
     /// The start time of `host_pid` (Issue 270 round 5): with it, the
@@ -96,7 +100,8 @@ pub(crate) fn record_group(
         job: job.map(str::to_string),
         survivors: Vec::new(),
         stalled: false,
-        survivors_unknown: false,
+        survivors_unknown: true,
+        teardown_complete: false,
         command_id: command_id.to_string(),
         host_pid: std::process::id(),
         host_start: owner::own_start(),
@@ -136,6 +141,10 @@ pub(crate) fn record_group(
         .write_all(&guard::supervised_marker(&record)?)
         .map_err(io(&guard.pending))?;
     marker.sync_all().map_err(io(&guard.pending))?;
+    #[cfg(unix)]
+    std::fs::File::open(dir)
+        .and_then(|dir| dir.sync_all())
+        .map_err(io(dir))?;
     guard.marker = Some(GroupEvidence::new(marker, record));
     Ok(guard)
 }
@@ -149,6 +158,10 @@ pub(crate) fn record_in(
     job: Option<&str>,
     command_id: &str,
 ) -> WorkflowResult<Option<GroupRecordGuard>> {
+    #[cfg(all(test, unix))]
+    if REGISTER_DELAY.with(std::cell::Cell::get) {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
     let session = if cfg!(unix) { leader } else { None };
     match (dir, leader) {
         (Some(dir), Some(pgid)) => {
@@ -207,9 +220,10 @@ pub(crate) fn record_running(record: &HostCommandGroupRecord) -> Option<bool> {
         }
         if let Some(job) = &record.job {
             let active = archon_shell::job_object::named_job_running(job).ok()?;
-            // A legacy stalled record with no process identities cannot prove
-            // termination merely because the job's name disappeared.
-            if !active && record.stalled && record.survivors.is_empty() {
+            // Neither an initial nor a legacy supervision marker proves exits
+            // merely because the job name disappeared. Explicit completion or
+            // recorded identities must establish that termination finished.
+            if !active && !record.teardown_complete && record.survivors.is_empty() {
                 return None;
             }
             return Some(active);
@@ -307,6 +321,9 @@ pub(crate) fn left_groups(
         // A live local guard may be updating its marker right now. It is
         // still running work, never a stall or an ended record.
         if owner == Owner::Supervising {
+            // Incomplete on disk protects crash recovery, but a live local
+            // guard is ordinary running work, not a settled stall.
+            record.survivors_unknown = false;
             running.push(record);
             continue;
         }
@@ -331,7 +348,11 @@ pub(crate) fn left_groups(
             record.stalled = true;
             record.survivors_unknown = true;
         }
-        if record_running(&record) == Some(false) {
+        let probe = record_running(&record);
+        if probe.is_none() {
+            record.survivors_unknown = true;
+        }
+        if probe == Some(false) {
             // Remove the marker first: a failed removal retains both names,
             // and the error says exactly which entry needs permission repair.
             if marked {
@@ -440,26 +461,9 @@ pub(crate) fn require_no_running_groups(
             first.command_id
         ));
     }
-    let others = running.len() - 1;
     Err(anyhow::anyhow!(
-        "fixed decomposition {run_id} cannot resume: host command '{}' (process group {}, pid {}) that a previous executor started is still running{}{}; stop that group (kill -TERM -{}) and resume again. If the group is unrelated (its id was reused), remove {}",
-        first.command_id,
-        first.pgid,
-        first.pid,
-        stall_note(first),
-        if others == 0 {
-            String::new()
-        } else {
-            format!(", with {others} other group(s)")
-        },
-        first.pgid,
-        first
-            .file
-            .clone()
-            .unwrap_or_else(|| run_dir
-                .join(GROUP_RECORDS_DIR)
-                .join(format!("{}.json", first.pgid)))
-            .display()
+        "{}",
+        remedy::known_refusal(first, run_id, running.len() - 1)
     ))
 }
 
@@ -470,3 +474,11 @@ mod tests;
 #[cfg(all(test, windows))]
 #[path = "workflow_host_command_groups_windows_tests.rs"]
 mod windows_tests;
+
+#[cfg(all(test, unix))]
+thread_local! {
+    pub(crate) static REGISTER_DELAY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[path = "workflow_host_command_groups_remedy.rs"]
+mod remedy;

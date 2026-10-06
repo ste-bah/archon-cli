@@ -70,6 +70,9 @@ fn crash_before_keep_reads_identities_from_the_supervision_marker() {
     record.host_pid = ended_group();
     record.host_start = None;
     record.survivors = vec![identity];
+    // This fixture models a completed identity checkpoint; initial records
+    // are intentionally incomplete until durable completion.
+    record.survivors_unknown = false;
     std::fs::write(
         &path,
         serde_json::to_vec(&HostCommandGroupRecord {
@@ -135,6 +138,9 @@ fn crash_after_kill_before_reap_keeps_the_last_identity_checkpoint() {
     std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
     // Model a process whose kill was requested but has not yet finished.
     record.survivors = vec![identity];
+    // This fixture models a completed identity checkpoint; initial records
+    // are intentionally incomplete until durable completion.
+    record.survivors_unknown = false;
     std::fs::write(
         path.with_extension("pending"),
         guard::supervised_marker(&record).unwrap(),
@@ -171,7 +177,7 @@ fn a_real_executor_crash_retains_a_descendant_that_left_its_session() {
     }
     let run = tempfile::tempdir().unwrap();
     let mut children = Children {
-        host: std::process::Command::new(std::env::current_exe().unwrap())
+        host: archon_shell::spawn::command(std::env::current_exe().unwrap())
             .args(["--ignored", "--exact", "command::workflow_host_command_groups::tests::regression_tests::supervision_fixture"])
             .env("HOST_COMMAND_CRASH_FIXTURE", run.path())
             .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
@@ -194,11 +200,30 @@ fn a_real_executor_crash_retains_a_descendant_that_left_its_session() {
     };
     children.pins.push(escaped);
     let dir = run.path().join(GROUP_RECORDS_DIR);
-    let path = std::fs::read_dir(&dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .find(|path| path.extension().is_some_and(|ext| ext == "json"))
-        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let path = loop {
+        let path = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.extension().is_some_and(|ext| ext == "json")
+                    && std::fs::read(path)
+                        .ok()
+                        .and_then(|bytes| {
+                            serde_json::from_slice::<HostCommandGroupRecord>(&bytes).ok()
+                        })
+                        .is_some_and(|record| record.pid > 1 && record.leader_start.is_some())
+            });
+        if let Some(path) = path {
+            break path;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "fixture never registered its leader"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
     let record = read(&path);
     let leader = Pinned {
         pid: record.pid,
@@ -265,3 +290,6 @@ async fn supervision_fixture() {
         .await
         .unwrap();
 }
+
+#[path = "workflow_host_command_evidence_r2_tests.rs"]
+mod r2_tests;

@@ -87,7 +87,7 @@ fn seal_bytes(raw: &[u8], secrets: &HostSecrets) -> WorkflowResult<Vec<u8>> {
     let mut clean = decoded.clone();
     secrets.strings(&mut clean);
     let changed = clean != decoded;
-    let mut value = if changed {
+    let value = if changed {
         match serde_json::from_value::<GateEnvelopeV1>(decoded) {
             Ok(envelope) => serde_json::to_value(secrets.envelope(envelope))?,
             Err(_) => clean,
@@ -95,28 +95,38 @@ fn seal_bytes(raw: &[u8], secrets: &HostSecrets) -> WorkflowResult<Vec<u8>> {
     } else {
         clean
     };
-    // A residual secret invalidates the envelope. Dropping an optional error
-    // field must never erase a failure and permit publication.
-    let mut refused = false;
-    if let serde_json::Value::Object(fields) = &mut value {
-        for field in fields.values_mut() {
-            if secrets.holds_serialized_secret(&serde_json::to_vec(field)?) {
-                *field = serde_json::Value::Null;
-                refused = true;
-            }
+    // Verification traverses only data the child can supply. Wire-contract
+    // keys and closed enum constants are owned by the schema, even when a
+    // credential happens to have the same spelling (for example "body").
+    if let Ok(envelope) = serde_json::from_value::<GateEnvelopeV1>(value.clone()) {
+        let verified = secrets.envelope(envelope.clone());
+        if verified != envelope {
+            return refusal_envelope();
         }
+        return if changed {
+            Ok(serde_json::to_vec_pretty(&value)?)
+        } else {
+            Ok(raw.to_vec())
+        };
     }
-    let mut sealed = if refused {
-        b"null".to_vec()
-    } else {
-        serde_json::to_vec_pretty(&value)?
-    };
-    // Verification is on the final serialized output, in both plaintext and
-    // JSON-escaped spelling. No raw-byte search can bypass JSON decoding.
-    if secrets.holds_serialized_secret(&sealed) {
-        sealed = b"null".to_vec();
+    // A redaction refusal is valid operational evidence, never JSON null.
+    if secrets.holds_serialized_secret(&serde_json::to_vec(&value)?) {
+        return refusal_envelope();
     }
+    let sealed = serde_json::to_vec_pretty(&value)?;
     Ok(sealed)
+}
+
+fn refusal_envelope() -> WorkflowResult<Vec<u8>> {
+    Ok(serde_json::to_vec_pretty(&GateEnvelopeV1 {
+        schema_version: 1,
+        report: serde_json::Value::Null,
+        policy_findings: Vec::new(),
+        operational_error: Some(archon_workflow::GateOperationalError {
+            kind: "secret_redaction_refused".into(),
+            text: "Host evidence could not be safely redacted; update the forwarded credentials and retry".into(),
+        }),
+    })?)
 }
 
 fn remove_temporary_envelopes(root: &Path) -> WorkflowResult<()> {

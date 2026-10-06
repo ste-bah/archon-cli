@@ -3,7 +3,7 @@ use super::*;
 use std::time::Instant;
 
 fn fixture(rest: &str) -> confine::OwnedCheck {
-    let mut command = tokio::process::Command::new("cmd");
+    let mut command = archon_shell::spawn::tokio_command("cmd");
     command
         .args([
             "/C",

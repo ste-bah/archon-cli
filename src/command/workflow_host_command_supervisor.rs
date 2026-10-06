@@ -16,6 +16,8 @@ use io::{SupervisorEvent, abort_stdin, drain_pipe, finish_pipe_tasks, spawn_stdi
 #[path = "workflow_host_command_supervisor_guard.rs"]
 mod guard;
 use guard::{ProcessGroupGuard, stalled_output};
+#[path = "workflow_host_command_launch.rs"]
+mod launch;
 #[path = "workflow_host_command_termination.rs"]
 mod termination;
 #[cfg(all(test, unix))]
@@ -166,10 +168,20 @@ pub(crate) async fn supervise_process_group(
     // handle even if confinement never got as far as a tree.
     command.kill_on_drop(true);
 
-    let mut child = command.spawn().map_err(|source| WorkflowError::Io {
-        path: request.program.clone(),
-        source,
-    })?;
+    // Reserving before spawn makes a failed directory incapable of launching
+    // an unrecorded child. A crash in the spawn/registration gap retains the
+    // unresolved launch barrier, which the normal resume check reads.
+    let mut launch = launch::LaunchBarrier::reserve(group_records, &request.command_id)?;
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(source) => {
+            launch.clear()?;
+            return Err(WorkflowError::Io {
+                path: request.program.clone(),
+                source,
+            });
+        }
+    };
     // The select below observes timeout, control and completion. It cannot
     // observe this future being dropped - task cancellation, a panic, or an
     // early return on a path that never reaches termination - and a dropped
@@ -201,10 +213,12 @@ pub(crate) async fn supervise_process_group(
                     "host command registration failed: {error}; teardown stalled: {evidence}"
                 )));
             }
+            launch.clear()?;
             return Err(error);
         }
     };
     group_guard.hold_record(record)?;
+    launch.clear()?;
     #[cfg(unix)]
     let child = &mut *group_guard.child;
     // Borrowed on every platform, as the Unix guard hands it out.
@@ -276,6 +290,9 @@ pub(crate) async fn supervise_process_group(
                 // A scan runs on its own thread; the select keeps watching
                 // the exit, control and the clock meanwhile.
                 _ = scan.tick() => {
+                    if let Some(fault) = group_guard.tree.evidence.as_ref().and_then(|e| e.failure()) {
+                        break Outcome::Event(SupervisorEvent::Checkpoint(fault));
+                    }
                     if scanning.as_ref().is_none_or(tokio::task::JoinHandle::is_finished) {
                         scanning = group_guard.tree.spawn_refresh();
                     }
@@ -402,6 +419,7 @@ pub(crate) async fn supervise_process_group(
                     io::over_limit(&request, stream, limit)
                 }
                 SupervisorEvent::Failed(detail) => io::failed(&request, &detail),
+                SupervisorEvent::Checkpoint(detail) => WorkflowError::HostOperational(detail),
             };
             let pipes = finish_pipe_tasks(stdout_task, stderr_task).await;
             let teardown = match &pipes {

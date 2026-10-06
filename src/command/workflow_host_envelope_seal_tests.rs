@@ -80,7 +80,21 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
         use archon_workflow::{
             PREPARED_PUBLICATION_SCHEMA_VERSION, PreparedPublicationEntry, PreparedPublicationV1,
         };
-        let secret = request.environment["ANTHROPIC_API_KEY"].to_str().unwrap();
+        let secret = request
+            .environment
+            .get("ANTHROPIC_API_KEY")
+            .map(|value| value.to_str().unwrap())
+            .unwrap_or_else(|| {
+                request.environment["DATABASE_URL"]
+                    .to_str()
+                    .unwrap()
+                    .split("user:")
+                    .nth(1)
+                    .unwrap()
+                    .split('@')
+                    .next()
+                    .unwrap()
+            });
         if self.0 == Child::JsonOutput {
             let output = archon_shell::spawn::command("python3")
                 .args(["-c", "import json,sys; value=json.dumps(sys.argv[1]); sys.stdout.write(value); sys.stderr.write(value); sys.exit(1)", secret])
@@ -188,7 +202,17 @@ async fn run(child: Child) -> Ran {
 async fn run_secret(child: Child, secret: &str) -> Ran {
     let temp = tempfile::tempdir().unwrap();
     let mut context = context(temp.path());
-    context.freeze_provider_environment = [("ANTHROPIC_API_KEY".into(), secret.into())].into();
+    if ["body", "report", "schema_version"].contains(&secret) {
+        context
+            .acceptance_environment_allowlist
+            .push("DATABASE_URL".into());
+        context.freeze_provider_environment.insert(
+            "DATABASE_URL".into(),
+            format!("postgres://user:{secret}@host/db"),
+        );
+    } else {
+        context.freeze_provider_environment = [("ANTHROPIC_API_KEY".into(), secret.into())].into();
+    }
     if child == Child::TypedSecret {
         context.gate_mode = archon_core::config::GateMode::Enforce;
     }
@@ -428,3 +452,6 @@ async fn ascii_json_output_is_redacted_at_the_host_result_boundary() {
         assert_eq!(result.stderr, "\"[REDACTED]\"");
     }
 }
+
+#[path = "workflow_host_envelope_r2_tests.rs"]
+mod r2_tests;

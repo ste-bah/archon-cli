@@ -78,6 +78,10 @@ pub(crate) struct GroupRecordGuard {
 }
 
 impl GroupRecordGuard {
+    pub(crate) fn paths(&self) -> [PathBuf; 2] {
+        [self.path.clone(), self.pending.clone()]
+    }
+
     /// Where the record is written.
     #[cfg(test)]
     pub(crate) fn path(&self) -> &Path {
@@ -211,6 +215,7 @@ struct Evidence {
     file: Option<std::fs::File>,
     record: HostCommandGroupRecord,
     failed: bool,
+    fault: Option<String>,
 }
 impl GroupEvidence {
     pub(super) fn new(file: std::fs::File, record: HostCommandGroupRecord) -> Self {
@@ -218,6 +223,7 @@ impl GroupEvidence {
             file: Some(file),
             record,
             failed: false,
+            fault: None,
         })))
     }
     fn close(&self) -> std::io::Result<()> {
@@ -235,12 +241,16 @@ impl GroupEvidence {
             .map_err(|_| "survivor marker lock unavailable")?;
         state.write(bytes).map_err(|error| error.to_string())
     }
+    pub(crate) fn failure(&self) -> Option<String> {
+        self.0.try_lock().ok().and_then(|state| state.fault.clone())
+    }
     pub(crate) fn begin(&self) -> std::io::Result<()> {
         let mut state = self
             .0
             .lock()
             .map_err(|_| std::io::Error::other("survivor marker lock unavailable"))?;
         state.record.survivors_unknown = true;
+        state.record.teardown_complete = false;
         state.checkpoint()
     }
     pub(crate) fn complete(&self, survivors: &[(u32, u64)]) -> std::io::Result<()> {
@@ -250,6 +260,7 @@ impl GroupEvidence {
             .map_err(|_| std::io::Error::other("survivor marker lock unavailable"))?;
         state.record.survivors = survivors.to_vec();
         state.record.survivors_unknown = state.failed;
+        state.record.teardown_complete = !state.failed;
         state.checkpoint()?;
         if state.failed {
             return Err(std::io::Error::other(
@@ -277,8 +288,9 @@ impl Evidence {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         use std::io::{Seek, SeekFrom, Write};
         let result = (|| {
-            // Invalidate and sync first: a crash partway through the replacement
-            // leaves unreadable evidence, never an old empty survivor list.
+            // Invalidation or a partial replacement leaves unreadable evidence.
+            // If invalidation itself fails, the prior durable marker remains
+            // explicitly incomplete until complete() successfully syncs it.
             let file = self
                 .file
                 .as_mut()
@@ -289,7 +301,9 @@ impl Evidence {
             file.write_all(bytes)?;
             file.sync_all()
         })();
-        if result.is_err() {
+        if let Err(error) = &result {
+            self.fault
+                .get_or_insert_with(|| format!("survivor checkpoint failed: {error}"));
             self.failed = true;
             self.record.survivors_unknown = true;
         }

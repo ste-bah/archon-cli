@@ -11,8 +11,8 @@
 //! cannot be reaped) is reported as the check's operational error, which is
 //! resumable, never as a runner failure.
 //!
-//! On Windows an owned Job Object confirms accounting reaches zero within
-//! the teardown bound; an active job is an operational stall.
+//! On Windows an owned Job Object confirms accounting reaches zero, bounding
+//! only inactivity; an active job without progress is an operational stall.
 use super::*;
 use std::time::Duration;
 
@@ -160,8 +160,10 @@ impl Confinement {
         #[cfg(windows)]
         {
             let job = self.job.clone();
+            let progress = archon_shell::teardown_progress::Progress::new(REAP_BOUND);
+            let worker_progress = progress.clone();
             let work = tokio::task::spawn_blocking(move || {
-                match job.kill_and_confirm(REAP_BOUND) {
+                match job.kill_and_confirm_observed(&worker_progress) {
                     Ok(0) => Ok(()),
                     Ok(active) => Err(format!(
                         "scratch job teardown stalled: {active} active process(es) after termination"
@@ -171,12 +173,9 @@ impl Confinement {
                     )),
                 }
             });
-            tokio::time::timeout(REAP_BOUND, work)
-                .await
-                .map_err(|_| {
-                    "scratch job teardown deadline exceeded; survivors unknown".to_string()
-                })?
-                .map_err(|error| format!("scratch job teardown task failed: {error}"))?
+            progress.watch(work).await.map_err(|error| {
+                format!("scratch job teardown stalled; survivors unknown: {error}")
+            })?
         }
         #[cfg(not(any(unix, windows)))]
         Ok(())

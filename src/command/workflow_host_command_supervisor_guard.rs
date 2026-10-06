@@ -109,6 +109,8 @@ impl Drop for ProcessGroupGuard {
         }
         self.settled = true;
         let tree = self.tree.clone();
+        // A queued drop worker must not leave apparently complete evidence.
+        let persistence = tree.evidence.as_ref().and_then(|e| e.begin().err());
         // Shared, so a thread that cannot start still leaves the record to
         // settle here: kept, as "unknown survivors".
         let record = std::sync::Arc::new(std::sync::Mutex::new(self.record.take()));
@@ -118,6 +120,10 @@ impl Drop for ProcessGroupGuard {
             .name("archon-host-command-teardown".into())
             .spawn(move || {
                 let teardown = kill_blocking(&tree, !reaped);
+                let teardown = match persistence {
+                    Some(error) => teardown.and_stalled(format!("recording teardown intent failed: {error}")),
+                    None => teardown,
+                };
                 #[cfg(unix)]
                 let teardown = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
                     Ok(runtime) => match runtime.block_on(super::termination::reap(&mut child)) {
