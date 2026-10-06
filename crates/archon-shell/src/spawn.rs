@@ -17,6 +17,16 @@
 //! thread created the descriptor and when. A `pre_exec` hook makes std fork
 //! and exec instead of `posix_spawn` on macOS; the sweep runs in the child.
 //!
+//! The hook is installed on Apple targets only. Linux std creates every pipe
+//! and socket with `O_CLOEXEC` atomically (`pipe2`, `SOCK_CLOEXEC`), so the
+//! window does not exist there, and a hook would cost more than it guards:
+//! std would fork instead of `posix_spawn`, copying the page tables of a large
+//! process, and under `vm.overcommit_memory=2` that fork can fail with ENOMEM
+//! on every spawn. Other Unix targets, whose std also uses `pipe2`, keep
+//! std's default too.
+//! The API is the same everywhere, so call sites never change. A site that
+//! forks anyway (its own `pre_exec` hook) may still sweep there cheaply.
+//!
 //! A site that must pass a particular descriptor to its child adds its own
 //! `pre_exec` hook that `dup2`s it into place: hooks run in the order they
 //! are added, so that one runs after this sweep and its descriptor survives.
@@ -47,13 +57,13 @@ pub fn tokio_command(program: impl AsRef<OsStr>) -> tokio::process::Command {
 /// that reads it is async-signal safe. If it cannot be read, the spawn fails
 /// with that error rather than run a child that may inherit anything.
 pub fn stdio_only(command: &mut Command) -> &mut Command {
-    #[cfg(unix)]
+    // Apple only: see the module documentation for why not Linux.
+    #[cfg(target_vendor = "apple")]
     {
         use std::os::unix::process::CommandExt;
         let ceiling = crate::process_tree::descriptor_ceiling()
             .map_err(|error| error.raw_os_error().unwrap_or(libc::EINVAL));
-        // SAFETY: the hook calls only fcntl (and close_range on Linux), which
-        // are async-signal safe, and builds an io::Error from a plain code
+        // SAFETY: the hook calls only fcntl, which is async-signal safe, and builds an io::Error from a plain code
         // without allocating.
         unsafe {
             command.pre_exec(move || match ceiling {

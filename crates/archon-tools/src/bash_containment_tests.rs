@@ -187,9 +187,11 @@ fn shell_quote(path: &std::path::Path) -> String {
 
 /// Issue 340: the Bash tool's child inherits only its stdio. A pipe another
 /// thread had just made, before std set its `FD_CLOEXEC`, must not reach the
-/// tool's shell, or a background job there would hold that pipe open.
+/// tool's shell, or a background job there would hold that pipe open. Apple
+/// only: Linux std makes its pipes close-on-exec atomically, so the helper
+/// adds no sweep there.
 #[tokio::test]
-#[cfg(unix)]
+#[cfg(target_vendor = "apple")]
 async fn a_sibling_pipe_does_not_reach_the_bash_tool_shell() {
     let mut ends = [0; 2];
     // SAFETY: pipe writes two descriptors into the array it is given; both

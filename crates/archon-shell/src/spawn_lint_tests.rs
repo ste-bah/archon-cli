@@ -7,9 +7,10 @@
 //! `archon-test-support` crate, build scripts (they run in cargo, not in
 //! archon), the listed fixtures, and any `#[cfg(test)]` item in another file.
 //! A command type renamed on import keeps `Command::new(` visible only when
-//! the new name ends in `Command` (`TokioCommand::new(`); any other rename
-//! (`use std::process::Command as C`) is flagged at the import. A raw
-//! `libc::fork(` is flagged unless its file applies `inherit_only_stdio`.
+//! the new name ends in `Command` (`TokioCommand::new(`); any other rename,
+//! plain or inside braces (`use std::process::{Command as C}`), is flagged
+//! at the rename. A raw `libc::fork(` is flagged unless the function that
+//! calls it also calls `inherit_only_stdio`.
 
 use std::path::{Path, PathBuf};
 
@@ -20,18 +21,69 @@ const HELPER: &str = "crates/archon-shell/src/spawn.rs";
 /// `#[cfg(test)]` by its parent.
 const TEST_FIXTURES: &[&str] = &["src/command/workflow_live_v3_run_end_heal_fixture.rs"];
 
-/// Spellings that build a child without the helper.
-const FORBIDDEN: &[&str] = &["Command::new(", "open::that("];
+/// Spellings that build a child without the helper: `open`'s launchers
+/// spawn with a `Command` of their own (use `open::commands` with
+/// `run_first_launcher`).
+const FORBIDDEN: &[&str] = &[
+    "Command::new(",
+    "open::that(",
+    "open::that_detached(",
+    "open::that_in_background(",
+    "open::with(",
+    "open::with_detached(",
+    "open::with_in_background(",
+];
 
-/// A rename of a command type that would hide `Command::new(` from the lint.
+/// A rename of a command type that would hide `Command::new(` from the lint,
+/// in a plain `use` or one item of a braced group (which may span lines).
 fn hiding_rename(code: &str) -> bool {
-    code.split("process::Command as ").skip(1).any(|rest| {
-        let name: String = rest
+    let mut rest = code;
+    while let Some(at) = rest.find("Command as ") {
+        let whole_word = rest[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+        let name: String = rest[at + "Command as ".len()..]
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_')
             .collect();
-        !name.ends_with("Command")
-    })
+        if whole_word && !name.ends_with("Command") {
+            return true;
+        }
+        rest = &rest[at + 1..];
+    }
+    false
+}
+
+/// Whether the function around line `index` of `lines` (0-based) calls
+/// `inherit_only_stdio`: from the nearest `fn` at or above it to the brace
+/// that closes it.
+fn function_sweeps(lines: &[&str], index: usize) -> bool {
+    let is_fn = |line: &str| {
+        let code = line.split("//").next().unwrap_or("");
+        code.trim_start().starts_with("fn ") || code.contains(" fn ")
+    };
+    let Some(start) = (0..=index).rev().find(|&at| is_fn(lines[at])) else {
+        return false;
+    };
+    let mut depth = 0i64;
+    let mut opened = false;
+    for line in &lines[start..] {
+        if line
+            .split("//")
+            .next()
+            .unwrap_or("")
+            .contains("inherit_only_stdio(")
+        {
+            return true;
+        }
+        depth += brace_delta(line);
+        opened |= line.contains('{');
+        if opened && depth <= 0 {
+            break;
+        }
+    }
+    false
 }
 
 fn workspace_root() -> PathBuf {
@@ -151,10 +203,11 @@ fn violations() -> Vec<String> {
         let Ok(source) = std::fs::read_to_string(&path) else {
             continue;
         };
+        let all_lines: Vec<&str> = source.lines().collect();
         for (number, line) in production_lines(&source) {
             let code = line.split("//").next().unwrap_or("");
             // A raw fork that execs must sweep before it does.
-            let raw_fork = code.contains("libc::fork(") && !source.contains("inherit_only_stdio(");
+            let raw_fork = code.contains("libc::fork(") && !function_sweeps(&all_lines, number - 1);
             if FORBIDDEN.iter().any(|spelling| code.contains(spelling))
                 || hiding_rename(code)
                 || raw_fork
@@ -171,7 +224,7 @@ fn non_test_code_builds_children_only_through_the_spawn_helper() {
     let found = violations();
     assert!(
         found.is_empty(),
-        "build child processes with crate::spawn::{{command, tokio_command, \
+        "build child processes with archon_shell::spawn::{{command, tokio_command, \
          stdio_only}} so they inherit only stdio (Issue 340):\n{}",
         found.join("\n")
     );
@@ -192,4 +245,35 @@ fn the_lint_sees_a_spawn_in_production_code_and_not_in_a_test_item() {
     assert!(!hiding_rename(
         "use tokio::process::Command as TokioCommand;"
     ));
+    assert!(hiding_rename(
+        "use std::process::{Child, Command as C, Stdio};"
+    ));
+    assert!(hiding_rename("    Command as Spawn,"));
+    assert!(!hiding_rename(
+        "use x::{SubCommand as Sub, Command as BuildCommand};"
+    ));
+    assert!(
+        FORBIDDEN
+            .iter()
+            .any(|f| "open::that_detached(&url)".contains(f))
+    );
+}
+
+#[test]
+fn a_raw_fork_must_sweep_in_the_same_function() {
+    let lines: Vec<&str> = "fn sweeps() {
+    libc::fork();
+    inherit_only_stdio(c);
+}
+                            fn bare() {
+    libc::fork();
+}
+"
+    .lines()
+    .collect();
+    assert!(function_sweeps(&lines, 1));
+    assert!(
+        !function_sweeps(&lines, 5),
+        "a sweep in another function counts"
+    );
 }

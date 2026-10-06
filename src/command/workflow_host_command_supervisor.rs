@@ -133,16 +133,29 @@ pub(crate) async fn supervise_process_group(
     // its checks a group of its own, and the session still holds those
     // (Issue 270). On Linux it also becomes the reaper of its orphans, so a
     // descendant that leaves the session as well stays its descendant.
-    // It inherits nothing but its stdio (Issues 334, 340): `tokio_command`
-    // sweeps every other descriptor before this hook runs.
+    // It inherits nothing but its stdio (Issues 334, 340). On Apple targets
+    // `tokio_command` sweeps every other descriptor before this hook runs.
+    // Elsewhere this hook already makes std fork, so it sweeps here as well
+    // (one `close_range` on Linux) and keeps the Issue 334 guarantee for any
+    // descriptor that was opened without close-on-exec.
+    #[cfg(all(unix, not(target_vendor = "apple")))]
+    let ceiling =
+        archon_shell::process_tree::descriptor_ceiling().map_err(|source| WorkflowError::Io {
+            path: request.program.clone(),
+            source,
+        })?;
     #[cfg(unix)]
-    // SAFETY: setsid and prctl are async-signal-safe syscalls.
+    // SAFETY: setsid, prctl, fcntl and close_range are async-signal-safe
+    // syscalls; the ceiling was read before the fork.
     unsafe {
         command.pre_exec(move || {
             if libc::setsid() < 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            archon_shell::process_tree::become_subreaper()
+            archon_shell::process_tree::become_subreaper()?;
+            #[cfg(not(target_vendor = "apple"))]
+            archon_shell::process_tree::inherit_only_stdio(ceiling)?;
+            Ok(())
         });
     }
     // Suspended until it is in the job `confine` makes (Issue 273), so that

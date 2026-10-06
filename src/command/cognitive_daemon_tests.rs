@@ -1,13 +1,19 @@
+//! The pipe tests are Apple only: Linux std makes its pipes close-on-exec
+//! atomically, so `archon_shell::spawn` adds no sweep there (Issue 340).
+#[cfg(target_vendor = "apple")]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(target_vendor = "apple")]
 use std::path::Path;
 
 use super::daemon_command;
 
+#[cfg(target_vendor = "apple")]
 /// A sibling's pipe caught between std's `pipe()` and its `FD_CLOEXEC`:
 /// both ends inheritable, moved above a shell's own descriptors. Closed on
 /// drop.
 struct SiblingPipe([libc::c_int; 2]);
 
+#[cfg(target_vendor = "apple")]
 impl SiblingPipe {
     fn new() -> Self {
         let mut ends = [0; 2];
@@ -26,6 +32,7 @@ impl SiblingPipe {
     }
 }
 
+#[cfg(target_vendor = "apple")]
 impl Drop for SiblingPipe {
     fn drop(&mut self) {
         // SAFETY: closes only the descriptors this fixture opened.
@@ -36,6 +43,7 @@ impl Drop for SiblingPipe {
     }
 }
 
+#[cfg(target_vendor = "apple")]
 /// A stand-in daemon executable: it records its arguments and whether either
 /// end of `pipe` reached it, then exits.
 fn probe_daemon(dir: &Path, pipe: &SiblingPipe) -> std::path::PathBuf {
@@ -53,10 +61,12 @@ fn probe_daemon(dir: &Path, pipe: &SiblingPipe) -> std::path::PathBuf {
     exe
 }
 
+#[cfg(target_vendor = "apple")]
 fn report(dir: &Path) -> String {
     std::fs::read_to_string(dir.join("report")).unwrap()
 }
 
+#[cfg(target_vendor = "apple")]
 #[test]
 fn a_sibling_pipe_does_not_reach_the_cognitive_daemon() {
     let dir = tempfile::tempdir().unwrap();

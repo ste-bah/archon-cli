@@ -68,6 +68,7 @@ fn quiet(command: &mut Command) -> &mut Command {
         .stderr(Stdio::null())
 }
 
+#[cfg(target_vendor = "apple")]
 #[test]
 fn a_sibling_pipe_does_not_reach_a_std_child() {
     let pipe = SiblingPipe::new();
@@ -83,6 +84,7 @@ fn a_sibling_pipe_does_not_reach_a_std_child() {
     assert_eq!(status.code(), Some(0), "the sibling pipe reached the child");
 }
 
+#[cfg(target_vendor = "apple")]
 #[tokio::test]
 async fn a_sibling_pipe_does_not_reach_a_tokio_child() {
     let pipe = SiblingPipe::new();
@@ -97,6 +99,7 @@ async fn a_sibling_pipe_does_not_reach_a_tokio_child() {
     assert_eq!(status.code(), Some(0), "the sibling pipe reached the child");
 }
 
+#[cfg(target_vendor = "apple")]
 #[test]
 fn a_command_a_library_built_inherits_only_stdio_too() {
     let pipe = SiblingPipe::new();
@@ -104,6 +107,37 @@ fn a_command_a_library_built_inherits_only_stdio_too() {
     built.args(["-c", &pipe.probe()]);
     let status = quiet(stdio_only(&mut built)).status().unwrap();
     assert_eq!(status.code(), Some(0), "the sibling pipe reached the child");
+}
+
+/// Off Apple targets the helper adds no hook, so std keeps `posix_spawn`
+/// (no fork of a large parent): the race it guards against does not exist
+/// there, as the next test shows for std's own pipes.
+#[cfg(not(target_vendor = "apple"))]
+#[test]
+fn off_apple_the_helper_leaves_std_on_posix_spawn() {
+    let pipe = SiblingPipe::new();
+    let mut built = Command::new("/bin/sh");
+    built.args(["-c", &pipe.probe()]);
+    let status = quiet(stdio_only(&mut built)).status().unwrap();
+    assert_ne!(status.code(), Some(0), "a hook swept the descriptors");
+    let status = quiet(command("/bin/sh").args(["-c", &pipe.probe()]))
+        .status()
+        .unwrap();
+    assert_ne!(status.code(), Some(0), "a hook swept the descriptors");
+}
+
+/// Linux std creates pipes close-on-exec atomically (`pipe2(O_CLOEXEC)`),
+/// so no other thread's fork can catch one inheritable.
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_std_pipes_are_close_on_exec_from_creation() {
+    use std::os::fd::AsRawFd;
+    let (read, write) = std::io::pipe().unwrap();
+    for fd in [read.as_raw_fd(), write.as_raw_fd()] {
+        // SAFETY: reads only this descriptor's flags.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        assert_ne!(flags & libc::FD_CLOEXEC, 0, "fd {fd} is inheritable");
+    }
 }
 
 #[tokio::test]
