@@ -168,6 +168,25 @@ fn round3_regression_suite_passes() {
     );
 }
 
+/// Issue 357 round 7: a pass is progress in every kind of failed round, each
+/// entry's note stays its own, and observe pauses on a window with an outage.
+#[test]
+fn round_credit_regression_suite_passes() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/command/workflow_decompose_round_credit_test.cjs"
+        ))
+        .output()
+        .expect("node must be available");
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // --- round 5: deterministic refusals and gate operational errors -------------
 
 /// A refusal the host produced (not a model's text) naming the `n`-th task.

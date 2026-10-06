@@ -288,8 +288,9 @@ async function authorCandidate(w, policy) {
     if (stall) {
       // Observe never blocks on the artifact's quality: a loop that stopped
       // improving returns the artifact the tree holds now. An outage says
-      // nothing about the artifact, so it pauses in either mode.
-      if (stall !== "operational_no_progress" && args.gateMode === "observe" && lastCommitted) return lastCommitted;
+      // nothing about the artifact, so a window that holds one pauses in
+      // either mode (resumable), whatever the rest of the window was.
+      if (args.gateMode === "observe" && lastCommitted && !windowHasOutage(progress)) return lastCommitted;
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
     }
     call += 1;
@@ -313,17 +314,18 @@ async function authorCandidate(w, policy) {
     // rewrite alone clears no defect; every failure shares the same window.
     const advanced = (authorState.added || 0) > addedBefore;
     if (authored.status === "failed") {
+      // Every kind of failed round credits the entries that passed in it.
+      // Each entry reads its own refusal or note; the shared feedback stays
+      // the gate's findings.
+      const passed = policy.author ? authorState.roundPassed : [];
       if (authored.refusals) {
-        // Each refused entry is measured in its own repair frontier and reads
-        // its own refusal; the shared feedback stays the gate's findings.
-        recordRepairs(progress, call, authored.refusals, authorState.roundPassed, !measuredReplies, advanced);
+        recordRepairs(progress, call, authored.refusals, passed, !measuredReplies, advanced);
         lastFindings = authored.findings.map(progressText);
       } else if (authored.malformed) {
-        recordAnswered(progress, call, "entries", advanced, !measuredReplies);
+        recordAnswered(progress, call, "entries", advanced, !measuredReplies, passed);
         lastFindings = [authored.summary || "malformed replies"];
-        feedback = lastFindings.slice();
       } else {
-        recordOperational(progress, call, authored.summary, advanced);
+        recordOperational(progress, call, authored.summary, advanced, passed);
         lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
       }
       continue;

@@ -210,9 +210,19 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   const refusals = settled.filter(result => result && result.status === "fulfilled" && result.value.failure?.findings)
     .map(result => ({entryId:result.value.failure.entryId, findings:result.value.failure.findings}));
   state.roundPassed = pending.filter((_, index) => succeeded(settled[index]));
+  // Each entry's slot holds the note of its latest attempt only: a shape
+  // refusal, or the note of a reply that held no complete entry. A pass, or a
+  // call never answered, leaves no note, so a stale refusal is never shown as
+  // the previous reply's.
   state.refusals = state.refusals || new Map();
-  for (const id of state.roundPassed) state.refusals.delete(id);
-  for (const refusal of refusals) state.refusals.set(refusal.entryId, refusal.findings.map(progressText));
+  pending.forEach((id, index) => {
+    const result = settled[index];
+    if (!result || result.status !== "fulfilled") return;
+    const failure = result.value.failure;
+    if (failure && failure.entryId === id && Array.isArray(failure.findings)) state.refusals.set(id, failure.findings.map(progressText));
+    else if (failure && failure.malformed) state.refusals.set(id, [failure.summary]);
+    else state.refusals.delete(id);
+  });
   // A thrown call (a pause or cancel the host observed, or a host error)
   // outranks a failed reply at any index: returned as a failed value it would
   // be retried as an operational failure and the stop would be lost.

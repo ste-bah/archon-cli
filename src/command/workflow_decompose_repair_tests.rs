@@ -86,6 +86,11 @@ fn run_js(driver: &str) -> String {
         "openRepairEpisode",
         "PASSED_MEASURE",
         "recordRepairs",
+        // Issue 357 round 7: every failed round credits its passes.
+        "creditPassed",
+        "recordRound",
+        "creditedRound",
+        "windowHasOutage",
         "recordStep",
         "recordAttempt",
         "recordAnswered",

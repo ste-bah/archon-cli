@@ -188,17 +188,46 @@ function recordAttempt(progress, call, findings, answered = true) {
 // The measure of an entry that passed the author step: better than any refusal.
 const PASSED_MEASURE = { tier: JUDGED_TIER, stage: PASSED_STAGE, count: 0 };
 
+// Credits each entry that passed this round and was measured (refused) in
+// the current repair episode: its first pass beats its best. A pass is the
+// maximum, so each entry is credited at most once per episode. An entry with
+// no measure in the episode (a rewrite of one the judge sent back) is only
+// novelty until the judge accepts it (Issue 261). Returns the credited entries.
+function creditPassed(episode, passed) {
+  const credited = [];
+  if (!Array.isArray(passed)) throw new Error("an author round reported no passed entries");
+  for (const id of passed) {
+    const best = episode.bests.get(id);
+    if (!best || !isBetter(PASSED_MEASURE, best)) continue;
+    episode.bests.set(id, PASSED_MEASURE);
+    credited.push({ subject: id, findings: 0, progress: true, worse: false });
+  }
+  return credited;
+}
+
+// Closes one author round. `advanced` (a previously missing entry was
+// completed) empties the window. An entry that beat its own best restores the
+// window to where the repair episode opened, never below it, so attempts
+// before the episode still count. Otherwise the round is one more attempt
+// without progress.
+function recordRound(progress, entry, better, advanced) {
+  entry.progress = better || Boolean(advanced);
+  if (advanced || !better) return recordStep(progress, entry);
+  progress.stalled = Math.min(progress.stalled, progress.repair.stalled);
+  progress.stalledOperational = Math.min(progress.stalledOperational, progress.repair.stalledOperational);
+  progress.history.push(entry);
+  return true;
+}
+
 // Records one author round that refused entries for their shape. Each refused
 // entry is measured against its own best in the current repair episode (a
-// first measure beats nothing), and each measured entry that passed this round
-// beats its best. The round is progress when at least one entry beat its own
-// best. An entry worse than its best does not cancel another entry's
+// first measure beats nothing), and each entry that passed this round is
+// credited (creditPassed). The round is progress when at least one entry beat
+// its own best. An entry worse than its best does not cancel another entry's
 // progress: each best only improves, over a finite measure (tier, stage, a
 // defect count >= 0; a pass is terminal), so an episode holds finitely many
 // improvements and the loop stays bounded, while a stuck or worse entry keeps
-// reading its own refusal. Progress restores the window to where the episode
-// opened; `advanced` (a previously missing entry was completed) is progress
-// as in recordAnswered. `worse` is kept per entry as evidence.
+// reading its own refusal. `worse` is kept per entry as evidence.
 function recordRepairs(progress, call, refusals, passed = [], answered = true, advanced = false) {
   if (answered) progress.answered += 1;
   const episode = progress.repair;
@@ -215,37 +244,45 @@ function recordRepairs(progress, call, refusals, passed = [], answered = true, a
     measures.push(measure);
     entries.push({ subject: entryId, findings: measure.count, progress: improved, worse: regressed });
   }
-  for (const id of passed) {
-    if (!episode.bests.has(id) || !isBetter(PASSED_MEASURE, episode.bests.get(id))) continue;
-    episode.bests.set(id, PASSED_MEASURE);
-    better = true;
-    entries.push({ subject: id, findings: 0, progress: true, worse: false });
-  }
+  const credited = creditPassed(episode, passed);
+  entries.push(...credited);
   const tier = Math.min(...measures.map(measure => measure.tier));
   const stage = Math.min(...measures.map(measure => measure.stage));
-  const entry = {
+  return recordRound(progress, {
     call, kind: ["packaging", "refused", "judged"][tier], subject: refusals.map(refusal => refusal.entryId).join(", "),
     stage: DEFECT_STAGES[stage] || "passed", findings: measures.reduce((sum, measure) => sum + measure.count, 0),
-    progress: better || advanced, entries
-  };
-  if (advanced || !better) return recordStep(progress, entry);
-  progress.stalled = Math.min(progress.stalled, episode.stalled);
-  progress.stalledOperational = Math.min(progress.stalledOperational, episode.stalledOperational);
-  progress.history.push(entry);
-  return true;
+    progress: false, entries
+  }, better || credited.length > 0, advanced);
+}
+
+// A round whose failures measured nothing (an unparseable reply, a call that
+// failed in transport) still credits the entries that passed in it.
+function creditedRound(progress, entry, passed, advanced) {
+  const credited = creditPassed(progress.repair, passed);
+  if (credited.length > 0) entry.entries = credited;
+  return recordRound(progress, entry, credited.length > 0, advanced);
 }
 
 // Records an attempt the provider answered but nothing measured: an
 // incomplete reply, or an acceptance round that ended on malformed replies.
-// `advanced` is true only when the round completed a previously missing entry.
-function recordAnswered(progress, call, kind, advanced = false, answered = true) {
+// `advanced` is true only when the round completed a previously missing
+// entry; `passed` names the entries that passed in the same round.
+function recordAnswered(progress, call, kind, advanced = false, answered = true, passed = []) {
   if (answered) progress.answered += 1;
-  return recordStep(progress, { call, kind, findings: null, progress: Boolean(advanced) });
+  return creditedRound(progress, { call, kind, findings: null, progress: false }, passed, advanced);
 }
 
-// Records an author call the provider never answered.
-function recordOperational(progress, call, summary, advanced = false) {
-  return recordStep(progress, { call, kind: "operational", findings: null, progress: Boolean(advanced), summary: boundText(summary) });
+// Records an author call the provider never answered; `passed` names the
+// entries of the same round that passed.
+function recordOperational(progress, call, summary, advanced = false, passed = []) {
+  return creditedRound(progress, { call, kind: "operational", findings: null, progress: false, summary: boundText(summary) }, passed, advanced);
+}
+
+// Observe may end a stalled loop on its latest commit only when every attempt
+// of the window was answered: an outage never judged what it would have
+// produced, so a window that holds one pauses in either mode.
+function windowHasOutage(progress) {
+  return progress.stalledOperational > 0;
 }
 
 // Why the loop must stop now, or null while it may make another attempt.
