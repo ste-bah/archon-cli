@@ -179,24 +179,6 @@ fn live_owner_message(id: &str, path: &Path) -> String {
     )
 }
 
-/// Whether a process with `pid` exists now. Evidence only: the OS can give a
-/// dead owner's pid to an unrelated process, so `true` never means "owner".
-pub(crate) fn pid_running(pid: u32) -> Option<bool> {
-    #[cfg(unix)]
-    {
-        let pid = libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0)?;
-        // SAFETY: signal 0 only probes whether the process exists; EPERM
-        // means it exists and belongs to another user.
-        let probed = unsafe { libc::kill(pid, 0) };
-        Some(probed == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        None
-    }
-}
-
 #[cfg(test)]
 #[path = "workflow_executor_lease_tests.rs"]
 mod tests;

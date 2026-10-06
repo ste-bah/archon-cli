@@ -1,6 +1,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use archon_shell::process_liveness::process_alive;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -221,7 +222,7 @@ pub fn status_for(paths: &DaemonPaths, stale_ms: u64) -> Result<DaemonStatus, Co
     let state = paths.read_state()?;
     let stale = state
         .as_ref()
-        .is_some_and(|state| heartbeat_is_stale(state, stale_ms) || !is_pid_alive(state.pid));
+        .is_some_and(|state| heartbeat_is_stale(state, stale_ms) || !process_alive(state.pid));
     Ok(DaemonStatus {
         running: paths.lock_path.exists() && !stale,
         stale,
@@ -237,18 +238,4 @@ pub fn heartbeat_is_stale(state: &DaemonState, stale_ms: u64) -> bool {
         .signed_duration_since(state.last_heartbeat_at)
         .num_milliseconds();
     elapsed > stale_ms as i64
-}
-
-#[cfg(unix)]
-pub(crate) fn is_pid_alive(pid: u32) -> bool {
-    if pid == 0 || pid > i32::MAX as u32 {
-        return false;
-    }
-    // SAFETY: kill(pid, 0) sends no signal; it only checks process existence.
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn is_pid_alive(_pid: u32) -> bool {
-    false
 }

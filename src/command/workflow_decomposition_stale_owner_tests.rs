@@ -220,9 +220,7 @@ async fn fixed_resume_recovers_a_killed_owner_and_refuses_a_live_one() {
     assert_eq!(detail["owner_lock_free"], true);
     assert_eq!(detail["previous_owner_pid"], holder_pid);
     assert_eq!(detail["recovered_by_pid"], std::process::id());
-    #[cfg(unix)]
     assert_eq!(detail["previous_owner_pid_running"], false);
-    #[cfg(unix)]
     assert_eq!(detail["owner_state"], "exited");
 
     let state: FixedDecompositionStateV1 =
@@ -262,9 +260,7 @@ async fn fixed_resume_treats_a_reused_owner_pid_as_dead_when_the_lock_is_free() 
     let detail = &events[0]["detail"];
     assert_eq!(detail["previous_owner_pid"], reused);
     assert_eq!(detail["previous_owner_acquired_at"], "2026-10-03T00:00:00Z");
-    #[cfg(unix)]
     assert_eq!(detail["previous_owner_pid_running"], true);
-    #[cfg(unix)]
     assert_eq!(detail["owner_state"], "pid_reused");
     assert_eq!(detail["orphaned_inflight_markers"], 2);
     assert_eq!(detail["inflight_host_pids"], serde_json::json!([4242]));

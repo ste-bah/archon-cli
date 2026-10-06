@@ -21,6 +21,8 @@ archon-completion = { path = "../archon-completion" }
 archon-permissions = { path = "../archon-permissions" }
 archon-llm = { path = "../archon-llm" }
 archon-memory = { path = "../archon-memory" }
+# Issue 342: the shared pid liveness probe the candidate lock reclaims on.
+archon-shell = { path = "../archon-shell" }
 libc = "0.2"
 tracing.workspace = true
 candle-core = { version = "0.10.2", optional = true }
@@ -42,6 +44,8 @@ uuid.workspace = true
 mlx-rs = { version = "=0.25.3", optional = true }
 
 [dev-dependencies]
+# Issue 342: `LiveChild`, a real process the candidate lock tests hold a lock with.
+archon-test-support = { path = "../archon-test-support" }
 async-trait.workspace = true
 tempfile.workspace = true
 tokio.workspace = true

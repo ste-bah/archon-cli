@@ -105,8 +105,7 @@ mod tests_eval_run_store {
         let mut record = make_record(&run_id, candidate_id);
         record.pid = 999_999;
         // Set updated_at far in the past so heartbeat_age > stale_heartbeat_ms=0.
-        record.updated_at =
-            chrono::DateTime::from_timestamp(0, 0).unwrap_or_else(Utc::now);
+        record.updated_at = chrono::DateTime::from_timestamp(0, 0).unwrap_or_else(Utc::now);
         store.write_run(&record).unwrap();
 
         // budget_ms=0 (unlimited) + stale_heartbeat_ms=0 (immediate expiry).
@@ -118,6 +117,84 @@ mod tests_eval_run_store {
         assert!(
             !store.lock_path(candidate_id).exists(),
             "lock file must be removed after reclamation"
+        );
+    }
+
+    /// Issue 342: writes a lock naming `pid` and a run record with a fresh
+    /// heartbeat, so only the holder's liveness can make the lock stale.
+    fn hold_candidate_lock(store: &JepaEvalRunStore, candidate_id: &str, pid: u32) -> String {
+        let run_id = JepaEvalRunStore::generate_run_id();
+        let lock = CandidateLockRecord {
+            pid,
+            run_id: run_id.clone(),
+            host: "test-host".to_string(),
+            acquired_at: Utc::now(),
+        };
+        let json = serde_json::to_string(&lock).unwrap();
+        std::fs::write(store.lock_path(candidate_id), &json).unwrap();
+        let mut record = make_record(&run_id, candidate_id);
+        record.pid = pid;
+        store.write_run(&record).unwrap();
+        json
+    }
+
+    /// Issue 342: the probe answered "dead" for every pid on Windows, so a
+    /// running eval's lock was reclaimed there.
+    #[test]
+    fn a_running_holders_lock_with_a_fresh_heartbeat_is_not_reclaimed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = JepaEvalRunStore::new(tmp.path().to_path_buf()).unwrap();
+        let holder = archon_test_support::live_process::LiveChild::spawn();
+        let lock = hold_candidate_lock(&store, "candidate-live", holder.pid());
+
+        // Unlimited budget; the heartbeat is seconds old, far under an hour.
+        let reclaimed = store
+            .reclaim_stale_lock_if_applicable("candidate-live", 0, 3_600_000)
+            .unwrap();
+
+        assert!(!reclaimed, "pid {} still runs", holder.pid());
+        assert_eq!(
+            std::fs::read_to_string(store.lock_path("candidate-live")).unwrap(),
+            lock,
+            "the running holder's lock must be left as it was"
+        );
+    }
+
+    #[test]
+    fn a_running_holders_lock_within_its_budget_is_not_reclaimed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = JepaEvalRunStore::new(tmp.path().to_path_buf()).unwrap();
+        let holder = archon_test_support::live_process::LiveChild::spawn();
+        hold_candidate_lock(&store, "candidate-budget", holder.pid());
+
+        let reclaimed = store
+            .reclaim_stale_lock_if_applicable("candidate-budget", 3_600_000, 3_600_000)
+            .unwrap();
+
+        assert!(!reclaimed, "pid {} still runs within budget", holder.pid());
+        assert!(store.lock_path("candidate-budget").exists());
+    }
+
+    #[test]
+    fn a_reaped_holders_lock_is_reclaimed_even_with_a_fresh_heartbeat() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = JepaEvalRunStore::new(tmp.path().to_path_buf()).unwrap();
+        let mut holder = archon_test_support::live_process::LiveChild::spawn();
+        let lock = hold_candidate_lock(&store, "candidate-dead", holder.pid());
+        holder.end();
+
+        let reclaimed = store
+            .reclaim_stale_lock_if_applicable("candidate-dead", 3_600_000, 3_600_000)
+            .unwrap();
+
+        assert!(reclaimed, "pid {} was killed and reaped", holder.pid());
+        assert!(!store.lock_path("candidate-dead").exists());
+        let run_id = serde_json::from_str::<CandidateLockRecord>(&lock)
+            .unwrap()
+            .run_id;
+        assert_eq!(
+            store.read_run(&run_id).unwrap().status,
+            crate::jepa::EvalRunStatus::Stale
         );
     }
 

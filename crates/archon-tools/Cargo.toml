@@ -74,6 +74,8 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+# Issue 342: `LiveChild`, a real process the cron lock tests hold a lock with.
+archon-test-support = { path = "../archon-test-support" }
 archon-session = { path = "../archon-session", features = ["test-support"] }
 tempfile.workspace = true
 # TASK-AGS-105: serialize tests that rely on process-global

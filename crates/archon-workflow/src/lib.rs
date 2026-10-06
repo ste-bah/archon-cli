@@ -53,7 +53,8 @@ pub mod obligation_ids;
 mod persistence;
 pub mod planner;
 pub mod policy;
-pub mod process_liveness;
+// Issue 342: the probe moved down to the archon-shell leaf; same path here.
+pub use archon_shell::process_liveness;
 pub mod provider_tiers;
 mod remediation_items;
 pub mod repo_root;

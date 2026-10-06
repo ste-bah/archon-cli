@@ -23,6 +23,8 @@ tracing.workspace = true
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",
+    # Issue 342: `SYNCHRONIZE`, so `process_liveness` can wait on a process.
+    "Win32_Storage_FileSystem",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
@@ -32,3 +34,6 @@ windows-sys = { workspace = true, features = [
 # Builds fake Git-for-Windows install trees so shell discovery precedence is
 # testable on any platform, including from a Linux CI runner.
 tempfile.workspace = true
+# Issue 342: `LiveChild`, a real process the liveness tests start and end.
+# archon-test-support has no path back to this crate, so no cycle forms.
+archon-test-support = { path = "../archon-test-support" }

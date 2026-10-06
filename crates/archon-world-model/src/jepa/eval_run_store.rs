@@ -234,7 +234,8 @@ impl JepaEvalRunStore {
     /// Attempt to reclaim a stale lock file for `candidate_id`.
     ///
     /// Staleness algorithm:
-    /// - If the holding pid is dead (`kill(pid, 0)` -> ESRCH) -> stale.
+    /// - If the holding pid is not running on this platform
+    ///   (`archon_shell::process_liveness::process_alive`) -> stale.
     /// - `budget_ms == 0` (unlimited run): stale when the heartbeat age
     ///   (`Utc::now() - run.updated_at`) exceeds `stale_heartbeat_ms`.
     /// - `budget_ms > 0` (bounded run): stale when
@@ -256,7 +257,7 @@ impl JepaEvalRunStore {
         let json = std::fs::read_to_string(&lock_path)?;
         let lock: CandidateLockRecord = serde_json::from_str(&json)?;
 
-        let pid_alive = is_pid_alive(lock.pid);
+        let pid_alive = archon_shell::process_liveness::process_alive(lock.pid);
 
         let is_stale = if !pid_alive {
             true
@@ -419,24 +420,6 @@ impl JepaEvalRunStore {
             Ok(())
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// PID liveness check
-// ---------------------------------------------------------------------------
-
-/// Return `true` if the process with `pid` is alive (POSIX: `kill(pid, 0)`).
-/// Always returns `false` on Windows (conservative: treat unknown as dead).
-#[cfg(unix)]
-fn is_pid_alive(pid: u32) -> bool {
-    // SAFETY: kill(pid, 0) sends no signal; it only checks process existence.
-    // Returns 0 if the process exists and we have permission, -1 otherwise.
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-}
-
-#[cfg(not(unix))]
-fn is_pid_alive(_pid: u32) -> bool {
-    false
 }
 
 // ---------------------------------------------------------------------------

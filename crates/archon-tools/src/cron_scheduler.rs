@@ -108,7 +108,7 @@ pub fn try_acquire_pid_lock(lock_path: &Path) -> anyhow::Result<bool> {
                 // Already our lock
                 return Ok(true);
             }
-            if is_pid_alive(pid) {
+            if archon_shell::process_liveness::process_alive(pid) {
                 // Another live process holds the lock
                 return Ok(false);
             }
@@ -118,23 +118,6 @@ pub fn try_acquire_pid_lock(lock_path: &Path) -> anyhow::Result<bool> {
     // Write our PID
     std::fs::write(lock_path, std::process::id().to_string())?;
     Ok(true)
-}
-
-/// Check whether a process with the given PID is alive on Linux.
-fn is_pid_alive(pid: u32) -> bool {
-    // On Linux, /proc/<pid> exists if the process is alive
-    #[cfg(target_os = "linux")]
-    {
-        std::path::Path::new(&format!("/proc/{pid}")).exists()
-    }
-    // Fallback for other platforms
-    #[cfg(not(target_os = "linux"))]
-    {
-        // signal(pid, 0) would work but requires unsafe. Use a conservative approach.
-        // Assume alive if we can't check — prevents lock stealing on unknown platforms.
-        let _ = pid;
-        false
-    }
 }
 
 // ---------------------------------------------------------------------------

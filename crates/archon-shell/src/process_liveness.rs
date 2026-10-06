@@ -4,6 +4,11 @@
 //! reclaim when that writer is gone. A probe that answers "dead" for every
 //! pid on one platform closes the work of a live owner there, so each
 //! platform probes for real here and callers share this one answer.
+//!
+//! Issue 342: it lives in this leaf crate, not in archon-workflow, so that
+//! crates archon-workflow depends on (archon-tools) and crates that do not
+//! depend on it (archon-cognitive, archon-world-model) reach the same probe.
+//! archon-workflow re-exports it as `archon_workflow::process_liveness`.
 
 /// Whether `pid` names a process that is still running.
 ///
