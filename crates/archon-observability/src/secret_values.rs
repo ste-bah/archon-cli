@@ -41,6 +41,18 @@ impl SecretValues {
         secrets
     }
 
+    /// Every nonempty configured value for persisted evidence, including short
+    /// credentials. Unlike tracing, this boundary cannot discard known values.
+    pub fn for_evidence<'a>(values: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut secrets = Self::default();
+        for value in values.into_iter().filter(|value| !value.is_empty()) {
+            secrets.add(value);
+            secrets = secrets.with_url_credentials(value);
+        }
+        secrets.normalize();
+        secrets
+    }
+
     /// Include a known Authorization scheme's bare credential, even if short.
     pub fn with_authorization(mut self, value: &str) -> Self {
         if let Some((scheme, credential)) = value.trim().split_once(char::is_whitespace)
@@ -49,6 +61,26 @@ impl SecretValues {
         {
             self.add(credential.trim());
             self.normalize();
+        }
+        self
+    }
+
+    /// URL userinfo passwords are credentials regardless of the variable name
+    /// or password length. Register the address and both password spellings.
+    pub fn with_url_credentials(mut self, value: &str) -> Self {
+        if let Some((_, rest)) = value.split_once("://") {
+            let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+            if let Some((userinfo, _)) = authority.rsplit_once('@')
+                && let Some((_, password)) = userinfo.split_once(':')
+                && !password.is_empty()
+            {
+                self.add(value);
+                self.add(password);
+                if let Ok(decoded) = urlencoding::decode(password) {
+                    self.add(&decoded);
+                }
+                self.normalize();
+            }
         }
         self
     }
@@ -65,6 +97,19 @@ impl SecretValues {
         {
             if let Some(inner) = encoded.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
                 self.0.push(inner.to_string());
+                // Python json.dumps defaults to ensure_ascii, including UTF-16
+                // surrogate pairs for supplementary-plane characters.
+                let mut ascii = String::new();
+                for ch in inner.chars() {
+                    if ch.is_ascii() && ch != '\u{007f}' {
+                        ascii.push(ch);
+                    } else {
+                        for unit in ch.encode_utf16(&mut [0; 2]).iter() {
+                            ascii.push_str(&format!("\\u{unit:04x}"));
+                        }
+                    }
+                }
+                self.0.push(ascii);
             }
         }
         let encoded = urlencoding::encode(value).into_owned();

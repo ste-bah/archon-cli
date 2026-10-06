@@ -179,12 +179,32 @@ pub(crate) async fn supervise_process_group(
     let mut group_guard = ProcessGroupGuard::new(tree, child);
     #[cfg(not(unix))]
     let mut group_guard = ProcessGroupGuard::new(tree);
-    group_guard.hold_record(super::workflow_host_command_groups::record_in(
+    let record = match super::workflow_host_command_groups::record_in(
         group_records,
         group_guard.tree.leader(),
         group_guard.tree.job_name(),
         &request.command_id,
-    )?);
+    ) {
+        Ok(record) => record,
+        Err(error) => {
+            // Registration failed before the normal supervision loop. Settle
+            // teardown before returning the operational fault, so a repair and
+            // resume cannot race a cleanup thread from this failed registration.
+            #[cfg(unix)]
+            let child = &mut *group_guard.child;
+            #[cfg(not(unix))]
+            let child = &mut child;
+            let teardown = terminate_and_reap(child, &group_guard.tree).await;
+            group_guard.reaped();
+            if let Some(evidence) = group_guard.settle(teardown) {
+                return Err(WorkflowError::HostOperational(format!(
+                    "host command registration failed: {error}; teardown stalled: {evidence}"
+                )));
+            }
+            return Err(error);
+        }
+    };
+    group_guard.hold_record(record)?;
     #[cfg(unix)]
     let child = &mut *group_guard.child;
     // Borrowed on every platform, as the Unix guard hands it out.

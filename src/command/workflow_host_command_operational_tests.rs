@@ -487,3 +487,7 @@ mod stall;
 
 #[path = "workflow_host_command_operational_unsettled_tests.rs"]
 mod unsettled_tests;
+
+#[cfg(unix)]
+#[path = "workflow_host_command_registration_tests.rs"]
+mod registration_tests;

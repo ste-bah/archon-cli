@@ -28,7 +28,7 @@ mod identity;
 mod tracker;
 pub use holders_impl::{HOLDER_PROBE_DEADLINE, Holder, holders, holders_within, lsof_program};
 pub use identity::{Pinned, Table, deliver, exited, identity_of, snapshot_until, start_of};
-pub use tracker::{ReapToken, Tracker};
+pub use tracker::{IdentityRecorder, ReapToken, Tracker};
 #[path = "process_tree_cleanup.rs"]
 mod cleanup;
 pub use cleanup::{drain_cleanup, lock_until, register_cleanup};

@@ -101,6 +101,12 @@ fn check_deadline(deadline: Instant) -> io::Result<()> {
     }
 }
 
+/// Receives each adopted identity before the tracker can signal it.
+/// Persistence errors are scan errors, never permission to forget a member.
+pub trait IdentityRecorder: std::fmt::Debug + Send {
+    fn checkpoint(&mut self, pinned: &[Pinned]) -> io::Result<()>;
+}
+
 #[derive(Debug, Default)]
 pub struct Tracker {
     /// The leader, while it is unreaped.
@@ -111,6 +117,7 @@ pub struct Tracker {
     groups: Vec<u32>,
     sessions: Vec<u32>,
     members: BTreeMap<u32, Member>,
+    recorder: Option<Box<dyn IdentityRecorder>>,
 }
 
 impl Tracker {
@@ -126,9 +133,17 @@ impl Tracker {
             groups,
             sessions,
             members: BTreeMap::new(),
+            recorder: None,
         };
         tracker.members.insert(root.pid, Member::adopt(root));
         tracker
+    }
+
+    /// Install durable identity recording before any scan or teardown.
+    pub fn set_recorder(&mut self, mut recorder: Box<dyn IdentityRecorder>) -> io::Result<()> {
+        recorder.checkpoint(&self.pinned())?;
+        self.recorder = Some(recorder);
+        Ok(())
     }
 
     /// A tracker for a child that is no longer known to be unreaped: no root
@@ -243,6 +258,12 @@ impl Tracker {
         for pinned in adopted {
             check_deadline(deadline)?;
             self.members.insert(pinned.pid, Member::adopt(pinned));
+            if self.recorder.is_some() {
+                let pins = self.pinned();
+                if let Some(recorder) = &mut self.recorder {
+                    recorder.checkpoint(&pins)?;
+                }
+            }
         }
         check_deadline(deadline)?;
         if !self.reaped.0.load(Ordering::SeqCst) && !self.root_exited {

@@ -44,6 +44,7 @@ pub(in super::super) fn confine(child: &mut tokio::process::Child) -> WorkflowRe
         .map_err(|error| failed("confining the host command in its job object failed", error))?;
     Ok(Tree {
         leader: Some(pid),
+        evidence: None,
         job: Some(Arc::new(job)),
     })
 }
@@ -67,25 +68,62 @@ pub(in super::super) async fn leader_exit(
 }
 
 /// Terminate the job and wait until it is empty, within [`REAP_DEADLINE`].
-fn kill_job(job: &Job) -> Teardown {
-    match job.kill_and_confirm(REAP_DEADLINE) {
+fn kill_job(
+    job: &Job,
+    evidence: Option<&super::super::super::workflow_host_command_groups::GroupEvidence>,
+) -> Teardown {
+    let persistence = evidence.and_then(|evidence| evidence.begin().err());
+    let before = job.process_identities(REAP_DEADLINE);
+    let recorded = match (&before, evidence) {
+        (Ok(pins), Some(evidence)) => evidence.remember(pins),
+        _ => Ok(()),
+    };
+    let killed = job.kill_and_confirm(REAP_DEADLINE);
+    let survivors = job.process_identities(REAP_DEADLINE);
+    let successful = killed.is_ok();
+    let teardown = match killed {
         Ok(0) => Teardown::Confirmed,
-        Ok(active) => Teardown::stalled(format!(
-            "host command job object still has {active} active process(es) after termination"
-        )),
+        Ok(active) => Teardown::Stalled {
+            evidence: format!(
+                "host command job object still has {active} active process(es) after termination"
+            ),
+            survivors: survivors
+                .as_ref()
+                .ok()
+                .filter(|pins| !pins.is_empty())
+                .cloned(),
+        },
         Err(error) => {
             Teardown::stalled(format!("terminating the host command job failed: {error}"))
         }
+    };
+    if let Some(error) = persistence.or_else(|| recorded.err()) {
+        return teardown.and_stalled(format!("recording job identities failed: {error}"));
     }
+    if successful
+        && let Some(evidence) = evidence
+        && let Ok(pins) = &survivors
+    {
+        if let Err(error) = evidence.complete(pins) {
+            return teardown.and_stalled(format!("recording job identities failed: {error}"));
+        }
+    }
+    teardown
 }
 
 async fn kill_job_off_thread(tree: &Tree) -> Teardown {
     let Some(job) = tree.job.clone() else {
         return Teardown::Confirmed;
     };
-    tokio::task::spawn_blocking(move || kill_job(&job))
-        .await
-        .unwrap_or_else(|error| Teardown::stalled(format!("job termination task failed: {error}")))
+    let evidence = tree.evidence.clone();
+    let work = tokio::task::spawn_blocking(move || kill_job(&job, evidence.as_ref()));
+    // Enumeration before and after termination each has its own bound. Include
+    // blocking-pool admission in the async bound, so a queued task also stalls.
+    match tokio::time::timeout(REAP_DEADLINE * 3, work).await {
+        Ok(Ok(teardown)) => teardown,
+        Ok(Err(error)) => Teardown::stalled(format!("job termination task failed: {error}")),
+        Err(_) => Teardown::stalled("job teardown deadline exceeded; survivors unknown"),
+    }
 }
 
 pub(in super::super) async fn terminate_and_reap(
@@ -110,5 +148,7 @@ pub(in super::super) async fn terminate_completed_group(tree: &Tree) -> Teardown
 /// and multi-second at worst: the guard runs it on a dedicated thread, never
 /// on the async runtime, and keeps the resume record until it reports.
 pub(in super::super) fn kill_blocking(tree: &Tree, _leader_unreaped: bool) -> Teardown {
-    tree.job.as_deref().map_or(Teardown::Confirmed, kill_job)
+    tree.job.as_deref().map_or(Teardown::Confirmed, |job| {
+        kill_job(job, tree.evidence.as_ref())
+    })
 }

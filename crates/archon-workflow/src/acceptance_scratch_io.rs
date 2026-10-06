@@ -220,12 +220,10 @@ pub(super) fn redact(
     truncated: bool,
 ) -> Vec<u8> {
     let mut output = bytes.to_vec();
-    let mut values = host_environment
-        .values()
-        .filter(|v| !v.is_empty())
-        .collect::<Vec<_>>();
-    values.sort_by_key(|v| std::cmp::Reverse(v.len()));
-    for value in values {
+    let secrets = archon_observability::secret_values::SecretValues::for_evidence(
+        host_environment.values().map(String::as_str),
+    );
+    for value in secrets.iter() {
         let needle = value.as_bytes();
         let mut clean = Vec::new();
         let mut at = 0;
@@ -257,3 +255,7 @@ pub(super) fn redact(
     }
     output
 }
+
+#[cfg(test)]
+#[path = "acceptance_scratch_redaction_tests.rs"]
+mod redaction_tests;

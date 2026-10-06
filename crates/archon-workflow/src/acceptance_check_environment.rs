@@ -144,8 +144,12 @@ pub const PROXY_VARIABLES: &[&str] = &[
 
 /// Whether `name` is shaped like a credential: a name Issue 282's data rule
 /// accepts (a documented data suffix) or one ending in a secret's suffix.
-/// The default policy never binds one.
+/// The default policy never binds one. Standard proxy names describe routing;
+/// their values are checked separately for credentials by `bare_proxy`.
 pub fn credential_shaped(name: &str) -> bool {
+    if archon_shell::data_environment::is_proxy_variable(name) {
+        return false;
+    }
     let upper = name.to_ascii_uppercase();
     archon_shell::data_environment::check_data_variable(name).is_ok()
         || ["_TOKEN", "_KEY", "_SECRET", "_PASSWORD", "_PAT"]

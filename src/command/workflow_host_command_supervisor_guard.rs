@@ -33,8 +33,30 @@ impl ProcessGroupGuard {
         }
     }
 
-    pub(super) fn hold_record(&mut self, record: Option<GroupRecordGuard>) {
+    pub(super) fn hold_record(
+        &mut self,
+        record: Option<GroupRecordGuard>,
+    ) -> archon_workflow::WorkflowResult<()> {
+        self.tree.evidence = record.as_ref().and_then(GroupRecordGuard::evidence);
         self.record = record;
+        #[cfg(unix)]
+        if let Some(evidence) = self.tree.evidence.clone() {
+            self.tree
+                .tracker
+                .lock()
+                .map_err(|_| {
+                    archon_workflow::WorkflowError::HostOperational(
+                        "tree tracker lock poisoned".into(),
+                    )
+                })?
+                .set_recorder(Box::new(evidence))
+                .map_err(|error| {
+                    archon_workflow::WorkflowError::HostOperational(format!(
+                        "recording host command identities failed: {error}"
+                    ))
+                })?;
+        }
+        Ok(())
     }
 
     pub(super) fn reaped(&mut self) {

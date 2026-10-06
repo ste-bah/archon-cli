@@ -11,8 +11,8 @@
 //! cannot be reaped) is reported as the check's operational error, which is
 //! resumable, never as a runner failure.
 //!
-//! On Windows the check's Job Object (`process_wrap`) is the confinement and
-//! these calls do nothing.
+//! On Windows an owned Job Object confirms accounting reaches zero within
+//! the teardown bound; an active job is an operational stall.
 use super::*;
 use std::time::Duration;
 
@@ -51,11 +51,13 @@ pub(super) struct Confinement {
     abandoned: std::sync::Arc<std::sync::atomic::AtomicBool>,
     #[cfg(unix)]
     scanning: Option<tokio::task::JoinHandle<()>>,
+    #[cfg(windows)]
+    pub(super) job: std::sync::Arc<archon_shell::job_object::Job>,
     armed: bool,
 }
 
 impl Confinement {
-    #[cfg_attr(windows, allow(unused_variables))]
+    #[cfg(not(windows))]
     pub(super) fn new(leader: u32) -> Self {
         #[cfg(unix)]
         let tracker = archon_shell::process_tree::Tracker::new(
@@ -155,7 +157,28 @@ impl Confinement {
                 Err(error) => Err(format!("scratch teardown could not scan the tree: {error}")),
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            let job = self.job.clone();
+            let work = tokio::task::spawn_blocking(move || {
+                match job.kill_and_confirm(REAP_BOUND) {
+                    Ok(0) => Ok(()),
+                    Ok(active) => Err(format!(
+                        "scratch job teardown stalled: {active} active process(es) after termination"
+                    )),
+                    Err(error) => Err(format!(
+                        "scratch job teardown could not be confirmed: {error}"
+                    )),
+                }
+            });
+            tokio::time::timeout(REAP_BOUND, work)
+                .await
+                .map_err(|_| {
+                    "scratch job teardown deadline exceeded; survivors unknown".to_string()
+                })?
+                .map_err(|error| format!("scratch job teardown task failed: {error}"))?
+        }
+        #[cfg(not(any(unix, windows)))]
         Ok(())
     }
 
@@ -362,10 +385,25 @@ pub(super) async fn terminate(
     if let Err(evidence) = confinement.kill().await {
         *stall = Some(evidence);
     }
-    // Windows: terminate the whole Job Object, not just the leader.
-    #[cfg(windows)]
-    let _ = child.start_kill();
     let status = reap(child, stall).await;
     confinement.leader_reaped();
     status
+}
+
+#[cfg(windows)]
+pub(super) struct OwnedCheck {
+    pub(super) child: super::RunChild,
+    pub(super) confinement: Confinement,
+}
+#[cfg(windows)]
+impl OwnedCheck {
+    pub(super) fn new(child: super::RunChild, job: archon_shell::job_object::Job) -> Self {
+        Self {
+            child,
+            confinement: Confinement {
+                job: std::sync::Arc::new(job),
+                armed: true,
+            },
+        }
+    }
 }

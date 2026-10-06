@@ -139,6 +139,12 @@ impl Job {
         active_processes(self.handle)
     }
 
+    /// Live process ids and creation times, read within `bound`. A failed
+    /// enumeration proves nothing about survivors.
+    pub fn process_identities(&self, bound: Duration) -> io::Result<Vec<(u32, u64)>> {
+        processes::in_job(self.handle, bound)
+    }
+
     /// Ask every process in the job to end. Does not wait.
     pub fn terminate(&self) -> io::Result<()> {
         // SAFETY: the handle is valid while `self` lives.
@@ -227,8 +233,8 @@ fn active_processes(handle: HANDLE) -> io::Result<u32> {
 }
 
 /// Whether the job named `name` still has an active process. A job no
-/// handle holds any more has gone, and with it, killed on close, every
-/// process it held: that is `false`, not an error.
+/// handle holds any more has gone: that is `false`, not proof that every
+/// process it held finished exiting. Resume checks must also retain identities.
 pub fn named_job_running(name: &str) -> io::Result<bool> {
     let encoded = wide(name);
     // SAFETY: a NUL-terminated name; the handle is closed below.
@@ -296,3 +302,7 @@ fn resume_in(snapshot: HANDLE, pid: u32) -> io::Result<()> {
 #[cfg(test)]
 #[path = "job_object_tests.rs"]
 mod tests;
+
+#[path = "job_object_processes.rs"]
+mod processes;
+pub use processes::identity_of;

@@ -48,7 +48,31 @@ impl FixedHostCommandExecutor {
                     handle,
                     expected_generation,
                 )
-                .await?;
+                .await;
+            let observed = match observed {
+                Ok(observed) => observed,
+                Err(error @ (WorkflowError::Io { .. } | WorkflowError::HostOperational(_))) => {
+                    let secrets = HostSecrets::of(&self.context, &command.environment);
+                    let evidence = secrets.text(&error.to_string());
+                    let resume = format!("archon workflow resume --live --yes {run_id}");
+                    let message = format!(
+                        "host command '{}' stalled: {evidence}; repair the host I/O and resume: {resume}",
+                        command.command_id
+                    );
+                    let event = archon_workflow::control_pause::pause_with_evidence(
+                        &store,
+                        &run_id,
+                        expected_generation,
+                        serde_json::json!({"event":"host_command_registration_pause", "call_id":call_id,
+                            "command_id":command.command_id, "evidence":evidence, "resume":resume}),
+                    )?;
+                    if let Err(error) = event {
+                        tracing::warn!(%error, "host command I/O pause event not recorded");
+                    }
+                    return Err(WorkflowError::ControlPaused(message));
+                }
+                Err(error) => return Err(error),
+            };
             let Some(kind) = classify(&observed) else {
                 return Ok(observed);
             };

@@ -377,3 +377,6 @@ fn a_legacy_ambiguous_marker_stays_closed_after_owner_exit() {
     let refusal = refused.expect_err("legacy ambiguity was taken for a crash");
     assert!(refusal.to_string().contains("unknown"), "{refusal}");
 }
+
+#[path = "workflow_host_command_groups_regression_tests.rs"]
+mod regression_tests;

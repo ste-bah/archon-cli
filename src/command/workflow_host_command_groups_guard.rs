@@ -19,7 +19,7 @@ pub(super) fn supervised_marker(record: &HostCommandGroupRecord) -> serde_json::
     })
 }
 
-/// Settled evidence overrides the original record. Legacy markers cannot
+/// Checkpointed and settled evidence overrides the original record. Legacy markers cannot
 /// distinguish a crash from an unwritten stall, so they stay unknown.
 pub(super) struct PendingRecord {
     pub(super) record: HostCommandGroupRecord,
@@ -32,8 +32,9 @@ pub(super) fn pending_record(path: &Path) -> anyhow::Result<Option<PendingRecord
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
             return Err(anyhow::anyhow!(
-                "host command pending marker {} cannot be read ({error}); survivors unknown: verify the tree before removing it",
-                path.display()
+                "host command pending marker {} cannot be read ({error}); survivors unknown: verify the tree, then remove {} and resume again",
+                path.display(),
+                super::refusal_files(path)
             ));
         }
     };
@@ -62,7 +63,7 @@ pub(super) fn pending_record(path: &Path) -> anyhow::Result<Option<PendingRecord
         }
     };
     decode().map_err(|error| anyhow::anyhow!(
-        "host command pending marker {} is unreadable ({error}); survivors unknown: verify the tree before removing it", path.display()))
+        "host command pending marker {} is unreadable ({error}); survivors unknown: verify the tree, then remove {} and resume again", path.display(), super::refusal_files(path)))
 }
 
 /// Removes its record when the supervisor is done with the group, unless
@@ -72,7 +73,7 @@ pub(crate) struct GroupRecordGuard {
     pub(super) path: PathBuf,
     pub(super) kept: bool,
     pub(super) pending: PathBuf,
-    pub(super) marker: Option<std::fs::File>,
+    pub(super) marker: Option<GroupEvidence>,
     pub(super) record: HostCommandGroupRecord,
 }
 
@@ -151,27 +152,24 @@ impl GroupRecordGuard {
     /// open handle keeps the name visible, and a sibling's stall check that
     /// reads it would be refused and pause the run.
     fn remove_pending(&mut self) {
+        if let Some(marker) = &self.marker
+            && let Err(error) = marker.close()
+        {
+            tracing::warn!(%error, marker = %self.pending.display(), "survivor marker handle could not close");
+        }
         self.marker = None;
         let _ = std::fs::remove_file(&self.pending);
     }
 
     fn mark_settled(&mut self, record: &HostCommandGroupRecord) -> Result<(), String> {
-        use std::io::{Seek, SeekFrom, Write};
         let bytes = serde_json::to_vec(&SettledMarker {
             settled_record: record.clone(),
         })
         .map_err(|error| error.to_string())?;
-        let marker = self.marker.as_mut().ok_or("marker handle missing")?;
-        // Invalidate the old crash marker before writing. A partial write
-        // is unreadable evidence, never permission to discard survivors.
-        marker.set_len(0).map_err(|error| error.to_string())?;
-        marker
-            .seek(SeekFrom::Start(0))
-            .map_err(|error| error.to_string())?;
-        marker
-            .write_all(&bytes)
-            .map_err(|error| error.to_string())?;
-        marker.sync_all().map_err(|error| error.to_string())
+        self.marker
+            .as_ref()
+            .ok_or("marker handle missing")?
+            .write(&bytes)
     }
 }
 
@@ -182,6 +180,11 @@ impl Drop for GroupRecordGuard {
             // it names, which is right for a confirmed teardown. A marker
             // that cannot go keeps both, read as unknown while this process
             // lives and judged by what they name once it has exited.
+            if let Some(marker) = &self.marker
+                && let Err(error) = marker.close()
+            {
+                tracing::warn!(%error, marker = %self.pending.display(), "survivor marker handle could not close");
+            }
             self.marker = None;
             match std::fs::remove_file(&self.pending) {
                 Ok(()) => {
@@ -196,5 +199,112 @@ impl Drop for GroupRecordGuard {
             }
         }
         owner::release(&self.pending);
+    }
+}
+
+/// Shared with tree scans; every adopted identity is durably retained before
+/// a signal can erase its ancestry. The opened handle needs no directory write.
+#[derive(Clone, Debug)]
+pub(crate) struct GroupEvidence(std::sync::Arc<std::sync::Mutex<Evidence>>);
+#[derive(Debug)]
+struct Evidence {
+    file: Option<std::fs::File>,
+    record: HostCommandGroupRecord,
+    failed: bool,
+}
+impl GroupEvidence {
+    pub(super) fn new(file: std::fs::File, record: HostCommandGroupRecord) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(Evidence {
+            file: Some(file),
+            record,
+            failed: false,
+        })))
+    }
+    fn close(&self) -> std::io::Result<()> {
+        let mut state = self
+            .0
+            .try_lock()
+            .map_err(|_| std::io::Error::other("survivor marker lock unavailable"))?;
+        state.file = None;
+        Ok(())
+    }
+    fn write(&self, bytes: &[u8]) -> Result<(), String> {
+        let mut state = self
+            .0
+            .try_lock()
+            .map_err(|_| "survivor marker lock unavailable")?;
+        state.write(bytes).map_err(|error| error.to_string())
+    }
+    pub(crate) fn begin(&self) -> std::io::Result<()> {
+        let mut state = self
+            .0
+            .lock()
+            .map_err(|_| std::io::Error::other("survivor marker lock unavailable"))?;
+        state.record.survivors_unknown = true;
+        state.checkpoint()
+    }
+    pub(crate) fn complete(&self, survivors: &[(u32, u64)]) -> std::io::Result<()> {
+        let mut state = self
+            .0
+            .lock()
+            .map_err(|_| std::io::Error::other("survivor marker lock unavailable"))?;
+        state.record.survivors = survivors.to_vec();
+        state.record.survivors_unknown = state.failed;
+        state.checkpoint()?;
+        if state.failed {
+            return Err(std::io::Error::other(
+                "an earlier survivor marker write failed; survivors unknown",
+            ));
+        }
+        Ok(())
+    }
+    pub(crate) fn remember(&self, identities: &[(u32, u64)]) -> std::io::Result<()> {
+        let mut state = self
+            .0
+            .lock()
+            .map_err(|_| std::io::Error::other("survivor marker lock unavailable"))?;
+        // The tracker's complete pin set only forgets proven exits/reuse.
+        // Replace it instead of accumulating an unbounded history of dead pids.
+        state.record.survivors = identities.to_vec();
+        state.checkpoint()
+    }
+}
+impl Evidence {
+    fn checkpoint(&mut self) -> std::io::Result<()> {
+        let bytes = supervised_marker(&self.record)?;
+        self.write(&bytes)
+    }
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        use std::io::{Seek, SeekFrom, Write};
+        let result = (|| {
+            // Invalidate and sync first: a crash partway through the replacement
+            // leaves unreadable evidence, never an old empty survivor list.
+            let file = self
+                .file
+                .as_mut()
+                .ok_or_else(|| std::io::Error::other("survivor marker handle closed"))?;
+            file.set_len(0)?;
+            file.sync_all()?;
+            file.seek(SeekFrom::Start(0))?;
+            file.write_all(bytes)?;
+            file.sync_all()
+        })();
+        if result.is_err() {
+            self.failed = true;
+            self.record.survivors_unknown = true;
+        }
+        result
+    }
+}
+#[cfg(unix)]
+impl archon_shell::process_tree::IdentityRecorder for GroupEvidence {
+    fn checkpoint(&mut self, pinned: &[archon_shell::process_tree::Pinned]) -> std::io::Result<()> {
+        let identities: Vec<_> = pinned.iter().map(|pin| (pin.pid, pin.start)).collect();
+        GroupEvidence::remember(self, &identities)
+    }
+}
+impl GroupRecordGuard {
+    pub(crate) fn evidence(&self) -> Option<GroupEvidence> {
+        self.marker.clone()
     }
 }

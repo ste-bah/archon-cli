@@ -1286,6 +1286,7 @@ name = "archon-workflow"
 version = "1.9.3"
 dependencies = [
  "archon-llm",
+ "archon-observability",
  "archon-shell",
  "archon-test-support",
  "archon-tools",
@@ -1299,7 +1300,6 @@ dependencies = [
  "glob",
  "hex",
  "libc",
- "process-wrap",
  "regex",
  "rquickjs",
  "serde",

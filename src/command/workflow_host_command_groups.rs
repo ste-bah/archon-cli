@@ -68,7 +68,7 @@ use owner::Owner;
 
 #[path = "workflow_host_command_groups_guard.rs"]
 mod guard;
-pub(crate) use guard::GroupRecordGuard;
+pub(crate) use guard::{GroupEvidence, GroupRecordGuard};
 
 fn unknown_path(path: &Path) -> PathBuf {
     let stem = path
@@ -136,7 +136,7 @@ pub(crate) fn record_group(
         .write_all(&guard::supervised_marker(&record)?)
         .map_err(io(&guard.pending))?;
     marker.sync_all().map_err(io(&guard.pending))?;
-    guard.marker = Some(marker);
+    guard.marker = Some(GroupEvidence::new(marker, record));
     Ok(guard)
 }
 
@@ -175,7 +175,7 @@ pub(crate) fn group_running(pgid: u32) -> Option<bool> {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn survivors_running(
     record: &HostCommandGroupRecord,
     mut read: impl FnMut(u32) -> std::io::Result<Option<u64>>,
@@ -196,14 +196,24 @@ fn survivors_running(
 /// where that cannot be probed, which a caller must treat as possibly
 /// running; a failed session probe counts as running.
 pub(crate) fn record_running(record: &HostCommandGroupRecord) -> Option<bool> {
-    // A job is gone once no handle holds it, and killed on close with every
-    // process it held; while it exists, its accounting says what still runs.
-    #[cfg(windows)]
-    if let Some(job) = &record.job {
-        return archon_shell::job_object::named_job_running(job).ok();
-    }
     if record.survivors_unknown {
         return None;
+    }
+    #[cfg(windows)]
+    {
+        match survivors_running(record, archon_shell::job_object::identity_of) {
+            Some(false) => {}
+            other => return other,
+        }
+        if let Some(job) = &record.job {
+            let active = archon_shell::job_object::named_job_running(job).ok()?;
+            // A legacy stalled record with no process identities cannot prove
+            // termination merely because the job's name disappeared.
+            if !active && record.stalled && record.survivors.is_empty() {
+                return None;
+            }
+            return Some(active);
+        }
     }
     // A survivor is the same process only while its start time matches.
     #[cfg(unix)]
@@ -243,7 +253,12 @@ pub(crate) fn left_groups(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok((Vec::new(), Vec::new()));
         }
-        Err(error) => return Err(error.into()),
+        Err(error) => {
+            return Err(anyhow::anyhow!(
+                "cannot list host command record directory {}: {error}",
+                dir.display()
+            ));
+        }
     };
     let (mut running, mut ended) = (Vec::new(), Vec::new());
     for path in entries.map(|entry| entry.map(|entry| entry.path())) {
@@ -264,7 +279,12 @@ pub(crate) fn left_groups(
             // Settled since the listing (here, with its record, or by its
             // guard): there is nothing left to judge.
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error.into()),
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "cannot read host command record {}: {error}",
+                    path.display()
+                ));
+            }
         };
         let marker_record = if lone_marker {
             guard::pending_record(&path)?
@@ -275,8 +295,8 @@ pub(crate) fn left_groups(
         let mut record: HostCommandGroupRecord = marker_record.map(|marker| Ok(marker.record)).unwrap_or_else(|| serde_json::from_slice(&bytes))
             .map_err(|error| {
                 anyhow::anyhow!(
-                    "host command group record {} is unreadable ({error}); check that group by hand, then remove the record",
-                    path.display()
+                    "host command group record {} is unreadable ({error}); verify by hand that none of its processes runs, then remove {} and resume again",
+                    path.display(), refusal_files(&path)
                 )
             })?;
         let unknown = path.to_string_lossy().ends_with(UNKNOWN_SUFFIX);
@@ -290,16 +310,9 @@ pub(crate) fn left_groups(
             running.push(record);
             continue;
         }
-        let settled = if marked {
-            guard::pending_record(&pending)?
-                .filter(|marker| marker.settled)
-                .map(|marker| marker.record)
-        } else {
-            None
-        };
-        authoritative |= settled.is_some();
-        if let Some(settled) = settled {
-            record = settled;
+        if marked && let Some(marker) = guard::pending_record(&pending)? {
+            authoritative |= marker.settled;
+            record = marker.record;
         }
         record.file = Some(path.clone());
         match owner {
@@ -319,16 +332,59 @@ pub(crate) fn left_groups(
             record.survivors_unknown = true;
         }
         if record_running(&record) == Some(false) {
-            std::fs::remove_file(&path)?;
+            // Remove the marker first: a failed removal retains both names,
+            // and the error says exactly which entry needs permission repair.
             if marked {
-                let _ = std::fs::remove_file(&pending);
+                remove_healed(&pending)?;
             }
+            remove_healed(&path)?;
             ended.push(record);
         } else {
             running.push(record);
         }
     }
     Ok((running, ended))
+}
+
+pub(super) fn refusal_files(path: &Path) -> String {
+    let mut files = vec![path.to_path_buf()];
+    if path.extension().is_some_and(|ext| ext == "pending") {
+        let original = path.with_extension("json");
+        for record in [original.clone(), unknown_path(&original)] {
+            if record.exists() {
+                files.push(record);
+            }
+        }
+    } else {
+        let pending = if let Some(stem) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(UNKNOWN_SUFFIX))
+        {
+            path.with_file_name(format!("{stem}.pending"))
+        } else {
+            path.with_extension("pending")
+        };
+        if pending.exists() {
+            files.push(pending);
+        }
+    }
+    files
+        .iter()
+        .map(|file| file.display().to_string())
+        .collect::<Vec<_>>()
+        .join(" and ")
+}
+
+fn remove_healed(path: &Path) -> anyhow::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(anyhow::anyhow!(
+            "cannot remove healed host command record {}: {error}; restore write permission to its directory and resume again",
+            path.display()
+        )),
+    }
 }
 
 /// The kept records of stalled teardowns that still run (or whose survivors
@@ -372,6 +428,18 @@ pub(crate) fn require_no_running_groups(
     let Some(first) = running.first() else {
         return Ok(ended);
     };
+    if first.survivors_unknown {
+        let path = first.file.clone().unwrap_or_else(|| {
+            run_dir
+                .join(GROUP_RECORDS_DIR)
+                .join(format!("{}.json", first.pgid))
+        });
+        let files = refusal_files(&path);
+        return Err(anyhow::anyhow!(
+            "fixed decomposition {run_id} cannot resume: host command '{}' has unknown survivors; verify by hand that none of its processes runs, then remove {files} and resume again",
+            first.command_id
+        ));
+    }
     let others = running.len() - 1;
     Err(anyhow::anyhow!(
         "fixed decomposition {run_id} cannot resume: host command '{}' (process group {}, pid {}) that a previous executor started is still running{}{}; stop that group (kill -TERM -{}) and resume again. If the group is unrelated (its id was reused), remove {}",

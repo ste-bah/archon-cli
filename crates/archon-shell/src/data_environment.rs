@@ -21,7 +21,7 @@
 //! on every machine. A whole namespace is refused where its owner reads
 //! arbitrary keys from it (`CARGO_`, `GIT_CONFIG_`, `DYLD_`). Application
 //! namespaces such as PYTHON_API_KEY and GIT_SERVICE_TOKEN remain usable.
-//! Names must also end in DATA_SUFFIXES: a positive, documented data shape.
+//! Names need a documented DATA_SUFFIXES shape or a standard proxy routing name.
 //! Neither membership in the allowlist nor a data suffix overrides a control.
 //!
 //! Additional primary references: lua.org/manual/5.4/lua.html;
@@ -33,6 +33,12 @@
 //! stat.math.ethz.ch/CRAN/doc/manuals/r-devel/R-admin.pdf;
 //! docs.docker.com/reference/cli/docker/ and
 //! docs.podman.io/en/stable/markdown/podman.1.html.
+
+/// Fixed names SDKs read to route traffic, independent of credential naming.
+pub fn is_proxy_variable(name: &str) -> bool {
+    ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"]
+        .contains(&name.to_ascii_uppercase().as_str())
+}
 
 struct Family {
     reason: &'static str,
@@ -430,6 +436,11 @@ pub fn check_data_variable(name: &str) -> Result<(), String> {
         ));
     }
     let upper = name.to_ascii_uppercase();
+    // These fixed SDK names route traffic. They do not select executable code
+    // or a runtime startup file, and cannot be renamed to a data suffix.
+    if is_proxy_variable(name) {
+        return Ok(());
+    }
     if !DATA_SUFFIXES
         .iter()
         .any(|suffix| upper.ends_with(suffix) && upper.len() > suffix.len())

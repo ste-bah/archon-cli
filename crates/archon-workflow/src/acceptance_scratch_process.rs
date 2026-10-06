@@ -24,17 +24,12 @@ pub struct CheckResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<crate::acceptance_check_crash::CheckClassification>,
 }
-/// The spawned check: a Unix process-group leader, or, on Windows, a child
-/// confined to a Job Object so its descendants can be reaped and teardown
-/// verified by waiting on the job (Issue-234).
-#[cfg(windows)]
-type RunChild = Box<dyn process_wrap::tokio::ChildWrapper>;
-#[cfg(not(windows))]
+/// The leader's handle; confinement owns the process tree separately.
 type RunChild = tokio::process::Child;
 
 #[path = "acceptance_scratch_confine.rs"]
 mod confine;
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 use confine::Confinement;
 use confine::{leader_exit, reap, terminate};
 
@@ -57,16 +52,23 @@ fn spawn_confined(mut process: tokio::process::Command, cwd: &Path) -> WorkflowR
     process.spawn().map_err(|e| WorkflowError::io(cwd, e))
 }
 #[cfg(windows)]
-fn spawn_confined(process: tokio::process::Command, cwd: &Path) -> WorkflowResult<RunChild> {
-    use process_wrap::tokio::{CommandWrap, JobObject, KillOnDrop};
-    let mut wrap = CommandWrap::from(process);
-    wrap.wrap(JobObject);
-    wrap.wrap(KillOnDrop);
-    wrap.spawn().map_err(|e| WorkflowError::io(cwd, e))
+fn spawn_confined(
+    mut process: tokio::process::Command,
+    cwd: &Path,
+) -> WorkflowResult<confine::OwnedCheck> {
+    process.creation_flags(archon_shell::job_object::CREATE_SUSPENDED_FLAG);
+    let mut child = process.spawn().map_err(|e| WorkflowError::io(cwd, e))?;
+    let job = archon_shell::job_object::Job::create(None).map_err(|e| WorkflowError::io(cwd, e))?;
+    let (Some(pid), Some(handle)) = (child.id(), child.raw_handle()) else {
+        let _ = child.start_kill();
+        return Err(invalid("scratch child has no process handle"));
+    };
+    job.adopt_suspended(handle, pid)
+        .map_err(|e| WorkflowError::io(cwd, e))?;
+    Ok(confine::OwnedCheck::new(child, job))
 }
 
-/// Take the child's three pipes, however it was spawned.
-#[cfg(not(windows))]
+/// Take the child's three pipes.
 fn take_pipes(
     child: &mut RunChild,
 ) -> (
@@ -78,20 +80,6 @@ fn take_pipes(
         child.stdout.take().unwrap(),
         child.stderr.take().unwrap(),
         child.stdin.take().unwrap(),
-    )
-}
-#[cfg(windows)]
-fn take_pipes(
-    child: &mut RunChild,
-) -> (
-    tokio::process::ChildStdout,
-    tokio::process::ChildStderr,
-    tokio::process::ChildStdin,
-) {
-    (
-        child.stdout().take().unwrap(),
-        child.stderr().take().unwrap(),
-        child.stdin().take().unwrap(),
     )
 }
 async fn drain(
@@ -214,7 +202,12 @@ pub async fn run_at(
     if let Some(root) = site.audit_root {
         super::cache::record_group(root, None)?;
     }
+    #[cfg(not(windows))]
     let child = spawn_confined(process, cwd)?;
+    #[cfg(windows)]
+    let mut owned = spawn_confined(process, cwd)?;
+    #[cfg(windows)]
+    let child = &mut owned.child;
     let leader = child
         .id()
         .ok_or_else(|| invalid("scratch child has no process id"))?;
@@ -223,13 +216,15 @@ pub async fn run_at(
     #[cfg(unix)]
     let (child, confinement) = (&mut *owned.child, &mut owned.confinement);
     // Borrowed on every platform, as the Unix owner hands them out.
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let mut confinement = Confinement::new(leader);
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let confinement = &mut confinement;
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    let (child, confinement) = (&mut owned.child, &mut owned.confinement);
+    #[cfg(not(any(unix, windows)))]
     let mut child = child;
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let child = &mut child;
     if let Some(root) = site.audit_root {
         super::cache::record_group(root, Some(leader as i32))?;
@@ -298,13 +293,6 @@ pub async fn run_at(
         None => reap(child, &mut stall).await,
     };
     confinement.leader_reaped();
-    // Windows: terminate the Job Object and wait on it, so every process the
-    // check started is reaped before its output is read (Issue-234).
-    #[cfg(windows)]
-    {
-        let _ = child.start_kill();
-        let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
-    }
     let pipes = match tokio::time::timeout(Duration::from_secs(3), async {
         let out = (&mut stdout)
             .await
@@ -332,7 +320,7 @@ pub async fn run_at(
     // the leader exited.
     match teardown {
         Ok(()) => confinement.disarm(),
-        Err(evidence) => error = Some(evidence),
+        Err(evidence) => stall = Some(evidence),
     }
     // A scratch is private to the observation: what still holds it after
     // the tree is gone may be a descendant nothing else names any more.
@@ -384,3 +372,7 @@ async fn until(deadline: Option<tokio::time::Instant>) {
 #[cfg(all(test, unix))]
 #[path = "acceptance_scratch_process_tests.rs"]
 mod tests;
+
+#[cfg(all(test, windows))]
+#[path = "acceptance_scratch_process_windows_tests.rs"]
+mod windows_tests;

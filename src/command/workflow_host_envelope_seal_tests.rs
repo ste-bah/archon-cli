@@ -41,6 +41,7 @@ enum Child {
     Cancelled,
     TypedSecret,
     OperationalTypedSecret,
+    JsonOutput,
 }
 
 struct SecretPrintingProcess(Child);
@@ -80,6 +81,19 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
             PREPARED_PUBLICATION_SCHEMA_VERSION, PreparedPublicationEntry, PreparedPublicationV1,
         };
         let secret = request.environment["ANTHROPIC_API_KEY"].to_str().unwrap();
+        if self.0 == Child::JsonOutput {
+            let output = archon_shell::spawn::command("python3")
+                .args(["-c", "import json,sys; value=json.dumps(sys.argv[1]); sys.stdout.write(value); sys.stderr.write(value); sys.exit(1)", secret])
+                .output().unwrap();
+            return Ok(SupervisedProcessOutput {
+                exit_code: output.status.code(),
+                timed_out: false,
+                stdout_bytes: output.stdout.len() as u64,
+                stderr_bytes: output.stderr.len() as u64,
+                stderr: output.stderr,
+                stdout: output.stdout,
+            });
+        }
         let mut entries = Vec::new();
         for path in &request.declared_write_set {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -175,6 +189,9 @@ async fn run_secret(child: Child, secret: &str) -> Ran {
     let temp = tempfile::tempdir().unwrap();
     let mut context = context(temp.path());
     context.freeze_provider_environment = [("ANTHROPIC_API_KEY".into(), secret.into())].into();
+    if child == Child::TypedSecret {
+        context.gate_mode = archon_core::config::GateMode::Enforce;
+    }
     let task_file = context.task_root.join("TASK-X-010.md");
     std::fs::write(&task_file, b"live-before").unwrap();
     seed_frozen_chain(&context, &task_file);
@@ -379,10 +396,35 @@ async fn round2_manifest_claiming_sealed_identity_is_refused() {
 async fn round2_residual_typed_field_is_sealed_fail_closed() {
     for child in [Child::TypedSecret, Child::OperationalTypedSecret] {
         let ran = run(child).await;
-        assert!(
-            ran.result.is_err(),
-            "redaction must not erase a typed failure field"
-        );
+        let result = ran
+            .result
+            .as_ref()
+            .expect("redacted typed failure stays parseable");
+        let envelope = result.gate_envelope.as_ref().unwrap();
+        if child == Child::TypedSecret {
+            assert_eq!(envelope.policy_findings[0].subject, "[REDACTED]");
+        } else {
+            assert_eq!(
+                envelope.operational_error.as_ref().unwrap().kind,
+                "[REDACTED]"
+            );
+        }
+        assert!(result.publication_receipt.is_none());
         assert_no_clear_copy(&ran);
+    }
+}
+
+#[tokio::test]
+async fn ascii_json_output_is_redacted_at_the_host_result_boundary() {
+    for secret in [
+        "credential-é-canary",
+        "credential-\u{007f}-canary",
+        "credential-中-canary",
+        "credential-😀-canary",
+    ] {
+        let ran = run_secret(Child::JsonOutput, secret).await;
+        let result = ran.result.unwrap();
+        assert_eq!(result.stdout, "\"[REDACTED]\"");
+        assert_eq!(result.stderr, "\"[REDACTED]\"");
     }
 }
