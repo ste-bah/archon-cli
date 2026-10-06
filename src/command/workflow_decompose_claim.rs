@@ -279,7 +279,21 @@ pub(super) fn read_fixed_state(
     store: &WorkflowStore,
     run_id: &str,
 ) -> Result<FixedDecompositionStateV1> {
-    read_run_json(store, run_id, FIXED_DECOMPOSITION_STATE_PATH)
+    let value: serde_json::Value = read_run_json(store, run_id, FIXED_DECOMPOSITION_STATE_PATH)?;
+    if value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        != Some(u64::from(FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION))
+    {
+        return Err(super::resume::upgrade::unmapped(
+            "decomposition/state.json.schema_version",
+            &format!(
+                "found {}; this binary reads schema {}; install a compatible binary or explicitly migrate the state",
+                value["schema_version"], FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION
+            ),
+        ));
+    }
+    super::resume::upgrade::decode(value, FIXED_DECOMPOSITION_STATE_PATH)
 }
 
 pub(super) fn read_run_json<T: serde::de::DeserializeOwned>(
@@ -288,9 +302,10 @@ pub(super) fn read_run_json<T: serde::de::DeserializeOwned>(
     relative: &str,
 ) -> Result<T> {
     let path = store.run_dir(run_id).join(relative);
-    serde_json::from_slice(
+    let value = serde_json::from_slice(
         &std::fs::read(&path)
-            .with_context(|| format!("reading fixed decomposition record {}", path.display()))?,
+            .map_err(|error| super::resume::upgrade::unmapped(relative, &error.to_string()))?,
     )
-    .with_context(|| format!("parsing fixed decomposition record {}", path.display()))
+    .map_err(|error| super::resume::upgrade::unmapped(relative, &error.to_string()))?;
+    super::resume::upgrade::decode(value, relative)
 }

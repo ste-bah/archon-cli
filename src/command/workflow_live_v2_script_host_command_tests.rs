@@ -423,3 +423,6 @@ async fn host_command_generic_cache_match_still_requires_current_receipt_postcon
 
 #[path = "workflow_live_v2_round7_host_publication_tests.rs"]
 mod round7_host_publication_tests;
+
+#[path = "workflow_live_v2_upgrade_reuse_tests.rs"]
+mod upgrade_reuse_tests;

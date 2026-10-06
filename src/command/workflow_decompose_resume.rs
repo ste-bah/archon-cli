@@ -83,7 +83,19 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         ));
     }
     crate::command::workflow_decompose_owner::require_owner(&store, run_id, interactive_owner)?;
-    let state = read_fixed_state(&store, run_id)?;
+    let state = match read_fixed_state(&store, run_id) {
+        Ok(state) => state,
+        Err(error) => {
+            // The lease proves the old executor is gone. An unreadable
+            // decomposition frontier still pauses; it never becomes failure.
+            if run.status == archon_workflow::RunStatus::Running {
+                archon_workflow::LifecycleController::new(store.clone())
+                    .apply(run_id, archon_workflow::LifecycleAction::Pause)
+                    .context("pausing an unreadable decomposition state")?;
+            }
+            return Err(error);
+        }
+    };
     if state.run_kind != WorkflowRunKind::FixedDecompositionV1 {
         return Err(anyhow!(
             "workflow {run_id} is not a FixedDecompositionV1 run"
@@ -151,12 +163,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         Path::new(&state.identity.project_root_identity),
         "persisted project root",
     )?;
-    // The catalog is rebuilt under the launch revision, not the running one:
-    // its digest hashes `starting_binary_revision`, and per-call ids are keyed
-    // on it, so building it from the current build would fail the digest
-    // comparison and orphan every persisted per-call result on an upgraded
-    // binary. What the comparison must detect is a changed capability set,
-    // and that still shows up (Issue-59).
+    // Keep the launch revision as the call-key namespace. The capabilities
+    // come from this build; unchanged ones keep their legacy result keys.
     let catalog = fixed_decomposition_catalog(&state.identity.starting_binary_revision)?;
     let current_identity = FixedRunIdentityV1 {
         template_version: FIXED_DECOMPOSITION_TEMPLATE_VERSION.to_string(),
@@ -177,9 +185,9 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     }
     let recorded_source =
         std::fs::read_to_string(archon_workflow::bundle::record_path(&store.run_dir(run_id)))?;
-    if recorded_source != FIXED_SCRIPT_SOURCE {
+    if workflow_scaffold_hash(&recorded_source) != state.identity.script_digest {
         return Err(anyhow!(
-            "fixed decomposition recorded source differs from the embedded script; do not deploy or replace the binary while a decomposition is active"
+            "fixed decomposition resume paused: identity.script_digest does not match workflow.js; restore the intact launch bundle before resume"
         ));
     }
     let (_, prd_digest, acceptance_criteria) =
@@ -194,8 +202,15 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         .filter(|value| value.is_object())
         .cloned()
         .ok_or_else(|| {
-            anyhow!("fixed decomposition persisted arguments carry no frozenChain object")
+            upgrade::unmapped(
+                "decomposition/arguments.json.frozenChain",
+                "missing or not an object",
+            )
         })?;
+    let _: crate::command::workflow_decompose_frozen_chain::FrozenChainSnapshot = upgrade::decode(
+        frozen_chain.clone(),
+        "decomposition/arguments.json.frozenChain",
+    )?;
     // The repository the launch grounded the authors in is read back from the
     // task root's record, never from a flag or config: a resume replays the
     // launch's word, and the record is that word.
@@ -218,16 +233,27 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &repository_root,
         frozen_chain,
     );
-    if arguments != expected_arguments {
-        return Err(anyhow!(
-            "fixed decomposition persisted arguments differ from the launch-bound canonical arguments"
-        ));
-    }
+    upgrade::require_equal(
+        &arguments,
+        &expected_arguments,
+        "decomposition/arguments.json",
+    )?;
     let persisted_catalog: archon_workflow::CommandCapabilityCatalog =
         read_run_json(&store, run_id, FIXED_CATALOG_PATH)?;
-    if persisted_catalog != catalog {
+    if persisted_catalog.schema_version != 1 {
+        return Err(upgrade::unmapped(
+            "command-catalog.schema_version",
+            "unsupported version; install a compatible binary or migrate this catalog",
+        ));
+    }
+    let mut verified_catalog = persisted_catalog.clone();
+    verified_catalog.recompute_digest()?;
+    if verified_catalog.digest != persisted_catalog.digest
+        || persisted_catalog.digest != state.identity.catalog_digest
+        || persisted_catalog.starting_binary_revision != state.identity.starting_binary_revision
+    {
         return Err(anyhow!(
-            "fixed decomposition persisted command catalog differs from the current embedded catalog"
+            "fixed decomposition resume paused: command-catalog.digest or starting_binary_revision differs from identity; restore the intact launch catalog before resume"
         ));
     }
     let current_route = super::super::workflow_provider_route::resolve_anthropic_route(
@@ -236,11 +262,11 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     );
     let persisted_route: super::super::workflow_provider_route::TrustedProviderRouteSnapshot =
         read_run_json(&store, run_id, FIXED_PROVIDER_ROUTE_PATH)?;
-    if persisted_route != current_route {
-        return Err(anyhow!(
-            "fixed decomposition provider route differs from its launch snapshot; restore the original trusted configuration before resume"
-        ));
-    }
+    upgrade::require_equal(
+        &serde_json::to_value(&persisted_route)?,
+        &serde_json::to_value(&current_route)?,
+        "provider route",
+    )?;
     let log_path = crate::command::workflow_decompose_log::validated_fixed_log_path(
         Path::new(&state.log_path),
         &state.identity,
@@ -249,16 +275,12 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         "schema_version": "workflow-generated-v2-metadata-v1",
         "run_kind": "fixed_decomposition_v1",
         "fixed_identity": state.identity,
-        "scaffold_hash": workflow_scaffold_hash(FIXED_SCRIPT_SOURCE),
+        "scaffold_hash": state.identity.script_digest,
         "script_args": expected_arguments,
         "script_lifecycle": true,
     });
     let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
-    if metadata != expected_metadata {
-        return Err(anyhow!(
-            "fixed decomposition generated metadata differs from its canonical launch snapshot"
-        ));
-    }
+    upgrade::require_equal(&metadata, &expected_metadata, "generated metadata")?;
     let launch_digest = super::fixed_launch_digest(
         &state.identity,
         &arguments,
@@ -275,13 +297,16 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             "fixed decomposition launch snapshot differs from the verified workflow bundle anchor"
         ));
     }
-    // Every launch artifact has verified intact by here; the running build's
-    // revision is the one tolerated deviation, and it is recorded rather than
-    // refused. The persisted identity is left as the launch record.
-    if let Some(drift) = &binary_drift {
-        crate::command::workflow_decompose_events::emit_binary_revision_drift(
-            &store, run_id, &log_path, drift,
-        )?;
+    // Verify readable execution state before any provider or lifecycle change.
+    upgrade::validate_result_state(&store, run_id)?;
+    let changed = upgrade::record_upgrade(
+        &store,
+        run_id,
+        &log_path,
+        &state.identity,
+        &current_identity,
+    )?;
+    if changed && let Some(drift) = &binary_drift {
         ui_sink
             .emit(WorkflowUiEvent::Text(format!(
                 "Binary revision drift: persisted={} current={}\n",
@@ -347,7 +372,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
                 gate_mode: config.workflow.gate_mode,
             },
             store.run_dir(run_id),
-        ),
+        )
+        .with_launch_catalog(persisted_catalog),
     );
     let agent_names = AgentRegistry::load(&project_root)
         .available_agent_names()
@@ -421,3 +447,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     )
     .await
 }
+
+#[path = "workflow_decompose_upgrade.rs"]
+pub(super) mod upgrade;
