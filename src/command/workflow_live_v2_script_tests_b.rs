@@ -127,8 +127,8 @@ async function workflow(w) {
     );
 }
 
-/// Issue 332: a failed script's summary carries its error text, cut to the
-/// log's bound with a mark that says it is partial.
+/// Issues 332/337: a deliberate terminal stop's summary carries its reason,
+/// cut to the log's bound with a mark that says it is partial.
 #[tokio::test]
 async fn a_failed_script_summary_carries_its_error_text_within_the_log_bound() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -142,7 +142,9 @@ async fn a_failed_script_summary_carries_its_error_text_within_the_log_bound() {
         None,
     );
     let summary = runner
-        .run(r#"async function workflow(w) { throw new Error("long failure " + "x".repeat(5000)); }"#)
+        .run(r#"async function workflow(w) {
+          await __archonHost("terminalStop", JSON.stringify({schemaVersion:1,reason:"long failure " + "x".repeat(5000)}));
+        }"#)
         .await
         .expect("failed summary");
 

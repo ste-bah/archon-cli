@@ -75,6 +75,9 @@ impl WorkflowScriptHost {
         if method == archon_workflow::v2::script::SCRIPT_PAUSE_METHOD {
             return self.request_script_pause(&payload).await;
         }
+        if method == "terminalStop" {
+            return self.request_script_terminal_stop(&payload).await;
+        }
         let request: ScriptHostRequest = serde_json::from_str(&payload)?;
         let mut execution = self.execution_from_request(&method, request)?;
         if execution.call.method == WorkflowV2HostMethod::HostCommand {

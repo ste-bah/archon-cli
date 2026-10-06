@@ -298,7 +298,7 @@ async function verifyFrozenStage(w, capability) {
     const outcome = await w.hostCommand(capability, { stdin: null });
     const routed = routeFindings(outcome, new Set(), new Set());
     if (!routed.operational) {
-      if (routed.fatal.length > 0) throw new Error(`${capability} stopped: ${routed.fatal.join(" | ")}`);
+      if (routed.fatal.length > 0) await stopFixed(`${capability} stopped: ${routed.fatal.join(" | ")}`);
       requireCommitted(outcome, capability);
       return outcome;
     }

@@ -174,3 +174,5 @@ mod workflow_live_v2_script_host_audit;
 mod error_pause;
 #[path = "workflow_live_v2_script_host_remediation_pause.rs"]
 mod remediation_pause;
+#[path = "workflow_live_v2_script_host_terminal_stop.rs"]
+mod workflow_live_v2_script_host_terminal_stop;

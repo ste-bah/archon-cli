@@ -7,11 +7,12 @@
 //! the top, and every call it recorded complete answers from its record, so
 //! only the work after the crash runs again.
 //!
-//! Two hosts keep the failure ([`WorkflowScriptHost::pauses_on_script_errors`]).
-//! A source that cannot be evaluated at all (a syntax or top-level error,
-//! before the script's promise exists and before any call) still FAILS the
+//! The authoring bootstrap keeps the failure so its caller can re-author.
+//! Outside the fixed host, a source that cannot be evaluated (a syntax or
+//! top-level error, before the script's promise exists and before any call) FAILS the
 //! run: a resume evaluates the same source and cannot change it. The caller
-//! makes that distinction; this module handles the runtime case only.
+//! makes that distinction. The fixed host pauses these errors too; only a
+//! validated terminal-stop request ends its script terminally.
 //!
 //! A deterministic crash recurs on resume. Each pause records the error and
 //! the point it stopped at (the calls answered so far, and the last one) in
@@ -41,21 +42,41 @@ struct ScriptErrorPauseRecord {
 }
 
 impl WorkflowScriptHost {
-    /// Whether a runtime error of this host's script pauses its run. Two
-    /// hosts keep the failure: the v3 authoring bootstrap, whose own loop
-    /// re-authors on a script that came back without a result, and the fixed
-    /// decomposition host (the only one allowed raw outcomes), whose
-    /// immutable script ends its run by throwing its verdict -- a designed
-    /// terminal outcome a live decomposition depends on, not a crash.
+    /// The authoring bootstrap re-authors on error. Fixed scripts pause on
+    /// every unmarked error; deliberate stops are validated by the host API.
     pub(in super::super) fn pauses_on_script_errors(&self) -> bool {
-        self.runner.pauses_on_script_error && !self.runner.raw_outcomes_allowed
+        self.runner.pauses_on_script_error
+    }
+
+    pub(in super::super) async fn finish_script_error(
+        &self,
+        error: &str,
+        unevaluable: bool,
+    ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+        if unevaluable && !self.runner.raw_outcomes_allowed {
+            let error = format!(
+                "workflow.js cannot be evaluated (a syntax or top-level error, before any call); a resume evaluates the same source and cannot change it, so fix the script source: {error}"
+            );
+            return Ok(self.mark_script_failure(&error).await);
+        }
+        if self.pauses_on_script_errors() {
+            if let Some(stop) = self.pause_on_script_error(error).await {
+                return Err(stop);
+            }
+            if self.runner.raw_outcomes_allowed {
+                return Err(WorkflowError::SpecInvalid(format!(
+                    "workflow.js error: {error}; the host could not persist its script-error pause"
+                )));
+            }
+        }
+        Ok(self.mark_script_failure(error).await)
     }
 
     /// Pauses the run on the runtime error `error` of its workflow.js and
     /// returns the pause as the error the session ends with. A session that
     /// no longer owns the run changes nothing and gets the run's own control
-    /// decision. `None` when nothing could be recorded: the caller then fails
-    /// the run as before, carrying the error.
+    /// decision. `None` when nothing could be recorded: the fixed caller
+    /// reports the persistence fault; other callers keep their prior policy.
     pub(in super::super) async fn pause_on_script_error(
         &self,
         error: &str,

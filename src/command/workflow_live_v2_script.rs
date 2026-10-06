@@ -361,26 +361,17 @@ impl WorkflowV2ScriptRunner {
                     .ok()
                     .and_then(|slot| slot.clone());
                 if let Some(message) = recorded {
-                    return Err(WorkflowError::NotificationDelivery(message));
+                    if !host.runner.raw_outcomes_allowed {
+                        return Err(WorkflowError::NotificationDelivery(message));
+                    }
+                    return host
+                        .finish_script_error(
+                            &format!("{error}; host notification delivery failed: {message}"),
+                            unevaluable,
+                        )
+                        .await;
                 }
-                // Issue 335: a source that cannot be evaluated fails the
-                // run, since a resume evaluates it unchanged; a runtime error
-                // pauses it with its evidence, and a resume reuses the
-                // calls it recorded. The pause falls back to the failure only
-                // when it cannot be recorded.
-                if unevaluable {
-                    let error = format!(
-                        "workflow.js cannot be evaluated (a syntax or top-level error, before any call); a resume evaluates the same source and cannot change it, so fix the script source: {error}"
-                    );
-                    return Ok(host.mark_script_failure(&error).await);
-                }
-                if host.pauses_on_script_errors()
-                    && let Some(stop) = host.pause_on_script_error(&error).await
-                {
-                    return Err(stop);
-                }
-                let summary = host.mark_script_failure(&error).await;
-                Ok(summary)
+                host.finish_script_error(&error, unevaluable).await
             }
         }
     }
