@@ -229,6 +229,10 @@ pub async fn run_at(
     confinement.adopt(child)?;
     let (stdout_pipe, stderr_pipe, stdin_pipe) = take_pipes(child);
     let progress = confinement.progress();
+    progress.set_report_interval(
+        (Duration::from_secs(site.timeout_secs) / 4)
+            .clamp(Duration::from_millis(25), Duration::from_secs(60)),
+    );
     let overflow = Arc::new(AtomicBool::new(false));
     let mut stdout = tokio::spawn(drain(
         stdout_pipe,
@@ -293,6 +297,11 @@ pub async fn run_at(
             }
         }
     };
+    // A quiet, short check may finish before the first CPU sample. Its
+    // observed natural exit is real activity across a batch of such checks.
+    if stopped.is_none() && stall.is_none() {
+        progress.record();
+    }
     writer.abort();
     // Reap remaining members even if the leader exited successfully: the
     // whole tree, including every member a scan saw while the check ran,

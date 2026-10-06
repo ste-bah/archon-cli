@@ -91,6 +91,11 @@ pub(super) async fn collect_stream_into(
                 error_type,
                 message,
             } => {
+                if error_type == "transport_idle" {
+                    return Err(anyhow::Error::new(
+                        archon_llm::transport_idle::TransportIdle,
+                    ));
+                }
                 let partial_hash = if text_parts.is_empty() {
                     "none".to_string()
                 } else {

@@ -83,7 +83,9 @@ pub(super) async fn ask(
             )
             .await
         {
-            Ok(outcome) => outcome.map_err(anyhow::Error::new)?,
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(archon_workflow::WorkflowError::ControlPaused(_))) => return Ok(Asked::Stopped),
+            Ok(Err(error)) => return Err(anyhow::Error::new(error)),
             Err(_) => return Ok(Asked::Stopped),
         };
         // A truncated reply is not re-asked: the budget that cut it off has
@@ -126,3 +128,7 @@ fn require_complete(outcome: &WorkflowAgentOutcome) -> Result<()> {
         )),
     }
 }
+
+#[cfg(test)]
+#[path = "fidelity_transport_tests.rs"]
+mod transport_tests;

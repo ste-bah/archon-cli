@@ -188,20 +188,28 @@ impl LocalProvider {
         let body = self.request_body(&request);
 
         let url = format!("{}/chat/completions", self.base_url);
-        let resp = self.http.post(&url).json(&body).send().await.map_err(|e| {
-            if e.is_connect() {
-                LlmError::Http(format!(
-                    "Ollama not running? Could not connect to {}: {e}",
+        let resp = match self.http.post(&url).json(&body).send().await {
+            Ok(response) => response,
+            Err(error) if error.is_timeout() => return Ok(crate::transport_idle::receiver()),
+            Err(error) => {
+                return Err(LlmError::Http(format!(
+                    "local provider request failed at {}: {error}",
                     self.base_url
-                ))
-            } else {
-                LlmError::Http(e.to_string())
+                )));
             }
-        })?;
+        };
 
         let status = resp.status().as_u16();
         if status >= 400 {
-            let msg = resp.text().await.unwrap_or_else(|_| "unknown".to_string());
+            let msg = match resp.text().await {
+                Ok(body) => body,
+                Err(error) if error.is_timeout() => return Ok(crate::transport_idle::receiver()),
+                Err(error) => {
+                    return Err(LlmError::Http(format!(
+                        "error response body failed: {error}"
+                    )));
+                }
+            };
             if let Some(err) = crate::context_window::classify_context_window_body(
                 status,
                 &msg,
@@ -229,7 +237,12 @@ impl LocalProvider {
                     Err(e) => {
                         let _ = tx
                             .send(StreamEvent::Error {
-                                error_type: "http_error".to_string(),
+                                error_type: if e.is_timeout() {
+                                    "transport_idle"
+                                } else {
+                                    "http_error"
+                                }
+                                .into(),
                                 message: e.to_string(),
                             })
                             .await;

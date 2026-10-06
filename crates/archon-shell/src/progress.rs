@@ -8,7 +8,8 @@ pub struct Progress {
     sender: tokio::sync::watch::Sender<Instant>,
     clock: Arc<dyn Fn() -> Instant + Send + Sync>,
     report: bool,
-    last_report: Arc<Mutex<Instant>>,
+    last_report: Arc<Mutex<Option<Instant>>>,
+    report_interval: Arc<Mutex<Duration>>,
 }
 
 impl Default for Progress {
@@ -29,8 +30,18 @@ impl Progress {
             sender,
             clock,
             report,
-            last_report: Arc::new(Mutex::new(now)),
+            last_report: Arc::new(Mutex::new(None)),
+            report_interval: Arc::new(Mutex::new(Duration::from_secs(60))),
         }
+    }
+
+    /// Coalesce observed activity at a cadence below the caller's idle window.
+    /// This changes reporting only; it never manufactures local progress.
+    pub fn set_report_interval(&self, interval: Duration) {
+        *self
+            .report_interval
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = interval;
     }
 
     /// Real output or process activity only. Coalesced: no unbounded event queue.
@@ -39,10 +50,14 @@ impl Progress {
         self.sender.send_modify(|last| *last = (*last).max(now));
         if self.report {
             let mut last = self.last_report.lock().unwrap_or_else(|e| e.into_inner());
-            if now.saturating_duration_since(*last) >= Duration::from_secs(60) {
+            let interval = *self
+                .report_interval
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if last.is_none_or(|last| now.saturating_duration_since(last) >= interval) {
                 // Activity is not a saved verdict and never gets progress credit.
                 eprintln!("archon-host-activity: child making progress");
-                *last = now;
+                *last = Some(now);
             }
         }
     }

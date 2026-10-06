@@ -185,7 +185,16 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
             .send_message_with_progress(messages, system, tools, model, temperature, progress)
             .await
             .map(outcome_from_response)
-            .map_err(WorkflowError::port)
+            .map_err(|error| {
+                if error
+                    .downcast_ref::<archon_llm::transport_idle::TransportIdle>()
+                    .is_some()
+                {
+                    WorkflowError::ControlPaused(error.to_string())
+                } else {
+                    WorkflowError::port(error)
+                }
+            })
     }
 
     async fn continue_agent(

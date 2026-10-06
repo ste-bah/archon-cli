@@ -108,9 +108,9 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
     }
 
     if config.llm.provider != "anthropic" {
-        let fallback_denial_reason = match build_llm_provider_without_anthropic_fallback(
-            &config.llm,
-        ) {
+        let mut llm = config.llm.clone();
+        llm.local.timeout_secs = llm.local.timeout_secs.max(provider_read_backstop(config));
+        let fallback_denial_reason = match build_llm_provider_without_anthropic_fallback(&llm) {
             Ok(provider) => {
                 let selected_provider = provider.name().to_string();
                 let runtime_mode = runtime_mode_for_provider_name(&selected_provider);
@@ -165,14 +165,14 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
         endpoint_policy,
     );
     let api_url = route.endpoint;
-    // The transport must outlast `[subagent] stream_idle_timeout_secs`, or the
-    // hardcoded backstop decides when a silent stream dies and the configured
-    // guard silently does not apply.
+    // Direct judges/critics share this provider with subagents, but own a
+    // longer activity window. Size the read backstop against every caller,
+    // rather than allowing the subagent setting to cut a healthy direct call.
     let client = AnthropicClient::with_read_backstop(
         auth,
         identity,
         api_url,
-        AnthropicClient::read_backstop_for_idle_guard(config.subagent.stream_idle_timeout_secs),
+        provider_read_backstop(config),
     );
     let selection = build_llm_provider_selection(&config.llm, &config.models, client);
     let selected_provider = selection.provider.name().to_string();
@@ -192,6 +192,16 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
         )
         .await;
     Ok(observe_llm_provider_with_profile(selection.provider, runtime_mode, profile_id).await)
+}
+
+/// The direct judge/critic and subagent callers share the constructed transport.
+fn provider_read_backstop(config: &ArchonConfig) -> u64 {
+    AnthropicClient::read_backstop_for_idle_guard(
+        config
+            .subagent
+            .stream_idle_timeout_secs
+            .max(crate::command::workflow_task_set::judge::JUDGE_TIMEOUT_SECS),
+    )
 }
 
 pub(crate) async fn record_anthropic_fallback_denied(
@@ -424,3 +434,7 @@ fn flat_provider_missing_credential_reason(var: &str) -> &'static str {
 #[cfg(test)]
 #[path = "llm_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "llm_transport_idle_tests.rs"]
+pub(crate) mod transport_tests;

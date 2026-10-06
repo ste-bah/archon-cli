@@ -367,3 +367,6 @@ async fn a_reply_past_the_byte_cap_is_incomplete() {
 
 #[path = "workflow_task_set_judge_idle_tests.rs"]
 mod idle;
+
+#[path = "workflow_task_set_judge_transport_tests.rs"]
+mod transport;

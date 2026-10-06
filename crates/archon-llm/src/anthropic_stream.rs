@@ -23,7 +23,7 @@ async fn read_anthropic_stream<S, B, E>(mut stream: S, tx: tokio::sync::mpsc::Se
 where
     S: Stream<Item = Result<B, E>> + Unpin,
     B: AsRef<[u8]>,
-    E: std::fmt::Display,
+    E: std::fmt::Display + 'static,
 {
     let mut buffer = Vec::new();
     loop {
@@ -37,7 +37,11 @@ where
         match chunk {
             Ok(chunk) => buffer.extend_from_slice(chunk.as_ref()),
             Err(error) => {
-                send_stream_error(&tx, "network", error).await;
+                let idle = (&error as &dyn std::any::Any)
+                    .downcast_ref::<reqwest::Error>()
+                    .is_some_and(reqwest::Error::is_timeout);
+                send_stream_error(&tx, if idle { "transport_idle" } else { "network" }, error)
+                    .await;
                 return;
             }
         }

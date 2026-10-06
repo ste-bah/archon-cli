@@ -140,8 +140,11 @@ fn the_transport_backstop_is_derived_from_the_configured_idle_guard() {
     // round restarted, and its work was lost.
     let source = include_str!("../runtime/llm.rs");
     assert!(
-        source.contains("read_backstop_for_idle_guard(config.subagent.stream_idle_timeout_secs)"),
-        "the client must size its transport from the configured guard"
+        source.contains("provider_read_backstop(config)")
+            && source.contains(".stream_idle_timeout_secs")
+            && source
+                .contains(".max(crate::command::workflow_task_set::judge::JUDGE_TIMEOUT_SECS)"),
+        "the shared transport must clear both the configured and direct judge/critic guards"
     );
     assert!(
         !source.contains("AnthropicClient::new(auth, identity, api_url)"),
