@@ -34,6 +34,9 @@ impl WorkflowScriptHost {
         {
             return Ok(None);
         }
+        if !self.outcome_limits_hold(&record)? {
+            return Ok(None);
+        }
         if !self.refresh_audit_for_cache(&record).await? {
             return Ok(None);
         }

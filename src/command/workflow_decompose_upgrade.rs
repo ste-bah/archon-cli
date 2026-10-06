@@ -1,6 +1,8 @@
 //! Upgrade admission without mutating the immutable launch snapshot.
 use super::*;
-use std::io::{BufRead, BufReader};
+use crate::command::workflow_decompose_transitions::{
+    self as transitions, RuntimeTransition, RuntimeTransitions,
+};
 
 pub(crate) fn unmapped(field: &str, reason: &str) -> anyhow::Error {
     anyhow!(
@@ -118,85 +120,146 @@ fn validate_call_directory(
     Ok(())
 }
 
-/// One synced event per runtime transition, even if preparation is retried.
-/// Reading the last transition also records a rollback as an upgrade event.
-/// Launch identity and bundle are never replaced.
+/// One durable transition per runtime change, even if preparation is
+/// retried or a crash cuts it short. The last transition is read from its own
+/// record (`workflow_decompose_transitions`), never from the event log, so a
+/// rollback is a transition too and a torn event line blocks nothing. A run
+/// without the record reads its launch identity as the last runtime. Launch
+/// identity and bundle are never replaced. Returns the transition this call
+/// recorded, if any.
 pub(super) fn record_upgrade(
     store: &WorkflowStore,
     run_id: &str,
     log_path: &Path,
     launch: &FixedRunIdentityV1,
     current: &FixedRunIdentityV1,
-) -> Result<bool> {
-    let events_path = store.events_path(run_id);
-    let mut previous = launch.clone();
-    if events_path.exists() {
-        for (index, line) in BufReader::new(std::fs::File::open(&events_path)?)
+) -> Result<Option<RuntimeTransition>> {
+    let mut record = read_transitions(store, run_id)?.unwrap_or_default();
+    let previous = record
+        .transitions
+        .last()
+        .map_or_else(|| launch.clone(), |last| last.new.clone());
+    let changed = !transitions::same_runtime(&previous, current);
+    if changed {
+        record
+            .transitions
+            .push(RuntimeTransition::new(previous, current.clone()));
+        store.write_run_json(run_id, transitions::TRANSITIONS_PATH, &record)?;
+    }
+    // The visible copies of every transition, each written once: normally
+    // only the last one lacks any, after a crash cut its recording short.
+    let log = match std::fs::read(log_path) {
+        Ok(raw) => String::from_utf8_lossy(&raw).into_owned(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.into()),
+    };
+    for index in 0..record.transitions.len() {
+        let seq = match record.transitions[index].event_id {
+            Some(seq) => seq,
+            None => {
+                let seq = match emitted_seq(store, run_id, &record.transitions[index], index)? {
+                    Some(seq) => seq,
+                    None => emit_transition(store, run_id, &record.transitions[index], index)?,
+                };
+                record.transitions[index].event_id = Some(seq);
+                store.write_run_json(run_id, transitions::TRANSITIONS_PATH, &record)?;
+                seq
+            }
+        };
+        let transition = &record.transitions[index];
+        let key = format!("event_id={seq} transition={}", transition.label);
+        if !log
             .lines()
-            .enumerate()
+            .any(|line| line == key || line.starts_with(&format!("{key} ")))
         {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let event: serde_json::Value = serde_json::from_str(&line).map_err(|e| {
-                unmapped(&format!("events.jsonl.line[{}]", index + 1), &e.to_string())
-            })?;
-            if matches!(
-                event["detail"]["event"].as_str(),
-                Some("decomposition_runtime_upgrade" | "binary_revision_drift")
-            ) {
-                if let Some(new) = event["detail"].get("new") {
-                    previous = decode(new.clone(), "events.jsonl.detail.new")?;
-                } else if let Some(revision) = event["detail"]["current"].as_str() {
-                    // Explicit mapping of Issue 59's binary-only event.
-                    previous.starting_binary_revision = revision.to_string();
-                } else {
-                    return Err(unmapped(
-                        "events.jsonl.detail.current",
-                        "binary drift event has no revision",
-                    ));
-                }
-            }
+            crate::command::workflow_decompose_log::append_nofollow_line(
+                log_path,
+                &transition.log_line(seq),
+            )?;
         }
     }
-    // Root identity was verified separately. Only runtime components define
-    // an upgrade, including when public event sanitization redacts a path.
-    if previous.template_version == current.template_version
-        && previous.script_digest == current.script_digest
-        && previous.catalog_digest == current.catalog_digest
-        && previous.starting_binary_revision == current.starting_binary_revision
-    {
-        return Ok(false);
-    }
-    let harness_changed = previous.template_version != current.template_version
-        || previous.script_digest != current.script_digest
-        || previous.catalog_digest != current.catalog_digest;
-    let label = if harness_changed {
-        "decomposition_runtime_upgrade"
-    } else {
-        "binary_revision_drift"
-    };
+    Ok(changed
+        .then(|| record.transitions.last().cloned())
+        .flatten())
+}
+
+/// The kind stays `BinaryRevisionDrift`, which every reader of the event log
+/// (an older binary after a rollback too) parses; `detail.event` names the
+/// transition.
+fn emit_transition(
+    store: &WorkflowStore,
+    run_id: &str,
+    transition: &RuntimeTransition,
+    index: usize,
+) -> Result<u64> {
     let seq = store.next_event_seq(run_id)?;
     archon_workflow::WorkflowEventLog::new(store.clone()).emit(
-        run_id, seq, archon_workflow::WorkflowEventKind::BinaryRevisionDrift,
-        serde_json::json!({"event": label, "old": previous, "new": current,
-            "persisted": previous.starting_binary_revision, "current": current.starting_binary_revision}),
+        run_id,
+        seq,
+        archon_workflow::WorkflowEventKind::BinaryRevisionDrift,
+        serde_json::json!({
+            "event": transition.label,
+            "transition_index": index,
+            "old": transition.old,
+            "new": transition.new,
+            "persisted": transition.old.starting_binary_revision,
+            "current": transition.new.starting_binary_revision,
+        }),
     )?;
-    std::fs::File::open(&events_path)?.sync_all()?;
+    std::fs::File::open(store.events_path(run_id))?.sync_all()?;
     #[cfg(unix)]
     std::fs::File::open(store.run_dir(run_id))?.sync_all()?;
-    crate::command::workflow_decompose_log::append_nofollow_line(
-        log_path,
-        &format!(
-            "event_id={seq} transition={label} persisted={} current={}",
-            crate::command::workflow_decompose_events::log_field(
-                &previous.starting_binary_revision
+    Ok(seq)
+}
+
+fn read_transitions(store: &WorkflowStore, run_id: &str) -> Result<Option<RuntimeTransitions>> {
+    let path = store.run_dir(run_id).join(transitions::TRANSITIONS_PATH);
+    let raw = match std::fs::read(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(unmapped(transitions::TRANSITIONS_PATH, &error.to_string())),
+    };
+    let value: serde_json::Value = serde_json::from_slice(&raw)
+        .map_err(|e| unmapped(transitions::TRANSITIONS_PATH, &e.to_string()))?;
+    if value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        != Some(u64::from(transitions::TRANSITIONS_SCHEMA_VERSION))
+    {
+        return Err(unmapped(
+            &format!("{}.schema_version", transitions::TRANSITIONS_PATH),
+            &format!(
+                "found {}; this binary reads schema {}",
+                value["schema_version"],
+                transitions::TRANSITIONS_SCHEMA_VERSION
             ),
-            crate::command::workflow_decompose_events::log_field(&current.starting_binary_revision),
-        ),
-    )?;
-    Ok(true)
+        ));
+    }
+    decode(value, transitions::TRANSITIONS_PATH).map(Some)
+}
+
+/// The seq of the event that already shows transition `index`. A line that
+/// does not parse is skipped, as `next_event_seq` counts it: an interrupted
+/// append of any event never blocks a resume.
+fn emitted_seq(
+    store: &WorkflowStore,
+    run_id: &str,
+    transition: &RuntimeTransition,
+    index: usize,
+) -> Result<Option<u64>> {
+    let raw = match std::fs::read(store.events_path(run_id)) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(raw
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| serde_json::from_slice::<serde_json::Value>(line).ok())
+        .find(|event| {
+            event["detail"]["event"] == transition.label.as_str()
+                && event["detail"]["transition_index"] == serde_json::json!(index)
+        })
+        .and_then(|event| event["seq"].as_u64()))
 }
 
 /// Name the first unmappable field rather than silently substituting defaults.

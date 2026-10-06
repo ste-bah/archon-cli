@@ -49,6 +49,11 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn record_is_live(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
         self.record_is_reusable(record)
     }
+    /// Whether a recorded outcome that a limit cut short was cut by the
+    /// limits this build applies; replay paths ask before answering from it.
+    fn outcome_limits_hold(&self, _record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        Ok(true)
+    }
 
     async fn execute(
         &self,
@@ -239,6 +244,10 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
 
     fn record_is_live(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
         self.record_is_reusable_live(record, true)
+    }
+
+    fn outcome_limits_hold(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        self.outcome_limits_hold_for(record)
     }
 
     async fn execute(
@@ -460,4 +469,4 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
 }
 
 #[path = "workflow_host_command_exec_identity.rs"]
-mod identity;
+pub(crate) mod identity;

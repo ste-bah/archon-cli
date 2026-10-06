@@ -8,6 +8,12 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+/// The rule for every record below, and for the records a fixed resume reads
+/// beside them: a new field needs a bump of this version, even one with a
+/// serde default. The records deny unknown fields, so a binary that does not
+/// know a field pauses and names it, instead of dropping it on its next save.
+/// A rollback across a bump is therefore refused explicitly; the remedy is a
+/// binary that reads the newer schema, or an explicit migration.
 pub const FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION: u32 = 1;
 pub const FIXED_DECOMPOSITION_TEMPLATE_VERSION: &str = "fixed-decomposition-v1";
 

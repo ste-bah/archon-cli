@@ -25,7 +25,9 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_skeleton::validate_full_chain;
 
-/// The frozen chain the launcher found and verified under a task root.
+/// The frozen chain the launcher found and verified under a task root. Read
+/// strictly on resume: a new field follows the rule of
+/// `FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct FrozenChainSnapshot {

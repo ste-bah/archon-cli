@@ -94,12 +94,19 @@ impl WorkflowHostCommandExecutor for CatalogHost {
         &self,
         record: &WorkflowV2CallRecord,
     ) -> archon_workflow::WorkflowResult<bool> {
-        Ok(
-            crate::command::workflow_host_command_occurrence::record_identity_matches(
+        let outcome: archon_workflow::HostCommandResult =
+            serde_json::from_value(record.result.data.clone())?;
+        Ok(outcome.reusable()
+            && crate::command::workflow_host_command_occurrence::record_identity_matches(
                 record,
                 &self.call_identity(record.call.options.host_command.as_ref().unwrap())?,
-            ),
-        )
+            ))
+    }
+    fn outcome_limits_hold(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        self.keys.outcome_limits_hold(record)
     }
     async fn execute(
         &self,
@@ -107,13 +114,57 @@ impl WorkflowHostCommandExecutor for CatalogHost {
         generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        let stdin = request.stdin.clone().unwrap_or_default();
         // Simulated process result; identity and reuse use the real executor.
-        FakeHostCommandExecutor {
+        let mut outcome = FakeHostCommandExecutor {
             calls: AtomicUsize::new(0),
         }
         .execute(request, generation)
-        .await
+        .await?;
+        if stdin == "slow" || stdin == "loud" {
+            // Cut short by a limit: nothing landed.
+            outcome.exit_code = None;
+            outcome.timed_out = stdin == "slow";
+            outcome.stdout_truncated = stdin == "loud";
+            outcome.publication_receipt = None;
+            outcome.postcondition = None;
+        }
+        Ok(outcome)
     }
+}
+
+fn launch_catalog() -> archon_workflow::CommandCapabilityCatalog {
+    serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/crates/archon-workflow/tests/fixtures/fixed-command-catalog-v1.json"
+    )))
+    .unwrap()
+}
+
+/// `launch` with one change to the capability `command`.
+fn changed(
+    launch: &archon_workflow::CommandCapabilityCatalog,
+    command: &str,
+    change: &str,
+) -> archon_workflow::CommandCapabilityCatalog {
+    let mut catalog = launch.clone();
+    let capability = catalog.capabilities.get_mut(command).unwrap();
+    match change {
+        "none" => {}
+        "timeout" => capability.timeout_secs += 600,
+        "stdout_limit" => capability.max_stdout_bytes += 1,
+        "schema" => {
+            catalog.schema_version += 1;
+            catalog.capabilities.get_mut(command).unwrap().timeout_secs += 600;
+        }
+        "argv" => capability.argv_template.push("--new-bound".into()),
+        "environment" => {
+            capability.environment_profile = archon_workflow::EnvironmentProfileId::FreezeProvider
+        }
+        _ => unreachable!(),
+    }
+    catalog.recompute_digest().unwrap();
+    catalog
 }
 
 async fn catalog_upgrade(change: &str) {
@@ -123,12 +174,7 @@ async fn catalog_upgrade(change: &str) {
     let run = store.create_run(spec.clone()).unwrap();
     let v2 = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
     let context = crate::command::workflow_host_command_exec_tests::context(temp.path());
-    let launch: archon_workflow::CommandCapabilityCatalog =
-        serde_json::from_str(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/crates/archon-workflow/tests/fixtures/fixed-command-catalog-v1.json"
-        )))
-        .unwrap();
+    let launch = launch_catalog();
     let mut canonical = launch.clone();
     canonical.recompute_digest().unwrap();
     assert_eq!(canonical.digest, launch.digest, "exact live catalog shape");
@@ -140,17 +186,9 @@ async fn catalog_upgrade(change: &str) {
         ),
         calls: AtomicUsize::new(0),
     });
-    let mut catalog = launch.clone();
-    let capability = catalog.capabilities.get_mut("freeze-skeleton").unwrap();
-    match change {
-        "timeout" => capability.timeout_secs += 600,
-        "argv" => capability.argv_template.push("--new-bound".into()),
-        "environment" => {
-            capability.environment_profile = archon_workflow::EnvironmentProfileId::FreezeProvider
-        }
-        _ => unreachable!(),
-    }
-    catalog.recompute_digest().unwrap();
+    let catalog = changed(&launch, "freeze-skeleton", change);
+    // What the freeze does changed; a limit alone does not re-key it.
+    let rerun = matches!(change, "argv" | "environment");
     let second = Arc::new(CatalogHost {
         keys: FixedHostCommandExecutor::new(catalog, context, store.run_dir(&run.id))
             .with_launch_catalog(launch),
@@ -204,9 +242,13 @@ async fn catalog_upgrade(change: &str) {
         .run(&format!("{script}\n// updated harness"))
         .await
         .unwrap();
-    assert_eq!(summary.executed, 1, "only changed freeze re-executes");
-    assert_eq!(summary.reused, 2, "author and unchanged capability reuse");
-    assert_eq!(second.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        summary.executed,
+        usize::from(rerun),
+        "{change}: only a freeze whose meaning changed re-executes"
+    );
+    assert_eq!(summary.reused, 3 - usize::from(rerun), "{change}");
+    assert_eq!(second.calls.load(Ordering::SeqCst), usize::from(rerun));
     assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
     let summary = runner(second.clone())
         .run(&format!("{script}\n// next binary"))
@@ -221,8 +263,16 @@ async fn catalog_upgrade(change: &str) {
 }
 
 #[tokio::test]
-async fn upgrade_358_catalog_timeout_reruns_freeze_only() {
+async fn upgrade_358_catalog_timeout_keeps_completed_freeze() {
     catalog_upgrade("timeout").await;
+}
+#[tokio::test]
+async fn upgrade_358_catalog_output_limit_keeps_completed_freeze() {
+    catalog_upgrade("stdout_limit").await;
+}
+#[tokio::test]
+async fn upgrade_358_catalog_limit_only_schema_bump_keeps_completed_freeze() {
+    catalog_upgrade("schema").await;
 }
 #[tokio::test]
 async fn upgrade_358_catalog_argv_reruns_freeze_only() {
@@ -232,3 +282,6 @@ async fn upgrade_358_catalog_argv_reruns_freeze_only() {
 async fn upgrade_358_catalog_environment_reruns_freeze_only() {
     catalog_upgrade("environment").await;
 }
+
+#[path = "workflow_live_v2_upgrade_limit_tests.rs"]
+mod limit_tests;

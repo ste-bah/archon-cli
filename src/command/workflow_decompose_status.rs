@@ -34,6 +34,7 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
         state.identity.script_digest,
         state.identity.catalog_digest,
     ));
+    out.push_str(&crate::command::workflow_decompose_transitions::status_lines(store, run_id));
     out.push_str(&format!(
         "project_root: {}\nprd: {}\ntask_root: {}\nphase: {}\nlog_path: {}\nresume_eligible_calls: {}\n",
         state.identity.project_root_identity,

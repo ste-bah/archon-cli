@@ -119,6 +119,18 @@ pub(super) fn pause_records(
 }
 
 impl WorkflowScriptHost {
+    /// Issue 358: an answer a limit cut short is an answer about that limit;
+    /// after an upgrade changed it, the call runs again under the new one.
+    pub(super) fn outcome_limits_hold(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        match self.runner.host_command_executor.as_ref() {
+            Some(executor) => executor.outcome_limits_hold(record),
+            None => Ok(true),
+        }
+    }
+
     /// The recorded answer to `execution` when a pause whose credit holds
     /// covers the attempt its slot holds, asked with the same input.
     pub(super) async fn replay_covered_attempt(
@@ -146,7 +158,7 @@ impl WorkflowScriptHost {
         let covered = pauses
             .iter()
             .any(|pause| pause.covered.contains(&wanted) && credit_holds(pause, &slots));
-        if !covered {
+        if !covered || !self.outcome_limits_hold(&record)? {
             return Ok(None);
         }
         self.mark_reused(&record, generation).await?;

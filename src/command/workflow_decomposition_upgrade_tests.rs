@@ -430,3 +430,6 @@ impl WorkflowLlmClientFactory for UpgradeBarrier {
         ))
     }
 }
+
+#[path = "workflow_decomposition_upgrade_admission_tests.rs"]
+mod admission;

@@ -87,11 +87,33 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         Ok(state) => state,
         Err(error) => {
             // The lease proves the old executor is gone. An unreadable
-            // decomposition frontier still pauses; it never becomes failure.
+            // decomposition frontier still pauses, never fails, and through
+            // the dead-owner recovery: its event and the generation bump
+            // that fences the dead executor's work. The state names no log.
             if run.status == archon_workflow::RunStatus::Running {
-                archon_workflow::LifecycleController::new(store.clone())
-                    .apply(run_id, archon_workflow::LifecycleAction::Pause)
-                    .context("pausing an unreadable decomposition state")?;
+                let ended_groups =
+                    crate::command::workflow_host_command_groups::require_no_running_groups(
+                        &store.run_dir(run_id),
+                        run_id,
+                    )
+                    .map_err(|groups| {
+                        groups.context(format!(
+                            "the decomposition state is also unreadable: {error:#}"
+                        ))
+                    })?;
+                if let Some(recovery) =
+                    crate::command::workflow_decompose_stale_owner::recover_dead_generic_owner(
+                        &store,
+                        run_id,
+                        &execution_lease,
+                        &ended_groups,
+                    )?
+                {
+                    ui_sink
+                        .emit(WorkflowUiEvent::Text(recovery.summary(run_id)))
+                        .await
+                        .map_err(|error| anyhow!("reporting stale owner recovery: {error}"))?;
+                }
             }
             return Err(error);
         }
@@ -175,8 +197,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         prd_identity: path_text(&prd_path),
         task_root_identity: path_text(&task_root),
     };
-    let binary_drift =
-        archon_workflow::verify_fixed_resume_identity(&state.identity, &current_identity)?;
+    archon_workflow::verify_fixed_resume_identity(&state.identity, &current_identity)?;
     if canonical_persisted_project != project_root {
         return Err(anyhow!(
             "fixed decomposition resume project root differs from the invoking project; run the command from {}",
@@ -240,10 +261,17 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     )?;
     let persisted_catalog: archon_workflow::CommandCapabilityCatalog =
         read_run_json(&store, run_id, FIXED_CATALOG_PATH)?;
-    if persisted_catalog.schema_version != 1 {
+    // The schemas this build reads, from the build's own catalog schema.
+    if !crate::command::workflow_host_command_exec::identity::catalog_schema_readable(
+        persisted_catalog.schema_version,
+        catalog.schema_version,
+    ) {
         return Err(upgrade::unmapped(
             "command-catalog.schema_version",
-            "unsupported version; install a compatible binary or migrate this catalog",
+            &format!(
+                "found {}; this binary reads schemas 1..={}; install a compatible binary or migrate this catalog",
+                persisted_catalog.schema_version, catalog.schema_version
+            ),
         ));
     }
     let mut verified_catalog = persisted_catalog.clone();
@@ -299,21 +327,18 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     }
     // Verify readable execution state before any provider or lifecycle change.
     upgrade::validate_result_state(&store, run_id)?;
-    let changed = upgrade::record_upgrade(
+    let transition = upgrade::record_upgrade(
         &store,
         run_id,
         &log_path,
         &state.identity,
         &current_identity,
     )?;
-    if changed && let Some(drift) = &binary_drift {
+    for line in transition.iter().flat_map(|t| t.summary()) {
         ui_sink
-            .emit(WorkflowUiEvent::Text(format!(
-                "Binary revision drift: persisted={} current={}\n",
-                drift.persisted, drift.current
-            )))
+            .emit(WorkflowUiEvent::Text(line))
             .await
-            .map_err(|error| anyhow!("reporting binary revision drift: {error}"))?;
+            .map_err(|error| anyhow!("reporting the runtime transition: {error}"))?;
     }
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,
