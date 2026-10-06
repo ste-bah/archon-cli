@@ -114,6 +114,8 @@ enum Scripted {
     Publish(Vec<u8>),
     /// The operator pauses while the attempt runs; it then times out.
     OperatorPauseThenTimeOut,
+    /// Exits with this status and stderr (Issue 338).
+    Stderr(i32, String),
 }
 
 #[async_trait::async_trait]
@@ -141,6 +143,7 @@ impl HostCommandProcessAdapter for ScriptedProcess {
                 Ok(output(Some(EXIT_INCOMPLETE_RESUMABLE), false, &stderr))
             }
             Scripted::Exit(code) => Ok(output(Some(code), false, "genuine failure")),
+            Scripted::Stderr(code, stderr) => Ok(output(Some(code), false, &stderr)),
             Scripted::Error(text) => Err(WorkflowError::StageFailed(text.into())),
             Scripted::OperatorPauseThenTimeOut => {
                 archon_workflow::LifecycleController::new(self.run.0.clone())
@@ -481,3 +484,6 @@ fn round3_growing_operational_progress_has_no_total_attempt_limit() {
 #[cfg(unix)]
 #[path = "workflow_host_command_operational_stall_tests.rs"]
 mod stall;
+
+#[path = "workflow_host_command_operational_unsettled_tests.rs"]
+mod unsettled_tests;

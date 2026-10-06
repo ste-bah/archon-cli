@@ -449,7 +449,7 @@ async fn evaluate(
         record,
         archon_workflow::v2::acceptance_regression::SearchBudget::default(),
     )
-    .await;
+    .await?;
     use archon_workflow::v2::acceptance_routing as routing;
     // Batch O2: a file the run's scope-amendment ledger records an owner for
     // goes to that owner (an unreadable ledger is reported below, when the

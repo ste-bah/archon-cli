@@ -85,6 +85,9 @@ pub(super) async fn handle_staged_task_set_lint(
                 eprintln!("{report}");
                 std::process::exit(status);
             }
+            // Issue 338: a set no read can settle is the run's pause, never
+            // the gate's operational error.
+            crate::command::workflow_host_command_operational::exit_if_unsettled_publish(&error);
             crate::command::workflow_gate::GateEvaluation::new("", Vec::new())
                 .with_operational_error(error.to_string())
         }
@@ -284,9 +287,13 @@ async fn audit_candidate_fidelity(
             evaluation.findings.extend(findings);
             evaluation
         }
-        Err(error) => evaluation.with_operational_error(format!(
-            "obligation fidelity audit failed operationally: {error:#}"
-        )),
+        Err(error) => {
+            // Issue 338: as in the set gate.
+            crate::command::workflow_host_command_operational::exit_if_unsettled_publish(&error);
+            evaluation.with_operational_error(format!(
+                "obligation fidelity audit failed operationally: {error:#}"
+            ))
+        }
     }
 }
 

@@ -22,7 +22,7 @@ use archon_workflow::acceptance_world::FrozenCommandRef;
 use archon_workflow::task_set_contract::{
     AcceptanceCheck, AcceptanceContract, AcceptanceCriterion,
 };
-use archon_workflow::{WorkflowResult, WorkflowStore, poll_v2_run_control};
+use archon_workflow::{WorkflowError, WorkflowResult, WorkflowStore, poll_v2_run_control};
 
 use super::{StageContext, command_reference, git_head, observe_in_scratch};
 use crate::command::acceptance_scratch_policy::NativeBinding;
@@ -195,6 +195,8 @@ async fn run_selected(
                             });
                     }
                 }
+                // Issue 338: a task set no read can settle pauses the run.
+                Err(paused @ WorkflowError::ControlPaused(_)) => return Err(paused),
                 // Issue-128: one site failure is the round's, not eleven
                 // checks' — fanned out per check it read as eleven failing
                 // checks and went to their tasks.

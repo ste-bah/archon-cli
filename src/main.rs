@@ -30,6 +30,17 @@ use cli_args::Cli;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let outcome = run().await;
+    // Issue 338: a command that read nothing over a task-set publish no read
+    // could settle ends as the host-command contract's unsettled publish, so
+    // a parent that ran it as a child pauses its run instead of failing it.
+    if let Err(error) = &outcome {
+        command::workflow_host_command_operational::exit_if_unsettled_publish(error);
+    }
+    outcome
+}
+
+async fn run() -> Result<()> {
     // Issue 336: a check-source repin settles an interrupted task-set publish
     // before it writes, by the host's recovery.
     command::workflow_task_set::register_publish_settle();

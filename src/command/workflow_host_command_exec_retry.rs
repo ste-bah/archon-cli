@@ -4,7 +4,8 @@
 use super::*;
 use crate::command::workflow_host_command_operational::{
     NextStep, OperationalAttempt, OperationalReport, classify, next_step, pause_for_stall,
-    pause_run, record_retry, reported_progress, require_run_owned,
+    pause_for_unsettled_publish, pause_run, record_retry, reported_progress, require_run_owned,
+    unsettled_publish_evidence,
 };
 
 impl FixedHostCommandExecutor {
@@ -92,6 +93,18 @@ impl FixedHostCommandExecutor {
                     });
             if let Err(evidence) = stalled {
                 return Err(pause_for_stall(
+                    &store,
+                    &self.run_root,
+                    expected_generation,
+                    &report,
+                    &evidence,
+                ));
+            }
+            // A child that read nothing over a journal no read could settle
+            // already retried the settlement: pause now (Issue 338).
+            if let Some(evidence) = unsettled_publish_evidence(observed.exit_code, &observed.stderr)
+            {
+                return Err(pause_for_unsettled_publish(
                     &store,
                     &self.run_root,
                     expected_generation,

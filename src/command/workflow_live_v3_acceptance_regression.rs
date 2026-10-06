@@ -22,6 +22,7 @@ use archon_workflow::v2::acceptance_regression::{
 };
 use archon_workflow::v2::acceptance_routing::check_command;
 use archon_workflow::v2::acceptance_stage::AcceptanceRoundRecordV1;
+use archon_workflow::{WorkflowError, WorkflowResult};
 
 use super::exec::{StageContext, command_reference, git_head, observe_in_scratch_at};
 use crate::command::acceptance_scratch_policy::NativeBinding;
@@ -31,6 +32,9 @@ pub(super) struct ScratchObserver<'a> {
     pub(super) binding: &'a NativeBinding,
     pub(super) refs: Vec<FrozenCommandRef>,
     pub(super) evidence_dir: PathBuf,
+    /// The pause a probe met (Issue 338): a task set no read can settle is
+    /// the run's pause, never a commit with no verdict.
+    pub(super) paused: std::sync::Mutex<Option<WorkflowError>>,
 }
 
 #[async_trait::async_trait]
@@ -54,9 +58,20 @@ impl CheckObserver for ScratchObserver<'_> {
             })
             .find(|dir| !dir.exists())
             .expect("an unused evidence directory");
-        let checks = observe_in_scratch_at(self.context, self.binding, commit, &refs, &evidence)
-            .await
-            .ok()?;
+        let checks =
+            match observe_in_scratch_at(self.context, self.binding, commit, &refs, &evidence).await
+            {
+                Ok(checks) => checks,
+                Err(paused @ WorkflowError::ControlPaused(_)) => {
+                    let mut slot = self
+                        .paused
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner());
+                    slot.get_or_insert(paused);
+                    return None;
+                }
+                Err(_) => return None,
+            };
         // A check that could not be evaluated there has no verdict.
         Some(
             checks
@@ -83,7 +98,8 @@ impl CheckObserver for ScratchObserver<'_> {
 
 /// Record, on each failed check of `record`, the run landing that broke it
 /// or what the search established instead, within `budget` (the stage
-/// passes [`SearchBudget::default`]).
+/// passes [`SearchBudget::default`]). `ControlPaused` when a probe met a
+/// task set no read can settle (Issue 338).
 pub(super) async fn attribute(
     context: &StageContext,
     criteria: &[&AcceptanceCriterion],
@@ -92,7 +108,7 @@ pub(super) async fn attribute(
     evidence_dir: &std::path::Path,
     record: &mut AcceptanceRoundRecordV1,
     budget: SearchBudget,
-) {
+) -> WorkflowResult<()> {
     let commands: BTreeMap<&str, (&AcceptanceCriterion, String)> = criteria
         .iter()
         .map(|criterion| {
@@ -135,19 +151,21 @@ pub(super) async fn attribute(
         }
     };
     if failing.is_empty() {
-        return;
+        return Ok(());
     }
     let Some(binding) = &context.binding else {
-        return unsearched(
+        unsearched(
             record,
             "the stage runs its checks in the live checkout (no [workflow.acceptance_execution] scratch policy), so no earlier point of the run can be probed",
         );
+        return Ok(());
     };
     let (Some(tip), _) = git_head(&context.repository) else {
-        return unsearched(
+        unsearched(
             record,
             "the target repository's HEAD could not be read, so the run's landings could not be searched",
         );
+        return Ok(());
     };
     let refs: Vec<FrozenCommandRef> = criteria
         .iter()
@@ -159,6 +177,7 @@ pub(super) async fn attribute(
         binding,
         refs,
         evidence_dir: evidence_dir.to_path_buf(),
+        paused: Default::default(),
     };
     let store = WorkflowV2ResultStore::new(run_dir.join("v2"));
     let found = attribute_regressions(
@@ -170,6 +189,11 @@ pub(super) async fn attribute(
         budget,
     )
     .await;
+    if let Some(paused) =
+        (observer.paused.into_inner()).unwrap_or_else(|poison| poison.into_inner())
+    {
+        return Err(paused);
+    }
     for check in &mut record.checks {
         if let Some(regression) = found.regressions.get(&check.check_id) {
             check.regressed_by = Some(regression.clone());
@@ -177,4 +201,5 @@ pub(super) async fn attribute(
             check.regression_search = Some(search.clone());
         }
     }
+    Ok(())
 }

@@ -120,7 +120,14 @@ pub(crate) async fn entry() -> anyhow::Result<bool> {
     if std::env::args().nth(1).as_deref() != Some(FLAG) {
         return Ok(false);
     }
-    serve().await.map_err(anyhow::Error::new)?;
+    match serve().await {
+        // Issue 338: the only pause a guardian meets is a task set whose
+        // interrupted publish no read can settle; its parent pauses on it.
+        Err(WorkflowError::ControlPaused(evidence)) => {
+            crate::command::workflow_host_command_operational::exit_unsettled_publish(&evidence)
+        }
+        served => served.map_err(anyhow::Error::new)?,
+    }
     Ok(true)
 }
 async fn serve() -> WorkflowResult<()> {
@@ -268,6 +275,16 @@ pub(crate) async fn launch_selected(
         };
     drop(pipe);
     let diagnostics = drain(diagnostics).await;
+    if let Some(evidence) =
+        crate::command::workflow_host_command_operational::unsettled_publish_evidence(
+            status.code(),
+            diagnostics.as_bytes(),
+        )
+    {
+        return Err(WorkflowError::ControlPaused(format!(
+            "the native observation guardian read nothing: {evidence}"
+        )));
+    }
     if !status.success() {
         return Err(WorkflowError::StageFailed(format!(
             "native observation guardian failed ({status}); {}",
