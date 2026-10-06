@@ -34,7 +34,7 @@ pub const MAX_PROJECT_INPUT_BYTES: u64 = 1 << 30;
 /// The acceptance policy's project inputs, as the run recorded them at
 /// launch (`v2/generated-metadata.json`, the observer snapshot's native
 /// execution binding): the same set acceptance scratch copies.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectInputPolicy {
     /// The project root, canonical.
     pub project: PathBuf,

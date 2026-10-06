@@ -238,3 +238,90 @@ fn gc_missing_damaged_bytes_do_not_hide_unreadable_evidence() {
         "missing bytes hid evidence damage: {refused:?}"
     );
 }
+
+fn r2_parseable_missing_bytes(copy: bool, conflicting_original: bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = ProgressLedger::default();
+    for record in [set(1, 1, "AC-X"), set(2, 1, "AC-X")] {
+        write_round_record(dir.path(), &record).unwrap();
+        ledger.observe(&record);
+    }
+    if copy {
+        ledger.save(dir.path()).unwrap();
+    }
+    let original = round_dir(dir.path(), 2).join(attempt_file_name(1));
+    std::fs::write(&original, b"{").unwrap();
+    let first = ProgressLedger::load_healing(dir.path()).unwrap();
+    let lost = &first.quarantined[0];
+    let moved = dir.path().join(&lost.quarantined);
+    let evidence = moved.with_file_name(
+        moved
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .replace(".damaged", ".evidence.json"),
+    );
+    // The named case has valid evidence, missing bytes, and another intact round.
+    let parsed: QuarantinedRecordV1 =
+        serde_json::from_slice(&std::fs::read(&evidence).unwrap()).unwrap();
+    assert_eq!(parsed.round, 2);
+    std::fs::remove_file(&moved).unwrap();
+    if conflicting_original {
+        std::fs::write(&original, serde_json::to_vec(&set(99, 1, "AC-X")).unwrap()).unwrap();
+    }
+    let healed = ProgressLedger::load_healing(dir.path()).unwrap();
+    assert_eq!(
+        healed.unknown().len(),
+        1,
+        "parseable evidence byte loss silently skipped"
+    );
+    assert!(healed.unknown()[0].reason.contains("missing"));
+    if copy {
+        assert!(
+            healed
+                .ledger
+                .observed
+                .iter()
+                .any(|o| o.round == 2 && o.attempt == 1),
+            "known observation must remain"
+        );
+        assert!(healed.ledger.revisits >= 1, "known revisit must remain");
+        if !conflicting_original {
+            assert_eq!(healed.ledger, ledger);
+        }
+    }
+    assert_eq!(
+        ProgressLedger::load_healing(dir.path())
+            .unwrap()
+            .unknown()
+            .len(),
+        1
+    );
+    acknowledge_quarantined(dir.path(), &healed.unacknowledged).unwrap();
+    if copy {
+        std::fs::remove_file(
+            dir.path()
+                .join(ACCEPTANCE_RECORDS_DIR)
+                .join(PROGRESS_LEDGER_FILE),
+        )
+        .unwrap();
+    }
+    let acknowledged = ProgressLedger::load_healing(dir.path()).unwrap();
+    assert!(acknowledged.unknown().is_empty());
+    assert_eq!(
+        acknowledged.ledger, healed.ledger,
+        "acknowledgment must keep the known observation after saved-copy loss"
+    );
+}
+#[test]
+fn r2_parseable_byte_loss_with_saved_observation() {
+    r2_parseable_missing_bytes(true, false);
+}
+#[test]
+fn r2_parseable_byte_loss_without_saved_observation() {
+    r2_parseable_missing_bytes(false, false);
+}
+#[test]
+fn r2_parseable_byte_loss_with_nonmatching_original() {
+    r2_parseable_missing_bytes(true, true);
+}

@@ -105,3 +105,83 @@ fn gc_exhausted_frontier_never_merges_sequential_observations() {
         "saturated frontiers silently merged distinct rounds"
     );
 }
+
+#[cfg(unix)]
+fn r2_unwritable_order_log(prior: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let first = reserve_round(dir.path(), 1).unwrap();
+    let log = dir
+        .path()
+        .join(ACCEPTANCE_RECORDS_DIR)
+        .join("recording-order.log");
+    std::fs::write(&log, prior).unwrap();
+    let second = reserve_round(dir.path(), 2).unwrap();
+    std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o444)).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        prior,
+        "log remains readable"
+    );
+    assert!(
+        std::fs::OpenOptions::new().append(true).open(&log).is_err(),
+        "fault installed"
+    );
+    let mut record = set(1, first.attempt, "AC-X");
+    let landed = first.record(dir.path(), &mut record, |record, landing| {
+        landing.land(record)
+    });
+    std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(
+        landed.is_err(),
+        "round landed without advancing its durable frontier"
+    );
+    assert!(
+        !round_dir(dir.path(), 1)
+            .join(attempt_file_name(first.attempt))
+            .exists()
+    );
+    let mut retry = set(2, second.attempt, "AC-X");
+    second
+        .record(dir.path(), &mut retry, |record, landing| {
+            landing.land(record)
+        })
+        .unwrap();
+    let mut ledger = progress::ProgressLedger::load_healing(dir.path())
+        .unwrap()
+        .ledger;
+    for (round, stalled) in [(3, 1), (4, 2)] {
+        let reserved = reserve_round(dir.path(), round).unwrap();
+        assert!(reserved.frontier > second.frontier);
+        let mut retry = set(round, reserved.attempt, "AC-X");
+        let (_, decision) = reserved
+            .record(dir.path(), &mut retry, |record, landing| {
+                let decision = progress::decide_with(&mut ledger, record);
+                landing.land(record)?;
+                crate::WorkflowResult::Ok(decision)
+            })
+            .unwrap();
+        assert_eq!(decision.stalled_rounds, stalled);
+        assert_eq!(decision.escalate, stalled == 1);
+        assert!(!decision.final_round, "a stall never ends the run");
+        assert_eq!(
+            decision.pause,
+            (stalled == 2).then_some(progress::PAUSE_NO_PROGRESS)
+        );
+    }
+}
+#[cfg(unix)]
+#[test]
+fn r2_order_log_readonly_empty() {
+    r2_unwritable_order_log("");
+}
+#[cfg(unix)]
+#[test]
+fn r2_order_log_readonly_existing() {
+    r2_unwritable_order_log("seq=1 9 1 end\n");
+}
+#[cfg(unix)]
+#[test]
+fn r2_order_log_readonly_torn() {
+    r2_unwritable_order_log("seq=2 9");
+}

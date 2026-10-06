@@ -154,6 +154,15 @@ impl TuiEventSender {
 
     #[allow(clippy::result_large_err)]
     fn try_send_frame(&self, event: TuiEvent) -> Result<(), SendError<TuiEvent>> {
+        self.try_send_frame_inner(event, false)
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn try_send_frame_inner(
+        &self,
+        event: TuiEvent,
+        retry: bool,
+    ) -> Result<(), SendError<TuiEvent>> {
         if self.inner.closed.load(Ordering::Acquire) {
             crate::observability::record_tui_event_closed_send_failure();
             return Err(SendError(event));
@@ -172,7 +181,7 @@ impl TuiEventSender {
             .activity
             .lock()
             .expect("activity reconciliation lock");
-        let is_activity = matches!(event, TuiEvent::AgentActivity(_));
+        let terminal_activity = activity::terminal(&event);
         {
             let mut queue = self.inner.queue.lock().expect("tui event queue lock");
             if self.inner.closed.load(Ordering::Acquire) {
@@ -180,25 +189,29 @@ impl TuiEventSender {
                 return Err(SendError(event));
             }
             if let TuiEvent::AgentActivity(update) = &event {
-                let terminal =
-                    crate::agent_activity::is_terminal_non_parent(update.role, update.status);
+                if retry && !activity.rows.iter().any(|row| row == update) {
+                    // A newer update, especially a terminal one, supersedes
+                    // a backpressured activity. Never resurrect its old row.
+                    return Ok(());
+                }
+                let terminal = terminal_activity;
                 if frame_is_oversized(&event) && !terminal {
                     crate::observability::record_tui_event_oversized_rejected();
                     return Err(SendError(event));
                 }
-                activity.observe(update);
                 if frame_is_oversized(&event) {
-                    // Removal needs only the id; never retain oversized detail.
+                    activity.terminal_without_detail(update);
                     activity.dirty = true;
                     self.inner.notify.notify_one();
                     return Ok(());
                 }
+                activity.observe(update);
             }
             let Some(event) = coalesce_with_metrics(&mut queue, event) else {
                 return Ok(());
             };
             if queue.len() >= self.inner.capacity {
-                if is_activity {
+                if terminal_activity {
                     activity.dirty = true;
                     self.inner.notify.notify_one();
                     return Ok(());
@@ -216,7 +229,7 @@ impl TuiEventSender {
     }
 
     pub async fn send_async(&self, event: TuiEvent) -> Result<(), SendError<TuiEvent>> {
-        if matches!(event, TuiEvent::AgentActivity(_)) {
+        if activity::terminal(&event) {
             return self.send(event);
         }
         for frame in ContentFrames::new(event) {
@@ -230,7 +243,7 @@ impl TuiEventSender {
     }
 
     pub async fn send_atomic_async(&self, event: TuiEvent) -> Result<(), SendError<TuiEvent>> {
-        if matches!(event, TuiEvent::AgentActivity(_)) {
+        if activity::terminal(&event) {
             return self.send(event);
         }
         let frames = ContentFrames::new(event).collect::<Vec<_>>();
@@ -283,14 +296,16 @@ impl TuiEventSender {
     }
 
     async fn send_frame_async(&self, mut event: TuiEvent) -> Result<(), SendError<TuiEvent>> {
+        let mut retry = false;
         loop {
             let notified = self.inner.not_full.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            match self.try_send_frame(event) {
+            match self.try_send_frame_inner(event, retry) {
                 Ok(()) => return Ok(()),
                 Err(SendError(returned)) if !self.inner.closed.load(Ordering::Acquire) => {
                     event = returned;
+                    retry = true;
                     let blocked_at = std::time::Instant::now();
                     notified.await;
                     crate::observability::record_tui_event_blocked_send(blocked_at.elapsed());

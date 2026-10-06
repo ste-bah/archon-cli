@@ -107,6 +107,7 @@ pub(super) fn unreadable_evidence(
         written_nanos: u64::try_from(file_time(&moved)).unwrap_or(u64::MAX),
         quarantined_at: quarantined_at.to_rfc3339(),
         acknowledged_at: None,
+        missing_bytes_acknowledged: false,
     }))
 }
 
@@ -130,5 +131,32 @@ pub(super) fn keep_unreadable_evidence(
         &dir.join(format!(".{name}.unreadable.tmp")),
         &dir.join(format!("{name}{UNREADABLE_EVIDENCE_SUFFIX}")),
         &bytes,
+    )
+}
+
+/// Only the same intact observation at the original path proves that a
+/// quarantine move did not happen. A different round or state proves nothing.
+pub(super) fn matching_original(
+    run_dir: &Path,
+    evidence: &QuarantinedRecordV1,
+) -> crate::WorkflowResult<bool> {
+    let path = run_dir.join(&evidence.original);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(crate::WorkflowError::io(&path, error)),
+    };
+    let Ok(record) = serde_json::from_slice::<super::AcceptanceRoundRecordV1>(&bytes) else {
+        return Ok(false);
+    };
+    Ok(
+        (record.round, record.attempt) == (evidence.round, evidence.attempt)
+            && evidence
+                .state
+                .as_ref()
+                .is_none_or(|state| *state == super::super::state_key(&record))
+            && evidence
+                .progress_frontier
+                .is_none_or(|frontier| record.progress_frontier == Some(frontier)),
     )
 }

@@ -217,13 +217,20 @@ fn decide_history(
         let names: Vec<String> = (unknown.iter())
             .map(|lost| {
                 format!(
-                    "{} (moved to {}: {})",
-                    lost.original, lost.quarantined, lost.reason
+                    "{} (quarantine {}: {}; {})",
+                    lost.original,
+                    lost.quarantined,
+                    lost.reason,
+                    if lost.state.is_some() {
+                        "known observation retained"
+                    } else {
+                        "failing state unknown"
+                    }
                 )
             })
             .collect();
         let reason = format!(
-            "acceptance record(s) {} would not parse and were quarantined; no copy of their failing state survives, so the rounds without progress cannot be counted exactly",
+            "acceptance history has unacknowledged evidence loss: {}; surviving observations are retained, and unknown states prevent exact no-progress counting",
             names.join(", ")
         );
         return Err(Halt::Lost(reason, unknown.into_iter().cloned().collect()));

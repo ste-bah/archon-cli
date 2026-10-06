@@ -395,8 +395,8 @@ fn land_locked(
     let path = dir.join(attempt_file_name(record.attempt));
     let bytes = serde_json::to_vec_pretty(record)?;
     // The order entry first, synced: a record never exists without its
-    // place in the recording order unless the log itself failed.
-    progress::note_recorded_locked(run_dir, record.round, record.attempt);
+    // durable place in the recording order. An append failure lands nothing.
+    progress::note_recorded_locked(run_dir, record.round, record.attempt)?;
     // The staging name is never an `attempt-*.json`: a crash before the
     // rename leaves no record.
     let staging = dir.join(format!(

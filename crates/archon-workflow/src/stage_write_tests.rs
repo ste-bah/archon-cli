@@ -80,7 +80,7 @@ async fn gc_takeover_cannot_interleave_a_stage_mutation() {
             let run_id = run_id.clone();
             takeover = Some(std::thread::spawn(move || {
                 started_tx.send(()).unwrap();
-                let control = LifecycleController::new(store);
+                let control = LifecycleController::new(store.clone());
                 control.apply(&run_id, LifecycleAction::Pause).unwrap();
                 control.apply(&run_id, LifecycleAction::Resume).unwrap();
                 let _ = done_tx.send(());
@@ -121,7 +121,7 @@ async fn tripwire_case(case: u8) {
         run_id: run_id.clone(),
         owner: PauseOwner::Generation(generation),
     };
-    let control = LifecycleController::new(store);
+    let control = LifecycleController::new(store.clone());
     if case == 0 {
         control.apply(&run_id, LifecycleAction::Pause).unwrap();
         control.apply(&run_id, LifecycleAction::Resume).unwrap();
@@ -152,15 +152,48 @@ async fn tripwire_case(case: u8) {
                 .exists()
         );
     } else {
-        assert_eq!(std::fs::read(input).unwrap(), b"after");
+        if case == 1 {
+            control.apply(&run_id, LifecycleAction::Resume).unwrap();
+        }
+        let current = StageWriter {
+            store: store.clone(),
+            run_id: run_id.clone(),
+            owner: PauseOwner::Generation(store.load_state(&run_id).unwrap().generation),
+        };
+        let called = std::sync::atomic::AtomicBool::new(false);
+        let reconciled = scope(current.clone(), async {
+            // Round entry must reconcile before reserving evidence or running
+            // any of the stage's pre-evaluation repairs.
+            crate::v2::acceptance_stage::reserve_round(&root, 1)?;
+            crate::write_coordinator::input_tripwire::watch_owned(
+                current,
+                Some(&root),
+                "next evaluation",
+                async {
+                    called.store(true, std::sync::atomic::Ordering::SeqCst);
+                },
+            )
+            .await
+        })
+        .await;
+        assert!(
+            matches!(reconciled, Err(WorkflowError::ControlPaused(_))),
+            "pending comparison was lost"
+        );
+        assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
         assert!(
             !root
-                .join("write-coordination/environment-violations.jsonl")
+                .join(crate::v2::acceptance_stage::ACCEPTANCE_RECORDS_DIR)
+                .exists(),
+            "round reserved evidence before reconciling"
+        );
+        assert_eq!(std::fs::read(input).unwrap(), b"before");
+        assert!(
+            root.join("write-coordination/environment-violations.jsonl")
                 .exists()
         );
         assert!(
-            !root
-                .join("write-coordination/environment-violations")
+            root.join("write-coordination/environment-violations")
                 .exists()
         );
     }
@@ -170,10 +203,151 @@ async fn gc_tripwire_stale_arm_writes_nothing() {
     tripwire_case(0).await;
 }
 #[tokio::test]
-async fn gc_tripwire_paused_check_writes_nothing() {
+async fn r2_tripwire_paused_comparison_reconciles_before_new_work() {
     tripwire_case(1).await;
 }
 #[tokio::test]
-async fn gc_tripwire_resumed_check_writes_nothing() {
+async fn r2_tripwire_superseded_comparison_reconciles_before_new_work() {
     tripwire_case(2).await;
+}
+
+#[tokio::test]
+async fn r2_tripwire_dropped_call_reconciles_before_new_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let (run_id, generation) = running(&store);
+    let root = store.run_dir(&run_id);
+    let input = temp.path().join("inputs/config.json");
+    std::fs::create_dir_all(input.parent().unwrap()).unwrap();
+    std::fs::write(&input, b"before").unwrap();
+    crate::write_coordinator::project_inputs::write_test_policy(&root, temp.path(), &["inputs"]);
+    let writer = StageWriter {
+        store,
+        run_id,
+        owner: PauseOwner::Generation(generation),
+    };
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut first = Box::pin(crate::write_coordinator::input_tripwire::watch_owned(
+        writer.clone(),
+        Some(&root),
+        "dropped evaluation",
+        async {
+            std::fs::remove_file(&input).unwrap();
+            tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        },
+    ));
+    tokio::select! { _ = &mut first => panic!("call completed"), _ = rx => {} }
+    // Drop the entire armed future, as executor cancellation does.
+    drop(first);
+    let called = std::sync::atomic::AtomicBool::new(false);
+    let result = crate::write_coordinator::input_tripwire::watch_owned(
+        writer,
+        Some(&root),
+        "next evaluation",
+        async {
+            called.store(true, std::sync::atomic::Ordering::SeqCst);
+        },
+    )
+    .await;
+    assert!(
+        matches!(result, Err(WorkflowError::ControlPaused(_))),
+        "cancelled call lost its comparison"
+    );
+    assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(std::fs::read(input).unwrap(), b"before");
+}
+
+#[tokio::test]
+async fn r2_tripwire_process_restart_keeps_comparison_and_requires_repair() {
+    use crate::write_coordinator::input_tripwire::watch_owned;
+    if let Ok(project) = std::env::var("ARCHON_R2_TRIPWIRE_CHILD_PROJECT") {
+        let store = WorkflowStore::project(&project);
+        let run_id = std::env::var("ARCHON_R2_TRIPWIRE_CHILD_RUN").unwrap();
+        let generation = store.load_state(&run_id).unwrap().generation;
+        let root = store.run_dir(&run_id);
+        let writer = StageWriter {
+            store,
+            run_id,
+            owner: PauseOwner::Generation(generation),
+        };
+        let input = std::path::Path::new(&project).join("inputs/config.json");
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut call = Box::pin(watch_owned(
+            writer,
+            Some(&root),
+            "previous process",
+            async {
+                std::fs::write(input, b"changed in child").unwrap();
+                tx.send(()).unwrap();
+                std::future::pending::<()>().await;
+            },
+        ));
+        tokio::select! { _ = &mut call => panic!("call completed"), _ = rx => {} }
+        drop(call);
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::project(temp.path());
+    let (run_id, generation) = running(&store);
+    let root = store.run_dir(&run_id);
+    let input = temp.path().join("inputs/config.json");
+    std::fs::create_dir_all(input.parent().unwrap()).unwrap();
+    std::fs::write(&input, b"before").unwrap();
+    crate::write_coordinator::project_inputs::write_test_policy(&root, temp.path(), &["inputs"]);
+    let name = std::thread::current().name().unwrap().to_string();
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", &name])
+        .env("ARCHON_R2_TRIPWIRE_CHILD_PROJECT", temp.path())
+        .env("ARCHON_R2_TRIPWIRE_CHILD_RUN", &run_id)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success(), "child evaluation fixture failed");
+    assert_eq!(
+        std::fs::read(&input).unwrap(),
+        b"changed in child",
+        "the child reached its watched mutation"
+    );
+    let writer = StageWriter {
+        store,
+        run_id,
+        owner: PauseOwner::Generation(generation),
+    };
+    let called = std::sync::atomic::AtomicBool::new(false);
+    let result = watch_owned(writer.clone(), Some(&root), "next process", async {
+        called.store(true, std::sync::atomic::Ordering::SeqCst);
+    })
+    .await;
+    let Err(WorkflowError::ControlPaused(reason)) = result else {
+        panic!("a process restart lost the original comparison");
+    };
+    assert!(reason.contains("previous process"));
+    assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
+    // Host-write history is process-local: an uncertain repair keeps the
+    // original map and pauses again instead of adopting the changed bytes.
+    assert_eq!(std::fs::read(&input).unwrap(), b"changed in child");
+    assert!(
+        watch_owned(writer.clone(), Some(&root), "retry", async {})
+            .await
+            .is_err()
+    );
+    std::fs::write(&input, b"before").unwrap();
+    assert!(
+        watch_owned(
+            writer.clone(),
+            Some(&root),
+            "repair acknowledgement",
+            async {}
+        )
+        .await
+        .is_err(),
+        "the earlier detection still needs reporting after repair"
+    );
+    assert!(
+        watch_owned(writer, Some(&root), "after reconciliation", async {})
+            .await
+            .is_ok()
+    );
 }

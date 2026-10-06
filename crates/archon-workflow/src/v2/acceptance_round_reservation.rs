@@ -19,6 +19,12 @@ pub struct RoundReservation {
 }
 
 pub fn reserve_round(run_dir: &Path, round: u32) -> WorkflowResult<RoundReservation> {
+    // Reconcile before the round can write even its reservation or perform
+    // pre-evaluation input repairs. Acquire the run lock before, and release
+    // it before, taking the order lock used by landing.
+    if let Some(writer) = crate::stage_write::current() {
+        crate::write_coordinator::input_tripwire::reconcile_owned(&writer, run_dir)?;
+    }
     progress::under_order_lock(run_dir, || {
         crate::stage_write::with_write(|| {
             let parent = round_dir(run_dir, round);

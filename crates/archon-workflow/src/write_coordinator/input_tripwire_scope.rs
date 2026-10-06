@@ -29,6 +29,21 @@ pub async fn watch<T>(
     watch_inner(run_root, label, &[], work).await
 }
 
+/// Reconcile an earlier evaluation before any new round reserves evidence
+/// or repairs inputs. Only the current owner can settle the pending map.
+pub fn reconcile_owned(
+    writer: &crate::stage_write::StageWriter,
+    root: &Path,
+) -> crate::WorkflowResult<()> {
+    crate::stage_write::with_writer(writer, || {
+        super::pending::reconcile(root).map_err(|error| {
+            crate::WorkflowError::ControlPaused(format!(
+                "input comparison could not reconcile: {error}"
+            ))
+        })
+    })
+}
+
 /// A stage's tripwire mutations use its owner even on the blocking pool.
 /// A refused arm or check stops the stage; it is never an unwatched success.
 pub fn watch_owned<T>(
@@ -53,9 +68,18 @@ async fn watch_owned_inner<T>(
     work: std::pin::Pin<Box<impl std::future::Future<Output = T>>>,
 ) -> crate::WorkflowResult<(T, Option<EnvironmentViolation>)> {
     let arm_writer = writer.clone();
+    let arm_label = label.clone();
     let tripwire = tokio::task::spawn_blocking(move || {
         crate::stage_write::with_writer(&arm_writer, || {
-            crate::WorkflowResult::Ok(root.as_deref().and_then(InputTripwire::arm))
+            root.as_deref()
+                .map(|root| super::pending::arm(root, &arm_label))
+                .transpose()
+                .map(Option::flatten)
+                .map_err(|error| {
+                    crate::WorkflowError::ControlPaused(format!(
+                        "input comparison could not arm: {error}"
+                    ))
+                })
         })
     })
     .await
@@ -63,10 +87,17 @@ async fn watch_owned_inner<T>(
         crate::WorkflowError::HostOperational(format!("input tripwire could not arm: {error}"))
     })??;
     let out = crate::stage_write::scope(writer.clone(), work).await;
-    let owned = label.to_string();
     let violation = tokio::task::spawn_blocking(move || {
         crate::stage_write::with_writer(&writer, || {
-            crate::WorkflowResult::Ok(tripwire.and_then(|tripwire| tripwire.check(&owned)))
+            tripwire
+                .map(|tripwire| tripwire.check())
+                .transpose()
+                .map(Option::flatten)
+                .map_err(|error| {
+                    crate::WorkflowError::ControlPaused(format!(
+                        "input comparison could not complete: {error}"
+                    ))
+                })
         })
     })
     .await

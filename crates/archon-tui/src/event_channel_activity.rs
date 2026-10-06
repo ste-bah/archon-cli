@@ -1,5 +1,5 @@
 //! Bounded activity state used to reconcile the rail after queue overflow.
-use crate::events::AgentActivityUpdate;
+use crate::events::{AgentActivityStatus, AgentActivityUpdate, TuiEvent};
 
 #[derive(Debug, Default)]
 pub(super) struct ActivityState {
@@ -7,6 +7,15 @@ pub(super) struct ActivityState {
     pub dirty: bool,
 }
 impl ActivityState {
+    pub fn terminal_without_detail(&mut self, update: &AgentActivityUpdate) {
+        if crate::agent_activity::is_terminal_non_parent(update.role, update.status) {
+            self.rows.retain(|row| row.id != update.id);
+        } else if let Some(row) = self.rows.iter_mut().find(|row| row.id == update.id) {
+            row.status = update.status;
+            row.detail = None;
+            row.current_tool = None;
+        }
+    }
     pub fn observe(&mut self, update: &AgentActivityUpdate) {
         let terminal = crate::agent_activity::is_terminal_non_parent(update.role, update.status);
         if terminal {
@@ -22,4 +31,10 @@ impl ActivityState {
             }
         }
     }
+}
+
+/// Completion updates need reconciliation even for a retained parent row.
+pub(super) fn terminal(event: &TuiEvent) -> bool {
+    matches!(event, TuiEvent::AgentActivity(update) if matches!(update.status,
+        AgentActivityStatus::Complete | AgentActivityStatus::Failed | AgentActivityStatus::Cancelled))
 }

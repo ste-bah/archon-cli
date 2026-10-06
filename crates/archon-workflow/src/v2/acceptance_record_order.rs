@@ -125,32 +125,25 @@ pub(in crate::v2::acceptance_stage) fn under_order_lock<T, E: From<crate::Workfl
 
 /// Appends the entry of (`round`, `attempt`) to the log and syncs it and
 /// the directories above it (the log, or the records directory, may be
-/// new). The caller holds the order lock ([`under_order_lock`]). Best
-/// effort: a record the log misses is still read, placed by its own file
-/// time.
+/// new). The caller holds the order lock ([`under_order_lock`]). A landing
+/// requires this durable frontier advance; failure must pause the caller.
 pub(in crate::v2::acceptance_stage) fn note_recorded_locked(
     run_dir: &Path,
     round: u32,
     attempt: u32,
-) {
+) -> crate::WorkflowResult<()> {
     let path = log_path(run_dir);
-    let appended = append(&path, round, attempt).map_err(|e| crate::WorkflowError::io(&path, e));
-    let synced = appended.and_then(|()| match path.parent() {
+    append(&path, round, attempt).map_err(|e| crate::WorkflowError::io(&path, e))?;
+    match path.parent() {
         Some(dir) => super::super::sync_record_dirs(run_dir, dir),
         None => Ok(()),
-    });
-    if let Err(error) = synced {
-        tracing::warn!(%error, path = %path.display(), "acceptance recording order not appended");
     }
 }
 
 /// [`note_recorded_locked`], taking the order lock itself.
 #[cfg(test)]
 pub(in crate::v2::acceptance_stage) fn note_recorded(run_dir: &Path, round: u32, attempt: u32) {
-    let noted = under_order_lock(run_dir, || {
-        note_recorded_locked(run_dir, round, attempt);
-        crate::WorkflowResult::Ok(())
-    });
+    let noted = under_order_lock(run_dir, || note_recorded_locked(run_dir, round, attempt));
     noted.expect("the order lock is taken");
 }
 

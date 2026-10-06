@@ -74,6 +74,9 @@ pub struct QuarantinedRecordV1 {
     /// until then every load reports it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acknowledged_at: Option<String>,
+    /// A pause has explicitly acknowledged that the quarantined bytes vanished.
+    #[serde(default)]
+    pub missing_bytes_acknowledged: bool,
 }
 
 /// The ledger a load rebuilt, and the records it quarantined doing so.
@@ -82,15 +85,14 @@ pub struct HealedLedger {
     pub ledger: ProgressLedger,
     /// Quarantined by this load (its event is reported once, at discovery).
     pub quarantined: Vec<QuarantinedRecordV1>,
-    /// Every quarantined record, by this load or an earlier one, with no
-    /// copy of its state and no pause acknowledging the loss.
+    /// Unacknowledged losses: unknown state or missing quarantined bytes.
     pub unacknowledged: Vec<QuarantinedRecordV1>,
 }
 
 impl HealedLedger {
-    /// The records quarantined with no copy of their state whose loss no
-    /// pause has acknowledged: the rebuild cannot be exact, and the caller
-    /// pauses, then calls [`acknowledge_quarantined`].
+    /// Losses needing an operator pause: unknown observations or missing
+    /// quarantined bytes. Known observations still participate in the replay.
+    /// The caller pauses, then calls [`acknowledge_quarantined`].
     pub fn unknown(&self) -> Vec<&QuarantinedRecordV1> {
         self.unacknowledged.iter().collect()
     }
@@ -283,6 +285,7 @@ fn quarantine(
         written_nanos: u64::try_from(record.written).unwrap_or(u64::MAX),
         quarantined_at: chrono::Utc::now().to_rfc3339(),
         acknowledged_at: None,
+        missing_bytes_acknowledged: false,
     };
     let evidence_path = dir.join(format!("{stem}{EVIDENCE_SUFFIX}"));
     let staging = dir.join(format!(".{stem}.tmp"));
@@ -338,7 +341,7 @@ fn read_quarantine(
         evidence_files.sort();
         for path in evidence_files {
             let bytes = std::fs::read(&path).map_err(|e| crate::WorkflowError::io(&path, e))?;
-            let evidence = match serde_json::from_slice::<QuarantinedRecordV1>(&bytes) {
+            let mut evidence = match serde_json::from_slice::<QuarantinedRecordV1>(&bytes) {
                 Ok(evidence) => evidence,
                 Err(error) => match unreadable_evidence(run_dir, &round, &path, &error)? {
                     Some(lost) => lost,
@@ -346,6 +349,16 @@ fn read_quarantine(
                 },
             };
             let key = (evidence.round, evidence.attempt);
+            // Carry any saved observation into the loss receipt as well as
+            // the rebuilt ledger, so acknowledging it cannot lose that copy.
+            evidence.state = evidence
+                .state
+                .or_else(|| saved.and_then(|s| s.state_of(key.0, key.1).cloned()));
+            evidence.progress_frontier = evidence.progress_frontier.or_else(|| {
+                saved
+                    .and_then(|s| s.observed.iter().find(|o| (o.round, o.attempt) == key))
+                    .and_then(|o| o.progress_frontier)
+            });
             // Evidence whose bytes never moved is ignored; a file system
             // that will not say whether they moved is an I/O error the
             // caller pauses on, never "they never moved".
@@ -353,30 +366,34 @@ fn read_quarantine(
             let moved = moved
                 .try_exists()
                 .map_err(|e| crate::WorkflowError::io(&moved, e))?;
-            if !moved || !seen.insert(key) {
+            if !moved && evidence::matching_original(run_dir, &evidence)? {
                 continue;
             }
+            if !seen.insert(key) {
+                continue;
+            }
+            if !moved && !evidence.missing_bytes_acknowledged {
+                evidence.reason = format!(
+                    "{}; quarantined bytes {} are missing and no matching intact original proves a pre-move crash",
+                    evidence.reason, evidence.quarantined
+                );
+                // An earlier pause acknowledged unknown state, not this new byte loss.
+                evidence.acknowledged_at = None;
+                found.unknown.push(evidence.clone());
+            }
             found.any = true;
-            let state = (evidence.state.clone())
-                .or_else(|| saved.and_then(|s| s.state_of(key.0, key.1).cloned()));
-            match state {
+            match evidence.state.clone() {
                 Some(state) => found.known.push((
                     u128::from(evidence.written_nanos),
                     key,
                     ObservedState {
                         round: key.0,
                         attempt: key.1,
-                        progress_frontier: evidence.progress_frontier.or_else(|| {
-                            saved
-                                .and_then(|s| {
-                                    s.observed.iter().find(|o| (o.round, o.attempt) == key)
-                                })
-                                .and_then(|o| o.progress_frontier)
-                        }),
+                        progress_frontier: evidence.progress_frontier,
                         state,
                     },
                 )),
-                None if evidence.acknowledged_at.is_none() => found.unknown.push(evidence),
+                None if evidence.acknowledged_at.is_none() && moved => found.unknown.push(evidence),
                 None => {}
             }
         }
@@ -408,6 +425,9 @@ pub fn acknowledge_quarantined(
         keep_unreadable_evidence(&evidence_path, &dir, name)?;
         let acknowledged = QuarantinedRecordV1 {
             acknowledged_at: Some(at.clone()),
+            missing_bytes_acknowledged: !moved
+                .try_exists()
+                .map_err(|e| crate::WorkflowError::io(&moved, e))?,
             ..record.clone()
         };
         crate::store::write_atomic(

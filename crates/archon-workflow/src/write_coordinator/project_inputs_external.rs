@@ -25,7 +25,7 @@ use std::path::{Component, Path, PathBuf};
 pub const EXTERNAL_ROOTS_KEY: &str = "workflow.acceptance_execution.external_data_roots";
 
 /// The run's allowlist of external data directories, canonical.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExternalRoots {
     allowed: Vec<PathBuf>,
 }
