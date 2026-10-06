@@ -433,11 +433,7 @@ const answers = [];
 for (let attempt = 1; attempt <= 12; attempt += 1) answers.push(b.shouldContinue(attempt, attempt === 8 ? {between} : gaps(20 - attempt)));
 console.log(answers.join(","));"#
         );
-        assert_eq!(
-            run_budget_js(&driver),
-            vec!["true"; 12].join(","),
-            "{between}"
-        );
+        assert_eq!(run_budget_js(&driver), ["true"; 12].join(","), "{between}");
     }
 }
 

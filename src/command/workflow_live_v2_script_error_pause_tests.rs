@@ -106,11 +106,14 @@ fn runner(
 /// The last script-error pause event of `run_id`.
 fn last_script_error_pause(store: &WorkflowStore, run_id: &str) -> serde_json::Value {
     let events = std::fs::read_to_string(store.events_path(run_id)).expect("events");
-    events
+    // Every line must parse, so parse them all before the search from the end.
+    let parsed: Vec<serde_json::Value> = events
         .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("event json"))
-        .filter(|event| event["detail"]["event"] == "script_error_pause")
-        .last()
+        .map(|line| serde_json::from_str(line).expect("event json"))
+        .collect();
+    parsed
+        .into_iter()
+        .rfind(|event| event["detail"]["event"] == "script_error_pause")
         .unwrap_or_else(|| panic!("no script error pause evidence: {events}"))
 }
 

@@ -127,8 +127,12 @@ mod linux {
         }
         let layout = layout();
         let temp = [layout.base.parent().unwrap().to_path_buf()];
-        let sandbox =
-            LandlockSandbox::build(&sealed(&layout), &[layout.worktree.clone()], &temp).unwrap();
+        let sandbox = LandlockSandbox::build(
+            &sealed(&layout),
+            std::slice::from_ref(&layout.worktree),
+            &temp,
+        )
+        .unwrap();
         let data = layout.data.display().to_string();
         let lib = layout.checkout.join("lib.rs").display().to_string();
         for script in [
@@ -164,8 +168,12 @@ mod linux {
         }
         let layout = layout();
         let temp = [layout.base.parent().unwrap().to_path_buf()];
-        let sandbox =
-            LandlockSandbox::build(&sealed(&layout), &[layout.worktree.clone()], &temp).unwrap();
+        let sandbox = LandlockSandbox::build(
+            &sealed(&layout),
+            std::slice::from_ref(&layout.worktree),
+            &temp,
+        )
+        .unwrap();
         let private = sandbox
             .private_temp()
             .expect("the temp dir holds a sealed root");

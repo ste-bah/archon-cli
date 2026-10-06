@@ -196,8 +196,7 @@ fn a_launch_snapshot_settles_a_left_publish_or_stops_with_the_reason() {
             // The snapshot's own read, should the launch recovery have
             // settled nothing: refused with its reason, never read unlocked.
             let snapshot = super::workflow_run_end_snapshot::launch_snapshot(&store, &launch, true)
-                .err()
-                .expect("a snapshot over an unsettled journal");
+                .expect_err("a snapshot over an unsettled journal");
             assert!(crate::command::workflow_task_set::UnsettledPublish::is(
                 &snapshot
             ));

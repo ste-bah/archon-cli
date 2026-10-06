@@ -129,9 +129,11 @@ fn a_waiver_waits_for_a_publish_in_progress_and_keeps_both() {
             rx.recv_timeout(BLOCKED).is_err(),
             "the waiver rewrote the pin while a publish of it was open"
         );
-        for warning in publish.commit().unwrap() {
-            panic!("unexpected commit warning: {warning}");
-        }
+        let warnings = publish.commit().unwrap();
+        assert!(
+            warnings.is_empty(),
+            "unexpected commit warnings: {warnings:?}"
+        );
         rx.recv_timeout(FINISHES)
             .expect("the waiver ran once the publish ended");
         waiver.join().unwrap()

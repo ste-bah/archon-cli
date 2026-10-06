@@ -32,8 +32,11 @@ async function workflow(w) {
 /// spins: the post-stop budget plus slack. Before the fix, it never exits.
 const EXIT_BOUND: std::time::Duration = std::time::Duration::from_secs(20);
 
+/// The bytes of state.json and events.jsonl, and every file under v2/.
+type Snapshot = (Vec<u8>, Vec<u8>, Vec<String>);
+
 /// state.json, events.jsonl and every file under v2/.
-fn snapshot(store: &WorkflowStore, run_id: &str) -> (Vec<u8>, Vec<u8>, Vec<String>) {
+fn snapshot(store: &WorkflowStore, run_id: &str) -> Snapshot {
     let mut v2 = Vec::new();
     let mut stack = vec![store.run_dir(run_id).join("v2")];
     while let Some(dir) = stack.pop() {
@@ -64,7 +67,7 @@ async fn a_stale_executor_that_catches_and_retries_is_refused_at_once_and_exits(
     });
     let (runner, _rx) = runner(&store, &run_id, llm.clone(), None, None);
     runner.v2_store.bind_session_executor(launched);
-    let taken: Arc<std::sync::Mutex<Option<(Vec<u8>, Vec<u8>, Vec<String>)>>> = Arc::default();
+    let taken: Arc<std::sync::Mutex<Option<Snapshot>>> = Arc::default();
     let (hook_store, hook_id, hook_taken) = (store.clone(), run_id.clone(), taken.clone());
     // Executor A's first call is in flight when a resume gives the run to B.
     crate::command::workflow_live::workflow_live_v2::workflow_live_v2_fixed_persistence::publication_hook::install(

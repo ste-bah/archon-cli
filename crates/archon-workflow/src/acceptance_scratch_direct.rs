@@ -72,6 +72,14 @@ impl std::fmt::Debug for DirectSite {
 /// One check's fresh HOME, removed after it ran.
 struct FreshHome(PathBuf);
 
+/// A check's fresh HOME (held until the check ends), its variables, and
+/// what is withheld.
+type Prepared = (
+    Option<FreshHome>,
+    BTreeMap<String, String>,
+    BTreeSet<String>,
+);
+
 impl FreshHome {
     fn new() -> WorkflowResult<Self> {
         let path = std::env::temp_dir().join(format!("archon-check-home-{}", uuid::Uuid::new_v4()));
@@ -131,13 +139,7 @@ impl DirectSite {
 
     /// One check's environment: its fresh HOME, if the site gives one (held
     /// until the check ends), the variables, and what is withheld.
-    fn prepare(
-        &self,
-    ) -> WorkflowResult<(
-        Option<FreshHome>,
-        BTreeMap<String, String>,
-        BTreeSet<String>,
-    )> {
+    fn prepare(&self) -> WorkflowResult<Prepared> {
         let home = if self.fresh_home {
             Some(FreshHome::new()?)
         } else {

@@ -390,8 +390,7 @@ fn freeze_shape_a_marker_in_a_read_field_is_still_refused() {
               "zz":"\ud800","deliverable_contracts":[{{"kind":"file","artifact_path":"{artifact_path}"}}]}}]}}"#
         );
         let error = prepare_candidate(candidate.as_bytes())
-            .err()
-            .expect("a marker in a staged field must not freeze");
+            .expect_err("a marker in a staged field must not freeze");
         let text = format!("{error:#}");
         assert!(
             crate::command::workflow_task_set::CandidateRejected::caused(&error),
