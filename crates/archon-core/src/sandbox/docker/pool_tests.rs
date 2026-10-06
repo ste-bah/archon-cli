@@ -3,14 +3,23 @@
 //! The container itself is proved in `tests/sandbox_docker_world.rs` against a
 //! real daemon; nothing here can establish that a container was reused, and
 //! nothing here pretends to.
+//!
+//! No test here runs the real `docker`: these tests used to, and hung with the
+//! host daemon. The default pool points at a binary that cannot exist, so a
+//! call nobody meant to make fails at once instead of reaching a daemon; tests
+//! that need an answer use a fake (`pool_cli_tests.rs`).
 
 use super::super::exec::{docker_run_args, docker_terminal_args};
 use super::*;
 use std::path::PathBuf;
 
+/// No such binary: any docker call a test did not set up fails to spawn.
+const NO_DOCKER: &str = "/nonexistent/archon-pool-tests-must-not-run-docker";
+
 fn config() -> DockerConfig {
     DockerConfig {
         enabled: true,
+        binary: NO_DOCKER.into(),
         env_allowlist: vec!["ALLOWED".into(), "ANTHROPIC_API_KEY".into()],
         ..DockerConfig::default()
     }
@@ -274,7 +283,9 @@ async fn a_container_with_a_command_still_in_it_survives_the_turn_boundary() {
     live.insert(previous.clone(), held("archon-sbx-busy"));
     let _lease = live[&previous].lease();
 
-    pool.evict_finished_turns(&mut live, &current).await;
+    pool.evict_finished_turns(&mut live, &current)
+        .await
+        .expect("the daemon answered");
 
     assert!(
         live.contains_key(&previous),
@@ -285,9 +296,18 @@ async fn a_container_with_a_command_still_in_it_survives_the_turn_boundary() {
 
 /// And the deferral must be a deferral, not an exemption: once the command
 /// finishes, the next turn boundary collects it.
+#[cfg(unix)]
 #[tokio::test]
 async fn the_same_container_is_collected_once_its_command_finishes() {
-    let pool = pool(SandboxScope::Turn);
+    let fake = super::super::fake_docker::FakeDocker::new("exit 0");
+    let pool = ContainerPool::new(
+        DockerConfig {
+            binary: fake.binary(),
+            ..config()
+        },
+        "rw".into(),
+        SandboxScope::Turn,
+    );
     let previous = pool
         .key(&request("/repo", "s1", Some("s1#1")))
         .expect("held");
@@ -298,16 +318,21 @@ async fn the_same_container_is_collected_once_its_command_finishes() {
     live.insert(previous.clone(), held("archon-sbx-idle"));
 
     let lease = live[&previous].lease();
-    pool.evict_finished_turns(&mut live, &current).await;
+    pool.evict_finished_turns(&mut live, &current)
+        .await
+        .expect("the daemon answered");
     assert!(live.contains_key(&previous), "busy, so deferred");
 
     drop(lease);
-    pool.evict_finished_turns(&mut live, &current).await;
+    pool.evict_finished_turns(&mut live, &current)
+        .await
+        .expect("the daemon answered");
 
     assert!(
         !live.contains_key(&previous),
         "an idle container from a finished turn must not survive a second boundary"
     );
+    assert_eq!(fake.calls(), vec!["rm --force archon-sbx-idle"]);
 }
 
 /// A lease is released even when the command it covers panics or is cancelled,

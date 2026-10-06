@@ -12,8 +12,11 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command as TokioCommand;
 
+mod cli;
 mod doctor;
 mod exec;
+#[cfg(all(test, unix))]
+mod fake_docker;
 mod fs;
 mod pool;
 mod reap;
@@ -224,11 +227,7 @@ impl DockerSandboxBackend {
             // scope from a caller with no turn identity. Both mean one container
             // per command, which is what this path has always done.
             Ok(None) => self.execute_in_fresh(&request).await,
-            Err(error) => SandboxCommandResult {
-                content: format!("Error: {error}"),
-                is_error: true,
-                exit_code: None,
-            },
+            Err(error) => refuse_without_container(&error),
         }
     }
 
@@ -256,8 +255,10 @@ impl DockerSandboxBackend {
             return first;
         }
         if looks_like_a_missing_container(&first) {
-            if !self.pool.forget_if_gone(request, lease.name()).await {
-                return first;
+            match self.pool.forget_if_gone(request, lease.name()).await {
+                Ok(true) => {}
+                Ok(false) => return first,
+                Err(error) => return annotate_unanswered(first, &error),
             }
             // Released before the rebuild so the vanished container's count
             // cannot keep a replacement's eviction waiting on it.
@@ -268,17 +269,15 @@ impl DockerSandboxBackend {
                         .await
                 }
                 Ok(None) => self.execute_in_fresh(request).await,
-                Err(error) => SandboxCommandResult {
-                    content: format!("Error: {error}"),
-                    is_error: true,
-                    exit_code: None,
-                },
+                Err(error) => refuse_without_container(&error),
             };
         }
-        if looks_like_the_container_died_under_the_command(&first)
-            && self.pool.forget_if_gone(request, lease.name()).await
-        {
-            return annotate_lost_container(first);
+        if looks_like_the_container_died_under_the_command(&first) {
+            return match self.pool.forget_if_gone(request, lease.name()).await {
+                Ok(true) => annotate_lost_container(first),
+                Ok(false) => first,
+                Err(error) => annotate_unanswered(first, &error),
+            };
         }
         first
     }
@@ -383,6 +382,32 @@ fn annotate_lost_container(mut result: SandboxCommandResult) -> SandboxCommandRe
          sandbox.docker.container_max_age_secs may be shorter than the commands \
          being run.",
     );
+    result
+}
+
+/// The held container could not be started, or the daemon stopped answering
+/// while the pool prepared it (reaping, teardown), so the command is refused
+/// with the reason. Falling back to a per-command `docker run` would put the
+/// same request to the same daemon, and a daemon that did not answer one call
+/// would hold the command for the length of its own timeout as well.
+fn refuse_without_container(error: &cli::DockerCliError) -> SandboxCommandResult {
+    SandboxCommandResult {
+        content: format!("Error: docker sandbox refused the command: {error}"),
+        is_error: true,
+        exit_code: None,
+    }
+}
+
+/// The daemon could not be asked whether the container is still there, so
+/// nothing is concluded: the command is neither re-run nor reported as killed
+/// by a vanished container. The model is told why.
+fn annotate_unanswered(
+    mut result: SandboxCommandResult,
+    error: &cli::DockerCliError,
+) -> SandboxCommandResult {
+    result.content.push_str(&format!(
+        "\n\nThe sandbox could not check whether its container is still running: {error}"
+    ));
     result
 }
 
