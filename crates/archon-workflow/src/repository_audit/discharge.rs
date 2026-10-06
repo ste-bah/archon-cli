@@ -203,7 +203,7 @@ fn judged_commit(record: &WorkflowV2CallRecord, task: &str) -> Option<String> {
 }
 
 fn git_ok(repository: &Path, args: &[&str]) -> bool {
-    std::process::Command::new("git")
+    archon_shell::spawn::command("git")
         .arg("-C")
         .arg(repository)
         .args(args)

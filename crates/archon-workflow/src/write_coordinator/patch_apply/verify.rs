@@ -32,7 +32,7 @@ pub fn run_wave_verify(
         return Ok(result);
     };
     let start = SystemTime::now();
-    let output = std::process::Command::new(crate::acceptance::shell_program())
+    let output = archon_shell::spawn::command(crate::acceptance::shell_program())
         .arg("-c")
         .arg(cmd)
         .current_dir(canonical_root)

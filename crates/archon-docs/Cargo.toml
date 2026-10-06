@@ -5,6 +5,8 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+# Issue 340: every child is built through `archon_shell::spawn`.
+archon-shell = { path = "../archon-shell" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 async-trait.workspace = true

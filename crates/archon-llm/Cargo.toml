@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+# Issue 340: every child is built through `archon_shell::spawn`.
+archon-shell = { path = "../archon-shell" }
 archon-observability = { path = "../archon-observability" }
 async-trait.workspace = true
 base64.workspace = true

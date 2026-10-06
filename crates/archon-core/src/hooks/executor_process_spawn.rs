@@ -9,7 +9,6 @@ use process_wrap::tokio::JobObject;
 #[cfg(unix)]
 use process_wrap::tokio::ProcessGroup;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
-use tokio::process::Command;
 
 use super::RunError;
 
@@ -92,7 +91,7 @@ struct SpawnRequest {
 impl SpawnRequest {
     fn spawn(self) -> std::io::Result<Box<dyn ChildWrapper>> {
         let shell = archon_shell::resolve_shell();
-        let mut command_builder = Command::new(&shell.program);
+        let mut command_builder = archon_shell::spawn::tokio_command(&shell.program);
         command_builder
             .arg(shell.command_arg)
             .arg(&self.command)

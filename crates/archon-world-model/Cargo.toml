@@ -16,13 +16,14 @@ cuda = ["candle", "candle-core/cuda"]
 mlx-metal = ["dep:mlx-rs"]
 
 [dependencies]
+# Issues 340, 342: every child is built through `archon_shell::spawn`, and
+# the shared pid liveness probe lives there.
+archon-shell = { path = "../archon-shell" }
 anyhow.workspace = true
 archon-completion = { path = "../archon-completion" }
 archon-permissions = { path = "../archon-permissions" }
 archon-llm = { path = "../archon-llm" }
 archon-memory = { path = "../archon-memory" }
-# Issue 342: the shared pid liveness probe the candidate lock reclaims on.
-archon-shell = { path = "../archon-shell" }
 libc = "0.2"
 tracing.workspace = true
 candle-core = { version = "0.10.2", optional = true }

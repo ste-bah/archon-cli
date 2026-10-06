@@ -184,3 +184,45 @@ async fn timeout_kills_setsid_escaped_mutation() {
 fn shell_quote(path: &std::path::Path) -> String {
     format!("'{}'", path.display().to_string().replace('\'', "'\"'\"'"))
 }
+
+/// Issue 340: the Bash tool's child inherits only its stdio. A pipe another
+/// thread had just made, before std set its `FD_CLOEXEC`, must not reach the
+/// tool's shell, or a background job there would hold that pipe open. Apple
+/// only: Linux std makes its pipes close-on-exec atomically, so the helper
+/// adds no sweep there.
+#[tokio::test]
+#[cfg(target_vendor = "apple")]
+async fn a_sibling_pipe_does_not_reach_the_bash_tool_shell() {
+    let mut ends = [0; 2];
+    // SAFETY: pipe writes two descriptors into the array it is given; both
+    // stay inheritable, as in the window before std's FD_CLOEXEC.
+    assert_eq!(unsafe { libc::pipe(ends.as_mut_ptr()) }, 0);
+    let floor = (archon_shell::process_tree::descriptor_ceiling().unwrap() - 16).clamp(3, 300);
+    for end in &mut ends {
+        // SAFETY: F_DUPFD returns a new descriptor without FD_CLOEXEC; close
+        // releases only the low copy.
+        let moved = unsafe { libc::fcntl(*end, libc::F_DUPFD, floor) };
+        assert!(moved >= floor, "{}", std::io::Error::last_os_error());
+        unsafe { libc::close(*end) };
+        *end = moved;
+    }
+    let probe = format!(
+        "if [ -e /dev/fd/{} ] || [ -e /dev/fd/{} ]; then echo held; else echo absent; fi",
+        ends[0], ends[1]
+    );
+    let output = super::bash_containment::contained_bash_command(&probe, None)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await;
+    // SAFETY: closes only the descriptors this test opened.
+    unsafe {
+        libc::close(ends[0]);
+        libc::close(ends[1]);
+    }
+    let output = output.unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "absent",
+        "{output:?}"
+    );
+}

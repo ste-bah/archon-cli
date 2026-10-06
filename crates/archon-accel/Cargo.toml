@@ -11,5 +11,7 @@ edition.workspace = true
 # See plans/archon-ingestion-port-finish-plan-2026-06-30.md §4.
 
 [dependencies]
+# Issue 340: every child is built through `archon_shell::spawn`.
+archon-shell = { path = "../archon-shell" }
 serde.workspace = true
 sysinfo.workspace = true

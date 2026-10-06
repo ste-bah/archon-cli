@@ -43,16 +43,15 @@ futures-util.workspace = true
 tokio-util.workspace = true
 dashmap.workspace = true
 process-wrap.workspace = true
+# On Windows it owns the build's Job Object (archon-shell `job_object`), so it
+# can terminate the job and confirm it is empty (issue #242). Every child is
+# built through `archon_shell::spawn` (Issue 340).
+archon-shell = { path = "../archon-shell" }
 
 # The compilation gate confirms a timed-out build's process group is empty
 # (`killpg` until ESRCH) before it reports the timeout (issue #240).
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true
-
-# On Windows it owns the build's Job Object (archon-shell `job_object`), so it
-# can terminate the job and confirm it is empty (issue #242).
-[target.'cfg(windows)'.dependencies]
-archon-shell = { path = "../archon-shell" }
 
 [dev-dependencies]
 # `features = ["full"]` does not include `test-util`; the compilation-gate

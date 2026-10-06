@@ -16,6 +16,9 @@ which.workspace = true
 # leaves.
 libc.workspace = true
 tracing.workspace = true
+# Issue 340: `spawn::tokio_command`, so async callers build their children
+# with the same stdio-only rule as `spawn::command`.
+tokio.workspace = true
 
 # Issues 242/273: a Job Object the caller owns, so it can terminate the job
 # and confirm it is empty (`job_object`); process-wrap keeps its own private.

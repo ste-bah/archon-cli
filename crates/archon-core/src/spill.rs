@@ -167,7 +167,7 @@ fn restrict_to_current_user(dir: &Path) -> std::io::Result<()> {
         _ => user,
     };
 
-    let output = std::process::Command::new("icacls")
+    let output = archon_shell::spawn::command("icacls")
         .arg(dir)
         .arg("/inheritance:r")
         .arg("/grant:r")

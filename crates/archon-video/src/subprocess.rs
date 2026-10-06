@@ -57,7 +57,7 @@ pub(crate) async fn run_ffmpeg_audio_extraction(
     video_path: &Path,
     output_path: &Path,
 ) -> Result<Output, VideoError> {
-    let mut command = Command::new(bin);
+    let mut command = archon_shell::spawn::tokio_command(bin);
     command
         .args(["-hide_banner", "-nostdin", "-y"])
         .arg("-i")
@@ -82,7 +82,7 @@ pub(crate) async fn run_whisper_cpp(
     output_prefix: &Path,
     input_path: &Path,
 ) -> Result<Output, VideoError> {
-    let mut command = Command::new(bin);
+    let mut command = archon_shell::spawn::tokio_command(bin);
     command
         .args(["--model", model, "--output-json", "--output-file"])
         .arg(output_prefix)

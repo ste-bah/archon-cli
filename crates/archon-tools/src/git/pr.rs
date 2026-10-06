@@ -1,7 +1,5 @@
 //! Pull request creation via the `gh` CLI.
 
-use std::process::Command;
-
 /// Build the `gh pr create` command arguments.
 ///
 /// Returns the full argument list for `Command::new("gh")`.
@@ -27,7 +25,7 @@ pub fn build_gh_command(title: &str, body: Option<&str>) -> Vec<String> {
 pub fn create_pr(title: &str, body: Option<&str>) -> Result<String, String> {
     let args = build_gh_command(title, body);
 
-    let output = Command::new(&args[0])
+    let output = archon_shell::spawn::command(&args[0])
         .args(&args[1..])
         .output()
         .map_err(|e| {

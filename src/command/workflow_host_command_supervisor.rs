@@ -116,7 +116,7 @@ pub(crate) async fn supervise_process_group(
     control: HostCommandControl,
     group_records: Option<&std::path::Path>,
 ) -> WorkflowResult<SupervisedProcessOutput> {
-    let mut command = tokio::process::Command::new(&request.program);
+    let mut command = archon_shell::spawn::tokio_command(&request.program);
     command
         .args(&request.args)
         .current_dir(&request.cwd)
@@ -133,11 +133,12 @@ pub(crate) async fn supervise_process_group(
     // its checks a group of its own, and the session still holds those
     // (Issue 270). On Linux it also becomes the reaper of its orphans, so a
     // descendant that leaves the session as well stays its descendant.
-    // It inherits nothing but its stdio (Issue 334): a sibling's pipe that
-    // another thread had not yet made close-on-exec would otherwise outlive
-    // this exec, and a descendant holding it keeps that sibling's teardown
-    // from ever seeing end of file.
-    #[cfg(unix)]
+    // It inherits nothing but its stdio (Issues 334, 340). On Apple targets
+    // `tokio_command` sweeps every other descriptor before this hook runs.
+    // Elsewhere this hook already makes std fork, so it sweeps here as well
+    // (one `close_range` on Linux) and keeps the Issue 334 guarantee for any
+    // descriptor that was opened without close-on-exec.
+    #[cfg(all(unix, not(target_vendor = "apple")))]
     let ceiling =
         archon_shell::process_tree::descriptor_ceiling().map_err(|source| WorkflowError::Io {
             path: request.program.clone(),
@@ -152,7 +153,9 @@ pub(crate) async fn supervise_process_group(
                 return Err(std::io::Error::last_os_error());
             }
             archon_shell::process_tree::become_subreaper()?;
-            archon_shell::process_tree::inherit_only_stdio(ceiling)
+            #[cfg(not(target_vendor = "apple"))]
+            archon_shell::process_tree::inherit_only_stdio(ceiling)?;
+            Ok(())
         });
     }
     // Suspended until it is in the job `confine` makes (Issue 273), so that

@@ -397,7 +397,7 @@ fn own_callable_called(program: &str, source: &str, qualified: &str) -> bool {
 
 /// Whether the executing shell's parse-only mode rejects `command`.
 fn shell_rejects(command: &str) -> bool {
-    let child = std::process::Command::new(archon_shell::resolve_posix_shell())
+    let child = archon_shell::spawn::command(archon_shell::resolve_posix_shell())
         .args(["-n", "-s"])
         .env_clear()
         .stdin(std::process::Stdio::piped())

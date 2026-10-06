@@ -9,7 +9,7 @@ use crate::models::PageOffset;
 
 pub async fn extract_image_with_rapidocr(path: &Path) -> Result<OcrExtractResult, DocsError> {
     let started = Instant::now();
-    let mut command = tokio::process::Command::new(python_bin());
+    let mut command = archon_shell::spawn::tokio_command(python_bin());
     command
         .arg("-c")
         .arg(RAPID_OCR_SCRIPT)

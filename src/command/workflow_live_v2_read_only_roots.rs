@@ -75,7 +75,7 @@ fn target_dirs(repo: &Path) -> Vec<PathBuf> {
         .into_iter()
         .collect();
     if repo.join("Cargo.toml").is_file()
-        && let Ok(output) = std::process::Command::new("cargo")
+        && let Ok(output) = archon_shell::spawn::command("cargo")
             .args(["metadata", "--no-deps", "--format-version", "1"])
             .current_dir(repo)
             .output()

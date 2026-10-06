@@ -67,7 +67,6 @@ pub fn launch_background_in_dir(
     archon_binary: &Path,
 ) -> Result<String, SessionError> {
     use std::os::unix::process::CommandExt as _;
-    use std::process::Command;
 
     let session_id = uuid::Uuid::new_v4().to_string();
     std::fs::create_dir_all(dir)?;
@@ -96,7 +95,7 @@ pub fn launch_background_in_dir(
     let log_file = std::fs::File::create(&log_path)?;
     let log_stderr = log_file.try_clone().map_err(SessionError::IoError)?;
 
-    let child = Command::new(archon_binary)
+    let child = archon_shell::spawn::command(archon_binary)
         .arg("-p")
         .arg(query)
         .arg("--output-format")

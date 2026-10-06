@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 
 use rmcp::transport::child_process::{ConfigureCommandExt, TokioChildProcess};
-use tokio::process::Command;
 
 use crate::types::{McpError, ServerConfig};
 
@@ -20,7 +19,7 @@ pub fn spawn_transport(config: &ServerConfig) -> Result<TokioChildProcess, McpEr
     let env_clone: HashMap<String, String> = config.env.clone();
     let args_clone: Vec<String> = config.args.clone();
 
-    let cmd = Command::new(&config.command).configure(|cmd| {
+    let cmd = archon_shell::spawn::tokio_command(&config.command).configure(|cmd| {
         cmd.args(&args_clone);
         for (k, v) in &env_clone {
             cmd.env(k, v);

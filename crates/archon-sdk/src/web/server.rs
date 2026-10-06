@@ -186,7 +186,7 @@ impl WebServer {
         if self.config.open_browser {
             let url = format!("http://{addr}");
             // Non-fatal: best-effort browser open
-            if let Err(e) = open::that(&url) {
+            if let Err(e) = archon_shell::spawn::run_first_launcher(open::commands(&url)) {
                 tracing::warn!("web: could not open browser: {e}");
             }
         }

@@ -103,7 +103,7 @@
 use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use super::{IsolationError, run_git};
 
@@ -281,7 +281,7 @@ fn ignored_in_worktree(
         stdin_bytes.extend_from_slice(candidate.raw.as_bytes());
         stdin_bytes.push(0);
     }
-    let mut child = Command::new("git")
+    let mut child = archon_shell::spawn::command("git")
         .current_dir(isolated)
         .args(["check-ignore", "-z", "--stdin"])
         .stdin(Stdio::piped())

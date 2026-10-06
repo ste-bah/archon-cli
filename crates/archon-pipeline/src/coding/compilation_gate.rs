@@ -10,7 +10,6 @@ use std::time::Duration;
 use process_wrap::tokio::ProcessGroup;
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::process::Command;
 
 /// Minimal command description used by the compilation gate and its lifecycle tests.
 pub(crate) struct CommandSpec {
@@ -178,7 +177,7 @@ impl CleanupOutcome {
 }
 
 pub(crate) async fn execute(spec: CommandSpec, limit: Duration) -> io::Result<CommandExecution> {
-    let mut command = Command::new(&spec.program);
+    let mut command = archon_shell::spawn::tokio_command(&spec.program);
     command
         .args(&spec.args)
         .current_dir(&spec.current_dir)

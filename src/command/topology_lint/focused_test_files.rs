@@ -303,7 +303,7 @@ fn packages(tree: &RepositoryTree) -> Result<BTreeMap<String, String>> {
     {
         // m4: a manifest git cannot read fails the check, never a package
         // silently missing.
-        let output = std::process::Command::new("git")
+        let output = archon_shell::spawn::command("git")
             .arg("-C")
             .arg(tree.root())
             .args(["show", &format!("{}:{manifest}", tree.base_commit())])

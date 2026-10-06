@@ -9,7 +9,6 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::process::Command;
 
 use archon_workflow::repository_record::{
     RepositoryRecordV1, RepositoryTree, UNBORN_BASE_COMMIT, normalize_relative,
@@ -149,7 +148,7 @@ impl EvidenceIndex {
         if self.base() == UNBORN_BASE_COMMIT {
             return false;
         }
-        Command::new("git")
+        archon_shell::spawn::command("git")
             .arg("-C")
             .arg(self.tree.root())
             .args([
@@ -171,7 +170,7 @@ impl EvidenceIndex {
         if self.base() == UNBORN_BASE_COMMIT || !self.tree.exists_at_base(path) {
             return String::new();
         }
-        Command::new("git")
+        archon_shell::spawn::command("git")
             .arg("-C")
             .arg(self.tree.root())
             .args(["cat-file", "blob", &format!("{}:{path}", self.base())])

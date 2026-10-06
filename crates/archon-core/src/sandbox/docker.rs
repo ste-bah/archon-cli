@@ -10,7 +10,6 @@ use archon_permissions::sandbox::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
-use tokio::process::Command as TokioCommand;
 
 mod cli;
 mod doctor;
@@ -292,7 +291,7 @@ impl DockerSandboxBackend {
         args: Vec<String>,
         request: &SandboxCommandRequest,
     ) -> SandboxCommandResult {
-        let mut cmd = TokioCommand::new(&self.config.binary);
+        let mut cmd = archon_shell::spawn::tokio_command(&self.config.binary);
         cmd.args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

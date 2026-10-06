@@ -206,7 +206,7 @@ pub(crate) async fn launch_selected(
     // policy carrying it.
     request.policy.validate()?;
     let count = validate_selected(&request, &selection)?.2.len() as u64;
-    let mut command = tokio::process::Command::new(
+    let mut command = archon_shell::spawn::tokio_command(
         std::env::current_exe().map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?,
     );
     #[cfg(not(test))]

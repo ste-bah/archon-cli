@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use serde_json::Value;
-use tokio::process::Command;
 
 use crate::errors::VideoError;
 
@@ -42,7 +41,7 @@ pub async fn extract_metadata(
     })?;
     let output = tokio::time::timeout(
         Duration::from_secs(opts.timeout_secs as u64),
-        Command::new(&bin)
+        archon_shell::spawn::tokio_command(&bin)
             .args([
                 "-v",
                 "quiet",

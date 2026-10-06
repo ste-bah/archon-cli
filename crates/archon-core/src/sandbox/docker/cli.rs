@@ -18,7 +18,7 @@ use std::process::{Output, Stdio};
 use std::time::{Duration, Instant};
 
 use tokio::io::AsyncReadExt;
-use tokio::process::{Child, Command as TokioCommand};
+use tokio::process::Child;
 
 /// How long a docker CLI call may go with no output and no exit before it is
 /// treated as a daemon that is not answering.
@@ -91,7 +91,7 @@ pub(super) async fn run(
     call: &str,
     bound: Duration,
 ) -> Result<Output, DockerCliError> {
-    let mut command = TokioCommand::new(binary);
+    let mut command = archon_shell::spawn::tokio_command(binary);
     command
         .args(args)
         .stdin(Stdio::null())
@@ -165,7 +165,7 @@ pub(super) fn run_blocking(
     call: &str,
     bound: Duration,
 ) -> Result<(), DockerCliError> {
-    let mut command = std::process::Command::new(binary);
+    let mut command = archon_shell::spawn::command(binary);
     command
         .args(args)
         .stdin(Stdio::null())

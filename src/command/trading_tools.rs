@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, anyhow};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub(crate) struct ToolCommandOutput {
     pub status: i32,
@@ -158,7 +157,7 @@ pub(crate) fn run_command<P: AsRef<std::ffi::OsStr>>(
     args: &[String],
     cwd: Option<&Path>,
 ) -> Result<ToolCommandOutput> {
-    let mut command = Command::new(program);
+    let mut command = archon_shell::spawn::command(program);
     command.args(args);
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
@@ -193,7 +192,10 @@ pub(crate) fn join_output(output: &ToolCommandOutput) -> String {
 }
 
 fn binary_state(binary: &str) -> String {
-    match Command::new(binary).arg("--version").output() {
+    match archon_shell::spawn::command(binary)
+        .arg("--version")
+        .output()
+    {
         Ok(output) if output.status.success() => first_line(&output.stdout, &output.stderr),
         Ok(_) => "present but version check failed".into(),
         Err(_) => "missing".into(),

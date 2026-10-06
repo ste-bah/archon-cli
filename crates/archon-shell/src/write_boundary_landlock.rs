@@ -298,7 +298,7 @@ pub fn probe() -> Result<u32, String> {
         ));
     }
     let sandbox = LandlockSandbox::build(&[], &[], &[])?;
-    let mut trial = std::process::Command::new("/bin/sh");
+    let mut trial = crate::spawn::command("/bin/sh");
     trial
         .args(["-c", ":"])
         .stdin(std::process::Stdio::null())

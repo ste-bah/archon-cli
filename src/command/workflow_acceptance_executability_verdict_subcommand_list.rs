@@ -29,7 +29,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -244,7 +244,7 @@ fn list_in(program: &Path, root: &Path, at: &Context) -> Result<Listing, String>
         environment.entry(name.into()).or_insert(fresh);
     }
     let spawn = || {
-        let mut command = Command::new(program);
+        let mut command = archon_shell::spawn::command(program);
         command
             .arg("--list")
             .current_dir(&work)

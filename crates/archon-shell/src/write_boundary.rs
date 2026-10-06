@@ -90,7 +90,7 @@ pub fn warn_unbounded_once(what: &str, reason: &str) {
 
 #[cfg(target_os = "macos")]
 fn probe() -> Result<Mechanism, String> {
-    let status = std::process::Command::new(SANDBOX_EXEC)
+    let status = crate::spawn::command(SANDBOX_EXEC)
         .args(["-p", "(version 1)(allow default)", "/usr/bin/true"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

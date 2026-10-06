@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -112,7 +111,7 @@ fn is_git_probe(command: &str) -> bool {
 }
 
 fn is_git_repo(dir: &Path) -> bool {
-    Command::new("git")
+    archon_shell::spawn::command("git")
         .arg("-C")
         .arg(dir)
         .arg("rev-parse")

@@ -1,6 +1,6 @@
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -37,7 +37,7 @@ fn start(batch_size: usize, window_size: usize, poll_secs: u64) -> Result<()> {
         .create(true)
         .append(true)
         .open(log_path())?;
-    let child = Command::new(std::env::current_exe()?)
+    let child = archon_shell::spawn::command(std::env::current_exe()?)
         .args([
             "docs",
             "index-daemon",
@@ -211,7 +211,7 @@ fn signal_access(_pid: u32) -> PidOwner {
 fn terminate_process(pid: u32) -> Result<()> {
     #[cfg(unix)]
     {
-        let status = Command::new("kill")
+        let status = archon_shell::spawn::command("kill")
             .args(["-TERM", &pid.to_string()])
             .status()?;
         if !status.success() {

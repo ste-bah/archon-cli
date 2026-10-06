@@ -190,7 +190,16 @@ fn status(config: &ArchonConfig, cwd: &Path, as_json: bool) -> Result<()> {
 
 fn spawn_daemon_child(cwd: &Path, interval_ms: Option<u64>) -> Result<std::process::Child> {
     let exe = std::env::current_exe().context("resolve current archon executable")?;
-    let mut command = Command::new(exe);
+    daemon_command(&exe, cwd, interval_ms)
+        .spawn()
+        .context("spawn cognitive daemon")
+}
+
+/// The detached daemon `exe` runs as. Like every child, it inherits only its
+/// stdio (Issue 340): a long-lived daemon that kept another thread's new pipe
+/// would hold it open for its whole life.
+fn daemon_command(exe: &Path, cwd: &Path, interval_ms: Option<u64>) -> Command {
+    let mut command = archon_shell::spawn::command(exe);
     command
         .arg("cognitive")
         .arg("daemon")
@@ -203,7 +212,7 @@ fn spawn_daemon_child(cwd: &Path, interval_ms: Option<u64>) -> Result<std::proce
     if let Some(interval_ms) = interval_ms {
         command.arg("--interval-ms").arg(interval_ms.to_string());
     }
-    command.spawn().context("spawn cognitive daemon")
+    command
 }
 
 #[cfg(unix)]
@@ -412,3 +421,7 @@ fn print_status(status: &DaemonStatus, as_json: bool, root: &Path) -> Result<()>
     }
     Ok(())
 }
+
+#[cfg(all(test, unix))]
+#[path = "cognitive_daemon_tests.rs"]
+mod tests;

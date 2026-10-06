@@ -128,7 +128,7 @@ fn describe_status(status: std::process::ExitStatus) -> String {
 
 async fn run_archon(args: Vec<String>) -> Result<MirrorOutcome> {
     let exe = std::env::current_exe()?;
-    let output = tokio::process::Command::new(exe)
+    let output = archon_shell::spawn::tokio_command(exe)
         .args(args)
         .output()
         .await?;

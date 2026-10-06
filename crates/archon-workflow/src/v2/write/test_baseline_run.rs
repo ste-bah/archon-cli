@@ -67,7 +67,7 @@ async fn run_unwatched(
 ) -> CommandRun {
     let started = Instant::now();
     let env = dispatch.host_command_env(worktree).await;
-    let mut process = tokio::process::Command::new(archon_shell::resolve_posix_shell());
+    let mut process = archon_shell::spawn::tokio_command(archon_shell::resolve_posix_shell());
     process
         .arg("-c")
         .arg(command)

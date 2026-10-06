@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use archon_policy::PdfPolicy;
-use tokio::process::Command;
+use archon_shell::spawn;
 
 use crate::errors::DocsError;
 use crate::hash::sha256_hex;
@@ -132,7 +132,7 @@ pub fn classify_pdf_enrichment(path: &Path, pdf_policy: &PdfPolicy) -> Enrichmen
 /// enrichment report honest about image-only scans (which get OCR'd, not skipped). A handful of
 /// characters (stray artifacts on an otherwise image-only scan) do not count as a text layer.
 fn pdf_has_text_layer(path: &Path) -> bool {
-    let Ok(output) = std::process::Command::new(command_path("pdftotext", "ARCHON_PDFTOTEXT_BIN"))
+    let Ok(output) = spawn::command(command_path("pdftotext", "ARCHON_PDFTOTEXT_BIN"))
         .arg("-layout")
         .arg(path)
         .arg("-")
@@ -149,7 +149,7 @@ fn pdf_has_text_layer(path: &Path) -> bool {
 }
 
 pub(crate) fn pdf_page_count(path: &Path) -> Option<u32> {
-    let output = std::process::Command::new(command_path("pdfinfo", "ARCHON_PDFINFO_BIN"))
+    let output = spawn::command(command_path("pdfinfo", "ARCHON_PDFINFO_BIN"))
         .arg(path)
         .output()
         .ok()?;
@@ -159,7 +159,7 @@ pub(crate) fn pdf_page_count(path: &Path) -> Option<u32> {
 }
 
 pub(crate) fn list_embedded_image_dims(path: &Path) -> Vec<PdfImagesListEntry> {
-    match std::process::Command::new(command_path("pdfimages", "ARCHON_PDFIMAGES_BIN"))
+    match spawn::command(command_path("pdfimages", "ARCHON_PDFIMAGES_BIN"))
         .arg("-list")
         .arg(path)
         .output()
@@ -255,7 +255,7 @@ pub async fn extract_pdf_unified(
 }
 
 async fn extract_text_layer(path: &Path) -> Result<String, DocsError> {
-    let output = Command::new(command_path("pdftotext", "ARCHON_PDFTOTEXT_BIN"))
+    let output = spawn::tokio_command(command_path("pdftotext", "ARCHON_PDFTOTEXT_BIN"))
         .arg("-layout")
         .arg(path)
         .arg("-")
@@ -287,7 +287,7 @@ async fn extract_embedded_images(
     path: &Path,
     pdf_policy: &PdfPolicy,
 ) -> Result<EmbeddedImageExtraction, DocsError> {
-    let list_output = Command::new(command_path("pdfimages", "ARCHON_PDFIMAGES_BIN"))
+    let list_output = spawn::tokio_command(command_path("pdfimages", "ARCHON_PDFIMAGES_BIN"))
         .arg("-list")
         .arg(path)
         .output()
@@ -318,7 +318,7 @@ async fn extract_embedded_images(
         std::env::temp_dir().join(format!("archon-pdf-images-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&extract_dir)?;
     let prefix = extract_dir.join("img");
-    let extract_output = Command::new(command_path("pdfimages", "ARCHON_PDFIMAGES_BIN"))
+    let extract_output = spawn::tokio_command(command_path("pdfimages", "ARCHON_PDFIMAGES_BIN"))
         .arg("-png")
         .arg(path)
         .arg(&prefix)
@@ -403,7 +403,7 @@ async fn render_pdf_pages(path: &Path) -> Result<Vec<PdfImage>, DocsError> {
         std::env::temp_dir().join(format!("archon-pdf-render-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&render_dir)?;
     let prefix = render_dir.join("page");
-    let output = Command::new(command_path("pdftoppm", "ARCHON_PDFTOPPM_BIN"))
+    let output = spawn::tokio_command(command_path("pdftoppm", "ARCHON_PDFTOPPM_BIN"))
         .arg("-png")
         .arg(path)
         .arg(&prefix)

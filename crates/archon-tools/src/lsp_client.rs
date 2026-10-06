@@ -18,7 +18,7 @@ use lsp_types::{
     ClientCapabilities, DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams,
     InitializedParams, TextDocumentIdentifier, TextDocumentItem, Url, WorkspaceFolder,
 };
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 use tokio::time::timeout;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tower::ServiceBuilder;
@@ -129,7 +129,7 @@ impl LspClient {
         });
 
         // Spawn the server process
-        let mut child = Command::new(binary)
+        let mut child = archon_shell::spawn::tokio_command(binary)
             .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())

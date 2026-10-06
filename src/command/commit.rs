@@ -79,8 +79,7 @@ impl GitRunner for RealGit {
 }
 
 fn run_git(args: &[&str]) -> Result<String, String> {
-    use std::process::Command;
-    let output = Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .args(args)
         .output()
         .map_err(|e| format!("git not available: {}", e))?;

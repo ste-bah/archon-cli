@@ -122,7 +122,7 @@ fn detect_accelerators(
 /// `/usr/lib/wsl/lib/nvidia-smi` is on PATH). No link-time CUDA dependency.
 #[cfg(not(target_os = "macos"))]
 fn nvidia_smi() -> Result<Vec<Accelerator>, String> {
-    let out = std::process::Command::new("nvidia-smi")
+    let out = archon_shell::spawn::command("nvidia-smi")
         .args([
             "--query-gpu=index,name,memory.total,memory.free",
             "--format=csv,noheader,nounits",

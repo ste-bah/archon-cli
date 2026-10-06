@@ -1,7 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use tokio::process::Command;
-
 use crate::errors::VideoError;
 
 pub(crate) async fn capture_caption_bytes(
@@ -11,7 +9,7 @@ pub(crate) async fn capture_caption_bytes(
     let temp = tempfile::tempdir().map_err(|e| VideoError::AcquisitionFailed {
         message: format!("create caption capture temp dir: {e}"),
     })?;
-    let output = Command::new(downloader_bin)
+    let output = archon_shell::spawn::tokio_command(downloader_bin)
         .args([
             "--skip-download",
             "--write-subs",

@@ -29,13 +29,31 @@ pub fn descriptor_ceiling() -> io::Result<libc::c_int> {
     let soft = libc::c_int::try_from(limit.rlim_cur).unwrap_or(libc::c_int::MAX);
     #[cfg(target_vendor = "apple")]
     {
-        // The kernel also caps a process at `kern.maxfilesperproc`, which is
-        // what bounds the table when the soft limit is unlimited.
-        Ok(soft.min(max_files_per_proc()?))
+        // SAFETY: getdtablesize takes no arguments and cannot fail.
+        let table = unsafe { libc::getdtablesize() };
+        Ok(bounded_ceiling(soft, max_files_per_proc().ok(), table))
     }
     #[cfg(not(target_vendor = "apple"))]
     {
         Ok(soft)
+    }
+}
+
+/// The kernel also caps a process at `kern.maxfilesperproc` (`per_process`),
+/// which is what bounds the table when the soft limit is unlimited. A sandbox
+/// can deny that sysctl (Issue 340); the soft limit then still holds, bounded
+/// by the descriptor table size (`table`, from `getdtablesize`, which the
+/// kernel answers from the same two limits without a sysctl). Failing closed
+/// there would refuse every spawn of a process that can still run children.
+#[cfg_attr(not(target_vendor = "apple"), allow(dead_code))]
+pub(crate) fn bounded_ceiling(
+    soft: libc::c_int,
+    per_process: Option<libc::c_int>,
+    table: libc::c_int,
+) -> libc::c_int {
+    match per_process {
+        Some(cap) => soft.min(cap),
+        None => soft.min(table),
     }
 }
 

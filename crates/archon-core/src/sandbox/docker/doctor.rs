@@ -4,8 +4,6 @@
 //! the seam with no share in execution: nothing here runs a container or is on
 //! the path of a command.
 
-use std::process::Command;
-
 use super::DockerConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +48,10 @@ pub struct DockerDoctorReport {
 }
 
 pub fn probe_docker(binary: &str) -> DockerProbe {
-    match Command::new(binary).arg("--version").output() {
+    match archon_shell::spawn::command(binary)
+        .arg("--version")
+        .output()
+    {
         Ok(output) => {
             let version = crate::sandbox::first_non_empty_line(&output.stdout)
                 .or_else(|| crate::sandbox::first_non_empty_line(&output.stderr))

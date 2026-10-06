@@ -21,7 +21,6 @@ use std::sync::Arc;
 
 use archon_permissions::sandbox::SandboxCommandRequest;
 use archon_tools::filesystem::{FileSystem, LocalFs};
-use tokio::process::Command as TokioCommand;
 
 use super::exec::ssh_command_args;
 use super::{SshConfig, SshSandboxBackend};
@@ -93,7 +92,7 @@ impl RemoteExec for SshTransport {
     async fn run(&self, script: &str, stdin: &[u8]) -> io::Result<RemoteOutput> {
         let args = ssh_fs_args(&self.config, &self.working_dir, script)
             .map_err(|error| io::Error::other(format!("ssh sandbox: {error}")))?;
-        let mut cmd = TokioCommand::new(&self.config.binary);
+        let mut cmd = archon_shell::spawn::tokio_command(&self.config.binary);
         cmd.args(args);
         run_transport_process(cmd, stdin, REMOTE_FS_TIMEOUT_MS, "ssh").await
     }

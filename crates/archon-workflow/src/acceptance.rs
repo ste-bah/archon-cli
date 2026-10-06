@@ -12,7 +12,6 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// A fingerprint of a single target path. `None` means the path is absent.
 pub type TargetFingerprints = BTreeMap<String, Option<String>>;
@@ -120,7 +119,7 @@ pub(crate) fn run_verify_command_capture(
     if command.is_empty() {
         return Ok(None);
     }
-    let output = Command::new(shell_program())
+    let output = archon_shell::spawn::command(shell_program())
         .arg("-c")
         .arg(command)
         .current_dir(root)
@@ -150,10 +149,15 @@ pub(crate) fn run_verify_command_capture(
 pub(crate) fn shell_program() -> std::ffi::OsString {
     use std::path::PathBuf;
 
-    if Command::new("sh").arg("-c").arg("exit 0").output().is_ok() {
+    if archon_shell::spawn::command("sh")
+        .arg("-c")
+        .arg("exit 0")
+        .output()
+        .is_ok()
+    {
         return "sh".into();
     }
-    let Ok(output) = Command::new("where").arg("git").output() else {
+    let Ok(output) = archon_shell::spawn::command("where").arg("git").output() else {
         return "sh".into();
     };
     let Some(first) = String::from_utf8_lossy(&output.stdout)

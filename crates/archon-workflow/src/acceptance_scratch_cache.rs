@@ -447,7 +447,7 @@ fn lsof_says_idle(program: std::io::Result<PathBuf>, target: &Path) -> bool {
             return false;
         }
     };
-    match std::process::Command::new(&program)
+    match archon_shell::spawn::command(&program)
         .args(["-nP", "-t", "+D"])
         .arg(target)
         .output()

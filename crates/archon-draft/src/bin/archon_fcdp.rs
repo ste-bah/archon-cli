@@ -18,7 +18,7 @@ use std::process::exit;
 
 fn today() -> String {
     std::env::var("FCDP_TODAY").unwrap_or_else(|_| {
-        let out = std::process::Command::new("date")
+        let out = archon_shell::spawn::command("date")
             .arg("+%F")
             .output()
             .expect("date");

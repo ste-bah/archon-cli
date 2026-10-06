@@ -4,7 +4,6 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::process::Command;
 
 #[path = "provider_env_secret_values.rs"]
 mod secret_values;
@@ -269,7 +268,7 @@ async fn profile_values_with_timeout(
         };
     }
     let script = profile_script(keys, profiles);
-    let mut command = Command::new(profile_shell());
+    let mut command = archon_shell::spawn::tokio_command(profile_shell());
     command.arg("-c").arg(script).kill_on_drop(true);
     let output = match tokio::time::timeout(timeout, command.output()).await {
         Err(_) => {

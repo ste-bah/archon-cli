@@ -3,7 +3,6 @@ use crate::{WorkflowError, WorkflowResult};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
 
 #[path = "acceptance_scratch_cache.rs"]
 mod cache;

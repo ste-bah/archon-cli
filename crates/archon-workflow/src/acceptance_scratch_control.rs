@@ -54,7 +54,7 @@ pub(super) fn check() -> WorkflowResult<()> {
 pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult<String> {
     use std::{io::Read, process::Stdio};
     check()?;
-    let mut command = Command::new("git");
+    let mut command = archon_shell::spawn::command("git");
     command
         .arg("-C")
         .arg(root)

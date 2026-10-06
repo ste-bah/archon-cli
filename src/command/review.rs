@@ -79,8 +79,7 @@ impl GhRunner for RealGh {
 }
 
 fn run_gh(args: &[&str]) -> Result<String, String> {
-    use std::process::Command;
-    let output = Command::new("gh")
+    let output = archon_shell::spawn::command("gh")
         .args(args)
         .output()
         .map_err(|e| format!("gh CLI not available: {}", e))?;

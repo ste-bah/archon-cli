@@ -12,7 +12,7 @@ use archon_llm::provider::LlmError;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
+use tokio::process::{Child, ChildStdin};
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, tungstenite::protocol::Message,
@@ -142,7 +142,7 @@ impl Drop for CodexAppServerRpcClient {
 async fn connect_stdio(
     config: &CodexProviderConfig,
 ) -> Result<(CodexAppServerRpcClient, mpsc::Receiver<CodexNotification>), LlmError> {
-    let mut child = Command::new(&config.app_server_command)
+    let mut child = archon_shell::spawn::tokio_command(&config.app_server_command)
         .args(&config.app_server_args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

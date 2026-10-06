@@ -13,6 +13,8 @@ sdk-memory = []
 sdk-minimal = []
 
 [dependencies]
+# Issue 340: every child is built through `archon_shell::spawn`.
+archon-shell = { path = "../archon-shell" }
 archon-core = { path = "../archon-core" }
 archon-cognitive = { path = "../archon-cognitive" }
 archon-docs = { path = "../archon-docs" }

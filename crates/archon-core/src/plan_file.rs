@@ -200,7 +200,7 @@ pub fn open_plan_in_editor(path: &Path) -> std::io::Result<()> {
                 "vi".to_string()
             }
         });
-    let status = std::process::Command::new(&editor).arg(path).status()?;
+    let status = archon_shell::spawn::command(&editor).arg(path).status()?;
     if !status.success() {
         return Err(std::io::Error::other(format!(
             "editor '{editor}' exited with status {status}"

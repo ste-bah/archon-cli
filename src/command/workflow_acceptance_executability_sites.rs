@@ -212,7 +212,7 @@ pub(super) fn object_id(text: &str) -> bool {
 /// Whether `commit` names a commit in `repository`.
 pub(super) fn resolves(repository: &Path, commit: &str) -> bool {
     object_id(commit)
-        && std::process::Command::new("git")
+        && archon_shell::spawn::command("git")
             .arg("-C")
             .arg(repository)
             .args(["cat-file", "-e", &format!("{commit}^{{commit}}")])
@@ -278,7 +278,7 @@ pub(super) async fn observe(
 }
 
 pub(super) fn git_head(repository: &std::path::Path) -> Option<String> {
-    std::process::Command::new("git")
+    archon_shell::spawn::command("git")
         .arg("-C")
         .arg(repository)
         .args(["rev-parse", "HEAD"])
@@ -370,7 +370,7 @@ fn runtime_identity(probe: &HostProbe) -> &serde_json::Value {
                         content_digest(&std::fs::read(path).ok()?),
                     ))
                 });
-                let version = std::process::Command::new(name)
+                let version = archon_shell::spawn::command(name)
                     .arg(arg)
                     .current_dir(&probe.repository)
                     .env_clear()

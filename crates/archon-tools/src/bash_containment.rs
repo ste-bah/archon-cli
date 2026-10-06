@@ -85,13 +85,14 @@ pub(super) fn contained_bash_command(
     use super::bash_write_sandbox::Applied;
     let mut command = match boundary {
         Some(Applied::SandboxExec(profile)) => {
-            let mut command = Command::new(archon_shell::write_boundary::SANDBOX_EXEC);
+            let mut command =
+                archon_shell::spawn::tokio_command(archon_shell::write_boundary::SANDBOX_EXEC);
             command.arg("-p").arg(profile).arg(BASH_PROGRAM.as_path());
             command
         }
         #[cfg(target_os = "linux")]
         Some(Applied::Landlock(sandbox)) => {
-            let mut command = Command::new(BASH_PROGRAM.as_path());
+            let mut command = archon_shell::spawn::tokio_command(BASH_PROGRAM.as_path());
             // SAFETY: the hook makes two raw syscalls and allocates nothing.
             unsafe {
                 command.pre_exec(sandbox.restrict_hook());
@@ -105,8 +106,10 @@ pub(super) fn contained_bash_command(
         // Issue-234: the host-snapshot boundary adds no OS confinement to the
         // command itself; it was captured before and is restored after
         // (`bash_write_sandbox::annotate`). So the child is plain bash.
-        Some(Applied::HostSnapshot(_)) => Command::new(BASH_PROGRAM.as_path()),
-        None => Command::new(BASH_PROGRAM.as_path()),
+        Some(Applied::HostSnapshot(_)) => {
+            archon_shell::spawn::tokio_command(BASH_PROGRAM.as_path())
+        }
+        None => archon_shell::spawn::tokio_command(BASH_PROGRAM.as_path()),
     };
     match containment_for_platform(std::env::consts::OS) {
         BashContainment::ProcessGroup if cfg!(unix) => {
@@ -353,7 +356,7 @@ fn terminate_group_members(pgid: u32, aggregate_error: &str) -> Option<String> {
 /// Live pids in `pgid`, excluding this process and pid 1.
 #[cfg(unix)]
 fn process_group_members(pgid: u32) -> Vec<u32> {
-    let Ok(output) = std::process::Command::new("ps")
+    let Ok(output) = archon_shell::spawn::command("ps")
         .args(["-axo", "pid=,pgid=,stat="])
         .output()
     else {

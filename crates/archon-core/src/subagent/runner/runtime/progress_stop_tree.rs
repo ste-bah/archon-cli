@@ -76,7 +76,7 @@ async fn run_git(
     stdin: Option<Vec<u8>>,
     accept_failure: bool,
 ) -> Option<Vec<u8>> {
-    let mut command = tokio::process::Command::new("git");
+    let mut command = archon_shell::spawn::tokio_command("git");
     command
         .arg("--no-optional-locks")
         .arg("-C")

@@ -4,14 +4,15 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+# Issues 340, 342: every child is built through `archon_shell::spawn`, and
+# the shared pid liveness probe lives there.
+archon-shell = { path = "../archon-shell" }
 blake3.workspace = true
 chrono.workspace = true
 cozo.workspace = true
 archon-cozo = { path = "../archon-cozo" }
 archon-reasoning-quality = { path = "../archon-reasoning-quality" }
 archon-policy = { path = "../archon-policy" }
-# Issue 342: the shared pid liveness probe the daemon lock reclaims on.
-archon-shell = { path = "../archon-shell" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

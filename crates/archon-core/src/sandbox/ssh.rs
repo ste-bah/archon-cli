@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use archon_permissions::sandbox::{
@@ -8,7 +8,6 @@ use archon_permissions::sandbox::{
     SandboxTerminal, SandboxTerminalRequest,
 };
 use serde::{Deserialize, Serialize};
-use tokio::process::Command as TokioCommand;
 
 mod exec;
 mod fs;
@@ -109,7 +108,7 @@ pub struct SshDoctorReport {
 }
 
 pub fn probe_ssh(binary: &str) -> SshProbe {
-    match Command::new(binary).arg("-V").output() {
+    match archon_shell::spawn::command(binary).arg("-V").output() {
         Ok(output) => {
             let version = crate::sandbox::first_non_empty_line(&output.stdout)
                 .or_else(|| crate::sandbox::first_non_empty_line(&output.stderr))
@@ -338,7 +337,7 @@ impl SshSandboxBackend {
                 };
             }
         };
-        let mut cmd = TokioCommand::new(&self.config.binary);
+        let mut cmd = archon_shell::spawn::tokio_command(&self.config.binary);
         cmd.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

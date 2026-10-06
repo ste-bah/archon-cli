@@ -140,7 +140,7 @@ fn group_exists(pgid: u32) -> bool {
 /// `(pid, ppid, pgid, zombie)` of every process, from `ps`.
 #[cfg(unix)]
 fn processes() -> Vec<(u32, u32, u32, bool)> {
-    let Ok(output) = std::process::Command::new("ps")
+    let Ok(output) = archon_shell::spawn::command("ps")
         .args(["-axo", "pid=,ppid=,pgid=,stat="])
         .output()
     else {

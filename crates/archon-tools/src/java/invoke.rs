@@ -53,7 +53,7 @@ pub async fn run_stage(
         Launcher::OnPath(name) => std::path::PathBuf::from(name),
     };
 
-    let mut command = tokio::process::Command::new(&program);
+    let mut command = archon_shell::spawn::tokio_command(&program);
     command
         .args(stage_args(project.build_system, stage))
         .current_dir(&project.root)

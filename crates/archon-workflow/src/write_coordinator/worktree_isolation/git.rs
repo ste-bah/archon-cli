@@ -7,12 +7,12 @@
 //! sealed bytes and dirty overlays agree. Repository attributes still apply.
 
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 
 use super::IsolationError;
 
 pub(crate) fn run_git(args: &[&str], cwd: &Path) -> Result<Output, IsolationError> {
-    let output = Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .current_dir(cwd)
         .args(["-c", "core.autocrlf=false", "-c", "core.eol=lf"])
         .args(args)
@@ -32,7 +32,7 @@ pub(crate) fn run_git_with_stdin(
 fn raw_git_with_stdin(args: &[&str], cwd: &Path, stdin: &[u8]) -> Result<Output, IsolationError> {
     use std::io::Write;
 
-    let mut child = Command::new("git")
+    let mut child = archon_shell::spawn::command("git")
         .current_dir(cwd)
         .args(["-c", "core.autocrlf=false", "-c", "core.eol=lf"])
         .args(args)
