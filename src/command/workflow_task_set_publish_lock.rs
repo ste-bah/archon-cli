@@ -76,7 +76,7 @@ impl PublishLock {
 pub(crate) fn register_publish_settle() {
     archon_workflow::task_set_publish_lock::register_settle(|pin_path, tasks_root| {
         let paths = JournalPaths::for_pin(pin_path);
-        super::recover::recover_before_publish(&paths, pin_path, tasks_root)
+        super::recover::settle_all(&paths, pin_path, tasks_root)
             .map(drop)
             .map_err(|error| format!("settling the interrupted publish: {error:#}"))
     });
@@ -124,7 +124,7 @@ impl std::fmt::Display for UnsettledPublish {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "an interrupted publish of this task set left its journal {} (state: {}) and this read could not settle it: {}. Nothing was read; every read retries the settlement. A committed journal means the new set is final and only its cleanup is left; any other state rolls back to the old set. Operator remedy: fix what the cause names (a file or directory beside the pin or in the task set that cannot be written or removed), then resume the run (`archon workflow resume --live --yes <RUN_ID>`); each settlement is recorded in {}",
+            "an interrupted publish of this task set left its journal {} (state: {}) and it could not be settled: {}. Nothing was read; every read retries the settlement. A committed journal means the new set is final and only its cleanup is left; any other state rolls back to the old set. Operator remedy: fix what the cause names (a file or directory beside the pin or in the task set that cannot be written or removed), then resume the run (`archon workflow resume --live --yes <RUN_ID>`); each settlement is recorded in {}",
             self.journal.display(),
             self.state,
             self.cause,
@@ -188,10 +188,15 @@ impl ChainRead {
 /// evidence and the remedy (Issue 336): its cause is the host's environment,
 /// fixed by an operator, never the author's artifact nor a reason to fail.
 pub(super) fn stage_error(error: anyhow::Error) -> WorkflowError {
-    if UnsettledPublish::is(&error) {
+    pause_if_unsettled(&error).unwrap_or_else(|| WorkflowError::StageFailed(format!("{error:#}")))
+}
+
+/// The run's pause when `error` is, or wraps, an [`UnsettledPublish`]
+/// (Issue 338): what a stage that meets one anywhere -- a read, a chain
+/// lock's recovery, a child's exit -- ends with instead of its own failure.
+pub(crate) fn pause_if_unsettled(error: &anyhow::Error) -> Option<WorkflowError> {
+    UnsettledPublish::is(error).then(|| {
         tracing::warn!(error = %format!("{error:#}"), "pausing: the task set's interrupted publish could not be settled");
         WorkflowError::ControlPaused(format!("{error:#}"))
-    } else {
-        WorkflowError::StageFailed(format!("{error:#}"))
-    }
+    })
 }

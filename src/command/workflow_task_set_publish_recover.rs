@@ -77,15 +77,17 @@ pub(crate) fn recover_interrupted_publish(
     Ok(report)
 }
 
-/// Keep the same publish lock through the caller's complete read.
+/// Keep the same publish lock through the caller's complete read. A journal
+/// a publish left that this recovery cannot settle is [`UnsettledPublish`]
+/// (Issue 338), so a stage that meets it here -- a chain lock's acquisition
+/// in a repair, say -- pauses the run as a read would, never fails it.
 pub(crate) fn lock_and_recover(
     pin_path: &Path,
     tasks_root: &Path,
 ) -> Result<(PublishLock, RecoveryReport)> {
     let paths = JournalPaths::for_pin(pin_path);
     let lock = PublishLock::acquire(&paths)?;
-    let scopes = publication_scopes(pin_path, tasks_root)?;
-    let report = recover_locked(&paths, &scopes, pin_path, tasks_root)?;
+    let report = recover_before_publish(&paths, pin_path, tasks_root)?;
     Ok((lock, report))
 }
 
@@ -139,7 +141,23 @@ fn legacy_scopes(pin_path: &Path, tasks_root: &Path) -> Vec<(PathBuf, Option<Str
 
 /// Recovery under the publish lock uses the complete trusted task-set scope,
 /// including files an earlier publisher wrote outside this caller's subset.
+/// A journal left that it cannot settle is [`UnsettledPublish`] (Issue 338).
 pub(super) fn recover_before_publish(
+    paths: &JournalPaths,
+    pin_path: &Path,
+    tasks_root: &Path,
+) -> Result<RecoveryReport> {
+    settle_all(paths, pin_path, tasks_root).map_err(|error| {
+        if archon_workflow::task_set_publish_lock::interrupted_publish_left(pin_path) {
+            anyhow::Error::new(UnsettledPublish::new(paths, &error))
+        } else {
+            error
+        }
+    })
+}
+
+/// [`recover_before_publish`], its failure untyped: the cause alone.
+pub(super) fn settle_all(
     paths: &JournalPaths,
     pin_path: &Path,
     tasks_root: &Path,

@@ -133,3 +133,64 @@ async fn a_last_round_paused_on_an_unsettled_journal_is_accepted_once_the_operat
         record.operational_errors
     );
 }
+
+/// Issue 338: another writer leaves a journal no recovery can settle after
+/// the round read its contract. The repair's republish meets it when it
+/// takes the chain lock: the run pauses with the evidence, never a failed
+/// repair; once the operator fixes the cause the same repair republishes.
+#[tokio::test]
+async fn a_repair_whose_republish_meets_a_journal_another_writer_left_pauses_the_run() {
+    let (run, client) = refuted();
+    let context = super::super::exec::resolve_context(
+        &run.store,
+        &run.run_id,
+        run.runtime.target_repository_root.as_deref(),
+        Some(&run.universe),
+    )
+    .unwrap();
+    let (contract, _, _) = super::super::exec::load_contract(&context).unwrap();
+    let pin = pin_path(&run);
+    let bytes = std::fs::read(&pin).unwrap();
+    let fix = crate::command::workflow_task_set::crash_publish(
+        &pin,
+        &[(pin.clone(), bytes)],
+        "committed",
+        true,
+    );
+    let base =
+        crate::command::workflow_task_set::executability::Baseline::head_of(run.set.project.path())
+            .unwrap()
+            .commit;
+    let outcome = super::repair_unaccepted(Some(&client), &context, &contract, Some(&base)).await;
+    let error = match outcome {
+        Ok(repair) => panic!(
+            "the republish over an unsettled journal ended as a repair: {:?}",
+            repair.map(|(repair, _)| repair.failure)
+        ),
+        Err(error) => error,
+    };
+    let WorkflowError::ControlPaused(evidence) = error else {
+        panic!("the repair failed instead of pausing: {error}");
+    };
+    for needed in [
+        "state: committed",
+        "Operator remedy",
+        "publish-recovery.log",
+    ] {
+        assert!(evidence.contains(needed), "{needed} missing: {evidence}");
+    }
+    assert_eq!(
+        client
+            .author_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    fix();
+    let (repair, defects) =
+        super::repair_unaccepted(Some(&client), &context, &contract, Some(&base))
+            .await
+            .expect("the fixed set republishes")
+            .expect("a check to repair");
+    assert!(repair.repaired, "{}", repair.failure);
+    assert!(defects.is_empty(), "{defects:?}");
+}
