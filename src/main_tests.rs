@@ -90,3 +90,63 @@ async fn run_kb_with_temp_store(action: cli_args::KbAction) -> Result<()> {
     // the thread count, and these tests share a process with the whole bin target (#166).
     crate::command::kb::handle_kb_command_at(&db_path, action).await
 }
+
+#[tokio::test]
+async fn startup_read_only_subcommand_never_sets_up_voice() {
+    assert_subcommand_skips_voice(&["workflow", "decomposition-identity"], None).await;
+}
+
+#[tokio::test]
+async fn startup_refused_decompose_never_sets_up_voice() {
+    assert_subcommand_skips_voice(
+        &[
+            "workflow",
+            "decompose",
+            "--prd",
+            "missing.md",
+            "--tasks",
+            "missing-tasks",
+        ],
+        Some("requires --yes"),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn startup_invalid_freeze_host_call_never_sets_up_voice() {
+    assert_subcommand_skips_voice(
+        &[
+            "workflow",
+            "freeze-acceptance",
+            "--prd",
+            "missing.md",
+            "--tasks",
+            "missing-tasks",
+            "--candidate-stdin",
+        ],
+        Some("--staging-root"),
+    )
+    .await;
+}
+
+async fn assert_subcommand_skips_voice(args: &[&str], expected_error: Option<&str>) {
+    let cli = Cli::try_parse_from(std::iter::once("archon").chain(args.iter().copied())).unwrap();
+    let mut config = archon_core::config::ArchonConfig::default();
+    config.voice.enabled = true;
+    let env_vars = archon_core::env_vars::load_env_vars_from(&Default::default());
+    let flags = archon_core::cli_flags::ResolvedFlags::default();
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_path_buf();
+    let calls = std::cell::Cell::new(0);
+    let outcome = super::main_startup::run(
+        super::dispatch_modes(cli, &config, &env_vars, &flags, "test-session", &cwd),
+        || async { calls.set(calls.get() + 1) },
+        |_, ()| async { panic!("subcommand reached interactive session") },
+    )
+    .await;
+    match expected_error {
+        Some(message) => assert!(outcome.unwrap_err().to_string().contains(message)),
+        None => outcome.unwrap(),
+    }
+    assert_eq!(calls.get(), 0, "subcommand started voice setup");
+}

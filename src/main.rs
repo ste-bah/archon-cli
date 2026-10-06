@@ -14,8 +14,11 @@ mod main_bootstrap;
 mod main_dispatch;
 mod main_modes;
 mod main_resume;
+mod main_startup;
 #[cfg(test)]
 mod main_tests;
+#[cfg(test)]
+mod main_voice_tests;
 mod panic_save;
 mod runtime;
 pub(crate) mod session;
@@ -47,7 +50,7 @@ async fn run() -> Result<()> {
     if command::acceptance_scratch_guardian::entry().await? {
         return Ok(());
     }
-    let mut cli = Cli::parse();
+    let cli = Cli::parse();
     let bootstrap = main_bootstrap::bootstrap(&cli)?;
     let config = &bootstrap.config;
     let env_vars = &bootstrap.env_vars;
@@ -55,42 +58,95 @@ async fn run() -> Result<()> {
     let session_id = &bootstrap.session_id;
     gametheory_tool_executor::install(config.clone(), env_vars.clone());
 
-    // TODO(TUI-330): app::TuiEvent moves to archon_tui::events::TuiEvent
-    let voice_event_rx = crate::command::tui_helpers::setup_voice_pipeline(config).await;
+    run_interactive_after_dispatch(
+        config,
+        dispatch_modes(
+            cli,
+            config,
+            env_vars,
+            resolved_flags,
+            session_id,
+            &bootstrap.working_dir_for_config,
+        ),
+        |(cli, resume_messages), voice_event_rx| async move {
+            crate::session::run_interactive_session(
+                config,
+                session_id,
+                &cli,
+                env_vars,
+                resume_messages,
+                resolved_flags,
+                voice_event_rx,
+            )
+            .await
+        },
+    )
+    .await
+}
 
+/// Keep the production voice callback shared with the interactive wiring tests.
+/// Dispatch and the session consumer may be controlled without replacing setup.
+async fn run_interactive_after_dispatch<S, IF>(
+    config: &archon_core::config::ArchonConfig,
+    dispatch: impl std::future::Future<Output = Result<Option<S>>>,
+    interactive: impl FnOnce(S, Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>>) -> IF,
+) -> Result<()>
+where
+    IF: std::future::Future<Output = Result<()>>,
+{
+    main_startup::run(
+        dispatch,
+        || crate::command::tui_helpers::setup_voice_pipeline(config),
+        interactive,
+    )
+    .await
+}
+
+type InteractiveInput = (Cli, Option<Vec<serde_json::Value>>);
+
+/// Dispatch every noninteractive mode and validate the terminal before any
+/// interactive resources are started.
+async fn dispatch_modes(
+    mut cli: Cli,
+    config: &archon_core::config::ArchonConfig,
+    env_vars: &archon_core::env_vars::ArchonEnvVars,
+    resolved_flags: &archon_core::cli_flags::ResolvedFlags,
+    session_id: &str,
+    working_dir_for_config: &std::path::PathBuf,
+) -> Result<Option<InteractiveInput>> {
     if main_modes::handle_subcommand_if_present(
         &mut cli,
         config,
         env_vars,
         resolved_flags,
-        &bootstrap.working_dir_for_config,
+        working_dir_for_config,
     )
     .await?
     {
-        return Ok(());
+        return Ok(None);
     }
 
     if main_modes::handle_headless_if_requested(&cli, config, env_vars, resolved_flags, session_id)
         .await?
     {
-        return Ok(());
+        return Ok(None);
     }
 
     if main_modes::handle_catalog_modes_if_requested(&cli, config)? {
-        return Ok(());
+        return Ok(None);
     }
     if main_resume::handle_resume_list_if_requested(&cli, config).await? {
-        return Ok(());
+        return Ok(None);
     }
 
     let mut resume_messages = main_resume::load_explicit_resume_messages(&cli, config)?;
     main_resume::maybe_continue_session(&cli, config, &mut resume_messages);
     main_resume::maybe_auto_resume(&cli, config, &mut resume_messages);
     if main_modes::handle_session_management_if_requested(&cli, config)? {
-        return Ok(());
+        return Ok(None);
     }
     if main_modes::handle_background_if_requested(&cli)? {
-        return Ok(());
+        return Ok(None);
     }
     if main_modes::handle_print_mode_if_requested(
         &cli,
@@ -101,20 +157,11 @@ async fn run() -> Result<()> {
     )
     .await?
     {
-        return Ok(());
+        return Ok(None);
     }
     main_modes::ensure_interactive_tty()?;
 
-    crate::session::run_interactive_session(
-        config,
-        session_id,
-        &cli,
-        env_vars,
-        resume_messages,
-        resolved_flags,
-        voice_event_rx,
-    )
-    .await
+    Ok(Some((cli, resume_messages)))
 }
 
 fn resolve_json_schema(cli: &Cli) -> Result<Option<String>> {

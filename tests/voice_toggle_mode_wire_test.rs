@@ -1,17 +1,11 @@
-//! Integration test for TASK-WIRE-009: real archon binary logs the
-//! configured voice.toggle_mode at startup, proving the flag is read.
+//! Noninteractive startup must not wire voice, regardless of toggle mode.
+//! Interactive ordering and receiver delivery are covered by main_startup_tests.
 
-use std::path::PathBuf;
+use std::io::Read;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
-const SPAWN_TIMEOUT: Duration = Duration::from_secs(30);
 const TOGGLE_LOG: &str = "voice: toggle_mode=true";
 const PUSH_TO_TALK_LOG: &str = "voice: toggle_mode=false";
-
-fn archon_bin() -> Option<PathBuf> {
-    std::env::var_os("CARGO_BIN_EXE_archon").map(PathBuf::from)
-}
 
 fn minimal_config(toggle_mode: bool) -> String {
     format!(
@@ -66,7 +60,7 @@ enabled = false
 max_checkpoints = 10
 [voice]
 enabled = true
-device = "default"
+device = "nonexistent-voice-test-device"
 vad_threshold = 0.02
 stt_provider = "mock"
 stt_api_key = ""
@@ -78,16 +72,20 @@ toggle_mode = {toggle_mode}
 }
 
 fn run_and_scrape(toggle_mode: bool) -> String {
-    let bin = archon_bin().expect("archon binary not built");
+    let bin = env!("CARGO_BIN_EXE_archon");
     let tmp = tempfile::tempdir().expect("tempdir");
     let config_dir = tmp.path().join("archon");
     std::fs::create_dir_all(&config_dir).unwrap();
-    std::fs::write(config_dir.join("config.toml"), minimal_config(toggle_mode)).unwrap();
+    let config = minimal_config(toggle_mode);
+    let parsed: archon_core::config::ArchonConfig = toml::from_str(&config).expect("valid config");
+    assert!(parsed.voice.enabled);
+    assert_eq!(parsed.voice.toggle_mode, toggle_mode);
+    std::fs::write(config_dir.join("config.toml"), config).unwrap();
     let log_dir = tmp.path().join("data").join("archon").join("logs");
     let work_dir = tmp.path().join("work");
     std::fs::create_dir_all(&work_dir).unwrap();
 
-    let mut child = Command::new(&bin)
+    let status = Command::new(bin)
         .current_dir(&work_dir)
         .env("ARCHON_CONFIG_DIR", &config_dir)
         .env("ANTHROPIC_API_KEY", "sk-fake-test-key-not-real")
@@ -99,72 +97,55 @@ fn run_and_scrape(toggle_mode: bool) -> String {
         .env("XDG_DATA_HOME", tmp.path().join("data"))
         .env("XDG_CACHE_HOME", tmp.path().join("cache"))
         .env("XDG_CONFIG_HOME", tmp.path())
+        .env("ARCHON_CACHE_ROOT", tmp.path().join("cache"))
+        .env("ARCHON_TMPDIR", tmp.path().join("scratch"))
         .env("RUST_LOG", "info")
-        .arg("-p")
-        .arg("hello")
-        .arg("--output-format")
-        .arg("text")
-        .arg("--no-session-persistence")
-        .arg("--max-turns")
-        .arg("1")
+        .arg("--setting-sources")
+        .arg("user")
+        .arg("--list-themes")
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn archon");
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("run archon catalog mode");
+    assert!(status.success(), "catalog command failed: {status}");
 
-    let start = Instant::now();
-    loop {
-        if let Ok(Some(_)) = child.try_wait() {
-            break;
-        }
-        if start.elapsed() > SPAWN_TIMEOUT {
-            let _ = child.kill();
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    let _ = child.wait();
-
+    let entries: Vec<_> = std::fs::read_dir(&log_dir)
+        .expect("startup log directory")
+        .map(|entry| entry.expect("startup log entry"))
+        .collect();
+    assert_eq!(entries.len(), 1, "expected one startup log");
     let mut collected = String::new();
-    if let Ok(entries) = std::fs::read_dir(&log_dir) {
-        for entry in entries.flatten() {
-            if let Ok(contents) = std::fs::read_to_string(entry.path()) {
-                collected.push_str(&contents);
-            }
-        }
-    }
+    std::fs::File::open(entries[0].path())
+        .expect("open startup log")
+        .take(64 * 1024 + 1)
+        .read_to_string(&mut collected)
+        .expect("read startup log");
+    assert!(
+        collected.len() <= 64 * 1024,
+        "startup log exceeded test bound"
+    );
+    assert!(!collected.is_empty(), "startup log is empty");
     collected
 }
 
 #[test]
-fn voice_toggle_mode_true_logs_toggle_sentinel() {
-    if archon_bin().is_none() {
-        return;
-    }
-    let logs = run_and_scrape(true);
-    assert!(
-        logs.contains(TOGGLE_LOG),
-        "expected log {TOGGLE_LOG:?}\n--- logs ---\n{logs}\n---"
-    );
-    assert!(
-        !logs.contains(PUSH_TO_TALK_LOG),
-        "should NOT contain {PUSH_TO_TALK_LOG:?}\n--- logs ---\n{logs}\n---"
-    );
+fn voice_toggle_mode_true_does_not_wire_for_catalog_mode() {
+    assert_catalog_skips_voice(true);
 }
 
 #[test]
-fn voice_toggle_mode_false_logs_push_to_talk_sentinel() {
-    if archon_bin().is_none() {
-        return;
-    }
-    let logs = run_and_scrape(false);
+fn voice_toggle_mode_false_does_not_wire_for_catalog_mode() {
+    assert_catalog_skips_voice(false);
+}
+
+fn assert_catalog_skips_voice(toggle_mode: bool) {
+    let logs = run_and_scrape(toggle_mode);
     assert!(
-        logs.contains(PUSH_TO_TALK_LOG),
-        "expected log {PUSH_TO_TALK_LOG:?}\n--- logs ---\n{logs}\n---"
+        !logs.contains(TOGGLE_LOG) && !logs.contains(PUSH_TO_TALK_LOG),
+        "catalog mode wired voice with toggle_mode={toggle_mode}"
     );
-    assert!(
-        !logs.contains(TOGGLE_LOG),
-        "should NOT contain {TOGGLE_LOG:?}\n--- logs ---\n{logs}\n---"
-    );
+    assert!(!logs.contains("voice: capture device"));
+    assert!(!logs.contains("voice: pipeline"));
+    assert!(!logs.contains("voice: unavailable"));
 }
