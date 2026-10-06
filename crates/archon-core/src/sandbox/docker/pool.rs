@@ -15,14 +15,14 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use archon_permissions::sandbox::{SandboxCommandRequest, SandboxScope};
-use tokio::process::Command as TokioCommand;
 
 use super::DockerConfig;
+use super::cli::{self, DAEMON_NO_ANSWER_BOUND, DockerCliError};
 use super::exec::{ContainerKind, docker_exec_args, docker_pool_create_args};
 
 /// Labels every container Archon creates carries, and the only handle teardown
@@ -128,7 +128,14 @@ pub(super) struct ContainerPool {
     scope: SandboxScope,
     workspace_access: String,
     config: DockerConfig,
+    /// The no-progress bound on every docker CLI call this pool makes.
+    cli_bound: Duration,
     live: tokio::sync::Mutex<HashMap<LifetimeKey, Held>>,
+    /// Containers that may exist although nothing holds them: a `run
+    /// --detach` the daemon never answered (or that was cancelled), or an `rm`
+    /// it never answered. Killing the CLI does not stop the daemon, so each may
+    /// still appear. Removed once the daemon answers again, and in `Drop`.
+    unconfirmed: tokio::sync::Mutex<Vec<String>>,
     reaped: tokio::sync::OnceCell<()>,
 }
 
@@ -142,9 +149,19 @@ impl ContainerPool {
             scope,
             workspace_access,
             config,
+            cli_bound: DAEMON_NO_ANSWER_BOUND,
             live: tokio::sync::Mutex::new(HashMap::new()),
+            unconfirmed: tokio::sync::Mutex::new(Vec::new()),
             reaped: tokio::sync::OnceCell::new(),
         }
+    }
+
+    /// Test seam: a short bound, so a fake daemon that never answers is
+    /// observed in milliseconds rather than a minute.
+    #[cfg(test)]
+    pub(super) fn with_cli_bound(mut self, bound: Duration) -> Self {
+        self.cli_bound = bound;
+        self
     }
 
     /// The lifetime this request belongs to, or `None` when nothing is held.
@@ -170,36 +187,54 @@ impl ContainerPool {
     /// A lease on the held container for this request.
     ///
     /// `Ok(None)` means this request has no lifetime to hold and the caller
-    /// should fall back to the per-command `docker run`.
+    /// should fall back to the per-command `docker run`. An error means the
+    /// held container could not be started, or the daemon stopped answering on
+    /// the way (reaping, teardown); the caller refuses the command with it,
+    /// because a per-command `docker run` would put the same request to the
+    /// same daemon. The first call the daemon does not answer ends this one, so
+    /// a hung daemon costs one bound here, not one per call.
     pub(super) async fn container_for(
         &self,
         request: &SandboxCommandRequest,
-    ) -> Result<Option<ContainerLease>, String> {
+    ) -> Result<Option<ContainerLease>, DockerCliError> {
         // Before the early return, not after it. Reaping used to sit below the
         // `key()` bail-out, which meant it never ran under `scope = "tool"` —
         // where `key()` is always `None` — nor for a `turn`-scoped caller with
         // no turn id, which is what the TUI's pipeline adapter is. The two
         // configurations that create the *most* uncollectable containers were
         // exactly the two that never collected any.
+        let mut stalled = None;
+        let stall = &mut stalled;
         self.reaped
-            .get_or_init(|| super::reap::reap_orphans(self.binary.clone()))
+            .get_or_init(|| async move {
+                if let Err(error) =
+                    super::reap::reap_orphans(self.binary.clone(), self.cli_bound).await
+                {
+                    *stall = Some(error);
+                }
+            })
             .await;
+        if let Some(error) = stalled {
+            return Err(error);
+        }
         let Some(key) = self.key(request) else {
             return Ok(None);
         };
         // Held across the `docker run` below, so two commands racing for one
         // key cannot each start a container and leave one of them orphaned with
         // nothing holding its name. The cost is that a concurrent command for a
-        // *different* key waits out that creation — a few hundred milliseconds,
-        // once per lifetime, against a correctness property.
+        // *different* key waits out that creation — a few hundred milliseconds
+        // normally, at most one no-answer bound when the daemon has hung.
         let mut live = self.live.lock().await;
         if self.scope == SandboxScope::Turn {
-            self.evict_finished_turns(&mut live, &key).await;
+            self.evict_finished_turns(&mut live, &key).await?;
         }
         if let Some(held) = live.get(&key) {
             return Ok(Some(held.lease()));
         }
         let name = self.create(&key).await?;
+        // The daemon answered, so this is the moment to retry what it did not.
+        self.remove_unconfirmed().await;
         let held = Held {
             name,
             in_flight: Arc::new(AtomicUsize::new(0)),
@@ -219,11 +254,15 @@ impl ContainerPool {
     /// for a container Archon destroyed itself. A busy container is therefore
     /// left alone and reconsidered at the next turn boundary; if none comes,
     /// `Drop` and the container's own age bound still end it.
+    ///
+    /// Stops at the first teardown the daemon does not answer, and returns it:
+    /// each further one would wait out the same bound. What is left stays held
+    /// and is reconsidered at the next boundary.
     async fn evict_finished_turns(
         &self,
         live: &mut HashMap<LifetimeKey, Held>,
         current: &LifetimeKey,
-    ) {
+    ) -> Result<(), DockerCliError> {
         for key in finished_turns(live.keys(), current) {
             let Some(held) = live.get(&key) else {
                 continue;
@@ -236,13 +275,43 @@ impl ContainerPool {
                 );
                 continue;
             }
-            if let Some(held) = live.remove(&key) {
-                self.destroy(&held.name).await;
+            let Some(held) = live.remove(&key) else {
+                continue;
+            };
+            let Err(error) = self.destroy(&held.name).await else {
+                continue;
+            };
+            tracing::warn!(
+                container = %held.name,
+                %error,
+                "sandbox: could not tear down the previous turn's container"
+            );
+            if error.is_no_answer() {
+                self.unconfirmed.lock().await.push(held.name);
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    /// Retry removing containers the daemon did not answer about. Each one it
+    /// answers for — removed, or not known — is done with; one it again does
+    /// not answer stays listed and ends the retry.
+    async fn remove_unconfirmed(&self) {
+        let mut unconfirmed = self.unconfirmed.lock().await;
+        while let Some(name) = unconfirmed.pop() {
+            let Err(error) = self.destroy(&name).await else {
+                continue;
+            };
+            tracing::warn!(container = %name, %error, "sandbox: could not remove an unconfirmed container");
+            if error.is_no_answer() {
+                unconfirmed.push(name);
+                return;
             }
         }
     }
 
-    async fn create(&self, key: &LifetimeKey) -> Result<String, String> {
+    async fn create(&self, key: &LifetimeKey) -> Result<String, DockerCliError> {
         let name = format!(
             "archon-sbx-{}-{}",
             owner_id(),
@@ -255,21 +324,21 @@ impl ContainerPool {
             &name,
             self.config.container_max_age_secs,
         );
-        let output = TokioCommand::new(&self.binary)
-            .args(args)
-            .stdin(Stdio::null())
-            .output()
-            .await
-            .map_err(|error| format!("failed to spawn docker: {error}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "could not start a {} sandbox container from {}: {}",
-                self.scope,
-                self.image,
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
+        let call = format!(
+            "{} run --detach (start the {} sandbox container {name} from {})",
+            self.binary, self.scope, self.image
+        );
+        // Listed before the call, so a cancelled or unanswered create still
+        // leaves a name for teardown to remove.
+        self.unconfirmed.lock().await.push(name.clone());
+        let result = cli::run(&self.binary, &args, &call, self.cli_bound).await;
+        if !result.as_ref().is_err_and(DockerCliError::is_no_answer) {
+            self.unconfirmed
+                .lock()
+                .await
+                .retain(|listed| *listed != name);
         }
-        Ok(name)
+        result.map(|_| name)
     }
 
     /// Build the `docker exec` for a command in a held container.
@@ -284,39 +353,46 @@ impl ContainerPool {
     /// A container can vanish under us for reasons that are nobody's bug — the
     /// `sleep` that is its PID 1 reaches `container_max_age_secs`, an operator
     /// runs `docker rm`, the daemon restarts.
-    pub(super) async fn forget_if_gone(&self, request: &SandboxCommandRequest, name: &str) -> bool {
-        if self.is_running(name).await {
-            return false;
+    ///
+    /// An error means the daemon could not be asked, and nothing is concluded
+    /// from it: the container is neither forgotten nor reported gone.
+    pub(super) async fn forget_if_gone(
+        &self,
+        request: &SandboxCommandRequest,
+        name: &str,
+    ) -> Result<bool, DockerCliError> {
+        if self.is_running(name).await? {
+            return Ok(false);
         }
         let Some(key) = self.key(request) else {
-            return false;
+            return Ok(false);
         };
         let mut live = self.live.lock().await;
         if live.get(&key).is_some_and(|held| held.name == name) {
             live.remove(&key);
         }
-        true
+        Ok(true)
     }
 
-    async fn is_running(&self, name: &str) -> bool {
-        TokioCommand::new(&self.binary)
-            .args(["inspect", "-f", "{{.State.Running}}", name])
-            .stdin(Stdio::null())
-            .output()
+    /// The daemon's answer on whether `name` is running. A failed `inspect`
+    /// is an answer — the daemon knows no such container — and reads as not
+    /// running, as it always has. No answer at all is an error.
+    async fn is_running(&self, name: &str) -> Result<bool, DockerCliError> {
+        let args = ["inspect", "-f", "{{.State.Running}}", name].map(String::from);
+        let call = format!("{} inspect {name}", self.binary);
+        match cli::run(&self.binary, &args, &call, self.cli_bound).await {
+            Ok(output) => Ok(String::from_utf8_lossy(&output.stdout).trim() == "true"),
+            Err(DockerCliError::Failed { .. }) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn destroy(&self, name: &str) -> Result<(), DockerCliError> {
+        let args = ["rm", "--force", name].map(String::from);
+        let call = format!("{} rm --force {name}", self.binary);
+        cli::run(&self.binary, &args, &call, self.cli_bound)
             .await
-            .is_ok_and(|output| {
-                output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true"
-            })
-    }
-
-    async fn destroy(&self, name: &str) {
-        let _ = TokioCommand::new(&self.binary)
-            .args(["rm", "--force", name])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .await;
+            .map(drop)
     }
 }
 
@@ -336,19 +412,31 @@ impl Drop for ContainerPool {
         // `get_mut` rather than a lock: `Drop` holds `&mut self`, so no other
         // reference exists and blocking a runtime thread on an async mutex here
         // would be both unnecessary and deadlock-prone.
-        let names: Vec<String> = self
+        let mut names: Vec<String> = self
             .live
             .get_mut()
             .drain()
             .map(|(_, held)| held.name)
             .collect();
-        for name in names {
-            let _ = std::process::Command::new(&self.binary)
-                .args(["rm", "--force", &name])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+        names.append(self.unconfirmed.get_mut());
+        if names.is_empty() {
+            return;
+        }
+        // One call for all of them, so a daemon that does not answer costs one
+        // bound rather than one per container.
+        let mut args = vec!["rm".to_string(), "--force".to_string()];
+        args.extend(names.iter().cloned());
+        let call = format!("{} rm --force {}", self.binary, names.join(" "));
+        if let Err(error) = cli::run_blocking(&self.binary, &args, &call, self.cli_bound) {
+            // A failed batch may still have removed some: `rm --force a b`
+            // removes `a` and exits 1 when `b` is already gone.
+            tracing::warn!(
+                %error,
+                "sandbox: teardown of held containers at the session boundary \
+                 did not fully succeed (some may already have been gone); any \
+                 left are ended by their container_max_age_secs bound and the \
+                 next Archon's startup reaping"
+            );
         }
     }
 }
@@ -386,3 +474,7 @@ pub(super) fn max_age_is_sane(secs: u64) -> Result<(), String> {
 #[cfg(test)]
 #[path = "pool_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "pool_cli_tests.rs"]
+mod cli_tests;

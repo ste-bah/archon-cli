@@ -13,10 +13,9 @@
 //!    needs nothing from the host, and it is what bounds the leak when Archon is
 //!    killed and never started again.
 
-use std::process::Stdio;
+use std::time::Duration;
 
-use tokio::process::Command as TokioCommand;
-
+use super::cli::{self, DockerCliError};
 use super::pool::{OWNED_LABEL, OWNER_LABEL, PID_LABEL, owner_id};
 
 /// Remove every Archon sandbox container whose creating process is gone.
@@ -25,12 +24,26 @@ use super::pool::{OWNED_LABEL, OWNER_LABEL, PID_LABEL, owner_id};
 /// id *and* a dead pid. Parallel Archon sessions on one machine are ordinary
 /// here, so "not mine" alone would have two runs destroying each other's
 /// containers mid-command.
-pub(super) async fn reap_orphans(binary: String) {
-    let listed = match list_owned(&binary).await {
+///
+/// Every docker call is held to `bound` (no progress). Reaping is skipped, with
+/// a warning that carries the evidence, when the daemon cannot list
+/// containers; it stops at the first removal the daemon does not answer, since
+/// each further one would wait out the same bound. Nothing is lost by
+/// stopping: the containers' own `sleep` bound still ends them.
+///
+/// Returns the error only when the daemon gave no answer, so the caller can
+/// refuse rather than put the next call to the same hung daemon. A daemon that
+/// answered with a failure is logged and is not a reason to refuse.
+pub(super) async fn reap_orphans(binary: String, bound: Duration) -> Result<(), DockerCliError> {
+    let listed = match list_owned(&binary, bound).await {
         Ok(listed) => listed,
         Err(error) => {
-            tracing::debug!(%error, "sandbox: could not list containers to reap");
-            return;
+            tracing::warn!(%error, "sandbox: could not list containers to reap; skipping reaping");
+            return if error.is_no_answer() {
+                Err(error)
+            } else {
+                Ok(())
+            };
         }
     };
     let mut system = sysinfo::System::new();
@@ -46,14 +59,22 @@ pub(super) async fn reap_orphans(binary: String) {
             owner = %candidate.owner,
             "sandbox: removing a container left behind by a dead Archon process"
         );
-        let _ = TokioCommand::new(&binary)
-            .args(["rm", "--force", &candidate.name])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .await;
+        let args = ["rm", "--force", candidate.name.as_str()].map(String::from);
+        let call = format!("{binary} rm --force {}", candidate.name);
+        let Err(error) = cli::run(&binary, &args, &call, bound).await else {
+            continue;
+        };
+        tracing::warn!(
+            container = %candidate.name,
+            %error,
+            "sandbox: could not remove a container left behind by a dead Archon process"
+        );
+        if error.is_no_answer() {
+            tracing::warn!("sandbox: the Docker daemon is not answering; stopping reaping");
+            return Err(error);
+        }
     }
+    Ok(())
 }
 
 pub(super) struct Orphan {
@@ -62,25 +83,18 @@ pub(super) struct Orphan {
     pub(super) pid: Option<u32>,
 }
 
-async fn list_owned(binary: &str) -> Result<Vec<Orphan>, String> {
-    let output = TokioCommand::new(binary)
-        .args([
-            "ps",
-            "--all",
-            "--filter",
-            &format!("label={OWNED_LABEL}=1"),
-            "--format",
-            &format!(
-                "{{{{.Names}}}}\t{{{{.Label \"{OWNER_LABEL}\"}}}}\t{{{{.Label \"{PID_LABEL}\"}}}}"
-            ),
-        ])
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .map_err(|error| format!("failed to spawn docker: {error}"))?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
+async fn list_owned(binary: &str, bound: Duration) -> Result<Vec<Orphan>, DockerCliError> {
+    let filter = format!("label={OWNED_LABEL}=1");
+    let args = [
+        "ps".to_string(),
+        "--all".to_string(),
+        "--filter".to_string(),
+        filter.clone(),
+        "--format".to_string(),
+        format!("{{{{.Names}}}}\t{{{{.Label \"{OWNER_LABEL}\"}}}}\t{{{{.Label \"{PID_LABEL}\"}}}}"),
+    ];
+    let call = format!("{binary} ps --all --filter {filter}");
+    let output = cli::run(binary, &args, &call, bound).await?;
     Ok(parse_listing(&String::from_utf8_lossy(&output.stdout)))
 }
 
