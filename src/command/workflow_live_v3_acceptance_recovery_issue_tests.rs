@@ -204,3 +204,81 @@ fn issue301_authorized_changed_shape_is_selected_from_authenticated_history() {
 fn issue301_authorized_skeleton_binding_is_rebound_to_selected_contract() {
     changed_skeleton("authorized-binding");
 }
+
+// C1 remains live while the authenticated C2/S2 launch changed both checks
+// and task ordering. Serialization alone cannot select C1/S1 instead.
+fn combined_pair(format: bool, tampered: bool) {
+    let run = run_fixture_with(&[
+        ("AC-F-001", "test -f present", true),
+        ("AC-F-002", "test -f present", true),
+    ]);
+    let original = run.set.pin().identity();
+    metadata(&run, "a-original-run", &original);
+    let history = archon_workflow::task_set_lineage::ChainHistory::for_pin(&run.set.pin_path());
+    let path = run.set.tasks.join(TASK_SKELETON_FILE);
+    let original_skeleton = std::fs::read(&path).unwrap();
+    history.put(&original_skeleton).unwrap();
+    let mut contract = run.set.contract();
+    history
+        .put(&serde_json::to_vec_pretty(&contract).unwrap())
+        .unwrap();
+    if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
+        &mut contract.acceptance[0].check
+    {
+        command.push_str(" && true");
+    }
+    let contract_bytes = serde_json::to_vec_pretty(&contract).unwrap();
+    let contract_digest = history.put(&contract_bytes).unwrap().0;
+    let mut skeleton: archon_workflow::task_skeleton::TaskSkeleton =
+        serde_json::from_slice(&original_skeleton).unwrap();
+    skeleton.tasks.reverse();
+    skeleton.acceptance_digest = contract_digest.clone();
+    let mut bytes = serde_json::to_vec_pretty(&skeleton).unwrap();
+    let mut authorized = original.clone();
+    authorized.acceptance_digest = contract_digest;
+    authorized.freeze_event_id = "authorized-pair".into();
+    authorized.skeleton_digest = Some(history.put(&bytes).unwrap().0);
+    metadata(&run, "z-authorized-run", &authorized);
+    if format {
+        bytes.push(b'\n');
+    }
+    std::fs::write(path, bytes).unwrap();
+    std::fs::remove_file(run.set.pin_path()).unwrap();
+    recover(&run);
+    if tampered {
+        std::fs::remove_file(history.path(authorized.skeleton_digest.as_ref().unwrap())).unwrap();
+        let mut prepared = crate::command::workflow_task_set::prepare_from_judged(
+            run.set.project.path(),
+            &run.set.tasks,
+            &run.set.prd,
+            archon_core::config::GateMode::Observe,
+            &run.set.contract(),
+            None,
+        )
+        .unwrap();
+        let result = prepared.record_recovery_refreeze();
+        assert!(
+            result.is_err(),
+            "no compatible authenticated pair must refuse publication"
+        );
+        assert!(result.unwrap_err().to_string().contains("skeleton_changed"));
+    } else {
+        refreeze(&run);
+        verify(&run, "z-authorized-run", &authorized)
+            .expect("recovery must preserve the compatible C2/S2 pair");
+        assert!(verify(&run, "a-original-run", &original).is_err());
+        assert!(run.set.pin().skeleton_digest.is_some());
+    }
+}
+#[test]
+fn review301_combined_contract_and_shape_with_changed_serialization() {
+    combined_pair(true, false);
+}
+#[test]
+fn review301_combined_contract_and_shape_with_exact_bytes() {
+    combined_pair(false, false);
+}
+#[test]
+fn review301_missing_compatible_pair_is_explicit_refusal() {
+    combined_pair(true, true);
+}

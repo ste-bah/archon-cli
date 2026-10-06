@@ -130,7 +130,7 @@ impl WorkflowScriptHost {
         outcome: archon_workflow::WorkflowResult<()>,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
         self.owned_generation()?;
-        match outcome {
+        let result = match outcome {
             Ok(()) => {
                 self.runner
                     .finalize_repository_audit(self.summary().await)
@@ -145,14 +145,15 @@ impl WorkflowScriptHost {
                 }
                 let error = err.to_string();
                 if self.accumulator.lock().await.terminal_host_stop {
-                    return self
-                        .runner
+                    self.runner
                         .finalize_repository_audit(self.summary().await)
-                        .await;
+                        .await
+                } else {
+                    Ok(self.mark_script_failure(&error).await)
                 }
-                let summary = self.mark_script_failure(&error).await;
-                Ok(summary)
             }
-        }
+        };
+        self.owned_generation()?;
+        result
     }
 }

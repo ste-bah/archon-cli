@@ -103,6 +103,7 @@ impl AuditRuntime {
         detail: serde_json::Value,
     ) -> WorkflowResult<()> {
         self.store.with_run_lock(&self.run_id, |store| {
+            self.require_executor()?;
             let seq = store.next_event_seq(&self.run_id)?;
             WorkflowEventLog::new(store.clone())
                 .emit(&self.run_id, seq, kind, detail)

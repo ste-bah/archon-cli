@@ -72,7 +72,7 @@ struct StaleFixture {
 }
 
 /// The bytes of state.json and events.jsonl, and every file under v2/.
-type Snapshot = (Vec<u8>, Vec<u8>, Vec<String>);
+type Snapshot = (Vec<u8>, Vec<u8>, Vec<(String, Vec<u8>)>);
 
 /// state.json, events.jsonl and every file under v2/.
 fn snapshot(store: &WorkflowStore, run_id: &str) -> Snapshot {
@@ -85,7 +85,7 @@ fn snapshot(store: &WorkflowStore, run_id: &str) -> Snapshot {
             if path.is_dir() {
                 stack.push(path);
             } else {
-                v2.push(path.display().to_string());
+                v2.push((path.display().to_string(), std::fs::read(&path).unwrap()));
             }
         }
     }
@@ -313,3 +313,6 @@ async fn issue291_stale_lifecycle_cannot_decide_terminal_status() {
     }
     assert_eq!(snapshot(&fixture.store, &fixture.run_id), fixture.before);
 }
+
+#[path = "workflow_live_v2_review_race_tests.rs"]
+mod review_races;

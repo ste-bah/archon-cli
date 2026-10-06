@@ -16,12 +16,9 @@
 //!   re-dispatched, not a reason to declare the state broken and fail the
 //!   stage that happened to ask.
 //!
-//! Identity is therefore measured against the run AS IT IS NOW, never against
-//! a generation snapshotted when some long-lived handle was built. A handle
-//! outlives any number of lifecycle actions, so a snapshot goes stale for
-//! ordinary reasons; a stale snapshot is not evidence of anything being
-//! wrong. The finalizer already compares the state against the run's current
-//! executor ownership this way.
+//! The state must belong to the current run, AND the handle must belong to
+//! the captured executor. A new executor reinitializing shared state never
+//! grants an older handle authority to dispatch or write that state.
 
 use super::runtime::{AuditState, STATE_PATH};
 use crate::{RunStatus, WorkflowError, WorkflowResult, WorkflowStore};
@@ -64,4 +61,35 @@ pub(super) fn require_current_generation(
         ));
     }
     Ok(())
+}
+
+impl super::runtime::AuditRuntime {
+    /// Capture audit artifacts while this handle still owns the run.
+    pub fn capture_snapshot(
+        &self,
+        root: &std::path::Path,
+        paths: &[String],
+        store: &crate::WorkflowV2ResultStore,
+    ) -> WorkflowResult<super::runtime::Snapshot> {
+        self.with_executor_lock(|| super::runtime::Snapshot::capture(root, paths, store))
+    }
+    pub(super) fn require_executor(&self) -> WorkflowResult<()> {
+        crate::control_pause::require_executor(
+            &self.store.load_state(&self.run_id)?,
+            self.generation,
+        )
+    }
+    pub(super) fn require_active_executor(&self) -> WorkflowResult<()> {
+        crate::control_pause::PauseOwner::Executor(self.generation)
+            .require_pauser(&self.store.load_state(&self.run_id)?)
+    }
+    pub(in crate::repository_audit) fn with_executor_lock<T>(
+        &self,
+        operation: impl FnOnce() -> WorkflowResult<T>,
+    ) -> WorkflowResult<T> {
+        self.store.with_run_lock(&self.run_id, |_| {
+            self.require_executor()?;
+            operation()
+        })
+    }
 }

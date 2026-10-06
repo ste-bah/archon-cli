@@ -169,3 +169,86 @@ fn issue300_old_rollback_marker_without_file_evidence_preserves_later_bytes() {
         "a bare rollback decision cannot authorize replacing a live target"
     );
 }
+
+fn preserved_rollback_report(bound: bool, partial: bool) {
+    let set = frozen();
+    let txn = "aabbccddeeff00112233445566778899";
+    let body = set.tasks.join("publication.txt");
+    std::fs::write(&body, b"later publication").unwrap();
+    std::fs::write(sibling_transaction_path(&body, txn, "old"), b"stale backup").unwrap();
+    let missing = set.tasks.join("missing.txt");
+    if partial {
+        std::fs::write(sibling_transaction_path(&missing, txn, "old"), b"prior").unwrap();
+    }
+    let mut marker = serde_json::json!({"transaction":txn,"decisions":{txn:"rollback"}});
+    if bound {
+        marker["written"] =
+            serde_json::json!({txn:{body.display().to_string():content_digest(b"older write")}});
+    }
+    std::fs::write(
+        set.pin_path().with_extension("publish-verification"),
+        marker.to_string(),
+    )
+    .unwrap();
+    let report = recover_interrupted_publish(&set.pin_path(), &set.tasks).unwrap();
+    let event = &report.events[0];
+    assert_eq!(
+        event.outcome,
+        if partial {
+            RecoveryOutcome::RolledBack
+        } else {
+            RecoveryOutcome::Preserved
+        }
+    );
+    assert!(
+        event.files.contains(&body),
+        "preserved paths must be reported: {event:?}"
+    );
+    let reason = if bound {
+        "changed since"
+    } else {
+        "no transaction-bound"
+    };
+    let detail = event.detail.as_deref().unwrap();
+    assert!(
+        detail.contains("preserved") && detail.contains(reason),
+        "{detail}"
+    );
+    assert!(detail.contains(&body.display().to_string()), "{detail}");
+    let log = std::fs::read_to_string(recovery_log_path(&set.pin_path())).unwrap();
+    let logged: serde_json::Value = log
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .find(|event: &serde_json::Value| {
+            event["transaction"] == txn && event["source"] == "legacy"
+        })
+        .unwrap();
+    assert_eq!(
+        logged["outcome"],
+        if partial {
+            "rolled back"
+        } else {
+            "preserved live targets; unbound legacy backups discarded"
+        }
+    );
+    assert_eq!(logged["detail"], detail);
+    assert!(
+        logged["files"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!(body))
+    );
+    assert_eq!(std::fs::read(body).unwrap(), b"later publication");
+}
+#[test]
+fn review300_bare_rollback_reports_preservation() {
+    preserved_rollback_report(false, false);
+}
+#[test]
+fn review300_changed_digest_reports_preservation() {
+    preserved_rollback_report(true, false);
+}
+#[test]
+fn review300_partial_rollback_reports_each_preserved_path() {
+    preserved_rollback_report(false, true);
+}

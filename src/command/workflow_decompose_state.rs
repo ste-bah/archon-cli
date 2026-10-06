@@ -66,7 +66,7 @@ pub(crate) fn project_fixed_call(
         let mut records = v2.load_call_records()?;
         records.retain(|current| current.call.id != record.call.id);
         records.push(record.clone());
-        reconcile_interrupted(&mut state.dispositions, &records);
+        reconcile_interrupted(&mut state.dispositions, &records)?;
     }
     store.write_run_json(run_id, FIXED_STATE_PATH, &state)?;
 

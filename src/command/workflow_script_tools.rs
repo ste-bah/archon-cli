@@ -339,3 +339,7 @@ mod admission_tests;
 #[cfg(test)]
 #[path = "workflow_script_tools_progress_tests.rs"]
 mod progress_tests;
+
+#[cfg(test)]
+#[path = "workflow_script_tools_owner_test_support.rs"]
+pub(crate) mod owner_test_support;

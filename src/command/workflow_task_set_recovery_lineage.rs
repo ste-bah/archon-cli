@@ -351,7 +351,7 @@ pub(crate) fn verify(
         if !anchors::authorized(record, pin_path, run, launch, launch_lineage)? {
             continue;
         }
-        let from = anchors::completed_anchor(record)?;
+        let from = anchors::completed_anchor(record, pin_path)?;
         let mut expected = record
             .prior
             .as_ref()

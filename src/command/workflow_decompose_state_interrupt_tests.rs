@@ -423,3 +423,6 @@ fn issue291_projection_keeps_other_landings_failure_on_execution_reuse_and_inter
         );
     }
 }
+
+#[path = "workflow_decompose_state_supersession_tests.rs"]
+mod supersession;

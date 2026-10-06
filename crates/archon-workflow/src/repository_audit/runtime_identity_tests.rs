@@ -55,28 +55,25 @@ fn corrupt(store: &WorkflowStore, run_id: &str, edit: impl FnOnce(&mut serde_jso
     std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
 }
 
-/// The live shape: a long-lived handle built at one generation, a lifecycle
-/// action after it, and a fresh executor re-establishing the audit state at
-/// the new generation. The stale handle used to call that corruption and take
-/// every write stage down with it.
+/// A running operator edit moves generation while retaining executor ownership.
 #[test]
 fn a_generation_bump_under_a_live_handle_is_not_corruption() {
-    let (_temp, store, run) = run_store();
+    let (_temp, store, mut run) = run_store();
+    run.status = crate::RunStatus::Running;
+    store.save_state(&run).unwrap();
     let audit = AuditRuntime::initialize(store.clone(), run.id.clone(), policy()).unwrap();
-    let built_at = audit.generation;
-    bump(&store, &run.id);
-    AuditRuntime::initialize(store.clone(), run.id.clone(), policy()).unwrap();
-    assert!(built_at < generation(&store, &run.id), "the run moved on");
-
-    let state = audit.state().expect("a stale handle still reads the state");
-    assert_eq!(state.generation, generation(&store, &run.id));
-    // And the write path that reads it proceeds rather than failing.
+    run.generation += 1;
+    store.save_state(&run).unwrap();
+    let state = audit
+        .state()
+        .expect("retained executor still reads its state");
+    assert!(state.generation < generation(&store, &run.id));
     audit
         .update(|state| {
             state.attempts += 1;
             Ok(())
         })
-        .expect("a stale handle still writes");
+        .unwrap();
     assert_eq!(audit.state().unwrap().attempts, 1);
 }
 
@@ -134,4 +131,76 @@ fn an_unreadable_or_wrong_schema_audit_state_is_still_corrupt() {
         error.to_string().contains(&run.id),
         "the message names the run: {error}"
     );
+}
+
+fn reinitialized_audit_refuses_old_handle(action: &str) {
+    let (_temp, store, mut run) = run_store();
+    run.status = crate::RunStatus::Running;
+    store.save_state(&run).unwrap();
+    let stale = AuditRuntime::initialize(store.clone(), run.id.clone(), policy()).unwrap();
+    bump(&store, &run.id);
+    LifecycleController::new(store.clone())
+        .apply(&run.id, LifecycleAction::Resume)
+        .unwrap();
+    let newer = AuditRuntime::initialize(store.clone(), run.id.clone(), policy()).unwrap();
+    newer
+        .update(|s| {
+            s.snapshot = Some(super::runtime::Snapshot {
+                identity: "newer".into(),
+                root: store.run_dir(&run.id),
+                paths: vec![],
+            });
+            s.ledger.accept(
+                super::AuditContract {
+                    schema_version: 1,
+                    snapshot: "newer".into(),
+                    declared_paths: vec![],
+                },
+                super::AuditReport {
+                    schema_version: 1,
+                    snapshot: "newer".into(),
+                    records: vec![],
+                },
+            )?;
+            s.attempts = 71;
+            s.final_receipt = Some(super::runtime::FinalReceipt {
+                generation: s.generation,
+                snapshot: "newer".into(),
+                declared_paths: Default::default(),
+                assessment_count: 0,
+            });
+            Ok(())
+        })
+        .unwrap();
+    let path = store.run_dir(&run.id).join(STATE_PATH);
+    let before = std::fs::read(&path).unwrap();
+    let result = match action {
+        "clear" => stale.update(|s| {
+            s.final_receipt = None;
+            Ok(())
+        }),
+        "rewrite" => stale.update(|s| {
+            s.attempts += 1;
+            Ok(())
+        }),
+        _ => stale.seal_final("newer"),
+    };
+    assert!(
+        matches!(result, Err(WorkflowError::ControlCancelled(_))),
+        "{action}: {result:?}"
+    );
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+fn review291_reinitialized_audit_refuses_old_receipt_clear() {
+    reinitialized_audit_refuses_old_handle("clear");
+}
+#[test]
+fn review291_reinitialized_audit_refuses_old_state_rewrite() {
+    reinitialized_audit_refuses_old_handle("rewrite");
+}
+#[test]
+fn review291_reinitialized_audit_refuses_old_receipt_seal() {
+    reinitialized_audit_refuses_old_handle("seal");
 }

@@ -64,7 +64,7 @@ pub(super) fn host_bookkeeping(
 pub(crate) fn reconcile_interrupted(
     dispositions: &mut std::collections::BTreeMap<String, SubjectDisposition>,
     records: &[WorkflowV2CallRecord],
-) {
+) -> WorkflowResult<()> {
     let unbound_landing_failed = records.iter().any(|record| {
         record.status == WorkflowV2Status::Failed
             && record
@@ -76,10 +76,70 @@ pub(crate) fn reconcile_interrupted(
             && serde_json::from_value::<HostCommandResult>(record.result.data.clone())
                 .map_or(true, |outcome| outcome.subjects.is_empty())
     });
+    let mut latest = std::collections::BTreeMap::new();
+    for record in records {
+        let Some(request) = &record.call.options.host_command else {
+            continue;
+        };
+        if request.command_id == LAND_TASK_BODY {
+            continue;
+        }
+        let (_, subject) = host_subject(&request.command_id, &empty_outcome());
+        let entry = latest.entry(subject).or_insert(record);
+        if supersession_order(record) > supersession_order(entry) {
+            *entry = record;
+        }
+    }
+    for (subject, record) in latest {
+        // Rebuild the latest call's complete disposition. An interruption is
+        // only authoritative until a newer call for this fixed subject exists.
+        for old in records {
+            if let Some(request) = &old.call.options.host_command
+                && host_subject(&request.command_id, &empty_outcome()).1 == subject
+            {
+                dispositions.remove(&request.command_id);
+            }
+        }
+        dispositions.remove(&subject);
+        let kind = if interruption_reason(record).is_some() {
+            super::FixedCallProjectionKind::Interrupted
+        } else if record.status == WorkflowV2Status::Running {
+            super::FixedCallProjectionKind::Started
+        } else {
+            super::FixedCallProjectionKind::Executed
+        };
+        let projected = super::projection(record, kind)?;
+        if let Some((key, value)) = projected.disposition {
+            dispositions.insert(key, value);
+        }
+        // A later author attempt is work in progress for the same subject.
+        // Replaying an older gate must not overwrite that attempt either.
+        if let Some(author) = records
+            .iter()
+            .filter(|current| {
+                current.call.method == archon_workflow::WorkflowV2HostMethod::Agent
+                    && author_subject(&current.call.id).1 == subject
+                    && current.started_at > record.started_at
+            })
+            .max_by_key(|current| supersession_order(current))
+        {
+            dispositions.insert(
+                subject,
+                if interruption_reason(author).is_some() {
+                    SubjectDisposition::Interrupted
+                } else {
+                    SubjectDisposition::Pending
+                },
+            );
+        }
+    }
     for record in records {
         let Some(request) = record.call.options.host_command.as_ref() else {
             continue;
         };
+        if request.command_id != LAND_TASK_BODY {
+            continue;
+        }
         if interruption_reason(record).is_none() {
             if archon_workflow::v2::script::is_reusable_status(record.status)
                 && let Ok(outcome) =
@@ -109,6 +169,33 @@ pub(crate) fn reconcile_interrupted(
     if unbound_landing_failed {
         dispositions.insert(LAND_TASK_BODY.to_string(), SubjectDisposition::Failed);
     }
+    Ok(())
+}
+
+/// Call time establishes supersession across record slots. Legacy records may
+/// have no timestamps: an ambiguous interruption cannot displace an answer,
+/// and an ambiguous successful answer cannot erase a real failure.
+fn supersession_order(record: &WorkflowV2CallRecord) -> (&str, &str, u8, &str) {
+    let finality = if interruption_reason(record).is_some()
+        || matches!(
+            record.status,
+            WorkflowV2Status::Pending | WorkflowV2Status::Running
+        ) {
+        0
+    } else if matches!(
+        record.status,
+        WorkflowV2Status::Failed | WorkflowV2Status::Cancelled
+    ) {
+        2
+    } else {
+        1
+    };
+    (
+        &record.started_at,
+        &record.finished_at,
+        finality,
+        &record.call.id,
+    )
 }
 
 /// A host command outcome with nothing in it: what a call that has not

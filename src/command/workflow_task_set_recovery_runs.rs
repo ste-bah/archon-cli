@@ -9,9 +9,8 @@ pub(super) fn store(pin: &Path) -> Result<WorkflowStore> {
     Ok(WorkflowStore::new(root.join("workflows")))
 }
 
-/// Use the surviving, archived contract rather than directory ordering to
-/// select a no-prior-pin template. Older receipts can use their captured
-/// skeleton or a surviving launch preimage instead. Select only before
+/// Select an authenticated contract/skeleton pair matching the captured live
+/// shape. Prefer the surviving contract among compatible pairs. Select only before
 /// completion. Verification authenticates the recorded source with
 /// `completed_anchor`, rather than reselecting from surviving preimages.
 pub(super) fn anchor(
@@ -28,10 +27,9 @@ pub(super) fn anchor(
             .map(|skeleton| &skeleton.acceptance_digest)
     });
     let history = ChainHistory::for_pin(pin);
-    for launch in record.runs.values() {
-        if digest.is_some_and(|digest| digest != &launch.acceptance_digest) {
-            continue;
-        }
+    let mut launches = record.runs.values().collect::<Vec<_>>();
+    launches.sort_by_key(|launch| digest.is_some_and(|digest| digest != &launch.acceptance_digest));
+    for launch in launches {
         if history.get(&launch.acceptance_digest)?.is_none() {
             continue;
         }
@@ -53,12 +51,20 @@ pub(super) fn anchor(
         }
         return Ok(Some(launch.clone()));
     }
+    if !record.runs.is_empty() {
+        return Err(anyhow!(
+            "chain check skeleton_changed failed: recovery has no compatible authenticated contract/skeleton pair; restore the launch preimages and retry re-freeze, or re-freeze and start a new run"
+        ));
+    }
     Ok(None)
 }
 
 /// Bind the completed hop to the captured authority without reselecting
 /// its source from history that later preimage imports can extend.
-pub(super) fn completed_anchor(record: &Recovery) -> Result<&PortableAcceptanceIdentityV1> {
+pub(super) fn completed_anchor<'a>(
+    record: &'a Recovery,
+    pin: &Path,
+) -> Result<&'a PortableAcceptanceIdentityV1> {
     let from = &record
         .completed
         .as_ref()
@@ -69,16 +75,42 @@ pub(super) fn completed_anchor(record: &Recovery) -> Result<&PortableAcceptanceI
         Some(prior) => prior.identity() == *from,
         None => {
             record.runs.values().any(|launch| launch == from)
-                && record
-                    .contract_digest
-                    .as_ref()
-                    .is_none_or(|digest| digest == &from.acceptance_digest)
+                && record.contract_digest.as_ref().is_none_or(|digest| {
+                    digest == &from.acceptance_digest
+                        || record.skeleton.as_ref().is_some_and(|skeleton| {
+                            skeleton.acceptance_digest == from.acceptance_digest
+                        })
+                })
         }
     };
     if !captured {
         return Err(anyhow!(
             "recovery completion does not bind its prior anchor"
         ));
+    }
+    // Authenticate this completed source, never reselect it from history.
+    // Its contract may be the captured live contract or the captured skeleton's
+    // authenticated binding, but its skeleton must actually belong to it.
+    if record.prior.is_none()
+        && let Some(expected) = &record.skeleton
+    {
+        let digest = from.skeleton_digest.as_ref().ok_or_else(|| {
+            anyhow!("recovery completion does not bind its prior anchor: skeleton missing")
+        })?;
+        let bytes = ChainHistory::for_pin(pin).get(digest)?.ok_or_else(|| anyhow!(
+            "recovery completion does not bind its prior anchor: skeleton preimage {digest} missing; restore its evidence and retry re-freeze"))?;
+        let mut skeleton: TaskSkeleton = serde_json::from_slice(&bytes)?;
+        if skeleton.acceptance_digest != from.acceptance_digest {
+            return Err(anyhow!(
+                "recovery completion does not bind its prior anchor: skeleton belongs to another contract"
+            ));
+        }
+        skeleton.acceptance_digest = expected.acceptance_digest.clone();
+        if skeleton != *expected {
+            return Err(anyhow!(
+                "recovery completion does not bind its prior anchor: skeleton shape differs"
+            ));
+        }
     }
     Ok(from)
 }

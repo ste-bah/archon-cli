@@ -116,6 +116,8 @@ pub(super) fn recover_legacy(
             intent.save(&marker_path)?;
         }
         let mut files = Vec::new();
+        let mut preserved = Vec::new();
+        let mut restored = 0;
         if decision == Decision::Rollback {
             for (index, backup) in found.backups.iter().enumerate() {
                 let target = target_of(backup);
@@ -127,12 +129,23 @@ pub(super) fn recover_legacy(
                 // A retry never restores over bytes written after the decision.
                 // An older unbound marker can restore only a missing target.
                 if expected.map_or(current.is_some(), |expected| *expected != current) {
+                    preserved.push(format!(
+                        "{} preserved: {}",
+                        target.display(),
+                        if expected.is_none() {
+                            "no transaction-bound file evidence authorizes restoration"
+                        } else {
+                            "target changed since the transaction's recorded decision"
+                        }
+                    ));
+                    files.push(target);
                     continue;
                 }
                 rename(backup, &target)?;
                 super::journal::sync_parent(&target)?;
                 super::journal::crash_point(&format!("legacy-restored-{index}"));
                 files.push(target);
+                restored += 1;
             }
         }
         for (index, (staged, target)) in found.staged.iter().enumerate() {
@@ -146,6 +159,16 @@ pub(super) fn recover_legacy(
             super::journal::sync_parent(staged)?;
             super::journal::crash_point(&format!("legacy-renamed-{index}"));
         }
+        if decision == Decision::Preserve {
+            for backup in &found.backups {
+                let target = target_of(backup);
+                preserved.push(format!(
+                    "{} preserved: no transaction-bound file evidence authorizes restoration",
+                    target.display()
+                ));
+                files.push(target);
+            }
+        }
         let event = RecoveryEvent {
             transaction,
             source: "legacy",
@@ -153,19 +176,30 @@ pub(super) fn recover_legacy(
                 Decision::Discard => RecoveryOutcome::Discarded,
                 Decision::Preserve => RecoveryOutcome::Preserved,
                 Decision::Forward => RecoveryOutcome::RolledForward,
+                Decision::Rollback if restored == 0 && !preserved.is_empty() => {
+                    RecoveryOutcome::Preserved
+                }
                 Decision::Rollback => RecoveryOutcome::RolledBack,
             },
             files,
-            detail: Some(
-                if verify {
-                    "durable chain verification pending"
-                } else if decision == Decision::Preserve {
-                    "live targets preserved; no transaction-bound evidence authorizes their rollback"
-                } else {
-                    "decision bound to this transaction's file evidence"
-                }
-                .into(),
-            ),
+            detail: Some(if !preserved.is_empty() {
+                format!(
+                    "restored {restored} target(s); {}{}",
+                    preserved.join("; "),
+                    if verify {
+                        "; durable chain verification pending"
+                    } else {
+                        ""
+                    }
+                )
+            } else if verify {
+                "durable chain verification pending".into()
+            } else if decision == Decision::Preserve {
+                "live targets preserved; no transaction-bound evidence authorizes their rollback"
+                    .into()
+            } else {
+                "decision bound to this transaction's file evidence".into()
+            }),
         };
         super::recover::record_legacy_decision(
             paths,
