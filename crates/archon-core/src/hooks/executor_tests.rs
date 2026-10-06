@@ -1,6 +1,10 @@
 use super::{HookConfig, HookOutcome, execute_hook};
 use crate::hooks::{HookCommandType, HookFailurePolicy};
 
+/// Hook timeout for tests of a rule, not of timing: a hang guard that shell
+/// start time on a loaded runner cannot reach. 2s could, and did (#351).
+const HANG_GUARD_SECS: u32 = 60;
+
 fn config(command: &str, timeout: u32) -> HookConfig {
     HookConfig {
         hook_type: HookCommandType::Command,
@@ -30,7 +34,7 @@ async fn command_drains_pipes_before_writing_a_large_payload() {
         dir.path(),
         "issue92-session",
         "PreToolUse",
-        2,
+        HANG_GUARD_SECS,
     )
     .await
     .expect("output must drain while the payload is written");
@@ -50,10 +54,14 @@ fn unix_output_before_stdin_command(consumed: &std::path::Path) -> String {
 #[tokio::test]
 #[cfg(unix)]
 async fn hook_environment_is_allowlisted_and_includes_explicit_context() {
+    assert!(
+        std::env::var_os("CARGO_MANIFEST_DIR").is_some(),
+        "precondition: the \"missing\" check proves isolation only if this is set"
+    );
     let output = execute_hook(
         &config(
             "printf '{\"outcome\":\"success\",\"additional_context\":\"%s|%s|%s|%s\"}' \"${ARCHON_SESSION_ID}\" \"${ARCHON_CWD}\" \"${ARCHON_HOOK_EVENT}\" \"${CARGO_MANIFEST_DIR:-missing}\"",
-            2,
+            HANG_GUARD_SECS,
         ),
         &serde_json::json!({}),
         std::path::Path::new("/tmp"),
@@ -62,7 +70,7 @@ async fn hook_environment_is_allowlisted_and_includes_explicit_context() {
     )
     .await;
 
-    assert_eq!(output.outcome, HookOutcome::Success);
+    assert_eq!(output.outcome, HookOutcome::Success, "result={output:?}");
     assert_eq!(
         output.additional_context.as_deref(),
         Some("issue92-session|/tmp|PreToolUse|missing")
@@ -139,7 +147,7 @@ async fn hook_output_has_a_shared_bound_and_reports_truncation() {
     let output = execute_hook(
         &config(
             "yes stdout | head -c 131072; yes stderr | head -c 131072 >&2; exit 2",
-            2,
+            HANG_GUARD_SECS,
         ),
         &serde_json::json!({}),
         std::path::Path::new("/tmp"),
@@ -179,7 +187,7 @@ async fn windows_hook_output_has_a_shared_bound_and_reports_truncation() {
         dir.path(),
         "issue92-session",
         "PreToolUse",
-        60,
+        HANG_GUARD_SECS,
     )
     .await;
     let output = result.unwrap_or_else(|error| {
@@ -203,9 +211,14 @@ async fn windows_hook_output_has_a_shared_bound_and_reports_truncation() {
 #[tokio::test]
 #[cfg(windows)]
 async fn windows_hook_uses_isolated_environment_and_explicit_context() {
-    unsafe { std::env::set_var("ISSUE92_FORBIDDEN", "must-not-reach-hooks") };
+    // `std::env::set_var` races the other threads of this test binary (#351),
+    // so a child process that inherits the variable from birth does the check.
+    if std::env::var_os(FORBIDDEN_VAR).is_none() {
+        rerun_with_forbidden_var("windows_hook_uses_isolated_environment_and_explicit_context");
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
-    let mut hook = config(&windows_environment_command(), 2);
+    let mut hook = config(&windows_environment_command(), HANG_GUARD_SECS);
     hook.hook_type = HookCommandType::Prompt;
     let output = execute_hook(
         &hook,
@@ -215,9 +228,8 @@ async fn windows_hook_uses_isolated_environment_and_explicit_context() {
         "PreToolUse",
     )
     .await;
-    unsafe { std::env::remove_var("ISSUE92_FORBIDDEN") };
 
-    assert_eq!(output.outcome, HookOutcome::Success);
+    assert_eq!(output.outcome, HookOutcome::Success, "result={output:?}");
     let context = output.additional_context.unwrap();
     let parts: Vec<_> = context.split('|').collect();
     assert_eq!(parts[0], "issue92-session");
@@ -292,6 +304,31 @@ async fn windows_hook_timeout_kills_descendant_process() {
 
     assert_eq!(output.outcome, HookOutcome::Blocking, "result={output:?}");
     wait_until_process_is_absent(&pid).await;
+}
+
+/// Must match the name in `windows_environment_command`. CI sets it too.
+#[cfg(windows)]
+const FORBIDDEN_VAR: &str = "ISSUE92_FORBIDDEN";
+
+/// Run one test of this binary in a child process with [`FORBIDDEN_VAR`] set,
+/// and fail unless exactly that one test ran there and passed.
+#[cfg(windows)]
+fn rerun_with_forbidden_var(test_name: &str) {
+    let module = module_path!();
+    let module = module.split_once("::").map_or(module, |(_, rest)| rest);
+    let exact = format!("{module}::{test_name}");
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([exact.as_str(), "--exact", "--test-threads=1", "--nocapture"])
+        .env(FORBIDDEN_VAR, "must-not-reach-hooks")
+        .output()
+        .expect("child test process must start");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("test result: ok. 1 passed"),
+        "child run of {exact} failed: {:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        output.status
+    );
 }
 
 #[cfg(windows)]
