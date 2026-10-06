@@ -167,7 +167,8 @@ pub struct CommandSite<'a> {
     pub output_bytes: usize,
     pub timeout_secs: u64,
     /// Redacts allowlisted host values from captured output; a direct site
-    /// forwards the host environment unredacted, as agent shells do.
+    /// forwards no operator variable (its default policy, Issue 345) and
+    /// redacts nothing.
     pub(super) redactor: Option<&'a ScratchRoots>,
 }
 impl CommandSite<'_> {

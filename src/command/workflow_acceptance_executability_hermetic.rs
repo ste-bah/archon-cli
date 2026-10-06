@@ -21,9 +21,10 @@
 //! was copied is no evidence of any tree, and the run is unproven. A copy
 //! larger than [`PROJECT_COPY_BYTES`] is refused with the reason, never
 //! truncated. Checks run under the acceptance stage's own direct-site
-//! environment (the host environment with the engine's credentials withheld,
-//! `archon_tools::bash_env`), building warm from one cached target directory
-//! per repository under the copy parent. Copies older than a day that a
+//! environment (the default policy of the one check-environment rule,
+//! `archon_workflow::acceptance_check_environment`, Issue 345), building warm
+//! from one cached target directory per repository under the copy parent.
+//! Copies older than a day that a
 //! killed probe left are swept before a new one is made; a copy that cannot
 //! be removed is reported.
 
@@ -45,27 +46,13 @@ pub(super) const WARM_TARGETS: &str = "archon-probe-targets";
 /// Why a hermetic run gave no verdict.
 pub(super) struct Unrun(pub(super) String);
 
-/// The acceptance direct site's environment (`archon_tools::bash::host_env`,
-/// as `workflow_live_v3_acceptance_checks` builds it: the host's, with the
-/// engine's own credentials withheld), with the build directory set to
-/// `target`: a probe never builds into the host's own target directory.
-pub(super) fn probe_environment(target: Option<&Path>) -> BTreeMap<String, String> {
-    with_target(archon_tools::bash::host_env(), target)
-}
-
-pub(super) fn with_target(
-    vars: impl IntoIterator<Item = (String, String)>,
-    target: Option<&Path>,
-) -> BTreeMap<String, String> {
-    let mut environment: BTreeMap<String, String> = vars.into_iter().collect();
-    environment.remove("CARGO_TARGET_DIR");
-    if let Some(target) = target {
-        environment.insert(
-            "CARGO_TARGET_DIR".into(),
-            target.to_string_lossy().into_owned(),
-        );
+impl HostProbe {
+    /// Make the probe's own hermetic copies under `parent`.
+    #[cfg(all(test, unix))]
+    pub(crate) fn with_copy_parent(mut self, parent: PathBuf) -> Self {
+        self.copy_parent = parent;
+        self
     }
-    environment
 }
 
 /// Project paths never copied, as the scratch observation never exports
@@ -363,7 +350,11 @@ pub(super) async fn run_in_copy(
     let mut site = DirectSite {
         repository: copy.repository.clone(),
         project: copy.project.clone(),
-        environment: probe_environment(Some(&target)),
+        // The direct site's default policy; a probe never builds into the
+        // host's own target directory.
+        host: probe.host.clone(),
+        policy: None,
+        target: Some(target),
         // Issue 323: the probe's one per-check bound, as at every site.
         timeout_secs: probe.check_bound_secs(),
         output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,

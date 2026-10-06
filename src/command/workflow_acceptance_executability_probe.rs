@@ -77,8 +77,10 @@ impl HostProbe {
                 let site = DirectSite {
                     repository: self.repository.clone(),
                     project: self.project.clone(),
-                    // Exactly the round's own direct site environment.
-                    environment: archon_tools::bash::host_env().into_iter().collect(),
+                    // The round's own direct site: the default policy.
+                    host: self.host.clone(),
+                    policy: None,
+                    target: None,
                     // Issue 323: the probe's one per-check bound.
                     timeout_secs: self.check_bound_secs(),
                     output_bytes: DIRECT_DEFAULT_OUTPUT_BYTES,

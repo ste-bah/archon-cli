@@ -171,6 +171,8 @@ pub(crate) struct HostProbe {
     data_states: Mutex<BTreeMap<PathBuf, Vec<String>>>,
     repository: PathBuf,
     site: Site,
+    /// The host environment its sites build a check's from (Issue 345).
+    host: BTreeMap<String, String>,
     diagnostics: Mutex<Vec<String>>,
     /// What the host could not run, after its environment repairs.
     unproven: Mutex<BTreeMap<String, String>>,
@@ -258,6 +260,7 @@ impl HostProbe {
             data_states: Mutex::new(BTreeMap::new()),
             repository,
             site,
+            host: archon_workflow::acceptance_check_environment::host_environment(),
             diagnostics: Mutex::new(Vec::new()),
             unproven: Mutex::new(BTreeMap::new()),
             baseline: None,
@@ -314,13 +317,6 @@ impl HostProbe {
     /// that original ran on (A5, `FailedTree`).
     pub(crate) fn with_failed_tree(self, tree: FailedTree) -> Self {
         *self.failed_tree.lock().expect("failed tree lock") = Some(tree);
-        self
-    }
-
-    /// Make the probe's own hermetic copies under `parent`.
-    #[cfg(all(test, unix))]
-    pub(crate) fn with_copy_parent(mut self, parent: PathBuf) -> Self {
-        self.copy_parent = parent;
         self
     }
 

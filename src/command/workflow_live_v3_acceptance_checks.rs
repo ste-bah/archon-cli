@@ -31,9 +31,13 @@ fn direct_site(context: &StageContext) -> DirectSite {
     DirectSite {
         repository: context.repository.clone(),
         project: context.project.clone(),
-        environment: archon_tools::bash::host_env()
-            .into_iter()
-            .collect::<BTreeMap<_, _>>(),
+        // Issue 345: built from the host's by the one check-environment
+        // rule (the run's policy, else the default one), never handed it.
+        host: archon_workflow::acceptance_check_environment::host_environment(),
+        policy: context.binding.as_ref().map(|binding| {
+            archon_workflow::acceptance_check_environment::CheckPolicy::configured(&binding.policy)
+        }),
+        target: None,
         timeout_secs: context.binding.as_ref().map_or(
             archon_workflow::acceptance_scratch::DIRECT_DEFAULT_TIMEOUT_SECS,
             |binding| binding.policy.timeout_secs,

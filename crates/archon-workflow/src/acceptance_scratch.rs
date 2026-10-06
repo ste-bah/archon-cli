@@ -162,7 +162,12 @@ impl ScratchRoots {
     }
     pub(super) fn prepare_inner(policy: &ScratchPolicy, commit: &str) -> WorkflowResult<Self> {
         policy.validate()?;
-        let host_environment = policy.host_environment()?;
+        // Issue 345: the one check-environment rule's forwarded values.
+        let host_environment = crate::acceptance_check_environment::forwarded_values(
+            &crate::acceptance_check_environment::host_environment(),
+            &policy.environment_allowlist,
+        )
+        .map_err(invalid)?;
         control::check()?;
         if commit.len() != 40 || !commit.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(invalid("recorded source commit must be a full object id"));
@@ -401,18 +406,26 @@ impl ScratchRoots {
     pub fn target(&self) -> PathBuf {
         self.target.clone()
     }
+    /// A check's variables here but the forwarded values (Issue 345's one
+    /// rule, `acceptance_check_environment`): the policy's, and this
+    /// scratch's own HOME, TMPDIR, CARGO_HOME and build directory.
     pub fn environment(&self, policy: &ScratchPolicy) -> BTreeMap<String, String> {
-        let mut env = policy.environment.clone();
-        env.insert("PATH".into(), policy.toolchain_path.clone());
-        for (key, path) in [
-            ("HOME", self.root.join("home")),
-            ("TMPDIR", self.root.join("tmp")),
-            ("CARGO_HOME", self.root.join("cargo-home")),
-            ("CARGO_TARGET_DIR", self.target.clone()),
-        ] {
-            env.insert(key.into(), path.to_string_lossy().into_owned());
-        }
-        env
+        use crate::acceptance_check_environment::{CheckPolicy, host_environment, site_variables};
+        let (home, tmp, cargo) = (
+            self.root.join("home"),
+            self.root.join("tmp"),
+            self.root.join("cargo-home"),
+        );
+        site_variables(
+            &host_environment(),
+            &CheckPolicy::configured(policy),
+            &[
+                ("HOME", &home),
+                ("TMPDIR", &tmp),
+                ("CARGO_HOME", &cargo),
+                ("CARGO_TARGET_DIR", &self.target),
+            ],
+        )
     }
     pub(super) fn command_environment(&self, policy: &ScratchPolicy) -> BTreeMap<String, String> {
         let mut env = self.environment(policy);

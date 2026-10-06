@@ -15,13 +15,19 @@ const DRAIN_GRACE_SECS: u64 = 5;
 /// The child's entire environment. `PATH` comes from the policy's configured
 /// toolchain rather than a literal, so a check can find the binaries the host
 /// declared; every other host binding is dropped unless the policy names it in
-/// its allowlist. The caller clears the inherited environment first, so this is
-/// the whole of what crosses the boundary.
+/// its allowlist, but the platform's own process variables every check site
+/// keeps (`acceptance_check_environment::SYSTEM_VARIABLES`, Issue 345: none
+/// outside Windows). The caller clears the inherited environment first, so
+/// this is the whole of what crosses the boundary.
 pub(crate) fn child_environment(
     policy: &ScratchPolicy,
     host: impl Fn(&str) -> Option<OsString>,
 ) -> Vec<(String, OsString)> {
-    let mut bindings = vec![("PATH".to_string(), policy.toolchain_path.clone().into())];
+    let mut bindings: Vec<(String, OsString)> =
+        (archon_workflow::acceptance_check_environment::SYSTEM_VARIABLES.iter())
+            .filter_map(|name| Some((name.to_string(), host(name)?)))
+            .collect();
+    bindings.push(("PATH".to_string(), policy.toolchain_path.clone().into()));
     for key in &policy.environment_allowlist {
         // `validate` already refuses an allowlist that names PATH or any other
         // host execution binding, so a named key can never displace the
