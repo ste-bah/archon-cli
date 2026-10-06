@@ -4,6 +4,14 @@
 
 use crate::{Cli, Result};
 
+#[cfg(not(test))]
+use archon_tui::voice::real_audio_source as open_voice_audio;
+#[cfg(test)]
+#[path = "tui_voice_test_factory.rs"]
+pub(crate) mod voice_test_factory;
+#[cfg(test)]
+use voice_test_factory::open_audio as open_voice_audio;
+
 // -- Output style: --list-output-styles (CLI-310) ----------------------------
 pub(crate) fn handle_list_output_styles() -> Result<()> {
     use archon_core::output_style::OutputStyleRegistry;
@@ -182,7 +190,7 @@ pub(crate) async fn setup_voice_pipeline(
     let (voice_evt_tx, voice_evt_rx) = tokio::sync::mpsc::channel::<VTuiEvent>(16);
     let (level_tx, mut level_rx) = tokio::sync::mpsc::channel::<f32>(LEVEL_QUEUE);
 
-    let audio = match archon_tui::voice::real_audio_source(&config.voice.device, Some(level_tx)) {
+    let audio = match open_voice_audio(&config.voice.device, Some(level_tx)) {
         Ok(audio) => audio,
         Err(error) => {
             // Loud, and on stderr as well as in the log: the user turned voice

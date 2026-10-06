@@ -17,6 +17,8 @@ mod main_resume;
 mod main_startup;
 #[cfg(test)]
 mod main_tests;
+#[cfg(test)]
+mod main_voice_tests;
 mod panic_save;
 mod runtime;
 pub(crate) mod session;
@@ -56,7 +58,8 @@ async fn run() -> Result<()> {
     let session_id = &bootstrap.session_id;
     gametheory_tool_executor::install(config.clone(), env_vars.clone());
 
-    main_startup::run(
+    run_interactive_after_dispatch(
+        config,
         dispatch_modes(
             cli,
             config,
@@ -65,7 +68,6 @@ async fn run() -> Result<()> {
             session_id,
             &bootstrap.working_dir_for_config,
         ),
-        || crate::command::tui_helpers::setup_voice_pipeline(config),
         |(cli, resume_messages), voice_event_rx| async move {
             crate::session::run_interactive_session(
                 config,
@@ -78,6 +80,24 @@ async fn run() -> Result<()> {
             )
             .await
         },
+    )
+    .await
+}
+
+/// Keep the production voice callback shared with the interactive wiring tests.
+/// Dispatch and the session consumer may be controlled without replacing setup.
+async fn run_interactive_after_dispatch<S, IF>(
+    config: &archon_core::config::ArchonConfig,
+    dispatch: impl std::future::Future<Output = Result<Option<S>>>,
+    interactive: impl FnOnce(S, Option<tokio::sync::mpsc::Receiver<archon_tui::app::TuiEvent>>) -> IF,
+) -> Result<()>
+where
+    IF: std::future::Future<Output = Result<()>>,
+{
+    main_startup::run(
+        dispatch,
+        || crate::command::tui_helpers::setup_voice_pipeline(config),
+        interactive,
     )
     .await
 }
