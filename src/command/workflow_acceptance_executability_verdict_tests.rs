@@ -248,25 +248,135 @@ fn a_program_that_ran_and_exited_127_for_a_missing_script_is_a_verdict() {
     assert!(no_verdict("archon-333-absent x", &tcsh, &site(&[("PATH", "/nowhere")])).is_some());
 }
 
+/// Issue 333: a shell that runs the check may have the check's program's
+/// own name; its report that the program was not found never proves the
+/// program ran. Only the program's own message does.
+#[cfg(unix)]
+#[test]
+fn only_the_programs_own_message_proves_it_ran() {
+    let nowhere = site(&[("PATH", "/nowhere")]);
+    let given = "/usr/local/bin/sh";
+    let cases: &[(&str, &str, bool)] = &[
+        (
+            "sh scripts/x.sh",
+            "/bin/sh: line 1: sh: command not found",
+            false,
+        ),
+        (
+            "bash scripts/x.sh",
+            "/bin/bash: line 1: bash: command not found",
+            false,
+        ),
+        ("bash scripts/x.sh", "bash: bash: command not found", false),
+        ("dash x", "/bin/dash: 1: dash: not found", false),
+        (
+            "/usr/local/bin/sh x",
+            "/bin/sh: line 1: /usr/local/bin/sh: No such file or directory",
+            false,
+        ),
+        (
+            "bash scripts/x.sh",
+            "env: bash: No such file or directory",
+            false,
+        ),
+        ("bash scripts/x.sh", "sh: bash: not found", false),
+        ("bash scripts/x.sh", "sh: 1: bash: not found", false),
+        ("bash scripts/x.sh", "zsh: command not found: bash", false),
+        // Its own message: it ran, and 127 is its answer.
+        (
+            "bash scripts/three.sh",
+            "bash: scripts/three.sh: No such file or directory",
+            true,
+        ),
+        (
+            "bash scripts/three.sh",
+            "/bin/bash: scripts/three.sh: No such file or directory",
+            true,
+        ),
+        (
+            "bash scripts/three.sh",
+            "/bin/bash: line 0: scripts/three.sh: No such file or directory",
+            true,
+        ),
+    ];
+    for (command, stderr, verdict) in cases {
+        if command.starts_with(given) && std::path::Path::new(given).exists() {
+            continue;
+        }
+        let result = run(Some(127), "", &format!("{stderr}\n"));
+        let why = no_verdict(command, &result, &nowhere);
+        assert_eq!(why.is_none(), *verdict, "{command} / {stderr}: {why:?}");
+        if !verdict {
+            assert!(why.unwrap().contains("not on its search path"), "{stderr}");
+        }
+    }
+}
+
+/// A site that resolves programs by Windows's rules (or not), whatever
+/// this platform is, with only `variables`.
+fn site_by_rules(variables: &[(&str, &str)], windows: bool) -> Context {
+    let environment = (variables.iter())
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect();
+    Context::by_rules(environment, Vec::new(), windows)
+}
+
+/// Issue 333 (CI on Windows): only the site's `Path` and `PATHEXT` decide
+/// whether a program that exited 127 without naming itself was there. By
+/// Windows's rules `Path` is the search path, split on `;`, and the
+/// program is found with `PATHEXT`'s `.exe`: a verdict. Read as Unix reads
+/// it, `Path` is no search path at all: no verdict.
+#[test]
+fn a_sites_path_and_pathext_alone_decide_whether_a_program_is_there() {
+    let (empty, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::write(bin.path().join("archon333tool.exe"), "").unwrap();
+    let path = format!("{};{}", empty.path().display(), bin.path().display());
+    let variables = [("Path", path.as_str()), ("PATHEXT", ".com;.exe")];
+    let ran = run(Some(127), "", "missing input file\n");
+    let command = "archon333tool --in data.csv";
+    assert_eq!(
+        no_verdict(command, &ran, &site_by_rules(&variables, true)),
+        None
+    );
+    let why = no_verdict(command, &ran, &site_by_rules(&variables, false));
+    assert!(why.is_some_and(|why| why.contains("not on its search path")));
+    // Without `.exe` among PATHEXT's, or without the directory, it is not there.
+    let no_exe = [("Path", path.as_str()), ("PATHEXT", ".com")];
+    assert!(no_verdict(command, &ran, &site_by_rules(&no_exe, true)).is_some());
+    let elsewhere = [
+        ("Path", empty.path().to_str().unwrap()),
+        ("PATHEXT", ".exe"),
+    ];
+    assert!(no_verdict(command, &ran, &site_by_rules(&elsewhere, true)).is_some());
+    // A Windows program's own message, by its drive path, proves it ran.
+    let own = run(
+        Some(127),
+        "",
+        "C:\\Git\\bin\\archon333tool.exe: scripts/three.sh: No such file or directory\n",
+    );
+    assert_eq!(
+        no_verdict(command, &own, &site_by_rules(&elsewhere, true)),
+        None
+    );
+}
+
 /// Issue 333 (CI on Windows): the site's `Path` is its search path, split
-/// on `;`, and `bash` is found as `bash.exe` by the site's `PATHEXT`.
+/// on `;`, and `bash` is found as `bash.exe` by the site's `PATHEXT`. The
+/// program's message does not name it, so only those variables decide.
 #[cfg(windows)]
 #[test]
 fn a_windows_sites_path_and_pathext_resolve_as_its_child_does() {
     let (empty, bin) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     std::fs::write(bin.path().join("bash.exe"), "").unwrap();
     let path = format!("{};{}", empty.path().display(), bin.path().display());
+    let unnamed = run(Some(127), "", "missing input file\n");
     let at = site(&[("Path", path.as_str()), ("PATHEXT", ".COM;.EXE")]);
-    let missing = run(
-        Some(127),
-        "",
-        "bash: scripts/three.sh: No such file or directory\n",
-    );
-    assert_eq!(no_verdict("bash scripts/three.sh", &missing, &at), None);
+    assert_eq!(no_verdict("bash scripts/three.sh", &unnamed, &at), None);
     let at = site(&[
         ("Path", empty.path().to_str().unwrap()),
         ("PATHEXT", ".COM;.EXE"),
     ]);
+    assert!(no_verdict("bash scripts/three.sh", &unnamed, &at).is_some());
     let absent = run(Some(127), "", "sh: bash: command not found\n");
     assert!(no_verdict("bash scripts/three.sh", &absent, &at).is_some());
 }

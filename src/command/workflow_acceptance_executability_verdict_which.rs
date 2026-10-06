@@ -136,8 +136,8 @@ pub(super) fn candidates(name: &str, extensions: &[String]) -> Vec<String> {
 /// A program file's name without the executable extension this platform
 /// adds (`cargo.exe` is `cargo` on Windows) of those `pathext` lists: the
 /// name its subcommands use.
-pub(super) fn bare_name(name: &str, pathext: Option<&str>) -> String {
-    strip_extension(name, &extensions(cfg!(windows), pathext))
+pub(super) fn bare_name(name: &str, pathext: Option<&str>, windows: bool) -> String {
+    strip_extension(name, &extensions(windows, pathext))
 }
 
 /// `name` without the first of `extensions` it ends with (without case).

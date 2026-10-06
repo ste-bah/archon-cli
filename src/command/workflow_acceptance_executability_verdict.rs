@@ -89,6 +89,9 @@ pub(crate) struct Context {
     /// variables sees them (`verdict_which::variable`).
     path: Option<String>,
     pathext: Option<String>,
+    /// Whether the site resolves programs by Windows's rules: this
+    /// platform's, but for a test of those rules on any platform.
+    windows: bool,
     deliverables: Vec<String>,
     /// The variables a listing of a tool runs with (Issue 333), and the
     /// search path the check runs on among them. Only the site's own
@@ -141,8 +144,17 @@ impl Context {
     }
 
     fn at(environment: BTreeMap<String, String>, deliverables: Vec<String>) -> Self {
-        let windows = cfg!(windows);
+        Self::by_rules(environment, deliverables, cfg!(windows))
+    }
+
+    /// As [`Context::at`], resolving programs by Windows's rules or not.
+    fn by_rules(
+        environment: BTreeMap<String, String>,
+        deliverables: Vec<String>,
+        windows: bool,
+    ) -> Self {
         Self {
+            windows,
             path: which::variable(&environment, "PATH", windows).map(str::to_string),
             pathext: which::variable(&environment, "PATHEXT", windows).map(str::to_string),
             deliverables,
@@ -161,12 +173,12 @@ impl Context {
     /// launcher finds it with the site's own variables (`verdict_which`).
     fn find(&self, name: &str) -> Option<std::path::PathBuf> {
         let path = self.path.as_deref()?;
-        which::find_on(path, self.pathext.as_deref(), name, cfg!(windows))
+        which::find_on(path, self.pathext.as_deref(), name, self.windows)
     }
 
     /// `name` without the executable extension the site's `PATHEXT` adds.
     fn bare_name(&self, name: &str) -> String {
-        which::bare_name(name, self.pathext.as_deref())
+        which::bare_name(name, self.pathext.as_deref(), self.windows)
     }
 }
 
@@ -257,31 +269,82 @@ fn missing_program(commands: &[Simple], output: &str, at: &Context) -> Option<St
         .map(str::to_string)
 }
 
-/// Whether a line of `output` is the program `program`'s own message: it
-/// starts with the program's name (by any path to it, with or without its
-/// executable extension), then `: `.
+/// Whether a line of `output` is the program `program`'s own message, so
+/// it ran: the line starts with the program's name (by any path to it,
+/// with or without its executable extension), then `:`, and the rest --
+/// after a shell's `line N: ` or `N: ` -- is not a report that the program
+/// itself was not found. The shell that runs a check may have the
+/// program's own name (`/bin/sh: line 1: sh: command not found` for the
+/// check `sh x.sh`), and its report that `sh` was not found is no proof.
 fn printed_by(output: &str, program: &str, at: &Context) -> bool {
     let name = |text: &str| {
         let file = text.rsplit(['/', '\\']).next().unwrap_or(text);
         at.bare_name(file)
     };
+    let same = |a: &str, b: &str| match at.windows {
+        true => a.eq_ignore_ascii_case(b),
+        false => a == b,
+    };
     let wanted = name(program);
     (output.lines()).any(|line| {
-        let Some((speaker, said)) = line.trim_start().split_once(": ") else {
+        let line = line.trim_start();
+        // A drive's colon (`C:\Git\bin\bash.exe: ...`) is not the speaker's.
+        let bytes = line.as_bytes();
+        let drive = bytes.len() > 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'\\' | b'/');
+        let skip = if drive { 2 } else { 0 };
+        let Some(colon) = line[skip..].find(':').map(|at| at + skip) else {
             return false;
         };
-        // `foo: command not found` (as tcsh says it) names what did not run.
-        let lacking = said.trim_start().to_ascii_lowercase();
-        let speaker = name(speaker.trim());
-        !lacking.starts_with("command not found")
-            && !lacking.starts_with("not found")
-            && !speaker.is_empty()
-            && !speaker.contains(char::is_whitespace)
-            && match cfg!(windows) {
-                true => speaker.eq_ignore_ascii_case(&wanted),
-                false => speaker == wanted,
-            }
+        let (speaker, said) = (&line[..colon], &line[colon + 1..]);
+        let speaker = speaker.trim();
+        if speaker.is_empty()
+            || speaker.contains(char::is_whitespace)
+            || !same(&name(speaker), &wanted)
+        {
+            return false;
+        }
+        !not_found(said, program, &wanted, &same)
     })
+}
+
+/// Whether `said`, the rest of a line after its speaker, reports that the
+/// program -- by its bare name `bare` or as the check gave it, `given` --
+/// was not found: `[line N: ]prog: command not found`, `[N: ]prog: not
+/// found`, `prog: No such file or directory`, `command not found: prog`,
+/// or (as tcsh says it of itself) just `command not found`.
+fn not_found(said: &str, given: &str, bare: &str, same: &dyn Fn(&str, &str) -> bool) -> bool {
+    let mut rest = said.trim_start();
+    if let Some(after) = rest.strip_prefix("line ") {
+        rest = after;
+    }
+    if let Some((number, after)) = rest.split_once(": ")
+        && !number.is_empty()
+        && number.chars().all(|c| c.is_ascii_digit())
+    {
+        rest = after;
+    }
+    let lower = rest.to_ascii_lowercase();
+    const REPORTS: [&str; 3] = [
+        "command not found",
+        "not found",
+        "no such file or directory",
+    ];
+    if REPORTS[..2].iter().any(|report| lower.starts_with(report)) {
+        return true;
+    }
+    if let Some(named) = lower.strip_prefix("command not found:") {
+        let named = named.trim();
+        return same(named, &given.to_ascii_lowercase()) || same(named, &bare.to_ascii_lowercase());
+    }
+    let Some((named, report)) = rest.split_once(": ") else {
+        return false;
+    };
+    let report = report.trim().to_ascii_lowercase();
+    (same(named.trim(), given) || same(named.trim(), bare))
+        && REPORTS.iter().any(|known| report.starts_with(known))
 }
 
 /// The program's own name: a build tool whatever directory it is run from.

@@ -81,6 +81,7 @@ impl Bin {
         Context {
             path: Some(self.path()),
             pathext: None,
+            windows: cfg!(windows),
             deliverables: Vec::new(),
             environment: site,
             host_path: Some(self.host_path()),
