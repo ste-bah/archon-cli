@@ -84,7 +84,7 @@ impl JournalPaths {
             lock: archon_workflow::task_set_publish_lock::lock_path(pin_path),
             chain_lock: pin_path.with_extension("chain.lock"),
             journal,
-            log: pin_path.with_extension("publish-recovery.log"),
+            log: archon_workflow::task_set_publish_lock::recovery_log_path(pin_path),
         }
     }
 

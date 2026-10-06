@@ -337,3 +337,100 @@ async fn a_landing_cannot_switch_off_a_pinned_module_or_redirect_a_pinned_target
     );
     assert!(git(&f.repo, &["ls-files", "tests/weak.rs"]).is_empty());
 }
+
+/// Issue 338: the host's settlement, as this binary installs it: a journal
+/// whose bytes say `stuck` cannot be settled (its cleanup fails); any other
+/// is settled by removing it.
+fn install_settlement() {
+    archon_workflow::task_set_publish_lock::register_settle(|pin, _tasks| {
+        for path in archon_workflow::task_set_publish_lock::journal_paths(pin) {
+            match std::fs::read_to_string(&path) {
+                Ok(text) if text.contains("stuck") => {
+                    return Err(format!("removing {}: stuck", path.display()));
+                }
+                Ok(_) => std::fs::remove_file(&path).map_err(|error| error.to_string())?,
+                Err(_) => {}
+            }
+        }
+        Ok(())
+    });
+}
+
+fn journal(f: &Fixture, tasks: &Path, temp: bool) -> std::path::PathBuf {
+    let pin = PinStore::frozen(&project_root(f), tasks).pin.unwrap();
+    archon_workflow::task_set_publish_lock::journal_paths(&pin)[usize::from(temp)].clone()
+}
+
+fn implement() -> Edits {
+    Edits {
+        files: vec![("owned.txt", "implemented\n")],
+        report: vec!["owned.txt"],
+        via_adapter: true,
+    }
+}
+
+/// Issue 338: a publish a crash left mid-commit is settled under the
+/// exclusive lock before the landing reads its pins, and the branch lands.
+#[tokio::test]
+async fn a_publish_left_mid_commit_is_settled_before_the_landing_reads_its_pins() {
+    install_settlement();
+    let f = Fixture::new();
+    let (tasks, _) = frozen_task_set(&f);
+    let left = journal(&f, &tasks, false);
+    std::fs::write(&left, br#"{"state": "committed"}"#).unwrap();
+    let out = f
+        .wave("settle", vec![(vec!["owned.txt"], implement())])
+        .await;
+    assert_eq!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
+    assert!(!left.exists(), "the landing read over a left journal");
+    assert_eq!(git(&f.repo, &["show", "HEAD:owned.txt"]), "implemented");
+}
+
+/// Issue 338: a journal no read can settle -- its cleanup fails, or only its
+/// temp is left and that cannot be removed -- pauses the run with the
+/// evidence; it never refuses the branch (every branch would be), and once
+/// the operator fixes the cause the same work lands.
+#[tokio::test]
+async fn a_journal_no_read_can_settle_pauses_the_wave_and_the_work_lands_once_fixed() {
+    install_settlement();
+    for temp in [false, true] {
+        let f = Fixture::new();
+        let (tasks, _) = frozen_task_set(&f);
+        let left = journal(&f, &tasks, temp);
+        std::fs::write(&left, br#"{"state": "committed", "why": "stuck"}"#).unwrap();
+        let error = f
+            .try_wave("stuck", vec![(vec!["owned.txt"], implement())])
+            .await
+            .expect_err("a wave over an unsettled journal");
+        let WorkflowError::ControlPaused(evidence) = error else {
+            panic!("the wave failed instead of pausing: {error}");
+        };
+        let state = if temp {
+            "a journal temp only"
+        } else {
+            "committed"
+        };
+        for needed in [
+            journal(&f, &tasks, false).display().to_string(),
+            format!("state: {state}"),
+            "stuck".into(),
+            "Operator remedy".into(),
+            "archon workflow resume --live --yes".into(),
+        ] {
+            assert!(evidence.contains(&needed), "{needed} missing: {evidence}");
+        }
+        assert!(left.exists(), "the journal's decision was lost");
+        assert_eq!(git(&f.repo, &["show", "HEAD:owned.txt"]), "baseline");
+        let partial = run_root(&f).join("write-coordination/stages/stuck/partial/stuck-0.patch");
+        let kept = std::fs::read_to_string(&partial).expect("the paused branch's work is kept");
+        assert!(kept.contains("implemented"), "{kept}");
+        // The operator's fix: the cleanup can run again.
+        std::fs::write(&left, br#"{"state": "committed"}"#).unwrap();
+        let out = f
+            .wave("fixed", vec![(vec!["owned.txt"], implement())])
+            .await;
+        assert_eq!(out.status, WorkflowV2Status::Accepted, "{out:#?}");
+        assert!(!left.exists());
+        assert_eq!(git(&f.repo, &["show", "HEAD:owned.txt"]), "implemented");
+    }
+}

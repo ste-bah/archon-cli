@@ -70,16 +70,15 @@ impl PublishLock {
 }
 
 /// Install the host's settlement of an interrupted publish for the check-
-/// source repins of `archon-workflow`, which hold the publish lock themselves
-/// and settle before they write (Issue 336). Idempotent.
+/// source repins and reads of `archon-workflow`, which hold the publish lock
+/// themselves and settle before they write (Issue 336) or read (Issue 338).
+/// Idempotent.
 pub(crate) fn register_publish_settle() {
     archon_workflow::task_set_publish_lock::register_settle(|pin_path, tasks_root| {
         let paths = JournalPaths::for_pin(pin_path);
         super::recover::recover_before_publish(&paths, pin_path, tasks_root)
             .map(drop)
-            .map_err(|error| {
-                format!("settling the interrupted publish before the repin: {error:#}")
-            })
+            .map_err(|error| format!("settling the interrupted publish: {error:#}"))
     });
 }
 

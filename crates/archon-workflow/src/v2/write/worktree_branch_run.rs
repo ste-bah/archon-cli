@@ -278,14 +278,27 @@ pub(crate) async fn run_one_worktree_branch(
     // grant opened -- before the landing marker and every gate read the
     // worktree.
     let check_source_hold = if grant.forbidden.is_empty() {
-        super::check_source_hold::hold_check_source_changes(
+        let held = super::check_source_hold::hold_check_source_changes(
             &prepared.coordinator_plan,
             &|path| grant.covers(path),
             ctx.run_root,
             (&ctx.execution.call.id, &branch.id),
             &task_ids,
             &mut result,
-        )
+        );
+        // Issue 338: a pause keeps the branch's work for the resumed attempt,
+        // as the wave's partial-work capture would have (best effort, as it).
+        if held.is_err() {
+            let _ = super::partial_work::capture_partial_work(
+                &branch.workspace_root,
+                ctx.run_root,
+                &ctx.execution.call.id,
+                &branch.id,
+                &task_ids,
+                Some(super::partial_work::PartialOrigin::from_result(&result)),
+            );
+        }
+        held?
     } else {
         Default::default()
     };

@@ -179,7 +179,8 @@ async fn unreadable_pins_make_every_check_a_defect() {
         &dir.path().join("run"),
         &mut record,
     )
-    .await;
+    .await
+    .expect("an unreadable pin is a defect, not a pause");
     assert_eq!(outcome.defects.len(), 2, "{:?}", outcome.defects);
     assert!(outcome.defects["AC-1"].contains("cannot be read"));
 }

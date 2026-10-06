@@ -98,6 +98,9 @@ pub struct Settled {
     /// Why the request store could not be read: the round cannot vouch for
     /// any check.
     pub errors: Vec<String>,
+    /// A publish of the task set left a journal no settlement could settle
+    /// when a re-pin was written (Issue 338): the round pauses the run.
+    pub paused: Option<String>,
 }
 
 pub async fn settle(ctx: &Settle<'_>, mut pins: CheckSourcePins) -> Settled {
@@ -144,8 +147,7 @@ pub async fn settle(ctx: &Settle<'_>, mut pins: CheckSourcePins) -> Settled {
             }
         }
     }
-    let mut settlements = Vec::new();
-    let mut errors = Vec::new();
+    let (mut settlements, mut errors, mut paused) = (Vec::new(), Vec::new(), None);
     let queue = requests::pending(ctx.run_root).unwrap_or_else(|error| {
         errors.push(error);
         Vec::new()
@@ -159,7 +161,7 @@ pub async fn settle(ctx: &Settle<'_>, mut pins: CheckSourcePins) -> Settled {
                 request,
                 note: why,
             },
-            gate::Landing::Landed => settle_one(ctx, &mut pins, request).await,
+            gate::Landing::Landed => settle_one(ctx, &mut pins, request, &mut paused).await,
         };
         if let Some(resolution) = &settlement.resolution
             && let Err(error) = requests::settle_record(ctx.run_root, resolution)
@@ -174,6 +176,9 @@ pub async fn settle(ctx: &Settle<'_>, mut pins: CheckSourcePins) -> Settled {
             }
         }
         settlements.push(settlement);
+        if paused.is_some() {
+            break;
+        }
     }
     for change in tree_drift(&pins, &ctx.roots) {
         for id in &change.check_ids {
@@ -202,6 +207,7 @@ pub async fn settle(ctx: &Settle<'_>, mut pins: CheckSourcePins) -> Settled {
         defects,
         must_fail: guards.must_fail,
         errors,
+        paused,
     }
 }
 
@@ -209,6 +215,7 @@ async fn settle_one(
     ctx: &Settle<'_>,
     pins: &mut CheckSourcePins,
     request: SourceChangeRequest,
+    paused: &mut Option<String>,
 ) -> Settlement {
     let now = digest_now(&ctx.roots, &request);
     // A held landing change applies over the pinned source; a change found
@@ -429,7 +436,7 @@ async fn settle_one(
     let outcome = if accepted {
         accept(ctx, pins, &request, proposed.as_deref(), &settled.reason)
     } else {
-        refuse(ctx, &request, pinned)
+        refuse(ctx, &request, pinned).map_err(ApplyError::from)
     };
     match outcome {
         Ok(applied) => {
@@ -447,7 +454,11 @@ async fn settle_one(
                 note,
             }
         }
-        Err(error) => pending(request, error),
+        Err(ApplyError::Unsettled(evidence)) => {
+            *paused = Some(evidence.clone());
+            pending(request, evidence)
+        }
+        Err(ApplyError::Failed(error)) => pending(request, error),
     }
 }
 
@@ -474,7 +485,7 @@ fn pending(request: SourceChangeRequest, why: String) -> Settlement {
 mod apply;
 #[path = "check_source_settle_gate.rs"]
 mod gate;
-use apply::{accept, refuse};
+use apply::{ApplyError, accept, refuse};
 use gate::{add, digest_now, resolution};
 
 #[cfg(test)]

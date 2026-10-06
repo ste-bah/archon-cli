@@ -13,7 +13,6 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
-use archon_workflow::WorkflowLlmClient;
 use archon_workflow::check_source_pins::load_for_run;
 use archon_workflow::check_source_requests::VERDICT_ACCEPTED;
 use archon_workflow::check_source_resolve::Roots;
@@ -21,9 +20,11 @@ use archon_workflow::check_source_settle::{
     Settle, SourceJudge, SourceJudgeInput, SourceVerdict, settle,
 };
 use archon_workflow::task_set_contract::{AcceptanceContract, JudgeDecision};
+use archon_workflow::task_set_publish_lock::PublishLockError;
 use archon_workflow::v2::acceptance_stage::{
     AcceptanceCheckStatus, AcceptanceContractRepairV1, AcceptanceRoundRecordV1,
 };
+use archon_workflow::{WorkflowError, WorkflowLlmClient, WorkflowResult};
 
 use super::exec::StageContext;
 
@@ -42,22 +43,26 @@ pub(super) struct Outcome {
     pub(super) must_fail: BTreeMap<String, String>,
 }
 
-/// Settle every pinned check-source change for this round.
+/// Settle every pinned check-source change for this round. A publish of the
+/// task set a crash left that no read can settle pauses the run with the
+/// evidence (Issue 338): it is the host's environment, never the contract's
+/// defect, so no check is failed for it.
 pub(super) async fn apply(
     llm: Option<&dyn WorkflowLlmClient>,
     context: &StageContext,
     contract: &AcceptanceContract,
     run_dir: &Path,
     record: &mut AcceptanceRoundRecordV1,
-) -> Outcome {
+) -> WorkflowResult<Outcome> {
     let roots = Roots {
         repository: &context.repository,
         project: &context.project,
     };
     let (store, pins) = match load_for_run(run_dir, &context.project, &context.task_root, &roots) {
         Ok(Some(loaded)) => loaded,
-        Ok(None) => return Outcome::default(),
-        Err(error) => {
+        Ok(None) => return Ok(Outcome::default()),
+        Err(PublishLockError::Unsettled(evidence)) => return Err(paused(&evidence)),
+        Err(PublishLockError::Failed(error)) => {
             // Fail closed: no check runs on sources nobody can show it was
             // frozen with.
             let why = format!(
@@ -68,10 +73,10 @@ pub(super) async fn apply(
                 .chain(&contract.supplementary)
                 .map(|entry| (entry.id.clone(), why.clone()))
                 .collect();
-            return Outcome {
+            return Ok(Outcome {
                 defects,
                 must_fail: BTreeMap::new(),
-            };
+            });
         }
     };
     let (judge, judge_note) = match (llm, recorded_judge(contract)) {
@@ -102,6 +107,9 @@ pub(super) async fn apply(
         pins,
     )
     .await;
+    if let Some(evidence) = &settled.paused {
+        return Err(paused(evidence));
+    }
     record
         .operational_errors
         .extend(settled.errors.iter().cloned());
@@ -134,12 +142,20 @@ pub(super) async fn apply(
             )],
         });
     }
-    Outcome {
+    Ok(Outcome {
         defects: (settled.defects.into_iter())
             .map(|(id, why)| (id, format!("contract defect: {why}")))
             .collect(),
         must_fail: settled.must_fail,
-    }
+    })
+}
+
+/// The pause of a round whose task set holds a journal no read can settle.
+fn paused(evidence: &str) -> WorkflowError {
+    tracing::warn!(%evidence, "pausing: the task set's interrupted publish could not be settled");
+    WorkflowError::ControlPaused(format!(
+        "the frozen checks' pinned sources cannot be read as one version: {evidence}"
+    ))
 }
 
 /// A check that passed although it names a test nothing defines fails: a

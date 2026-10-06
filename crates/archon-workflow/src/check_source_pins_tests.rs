@@ -137,9 +137,21 @@ fn the_acceptance_pin_records_the_sidecar_and_a_mismatch_is_restored_or_refused(
         Some(content_digest(&PinStore::bytes(&pins)).as_str()),
         "the re-pin goes through the pin"
     );
-    // A sidecar that no longer hashes to the pin is restored from its filed copy.
+    // A sidecar that no longer hashes to the pin is read from its filed copy,
+    // and a reader never writes it (Issue 338): only the exclusive restore.
     std::fs::write(&store.sidecar, b"{\"tampered\": true}").unwrap();
     assert_eq!(store.verified_read().unwrap().unwrap(), pins);
+    assert_eq!(
+        std::fs::read(&store.sidecar).unwrap(),
+        b"{\"tampered\": true}",
+        "a reader wrote the sidecar"
+    );
+    store.restore_sidecar().unwrap();
+    assert_eq!(
+        store.read().unwrap().unwrap(),
+        pins,
+        "restored under the lock"
+    );
     // With no filed copy it is refused, never read.
     let mut other = pins.clone();
     other.origin = "other".into();
@@ -178,7 +190,9 @@ fn a_frozen_task_set_missing_its_contract_is_an_error() {
     .unwrap();
     let error = load_for_run(&run, &project, &tasks, &roots).unwrap_err();
     assert!(
-        error.contains("missing although the task set was frozen"),
+        error
+            .to_string()
+            .contains("missing although the task set was frozen"),
         "{error}"
     );
 }

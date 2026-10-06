@@ -320,7 +320,7 @@ async fn evaluate(
     }
     // PLAN-11: no check runs on a source nobody judged; pending source
     // changes settle before a repair republishes (and re-pins) the chain.
-    let sources = sources::apply(llm, &context, &contract, run_dir, record).await;
+    let sources = sources::apply(llm, &context, &contract, run_dir, record).await?;
     // A check the judge did not accept can never run: repair the contract
     // before running it, and never hand it to the implementing tasks.
     let Some(mut defects) = repair::apply(

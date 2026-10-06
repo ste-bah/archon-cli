@@ -5,21 +5,51 @@
 use std::path::Path;
 
 use super::Settle;
-use crate::check_source_pins::{CheckSourcePins, PinStore, PinnedSource, RepinLink};
+use crate::check_source_pins::{CheckSourcePins, PinStore, PinnedSource, Repin, RepinLink};
 use crate::check_source_requests::{self as requests, ORIGIN_LANDING, SourceChangeRequest};
 use crate::check_source_resolve::SourceRoot;
 use crate::check_source_rust::splice_item;
 use crate::task_set_contract::content_digest;
+use crate::task_set_publish_lock::PublishLockError;
+
+/// Why a settled request was not applied.
+#[derive(Debug)]
+pub(super) enum ApplyError {
+    /// A publish of the task set left a journal no settlement could settle
+    /// (Issue 338): the round pauses the run on this evidence.
+    Unsettled(String),
+    /// Anything else: the request stays pending.
+    Failed(String),
+}
+
+impl From<String> for ApplyError {
+    fn from(error: String) -> Self {
+        Self::Failed(error)
+    }
+}
+
+impl From<&str> for ApplyError {
+    fn from(error: &str) -> Self {
+        Self::Failed(error.to_string())
+    }
+}
+
+/// How many times a repin is computed again over pins that changed under it
+/// before the request is left pending.
+const REPIN_ATTEMPTS: usize = 3;
 
 /// Apply an accepted held change (a change found in the tree is already
 /// there) and re-pin every check it serves. Returns whether the tree changed.
+/// The re-pin is computed over the pins the store binds when it is written
+/// (Issue 338): pins a settled publish or another repin changed under it are
+/// re-pinned again from what is bound now, never overwritten.
 pub(super) fn accept(
     ctx: &Settle<'_>,
     pins: &mut CheckSourcePins,
     request: &SourceChangeRequest,
     proposed: Option<&[u8]>,
     reason: &str,
-) -> Result<bool, String> {
+) -> Result<bool, ApplyError> {
     let mut applied = false;
     if request.origin == ORIGIN_LANDING {
         let bytes = match &request.item {
@@ -57,11 +87,47 @@ pub(super) fn accept(
         )?;
         applied = true;
     }
-    let prior_digest = content_digest(&PinStore::bytes(pins));
-    ctx.store.blobs.put(&PinStore::bytes(pins));
     if let Some(bytes) = proposed {
         ctx.store.blobs.put(bytes);
     }
+    let mut base = pins.clone();
+    for _ in 0..REPIN_ATTEMPTS {
+        let mut next = base.clone();
+        repin(ctx, &mut next, request, reason);
+        match ctx.store.write_over(&base, &next) {
+            Ok(Repin::Written) => {
+                *pins = next;
+                return Ok(applied);
+            }
+            Ok(Repin::Stale(now)) if now.acceptance_digest == base.acceptance_digest => {
+                base = now;
+            }
+            Ok(Repin::Stale(now)) => {
+                return Err(ApplyError::Failed(format!(
+                    "the task set's check-source pins now bind the contract {} instead of the one this round read ({}): it was republished while the change was settled, so nothing was re-pinned; the request stays pending and the next round settles it against the set it reads",
+                    now.acceptance_digest, base.acceptance_digest
+                )));
+            }
+            Err(PublishLockError::Unsettled(evidence)) => {
+                return Err(ApplyError::Unsettled(evidence));
+            }
+            Err(PublishLockError::Failed(error)) => return Err(ApplyError::Failed(error)),
+        }
+    }
+    Err(ApplyError::Failed(format!(
+        "the check-source pins changed under the re-pin {REPIN_ATTEMPTS} times; nothing was re-pinned and the request stays pending"
+    )))
+}
+
+/// Re-pin, in `pins`, every check `request` serves to its proposed source.
+fn repin(
+    ctx: &Settle<'_>,
+    pins: &mut CheckSourcePins,
+    request: &SourceChangeRequest,
+    reason: &str,
+) {
+    let prior_digest = content_digest(&PinStore::bytes(pins));
+    ctx.store.blobs.put(&PinStore::bytes(pins));
     for id in &request.check_ids {
         let Some(check) = pins.checks.get_mut(id) else {
             continue;
@@ -124,8 +190,7 @@ pub(super) fn accept(
         .iter()
         .any(|link| link.request_id == request.request_id)
     {
-        ctx.store.write(pins)?;
-        return Ok(applied);
+        return;
     }
     pins.repins.push(RepinLink {
         request_id: request.request_id.clone(),
@@ -139,8 +204,6 @@ pub(super) fn accept(
         at: chrono::Utc::now().to_rfc3339(),
         prior_digest,
     });
-    ctx.store.write(pins)?;
-    Ok(applied)
 }
 
 /// A refused held change simply stays out. A refused change found in the

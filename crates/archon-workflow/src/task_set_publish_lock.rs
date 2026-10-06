@@ -55,6 +55,12 @@ pub fn journal_paths(pin_path: &Path) -> [PathBuf; 2] {
     [journal, PathBuf::from(temp)]
 }
 
+/// The durable log of every settlement of an interrupted publish of the set
+/// pinned at `pin_path`. The host's `JournalPaths` names the same file.
+pub fn recovery_log_path(pin_path: &Path) -> PathBuf {
+    pin_path.with_extension("publish-recovery.log")
+}
+
 /// Whether a publish of the set pinned at `pin_path` left its journal: one a
 /// crash or a failed cleanup interrupted, or one a live writer holds.
 pub fn interrupted_publish_left(pin_path: &Path) -> bool {
@@ -88,6 +94,86 @@ static SETTLE: OnceLock<Settle> = OnceLock::new();
 /// installed stays; without one, a writer that finds a journal is refused.
 pub fn register_settle(settle: Settle) {
     let _ = SETTLE.set(settle);
+}
+
+/// Why a holder of a set's publish lock could not go ahead (Issue 338).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PublishLockError {
+    /// A publish of the set left a journal that no settlement could settle:
+    /// the evidence and the operator's remedy. Nothing was read or written;
+    /// every later holder retries the settlement. A run pauses on this,
+    /// never fails.
+    Unsettled(String),
+    /// Anything else: the lock could not be taken, or what it guards could
+    /// not be read or written.
+    Failed(String),
+}
+
+impl PublishLockError {
+    /// The evidence of an unsettled journal, when this is one.
+    pub fn unsettled(&self) -> Option<&str> {
+        match self {
+            Self::Unsettled(evidence) => Some(evidence),
+            Self::Failed(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for PublishLockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unsettled(text) | Self::Failed(text) => f.write_str(text),
+        }
+    }
+}
+
+impl std::error::Error for PublishLockError {}
+
+impl From<String> for PublishLockError {
+    fn from(error: String) -> Self {
+        Self::Failed(error)
+    }
+}
+
+/// Settle what a publish of the set pinned at `pin_path` left, by the host's
+/// settlement; the caller holds the lock exclusive. With none installed, or
+/// a set root unknown, a journal left cannot be settled. A failure that
+/// leaves a journal is [`PublishLockError::Unsettled`]; any other is the
+/// settlement's own.
+fn settle_left(pin_path: &Path, tasks_root: Option<&Path>) -> Result<(), PublishLockError> {
+    let cause = match (SETTLE.get(), tasks_root) {
+        (Some(settle), Some(tasks_root)) => match settle(pin_path, tasks_root) {
+            Ok(()) => return Ok(()),
+            Err(cause) if !interrupted_publish_left(pin_path) => {
+                return Err(PublishLockError::Failed(cause));
+            }
+            Err(cause) => cause,
+        },
+        _ => "no settlement of an interrupted publish is installed in this process".to_string(),
+    };
+    Err(PublishLockError::Unsettled(unsettled_evidence(
+        pin_path, &cause,
+    )))
+}
+
+/// The evidence and the operator's remedy for a journal left at `pin_path`
+/// that could not be settled for `cause`.
+pub fn unsettled_evidence(pin_path: &Path, cause: &str) -> String {
+    let [journal, temp] = journal_paths(pin_path);
+    let state = std::fs::read(&journal)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| value.get("state")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| match (journal.exists(), temp.exists()) {
+            (true, _) => "unreadable".into(),
+            (false, true) => "a journal temp only".into(),
+            (false, false) => "gone".into(),
+        });
+    format!(
+        "an interrupted publish of this task set left its journal {} (state: {state}) and it could not be settled: {cause}. Nothing was read or written; every read retries the settlement. A committed journal means the new set is final and only its cleanup is left; any other state rolls back to the old set. Operator remedy: fix what the cause names (a file or directory beside the pin or in the task set that cannot be written or removed), then resume the run (`archon workflow resume --live --yes <RUN_ID>`); each settlement is recorded in {}",
+        journal.display(),
+        recovery_log_path(pin_path).display()
+    )
 }
 
 /// How many times a reader settles and starts again before it gives up: a
@@ -156,32 +242,75 @@ impl PublishLockFile {
     /// when this thread already holds it exclusive (the repin runs under its
     /// holder, which settled) or when no set of this project was ever frozen
     /// (the pin's directory does not exist, so nothing is published). Refused
-    /// when this thread holds it shared: a write inside a read.
-    pub fn hold(pin_path: &Path, tasks_root: Option<&Path>) -> Result<Option<Self>, String> {
+    /// when this thread holds it shared: a write inside a read. A journal the
+    /// settlement cannot settle, or one left with no settlement installed, is
+    /// [`PublishLockError::Unsettled`].
+    pub fn hold(
+        pin_path: &Path,
+        tasks_root: Option<&Path>,
+    ) -> Result<Option<Self>, PublishLockError> {
+        Self::hold_writer(pin_path, tasks_root, true)
+    }
+
+    /// [`Self::hold`] that settles only a journal left, never the host's
+    /// sweep of journal-less debris: for a write that puts back bytes the
+    /// pin already binds, which no debris elsewhere can make wrong.
+    pub fn hold_journal_settled(
+        pin_path: &Path,
+        tasks_root: Option<&Path>,
+    ) -> Result<Option<Self>, PublishLockError> {
+        Self::hold_writer(pin_path, tasks_root, false)
+    }
+
+    fn hold_writer(
+        pin_path: &Path,
+        tasks_root: Option<&Path>,
+        debris: bool,
+    ) -> Result<Option<Self>, PublishLockError> {
         let path = lock_path(pin_path);
         match held_mode_here(&path) {
             Some(LockMode::Exclusive) => return Ok(None),
             Some(LockMode::Shared) => {
-                return Err(format!(
+                return Err(PublishLockError::Failed(format!(
                     "this thread reads the task set under the shared publish lock {}; a write inside that read is refused, as it would wait on the read",
                     path.display()
-                ));
+                )));
             }
             None if !path.parent().is_some_and(Path::is_dir) => return Ok(None),
             None => {}
         }
         let lock = Self::acquire(&path)?;
-        match (SETTLE.get(), tasks_root) {
-            (Some(settle), Some(tasks_root)) => settle(pin_path, tasks_root)?,
-            _ if interrupted_publish_left(pin_path) => {
-                return Err(format!(
-                    "a publish of this task set was interrupted and left {}; it is settled before anything else writes the set — run any `archon workflow` command on the set (launch, resume, or a freeze) to settle it, then retry",
-                    journal_paths(pin_path)[0].display()
-                ));
-            }
-            _ => {}
+        // The host's settlement also clears journal-less debris, so a writer
+        // runs it whether or not a journal is left.
+        let sweep = debris && SETTLE.get().is_some() && tasks_root.is_some();
+        if sweep || interrupted_publish_left(pin_path) {
+            settle_left(pin_path, tasks_root)?;
         }
         Ok(Some(lock))
+    }
+
+    /// Hold the publish lock of the set pinned at `pin_path` shared for one
+    /// read of a set no interrupted publish is left in (Issue 338): a journal
+    /// found under the shared lock is settled under the exclusive lock by the
+    /// host's [`register_settle`]d settlement, as
+    /// [`Self::acquire_shared_settled`] does. `None` as for
+    /// [`Self::hold_shared`]. A journal no settlement can settle is
+    /// [`PublishLockError::Unsettled`]: the caller's run pauses on it.
+    pub fn hold_shared_settled(
+        pin_path: &Path,
+        tasks_root: &Path,
+    ) -> Result<Option<Self>, PublishLockError> {
+        let path = lock_path(pin_path);
+        if held_here(&path) || !path.parent().is_some_and(Path::is_dir) {
+            return Ok(None);
+        }
+        Self::acquire_shared_settled(
+            pin_path,
+            || settle_left(pin_path, Some(tasks_root)),
+            PublishLockError::Failed,
+            |exhausted| PublishLockError::Unsettled(unsettled_evidence(pin_path, &exhausted)),
+        )
+        .map(Some)
     }
 
     /// Hold the publish lock of the set pinned at `pin_path` shared for one

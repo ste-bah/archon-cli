@@ -408,3 +408,5 @@ async fn an_accepted_unit_test_change_goes_in_over_its_pin_though_the_file_moved
 mod b;
 #[path = "check_source_settle_tests_c.rs"]
 mod c;
+#[path = "check_source_settle_tests_d.rs"]
+mod d;
