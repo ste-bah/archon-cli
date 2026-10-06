@@ -24,6 +24,23 @@ impl WorkflowScriptHost {
         generation: Option<u64>,
         call_generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<Option<WorkflowV2Result>> {
+        self.runner
+            .v2_store
+            .session_workflow_store()?
+            .execute_writer(
+                &self.runner.run_id,
+                self.dispatch_live_inner(execution, source_task_graph, generation, call_generation),
+            )
+            .await
+    }
+
+    async fn dispatch_live_inner(
+        &self,
+        execution: &WorkflowV2CallExecution,
+        source_task_graph: Option<&archon_workflow::WorkflowV2SourceTaskGraph>,
+        generation: Option<u64>,
+        call_generation: Option<u64>,
+    ) -> archon_workflow::WorkflowResult<Option<WorkflowV2Result>> {
         if execution.call.method == WorkflowV2HostMethod::HostCommand {
             return self
                 .execute_host_command(execution, generation)

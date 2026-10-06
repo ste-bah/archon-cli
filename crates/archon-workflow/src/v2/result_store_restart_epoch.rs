@@ -34,12 +34,14 @@ impl WorkflowV2ResultStore {
     /// Move the restart epoch on, durably. Called by a restart, under the
     /// run lock.
     pub fn bump_restart_epoch(&self) -> WorkflowResult<u64> {
-        let next = self.restart_epoch()?.saturating_add(1);
-        write_json_synced(
-            &self.root.join(RESTART_EPOCH_FILE),
-            &serde_json::json!({ "epoch": next }),
-        )?;
-        Ok(next)
+        self.with_session_write_lock(|| {
+            let next = self.restart_epoch()?.saturating_add(1);
+            write_json_synced(
+                &self.root.join(RESTART_EPOCH_FILE),
+                &serde_json::json!({ "epoch": next }),
+            )?;
+            Ok(next)
+        })
     }
 
     /// Refuse a write of this store's session once a restart moved the
@@ -62,24 +64,26 @@ impl WorkflowV2ResultStore {
     /// A session write under the run's control lock. This is the same lock
     /// `WorkflowStore::with_run_lock` and every restart hold; use the run
     /// directory directly so standalone result stores have the same boundary.
-    fn with_session_write_lock<T>(
+    pub fn with_session_write_lock<T>(
         &self,
         write: impl FnOnce() -> WorkflowResult<T>,
     ) -> WorkflowResult<T> {
-        let run = self.run_root();
-        fs::create_dir_all(run).map_err(|err| WorkflowError::io(run, err))?;
-        let path = run.join(".control.lock");
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&path)
-            .map_err(|err| WorkflowError::io(&path, err))?;
-        let mut lock = fd_lock::RwLock::new(file);
-        let _guard = lock.write().map_err(|err| WorkflowError::io(&path, err))?;
-        // Issue 291: the epoch, and the executor this session writes for.
-        self.require_session_owner()?;
-        write()
+        self.session_workflow_store()?
+            .with_run_lock(&self.run_id(), |_| {
+                self.require_session_owner()?;
+                write()
+            })
+    }
+
+    /// The same captured-owner store used by host, audit and admission fences.
+    pub fn session_workflow_store(&self) -> WorkflowResult<crate::WorkflowStore> {
+        let root = self.run_root().parent().ok_or_else(|| {
+            WorkflowError::StateCorrupt("result store has no runs directory".into())
+        })?;
+        let store = crate::WorkflowStore::new(root);
+        Ok(match self.session_executor() {
+            Some(generation) => store.for_executor(&self.run_id(), generation),
+            None => store,
+        })
     }
 }

@@ -32,6 +32,7 @@ fn record(
         },
         attempt: 1,
         schema_version: "1".into(),
+        admission_sequence: None,
         started_at: started_at.into(),
         finished_at: started_at.into(),
         input_hash: "in".into(),

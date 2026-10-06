@@ -103,7 +103,6 @@ pub(super) fn capture(pin: &Path, tasks: &Path, record: &mut Recovery) -> Result
             // A changed serialization has no named digest. Authenticate its
             // entire shape against launch preimages before choosing a source;
             // directory ordering cannot select an incompatible older skeleton.
-            let live = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
             for anchor in &anchors {
                 let Some(digest) = &anchor.skeleton_digest else {
                     continue;
@@ -111,8 +110,9 @@ pub(super) fn capture(pin: &Path, tasks: &Path, record: &mut Recovery) -> Result
                 let Some(preimage) = history.get(digest)? else {
                     continue;
                 };
-                let archived: serde_json::Value = serde_json::from_slice(&preimage)?;
-                if live.as_ref() == Some(&archived) {
+                if authenticates_skeleton(record, anchor, &bytes, &preimage)? {
+                    // Retain the archived pair's binding, not the live rebound
+                    // binding. Anchor selection and completed adoption use it.
                     record.skeleton = Some(serde_json::from_slice(&preimage)?);
                     break;
                 }
@@ -243,17 +243,15 @@ pub(crate) fn refreeze_base(
     tasks: &Path,
 ) -> Result<Option<archon_workflow::task_set_contract::AcceptanceContract>> {
     let (records, _) = read(pin)?;
+    let task_root = tasks.canonicalize().map(archon_shell::paths::plain)?;
     let Some(record) = records
         .iter()
         .rev()
-        .find(|record| record.completed.is_none())
+        .find(|record| record.completed.is_none() && record.task_root == task_root)
     else {
         return Ok(None);
     };
-    if let Err(error) = validate(record, pin, tasks) {
-        tracing::warn!(%error, "recovery template deferred; authority retained for retry");
-        return Ok(None);
-    }
+    validate(record, pin, tasks)?;
     let anchor = anchors::anchor(record, pin)?;
     let Some(anchor) = anchor else {
         return Ok(None);
@@ -301,42 +299,43 @@ pub(super) fn bound_skeleton(
         }
     };
     if let Some(live) = live {
-        let digest = content_digest(&live);
-        let authorized = record
+        if !authenticates_skeleton(record, anchor, &live, &bytes)? {
+            return Err(anyhow!(
+                "chain check skeleton_changed failed: live skeleton shape or contract binding is not authenticated by a captured launch"
+            ));
+        }
+    }
+    Ok(Some(skeleton))
+}
+
+/// The same authority for capture and publication: archived shape belongs to
+/// its launch contract; live binding may name any captured authorized contract.
+fn authenticates_skeleton(
+    record: &Recovery,
+    anchor: &PortableAcceptanceIdentityV1,
+    live: &[u8],
+    archived: &[u8],
+) -> Result<bool> {
+    let expected: serde_json::Value = serde_json::from_slice(archived)?;
+    if expected["acceptance_digest"].as_str() != Some(&anchor.acceptance_digest) {
+        return Ok(false);
+    }
+    let Ok(mut live) = serde_json::from_slice::<serde_json::Value>(live) else {
+        return Ok(false);
+    };
+    let Some(binding) = live.get_mut("acceptance_digest") else {
+        return Ok(false);
+    };
+    if !binding.as_str().is_some_and(|digest| {
+        record
             .prior
             .iter()
             .map(AcceptancePin::identity)
             .chain(record.runs.values().cloned())
-            .any(|launch| launch.skeleton_digest.as_ref() == Some(&digest));
-        if !authorized {
-            let mut live: serde_json::Value = serde_json::from_slice(&live)
-                .context("chain check skeleton_changed failed: invalid live recovery skeleton")?;
-            let expected: serde_json::Value = serde_json::from_slice(&bytes)?;
-            let binding = live.get_mut("acceptance_digest").ok_or_else(|| {
-                anyhow!(
-                    "chain check skeleton_changed failed: live skeleton has no contract binding"
-                )
-            })?;
-            let bound_contract = binding.as_str().is_some_and(|digest| {
-                record
-                    .prior
-                    .iter()
-                    .map(AcceptancePin::identity)
-                    .chain(record.runs.values().cloned())
-                    .any(|launch| launch.acceptance_digest == digest)
-            });
-            if !bound_contract {
-                return Err(anyhow!(
-                    "chain check skeleton_changed failed: live skeleton contract binding is not authenticated by a captured launch"
-                ));
-            }
-            *binding = expected["acceptance_digest"].clone();
-            if live != expected {
-                return Err(anyhow!(
-                    "chain check skeleton_changed failed: live skeleton changes are not bound by a captured launch"
-                ));
-            }
-        }
+            .any(|launch| launch.acceptance_digest == digest)
+    }) {
+        return Ok(false);
     }
-    Ok(Some(skeleton))
+    *binding = expected["acceptance_digest"].clone();
+    Ok(live == expected)
 }

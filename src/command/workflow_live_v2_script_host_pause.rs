@@ -305,22 +305,26 @@ fn append_fixed_log(store: &WorkflowStore, run_id: &str, line: &str) {
     let state_path = store
         .run_dir(run_id)
         .join(crate::command::workflow_decompose_state::FIXED_STATE_PATH);
-    let appended = std::fs::read(&state_path)
-        .map_err(|source| WorkflowError::Io {
-            path: state_path.clone(),
-            source,
-        })
-        .and_then(|raw| {
-            serde_json::from_slice::<archon_workflow::FixedDecompositionStateV1>(&raw)
-                .map_err(WorkflowError::from)
-        })
-        .and_then(|state| {
-            crate::command::workflow_decompose_log::validated_fixed_log_path(
-                std::path::Path::new(&state.log_path),
-                &state.identity,
-            )
-        })
-        .and_then(|path| crate::command::workflow_decompose_log::append_nofollow_line(&path, line));
+    let appended = store.with_run_lock(run_id, |_| {
+        std::fs::read(&state_path)
+            .map_err(|source| WorkflowError::Io {
+                path: state_path.clone(),
+                source,
+            })
+            .and_then(|raw| {
+                serde_json::from_slice::<archon_workflow::FixedDecompositionStateV1>(&raw)
+                    .map_err(WorkflowError::from)
+            })
+            .and_then(|state| {
+                crate::command::workflow_decompose_log::validated_fixed_log_path(
+                    std::path::Path::new(&state.log_path),
+                    &state.identity,
+                )
+            })
+            .and_then(|path| {
+                crate::command::workflow_decompose_log::append_nofollow_line(&path, line)
+            })
+    });
     if let Err(error) = appended {
         tracing::warn!(%error, "script pause log line not written");
     }

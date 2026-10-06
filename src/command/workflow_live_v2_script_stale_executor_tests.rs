@@ -316,3 +316,10 @@ async fn issue291_stale_lifecycle_cannot_decide_terminal_status() {
 
 #[path = "workflow_live_v2_review_race_tests.rs"]
 mod review_races;
+
+#[path = "workflow_live_v2_round3_audit_tests.rs"]
+mod round3_audit;
+#[path = "workflow_live_v2_round3_gate_tests.rs"]
+mod round3_gates;
+#[path = "workflow_live_v2_spawn_fence_tests.rs"]
+mod spawned_admission;

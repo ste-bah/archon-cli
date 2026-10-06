@@ -10,15 +10,15 @@ use super::super::exec::StageContext;
 
 /// Why a publication was refused: every gate finding (subject, text), and
 /// the refusal.
-pub(super) struct Refused {
-    pub(super) findings: Vec<(String, String)>,
-    pub(super) error: String,
+pub(in super::super) struct Refused {
+    pub(in super::super) findings: Vec<(String, String)>,
+    pub(in super::super) error: String,
 }
 
 /// Freeze `contract` exactly as `workflow freeze-acceptance` publishes, under
 /// the enforce gate: every finding refuses it. The lock records
 /// `baseline_commit`, the tree its checks were proven on (Issue 328).
-pub(super) fn publish_fresh(
+pub(in super::super) fn publish_fresh(
     context: &StageContext,
     prd_path: &Path,
     contract: &AcceptanceContract,

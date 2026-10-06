@@ -61,15 +61,29 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
             .map_err(|error| WorkflowError::NotificationDelivery(error.to_string()))?;
         require_owner(store)?;
         let started = std::time::Instant::now();
-        let client = self.0.with_timeout_secs(timeout, timeout_source);
+        let mut client = self.0.with_timeout_secs(timeout, timeout_source);
+        if let Some(v2) = store {
+            client = client.with_owner_store(v2.session_workflow_store()?);
+        }
         let call = archon_tools::workflow_read_guard::scope_run_store(
             run_store,
             Box::pin(adapter.run_with_repair(&client, &request)),
         );
         let call = async {
-            match &scope {
-                Some(s) => s.run(call).await,
-                None => call.await,
+            let work = async {
+                match &scope {
+                    Some(s) => s.run(call).await,
+                    None => call.await,
+                }
+                .map_err(archon_workflow::WorkflowV2AgentError::into_workflow_error)
+            };
+            match store {
+                Some(v2) => {
+                    v2.session_workflow_store()?
+                        .execute_owned(&v2.run_id(), work)
+                        .await
+                }
+                None => work.await,
             }
         };
         let result = if let Some(landing) = archon_workflow::repository_audit::landing::current() {
@@ -108,6 +122,12 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
                 .map_err(|e| WorkflowError::StageFailed(e.to_string()))?;
         }
         result.map_err(|e| {
+            if matches!(
+                e,
+                WorkflowError::ControlCancelled(_) | WorkflowError::ControlPaused(_)
+            ) {
+                return e;
+            }
             WorkflowError::StageFailed(format!("repository audit assessment failed: {e}"))
         })
     }

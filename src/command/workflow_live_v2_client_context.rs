@@ -1,6 +1,23 @@
 use super::*;
 
 impl LiveV2AgentClient {
+    pub(in super::super) fn with_owner_store(
+        mut self,
+        store: archon_workflow::WorkflowStore,
+    ) -> Self {
+        self.owner_store = Some(store);
+        self
+    }
+    pub(super) async fn admit_provider<T>(
+        &self,
+        work: impl std::future::Future<Output = archon_workflow::WorkflowResult<T>>,
+    ) -> archon_workflow::WorkflowResult<T> {
+        match &self.owner_store {
+            Some(store) => store.execute_owned(&self.run_id, work).await,
+            None => work.await,
+        }
+    }
+
     pub(in super::super) fn fanout_parallelism(&self, requested: Option<usize>) -> usize {
         read_only_v2_fanout_parallelism(requested, live_v2_subagent_max_concurrency())
     }

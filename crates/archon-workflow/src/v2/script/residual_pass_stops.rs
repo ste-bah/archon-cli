@@ -20,16 +20,19 @@ impl WorkflowV2ResultStore {
     /// rounds again, and a pass after it that still revisits a state pauses
     /// again.
     pub fn waive_residual_stall(&self, pass: u64) -> WorkflowResult<()> {
-        let mut waived = self.residual_stall_waivers();
-        if !waived.insert(pass) {
-            return Ok(());
-        }
-        let path = self.root().join(WAIVER_FILE);
-        std::fs::create_dir_all(self.root()).map_err(|err| WorkflowError::io(self.root(), err))?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec(&waived)?)
-            .map_err(|err| WorkflowError::io(&tmp, err))?;
-        std::fs::rename(&tmp, &path).map_err(|err| WorkflowError::io(&path, err))
+        self.with_session_write_lock(|| {
+            let mut waived = self.residual_stall_waivers();
+            if !waived.insert(pass) {
+                return Ok(());
+            }
+            let path = self.root().join(WAIVER_FILE);
+            std::fs::create_dir_all(self.root())
+                .map_err(|err| WorkflowError::io(self.root(), err))?;
+            let tmp = path.with_extension("json.tmp");
+            std::fs::write(&tmp, serde_json::to_vec(&waived)?)
+                .map_err(|err| WorkflowError::io(&tmp, err))?;
+            std::fs::rename(&tmp, &path).map_err(|err| WorkflowError::io(&path, err))
+        })
     }
 
     fn residual_stall_waivers(&self) -> BTreeSet<u64> {
@@ -78,12 +81,15 @@ impl WorkflowV2ResultStore {
     /// Preserve legacy configuration in run metadata. Execution ignores
     /// this total ceiling and stops only on no progress.
     pub fn record_max_residual_passes(&self, ceiling: u64) -> WorkflowResult<()> {
-        let path = self.residual_ceiling_path();
-        std::fs::create_dir_all(self.root()).map_err(|err| WorkflowError::io(self.root(), err))?;
-        let bytes = serde_json::to_vec_pretty(&json!({ CEILING_KEY: ceiling.max(1) }))?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, bytes).map_err(|err| WorkflowError::io(&tmp, err))?;
-        std::fs::rename(&tmp, &path).map_err(|err| WorkflowError::io(&path, err))
+        self.with_session_write_lock(|| {
+            let path = self.residual_ceiling_path();
+            std::fs::create_dir_all(self.root())
+                .map_err(|err| WorkflowError::io(self.root(), err))?;
+            let bytes = serde_json::to_vec_pretty(&json!({ CEILING_KEY: ceiling.max(1) }))?;
+            let tmp = path.with_extension("json.tmp");
+            std::fs::write(&tmp, bytes).map_err(|err| WorkflowError::io(&tmp, err))?;
+            std::fs::rename(&tmp, &path).map_err(|err| WorkflowError::io(&path, err))
+        })
     }
 
     /// The run's legacy ceiling metadata, with a default for older runs.

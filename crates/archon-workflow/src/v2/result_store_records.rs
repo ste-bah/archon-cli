@@ -79,6 +79,9 @@ pub struct WorkflowV2CallRecord {
     pub schema_version: String,
     #[serde(default)]
     pub started_at: String,
+    /// Monotonic run-local admission identity; completion and unwind retain it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission_sequence: Option<u64>,
     #[serde(default)]
     pub finished_at: String,
     pub input_hash: String,
@@ -155,6 +158,7 @@ impl WorkflowV2CallRecord {
             attempt,
             schema_version: RESULT_SCHEMA_VERSION.to_string(),
             started_at: now.clone(),
+            admission_sequence: None,
             finished_at: now,
             input_hash,
             output_hash: stable_result_hash(&result),

@@ -208,6 +208,14 @@ fn issue301_authorized_skeleton_binding_is_rebound_to_selected_contract() {
 // C1 remains live while the authenticated C2/S2 launch changed both checks
 // and task ordering. Serialization alone cannot select C1/S1 instead.
 fn combined_pair(format: bool, tampered: bool) {
+    combined_rebound(format, tampered, false);
+}
+
+fn combined_rebound(format: bool, tampered: bool, rebound: bool) {
+    combined_shape(format, tampered, rebound, true);
+}
+
+fn combined_shape(format: bool, tampered: bool, rebound: bool, changed_shape: bool) {
     let run = run_fixture_with(&[
         ("AC-F-001", "test -f present", true),
         ("AC-F-002", "test -f present", true),
@@ -231,7 +239,9 @@ fn combined_pair(format: bool, tampered: bool) {
     let contract_digest = history.put(&contract_bytes).unwrap().0;
     let mut skeleton: archon_workflow::task_skeleton::TaskSkeleton =
         serde_json::from_slice(&original_skeleton).unwrap();
-    skeleton.tasks.reverse();
+    if changed_shape {
+        skeleton.tasks.reverse();
+    }
     skeleton.acceptance_digest = contract_digest.clone();
     let mut bytes = serde_json::to_vec_pretty(&skeleton).unwrap();
     let mut authorized = original.clone();
@@ -239,12 +249,39 @@ fn combined_pair(format: bool, tampered: bool) {
     authorized.freeze_event_id = "authorized-pair".into();
     authorized.skeleton_digest = Some(history.put(&bytes).unwrap().0);
     metadata(&run, "z-authorized-run", &authorized);
+    if rebound {
+        skeleton.acceptance_digest = original.acceptance_digest.clone();
+        bytes = serde_json::to_vec_pretty(&skeleton).unwrap();
+    }
     if format {
         bytes.push(b'\n');
     }
     std::fs::write(path, bytes).unwrap();
     std::fs::remove_file(run.set.pin_path()).unwrap();
-    recover(&run);
+    let captured = recover(&run);
+    if !changed_shape {
+        let compatible: archon_workflow::task_skeleton::TaskSkeleton =
+            serde_json::from_value(captured[0]["skeleton"].clone()).unwrap();
+        assert_eq!(compatible.tasks, skeleton.tasks);
+        assert!(
+            compatible.acceptance_digest == original.acceptance_digest
+                || compatible.acceptance_digest == authorized.acceptance_digest
+        );
+    }
+    let assert_paired_capture = || {
+        if rebound {
+            let mut authenticated = skeleton.clone();
+            authenticated.acceptance_digest = authorized.acceptance_digest.clone();
+            assert_eq!(
+                captured[0]["skeleton"],
+                serde_json::to_value(&authenticated).unwrap(),
+                "retain the authenticated shape and its paired launch binding during capture"
+            );
+        }
+    };
+    if !tampered {
+        assert_paired_capture();
+    }
     if tampered {
         std::fs::remove_file(history.path(authorized.skeleton_digest.as_ref().unwrap())).unwrap();
         let mut prepared = crate::command::workflow_task_set::prepare_from_judged(
@@ -262,11 +299,17 @@ fn combined_pair(format: bool, tampered: bool) {
             "no compatible authenticated pair must refuse publication"
         );
         assert!(result.unwrap_err().to_string().contains("skeleton_changed"));
+        assert_paired_capture();
     } else {
         refreeze(&run);
         verify(&run, "z-authorized-run", &authorized)
             .expect("recovery must preserve the compatible C2/S2 pair");
-        assert!(verify(&run, "a-original-run", &original).is_err());
+        let original_proof = verify(&run, "a-original-run", &original);
+        if changed_shape {
+            assert!(original_proof.is_err());
+        } else {
+            original_proof.expect("the unchanged authenticated shape remains compatible");
+        }
         assert!(run.set.pin().skeleton_digest.is_some());
     }
 }
@@ -281,4 +324,18 @@ fn review301_combined_contract_and_shape_with_exact_bytes() {
 #[test]
 fn review301_missing_compatible_pair_is_explicit_refusal() {
     combined_pair(true, true);
+}
+
+#[test]
+fn round3_301_changed_shape_rebound_live_contract() {
+    combined_rebound(false, false, true);
+}
+#[test]
+fn round3_301_changed_shape_rebound_with_serialization() {
+    combined_shape(true, false, false, false);
+    combined_rebound(true, false, true);
+}
+#[test]
+fn round3_301_changed_shape_rebound_missing_preimage() {
+    combined_rebound(true, true, true);
 }

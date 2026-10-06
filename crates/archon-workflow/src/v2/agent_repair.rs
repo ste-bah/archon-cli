@@ -132,6 +132,11 @@ pub enum WorkflowV2AgentError {
     EmptyReply,
     #[error("agent transport failed: {0}")]
     Transport(String),
+    /// Host control remains typed across admission and repair boundaries.
+    #[error("workflow paused by run control: {0}")]
+    ControlPaused(String),
+    #[error("workflow cancelled by run control: {0}")]
+    ControlCancelled(String),
     /// Issue 324: the host failed on its own state (an I/O fault) while
     /// serving the call. Never the agent's output and never transport: it
     /// keeps its kind to the caller (`host_fault::agent_error_into_workflow`).
@@ -206,6 +211,8 @@ impl WorkflowV2AgentError {
             }
             Self::EmptyReply
             | Self::Transport(_)
+            | Self::ControlPaused(_)
+            | Self::ControlCancelled(_)
             | Self::HostIo { .. }
             | Self::HostStateCorrupt(_)
             | Self::ContinuationRefused(_)
@@ -296,7 +303,12 @@ fn repair_exhausted(
     last_error: WorkflowV2AgentError,
 ) -> WorkflowV2AgentError {
     // Issue 324: a host fault is the outcome as it is, never a repair result.
-    if last_error.is_host_fault() {
+    if last_error.is_host_fault()
+        || matches!(
+            last_error,
+            WorkflowV2AgentError::ControlPaused(_) | WorkflowV2AgentError::ControlCancelled(_)
+        )
+    {
         return last_error;
     }
     if matches!(

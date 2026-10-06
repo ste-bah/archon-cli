@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+#[path = "workflow_admission.rs"]
+mod admission;
 #[path = "workflow_read_guard_focused.rs"]
 mod focused;
 #[path = "workflow_read_guard_forbidden.rs"]
@@ -23,6 +25,7 @@ mod records;
 mod repeat;
 #[path = "workflow_read_guard_run_store.rs"]
 mod run_store;
+pub use admission::AdmissionFence;
 #[path = "workflow_read_guard_settings.rs"]
 mod settings;
 #[path = "workflow_read_guard_shell.rs"]

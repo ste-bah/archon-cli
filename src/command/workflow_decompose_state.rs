@@ -39,6 +39,9 @@ pub(crate) fn project_fixed_call(
         source,
     })?;
     let mut state: FixedDecompositionStateV1 = serde_json::from_slice(&raw)?;
+    let admitted = archon_workflow::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"))
+        .record_with_admission(record)?;
+    let record = &admitted;
     let projection = projection(record, kind)?;
     let previous_phase = state.phase;
     state.phase = projection.phase;

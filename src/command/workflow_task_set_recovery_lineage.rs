@@ -226,17 +226,18 @@ impl PreparedAcceptanceFreeze {
     pub(crate) fn record_recovery_refreeze(&mut self) -> Result<()> {
         let pin_path = super::acceptance_pin_path(&self.project_root, &self.tasks_root);
         let (mut records, digest) = read(&pin_path)?;
+        let task_root = self
+            .tasks_root
+            .canonicalize()
+            .map(archon_shell::paths::plain)?;
         let Some(record) = records
             .iter_mut()
             .rev()
-            .find(|record| record.completed.is_none())
+            .find(|record| record.completed.is_none() && record.task_root == task_root)
         else {
             return Ok(());
         };
-        if let Err(error) = evidence::validate(record, &pin_path, &self.tasks_root) {
-            tracing::warn!(%error, "recovery adoption deferred; pending authority retained for retry");
-            return Ok(());
-        }
+        evidence::validate(record, &pin_path, &self.tasks_root)?;
         let Some(from) = anchors::anchor(record, &pin_path)? else {
             return Ok(());
         };

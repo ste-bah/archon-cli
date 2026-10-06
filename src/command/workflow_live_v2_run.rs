@@ -301,6 +301,18 @@ async fn execute_generated_v2_run(
     adopt_accepted_cache: bool,
     executor_lease: Arc<crate::command::workflow_executor_lease::ExecutionLease>,
 ) -> Result<String> {
+    if let Err(WorkflowError::ControlCancelled(refused)) =
+        archon_workflow::control_pause::require_executor(
+            &store.load_state(&run.id)?,
+            run.generation,
+        )
+    {
+        return Ok(run_control::lost_ownership_report(
+            "Workflow", &run.id, &refused,
+        ));
+    }
+    let owner_store = store.for_executor(&run.id, run.generation);
+    let store = &owner_store;
     let adapter = WorkflowV2AgentAdapter::new();
     let runtime = WorkflowV2ScriptRuntime {
         target_repository_root: plan.target_repository_root.clone(),
@@ -340,8 +352,10 @@ async fn execute_generated_v2_run(
         runtime.target_repository_root.clone(),
         Some(u64::from(runtime.generated_config.host_call_timeout_secs)),
     )
-    .with_provider_env_resolution(provider_env_resolution);
+    .with_provider_env_resolution(provider_env_resolution)
+    .with_owner_store(store.clone());
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    v2_store.bind_session_executor(run.generation);
     v2_store.record_max_residual_passes(runtime.generated_config.max_residual_passes.into())?;
     let resume_completed_ids = if adopt_accepted_cache {
         plan.task_universe

@@ -48,58 +48,63 @@ impl WorkflowV2ResultStore {
     /// another process moved first is skipped. Cost when there is nothing to
     /// migrate: one failed directory open.
     fn migrate_flat_archive(&self) -> WorkflowResult<()> {
-        let flat = self.root.join("results").join(FLAT_CALL_ARCHIVE);
-        let entries = match fs::read_dir(&flat) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(err) => return Err(WorkflowError::io(&flat, err)),
-        };
-        for entry in entries {
-            let entry = entry.map_err(|err| WorkflowError::io(&flat, err))?;
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let dir = match self.legacy_archive_stem(&name, &path) {
-                Some(stem) => self.call_archive_root().join(stem),
-                None => self.call_archive_root().join(UNSORTED_ARCHIVE),
+        if !self.root.join("results").join(FLAT_CALL_ARCHIVE).exists() {
+            return Ok(());
+        }
+        self.with_session_write_lock(|| {
+            let flat = self.root.join("results").join(FLAT_CALL_ARCHIVE);
+            let entries = match fs::read_dir(&flat) {
+                Ok(entries) => entries,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(err) => return Err(WorkflowError::io(&flat, err)),
             };
-            fs::create_dir_all(&dir).map_err(|err| WorkflowError::io(&dir, err))?;
-            let target = dir.join(&name);
-            match fs::rename(&path, &target) {
-                Ok(()) if self.durable => {
-                    // Persist the destination and all newly created directory
-                    // links before making the source removal durable. Otherwise
-                    // a rewind can outlive the invalidated destination and an
-                    // old flat entry can return on the next migration.
-                    crate::durable_io::sync_file(&target)?;
-                    crate::durable_io::sync_dir(&dir)?;
-                    crate::durable_io::sync_dir(&self.call_archive_root())?;
-                    crate::durable_io::sync_dir(&self.root.join("results"))?;
-                    crate::durable_io::sync_dir(&flat)?;
+            for entry in entries {
+                let entry = entry.map_err(|err| WorkflowError::io(&flat, err))?;
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
                 }
-                Ok(()) => {}
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                Err(err) => return Err(WorkflowError::io(&target, err)),
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let dir = match self.legacy_archive_stem(&name, &path) {
+                    Some(stem) => self.call_archive_root().join(stem),
+                    None => self.call_archive_root().join(UNSORTED_ARCHIVE),
+                };
+                fs::create_dir_all(&dir).map_err(|err| WorkflowError::io(&dir, err))?;
+                let target = dir.join(&name);
+                match fs::rename(&path, &target) {
+                    Ok(()) if self.durable => {
+                        // Persist the destination and all newly created directory
+                        // links before making the source removal durable. Otherwise
+                        // a rewind can outlive the invalidated destination and an
+                        // old flat entry can return on the next migration.
+                        crate::durable_io::sync_file(&target)?;
+                        crate::durable_io::sync_dir(&dir)?;
+                        crate::durable_io::sync_dir(&self.call_archive_root())?;
+                        crate::durable_io::sync_dir(&self.root.join("results"))?;
+                        crate::durable_io::sync_dir(&flat)?;
+                    }
+                    Ok(()) => {}
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(WorkflowError::io(&target, err)),
+                }
             }
-        }
-        // Only an empty directory is removed; anything left stays readable
-        // and is moved by the next lookup.
-        match fs::remove_dir(&flat) {
-            Ok(()) if self.durable => crate::durable_io::sync_dir(&self.root.join("results"))?,
-            Ok(()) => {}
-            Err(err)
-                if matches!(
-                    err.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
-                ) => {}
-            // Outside a restart a failed removal is retried by the next lookup;
-            // only the restart path needs the flat directory gone durably.
-            Err(_) if !self.durable => {}
-            Err(err) => return Err(WorkflowError::io(&flat, err)),
-        }
-        Ok(())
+            // Only an empty directory is removed; anything left stays readable
+            // and is moved by the next lookup.
+            match fs::remove_dir(&flat) {
+                Ok(()) if self.durable => crate::durable_io::sync_dir(&self.root.join("results"))?,
+                Ok(()) => {}
+                Err(err)
+                    if matches!(
+                        err.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                    ) => {}
+                // Outside a restart a failed removal is retried by the next lookup;
+                // only the restart path needs the flat directory gone durably.
+                Err(_) if !self.durable => {}
+                Err(err) => return Err(WorkflowError::io(&flat, err)),
+            }
+            Ok(())
+        })
     }
 
     /// The slot stem a legacy archived file belongs to: from its name

@@ -179,17 +179,19 @@ impl WorkflowV2ResultStore {
 
     /// Move each file into the `revoked/` directory of its call directory.
     fn move_revoked(&self, files: &[PathBuf]) -> WorkflowResult<()> {
-        for file in files {
-            let parent = file.parent().unwrap_or_else(|| Path::new("."));
-            let call_dir =
-                if parent.file_name().and_then(|name| name.to_str()) == Some("superseded") {
-                    parent.parent().unwrap_or(parent)
-                } else {
-                    parent
-                };
-            archive_file_into(file, &call_dir.join("revoked"), self.durable)?;
-        }
-        Ok(())
+        self.with_session_write_lock(|| {
+            for file in files {
+                let parent = file.parent().unwrap_or_else(|| Path::new("."));
+                let call_dir =
+                    if parent.file_name().and_then(|name| name.to_str()) == Some("superseded") {
+                        parent.parent().unwrap_or(parent)
+                    } else {
+                        parent
+                    };
+                archive_file_into(file, &call_dir.join("revoked"), self.durable)?;
+            }
+            Ok(())
+        })
     }
 }
 

@@ -72,7 +72,7 @@ impl AuditRuntime {
             Ok(generation)
         })?;
         Ok(Self {
-            store,
+            store: store.for_executor(&run_id, generation),
             run_id,
             generation,
             assessment_lock: Arc::new(tokio::sync::Mutex::new(())),

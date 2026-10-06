@@ -15,32 +15,34 @@ impl Snapshot {
         plan: &WritePlan,
         store: &WorkflowV2ResultStore,
     ) -> WorkflowResult<Self> {
-        let mut plan = plan.clone();
-        plan.isolated_root = store
-            .root()
-            .join("repository-audit/snapshots")
-            .join(uuid::Uuid::new_v4().to_string());
-        plan.item_id = "repository-audit".into();
-        let view = source.assessment_workspace(root, &plan).map_err(error)?;
-        let identity = String::from_utf8_lossy(
-            &run_git(&["rev-parse", "HEAD^{tree}"], &view.plan.isolated_root)
+        store.with_session_write_lock(|| {
+            let mut plan = plan.clone();
+            plan.isolated_root = store
+                .root()
+                .join("repository-audit/snapshots")
+                .join(uuid::Uuid::new_v4().to_string());
+            plan.item_id = "repository-audit".into();
+            let view = source.assessment_workspace(root, &plan).map_err(error)?;
+            let identity = String::from_utf8_lossy(
+                &run_git(&["rev-parse", "HEAD^{tree}"], &view.plan.isolated_root)
+                    .map_err(error)?
+                    .stdout,
+            )
+            .trim()
+            .to_string();
+            let listing = run_git(&["ls-files", "-z"], &view.plan.isolated_root)
                 .map_err(error)?
-                .stdout,
-        )
-        .trim()
-        .to_string();
-        let listing = run_git(&["ls-files", "-z"], &view.plan.isolated_root)
-            .map_err(error)?
-            .stdout;
-        let paths = listing
-            .split(|b| *b == 0)
-            .filter(|p| !p.is_empty())
-            .map(|p| String::from_utf8(p.to_vec()).map_err(error))
-            .collect::<WorkflowResult<Vec<_>>>()?;
-        Ok(Self {
-            identity,
-            root: view.plan.isolated_root,
-            paths,
+                .stdout;
+            let paths = listing
+                .split(|b| *b == 0)
+                .filter(|p| !p.is_empty())
+                .map(|p| String::from_utf8(p.to_vec()).map_err(error))
+                .collect::<WorkflowResult<Vec<_>>>()?;
+            Ok(Self {
+                identity,
+                root: view.plan.isolated_root,
+                paths,
+            })
         })
     }
     pub fn capture(
@@ -48,10 +50,12 @@ impl Snapshot {
         paths: &[String],
         store: &WorkflowV2ResultStore,
     ) -> WorkflowResult<Self> {
-        let plan = snapshot_plan(root, paths, store)?;
-        let source = capture_sealed_source(root, &plan, &WriteCoordinatorConfig::default())
-            .map_err(error)?;
-        Self::from_sealed(root, &source, &plan, store)
+        store.with_session_write_lock(|| {
+            let plan = snapshot_plan(root, paths, store)?;
+            let source = capture_sealed_source(root, &plan, &WriteCoordinatorConfig::default())
+                .map_err(error)?;
+            Self::from_sealed(root, &source, &plan, store)
+        })
     }
     pub fn content_index(&self) -> WorkflowResult<BTreeMap<String, String>> {
         let listing = run_git(&["ls-tree", "-r", "-z", "HEAD"], &self.root)

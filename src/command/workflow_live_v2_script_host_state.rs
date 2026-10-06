@@ -190,9 +190,7 @@ impl WorkflowScriptHost {
         input_hash: &str,
         generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<()> {
-        if !self.fixed_decomposition_state_present() {
-            return Ok(());
-        }
+        // Every run persists admission before dispatch, even without a fixed projection.
         let mut call = execution.call.clone();
         call.options.task = None;
         call.options.source = None;
@@ -214,6 +212,9 @@ impl WorkflowScriptHost {
             execution.depends_on.clone(),
         )
         .with_scaffold_hash(Some(self.scaffold_hash.clone()));
+        if !self.fixed_decomposition_state_present() {
+            return self.runner.v2_store.save_call_admission(&record);
+        }
         self.persist_generation_owned_call_and_emit(
             &record,
             crate::command::workflow_decompose_state::FixedCallProjectionKind::Started,

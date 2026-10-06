@@ -196,6 +196,37 @@ async fn run_subagent_with_auto_background(
     allow_auto_background: bool,
     auto_background_completion: Option<oneshot::Sender<SubagentOutcome>>,
 ) -> SubagentOutcome {
+    let admission = ctx
+        .run_store
+        .as_ref()
+        .and_then(|store| store.admission.clone());
+    let work = run_subagent_owned(
+        subagent_id,
+        request,
+        system,
+        cancel,
+        ctx,
+        allow_auto_background,
+        auto_background_completion,
+    );
+    match admission {
+        Some(fence) => fence
+            .execute(work)
+            .await
+            .unwrap_or_else(SubagentOutcome::Failed),
+        None => work.await,
+    }
+}
+
+async fn run_subagent_owned(
+    subagent_id: String,
+    request: SubagentRequest,
+    system: Vec<serde_json::Value>,
+    cancel: CancellationToken,
+    ctx: ToolContext,
+    allow_auto_background: bool,
+    auto_background_completion: Option<oneshot::Sender<SubagentOutcome>>,
+) -> SubagentOutcome {
     let exec = match get_subagent_executor() {
         Some(e) => e,
         None => {
@@ -234,7 +265,11 @@ async fn run_subagent_with_auto_background(
         let sid = subagent_id.clone();
         async move {
             let mut alive = alive;
-            let result = crate::subagent_session::inherit(
+            let admission = ctx
+                .run_store
+                .as_ref()
+                .and_then(|store| store.admission.clone());
+            let work = crate::subagent_session::inherit(
                 session,
                 crate::host_timeout::inherit(
                     host_timeout,
@@ -252,8 +287,14 @@ async fn run_subagent_with_auto_background(
                         ),
                     ),
                 ),
-            )
-            .await;
+            );
+            let result = match admission {
+                Some(fence) => fence
+                    .execute(work)
+                    .await
+                    .unwrap_or_else(|reason| Err(ExecutorError::Internal(reason))),
+                None => work.await,
+            };
             let cancelled = result.is_err() && cancel.is_cancelled();
             let execution = ExecutionResult { result, cancelled };
             alive.finished(execution.terminal_status());

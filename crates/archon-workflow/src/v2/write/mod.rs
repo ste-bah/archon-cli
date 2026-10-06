@@ -121,6 +121,7 @@ pub async fn run_write_capable_v2_fanout(
     task_universe: Option<&WorkflowV2TaskUniverse>,
     source_task_graph: Option<&WorkflowV2SourceTaskGraph>,
 ) -> WorkflowResult<WorkflowV2Result> {
+    v2_store.session_workflow_store()?.execute_writer(&v2_store.run_id(), async {
     let audit = dispatch.repository_audit();
     let _audit_boundary = match &audit {
         Some(audit) => Some(audit.lock_write_boundary().await),
@@ -288,6 +289,7 @@ pub async fn run_write_capable_v2_fanout(
             execution.call.id
         ))),
     }
+    }).await
 }
 
 fn revalidate_reused_artifact_results(
@@ -480,3 +482,8 @@ mod worktree_unapplied_tests;
 mod delivery_tests;
 #[cfg(test)]
 mod preserved_apply_tests;
+
+#[cfg(test)]
+mod audit_round3_hooks;
+#[cfg(test)]
+mod audit_round3_tests;

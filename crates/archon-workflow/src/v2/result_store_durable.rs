@@ -18,11 +18,13 @@ impl WorkflowV2ResultStore {
 
     /// Write `value` to `path`, synced when this store is durable.
     fn write_record<T: Serialize>(&self, path: &Path, value: &T) -> WorkflowResult<()> {
-        if self.durable {
-            write_json_synced(path, value)
-        } else {
-            write_json(path, value)
-        }
+        self.with_session_write_lock(|| {
+            if self.durable {
+                write_json_synced(path, value)
+            } else {
+                write_json(path, value)
+            }
+        })
     }
 }
 

@@ -75,9 +75,11 @@ impl WorkflowV2ScriptRunner {
                 .await?;
         } else {
             let root = self.v2_store.root().join("repository-audit/no-repository");
-            std::fs::create_dir_all(&root).map_err(|e| WorkflowError::Io {
-                path: root.clone(),
-                source: e,
+            audit.store.with_run_lock(&audit.run_id, |_| {
+                std::fs::create_dir_all(&root).map_err(|e| WorkflowError::Io {
+                    path: root.clone(),
+                    source: e,
+                })
             })?;
             let snapshot = Snapshot {
                 identity: "no-repository".into(),

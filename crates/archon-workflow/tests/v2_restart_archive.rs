@@ -8,7 +8,7 @@
 mod restart_run;
 
 use archon_workflow::v2::restart::restart_generated_v2_task;
-use archon_workflow::{WorkflowV2CallRecord, WorkflowV2ResultStore};
+use archon_workflow::{WorkflowError, WorkflowV2CallRecord, WorkflowV2ResultStore};
 use restart_run::{accepted, agent_call, generated_run, interrupted, slot, v2_store};
 
 const T3: &str = "2026-10-03T05:16:09+00:00";
@@ -46,6 +46,14 @@ fn reuse_after_a_restart_still_reads_the_archive() {
     // and goes back into the slot.
     let kept = history_candidate(&v2, "author-c").expect("author-c still reusable");
     assert_eq!(kept, accepted("author-c", "T-C"));
+    // The prior session may read history, but cannot restore it into a
+    // successor's slot. A newly opened session keeps unrelated reuse intact.
+    assert!(matches!(
+        v2.restore_call_record(&kept),
+        Err(WorkflowError::ControlCancelled(_))
+    ));
+    assert_eq!(slot(&v2, "author-c").unwrap(), interrupted("author-c"));
+    let v2 = v2_store(&store, &run);
     v2.restore_call_record(&kept).unwrap();
     assert_eq!(slot(&v2, "author-c").unwrap(), kept);
 

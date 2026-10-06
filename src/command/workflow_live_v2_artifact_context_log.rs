@@ -35,9 +35,18 @@ pub(super) fn record(
     };
     text.push('\n');
     let path = store.root().join(LOG_FILE);
-    let _ = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .and_then(|mut file| file.write_all(text.as_bytes()));
+    let result = store.with_session_write_lock(|| {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .and_then(|mut file| file.write_all(text.as_bytes()))
+            .map_err(|source| archon_workflow::WorkflowError::Io {
+                path: path.clone(),
+                source,
+            })
+    });
+    if let Err(error) = result {
+        tracing::warn!(%error, "artifact context not appended");
+    }
 }

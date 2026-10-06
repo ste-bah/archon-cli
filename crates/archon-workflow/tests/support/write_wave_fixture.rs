@@ -274,6 +274,36 @@ pub struct Fixture {
 
 pub const FORMATTED_BASELINE: &str = "fn f() {\n    1\n}\n";
 impl Fixture {
+    pub fn race_branches(
+        &self,
+        id: &str,
+        edits: Vec<(Vec<&str>, Edits)>,
+    ) -> (WorkflowV2HostCall, Vec<(WorkflowV2FanoutItem, Edits)>) {
+        self.wave_branches(id, edits)
+    }
+    pub async fn race_wave(
+        &self,
+        call: WorkflowV2HostCall,
+        branches: Vec<(WorkflowV2FanoutItem, Edits)>,
+    ) -> WorkflowResult<WorkflowV2Result> {
+        self.try_wave_for(
+            &self.v2,
+            call,
+            branches,
+            (
+                Some(AuditScript {
+                    flagged: vec![],
+                    dispositions: BTreeMap::new(),
+                }),
+                &[],
+                &[],
+            ),
+            self.item_task_ids.clone(),
+            false,
+        )
+        .await
+        .0
+    }
     pub fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
         let repo = temp.path().join("repo");

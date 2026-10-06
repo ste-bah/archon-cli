@@ -87,9 +87,6 @@ impl super::runtime::AuditRuntime {
         &self,
         operation: impl FnOnce() -> WorkflowResult<T>,
     ) -> WorkflowResult<T> {
-        self.store.with_run_lock(&self.run_id, |_| {
-            self.require_executor()?;
-            operation()
-        })
+        self.store.with_run_lock(&self.run_id, |_| operation())
     }
 }

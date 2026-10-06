@@ -1,6 +1,6 @@
 //! All call-cache routes share audit admission before granting completion credit.
 use super::*;
-use archon_workflow::repository_audit::{reuse, runtime::Snapshot};
+use archon_workflow::repository_audit::reuse;
 
 impl WorkflowScriptHost {
     fn audit_cache_paths(record: &WorkflowV2CallRecord) -> Vec<String> {
@@ -40,7 +40,7 @@ impl WorkflowScriptHost {
         reuse::admits(&state, &Self::audit_cache_paths(record))
     }
 
-    pub(super) async fn refresh_audit_for_cache(
+    pub(in super::super) async fn refresh_audit_for_cache(
         &self,
         record: &WorkflowV2CallRecord,
     ) -> archon_workflow::WorkflowResult<bool> {
@@ -57,8 +57,15 @@ impl WorkflowScriptHost {
                 let mut all = audit.state()?.declared_paths;
                 all.extend(paths);
                 let all = all.into_iter().collect::<Vec<_>>();
-                let snapshot =
-                    Snapshot::capture(std::path::Path::new(root), &all, &self.runner.v2_store)?;
+                #[cfg(test)]
+                super::super::super::workflow_live_v2_fixed_persistence::publication_hook::run(
+                    self.runner.workflow_store.run_dir(&self.runner.run_id),
+                );
+                let snapshot = audit.capture_snapshot(
+                    std::path::Path::new(root),
+                    &all,
+                    &self.runner.v2_store,
+                )?;
                 audit
                     .assess(
                         &snapshot,

@@ -305,7 +305,6 @@ async fn adopted_recovery_cleans_its_moved_aside_files() {
 #[tokio::test]
 async fn moved_aside_pin_digest_is_bound_before_adoption() {
     let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
-    let launch = run.set.pin().identity();
     pre_implementation_head(&run);
     recover(&run);
     let pin = run.set.pin_path();
@@ -317,9 +316,20 @@ async fn moved_aside_pin_digest_is_bound_before_adoption() {
         serde_json::from_slice(&std::fs::read(&aside).unwrap()).unwrap();
     value["freeze_event_id"] = "tampered-inspection-pin".into();
     std::fs::write(aside, serde_json::to_vec(&value).unwrap()).unwrap();
-    stage(&run, &accepting()).await;
+    let contract_before = run.set.contract_bytes();
+    let (_result, record) = stage(&run, &accepting()).await;
+    assert!(record.blocks_completion());
     assert!(
-        verify(&run, &launch).is_err(),
-        "the receipt must bind the actual moved pin digest"
+        record
+            .operational_errors
+            .iter()
+            .any(|error| error.contains("recovery")),
+        "the altered preimage must produce a named refusal: {:?}",
+        record.operational_errors
     );
+    assert!(
+        !pin.exists(),
+        "untrusted evidence must refuse before re-freeze"
+    );
+    assert_eq!(run.set.contract_bytes(), contract_before);
 }

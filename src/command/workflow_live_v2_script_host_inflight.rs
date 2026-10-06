@@ -89,8 +89,13 @@ fn write_marker(dir: &std::path::Path, marker: &InflightMarker) -> std::io::Resu
 
 /// Best effort: a marker that cannot be written costs only the orphan record
 /// a later start would have made, never the call.
-fn write_inflight(dir: &std::path::Path, marker: &InflightMarker) {
-    if let Err(error) = write_marker(dir, marker) {
+fn write_inflight(store: &WorkflowV2ResultStore, dir: &std::path::Path, marker: &InflightMarker) {
+    if let Err(error) = store.with_session_write_lock(|| {
+        write_marker(dir, marker).map_err(|e| WorkflowError::Io {
+            path: dir.to_path_buf(),
+            source: e,
+        })
+    }) {
         tracing::warn!(call_id = %marker.call.id, %error, "in-flight marker not written");
     }
 }
@@ -100,6 +105,7 @@ fn write_inflight(dir: &std::path::Path, marker: &InflightMarker) {
 /// it returns. Every copy keeps the dispatch time, so the orphan record still
 /// says when the call started.
 async fn refresh_while<T>(
+    store: &WorkflowV2ResultStore,
     dir: &std::path::Path,
     run_id: &str,
     execution: &WorkflowV2CallExecution,
@@ -108,7 +114,7 @@ async fn refresh_while<T>(
     work: impl std::future::Future<Output = T>,
 ) -> T {
     let first = InflightMarker::now(run_id, execution, attempt, input_hash);
-    write_inflight(dir, &first);
+    write_inflight(store, dir, &first);
     let started_at = first.started_at;
     let mut tick = tokio::time::interval_at(
         tokio::time::Instant::now() + INFLIGHT_REFRESH,
@@ -125,7 +131,7 @@ async fn refresh_while<T>(
             _ = tick.tick() => {
                 let mut marker = InflightMarker::now(run_id, execution, attempt, input_hash);
                 marker.started_at.clone_from(&started_at);
-                write_inflight(dir, &marker);
+                write_inflight(store, dir, &marker);
             }
         }
     }
@@ -199,6 +205,7 @@ impl WorkflowScriptHost {
         work: impl std::future::Future<Output = T>,
     ) -> T {
         refresh_while(
+            &self.runner.v2_store,
             &self.inflight_dir(),
             &self.runner.run_id,
             execution,
@@ -211,7 +218,24 @@ impl WorkflowScriptHost {
 
     pub(super) fn clear_inflight(&self, call_id: &str) {
         self.forget_pending_call(call_id);
-        let _ = std::fs::remove_file(self.inflight_dir().join(marker_name(call_id)));
+        self.remove_inflight(&self.inflight_dir().join(marker_name(call_id)));
+    }
+
+    fn remove_inflight(&self, path: &std::path::Path) {
+        if let Err(error) =
+            self.runner
+                .v2_store
+                .with_session_write_lock(|| match std::fs::remove_file(path) {
+                    Ok(()) => Ok(()),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(error) => Err(WorkflowError::Io {
+                        path: path.to_path_buf(),
+                        source: error,
+                    }),
+                })
+        {
+            tracing::warn!(%error, "in-flight marker removal refused");
+        }
     }
 
     /// Record every call a previous host process died under. A call answered
@@ -237,7 +261,7 @@ impl WorkflowScriptHost {
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<InflightMarker>(&bytes).ok());
             let Some(marker) = marker else {
-                let _ = std::fs::remove_file(&path);
+                self.remove_inflight(&path);
                 continue;
             };
             // A host still alive owns its call; only a dead one's is orphaned.
@@ -248,7 +272,7 @@ impl WorkflowScriptHost {
             // write leaves it for the next start (Batch O review).
             match self.record_orphan(&marker) {
                 Ok(()) => {
-                    let _ = std::fs::remove_file(&path);
+                    self.remove_inflight(&path);
                 }
                 Err(error) => {
                     tracing::warn!(call_id = %marker.call.id, %error, "orphaned call not recorded");

@@ -275,7 +275,8 @@ async fn the_marker_is_refreshed_with_new_progress_and_keeps_its_dispatch_time()
         .expect("marker json")
     };
     let (done, finished) = tokio::sync::oneshot::channel::<()>();
-    let work = refresh_while(&dir, run, &execution, 1, "in-hash", finished);
+    let store = WorkflowV2ResultStore::new(dir.parent().unwrap().join("v2"));
+    let work = refresh_while(&store, &dir, run, &execution, 1, "in-hash", finished);
     tokio::pin!(work);
     let zero = std::time::Duration::ZERO;
     assert!(

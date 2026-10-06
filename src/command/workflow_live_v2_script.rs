@@ -207,15 +207,16 @@ impl WorkflowV2ScriptRunner {
         mut self,
         harness_source: &str,
     ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
-        // Issue-253: the generation a later control outcome must be past.
         let start = observe_start(&self.workflow_store, &self.run_id)?;
-        // Issue 261/291: what every dispatch and write must still own. A
-        // launch binds its generation first; a later script keeps it.
+        // First captured binding owns every dispatch and write.
         if let Some(generation) = start.generation() {
             self.v2_store.bind_session_executor(generation);
+            self.workflow_store = self.workflow_store.for_executor(
+                &self.run_id,
+                self.v2_store.session_executor().unwrap_or(generation),
+            );
         }
-        // Issue 329: a session a resume replaced before its script started
-        // starts nothing -- no repository audit, no script.
+        self.client = self.client.with_owner_store(self.workflow_store.clone());
         if let Ok(run) = self.workflow_store.load_state(&self.run_id) {
             self.v2_store.require_session_executor(&run)?;
         }

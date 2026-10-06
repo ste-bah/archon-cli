@@ -119,7 +119,7 @@ pub(crate) fn reconcile_interrupted(
             .filter(|current| {
                 current.call.method == archon_workflow::WorkflowV2HostMethod::Agent
                     && author_subject(&current.call.id).1 == subject
-                    && current.started_at > record.started_at
+                    && supersession_order(current) > supersession_order(record)
             })
             .max_by_key(|current| supersession_order(current))
         {
@@ -172,10 +172,10 @@ pub(crate) fn reconcile_interrupted(
     Ok(())
 }
 
-/// Call time establishes supersession across record slots. Legacy records may
+/// Durable admission order establishes supersession across record slots. Legacy records may
 /// have no timestamps: an ambiguous interruption cannot displace an answer,
 /// and an ambiguous successful answer cannot erase a real failure.
-fn supersession_order(record: &WorkflowV2CallRecord) -> (&str, &str, u8, &str) {
+fn supersession_order(record: &WorkflowV2CallRecord) -> (Option<u64>, &str, u8, &str) {
     let finality = if interruption_reason(record).is_some()
         || matches!(
             record.status,
@@ -191,8 +191,8 @@ fn supersession_order(record: &WorkflowV2CallRecord) -> (&str, &str, u8, &str) {
         1
     };
     (
+        record.admission_sequence,
         &record.started_at,
-        &record.finished_at,
         finality,
         &record.call.id,
     )
