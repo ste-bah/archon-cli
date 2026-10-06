@@ -56,20 +56,37 @@ pub(super) struct GeneratedV2Metadata {
     pub(super) script_lifecycle: Option<bool>,
 }
 
+/// Whether a run enters the authored-script lifecycle, and its run-end
+/// observer snapshot: taken before the run was created (a launch, Issue
+/// 338), or still to collect.
+pub(super) enum LaunchSnapshot {
+    Collect(bool),
+    Taken(bool, Option<RunEndAcceptanceObserverSnapshotV1>),
+}
+
+impl From<bool> for LaunchSnapshot {
+    fn from(script_lifecycle: bool) -> Self {
+        Self::Collect(script_lifecycle)
+    }
+}
+
 pub(super) fn save_generated_v2_metadata(
     store: &WorkflowStore,
     run_id: &str,
     plan: &WorkflowScriptPlan,
-    script_lifecycle: bool,
+    launch: impl Into<LaunchSnapshot>,
 ) -> archon_workflow::WorkflowResult<()> {
     let generated_scaffold = plan.generated_scaffold();
-    let observer_snapshot = (script_lifecycle && plan.task_universe.is_some())
-        .then(|| {
-            plan.task_universe.as_ref().and_then(|universe| {
-                super::workflow_run_end_snapshot::collect_run_end_observer_snapshot(store, universe)
-            })
-        })
-        .flatten();
+    let (script_lifecycle, observer_snapshot) = match launch.into() {
+        LaunchSnapshot::Taken(script_lifecycle, snapshot) => (script_lifecycle, snapshot),
+        LaunchSnapshot::Collect(script_lifecycle) => (
+            script_lifecycle,
+            super::workflow_run_end_snapshot::launch_snapshot(store, plan, script_lifecycle)
+                .map_err(|error| {
+                    archon_workflow::WorkflowError::StageFailed(format!("{error:#}"))
+                })?,
+        ),
+    };
     let metadata = GeneratedV2Metadata {
         schema_version: "workflow-generated-v2-metadata-v1".to_string(),
         run_kind: Some(if plan.task_universe.is_some() {

@@ -22,7 +22,7 @@ mod journal;
 mod legacy;
 #[path = "workflow_task_set_publish_lock.rs"]
 mod lock;
-pub(crate) use lock::{ChainRead, register_publish_settle};
+pub(crate) use lock::{ChainRead, UnsettledPublish, pause_if_unsettled, register_publish_settle};
 #[path = "workflow_task_set_publish_verification.rs"]
 mod verification;
 pub(crate) fn valid_recovery_transaction(value: &str) -> bool {
@@ -452,6 +452,11 @@ mod crash_tests;
 mod shared_lock_tests;
 #[cfg(test)]
 pub(crate) use shared_lock_tests::stick_next_commit;
+#[cfg(test)]
+#[path = "workflow_task_set_publish_read_settle_tests.rs"]
+mod read_settle_tests;
+#[cfg(test)]
+pub(crate) use read_settle_tests::crash_publish;
 
 #[cfg(test)]
 pub(crate) fn reader_test_step(step: &str) {

@@ -3,6 +3,9 @@
 //! This probe is deliberately non-blocking: it opts a normal authored task run
 //! in when any frozen-chain artifact is present, but it neither validates the
 //! chain nor rejects launch. Validation belongs to the post-terminal observer.
+//! The one exception is a set it cannot read as one version (Issue 338): a
+//! snapshot of a half-published set would bind the run to a chain that never
+//! existed, so the launch stops there with the reason, never reading it.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -23,9 +26,13 @@ pub(super) mod toolchain;
 pub(super) fn collect_run_end_observer_snapshot(
     store: &WorkflowStore,
     universe: &WorkflowV2TaskUniverse,
-) -> Option<RunEndAcceptanceObserverSnapshotV1> {
-    let project_root = project_root(store)?;
-    let task_root = canonical_task_root(project_root, universe)?;
+) -> anyhow::Result<Option<RunEndAcceptanceObserverSnapshotV1>> {
+    let Some(project_root) = project_root(store) else {
+        return Ok(None);
+    };
+    let Some(task_root) = canonical_task_root(project_root, universe) else {
+        return Ok(None);
+    };
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project_root, &task_root);
     let task_artifacts = [
         ACCEPTANCE_CONTRACT_FILE,
@@ -38,15 +45,16 @@ pub(super) fn collect_run_end_observer_snapshot(
         .any(|name| task_root.join(name).exists())
         && !pin_path.exists()
     {
-        return None;
+        return Ok(None);
     }
-    // Issue 294: the pin and the native binding are one version. A set that
-    // cannot be locked is read as before, and the reason is logged.
+    // Issue 294: the pin and the native binding are one version; a set that
+    // cannot be read as one is not read at all (Issue 338).
     let _read = crate::command::workflow_task_set::ChainRead::begin(&pin_path, &task_root)
-        .inspect_err(|error| {
-            tracing::warn!(error = %format!("{error:#}"), "launch snapshot read without the publish lock");
-        })
-        .ok();
+        .map_err(|error| {
+            error.context(
+                "the run-end observer's launch snapshot cannot read the bound task set as one version, so no run is started; fix the cause below and launch again",
+            )
+        })?;
     let portable_acceptance_identity = std::fs::read(&pin_path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<AcceptancePin>(&bytes).ok())
@@ -55,7 +63,7 @@ pub(super) fn collect_run_end_observer_snapshot(
             acceptance_digest: pin.acceptance_digest,
             skeleton_digest: pin.skeleton_digest,
         });
-    Some(RunEndAcceptanceObserverSnapshotV1 {
+    Ok(Some(RunEndAcceptanceObserverSnapshotV1 {
         native_execution: match crate::command::acceptance_scratch_policy::capture(
             project_root,
             &task_root,
@@ -77,7 +85,7 @@ pub(super) fn collect_run_end_observer_snapshot(
         // so any change after this launch that its lineage does not record
         // is refused.
         lineage_recording: Some(archon_workflow::task_set_lineage::LINEAGE_RECORDING_V1),
-    })
+    }))
 }
 
 pub(super) fn project_root(store: &WorkflowStore) -> Option<&Path> {
@@ -110,6 +118,34 @@ pub(super) fn canonical_task_root(
     match roots.into_iter().collect::<Vec<_>>().as_slice() {
         [root] => Some(root.clone()),
         _ => None,
+    }
+}
+
+/// A launch's refusals, before its run is created (Issue 338): a contract
+/// with a check the judge did not accept, or a bound set the observer's
+/// snapshot cannot read as one version. Returns the snapshot it took.
+pub(super) fn refuse_launch(
+    store: &WorkflowStore,
+    plan: &super::WorkflowScriptPlan,
+    script_lifecycle: bool,
+) -> anyhow::Result<super::workflow_live_v2_metadata::LaunchSnapshot> {
+    refuse_unaccepted_launch(store, plan.task_universe.as_ref())?;
+    let snapshot = launch_snapshot(store, plan, script_lifecycle)?;
+    Ok(super::workflow_live_v2_metadata::LaunchSnapshot::Taken(
+        script_lifecycle,
+        snapshot,
+    ))
+}
+
+/// The run-end observer snapshot of an authored-script run's bound set.
+pub(super) fn launch_snapshot(
+    store: &WorkflowStore,
+    plan: &super::WorkflowScriptPlan,
+    script_lifecycle: bool,
+) -> anyhow::Result<Option<RunEndAcceptanceObserverSnapshotV1>> {
+    match (script_lifecycle, &plan.task_universe) {
+        (true, Some(universe)) => collect_run_end_observer_snapshot(store, universe),
+        _ => Ok(None),
     }
 }
 

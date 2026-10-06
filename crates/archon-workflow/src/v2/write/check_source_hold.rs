@@ -39,6 +39,7 @@ use crate::check_source_requests::{
 use crate::check_source_resolve::Roots;
 use crate::check_source_rust::{item_text, splice_item};
 use crate::task_set_contract::content_digest;
+use crate::task_set_publish_lock::PublishLockError;
 
 /// What the hold did for one branch.
 #[derive(Debug, Default)]
@@ -58,7 +59,8 @@ pub(super) struct Hold {
 /// and only on paths the grant opened (`opened`) or the project inputs the
 /// landing applies. Pins that exist but cannot be read, or a worktree whose
 /// changes cannot be listed, are `unavailable`: the branch is refused (fail
-/// closed), never landed unread.
+/// closed), never landed unread. A publish no read can settle pauses the run
+/// instead (Issue 338): it would refuse every branch.
 pub(super) fn hold_check_source_changes(
     plan: &WritePlan,
     opened: &dyn Fn(&str) -> bool,
@@ -66,14 +68,14 @@ pub(super) fn hold_check_source_changes(
     (call_id, branch_id): (&str, &str),
     task_ids: &[String],
     result: &mut WorkflowV2Result,
-) -> Hold {
+) -> crate::WorkflowResult<Hold> {
     let mut hold = Hold::default();
     let policy = match landing_policy(run_root) {
         Ok(Some(policy)) => policy,
-        Ok(None) => return hold,
+        Ok(None) => return Ok(hold),
         Err(error) => {
             hold.unavailable = Some(error);
-            return hold;
+            return Ok(hold);
         }
     };
     let roots = Roots {
@@ -82,10 +84,11 @@ pub(super) fn hold_check_source_changes(
     };
     let (store, pins) = match load_for_run(run_root, &policy.project, &policy.task_root, &roots) {
         Ok(Some(loaded)) => loaded,
-        Ok(None) => return hold,
-        Err(error) => {
+        Ok(None) => return Ok(hold),
+        Err(PublishLockError::Unsettled(why)) => return Err(WorkflowError::ControlPaused(why)),
+        Err(PublishLockError::Failed(error)) => {
             hold.unavailable = Some(error);
-            return hold;
+            return Ok(hold);
         }
     };
     let changed = match crate::write_coordinator::patch_manifest::workspace_changed_paths(
@@ -99,7 +102,7 @@ pub(super) fn hold_check_source_changes(
             hold.unavailable = Some(format!(
                 "the worktree's changes could not be listed: {error}"
             ));
-            return hold;
+            return Ok(hold);
         }
     };
     let inputs = crate::write_coordinator::project_inputs::ProjectInputPolicy::for_run(run_root);
@@ -147,7 +150,7 @@ pub(super) fn hold_check_source_changes(
     }
     hold.refusals.sort();
     hold.refusals.dedup();
-    hold
+    Ok(hold)
 }
 
 /// The landing policy that names the run's task set; `None` only for a run

@@ -95,7 +95,8 @@ async fn attribution_replay_of_a_recorded_round() {
         &mut record,
         budget,
     )
-    .await;
+    .await
+    .unwrap();
     route_failures(Some(&universe), &context.repository, &all, &mut record);
     mark_blocked(&mut record);
     for check in record.failing_checks() {

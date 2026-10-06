@@ -286,11 +286,15 @@ pub(crate) fn stage_verify(
             ),
             Vec::new(),
         ),
-        Err(error) => super::workflow_gate::GateEvaluation::new(
-            format!("{} failed", stage.command_id()),
-            Vec::new(),
-        )
-        .with_operational_error(format!("{error:#}")),
+        Err(error) => {
+            // Issue 338: a set no read can settle pauses the run instead.
+            super::workflow_host_command_operational::exit_if_unsettled_publish(&error);
+            super::workflow_gate::GateEvaluation::new(
+                format!("{} failed", stage.command_id()),
+                Vec::new(),
+            )
+            .with_operational_error(format!("{error:#}"))
+        }
     };
     let staging_root = gate_envelope
         .parent()

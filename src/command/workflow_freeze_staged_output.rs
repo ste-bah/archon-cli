@@ -24,6 +24,8 @@ pub(super) fn report_operational_failure(
     command_id: &str,
     error: &anyhow::Error,
 ) -> Result<()> {
+    // Issue 338: a set no read can settle is the run's pause, not the stage's.
+    crate::command::workflow_host_command_operational::exit_if_unsettled_publish(error);
     write_staged_manifest(
         cwd,
         staged,

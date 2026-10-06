@@ -165,6 +165,8 @@ async fn evaluate_inner(
             observed.operational_errors.push(violation.message());
             Ok(observed)
         }
+        // Issue 338: a pause stays the run's pause.
+        (Err(paused @ WorkflowError::ControlPaused(_)), _) => Err(paused),
         (Err(error), Some(violation)) => Err(WorkflowError::StageFailed(format!(
             "{error}; {}",
             violation.message()

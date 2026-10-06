@@ -73,7 +73,14 @@ fn same_thread_nesting_reads_under_any_holder_and_refuses_a_write_inside_a_read(
     let read = PublishLockFile::hold_shared(&pin).unwrap().unwrap();
     assert!(PublishLockFile::hold_shared(&pin).unwrap().is_none());
     let refused = PublishLockFile::hold(&pin, None).err().unwrap();
-    assert!(refused.contains("a write inside that read"), "{refused}");
+    assert!(
+        refused.to_string().contains("a write inside that read"),
+        "{refused}"
+    );
+    assert!(
+        refused.unsettled().is_none(),
+        "a nested write is no journal"
+    );
     assert!(PublishLockFile::acquire(&lock_path(&pin)).is_err());
     drop(read);
     let write = PublishLockFile::hold(&pin, None).unwrap().unwrap();
@@ -140,7 +147,9 @@ fn a_repin_with_no_settlement_installed_refuses_a_left_journal() {
     let refused = PublishLockFile::hold(&pin, Some(Path::new("/tasks")))
         .err()
         .unwrap();
-    assert!(refused.contains("was interrupted"), "{refused}");
+    let evidence = refused.unsettled().expect("a left journal is unsettled");
+    assert!(evidence.contains("no settlement"), "{evidence}");
+    assert!(evidence.contains("a journal temp only"), "{evidence}");
     assert!(!held_here(&lock_path(&pin)));
 }
 

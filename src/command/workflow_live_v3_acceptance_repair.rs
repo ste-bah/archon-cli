@@ -54,11 +54,11 @@ use super::exec::{self, StageContext};
 use crate::command::workflow_task_set::executability::{
     Baseline, FailedTree, HOST_UNPROVEN, HostProbe, crash_findings_at, originals,
 };
-use crate::command::workflow_task_set::non_accepted_ids;
 use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
 use crate::command::workflow_task_set::republish::{
     ReauthorRequest, ReauthorResult, reauthor_and_republish, reauthor_command,
 };
+use crate::command::workflow_task_set::{non_accepted_ids, pause_if_unsettled};
 
 /// Contract-defect text per check id the repair could not fix.
 pub(super) type Defects = BTreeMap<String, String>;
@@ -127,21 +127,26 @@ pub(super) async fn republish(
 }
 
 /// Repair every non-accepted check in `contract`. `None` when there is none.
+/// `ControlPaused` when the republish met a journal another publish left
+/// that no recovery can settle (Issue 338): never a failed repair.
 pub(super) async fn repair_unaccepted(
     llm: Option<&dyn WorkflowLlmClient>,
     context: &StageContext,
     contract: &AcceptanceContract,
     base: Option<&str>,
-) -> Option<(AcceptanceContractRepairV1, Defects)> {
+) -> WorkflowResult<Option<(AcceptanceContractRepairV1, Defects)>> {
     let ids = non_accepted_ids(contract);
     if ids.is_empty() {
-        return None;
+        return Ok(None);
     }
     // A check the judge never accepted never ran: there is no verdict of
     // its own to hold a repair to, only the baseline.
     let outcome = republish(llm, context, contract, &ids, &BTreeMap::new(), base, None).await;
+    if let Some(paused) = outcome.as_ref().err().and_then(pause_if_unsettled) {
+        return Err(paused);
+    }
     let check_ids = ids.iter().cloned().collect::<Vec<_>>();
-    Some(match outcome {
+    Ok(Some(match outcome {
         Ok(result) => (
             AcceptanceContractRepairV1 {
                 check_ids,
@@ -178,7 +183,7 @@ pub(super) async fn repair_unaccepted(
                 defects,
             )
         }
-    })
+    }))
 }
 
 /// Repair the round's contract in place and record the attempt. Returns the
@@ -194,7 +199,7 @@ pub(super) async fn apply(
     record: &mut AcceptanceRoundRecordV1,
     base: Option<&str>,
 ) -> WorkflowResult<Option<Defects>> {
-    let Some((repair, defects)) = repair_unaccepted(llm, context, contract, base).await else {
+    let Some((repair, defects)) = repair_unaccepted(llm, context, contract, base).await? else {
         return Ok(Some(Defects::new()));
     };
     let repaired = repair.repaired;
@@ -328,7 +333,11 @@ pub(super) async fn repair_ran(
     )
     .await;
     // Issue 336: a republished set whose interrupted publish cannot be
-    // settled pauses the run; it is never this repair's failure.
+    // settled pauses the run; it is never this repair's failure, nor is one
+    // the republish itself met (Issue 338).
+    if let Some(paused) = outcome.as_ref().err().and_then(pause_if_unsettled) {
+        return Err(paused);
+    }
     let reloaded = match outcome.map(|result| (result, exec::load_contract(round.context))) {
         Ok((_, Err(paused @ WorkflowError::ControlPaused(_)))) => return Err(paused),
         Ok((result, loaded)) => loaded

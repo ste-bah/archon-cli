@@ -106,7 +106,7 @@ async fn run_v2_workflow_with_origin(
     script_lifecycle: bool,
     learning: &archon_core::config::LearningConfig,
 ) -> Result<String> {
-    super::workflow_run_end_snapshot::refuse_unaccepted_launch(store, plan.task_universe.as_ref())?;
+    let snapshot = super::workflow_run_end_snapshot::refuse_launch(store, &plan, script_lifecycle)?;
     let run = store.create_run(plan.approval_metadata_spec())?;
     let lease = workflow_live_v2_run_lease::take(store, &run.id)?;
     // Issue-55: the decomposition's repository, base commit and HEAD are the
@@ -127,7 +127,7 @@ async fn run_v2_workflow_with_origin(
             .map_err(|error| anyhow::anyhow!("reporting the bound repository: {error}"))?;
     }
     WorkflowBundle::create_for_run(store, &run, &plan.harness_source, origin)?;
-    save_generated_v2_metadata(store, &run.id, &plan, script_lifecycle)?;
+    save_generated_v2_metadata(store, &run.id, &plan, snapshot)?;
     super::workflow_run_end_snapshot::toolchain::warn(store, &run.id, &ui_sink).await;
     let run = match gate_live_approval(cwd, store, run, approval_mode, &ui_sink).await? {
         LiveApprovalOutcome::Proceed(run) => *run,

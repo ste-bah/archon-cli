@@ -9,6 +9,7 @@ use crate::check_source_resolve::Roots;
 use crate::task_set_contract::{
     ACCEPTANCE_CONTRACT_FILE, AcceptanceContract, AcceptancePin, content_digest,
 };
+use crate::task_set_publish_lock::{PublishLockError, PublishLockFile};
 
 /// Where one set of pins is kept.
 #[derive(Debug, Clone)]
@@ -76,8 +77,30 @@ impl PinStore {
     /// its acceptance pin: the new bytes are filed by digest first, the pin
     /// then names that digest (the commit point), and the sidecar follows --
     /// so a crash between the two leaves a pin whose sidecar
-    /// [`Self::verified_read`] restores from the filed bytes.
-    pub fn write(&self, pins: &CheckSourcePins) -> Result<(), String> {
+    /// [`Self::verified_read`] reads from the filed bytes.
+    pub fn write(&self, pins: &CheckSourcePins) -> Result<(), PublishLockError> {
+        self.replace(None, pins).map(drop)
+    }
+
+    /// [`Self::write`] over the pins `prior` only (Issue 338): the pins the
+    /// store binds are read again under the exclusive lock, once a publish a
+    /// crash interrupted is settled, and when they are no longer `prior` --
+    /// that settlement rolled a new set forward, or another repin ran --
+    /// nothing is written and [`Repin::Stale`] carries what is bound now. A
+    /// store that binds nothing yet is written.
+    pub fn write_over(
+        &self,
+        prior: &CheckSourcePins,
+        pins: &CheckSourcePins,
+    ) -> Result<Repin, PublishLockError> {
+        self.replace(Some(prior), pins)
+    }
+
+    fn replace(
+        &self,
+        prior: Option<&CheckSourcePins>,
+        pins: &CheckSourcePins,
+    ) -> Result<Repin, PublishLockError> {
         let bytes = Self::bytes(pins);
         if let Ok(prior) = std::fs::read(&self.sidecar) {
             self.blobs.put(&prior);
@@ -94,12 +117,16 @@ impl PinStore {
         // exclusive, and only once a publish a crash interrupted is settled:
         // never written over a half-applied set (Issue 336).
         let _publish = match (&self.pin, self.frozen) {
-            (Some(pin), true) => crate::task_set_publish_lock::PublishLockFile::hold(
-                pin,
-                self.tasks_root.as_deref(),
-            )?,
+            (Some(pin), true) => PublishLockFile::hold(pin, self.tasks_root.as_deref())?,
             _ => None,
         };
+        // A store that binds nothing yet holds nothing to overwrite.
+        if let Some(prior) = prior
+            && let Some(now) = self.verified_read()?
+            && Self::bytes(&now) != Self::bytes(prior)
+        {
+            return Ok(Repin::Stale(now));
+        }
         if let (Some(pin_path), true) = (&self.pin, self.frozen)
             && pin_path.is_file()
         {
@@ -108,7 +135,8 @@ impl PinStore {
                 return Err(format!(
                     "the new pins could not be filed under {}",
                     self.sidecar.display()
-                ));
+                )
+                .into());
             }
             let mut pin = read_pin(pin_path)?;
             pin.check_sources_digest = Some(digest);
@@ -119,36 +147,81 @@ impl PinStore {
             .map_err(|error| format!("{} could not be written: {error}", pin_path.display()))?;
         }
         write_atomically(&self.sidecar, &bytes)
-            .map_err(|error| format!("{} could not be written: {error}", self.sidecar.display()))
+            .map_err(|error| format!("{} could not be written: {error}", self.sidecar.display()))?;
+        Ok(Repin::Written)
     }
 
     /// [`Self::read`], held to the digest the acceptance pin records when
-    /// it records one: a sidecar that does not hash to it is restored from
-    /// the bytes filed under it, else refused.
+    /// it records one: a sidecar that does not hash to it is read from the
+    /// bytes filed under it, else refused. A reader never writes (Issue
+    /// 338): the sidecar itself is put back by [`Self::restore_sidecar`],
+    /// under the exclusive lock, or by the next repin.
     pub fn verified_read(&self) -> Result<Option<CheckSourcePins>, String> {
-        let Some(pin_path) = self.pin.as_ref().filter(|path| path.is_file()) else {
-            return self.read();
+        match self.unbound_sidecar()? {
+            None => self.read(),
+            Some((_, filed)) => serde_json::from_slice(&filed)
+                .map(Some)
+                .map_err(|error| format!("{} is malformed: {error}", self.sidecar.display())),
+        }
+    }
+
+    /// The sidecar's bytes as the pin binds them, when the sidecar on disk
+    /// does not hash to the pin's digest: its pin path and the filed copy.
+    /// Refused when no copy is filed.
+    fn unbound_sidecar(&self) -> Result<Option<(&Path, Vec<u8>)>, String> {
+        let Some(pin_path) = self.pin.as_deref().filter(|path| path.is_file()) else {
+            return Ok(None);
         };
         let Some(digest) = read_pin(pin_path)?.check_sources_digest else {
-            return self.read();
+            return Ok(None);
         };
         let actual = std::fs::read(&self.sidecar)
             .ok()
             .map(|bytes| content_digest(&bytes));
-        if actual.as_deref() != Some(digest.as_str()) {
-            let Some(filed) = self.blobs.get(&digest) else {
-                return Err(format!(
-                    "{} does not hash to the digest {digest} its acceptance pin {} records, and no copy is filed under it; re-run `workflow freeze-acceptance`",
-                    self.sidecar.display(),
-                    pin_path.display()
-                ));
-            };
+        if actual.as_deref() == Some(digest.as_str()) {
+            return Ok(None);
+        }
+        match self.blobs.get(&digest) {
+            Some(filed) => Ok(Some((pin_path, filed))),
+            None => Err(format!(
+                "{} does not hash to the digest {digest} its acceptance pin {} records, and no copy is filed under it; re-run `workflow freeze-acceptance`",
+                self.sidecar.display(),
+                pin_path.display()
+            )),
+        }
+    }
+
+    /// Put a frozen sidecar a crashed repin left behind its pin back to the
+    /// bytes the pin binds, under the exclusive publish lock (any journal
+    /// settled first), so no reader writes. Nothing is done when it already
+    /// binds, when no copy is filed (the read reports it), or when this
+    /// thread holds the lock (its holder's read takes the filed copy).
+    pub fn restore_sidecar(&self) -> Result<(), PublishLockError> {
+        let Some(pin) = self.pin.as_deref().filter(|_| self.frozen) else {
+            return Ok(());
+        };
+        if crate::task_set_publish_lock::held_here(&crate::task_set_publish_lock::lock_path(pin))
+            || !matches!(self.unbound_sidecar(), Ok(Some(_)))
+        {
+            return Ok(());
+        }
+        let _write = PublishLockFile::hold_journal_settled(pin, self.tasks_root.as_deref())?;
+        if let Some((_, filed)) = self.unbound_sidecar()? {
             write_atomically(&self.sidecar, &filed).map_err(|error| {
                 format!("{} could not be restored: {error}", self.sidecar.display())
             })?;
         }
-        self.read()
+        Ok(())
     }
+}
+
+/// What [`PinStore::write_over`] did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Repin {
+    Written,
+    /// The store binds these pins, not the caller's prior: nothing was
+    /// written.
+    Stale(CheckSourcePins),
 }
 
 fn read_pin(path: &Path) -> Result<AcceptancePin, String> {
@@ -209,18 +282,24 @@ pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()>
 /// sidecar when it binds the contract; else the run's own record when it
 /// does; else the run pins now (re-bound from whichever stale set exists, or
 /// fresh) into its own record. `None` when the task root holds no readable
-/// contract: there is nothing to pin.
+/// contract: there is nothing to pin. A publish of the set a crash
+/// interrupted is settled first, under the exclusive lock (Issue 338); one
+/// no settlement can settle is [`PublishLockError::Unsettled`], on which the
+/// caller's run pauses.
 pub fn load_for_run(
     run_root: &Path,
     project_root: &Path,
     tasks_root: &Path,
     roots: &Roots,
-) -> Result<Option<(PinStore, CheckSourcePins)>, String> {
+) -> Result<Option<(PinStore, CheckSourcePins)>, PublishLockError> {
+    let frozen = PinStore::frozen(project_root, tasks_root);
     // Issue 294: the contract, the pin and the sidecar are read as one
     // version, never mid-republish (the publish lock every publisher holds),
-    // held shared beside other readers (Issue 336).
-    let _read = match &PinStore::frozen(project_root, tasks_root).pin {
-        Some(pin) => crate::task_set_publish_lock::PublishLockFile::hold_shared(pin)?,
+    // held shared beside other readers (Issue 336), and never over a journal
+    // a crashed publish left (Issue 338).
+    frozen.restore_sidecar()?;
+    let _read = match &frozen.pin {
+        Some(pin) => PublishLockFile::hold_shared_settled(pin, tasks_root)?,
         None => None,
     };
     let path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
@@ -229,22 +308,21 @@ pub fn load_for_run(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             // Nothing to pin only if nothing was ever frozen here: a lock or
             // a pinned sidecar without its contract is a broken chain.
-            let frozen = PinStore::frozen(project_root, tasks_root);
             let lock = tasks_root.join(crate::task_set_contract::ACCEPTANCE_LOCK_FILE);
             if lock.exists() || frozen.sidecar.exists() {
                 return Err(format!(
                     "{} is missing although the task set was frozen",
                     path.display()
-                ));
+                )
+                .into());
             }
             return Ok(None);
         }
-        Err(error) => return Err(format!("{} could not be read: {error}", path.display())),
+        Err(error) => return Err(format!("{} could not be read: {error}", path.display()).into()),
     };
     let contract: AcceptanceContract = serde_json::from_slice(&bytes)
         .map_err(|error| format!("the acceptance contract is malformed: {error}"))?;
     let digest = content_digest(&bytes);
-    let frozen = PinStore::frozen(project_root, tasks_root);
     let mut run = PinStore::for_run(run_root);
     run.blobs = run.blobs.with_fallback(&frozen.blobs);
     let frozen_pins = frozen.verified_read()?;
@@ -273,3 +351,7 @@ pub fn load_for_run(
     run.write(&pins)?;
     Ok(Some((run, pins)))
 }
+
+#[cfg(test)]
+#[path = "check_source_store_tests.rs"]
+mod tests;

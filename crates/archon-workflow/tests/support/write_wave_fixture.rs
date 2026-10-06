@@ -47,6 +47,8 @@ pub const RUN: &str = "\u{0}run:";
 pub const STALL: &str = "\u{0}stall";
 #[path = "write_wave_guarded.rs"]
 mod guarded;
+#[path = "write_wave_try.rs"]
+mod try_wave;
 use guarded::guarded_bash;
 // Shared by every write-wave test binary; each one uses only some of these.
 #[allow(unused_imports)]
@@ -372,33 +374,7 @@ impl Fixture {
         audit: Option<AuditScript>,
         failing: &[&str],
     ) -> (WorkflowV2Result, Vec<String>) {
-        let call = WorkflowV2HostCall {
-            id: id.into(),
-            method: WorkflowV2HostMethod::Fanout,
-            write_mode: Some(WorkflowV2WriteMode::Worktree),
-            options: WorkflowV2HostOptions {
-                item_kind: Some("implementation".into()),
-                task: Some("Implement the item now.".into()),
-                target_files_from_item: true,
-                ..Default::default()
-            },
-        };
-        let mut branches = Vec::new();
-        for (index, (targets, edits)) in items.into_iter().enumerate() {
-            let branch_id = format!("{id}-{index}");
-            let mut branch = call.clone();
-            branch.id = branch_id.clone();
-            branch.method = WorkflowV2HostMethod::Implementation;
-            branch.options.target_files = targets.iter().map(|t| (*t).to_string()).collect();
-            let item = WorkflowV2FanoutItem::read_only(
-                branch_id.clone(),
-                "coder",
-                branch,
-                json!({"item": {"item_id": branch_id, "canonical_task_ids": self.item_task_ids,
-                    "target_files": targets, "work_type": "implementation"}}),
-            );
-            branches.push((item, edits));
-        }
+        let (call, branches) = self.wave_branches(id, items);
         self.wave_on(&self.v2, call, branches, (audit, failing, &[]), false)
             .await
     }
@@ -426,48 +402,14 @@ impl Fixture {
         store: &WorkflowV2ResultStore,
         call: WorkflowV2HostCall,
         branches: Vec<(WorkflowV2FanoutItem, Edits)>,
-        (audit, failing, rejecting): (Option<AuditScript>, &[&str], &[&str]),
+        judged: (Option<AuditScript>, &[&str], &[&str]),
         task_ids: Vec<String>,
         panic_on_work: bool,
     ) -> (WorkflowV2Result, Vec<String>) {
-        let per_branch = branches
-            .iter()
-            .map(|(item, edits)| (item.id.clone(), edits.clone()))
-            .collect();
-        let branches = branches.into_iter().map(|(item, _)| item).collect();
-        let dispatch = Scripted {
-            per_branch,
-            prompts: Mutex::new(vec![]),
-            stamps: self.stamps.clone(),
-            audit: audit.map(|script| (self.audit_runtime(), script)),
-            failing: failing.iter().map(|id| (*id).to_string()).collect(),
-            task_ids,
-            panic_on_work,
-            rejecting: rejecting.iter().map(|id| (*id).to_string()).collect(),
-            shell: self.shell.clone(),
-        };
-        let result = run_write_capable_v2_fanout(
-            "fallback objective",
-            Some(self.repo.to_str().unwrap()),
-            WorkflowV2CallExecution {
-                call,
-                input: json!({}),
-                depends_on: vec![],
-            },
-            WorkflowV2AgentAdapter::new(),
-            &dispatch,
-            store,
-            &self.store,
-            &self.run,
-            true,
-            branches,
-            self.universe.as_ref(),
-            None,
-        )
-        .await
-        .unwrap();
-        let prompts = dispatch.prompts.into_inner().unwrap();
-        (result, prompts)
+        let (result, prompts) = self
+            .try_wave_for(store, call, branches, judged, task_ids, panic_on_work)
+            .await;
+        (result.unwrap(), prompts)
     }
 
     pub fn branch_result(&self, call_id: &str, branch_id: &str) -> WorkflowV2Result {

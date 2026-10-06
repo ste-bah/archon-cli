@@ -320,7 +320,7 @@ async fn evaluate(
     }
     // PLAN-11: no check runs on a source nobody judged; pending source
     // changes settle before a repair republishes (and re-pins) the chain.
-    let sources = sources::apply(llm, &context, &contract, run_dir, record).await;
+    let sources = sources::apply(llm, &context, &contract, run_dir, record).await?;
     // A check the judge did not accept can never run: repair the contract
     // before running it, and never hand it to the implementing tasks.
     let Some(mut defects) = repair::apply(
@@ -449,7 +449,7 @@ async fn evaluate(
         record,
         archon_workflow::v2::acceptance_regression::SearchBudget::default(),
     )
-    .await;
+    .await?;
     use archon_workflow::v2::acceptance_routing as routing;
     // Batch O2: a file the run's scope-amendment ledger records an owner for
     // goes to that owner (an unreadable ledger is reported below, when the

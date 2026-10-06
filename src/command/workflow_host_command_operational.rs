@@ -3,9 +3,9 @@
 //!
 //! # Outcome contract
 //!
-//! The fixed executor tells three endings of a host command apart:
+//! The fixed executor tells four endings of a host command apart:
 //!
-//! * **Completed** - any exit status the command chose, except the one below.
+//! * **Completed** - any exit status the command chose, except the two below.
 //!   Exit 0 goes on to publication; any other code is the command's own verdict
 //!   and reaches the script unchanged.
 //! * **Timed out** - the supervisor killed the process group at the catalog's
@@ -22,6 +22,15 @@
 //!   - A command that saves nothing (the unstaged CLI freeze, Issue 288)
 //!     reports progress 0 and says so in its reason; a re-run of it starts
 //!     over.
+//! * **Unsettled publish** (Issue 338) - the command found that a publish of
+//!   the task set it reads was interrupted and left a journal no read could
+//!   settle, so it read nothing. It exits with [`EXIT_UNSETTLED_PUBLISH`]
+//!   (79) AND writes one stderr line [`UNSETTLED_PUBLISH_MARKER`]` <evidence>`
+//!   naming the journal, its state, the cause and the operator's remedy; an
+//!   exit 79 without the line is an ordinary completion. Any child of this
+//!   binary ends this way on such a read, whatever its command (`main`,
+//!   the staged lint gates, the native observation guardian). Its stdout is
+//!   ignored and nothing it staged is published.
 //!
 //! Either operational ending may report progress with a stderr line
 //! `archon-host-progress: <n>` ([`PROGRESS_MARKER`]). `<n>` is the cumulative
@@ -38,7 +47,9 @@
 //! exactly one retry. The call staging directory is cleared before every
 //! attempt. When the policy stops, the run is PAUSED, never failed: the call
 //! is recorded as interrupted, so a resume runs it again instead of reusing
-//! it.
+//! it. An unsettled publish is not retried: the child already retried the
+//! settlement, and the cause is the host's environment, so the run pauses
+//! at once with the child's evidence, exactly as an in-process read does.
 
 use std::path::Path;
 
@@ -50,6 +61,57 @@ use super::workflow_host_command_supervisor::SupervisedProcessOutput;
 
 /// The exit status of an incomplete, resumable host command (`EX_TEMPFAIL`).
 pub(crate) const EXIT_INCOMPLETE_RESUMABLE: i32 = 75;
+/// The exit status of a command that read nothing because a publish of its
+/// task set left a journal no read could settle (Issue 338). Outside the
+/// `sysexits.h` range, and only an ending with [`UNSETTLED_PUBLISH_MARKER`].
+pub(crate) const EXIT_UNSETTLED_PUBLISH: i32 = 79;
+/// The stderr line prefix that carries an unsettled publish's evidence.
+pub(crate) const UNSETTLED_PUBLISH_MARKER: &str = "archon-unsettled-publish:";
+
+/// The child's half of an unsettled-publish ending: the stderr line for
+/// `evidence`, on one line whatever it holds.
+pub(crate) fn unsettled_publish_line(evidence: &str) -> String {
+    let flat = evidence.split_whitespace().collect::<Vec<_>>().join(" ");
+    format!("{UNSETTLED_PUBLISH_MARKER} {flat}")
+}
+
+/// The stderr line a child ends with when `error` is, or wraps, an
+/// unsettled publish; `None` for any other failure, which is the command's.
+pub(crate) fn unsettled_publish_of(error: &anyhow::Error) -> Option<String> {
+    crate::command::workflow_task_set::UnsettledPublish::is(error)
+        .then(|| unsettled_publish_line(&format!("{error:#}")))
+}
+
+/// The child's ending when `error` is, or wraps, an unsettled publish: its
+/// line on stderr, then [`EXIT_UNSETTLED_PUBLISH`]. Returns otherwise.
+pub(crate) fn exit_if_unsettled_publish(error: &anyhow::Error) {
+    if let Some(line) = unsettled_publish_of(error) {
+        eprintln!("{line}");
+        std::process::exit(EXIT_UNSETTLED_PUBLISH)
+    }
+}
+
+/// End this process as an unsettled publish with `evidence`.
+pub(crate) fn exit_unsettled_publish(evidence: &str) -> ! {
+    eprintln!("{}", unsettled_publish_line(evidence));
+    std::process::exit(EXIT_UNSETTLED_PUBLISH)
+}
+
+/// The parent's half: the evidence a child that ended with `exit_code` and
+/// `stderr` reports, when it ended as an unsettled publish.
+pub(crate) fn unsettled_publish_evidence(exit_code: Option<i32>, stderr: &[u8]) -> Option<String> {
+    if exit_code != Some(EXIT_UNSETTLED_PUBLISH) {
+        return None;
+    }
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .rev()
+        .find_map(|line| {
+            let evidence = line.trim().strip_prefix(UNSETTLED_PUBLISH_MARKER)?.trim();
+            (!evidence.is_empty()).then(|| evidence.to_string())
+        })
+}
+
 /// The stderr line prefix that reports persisted progress.
 pub(crate) const PROGRESS_MARKER: &str = "archon-host-progress:";
 /// The stderr line a host command writes to report `completed` units.
@@ -62,6 +124,7 @@ pub(crate) fn progress_line(completed: u64) -> String {
 pub(crate) enum OperationalKind {
     TimedOut,
     IncompleteResumable,
+    UnsettledPublish,
 }
 
 impl OperationalKind {
@@ -69,6 +132,7 @@ impl OperationalKind {
         match self {
             Self::TimedOut => "timed_out",
             Self::IncompleteResumable => "incomplete_resumable",
+            Self::UnsettledPublish => "unsettled_publish",
         }
     }
 }
@@ -79,6 +143,8 @@ pub(crate) fn classify(output: &SupervisedProcessOutput) -> Option<OperationalKi
         Some(OperationalKind::TimedOut)
     } else if output.exit_code == Some(EXIT_INCOMPLETE_RESUMABLE) {
         Some(OperationalKind::IncompleteResumable)
+    } else if unsettled_publish_evidence(output.exit_code, &output.stderr).is_some() {
+        Some(OperationalKind::UnsettledPublish)
     } else {
         None
     }
@@ -324,6 +390,54 @@ pub(crate) fn pause_for_stall(
         report,
         "teardown_stalled",
     )
+}
+
+/// Pauses the run because `report`'s call read nothing: a publish of its
+/// task set left a journal no read could settle (Issue 338). `evidence` is
+/// the child's; the call runs again on resume, once the operator fixed the
+/// cause it names.
+pub(crate) fn pause_for_unsettled_publish(
+    store: &WorkflowStore,
+    run_root: &Path,
+    expected_generation: u64,
+    report: &OperationalReport,
+    evidence: &str,
+) -> WorkflowError {
+    let detail = serde_json::json!({
+        "event": "host_command_unsettled_publish",
+        "call_id": report.call_id,
+        "command_id": report.command_id,
+        "evidence": evidence,
+        "resume": report.resume_command(),
+    });
+    let message = format!(
+        "host command '{}' (call {}) read nothing: {evidence}; the run is paused, not failed, and the call runs again on resume: {}",
+        report.command_id,
+        report.call_id,
+        report.resume_command()
+    );
+    tracing::warn!(run_id = report.run_id, "{message}");
+    match archon_workflow::control_pause::pause_with_evidence(
+        store,
+        report.run_id,
+        expected_generation,
+        detail,
+    ) {
+        Ok(event) => {
+            match event {
+                Ok(seq) => append_log(
+                    run_root,
+                    &format!(
+                        "event_id={seq} transition=host_command_unsettled_publish call_id={} command_id={} next_action=resume run_id={}",
+                        report.call_id, report.command_id, report.run_id
+                    ),
+                ),
+                Err(error) => tracing::warn!(%error, "host command pause event not recorded"),
+            }
+            WorkflowError::ControlPaused(message)
+        }
+        Err(error) => error,
+    }
 }
 
 fn progress_text(progress: Option<u64>) -> String {

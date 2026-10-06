@@ -310,7 +310,7 @@ impl BlobStore {
 #[path = "check_source_store.rs"]
 mod store;
 pub(crate) use store::write_atomically;
-pub use store::{PinStore, load_for_run};
+pub use store::{PinStore, Repin, load_for_run};
 
 #[cfg(test)]
 pub(crate) mod tests_support {
