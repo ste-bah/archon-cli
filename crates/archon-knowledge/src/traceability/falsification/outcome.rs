@@ -59,6 +59,11 @@ pub enum FalsificationOutcome {
     /// The experiment was not attempted. Named, because "we refused" and "we
     /// tried and learned nothing" are different facts about the same edge.
     Refused(RefusedToRun),
+    /// Separate diagnostic only: the wrapped outcome and promotion stand.
+    WithDiagnostics {
+        outcome: Box<FalsificationOutcome>,
+        note: String,
+    },
 }
 
 impl FalsificationOutcome {
@@ -70,6 +75,7 @@ impl FalsificationOutcome {
     /// ladder. There is no such route.
     pub fn level_after(&self, current: ProofLevel) -> ProofLevel {
         match self {
+            FalsificationOutcome::WithDiagnostics { outcome, .. } => outcome.level_after(current),
             FalsificationOutcome::DependencyShown { .. } if current >= ProofLevel::Exercised => {
                 ProofLevel::Falsifiable
             }
@@ -80,6 +86,9 @@ impl FalsificationOutcome {
     /// One line, in the words of whichever check produced it.
     pub fn describe(&self) -> String {
         match self {
+            FalsificationOutcome::WithDiagnostics { outcome, note } => {
+                format!("{}\n{note}", outcome.describe())
+            }
             FalsificationOutcome::DependencyShown { mutated_exit } => format!(
                 "FALSIFIABLE: the verifier passed on the original bytes and failed (exit {}) \
                  with the anchored lines replaced by an abort. It depends on them.",
@@ -177,6 +186,9 @@ pub enum RefusedToRun {
     BaselineDidNotPass {
         command: String,
         exit_code: Option<i32>,
+        /// Withheld-name diagnostic, never the reason for the refusal.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
     },
     /// The anchored range could not be replaced.
     UnusableRange { file_path: String, reason: String },
@@ -215,10 +227,17 @@ impl RefusedToRun {
                 "{backup_path} is left over from an earlier run that did not finish. Compare it \
                  with the working file, restore by hand, delete the backup, and re-run"
             ),
-            RefusedToRun::BaselineDidNotPass { command, exit_code } => format!(
+            RefusedToRun::BaselineDidNotPass {
+                command,
+                exit_code,
+                note,
+            } => format!(
                 "`{command}` did not pass on the unmodified tree (exit {}); a verifier that is \
-                 already failing cannot be broken by a mutation",
-                exit(*exit_code)
+                 already failing cannot be broken by a mutation{}",
+                exit(*exit_code),
+                note.as_ref()
+                    .map(|note| format!("\n{note}"))
+                    .unwrap_or_default()
             ),
             RefusedToRun::UnusableRange { file_path, reason } => {
                 format!("{file_path}: {reason}")

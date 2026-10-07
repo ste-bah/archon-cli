@@ -30,6 +30,7 @@ pub(crate) struct VerifyCommandReport {
     pub exit_code: Option<i32>,
     pub stdout: String,
     pub stderr: String,
+    pub environment_note: Option<String>,
 }
 
 impl AcceptanceOutcome {
@@ -64,7 +65,13 @@ impl VerifyCommandReport {
             .exit_code
             .map(|code| code.to_string())
             .unwrap_or_else(|| "signal".to_string());
-        format!("verify_command exited with status {code}")
+        format!(
+            "verify_command exited with status {code}{}",
+            self.environment_note
+                .as_ref()
+                .map(|note| format!("\n{note}"))
+                .unwrap_or_default()
+        )
     }
 }
 
@@ -138,15 +145,11 @@ pub(crate) fn run_verify_command_capture(
         .current_dir(root)
         .output()
         .map_err(|err| format!("verify_command failed to launch: {err}"))?;
-    if !output.status.success()
-        && let Some(reason) = environment.failure(&[&output.stdout, &output.stderr])
-    {
-        return Err(reason);
-    }
     let mut stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    if !output.status.success()
-        && let Some(note) = environment.note(&[&output.stdout, &output.stderr])
-    {
+    let environment_note = (!output.status.success())
+        .then(|| environment.note(&[&output.stdout, &output.stderr]))
+        .flatten();
+    if let Some(note) = &environment_note {
         stderr.push_str(&format!("\n{note}"));
     }
     Ok(Some(VerifyCommandReport {
@@ -154,6 +157,7 @@ pub(crate) fn run_verify_command_capture(
         exit_code: output.status.code(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr,
+        environment_note,
     }))
 }
 

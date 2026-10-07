@@ -109,6 +109,7 @@ pub(super) enum Ran {
         code: Option<i32>,
         success: bool,
         output: String,
+        note: Option<String>,
     },
     /// Killed at the deadline. Not a failure — an absence of an answer.
     TimedOut {
@@ -128,6 +129,7 @@ pub(super) fn run(cwd: &Path, argv: &[String], timeout: Duration) -> Ran {
     run_with_policy(cwd, argv, timeout, None)
 }
 
+#[cfg(test)]
 pub(super) fn run_with_policy(
     cwd: &Path,
     argv: &[String],
@@ -139,6 +141,15 @@ pub(super) fn run_with_policy(
             Ok(environment) => environment.with_remedy("Name the needed variables in [workflow.acceptance_execution] environment_allowlist in the operator configuration consumed by requirements trace, then retry --falsify"),
             Err(reason) => return Ran::NotLaunchable { reason },
         };
+    run_in_environment(cwd, argv, timeout, &environment)
+}
+
+pub(super) fn run_in_environment(
+    cwd: &Path,
+    argv: &[String],
+    timeout: Duration,
+    environment: &archon_workflow::acceptance_check_environment::CommandEnvironment,
+) -> Ran {
     let spawned = environment
         .command(&argv[0])
         .args(&argv[1..])
@@ -184,21 +195,12 @@ pub(super) fn run_with_policy(
     let stdout = out_reader.join().unwrap_or_default();
     let stderr = err_reader.join().unwrap_or_default();
 
-    if status.as_ref().is_some_and(|status| !status.success())
-        && let Some(reason) = environment.failure(&[stdout.as_bytes(), stderr.as_bytes()])
-    {
-        return Ran::NotLaunchable { reason };
-    }
     let note = status
         .as_ref()
         .filter(|status| !status.success())
         .and_then(|_| environment.note(&[stdout.as_bytes(), stderr.as_bytes()]));
     let mut output = stdout;
     output.push_str(&stderr);
-    if let Some(note) = note {
-        output.push('\n');
-        output.push_str(&note);
-    }
 
     match status {
         None => Ran::TimedOut {
@@ -208,6 +210,7 @@ pub(super) fn run_with_policy(
             code: status.code(),
             success: status.success(),
             output,
+            note,
         },
     }
 }

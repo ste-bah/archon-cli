@@ -22,7 +22,7 @@
 use super::process::CommandSite;
 use super::*;
 use crate::acceptance_check_environment::{
-    CheckPolicy, check_environment, profile_bindings, withheld, withheld_error,
+    CheckPolicy, check_environment, profile_bindings, withheld, withheld_note,
 };
 use crate::acceptance_world::{FrozenCommandRef, resolve_command};
 use crate::task_set_contract::AcceptanceContract;
@@ -181,14 +181,18 @@ pub async fn run_check_direct(
     let at = site.command_site(environment);
     let result =
         super::observe::execute_check_at(&at, contract, reference, &command, cancel).await?;
-    Ok(unless_withheld(result, &withheld))
+    Ok(with_withheld_note(result, &withheld))
 }
 
-/// `result`, or, when it failed saying a withheld variable the allowlist
-/// could forward is missing, the operational error naming it (no verdict).
-fn unless_withheld(mut result: CheckResult, withheld: &BTreeSet<String>) -> CheckResult {
+/// Preserve the failed result and persist a separate withheld-name note.
+fn with_withheld_note(mut result: CheckResult, withheld: &BTreeSet<String>) -> CheckResult {
     if result.exit_code != Some(0) && result.operational_error.is_none() {
-        result.operational_error = withheld_error(&[&result.stdout, &result.stderr], withheld);
+        if let Some(note) = withheld_note(&[&result.stdout, &result.stderr], withheld) {
+            eprintln!("{note}");
+            result
+                .stderr
+                .extend_from_slice(format!("\n{note}").as_bytes());
+        }
     }
     result
 }
@@ -236,7 +240,7 @@ pub async fn evaluate_floor_direct(
             let (_home, environment, withheld) = site.prepare()?;
             let at = site.command_site(environment);
             let result = super::process::run_at(&at, acceptance_id, &generated, cancel).await?;
-            Ok(unless_withheld(result, &withheld))
+            Ok(with_withheld_note(result, &withheld))
         }
     }
 }

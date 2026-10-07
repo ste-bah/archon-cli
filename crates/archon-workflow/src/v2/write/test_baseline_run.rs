@@ -141,8 +141,8 @@ async fn run_unwatched(
     drop(group);
     let out = stdout.await.ok().flatten().unwrap_or_default();
     let err = stderr.await.ok().flatten().unwrap_or_default();
-    let environment_error = if !timed_out && status.as_ref().is_ok_and(|status| !status.success()) {
-        environment.failure(&[out.as_bytes(), err.as_bytes()])
+    let note = if !timed_out && status.as_ref().is_ok_and(|status| !status.success()) {
+        environment.note(&[out.as_bytes(), err.as_bytes()])
     } else {
         None
     };
@@ -154,7 +154,7 @@ async fn run_unwatched(
         }
         output.push_str(&err);
     }
-    let (mut exit_code, mut error) = match (status, timed_out) {
+    let (exit_code, error) = match (status, timed_out) {
         (_, true) => (
             None,
             Some(format!(
@@ -168,11 +168,8 @@ async fn run_unwatched(
             Some(format!("baseline command could not be waited on: {error}")),
         ),
     };
-    if error.is_none()
-        && let Some(reason) = environment_error
-    {
-        exit_code = None;
-        error = Some(reason);
+    if let Some(note) = note {
+        output.push_str(&format!("\n{note}"));
     }
     CommandRun {
         exit_code,

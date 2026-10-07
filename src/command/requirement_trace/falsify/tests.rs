@@ -14,7 +14,7 @@ use super::*;
 
 /// A repository with one committed Rust file, so the cleanliness check has
 /// something true to say.
-fn repo_with_committed_file(body: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+pub(super) fn repo_with_committed_file(body: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path().to_path_buf();
     std::fs::create_dir_all(root.join("src")).expect("mkdir");
@@ -38,7 +38,7 @@ fn repo_with_committed_file(body: &str) -> (tempfile::TempDir, std::path::PathBu
     (dir, path)
 }
 
-fn plan_for(root: &Path, command: &str) -> FalsificationPlan {
+pub(super) fn plan_for(root: &Path, command: &str) -> FalsificationPlan {
     let bytes = std::fs::read(root.join("src/a.rs")).expect("read");
     FalsificationPlan {
         requirement_id: "REQ-DL-100".into(),
@@ -258,6 +258,7 @@ fn a_build_failure_in_the_mutated_run_is_inconclusive_not_a_kill() {
             code: Some(101),
             success: false,
             output: "error[E0308]: mismatched types\nerror: could not compile `x`".into(),
+            note: None,
         },
     );
     assert!(
@@ -277,6 +278,7 @@ fn a_test_failure_in_the_mutated_run_is_the_one_thing_that_promotes() {
             code: Some(101),
             success: false,
             output: "test interval::rejects_unknown ... FAILED\ntest result: FAILED".into(),
+            note: None,
         },
     );
     assert_eq!(
@@ -295,6 +297,7 @@ fn a_verifier_that_still_passes_while_mutated_is_recorded_as_decoration() {
             code: Some(0),
             success: true,
             output: "test result: ok. 12 passed".into(),
+            note: None,
         },
     );
     assert_eq!(

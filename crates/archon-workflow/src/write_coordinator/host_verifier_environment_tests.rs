@@ -189,3 +189,56 @@ fn review349_recorded_policy_reaches_host_verifiers() {
         },
     );
 }
+
+fn stage_note_case(case: &str, message: &str) {
+    operator(case, true, |root| {
+        let command = format!("printf '%s\\n' '{}'; exit 3", message);
+        let report = crate::acceptance::run_verify_command_capture(root, Some(&command), None)
+            .expect("failure is still a captured result")
+            .unwrap();
+        assert_eq!(report.exit_code, Some(3));
+        assert!(report.stderr.contains("Note:") && report.stderr.contains("FIXTURE_API_KEY"));
+        let run = root.join("wave-run");
+        let error = crate::write_coordinator::patch_apply::run_wave_verify(
+            root,
+            Some(&command),
+            0,
+            &run,
+            "stage",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                crate::write_coordinator::ApplyError::VerifyFailed { exit: 3, .. }
+            ),
+            "{error}"
+        );
+        let persisted =
+            std::fs::read_to_string(run.join("write-coordination/stages/stage/tests/0.json"))
+                .unwrap();
+        assert!(persisted.contains("Note:") && persisted.contains("FIXTURE_API_KEY"));
+        assert!(!persisted.contains("hidden-data"));
+    });
+}
+#[test]
+fn r4_stage_pytest_expectation() {
+    stage_note_case(
+        "r4_stage_pytest_expectation",
+        "E AssertionError: expected FIXTURE_API_KEY environment variable is not set in stderr",
+    );
+}
+#[test]
+fn r4_stage_actual_diagnostic() {
+    stage_note_case(
+        "r4_stage_actual_diagnostic",
+        "FIXTURE_API_KEY environment variable is not set",
+    );
+}
+#[test]
+fn r4_stage_actual_after_expectation() {
+    stage_note_case(
+        "r4_stage_actual_after_expectation",
+        "E AssertionError: expected FIXTURE_API_KEY environment variable is not set in stderr\nFIXTURE_API_KEY environment variable is not set",
+    );
+}

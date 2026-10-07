@@ -223,7 +223,7 @@ fn assert_every_finding_reaches_the_gap(findings: &[String]) {
 fn every_declarative_floor_finding_reaches_the_residual_gap() {
     let findings = many_findings();
     assert!(findings.iter().all(|f| (40..=80).contains(&f.len())));
-    let ContractVerification::Failed(reported) = floor_failed(&findings) else {
+    let ContractVerification::Failed(reported, _) = floor_failed(&findings) else {
         panic!("expected a failure");
     };
     assert_every_finding_reaches_the_gap(&reported);
@@ -298,11 +298,87 @@ fn a_thousand_findings_stay_within_budget_and_all_reach_the_evidence_file() {
 async fn verifier_output_past_the_cap_is_cut_with_its_byte_count_and_never_passes() {
     let command = r#"printf '{"status":"verified"}\n'; head -c 2000000 /dev/zero | tr '\0' 'x'"#;
     match run_contract_verifier_within(command, std::time::Duration::from_secs(60)).await {
-        ContractVerification::Failed(findings) => {
+        ContractVerification::Failed(findings, _) => {
             let text = findings.join("; ");
             assert!(text.contains("[output cut]"), "{text}");
             assert!(text.contains("of 2000022 bytes"), "{text}");
         }
         _ => panic!("a cut verdict must never pass"),
     }
+}
+
+#[cfg(unix)]
+fn contract_note_case(case: &str, json: &str, exit: i32) {
+    if std::env::var("ISSUE_349_CASE").as_deref() != Ok(case) {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([case, "--nocapture"])
+            .env("ISSUE_349_CASE", case)
+            .env("FIXTURE_API_KEY", "hidden-data")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        return;
+    }
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let script = format!("printf '%s\\n' '{}'; exit {exit}", json);
+    match runtime.block_on(run_contract_verifier(&script)) {
+        ContractVerification::Failed(findings, Some(note)) => {
+            assert!(
+                note.starts_with("Note:")
+                    && note.contains("FIXTURE_API_KEY")
+                    && !note.contains("hidden-data")
+            );
+            assert_every_finding_reaches_the_gap(&findings);
+            let mut outcome = accepted("verifier");
+            demote_failed_contract(&mut outcome, &findings, None);
+            demote::attach_environment_note(&mut outcome, &note);
+            assert_eq!(outcome.status, WorkflowV2Status::NeedsReview);
+            assert_eq!(outcome.failure_kind, Some(BranchFailureKind::Semantic));
+            let result = outcome.result.unwrap();
+            assert_eq!(
+                result.data["declared_contract_finding_count"],
+                findings.len()
+            );
+            assert_eq!(result.data["check_environment_note"], note);
+            assert!(result.residual_gaps[0].description.contains(&note));
+        }
+        _ => panic!("output changed the real failure verdict"),
+    }
+    let script = r#"printf '%s\n' '{"status":"verified","message":"FIXTURE_API_KEY is not set"}'"#;
+    assert!(matches!(
+        runtime.block_on(run_contract_verifier(script)),
+        ContractVerification::Passed
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn r4_contract_json_failure_exit_one() {
+    contract_note_case(
+        "r4_contract_json_failure_exit_one",
+        r#"{"status":"failed","failures":["FIXTURE_API_KEY environment variable is not set"]}"#,
+        1,
+    );
+}
+#[cfg(unix)]
+#[test]
+fn r4_contract_json_failure_exit_zero() {
+    contract_note_case(
+        "r4_contract_json_failure_exit_zero",
+        r#"{"status":"failed","failures":["FIXTURE_API_KEY environment variable is not set"]}"#,
+        0,
+    );
+}
+#[cfg(unix)]
+#[test]
+fn r4_contract_json_quoted_expectation() {
+    contract_note_case(
+        "r4_contract_json_quoted_expectation",
+        r#"{"status":"failed","failures":["expected \"FIXTURE_API_KEY environment variable is not set\" in stderr"]}"#,
+        0,
+    );
 }

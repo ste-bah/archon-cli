@@ -150,7 +150,13 @@ fn attempt_with_policy(
 
     refuse_if_dirty(cwd, &plan.file_path)?;
 
-    match verifier::run_with_policy(cwd, &argv, VERIFIER_TIMEOUT, policy) {
+    // Baseline and mutant must receive exactly the same captured variables.
+    // Output text never decides whether a failure is an environment problem.
+    let environment = match archon_workflow::acceptance_check_environment::CommandEnvironment::capture(policy) {
+        Ok(environment) => environment.with_remedy("Ask the operator to allowlist needed names in [workflow.acceptance_execution] environment_allowlist in the configuration consumed by requirements trace"),
+        Err(reason) => return Ok(FalsificationOutcome::Inconclusive(Inconclusive::VerifierNotLaunchable { reason })),
+    };
+    match verifier::run_in_environment(cwd, &argv, VERIFIER_TIMEOUT, &environment) {
         verifier::Ran::NotLaunchable { reason } => {
             return Ok(FalsificationOutcome::Inconclusive(
                 Inconclusive::VerifierNotLaunchable { reason },
@@ -161,10 +167,16 @@ fn attempt_with_policy(
                 seconds,
             }));
         }
-        verifier::Ran::Finished { code, success, .. } if !success => {
+        verifier::Ran::Finished {
+            code,
+            success,
+            note,
+            ..
+        } if !success => {
             return Err(RefusedToRun::BaselineDidNotPass {
                 command: plan.command.clone(),
                 exit_code: code,
+                note,
             });
         }
         verifier::Ran::Finished { .. } => {}
@@ -179,7 +191,7 @@ fn attempt_with_policy(
                 reason: format!("could not install the mutation: {err}"),
             }
         })?;
-    let mutated = verifier::run_with_policy(cwd, &argv, VERIFIER_TIMEOUT, policy);
+    let mutated = verifier::run_in_environment(cwd, &argv, VERIFIER_TIMEOUT, &environment);
     // Explicit, so the restore happens before the outcome is reported rather
     // than at the end of the enclosing scope. `Drop` remains the net.
     if let Err(err) = installed.restore() {
@@ -191,6 +203,21 @@ fn attempt_with_policy(
 
 /// What a mutated run means.
 fn classify(language: &str, ran: verifier::Ran) -> FalsificationOutcome {
+    let note = match &ran {
+        verifier::Ran::Finished { note, .. } => note.clone(),
+        _ => None,
+    };
+    let outcome = classify_result(language, ran);
+    match note {
+        Some(note) => FalsificationOutcome::WithDiagnostics {
+            outcome: Box::new(outcome),
+            note,
+        },
+        None => outcome,
+    }
+}
+
+fn classify_result(language: &str, ran: verifier::Ran) -> FalsificationOutcome {
     match ran {
         verifier::Ran::NotLaunchable { reason } => {
             FalsificationOutcome::Inconclusive(Inconclusive::VerifierNotLaunchable { reason })

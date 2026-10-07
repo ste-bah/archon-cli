@@ -89,22 +89,21 @@ fn falsifier_missing_path_refuses_before_execution() {
 }
 
 #[test]
-fn falsifier_missing_data_is_inconclusive() {
+fn falsifier_missing_data_keeps_exit_and_note() {
     operator(
-        "falsifier_missing_data_is_inconclusive",
+        "falsifier_missing_data_keeps_exit_and_note",
         true,
-        |root| match run_script(
-            root,
-            "test -n \"${FIXTURE_API_KEY-}\" || { echo 'FIXTURE_API_KEY is not set' >&2; exit 1; }",
-        ) {
-            Ran::NotLaunchable { reason } => {
-                assert!(
-                    reason.contains("FIXTURE_API_KEY") && reason.contains("no verdict"),
-                    "{reason}"
-                );
-                assert!(!reason.contains("hidden-data"));
+        |root| match run_script(root, "echo 'FIXTURE_API_KEY is not set' >&2; exit 1") {
+            Ran::Finished {
+                code: Some(1),
+                success: false,
+                note,
+                ..
+            } => {
+                let note = note.unwrap();
+                assert!(note.contains("Note:") && !note.contains("hidden-data"));
             }
-            _ => panic!("missing operator data became a product verdict"),
+            _ => panic!("output changed the process failure"),
         },
     );
 }
@@ -233,8 +232,13 @@ macro_rules! missing_case {
         fn $id() {
             operator(stringify!($id), true, |root| {
                 match run_script(root, $script) {
-                    Ran::NotLaunchable { reason } => assert!(reason.contains("FIXTURE_API_KEY")),
-                    _ => panic!("a missing host variable became a mutant kill"),
+                    Ran::Finished {
+                        code: Some(3),
+                        success: false,
+                        note,
+                        ..
+                    } => assert!(note.unwrap().contains("FIXTURE_API_KEY")),
+                    _ => panic!("output changed the verifier result"),
                 }
             });
         }
@@ -263,12 +267,13 @@ macro_rules! noted_case {
                     Ran::Finished {
                         code: Some(3),
                         success: false,
-                        output,
+                        note,
+                        ..
                     } => {
+                        let note = note.expect("withheld-name diagnostic");
                         assert!(
-                            output.contains("withheld variable")
-                                && output.contains("FIXTURE_API_KEY"),
-                            "ambiguous evidence lacked a visible note: {output}"
+                            note.contains("withheld variable") && note.contains("FIXTURE_API_KEY"),
+                            "{note}"
                         );
                     }
                     _ => panic!("ambiguous evidence changed the verifier result"),
@@ -289,3 +294,6 @@ noted_case!(
     r3_falsify_note_unknown_quote,
     "actual text: \"FIXTURE_API_KEY is not set\""
 );
+
+#[path = "verifier_r4_tests.rs"]
+mod round_four;

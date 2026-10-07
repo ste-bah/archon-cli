@@ -159,3 +159,19 @@ pub(crate) fn demote_failed_contract(
     outcome.status = WorkflowV2Status::NeedsReview;
     outcome.failure_kind = Some(BranchFailureKind::Semantic);
 }
+
+/// Separate diagnostics accompany the existing demotion, never a finding.
+pub(super) fn attach_environment_note(outcome: &mut WorkflowV2BranchOutcome, note: &str) {
+    if let Some(result) = &mut outcome.result {
+        result.data["check_environment_note"] = serde_json::json!(note);
+        if let Some(gap) = result.residual_gaps.last_mut() {
+            gap.description.push_str(&format!("\n{note}"));
+        }
+    } else {
+        let error = outcome.error.get_or_insert_with(String::new);
+        if !error.is_empty() {
+            error.push('\n');
+        }
+        error.push_str(note);
+    }
+}

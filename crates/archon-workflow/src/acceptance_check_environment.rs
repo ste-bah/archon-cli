@@ -32,11 +32,10 @@
 //! else: an operator variable a check needs is named in
 //! `environment_allowlist`, and never reaches a check by default.
 //!
-//! Before Issue 345 a site with no section gave a check every host variable
-//! but Archon's own keys. A check that read one of them now fails; when that
-//! variable could be forwarded and the check's output says it is missing or
-//! unset, the failure is no verdict but an operational error naming it
-//! ([`withheld_error`]).
+//! Output never changes a verifier's real verdict. On failure, a separate
+//! [`withheld_note`] lists withheld names occurring as case-sensitive substrings
+//! anywhere in stdout/stderr, so the agent can ask the operator to allowlist
+//! needed data. This is a diagnostic, never evidence of the failure's cause.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -197,9 +196,6 @@ pub fn profile_bindings(home: &Path) -> Vec<(&'static str, std::path::PathBuf)> 
     bindings
 }
 
-/// Variables a shell sets for itself: never withheld, whatever the host has.
-const SHELL_OWN: &[&str] = &["PWD", "OLDPWD", "SHLVL", "_"];
-
 /// What a site's policy gives a check.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -293,7 +289,14 @@ pub(crate) fn lookup<'a>(
 /// The host's environment, as a map: every variable whose name and value are
 /// Unicode (a check's environment is built from it, never handed it whole).
 pub fn host_environment() -> BTreeMap<String, String> {
-    std::env::vars_os()
+    unicode_environment(std::env::vars_os())
+}
+
+fn unicode_environment(
+    variables: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> BTreeMap<String, String> {
+    variables
+        .into_iter()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect()
 }
@@ -377,7 +380,20 @@ pub struct CommandEnvironment {
 
 impl CommandEnvironment {
     pub fn capture(policy: Option<&CheckPolicy>) -> Result<Self, String> {
-        Self::from_host(&host_environment(), policy)
+        // One OS snapshot for bindings and withheld names. A non-Unicode
+        // value cannot be forwarded, but its Unicode name still needs a note.
+        let host: Vec<_> = std::env::vars_os().collect();
+        let names: BTreeSet<String> = host
+            .iter()
+            .filter_map(|(name, _)| name.to_str().map(str::to_owned))
+            .collect();
+        let mut environment = Self::from_host(&unicode_environment(host), policy)?;
+        environment.withheld.extend(
+            names
+                .into_iter()
+                .filter(|name| lookup(&environment.variables, name).is_none()),
+        );
+        Ok(environment)
     }
 
     /// The policy is operator-owned, never taken from verifier/task text.
@@ -432,16 +448,14 @@ impl CommandEnvironment {
         tokio::process::Command::from(self.command(program))
     }
 
-    /// Call only for a failed verifier: a bare mention or a name the data
-    /// allowlist cannot forward never converts a failure to an environment error.
-    pub fn failure(&self, outputs: &[&[u8]]) -> Option<String> {
-        withheld::withheld_error_with_remedy(outputs, &self.withheld, self.remedy)
-    }
-
-    /// Ambiguous mentions retain the real verdict; callers can attach this
-    /// separate note to captured output as well as the visible diagnostic.
+    /// Call only for a failed verifier. Persist this separate diagnostic with
+    /// the result; stdout/stderr must never change the verdict (Issue 349).
     pub fn note(&self, outputs: &[&[u8]]) -> Option<String> {
-        withheld::withheld_note(outputs, &self.withheld)
+        let note = withheld::withheld_note_with_remedy(outputs, &self.withheld, self.remedy);
+        if let Some(note) = &note {
+            eprintln!("{note}");
+        }
+        note
     }
 }
 
@@ -453,7 +467,7 @@ pub use policy::{
 
 #[path = "acceptance_check_environment_withheld.rs"]
 mod withheld;
-pub use withheld::{withheld, withheld_error};
+pub use withheld::{withheld, withheld_note};
 
 #[cfg(test)]
 #[path = "acceptance_check_environment_tests.rs"]

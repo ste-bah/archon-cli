@@ -203,13 +203,12 @@ pub(crate) fn run_supervised(
         Err(reason) => Err(VerifierFailure::Environment(reason)),
         Ok(status) if status.success() => Ok(()),
         Ok(status) => {
-            if let Some(reason) = environment.failure(&[out.as_bytes(), err.as_bytes()]) {
-                return Err(VerifierFailure::Environment(reason));
-            }
+            let note = environment.note(&[out.as_bytes(), err.as_bytes()]);
             Err(VerifierFailure::Product(format!(
-                "declared artifact verifier failed with {status}: {}{}",
+                "declared artifact verifier failed with {status}: {}{}{}",
                 out.trim(),
                 err.trim(),
+                note.map(|note| format!("\n{note}")).unwrap_or_default(),
             )))
         }
     }

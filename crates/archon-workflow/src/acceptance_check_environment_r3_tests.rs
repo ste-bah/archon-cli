@@ -5,9 +5,8 @@ macro_rules! ordinary {
         #[test]
         fn $id() {
             let withheld = BTreeSet::from(["FIXTURE_API_KEY".into()]);
-            assert_eq!(
-                withheld_error(&[$text.as_bytes()], &withheld),
-                None,
+            assert!(
+                withheld_note(&[$text.as_bytes()], &withheld).is_some(),
                 "{}",
                 $text
             );
@@ -38,13 +37,13 @@ macro_rules! diagnostic {
         fn $id() {
             let withheld = BTreeSet::from(["FIXTURE_API_KEY".into()]);
             assert!(
-                withheld_error(&[$text.as_bytes()], &withheld).is_some(),
+                withheld_note(&[$text.as_bytes()], &withheld).is_some(),
                 "{}",
                 $text
             );
             let after_expectation = format!("expected a different error\n{}", $text);
-            assert!(withheld_error(&[after_expectation.as_bytes()], &withheld).is_some());
-            assert_eq!(withheld_error(&[$text.as_bytes()], &BTreeSet::new()), None);
+            assert!(withheld_note(&[after_expectation.as_bytes()], &withheld).is_some());
+            assert_eq!(withheld_note(&[$text.as_bytes()], &BTreeSet::new()), None);
         }
     };
 }

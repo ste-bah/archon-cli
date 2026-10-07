@@ -162,12 +162,11 @@ async fn a_forwarded_variable_is_present_and_a_missing_one_is_named() {
     assert!(error.contains("'POLYGON_API_KEY' is absent"), "{error}");
 }
 
-/// A check that fails saying a withheld variable the allowlist could
-/// forward is unset gives no verdict but the operational error naming it; a
+/// A withheld-name note is diagnostic only; a
 /// failure naming none, one the allowlist refuses, or a bare mention stays
 /// the check's verdict.
 #[tokio::test]
-async fn a_failure_reading_a_withheld_variable_is_an_operational_error() {
+async fn a_failure_reading_a_withheld_variable_keeps_exit_and_note() {
     let repo = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
     let mut site = site(repo.path(), repo.path());
@@ -180,7 +179,9 @@ async fn a_failure_reading_a_withheld_variable_is_an_operational_error() {
     )
     .await
     .unwrap();
-    let error = result.operational_error.as_deref().expect("no verdict");
+    assert!(result.operational_error.is_none());
+    assert_eq!(result.exit_code, Some(1));
+    let error = String::from_utf8_lossy(&result.stderr);
     assert!(error.contains("MY_SERVICE_TOKEN"), "{error}");
     assert!(!error.contains("service-secret-value-345"), "{error}");
     for verdict in [

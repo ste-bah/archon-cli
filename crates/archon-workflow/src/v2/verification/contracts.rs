@@ -129,9 +129,12 @@ async fn enforce_one(
         match verification {
             ContractVerification::Passed => passed += 1,
             ContractVerification::Unavailable(reason) => return Some(reason),
-            ContractVerification::Failed(detail) => {
+            ContractVerification::Failed(detail, note) => {
                 stamp_contract_evaluator(outcome, shared_floor_count, generated_count);
                 demote_failed_contract(outcome, &detail, run_root);
+                if let Some(note) = note {
+                    demote::attach_environment_note(outcome, &note);
+                }
                 return None;
             }
         }
@@ -169,9 +172,12 @@ fn run_shared_declarative_floor(
     let facts = match collect_declarative_floor_facts(roots, &contract) {
         Ok(facts) => facts,
         Err(error) => {
-            return Some(ContractVerification::Failed(vec![format!(
-                "host could not collect declared contract facts: {error}"
-            )]));
+            return Some(ContractVerification::Failed(
+                vec![format!(
+                    "host could not collect declared contract facts: {error}"
+                )],
+                None,
+            ));
         }
     };
     Some(match evaluate_declarative_floor(&contract, &facts) {
@@ -184,7 +190,7 @@ fn run_shared_declarative_floor(
 /// Issue 219: every floor finding reaches the branch's demotion, none
 /// dropped (only the first five used to).
 fn floor_failed(findings: &[String]) -> ContractVerification {
-    ContractVerification::Failed(findings.to_vec())
+    ContractVerification::Failed(findings.to_vec(), None)
 }
 
 fn stamp_contract_evaluator(
@@ -241,7 +247,7 @@ const CONTRACT_VERIFIER_TIMEOUT: std::time::Duration = std::time::Duration::from
 pub(super) enum ContractVerification {
     Passed,
     /// Every finding the verifier or floor reported, none dropped (Issue 219).
-    Failed(Vec<String>),
+    Failed(Vec<String>, Option<String>),
     /// Batch G2: no verdict at all -- the verifier could not be started or
     /// waited on, or did not finish. The environment's, never the branch's.
     Unavailable(String),
@@ -368,13 +374,16 @@ pub(super) async fn run_contract_verifier_for(
         .filter_map(verdict_failure)
         .flatten()
         .collect();
-    if (!output.status.success() || !failures.is_empty())
-        && let Some(reason) = environment.failure(&[&output.stdout, &output.stderr])
-    {
-        return ContractVerification::Unavailable(reason);
-    }
+    // Notes accompany every real failure, including JSON verdict failures on
+    // exit zero. They never turn a branch failure into Unavailable (Issue 349).
+    let failed = |findings: Vec<String>| {
+        ContractVerification::Failed(
+            findings,
+            environment.note(&[&output.stdout, &output.stderr]),
+        )
+    };
     if !failures.is_empty() || cut.is_some() {
-        return ContractVerification::Failed(failures.into_iter().chain(cut).collect());
+        return failed(failures.into_iter().chain(cut).collect());
     }
     if !output.status.success() {
         // Its end and its failure lines (stdout when stderr is silent),
@@ -384,7 +393,7 @@ pub(super) async fn run_contract_verifier_for(
         } else {
             &output.stderr
         };
-        return ContractVerification::Failed(vec![format!(
+        return failed(vec![format!(
             "declared contract verifier exited non-zero: {}",
             crate::failure_evidence::failure_evidence(said, 420)
         )]);
@@ -400,7 +409,7 @@ pub(super) async fn run_contract_verifier_for(
     }) {
         return ContractVerification::Passed;
     }
-    ContractVerification::Failed(vec![
+    failed(vec![
         "declared contract verifier produced no parseable status; treating as unverified"
             .to_string(),
     ])
