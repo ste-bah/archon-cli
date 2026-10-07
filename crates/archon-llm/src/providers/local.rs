@@ -12,7 +12,9 @@ use crate::provider::{
     DataFlowClassification, LlmError, LlmProvider, LlmRequest, LlmResponse, ModelInfo,
     ProviderFeature, classify_data_flow_endpoint,
 };
-use crate::providers::openai::{build_openai_stream_request_body, parse_openai_sse_chunk};
+use crate::providers::openai::{
+    build_openai_stream_request_body, parse_openai_sse_chunk, sse_keepalive,
+};
 use crate::reasoning::ReasoningConfig;
 use crate::streaming::StreamEvent;
 use crate::types::Usage;
@@ -262,6 +264,12 @@ impl LocalProvider {
                     if line == "data: [DONE]" {
                         let _ = tx.send(StreamEvent::MessageStop).await;
                         return;
+                    }
+                    if let Some(ping) = sse_keepalive(&line) {
+                        if tx.send(ping).await.is_err() {
+                            return;
+                        }
+                        continue;
                     }
                     if let Some(data) = line.strip_prefix("data: ") {
                         for event in parse_openai_sse_chunk(data) {

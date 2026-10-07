@@ -11,6 +11,19 @@ use crate::providers::openai_protocol::{usage_event, usage_from_openai_chunk};
 use crate::streaming::StreamEvent;
 use crate::types::ContentBlockType;
 
+/// An SSE comment line (one that starts with `:`) is the protocol's keep-alive
+/// (WHATWG HTML, server-sent events: "comment lines ... prevent connections
+/// from timing out"). It carries no content, but it is the server's own proof
+/// that the stream is open and alive, exactly what Anthropic's `ping` event
+/// is. Surface it as [`StreamEvent::Ping`] so an activity window renews on
+/// either protocol's keep-alive; every consumer already ignores `Ping` for
+/// content.
+pub(crate) fn sse_keepalive(line: &str) -> Option<StreamEvent> {
+    line.trim_start()
+        .starts_with(':')
+        .then_some(StreamEvent::Ping)
+}
+
 /// Parse a single OpenAI SSE JSON chunk into StreamEvents.
 ///
 /// Handles text deltas, tool call starts/argument chunks, and finish reasons.

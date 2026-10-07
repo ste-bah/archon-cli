@@ -8,8 +8,17 @@
 //! the same path as a check that cannot fail -- to make it fail by its own
 //! assertion. A re-authored check has new text and starts afresh; an author
 //! that makes no progress pauses the run, as every re-author does. A check
-//! that later gives a verdict there forgets the strike. A no-progress stall
-//! never earns a strike: it remains operational and resumable.
+//! that later gives a verdict there forgets the strike.
+//!
+//! A no-progress stall (no output and no process-tree activity for the
+//! check's window) is judged the same way, by its own strike, keyed by the
+//! same check identity (commit, check text) and its window: the first stall
+//! is operational -- the host may be at fault -- so it is unproven and earns
+//! no progress credit, and the run pauses resumably. When the same check
+//! stalls so again after a resume, it is a check defect and goes to its
+//! author through the same repair path. A check that later runs to an end
+//! forgets its stall strike. A stall never fails the run and never passes the
+//! check.
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -65,14 +74,42 @@ pub(super) fn silent_failure(
 
 /// The strike file of check `id` of `contract` on `commit`.
 fn strike(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) -> PathBuf {
+    strike_file(probe, "unproven-on-base", commit, contract, id, "")
+}
+
+/// The stall strike of check `id` of `contract` on `commit`: its identity is
+/// the no-verdict strike's plus the no-progress window it stalled under, so a
+/// longer window is a fresh trial, not a second stall.
+fn stall_strike(
+    probe: &HostProbe,
+    commit: &str,
+    contract: &AcceptanceContract,
+    id: &str,
+) -> PathBuf {
+    let window = probe.check_bound_secs().to_string();
+    strike_file(probe, "stalled-on-base", commit, contract, id, &window)
+}
+
+fn strike_file(
+    probe: &HostProbe,
+    kind: &str,
+    commit: &str,
+    contract: &AcceptanceContract,
+    id: &str,
+    salt: &str,
+) -> PathBuf {
     let text = (contract.acceptance.iter())
         .chain(&contract.supplementary)
         .find(|entry| entry.id == id)
         .and_then(executed_text)
         .map_or("", |(_, text)| text);
-    let key = content_digest(format!("{commit}\0{id}\0{text}").as_bytes());
+    let mut identity = format!("{commit}\0{id}\0{text}");
+    if !salt.is_empty() {
+        identity.push_str(&format!("\0{salt}"));
+    }
+    let key = content_digest(identity.as_bytes());
     (probe.project.join(FREEZE_CACHE_DIR))
-        .join("unproven-on-base")
+        .join(kind)
         .join(format!("{key}.strike"))
 }
 
@@ -104,21 +141,49 @@ pub(super) fn settle(
     })
 }
 
-/// A check with no output or process-tree activity is unproven and resumable.
-/// It never earns a strike or an author finding, even on repeated retries.
+/// Settle check `id`, which made no progress (no output, no process-tree
+/// activity) for its window on `commit`: unproven the first time, with its
+/// stall strike saved but no progress credit, so the run pauses resumably;
+/// its author's finding when it stalls so again after a resume.
 pub(super) fn settle_timed_out(
     probe: &HostProbe,
     commit: &str,
     contract: &AcceptanceContract,
     id: &str,
 ) -> Option<String> {
-    let _ = (commit, contract);
-    probe.unproven(id, format!("unproven (timed out): no output or process-tree activity for {}s; every saved verdict is kept", probe.check_bound_secs()));
-    None
+    let short: String = commit.chars().take(12).collect();
+    let window = probe.check_bound_secs();
+    let why = format!("no output or process-tree activity for {window}s");
+    let path = stall_strike(probe, commit, contract, id);
+    struck(probe, &path, id, &why, Credit::None, || {
+        (
+            format!(
+                "check '{id}': it made no progress on the base commit {short} twice: {why}, and so again when the host ran it on that same commit after a resume. A check that waits forever (on input, a socket, a lock or a timer) gives no verdict on any tree. Repair or replace it so that it ends by its own assertion"
+            ),
+            format!(
+                "unproven (timed out): {why} on the pre-implementation tree at {short}; every saved verdict is kept and the run pauses resumably, since the host may be at fault. If it stalls so again on that commit after a resume, it goes to its author"
+            ),
+        )
+    })
 }
 
-/// The finding when `id` already has a strike on `commit`; otherwise save
-/// one and record `id` unproven. `texts` gives (finding, unproven reason).
+/// Forget the stall strike of check `id` on `commit`: it ran to an end there.
+pub(super) fn ran(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) {
+    let _ = std::fs::remove_file(stall_strike(probe, commit, contract, id));
+}
+
+/// Whether saving a first strike is progress for the staged freeze.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Credit {
+    /// A no-verdict failure is a finished run: its strike is saved work.
+    Saved,
+    /// A stall may be the host's fault: no credit, so the run pauses.
+    None,
+}
+
+/// The finding when `id` already has a no-verdict strike on `commit`;
+/// otherwise save one and record `id` unproven. `texts` gives (finding,
+/// unproven reason).
 fn strike_or_unproven(
     probe: &HostProbe,
     commit: &str,
@@ -128,8 +193,21 @@ fn strike_or_unproven(
     texts: impl FnOnce() -> (String, String),
 ) -> Option<String> {
     let path = strike(probe, commit, contract, id);
+    struck(probe, &path, id, why, Credit::Saved, texts)
+}
+
+/// The finding when the strike at `path` already exists; otherwise save it
+/// durably (written whole, then renamed into place) and record `id` unproven.
+fn struck(
+    probe: &HostProbe,
+    path: &std::path::Path,
+    id: &str,
+    why: &str,
+    credit: Credit,
+    texts: impl FnOnce() -> (String, String),
+) -> Option<String> {
     let (finding, unproven) = texts();
-    let previous = std::fs::File::open(&path).and_then(|file| {
+    let previous = std::fs::File::open(path).and_then(|file| {
         let mut prefix = Vec::new();
         file.take(128).read_to_end(&mut prefix)?;
         Ok(prefix)
@@ -151,9 +229,19 @@ fn strike_or_unproven(
             return None;
         }
     }
+    let staged = path.with_extension("strike.tmp");
     let saved = (path.parent()).is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
-        && std::fs::write(&path, why).is_ok();
-    if saved {
+        && std::fs::write(&staged, why).is_ok()
+        && std::fs::rename(&staged, path).is_ok();
+    if !saved {
+        let _ = std::fs::remove_file(&staged);
+        probe.unproven(
+            id,
+            format!("{unproven}; its strike could not be saved, so it stays the host's"),
+        );
+        return None;
+    }
+    if credit == Credit::Saved {
         probe.resume.progress.saved(false);
     }
     probe.unproven(id, unproven);

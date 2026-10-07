@@ -139,12 +139,14 @@ fn the_transport_backstop_is_derived_from_the_configured_idle_guard() {
     // stream idle guard: every think longer than ~33 minutes was cut, the
     // round restarted, and its work was lost.
     let source = include_str!("../runtime/llm.rs");
+    // #356: sized per caller class; behaviour is proven over real HTTP in
+    // `runtime/llm_transport_callers_tests.rs`.
     assert!(
-        source.contains("provider_read_backstop(config)")
+        source.contains("provider_read_backstop(config, callers)")
             && source.contains(".stream_idle_timeout_secs")
             && source
-                .contains(".max(crate::command::workflow_task_set::judge::JUDGE_TIMEOUT_SECS)"),
-        "the shared transport must clear both the configured and direct judge/critic guards"
+                .contains("idle.max(crate::command::workflow_task_set::judge::JUDGE_TIMEOUT_SECS)"),
+        "workflow transports must clear both the configured and judge/critic guards"
     );
     assert!(
         !source.contains("AnthropicClient::new(auth, identity, api_url)"),

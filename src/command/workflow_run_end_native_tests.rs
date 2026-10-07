@@ -406,7 +406,7 @@ fn guardian_partial_request_cannot_wait_forever() {
     let diagnostics = diagnostics.join().unwrap();
     assert!(!status.success());
     assert!(
-        diagnostics.contains("guardian request deadline exceeded"),
+        diagnostics.contains("no guardian request byte"),
         "guardian ended for another reason:\n{diagnostics}"
     );
 }

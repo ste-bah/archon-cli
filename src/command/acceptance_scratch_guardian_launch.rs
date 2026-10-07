@@ -36,6 +36,8 @@ pub(crate) async fn launch_selected(
         .envs(child_environment(&request.policy, |key: &str| {
             std::env::var_os(key)
         }))
+        // Its stderr renews the window below: it reports activity there.
+        .env(archon_shell::progress::SUPERVISED_ENV, "1")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         // Piped, never discarded: a guardian that dies before writing evidence
@@ -53,16 +55,35 @@ pub(crate) async fn launch_selected(
         .map(|stderr| tokio::spawn(collect_diagnostics(stderr, progress.clone())));
     let mut pipe = child.stdin.take().unwrap();
     let bytes = request_line(&request, &selection)?;
-    tokio::time::timeout(std::time::Duration::from_secs(5), pipe.write_all(&bytes))
-        .await
-        .map_err(|_| WorkflowError::StageFailed("guardian request delivery timed out".into()))?
-        .map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?;
     // A silent check saves its result at its own window; allow teardown and
     // evidence publication before declaring the enclosing guardian stalled.
-    // Actual check output and tree activity cross stderr as coalesced pulses.
+    // Actual check output, tree activity and finished phases cross stderr
+    // as coalesced pulses.
     let budget = request.policy.timeout_secs.min(86400).saturating_add(120);
     #[cfg(test)]
     let budget = TEST_WINDOW.with(|window| window.get()).unwrap_or(budget);
+    // #356: delivery is bounded by no progress, never a total: every chunk
+    // the child takes renews the window; a child that takes none pauses.
+    let delivered = progress
+        .bound(std::time::Duration::from_secs(budget), async {
+            for chunk in bytes.chunks(8192) {
+                pipe.write_all(chunk).await?;
+                progress.record();
+            }
+            pipe.flush().await
+        })
+        .await;
+    match delivered {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => return Err(WorkflowError::SpecInvalid(error.to_string())),
+        Err(_) => {
+            let _ = child.kill().await;
+            return Err(WorkflowError::ControlPaused(format!(
+                "native guardian took no request byte for {budget}s; resumable; {}",
+                failure_context(&request.evidence, &drain(diagnostics).await)
+            )));
+        }
+    }
     let status = match progress
         .bound(std::time::Duration::from_secs(budget), child.wait())
         .await
@@ -95,8 +116,9 @@ pub(crate) async fn launch_selected(
             diagnostics.as_bytes(),
         )
     {
+        // A publish no read could settle (Issue 338), or a stall (#356).
         return Err(WorkflowError::ControlPaused(format!(
-            "the native observation guardian read nothing: {evidence}"
+            "the native observation guardian paused: {evidence}"
         )));
     }
     if !status.success() {

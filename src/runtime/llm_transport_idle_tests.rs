@@ -47,6 +47,13 @@ pub(crate) async fn settle() {
     }
 }
 pub(crate) const PING: &str = "event: ping\ndata: {\"type\":\"ping\"}\n\n";
+/// The OpenAI-compatible protocol has no ping event; its keep-alive is the SSE
+/// comment line. Each provider gets its own protocol's keep-alive, never the
+/// other's.
+pub(crate) const SSE_COMMENT_PING: &str = ": ping\n\n";
+pub(crate) fn ping(local: bool) -> &'static str {
+    if local { SSE_COMMENT_PING } else { PING }
+}
 pub(crate) fn answer(text: &str) -> String {
     format!(
         "event: content_block_delta\ndata: {}\n\nevent: message_delta\ndata: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"end_turn\"}},\"usage\":{{\"output_tokens\":10}}}}\n\nevent: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n",
@@ -58,11 +65,20 @@ pub(crate) async fn client_for(
     headers: bool,
     local: bool,
 ) -> (Arc<dyn WorkflowLlmClient>, Transport) {
+    client_with(backstop, headers, local, TransportCallers::Workflow).await
+}
+pub(crate) async fn client_with(
+    backstop: Option<u64>,
+    headers: bool,
+    local: bool,
+    callers: TransportCallers,
+) -> (Arc<dyn WorkflowLlmClient>, Transport) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}/v1/messages", listener.local_addr().unwrap());
     let (frames, mut rx) =
         tokio::sync::mpsc::channel::<(String, tokio::sync::oneshot::Sender<()>)>(1);
     let (ready_tx, ready) = tokio::sync::oneshot::channel();
+    let opening = ping(local);
     let server = tokio::spawn(async move {
         let mut socket = loop {
             let (mut socket, _) = listener.accept().await.unwrap();
@@ -101,7 +117,7 @@ pub(crate) async fn client_for(
         if headers {
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n").await.unwrap();
             socket
-                .write_all(format!("{:x}\r\n{PING}\r\n", PING.len()).as_bytes())
+                .write_all(format!("{:x}\r\n{opening}\r\n", opening.len()).as_bytes())
                 .await
                 .unwrap();
         }
@@ -161,6 +177,7 @@ pub(crate) async fn client_for(
             &env,
             "transport-regression",
             crate::command::workflow_provider_route::ProviderEndpointPolicy::ConfiguredOnly,
+            callers,
         )
         .await
         .unwrap()
@@ -191,3 +208,7 @@ pub(crate) fn openai_delta(text: &str, complete: bool) -> String {
     }
     frame
 }
+
+#[cfg(test)]
+#[path = "llm_transport_callers_tests.rs"]
+mod callers;

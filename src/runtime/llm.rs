@@ -86,8 +86,25 @@ pub(crate) async fn build_configured_llm_provider(
         env_vars,
         origin,
         crate::command::workflow_provider_route::ProviderEndpointPolicy::AmbientAllowed,
+        TransportCallers::Command,
     )
     .await
+}
+
+/// The caller class a constructed transport serves (#356). The HTTP read
+/// backstop is a property of the client, so it is sized for its callers: a
+/// dead stream must end at the bound its own callers expect, not at another
+/// caller's longer window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TransportCallers {
+    /// Command surfaces (kb, team, pipeline, ...). Their transport clears only
+    /// `[subagent] stream_idle_timeout_secs` (Anthropic) or uses
+    /// `[llm.local] timeout_secs` (local), as configured.
+    Command,
+    /// Workflow clients. They serve the acceptance judge and the fidelity
+    /// critic, whose renewable activity window (`JUDGE_TIMEOUT_SECS`) must
+    /// decide when a silent call ends, so the transport outlasts that window.
+    Workflow,
 }
 
 pub(crate) async fn build_configured_llm_provider_with_policy(
@@ -95,6 +112,7 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
     env_vars: &ArchonEnvVars,
     origin: &str,
     endpoint_policy: crate::command::workflow_provider_route::ProviderEndpointPolicy,
+    callers: TransportCallers,
 ) -> Result<Arc<dyn LlmProvider>> {
     if config.llm.provider == "openai-codex" {
         let (provider, runtime_mode) =
@@ -109,7 +127,12 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
 
     if config.llm.provider != "anthropic" {
         let mut llm = config.llm.clone();
-        llm.local.timeout_secs = llm.local.timeout_secs.max(provider_read_backstop(config));
+        if callers == TransportCallers::Workflow {
+            llm.local.timeout_secs = llm
+                .local
+                .timeout_secs
+                .max(provider_read_backstop(config, callers));
+        }
         let fallback_denial_reason = match build_llm_provider_without_anthropic_fallback(&llm) {
             Ok(provider) => {
                 let selected_provider = provider.name().to_string();
@@ -165,14 +188,11 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
         endpoint_policy,
     );
     let api_url = route.endpoint;
-    // Direct judges/critics share this provider with subagents, but own a
-    // longer activity window. Size the read backstop against every caller,
-    // rather than allowing the subagent setting to cut a healthy direct call.
     let client = AnthropicClient::with_read_backstop(
         auth,
         identity,
         api_url,
-        provider_read_backstop(config),
+        provider_read_backstop(config, callers),
     );
     let selection = build_llm_provider_selection(&config.llm, &config.models, client);
     let selected_provider = selection.provider.name().to_string();
@@ -194,14 +214,17 @@ pub(crate) async fn build_configured_llm_provider_with_policy(
     Ok(observe_llm_provider_with_profile(selection.provider, runtime_mode, profile_id).await)
 }
 
-/// The direct judge/critic and subagent callers share the constructed transport.
-fn provider_read_backstop(config: &ArchonConfig) -> u64 {
-    AnthropicClient::read_backstop_for_idle_guard(
-        config
-            .subagent
-            .stream_idle_timeout_secs
-            .max(crate::command::workflow_task_set::judge::JUDGE_TIMEOUT_SECS),
-    )
+/// The read backstop that clears every idle guard of `callers`: the subagent
+/// stream guard always, and the judge/critic activity window for workflow
+/// clients only.
+pub(crate) fn provider_read_backstop(config: &ArchonConfig, callers: TransportCallers) -> u64 {
+    let idle = config.subagent.stream_idle_timeout_secs;
+    AnthropicClient::read_backstop_for_idle_guard(match callers {
+        TransportCallers::Command => idle,
+        TransportCallers::Workflow => {
+            idle.max(crate::command::workflow_task_set::judge::JUDGE_TIMEOUT_SECS)
+        }
+    })
 }
 
 pub(crate) async fn record_anthropic_fallback_denied(

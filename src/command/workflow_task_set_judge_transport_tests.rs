@@ -1,6 +1,6 @@
 //! Real configured provider transport must outlast the judge activity window.
 use super::*;
-use crate::runtime::llm::transport_tests::{PING, answer, client_for, openai_delta, settle};
+use crate::runtime::llm::transport_tests::{PING, answer, client_for, openai_delta, ping, settle};
 use std::time::Duration;
 
 async fn active_then_stall(gap: u64, local: bool) {
@@ -16,13 +16,8 @@ async fn active_then_stall(gap: u64, local: bool) {
             !judge.is_finished(),
             "real HTTP read backstop cut an active judge before its {JUDGE_TIMEOUT_SECS}s window"
         );
-        transport
-            .frame(&if local {
-                openai_delta(" ", false)
-            } else {
-                PING.into()
-            })
-            .await;
+        // Each provider's own keep-alive: Anthropic `ping`, SSE comment locally.
+        transport.frame(ping(local)).await;
     }
     transport
         .frame(&if local {

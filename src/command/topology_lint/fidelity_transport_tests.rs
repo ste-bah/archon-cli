@@ -1,6 +1,6 @@
 //! A real HTTP read-idle expiration is stopped, never an ordinary lint error.
 use super::*;
-use crate::runtime::llm::transport_tests::{PING, client_for, openai_delta, settle};
+use crate::runtime::llm::transport_tests::{PING, client_for, openai_delta, ping, settle};
 use std::sync::Arc;
 
 async fn lint(client: Arc<dyn archon_workflow::WorkflowLlmClient>, cache: &Path) -> Result<()> {
@@ -48,10 +48,10 @@ async fn idle_after_for(frame: Option<&str>, local: bool) {
             let critic = tokio::task::spawn_local(async move { lint(client, cache.path()).await });
             transport.ready().await;
             if let Some(frame) = frame {
-                let frame = if local && frame != PING {
-                    openai_delta("{", false)
-                } else {
-                    frame.into()
+                let frame = match (local, frame == PING) {
+                    (true, true) => ping(true).into(),
+                    (true, false) => openai_delta("{", false),
+                    (false, _) => frame.to_string(),
                 };
                 transport.frame(&frame).await;
             }

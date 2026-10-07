@@ -71,8 +71,8 @@ pub(super) async fn prove(
                 .await;
         let result = run.results.get(id);
         if result.is_some_and(super::repairs::timed_out) {
-            // Issue 323: the mutated check (its nonce kept across retries)
-            // is struck on the base like any other.
+            // #356: the mutated check (its nonce kept across retries) is
+            // judged on the base like any other stall.
             let commit = &baseline.commit;
             if let Some(finding) = super::silent::settle_timed_out(probe, commit, &mutated, id) {
                 findings.insert(id.clone(), finding);
@@ -98,6 +98,7 @@ pub(super) async fn prove(
             continue;
         }
         let result = result.expect("a result when the run completed");
+        super::silent::ran(probe, &baseline.commit, &mutated, id);
         let moved = markers.moved(result);
         // Issue 328: nor did a run that failed for its host (a program that
         // could not start, a tree that did not build) fail on its own terms.

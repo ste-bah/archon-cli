@@ -1,5 +1,30 @@
 //! A renewable no-progress window. Output/activity renews it; elapsed totals do not.
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// Set to `1` by a supervisor on a child whose stderr it reads as activity
+/// (the host-command supervisor, the native-observation guardian launcher).
+/// Only such a child writes activity lines to stderr; any other process (the
+/// main run process, a terminal) records them in its log instead, where they
+/// are evidence, not noise.
+pub const SUPERVISED_ENV: &str = "ARCHON_ACTIVITY_SUPERVISED";
+/// The stderr line a supervised child writes for observed activity.
+pub const ACTIVITY_LINE: &str = "archon-host-activity: child making progress";
+
+/// Whether this process's stderr is read as activity by its supervisor.
+pub fn supervised() -> bool {
+    static SUPERVISED: OnceLock<bool> = OnceLock::new();
+    *SUPERVISED.get_or_init(|| std::env::var_os(SUPERVISED_ENV).is_some_and(|value| value == "1"))
+}
+
+/// Report one coalesced unit of real activity: to the supervisor when there
+/// is one, else to the log. Never a saved verdict, never progress credit.
+pub fn report_activity() {
+    if supervised() {
+        eprintln!("{ACTIVITY_LINE}");
+    } else {
+        tracing::debug!(target: "archon_host_activity", "child making progress");
+    }
+}
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -56,7 +81,7 @@ impl Progress {
                 .unwrap_or_else(|e| e.into_inner());
             if last.is_none_or(|last| now.saturating_duration_since(last) >= interval) {
                 // Activity is not a saved verdict and never gets progress credit.
-                eprintln!("archon-host-activity: child making progress");
+                report_activity();
                 *last = Some(now);
             }
         }
@@ -99,3 +124,7 @@ impl std::fmt::Display for Stalled {
     }
 }
 impl std::error::Error for Stalled {}
+
+#[cfg(test)]
+#[path = "progress_tests.rs"]
+mod tests;

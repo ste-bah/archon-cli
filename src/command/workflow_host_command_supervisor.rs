@@ -122,6 +122,9 @@ pub(crate) async fn supervise_process_group(
         .current_dir(&request.cwd)
         .env_clear()
         .envs(&request.environment)
+        // Its stderr renews this call's no-progress window: it may report
+        // observed activity there (`archon_shell::progress`).
+        .env(archon_shell::progress::SUPERVISED_ENV, "1")
         .stdin(if request.stdin.is_some() {
             Stdio::piped()
         } else {

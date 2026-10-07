@@ -1,6 +1,7 @@
 //! Owned observation subprocess. Parent keeps stdin open as a liveness pipe.
 use archon_workflow::acceptance_scratch::{
-    ObservationResult, ScratchPolicy, observe_commands_cancellable,
+    OBSERVATION_STALLED, ObservationResult, ScratchPolicy, observation_stall,
+    observe_commands_cancellable,
 };
 use archon_workflow::acceptance_world::{AcceptanceCommandKind, FrozenCommandRef};
 use archon_workflow::task_set_contract::{
@@ -22,11 +23,12 @@ use std::{
 pub(crate) mod diagnostics;
 
 const FLAG: &str = "--internal-native-observer";
-/// How long the guardian waits for its whole request line. The parent writes
-/// the line straight after spawn, so this only ends a parent that stalled
-/// mid-line. The clock starts when the guardian begins reading: process
-/// start-up never counts against it (Issue 302).
-const REQUEST_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+/// How long the guardian waits with no request byte arriving. The parent
+/// writes the line straight after spawn, so this only ends a parent that
+/// stalled mid-line. A no-progress window, renewed by every byte (#356),
+/// never a total; it starts when the guardian begins reading, so process
+/// start-up never counts against it (Issue 302). Its expiry pauses.
+const REQUEST_IDLE: std::time::Duration = std::time::Duration::from_secs(5);
 /// Sidecar key on the request line that narrows an observation to a set of
 /// pinned check ids. Carried beside `Request` rather than inside it so the R2
 /// wire struct is byte-identical: the authored run's acceptance stage uses it
@@ -134,7 +136,7 @@ async fn serve() -> WorkflowResult<()> {
     let mut reader = std::io::BufReader::new(stdin);
     // Read the descriptor directly so BufReader prefetch cannot hide bytes
     // from poll. The untouched reader subsequently owns the liveness pipe.
-    let line = read_request(reader.get_ref(), REQUEST_DEADLINE)?;
+    let line = read_request(reader.get_ref(), REQUEST_IDLE)?;
     let (request, selection) = parse_request_line(&line)?;
     let cancel = Arc::new(AtomicBool::new(false));
     let flag = cancel.clone();
@@ -162,6 +164,16 @@ async fn serve() -> WorkflowResult<()> {
         cancel,
     )
     .await?;
+    // #356: a phase or git child that made no progress is the host's, and
+    // resumable: the parent pauses on it (its evidence is already written).
+    if let Some(stall) = observation_stall(
+        result
+            .operational_errors
+            .iter()
+            .chain(&result.cleanup_error),
+    ) {
+        return Err(WorkflowError::ControlPaused(stall.clone()));
+    }
     if !result.teardown_verified || !result.live_roots_unchanged {
         return Err(WorkflowError::ArtifactInvalid(
             "native observation void: live-root audit or teardown failed; inspect scratch evidence"
@@ -202,14 +214,15 @@ fn read_request(
     source: &impl std::os::fd::AsRawFd,
     limit: std::time::Duration,
 ) -> WorkflowResult<String> {
-    let deadline = std::time::Instant::now() + limit;
+    let mut last = std::time::Instant::now();
     let fd = source.as_raw_fd();
     let mut bytes = Vec::new();
     loop {
-        if std::time::Instant::now() >= deadline {
-            return Err(WorkflowError::SpecInvalid(
-                "guardian request deadline exceeded".into(),
-            ));
+        if last.elapsed() >= limit {
+            return Err(WorkflowError::ControlPaused(format!(
+                "{OBSERVATION_STALLED}: no guardian request byte for {}s",
+                limit.as_secs()
+            )));
         }
         let mut poll = libc::pollfd {
             fd,
@@ -232,6 +245,7 @@ fn read_request(
                 "guardian request pipe closed before newline".into(),
             ));
         }
+        last = std::time::Instant::now();
         if byte == b'\n' {
             break;
         }

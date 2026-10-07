@@ -27,7 +27,7 @@ fn read_with_limit(
 }
 
 /// A parent that writes part of a line and then stalls, pipe still open, is
-/// refused by the deadline: not by end-of-file, and not before the deadline.
+/// paused by the no-progress window: not by end-of-file, not before it.
 #[test]
 fn a_stalled_partial_request_is_refused_at_the_read_deadline() {
     let (reader, mut writer) = std::io::pipe().unwrap();
@@ -37,10 +37,8 @@ fn a_stalled_partial_request_is_refused_at_the_read_deadline() {
     drop(writer);
     let error = result.expect_err("a partial request was accepted");
     assert!(
-        error
-            .to_string()
-            .contains("guardian request deadline exceeded"),
-        "{error}"
+        matches!(&error, archon_workflow::WorkflowError::ControlPaused(why) if why.contains("no guardian request byte")),
+        "a stall pauses, never fails: {error}"
     );
     assert!(
         elapsed >= limit,
@@ -57,4 +55,51 @@ fn a_complete_request_line_is_read_without_its_newline() {
     let (result, _) = read_with_limit(reader, limit, limit * 2);
     drop(writer);
     assert_eq!(result.unwrap(), "{\"k\":1}");
+}
+
+/// #356: the window renews on every byte: a line that keeps arriving, each
+/// gap below the window, is read whole however long it takes in total.
+#[test]
+fn issue356_a_slow_but_progressing_request_line_is_read_whole() {
+    let (reader, mut writer) = std::io::pipe().unwrap();
+    let limit = Duration::from_millis(400);
+    let feeder = std::thread::spawn(move || {
+        for byte in b"{\"slow\":1}\n" {
+            std::thread::sleep(Duration::from_millis(100));
+            writer.write_all(&[*byte]).unwrap();
+        }
+        writer
+    });
+    let started = Instant::now();
+    let (result, _) = read_with_limit(reader, limit, Duration::from_secs(60));
+    assert!(
+        started.elapsed() > limit * 2,
+        "the total outlasted the window"
+    );
+    drop(feeder.join().unwrap());
+    assert_eq!(result.unwrap(), "{\"slow\":1}");
+}
+
+/// #356: a stall after progress is measured from the last byte, not the start.
+#[test]
+fn issue356_a_request_stall_is_measured_from_its_last_byte() {
+    let (reader, mut writer) = std::io::pipe().unwrap();
+    let limit = Duration::from_millis(400);
+    let feeder = std::thread::spawn(move || {
+        for _ in 0..4 {
+            std::thread::sleep(Duration::from_millis(150));
+            writer.write_all(b"x").unwrap();
+        }
+        writer
+    });
+    let (result, elapsed) = read_with_limit(reader, limit, Duration::from_secs(60));
+    drop(feeder.join().unwrap());
+    assert!(
+        matches!(
+            result,
+            Err(archon_workflow::WorkflowError::ControlPaused(_))
+        ),
+        "{result:?}"
+    );
+    assert!(elapsed >= Duration::from_millis(600) + limit, "{elapsed:?}");
 }

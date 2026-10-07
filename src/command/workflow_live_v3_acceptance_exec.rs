@@ -387,6 +387,12 @@ pub(super) async fn observe_in_scratch_at(
         let _ = std::fs::write(evidence_dir.join("scratch-observation.json"), bytes);
     }
     let result = result?;
+    // #356: an observation that made no progress is the host's: it pauses.
+    if let Some(stall) =
+        archon_workflow::acceptance_scratch::observation_stall(&result.operational_errors)
+    {
+        return Err(WorkflowError::ControlPaused(stall.clone()));
+    }
     if !result.operational_errors.is_empty() {
         return Err(WorkflowError::StageFailed(format!(
             "scratch observation failed: {}",

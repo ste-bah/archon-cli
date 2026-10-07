@@ -192,8 +192,8 @@ fn open_lock(path: &Path) -> WorkflowResult<std::fs::File> {
 }
 
 impl Lease {
-    /// Lock the cache at `dir`, waiting (within the phase deadline) for any
-    /// other holder. A slot left behind by one that never tore down, or a
+    /// Lock the cache at `dir`, waiting for any other holder; a wait with
+    /// no progress for the phase's window pauses resumably (#356). A slot left behind by one that never tore down, or a
     /// target over half of `limit` bytes (each check audits the scratch and
     /// the target together against it), moves the cache to its next
     /// generation: cold, never stale.
@@ -206,7 +206,8 @@ impl Lease {
         let path = dir.join("lock");
         let lock = open_lock(&path)?;
         while !try_lock(&lock, &path)? {
-            control::check()?;
+            // Waiting on another holder is no progress of this observation.
+            control::poll("the build cache lock another observation holds")?;
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
         // Its last use, for the expiry of unused caches.

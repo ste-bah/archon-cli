@@ -31,13 +31,14 @@ pub(crate) enum FrameOutcome {
 ///
 /// Returns `None` for:
 ///   - empty lines (SSE event separators)
-///   - `:`-prefixed comment / keepalive lines (SSE spec says ignore)
 ///   - lines that aren't `data:` (e.g. `event:`, `id:`, `retry:`) —
 ///     OpenAI-compat streams don't use those fields and our caller has no
 ///     use for them.
 ///
 /// A `data: {json}` line returns `Some(Events(vec))`. The `[DONE]` sentinel
-/// returns `Some(End)`.
+/// returns `Some(End)`. A `:`-prefixed comment line is the SSE keep-alive and
+/// returns `Some(Events([Ping]))`: it carries no content, but it is the
+/// server's proof of a live stream, as Anthropic's `ping` event is.
 pub(crate) fn decode_sse_line(line: &[u8]) -> Option<FrameOutcome> {
     let s = std::str::from_utf8(line).ok()?;
     // Strip any trailing CR (SSE lines may end `\r\n`).
@@ -46,9 +47,8 @@ pub(crate) fn decode_sse_line(line: &[u8]) -> Option<FrameOutcome> {
     if trimmed.is_empty() {
         return None;
     }
-    // SSE comment: any line starting with `:` is a comment / keepalive.
-    if trimmed.starts_with(':') {
-        return None;
+    if let Some(ping) = super::openai_stream::sse_keepalive(trimmed) {
+        return Some(FrameOutcome::Events(vec![ping]));
     }
     // Only `data:` fields carry payload. `event:`, `id:`, `retry:` are
     // valid SSE fields but are no-ops for OpenAI-compat streams.
@@ -79,10 +79,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decode_sse_skips_comments() {
-        // Validation Criterion 4: `: keepalive` must return None.
-        assert!(decode_sse_line(b": keepalive").is_none());
-        assert!(decode_sse_line(b":ping").is_none());
+    fn decode_sse_keepalive_comment_is_ping_not_content() {
+        // #356: a keep-alive comment is stream activity (Ping), never content.
+        for line in [
+            &b": keepalive"[..],
+            b":ping",
+            b"  : OPENROUTER PROCESSING\r",
+        ] {
+            match decode_sse_line(line) {
+                Some(FrameOutcome::Events(events)) => {
+                    assert!(
+                        matches!(events.as_slice(), [StreamEvent::Ping]),
+                        "{events:?}"
+                    )
+                }
+                other => panic!("expected a Ping, got {other:?}"),
+            }
+        }
         assert!(decode_sse_line(b"").is_none());
         assert!(decode_sse_line(b"   ").is_none());
     }

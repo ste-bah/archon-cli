@@ -84,9 +84,11 @@ async fn a_rounds_base_copy_bounds_each_check_by_the_same_bound() {
     assert!(elapsed < QUICK, "bounded in the copy: {elapsed:?}");
 }
 
-/// A real stall stays resumable on repeated attempts; the other verdicts survive.
+/// #356: a real stall is the host's the first time (resumable, no credit);
+/// the same check stalling so again after a resume goes to its author, and
+/// the other verdicts survive both attempts.
 #[tokio::test]
-async fn issue356_repeated_silent_check_stays_resumable() {
+async fn issue356_repeated_silent_check_goes_to_its_author() {
     let trees = trees(&[
         ("AC-B-005", SLOW, REPO),
         ("AC-B-006", "test -f feature.txt", REPO),
@@ -111,22 +113,43 @@ async fn issue356_repeated_silent_check_stays_resumable() {
         first.incomplete().is_none(),
         "the stall is local to its check"
     );
-    assert!(
-        first.resume.progress.saved_count() > 0,
-        "the other check is durably saved"
-    );
+    let saved = first.resume.progress.saved_count();
+    assert!(saved > 0, "the other check is durably saved");
     assert!(elapsed < QUICK, "{elapsed:?}");
+
+    // The stall alone earns no progress credit: a freeze of only the
+    // stalled check saves nothing, so the host pauses it resumably.
+    let ids = std::collections::BTreeSet::from(["AC-B-005".to_string()]);
+    let other = tempfile::tempdir().unwrap();
+    let fresh = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+        .with_copy_parent(other.path().to_path_buf())
+        .with_resume(&FreezeResume::saving(FreezeBudget::unlimited(), true))
+        .without_process_memo()
+        .with_check_cap(BOUND + 1);
+    let findings = fresh.script_defects(&trees.contract(), &ids).await;
+    assert!(
+        findings.is_empty(),
+        "a new window is a first stall: {findings:?}"
+    );
+    assert_eq!(
+        fresh.resume.progress.saved_count(),
+        0,
+        "no credit for a stall"
+    );
 
     let retry = freeze();
     let findings = retry.script_defects(&trees.contract(), &trees.ids()).await;
     let unproven = retry.take_unproven();
+    let finding = findings
+        .get("AC-B-005")
+        .expect("the second stall is the author's");
     assert!(
-        findings.is_empty(),
-        "a repeated stall is never the author's defect: {findings:?}"
+        finding.contains("made no progress") && finding.contains("Repair or replace"),
+        "{finding}"
     );
     assert!(
-        timed_out(&unproven, "AC-B-005"),
-        "still resumable: {unproven:?}"
+        !unproven.contains_key("AC-B-005"),
+        "no longer the host's: {unproven:?}"
     );
     assert!(
         retry.resume.progress.reused_count() > 0,
