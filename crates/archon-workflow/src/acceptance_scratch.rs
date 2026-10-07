@@ -42,6 +42,7 @@ mod observe;
 mod process;
 #[path = "acceptance_scratch_seal.rs"]
 mod seal;
+pub use control::{OBSERVATION_STALLED, observation_stall};
 pub use observe::observe_commands_hooked;
 pub use observe::{ObservationResult, observe_commands, observe_commands_cancellable};
 pub(crate) use process::drain_counted;

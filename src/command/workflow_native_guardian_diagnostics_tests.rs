@@ -281,3 +281,6 @@ async fn guardian_resolves_its_own_tools_through_the_configured_toolchain() {
          not a hardcoded host PATH"
     );
 }
+
+#[path = "workflow_native_guardian_idle_tests.rs"]
+mod idle;

@@ -236,6 +236,12 @@ impl OpenAiProvider {
                         let _ = tx.send(StreamEvent::MessageStop).await;
                         return;
                     }
+                    if let Some(ping) = sse_keepalive(&line) {
+                        if tx.send(ping).await.is_err() {
+                            return;
+                        }
+                        continue;
+                    }
 
                     if let Some(data) = line.strip_prefix("data: ") {
                         for event in parse_openai_sse_chunk(data) {
@@ -432,7 +438,7 @@ impl LlmProvider for OpenAiProvider {
     }
 }
 
-pub(crate) use super::openai_stream::parse_openai_sse_chunk;
+pub(crate) use super::openai_stream::{parse_openai_sse_chunk, sse_keepalive};
 
 impl OpenAiProvider {
     fn request_body(&self, request: &LlmRequest) -> serde_json::Value {

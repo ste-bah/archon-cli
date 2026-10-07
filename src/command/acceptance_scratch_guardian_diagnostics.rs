@@ -40,7 +40,10 @@ pub(crate) fn child_environment(
 }
 
 /// Read the child's stderr to end of pipe, keeping a bounded prefix.
-pub(crate) async fn collect_diagnostics(mut stderr: tokio::process::ChildStderr) -> String {
+pub(crate) async fn collect_diagnostics(
+    mut stderr: tokio::process::ChildStderr,
+    progress: archon_shell::progress::Progress,
+) -> String {
     use tokio::io::AsyncReadExt;
     let mut kept: Vec<u8> = Vec::new();
     let mut truncated = false;
@@ -49,6 +52,8 @@ pub(crate) async fn collect_diagnostics(mut stderr: tokio::process::ChildStderr)
         match stderr.read(&mut buffer).await {
             Ok(0) | Err(_) => break,
             Ok(read) => {
+                // Even discarded bytes renew activity, without retaining more.
+                progress.record();
                 let taken = DIAGNOSTIC_BYTES.saturating_sub(kept.len()).min(read);
                 kept.extend_from_slice(&buffer[..taken]);
                 truncated |= taken < read;

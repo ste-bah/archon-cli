@@ -1,5 +1,4 @@
-//! Issue 259: the set gate's fidelity audit stops resumable before its host
-//! wall clock and a retry continues from the call batches already saved.
+//! A silent fidelity critic pauses resumably; retries reuse the saved batches.
 //!
 //! Fixtures are a made-up PRD in a made-up domain: three tasks, each the
 //! only claimant of its own two requirements, so the audit asks exactly
@@ -115,6 +114,9 @@ impl WorkflowLlmClient for Critic {
         {
             now.store(99_999, SeqCst);
         }
+        if self.jump.as_ref().is_some_and(|(after, _)| calls > *after) {
+            std::future::pending::<()>().await;
+        }
         let verdicts: Vec<_> = ids
             .iter()
             .map(|id| serde_json::json!({"obligation_id": id, "necessarily_true": true, "reason": "obliged"}))
@@ -184,7 +186,7 @@ fn lint_wall_clock() -> u64 {
         .timeout_secs
 }
 
-/// The staged set gate's resume on `clock`: its catalog wall clock.
+/// The staged set gate's resume on `clock`: its catalog no-progress window.
 fn staged(clock: Clock) -> FreezeResume {
     FreezeResume::saving(FreezeBudget::within(lint_wall_clock(), clock), true)
 }
@@ -229,10 +231,9 @@ fn ids(range: &[usize]) -> Vec<String> {
     range.iter().map(|n| format!("{PREFIX}00{n}")).collect()
 }
 
-/// A lint the deadline stops exits 75 with progress n > 0, and its n
-/// batches are on disk; a retry asks only the rest and finishes.
-#[tokio::test]
-async fn a_lint_stopped_at_the_deadline_exits_resumable_and_a_retry_reuses_its_units() {
+/// A stalled critic exits 75; saved batches are on disk and reused on retry.
+#[tokio::test(start_paused = true)]
+async fn a_lint_stalled_on_the_provider_exits_resumable_and_a_retry_reuses_its_units() {
     let temp = corpus();
     let cwd = temp.path();
     let (now, clock) = hand_clock();
@@ -240,7 +241,7 @@ async fn a_lint_stopped_at_the_deadline_exits_resumable_and_a_retry_reuses_its_u
     let resume = staged(clock);
     let error = match lint(cwd, first.clone(), &resume).await {
         Ok(evaluation) => panic!(
-            "the deadline must stop the lint, not finish it: {:?} {}",
+            "the silent provider must stop the lint: {:?} {}",
             evaluation.operational_error(),
             evaluation.report
         ),
@@ -268,14 +269,18 @@ async fn a_lint_stopped_at_the_deadline_exits_resumable_and_a_retry_reuses_its_u
         Some(OperationalKind::IncompleteResumable)
     );
     assert_eq!(reported_progress(stderr.as_bytes()), Some(2), "{stderr}");
-    assert_eq!(first.calls(), 2, "nothing starts after the deadline");
+    assert_eq!(
+        first.calls(),
+        3,
+        "the next call starts and stops only on inactivity"
+    );
     assert_eq!(records(cwd).len(), 2, "each finished batch is saved");
 
     let retry = Critic::new();
     let resume = staged(hand_clock().1);
     let evaluation = complete(cwd, retry.clone(), &resume).await;
     assert_eq!(retry.calls(), 1, "only the batch with no verdict is asked");
-    let done: Vec<String> = first.asked().concat();
+    let done: Vec<String> = first.asked()[..2].concat();
     assert!(
         retry.asked()[0].iter().all(|id| !done.contains(id)),
         "no saved unit is recomputed: {:?} after {:?}",
@@ -291,11 +296,9 @@ async fn a_lint_stopped_at_the_deadline_exits_resumable_and_a_retry_reuses_its_u
     assert_eq!(records(cwd).len(), 3);
 }
 
-/// A call still running at the deadline is stopped there, and the lint
-/// stops resumable; with no budget the same hang is the call's own timeout,
-/// an operational error, as before.
+/// A silent provider stalls under both staged and ordinary invocation policies.
 #[tokio::test(start_paused = true)]
-async fn a_call_running_at_the_deadline_is_stopped_resumable() {
+async fn a_silent_provider_call_is_stopped_resumable() {
     let temp = corpus();
     let cwd = temp.path();
     let hanging = || {
@@ -305,7 +308,7 @@ async fn a_call_running_at_the_deadline_is_stopped_resumable() {
     };
     let (now, clock) = hand_clock();
     let resume = staged(clock);
-    // 200 s of the budget left: every call starts, cut to what remains.
+    // Elapsed orchestration time cannot cut the provider's own idle window.
     now.store(lint_wall_clock() - 600 - 200, SeqCst);
     let critic = hanging();
     let error = lint(cwd, critic.clone(), &resume)
@@ -314,10 +317,7 @@ async fn a_call_running_at_the_deadline_is_stopped_resumable() {
     let text = LintIncomplete::caused(&error)
         .expect("resumable")
         .to_string();
-    assert!(
-        text.contains("0 batch(es) were not started") && text.contains("3 were stopped"),
-        "{text}"
-    );
+    assert!(text.contains("3 batch(es) stalled"), "{text}");
     assert_eq!(critic.calls(), 3);
     let (stderr, status) = resumable_exit(&error).expect("resumable");
     assert_eq!(
@@ -326,16 +326,15 @@ async fn a_call_running_at_the_deadline_is_stopped_resumable() {
     );
     assert!(records(cwd).is_empty());
 
-    let evaluation = lint(cwd, hanging(), &FreezeResume::none())
+    let error = lint(cwd, hanging(), &FreezeResume::none())
         .await
-        .expect("an evaluation");
-    let error = evaluation.operational_error().expect("operational");
-    assert!(error.contains("fidelity critic timed out after"), "{error}");
+        .expect_err("a silent critic remains resumable");
+    assert!(LintIncomplete::caused(&error).is_some());
 }
 
 /// Each attempt that saves a unit reports more progress than the last, so
 /// the executor retries it; the last attempt finishes.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn progress_grows_across_retries_until_the_lint_finishes() {
     let temp = corpus();
     let cwd = temp.path();
@@ -344,7 +343,7 @@ async fn progress_grows_across_retries_until_the_lint_finishes() {
         let (now, clock) = hand_clock();
         let error = lint(cwd, Critic::jumping_after(1, now), &staged(clock))
             .await
-            .expect_err("one batch per attempt, then the deadline");
+            .expect_err("one batch per attempt, then a silent provider");
         let (stderr, _) = resumable_exit(&error).expect("resumable");
         let progress = reported_progress(stderr.as_bytes());
         assert_eq!(progress, Some(u64::from(attempt)));
@@ -455,23 +454,28 @@ async fn a_saved_verdict_is_keyed_by_binary_and_critic_identity() {
     assert_eq!(rebuilt.load(&digest, &obligations, &[]), None);
 }
 
-/// The staged set gate reads its own catalog wall clock, never a copy.
+/// The staged set gate reads its own catalog no-progress window, never a copy.
 #[test]
-fn the_staged_set_gate_runs_on_its_catalog_wall_clock() {
+fn the_staged_set_gate_reads_its_catalog_no_progress_window() {
     let resume = FreezeResume::staged("task-set-lint");
     assert_eq!(resume.budget.outer_secs(), lint_wall_clock());
 }
 
-/// The catalog stays pinned. The fixed script digest moves by design
-/// (Issues 261, 288, 337, 357, 360); a run on an older script resumes through
-/// the Issue 358 upgrade path and the Issue 360 phase seed.
+/// The catalog identity changes with #356 (schema 2: timeout semantics); rebuilding
+/// schema 1 reproduces the old catalog. The fixed script digest moves by design
+/// (Issues 261, 288, 337, 357, 360); older runs resume via #358 and the #360 seed.
 #[test]
-fn the_catalog_is_unchanged_and_script_matches_the_planned_release() {
-    let catalog = crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("rev")
-        .expect("catalog");
-    assert_eq!(
-        catalog.digest,
-        "c59953c92b47b59b10c4b6b0cf19e6ae736c88aa037bef173cb141d25dd7b6c7"
+fn issue356_catalog_identity_changes_and_script_matches_the_release() {
+    let catalog =
+        crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("rev").unwrap();
+    let old_digest = "c59953c92b47b59b10c4b6b0cf19e6ae736c88aa037bef173cb141d25dd7b6c7";
+    let mut old = catalog.clone();
+    old.schema_version = 1;
+    old.recompute_digest().unwrap();
+    assert_eq!(old.digest, old_digest);
+    assert_ne!(
+        catalog.digest, old_digest,
+        "timeout semantics must change resume identity"
     );
     assert_eq!(
         archon_workflow::workflow_scaffold_hash(

@@ -93,17 +93,26 @@ pub(super) async fn complete_reply(
             messages.push(serde_json::json!({ "role": "assistant", "content": reply.clone() }));
             messages.push(serde_json::json!({ "role": "user", "content": CONTINUE_PROMPT }));
         }
-        let outcome = tokio::time::timeout(
-            Duration::from_secs(JUDGE_TIMEOUT_SECS),
-            client.send_message_with_temperature(messages, Vec::new(), Vec::new(), model, 0.0),
-        )
-        .await
-        .map_err(|_| {
-            JudgeIncomplete(format!(
-                "a judge call timed out after {JUDGE_TIMEOUT_SECS}s with no reply"
-            ))
-        })?
-        .map_err(|error| JudgeIncomplete(format!("the provider gave no reply: {error}")))?;
+        let progress = archon_shell::progress::Progress::new(true);
+        let outcome = progress
+            .bound(
+                Duration::from_secs(JUDGE_TIMEOUT_SECS),
+                client.send_message_with_progress(
+                    messages,
+                    Vec::new(),
+                    Vec::new(),
+                    model,
+                    0.0,
+                    progress.clone(),
+                ),
+            )
+            .await
+            .map_err(|_| {
+                JudgeIncomplete(format!(
+                    "a judge call stalled after {JUDGE_TIMEOUT_SECS}s with no provider progress"
+                ))
+            })?
+            .map_err(|error| JudgeIncomplete(format!("the provider gave no reply: {error}")))?;
         let grown = format!("{reply}{}", outcome.content);
         if grown.len() > MAX_PARTIAL_REPLY_BYTES
             || archon_observability::redaction::redact_text(&grown).len() > MAX_PARTIAL_REPLY_BYTES

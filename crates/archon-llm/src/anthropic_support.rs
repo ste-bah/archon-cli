@@ -43,6 +43,9 @@ impl Default for MessageRequest {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
+    #[error("provider transport read-idle backstop expired; resumable")]
+    IdleTimeout,
+
     #[error("HTTP error: {0}")]
     HttpError(String),
 

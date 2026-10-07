@@ -254,6 +254,9 @@ pub mod data_environment;
 // inherits only its stdio. Here, in the leaf, because every crate spawns.
 pub mod spawn;
 
+/// Renewable output and activity bounds.
+pub mod progress;
+
 // Issue-270: every process a supervised child started, past its first
 // process group: here, in the leaf, because the host-command supervisor and
 // archon-workflow's check runner both confine their children with it.

@@ -238,3 +238,30 @@ fn an_idle_check_without_a_runnable_lsof_reads_busy() {
         idle.path()
     ));
 }
+
+/// #356: waiting for another holder's lock is no progress of this
+/// observation: no release within the phase window pauses resumably; a
+/// release within it lets the wait finish.
+#[test]
+fn issue356_a_lock_held_past_the_window_pauses_and_a_release_in_time_wins() {
+    let cache = tempfile::tempdir().unwrap();
+    let held = Lease::acquire(cache.path(), LIMIT).unwrap();
+    let started = std::time::Instant::now();
+    let error = control::Control::new(1, Default::default())
+        .run(|| Lease::acquire(cache.path(), LIMIT))
+        .map(|_| ())
+        .expect_err("a holder that never releases stalls the wait");
+    assert!(
+        matches!(&error, WorkflowError::ControlPaused(why) if why.contains(control::OBSERVATION_STALLED)),
+        "a stall pauses, never fails: {error}"
+    );
+    assert!(started.elapsed() >= std::time::Duration::from_secs(1));
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        drop(held);
+    });
+    let acquired =
+        control::Control::new(1, Default::default()).run(|| Lease::acquire(cache.path(), LIMIT));
+    release.join().unwrap();
+    assert!(acquired.is_ok(), "{:?}", acquired.err());
+}

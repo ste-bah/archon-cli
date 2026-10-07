@@ -58,6 +58,7 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
         env_vars,
         origin,
         policy.endpoint,
+        crate::runtime::llm::TransportCallers::Workflow,
     )
     .await?;
     let raw: Arc<dyn LlmClient> = Arc::new(

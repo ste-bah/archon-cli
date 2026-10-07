@@ -61,14 +61,17 @@ use crate::command::acceptance_scratch_policy::NativeBinding;
 /// Bytes of a crashed check's stderr shown to its author.
 const FINDING_TAIL_BYTES: usize = 3000;
 
-/// Issues 263, 323: the one per-check bound of every probe site (scratch,
-/// direct and hermetic copy alike): the configured `[workflow.acceptance_
-/// execution] timeout_secs`, else -- the direct and hermetic sites exist only
-/// without that policy -- the direct default (1800 s), the limit the
-/// acceptance stage itself runs the check under. A freeze bounds it further
-/// by its budget's share (`HostProbe::check_bound_secs`). A check past it is
-/// unproven (timed out), the host's; the same on the same base again goes to
-/// its author (`workflow_acceptance_executability_silent`).
+/// Issues 263, 323, 356: the one per-check no-progress window of every probe
+/// site (scratch, direct and hermetic copy alike): the configured
+/// `[workflow.acceptance_execution] timeout_secs`, else -- the direct and
+/// hermetic sites exist only without that policy -- the direct default
+/// (1800 s), the window the acceptance stage itself runs the check under.
+/// It is renewed by the check's output and process-tree activity; it is
+/// never a total, and a freeze uses it whole (no share of a budget). A check
+/// that makes no progress for it is unproven (timed out) and the run pauses
+/// resumably, since the host may be at fault; the same check stalling so
+/// again on the same base after a resume goes to its author
+/// (`workflow_acceptance_executability_silent`).
 fn probe_check_cap_secs(site: &Site) -> u64 {
     match site {
         Site::Scratch(binding) => binding.policy.timeout_secs,

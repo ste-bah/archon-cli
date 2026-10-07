@@ -22,6 +22,9 @@ use crate::streaming::StreamEvent;
 impl From<ApiError> for LlmError {
     fn from(e: ApiError) -> Self {
         match e {
+            ApiError::IdleTimeout => {
+                LlmError::Http(crate::transport_idle::TransportIdle.to_string())
+            }
             ApiError::HttpError(msg) => {
                 classify_context_window_error(None, None, None, &msg, Some("anthropic"), None)
                     .unwrap_or(LlmError::Http(msg))
@@ -217,10 +220,14 @@ impl LlmProvider for AnthropicProvider {
 
     async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         let msg_request = self.prepare_message(request);
-        self.client
-            .stream_message(msg_request)
-            .await
-            .map_err(LlmError::from)
+        match self.client.stream_message(msg_request).await {
+            Err(ApiError::IdleTimeout) => {
+                // Header silence and body silence have the same resumable
+                // meaning at the provider boundary.
+                Ok(crate::transport_idle::receiver())
+            }
+            result => result.map_err(LlmError::from),
+        }
     }
 
     /// Collect a full non-streaming response by consuming all stream events.

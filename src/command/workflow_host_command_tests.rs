@@ -326,3 +326,30 @@ fn fixed_catalog_declared_write_sets_match_child_manifest_shapes() {
 
 #[path = "workflow_host_environment_tests.rs"]
 mod environment_tests;
+
+#[test]
+fn issue356_old_total_catalog_cannot_resume_as_idle_catalog() {
+    use archon_workflow::{FixedRunIdentityV1, verify_fixed_resume_identity};
+    for revision in ["old-build", "second-build", ""] {
+        let current = fixed_decomposition_catalog(revision).unwrap();
+        let mut old = current.clone();
+        old.schema_version = 1;
+        old.recompute_digest().unwrap();
+        let identity = |digest| FixedRunIdentityV1 {
+            template_version: "v1".into(),
+            starting_binary_revision: revision.into(),
+            script_digest: "script".into(),
+            catalog_digest: digest,
+            project_root_identity: "/project".into(),
+            prd_identity: "/prd".into(),
+            task_root_identity: "/tasks".into(),
+        };
+        let error = verify_fixed_resume_identity(&identity(old.digest), &identity(current.digest))
+            .expect_err("old total-clock semantics must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("resume identity mismatch for catalog_digest")
+        );
+    }
+}

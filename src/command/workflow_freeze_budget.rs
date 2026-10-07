@@ -1,52 +1,14 @@
-//! The staged acceptance freeze's own time budget and its resumable
-//! outcome (Issue 255).
-//!
-//! The host kills `freeze-acceptance` at its catalog wall clock and the
-//! work in flight is lost. The freeze therefore keeps a deadline of its own,
-//! read from that same catalog entry (never a second copy of the number)
-//! less [`FREEZE_SAFETY_MARGIN_SECS`] for teardown and reporting. Before each
-//! probe check it asks the budget how long the check may run; when too
-//! little is left it stops, with every finished probe result and the
-//! judge's verdicts already saved, and reports [`FreezeIncomplete`]: an
-//! operational outcome whose text starts with
-//! [`FREEZE_INCOMPLETE_RESUMABLE`]. A retry of the same freeze resumes from
-//! the saved results.
-//!
-//! The staged freeze ends it with the host's operational contract
-//! (`workflow_host_command_operational`): the reason on stderr, then the
-//! progress line, then exit status `EXIT_INCOMPLETE_RESUMABLE` (75), which
-//! the executor retries while progress grows and otherwise pauses the run.
-//! While it runs it writes a progress line after every saved probe verdict
-//! and after the saved judge verdicts, so even a freeze the host kills
-//! reports how far it got. Everything it saves lives outside the call's
-//! staging directory, which the executor clears before each retry. An
-//! unstaged freeze has no host deadline and never produces it.
-//!
-//! The budget and the progress counter are not the freeze's alone: the
-//! staged set gate (`task-set-lint`, Issue 259) runs its critic calls under
-//! [`FreezeResume::staged`] for its own catalog entry and counts its saved
-//! call batches here (`topology_lint::fidelity_resume`).
+//! Staged freeze/lint persistence and resumable no-progress outcomes.
+//! Each operation watches its own output/activity, and the host watches child
+//! output. Saved verdicts are reported after each durable result. There is no
+//! total deadline and no share of one: active work can run for any duration.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use archon_workflow::acceptance_scratch::CheckAllowance;
 
-/// Kept back from the catalog wall clock: the last check's integrity
-/// audit, the observation's teardown and live-root audit, and the report.
-pub(crate) const FREEZE_SAFETY_MARGIN_SECS: u64 = 600;
-/// No check starts with less than this left: it could not finish.
-pub(crate) const MIN_CHECK_WINDOW_SECS: u64 = 120;
-/// No observation starts with less than this beyond one check's window:
-/// preparing a scratch slot alone takes most of a minute.
-pub(crate) const OBSERVATION_SETUP_SECS: u64 = 120;
-/// Issue 323: a freeze gives one probe check at most this fraction
-/// (`1 / CHECK_SHARE`) of its usable window, however long its site's own
-/// per-check limit is ([`FreezeBudget::check_bound`]). A probed check runs
-/// at least twice (its site's tree and the pre-implementation tree), so one
-/// check past its bound leaves at least half the window for the others.
-pub(crate) const CHECK_SHARE: u64 = 4;
 /// How every [`FreezeIncomplete`] text starts, for whoever must tell an
 /// incomplete, resumable freeze from a failed one.
 pub(crate) const FREEZE_INCOMPLETE_RESUMABLE: &str = "operational: freeze incomplete, resumable";
@@ -57,107 +19,60 @@ pub(crate) const FREEZE_INCOMPLETE_RESUMABLE: &str = "operational: freeze incomp
 /// project data.
 pub(crate) const FREEZE_CACHE_DIR: &str = ".archon/freeze-cache";
 
-/// The clock a budget reads; injected by tests.
+/// An injected orchestration clock, retained to prove elapsed totals cannot
+/// ration active operations. Each operation watches its own progress clock.
 pub(crate) type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
 
-/// A freeze's remaining time. Unlimited unless the freeze runs under a
-/// host wall clock.
+/// The host's no-progress policy, never an end-to-end work budget.
 #[derive(Clone)]
 pub(crate) struct FreezeBudget {
-    deadline: Option<Instant>,
-    clock: Clock,
-    /// The wall clock it was derived from, for the report.
     outer_secs: u64,
 }
 
 impl FreezeBudget {
     pub(crate) fn unlimited() -> Self {
-        Self {
-            deadline: None,
-            clock: Arc::new(Instant::now),
-            outer_secs: 0,
-        }
+        Self { outer_secs: 0 }
     }
 
-    /// A budget of `outer_secs` from now on `clock`, less the margin.
-    pub(crate) fn within(outer_secs: u64, clock: Clock) -> Self {
-        let usable = outer_secs.saturating_sub(FREEZE_SAFETY_MARGIN_SECS);
-        Self {
-            deadline: Some(clock() + Duration::from_secs(usable)),
-            clock,
-            outer_secs,
-        }
+    /// The injected orchestration clock is deliberately not a total deadline.
+    pub(crate) fn within(outer_secs: u64, _clock: Clock) -> Self {
+        Self { outer_secs }
     }
 
-    /// The budget of the host command `command_id`, from now: its catalog
-    /// wall clock (`workflow_host_command_catalog`), read and never
-    /// restated. Unlimited when the catalog has no such command.
     pub(crate) fn for_host_command(command_id: &str) -> Self {
-        let timeout =
+        let catalog =
             crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("")
-                .ok()
-                .and_then(|catalog| catalog.capabilities.get(command_id).map(|c| c.timeout_secs));
-        match timeout {
-            Some(secs) => Self::within(secs, Arc::new(Instant::now)),
-            None => Self::unlimited(),
-        }
+                .expect("binary host catalog must be valid");
+        let entry = catalog
+            .capabilities
+            .get(command_id)
+            .expect("staged command must have a host capability");
+        Self::within(entry.timeout_secs, Arc::new(Instant::now))
     }
 
-    /// The host wall clock this budget was derived from; 0 when unlimited.
     pub(crate) fn outer_secs(&self) -> u64 {
         self.outer_secs
     }
 
-    fn remaining(&self) -> Option<Duration> {
-        self.deadline
-            .map(|deadline| deadline.saturating_duration_since((self.clock)()))
-    }
-
-    /// The per-check bound a probe check runs under in this budget: its
-    /// site's own `cap_secs`, never more than [`CHECK_SHARE`]'s share of the
-    /// usable window (nor less than [`MIN_CHECK_WINDOW_SECS`]); unlimited,
-    /// `cap_secs` itself. A check past it is unproven (timed out), never a
-    /// spent budget, so one slow check never consumes the whole freeze.
+    /// A site's own no-progress window; no fraction of a total.
     pub(crate) fn check_bound(&self, cap_secs: u64) -> u64 {
-        if self.deadline.is_none() {
-            return cap_secs;
-        }
-        let usable = self.outer_secs.saturating_sub(FREEZE_SAFETY_MARGIN_SECS);
-        cap_secs.min((usable / CHECK_SHARE).max(MIN_CHECK_WINDOW_SECS))
+        cap_secs
     }
 
-    /// How long the next check may run under a per-check `cap_secs`.
     pub(crate) fn allowance(&self, cap_secs: u64) -> CheckAllowance {
-        let Some(remaining) = self.remaining() else {
-            return CheckAllowance::Run {
-                timeout_secs: cap_secs,
-                cut: false,
-            };
-        };
-        let left = remaining.as_secs();
-        if left < MIN_CHECK_WINDOW_SECS {
-            return CheckAllowance::Defer;
-        }
         CheckAllowance::Run {
-            timeout_secs: cap_secs.min(left),
-            cut: left < cap_secs,
+            timeout_secs: cap_secs,
+            cut: false,
         }
     }
 
-    /// Whole seconds left, `None` when unlimited.
-    pub(crate) fn remaining_secs(&self) -> Option<u64> {
-        self.remaining().map(|left| left.as_secs())
-    }
-
-    /// Whether a new observation (or copy) may still be prepared.
     pub(crate) fn allows_observation(&self) -> bool {
-        self.remaining()
-            .is_none_or(|left| left.as_secs() >= MIN_CHECK_WINDOW_SECS + OBSERVATION_SETUP_SECS)
+        true
     }
 
     fn describe(&self) -> String {
         format!(
-            "the freeze stops starting checks {FREEZE_SAFETY_MARGIN_SECS}s before its {}s host wall clock",
+            "a step stalled under the {}s host no-progress window",
             self.outer_secs
         )
     }
@@ -250,7 +165,7 @@ fn add(counter: &AtomicU64, units: u64) {
 }
 
 /// The freeze stopped before it finished, with its progress saved: for its
-/// time budget, or because a step could not complete (Issues 260, 263).
+/// no-progress window, or because a step could not complete.
 #[derive(Debug)]
 pub(crate) struct FreezeIncomplete {
     cause: IncompleteCause,
@@ -352,7 +267,7 @@ impl std::fmt::Display for FreezeIncomplete {
                 lacking,
             } => write!(
                 f,
-                "{FREEZE_INCOMPLETE_RESUMABLE}: {budget}, and too little time was left; {saved} probe result(s) were saved by this attempt and {reused} reused from earlier ones, and the judge's verdicts are saved; {} check(s) still have no {lacking} ({}). Retry the freeze with the same candidate (resume the run): it continues from the saved results",
+                "{FREEZE_INCOMPLETE_RESUMABLE}: {budget}, and a step made no progress; {saved} probe result(s) were saved by this attempt and {reused} reused from earlier ones, and the judge's verdicts are saved; {} check(s) still have no {lacking} ({}). Retry the freeze with the same candidate (resume the run): it continues from the saved results",
                 deferred.len(),
                 deferred.join(", ")
             ),

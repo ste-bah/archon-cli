@@ -188,10 +188,10 @@ async fn hanging_checkout_is_bounded_and_records_cleanup() {
     );
     assert!(!out.passed());
     assert!(out.teardown_verified, "{:?}", out.cleanup_error);
+    // #356: a checkout with no output and no CPU is a no-progress stall: the
+    // host's, resumable (its window, not a total, bounded it).
     assert!(
-        out.operational_errors
-            .iter()
-            .any(|e| e.contains("deadline")),
+        archon_workflow::acceptance_scratch::observation_stall(&out.operational_errors).is_some(),
         "{:?}",
         out.operational_errors
     );

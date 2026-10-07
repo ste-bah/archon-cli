@@ -172,6 +172,31 @@ impl WorkflowLlmClient for PipelineWorkflowLlmClient {
             .map_err(WorkflowError::port)
     }
 
+    async fn send_message_with_progress(
+        &self,
+        messages: Vec<serde_json::Value>,
+        system: Vec<serde_json::Value>,
+        tools: Vec<serde_json::Value>,
+        model: &str,
+        temperature: f64,
+        progress: archon_shell::progress::Progress,
+    ) -> WorkflowResult<WorkflowAgentOutcome> {
+        self.inner
+            .send_message_with_progress(messages, system, tools, model, temperature, progress)
+            .await
+            .map(outcome_from_response)
+            .map_err(|error| {
+                if error
+                    .downcast_ref::<archon_llm::transport_idle::TransportIdle>()
+                    .is_some()
+                {
+                    WorkflowError::ControlPaused(error.to_string())
+                } else {
+                    WorkflowError::port(error)
+                }
+            })
+    }
+
     async fn continue_agent(
         &self,
         call: WorkflowAgentCall,

@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
 
 use super::*;
+use std::time::Duration;
 
 /// A clock the test moves by hand: `start + seconds`.
 pub(crate) fn hand_clock() -> (Arc<AtomicU64>, Clock) {
@@ -16,28 +17,20 @@ pub(crate) fn hand_clock() -> (Arc<AtomicU64>, Clock) {
 }
 
 #[test]
-fn a_check_gets_its_cap_until_the_budget_is_nearly_spent_then_nothing_starts() {
+fn orchestration_never_cuts_a_site_window_to_elapsed_time() {
     let (now, clock) = hand_clock();
     let budget = FreezeBudget::within(7_800, clock);
-    let run = |timeout_secs, cut| CheckAllowance::Run { timeout_secs, cut };
-    assert_eq!(budget.allowance(1_200), run(1_200, false));
-    assert!(budget.allows_observation());
-    // 7_200 usable: with 700 left, a check is cut to what remains.
-    now.store(6_500, SeqCst);
-    assert_eq!(budget.allowance(1_200), run(700, true));
-    now.store(
-        7_200 - MIN_CHECK_WINDOW_SECS - OBSERVATION_SETUP_SECS + 1,
-        SeqCst,
-    );
-    assert!(!budget.allows_observation(), "too late to prepare a slot");
-    assert!(matches!(
-        budget.allowance(1_200),
-        CheckAllowance::Run { .. }
-    ));
-    now.store(7_200 - MIN_CHECK_WINDOW_SECS + 1, SeqCst);
-    assert_eq!(budget.allowance(1_200), CheckAllowance::Defer);
-    now.store(99_999, SeqCst);
-    assert_eq!(budget.allowance(1_200), CheckAllowance::Defer);
+    for seconds in [0, 6_500, 7_201, 99_999] {
+        now.store(seconds, SeqCst);
+        assert_eq!(
+            budget.allowance(1_200),
+            CheckAllowance::Run {
+                timeout_secs: 1_200,
+                cut: false
+            }
+        );
+        assert!(budget.allows_observation());
+    }
 }
 
 #[test]
@@ -54,21 +47,14 @@ fn an_unlimited_budget_only_applies_the_cap() {
 }
 
 #[test]
-fn the_staged_budget_reads_the_catalog_wall_clock_and_keeps_the_margin() {
-    let catalog = crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("")
-        .expect("the fixed catalog");
-    let outer = catalog.capabilities["freeze-acceptance"].timeout_secs;
-    let budget = FreezeBudget::for_host_command("freeze-acceptance");
-    assert_eq!(budget.outer_secs, outer);
-    let left = budget.remaining().expect("a deadline").as_secs();
-    assert!(
-        left <= outer - FREEZE_SAFETY_MARGIN_SECS && left + 5 >= outer - FREEZE_SAFETY_MARGIN_SECS
-    );
-    assert!(
-        FreezeBudget::for_host_command("no-such-command")
-            .remaining()
-            .is_none()
-    );
+fn the_staged_budget_reads_the_catalog_no_progress_window() {
+    let catalog =
+        crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("").unwrap();
+    for id in ["freeze-acceptance", "task-set-lint"] {
+        let budget = FreezeBudget::for_host_command(id);
+        assert_eq!(budget.outer_secs(), catalog.capabilities[id].timeout_secs);
+        assert_eq!(budget.check_bound(20_000), 20_000);
+    }
 }
 
 #[test]
@@ -122,4 +108,48 @@ fn the_progress_total_saturates() {
     progress.saved(false);
     progress.reused(false);
     assert_eq!(progress.total(), u64::MAX);
+}
+
+// Issue 356: orchestration must never ration active work by elapsed totals.
+#[test]
+fn issue356_freeze_runs_past_old_total() {
+    let (now, clock) = hand_clock();
+    let resume = FreezeResume::saving(FreezeBudget::within(7_800, clock), true);
+    for seconds in [2_000, 6_000, 8_000, 20_000] {
+        now.store(seconds, SeqCst);
+        resume.progress.saved(false);
+        assert!(resume.budget.allows_observation(), "active at {seconds}s");
+        assert_eq!(
+            resume.budget.allowance(7_200),
+            CheckAllowance::Run {
+                timeout_secs: 7_200,
+                cut: false
+            }
+        );
+    }
+}
+
+#[test]
+fn issue356_check_keeps_its_site_window() {
+    let (_, clock) = hand_clock();
+    let budget = FreezeBudget::within(7_800, clock);
+    for cap in [1_801, 7_200, 20_000] {
+        assert_eq!(budget.check_bound(cap), cap);
+    }
+}
+
+#[test]
+fn issue356_lint_has_no_total_deadline() {
+    let (now, clock) = hand_clock();
+    let budget = FreezeBudget::within(7_800, clock);
+    for seconds in [7_801, 16_000, 100_000] {
+        now.store(seconds, SeqCst);
+        assert_eq!(
+            budget.allowance(7_200),
+            CheckAllowance::Run {
+                timeout_secs: 7_200,
+                cut: false
+            }
+        );
+    }
 }

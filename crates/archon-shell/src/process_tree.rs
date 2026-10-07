@@ -165,3 +165,7 @@ fn canonical_roots(paths: &[&Path]) -> Vec<PathBuf> {
 #[cfg(test)]
 #[path = "process_tree_tests.rs"]
 mod tests;
+
+#[path = "process_tree_activity.rs"]
+mod activity;
+pub use activity::Activity;

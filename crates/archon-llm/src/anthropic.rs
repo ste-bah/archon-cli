@@ -171,11 +171,13 @@ impl AnthropicClient {
             );
             tracing::debug!("API request body: {}", crate::debug_body::debug_body(&body));
 
-            let response = req
-                .body(body.clone())
-                .send()
-                .await
-                .map_err(|e| ApiError::HttpError(format!("request failed: {e}")))?;
+            let response = req.body(body.clone()).send().await.map_err(|e| {
+                if e.is_timeout() {
+                    ApiError::IdleTimeout
+                } else {
+                    ApiError::HttpError(format!("request failed: {e}"))
+                }
+            })?;
 
             let status = response.status();
 
@@ -192,7 +194,13 @@ impl AnthropicClient {
 
             let capture =
                 crate::transport_evidence::Capture::new(&response, vec![auth_header_value]);
-            let response_body = response.text().await.unwrap_or_default();
+            let response_body = response.text().await.map_err(|error| {
+                if error.is_timeout() {
+                    ApiError::IdleTimeout
+                } else {
+                    ApiError::HttpError(format!("error response body failed: {error}"))
+                }
+            })?;
             capture.body(response_body.as_bytes());
 
             tracing::debug!(

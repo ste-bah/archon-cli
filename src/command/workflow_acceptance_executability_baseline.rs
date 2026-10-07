@@ -349,12 +349,14 @@ pub(super) async fn cannot_fail_findings(
         let id = &reference.acceptance_id;
         let result = run.results.get(id);
         if result.is_some_and(timed_out) {
-            // Issue 323: past its bound on the base: unproven (timed out),
-            // retried; so again on the same base, the author's.
+            // #356: no progress for its window on the base: operational and
+            // resumable the first time; so again after a resume, the author's.
             if let Some(finding) = silent::settle_timed_out(probe, &baseline.commit, contract, id) {
                 findings.insert(id.clone(), finding);
             }
-        } else if let Some(reason) = run.unrun(id) {
+            continue;
+        }
+        if let Some(reason) = run.unrun(id) {
             probe.unproven(
                 id,
                 format!(
@@ -362,6 +364,8 @@ pub(super) async fn cannot_fail_findings(
                 ),
             );
         } else if let Some(result) = result {
+            // It ran to an end on the base: any earlier stall was not its own.
+            silent::ran(probe, &baseline.commit, contract, id);
             if let Some(why) = silent::silent_failure_off_thread(contract, result, &at).await {
                 // Issue 328: failing without a verdict proves nothing; failing
                 // so again on the same base goes to the author.

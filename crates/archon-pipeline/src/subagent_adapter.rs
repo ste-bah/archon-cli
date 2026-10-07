@@ -364,6 +364,20 @@ impl LlmClient for SubagentPipelineClient {
             .await
     }
 
+    async fn send_message_with_progress(
+        &self,
+        messages: Vec<serde_json::Value>,
+        system: Vec<serde_json::Value>,
+        tools: Vec<serde_json::Value>,
+        model: &str,
+        temperature: f64,
+        progress: archon_shell::progress::Progress,
+    ) -> Result<LlmResponse> {
+        self.fallback
+            .send_message_with_progress(messages, system, tools, model, temperature, progress)
+            .await
+    }
+
     async fn run_agent(&self, request: AgentExecutionRequest) -> Result<LlmResponse> {
         self.execute_session(request, false).await
     }

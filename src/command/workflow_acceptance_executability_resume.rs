@@ -9,11 +9,8 @@
 //!   data's state, the check's id and exact content: `sites::memo_key`), so
 //!   a changed check, commit or data set never meets an old verdict; a
 //!   verdict is committed only after final observation validation;
-//! - asks the freeze's budget before every check how long it may run, and
-//!   once too little is left runs nothing more and reports the freeze
-//!   [`FreezeIncomplete`] instead of being killed;
-//! - bounds every check by its site's own limit (`probe_check_cap_secs`),
-//!   and never by more than the budget's share of its window (Issue 323);
+//! - bounds each check by its site's own no-progress window, watching its
+//!   output and process-tree activity; there is no total budget or share;
 //! - keeps the nonce of each input mutation it draws, so a retry builds the
 //!   same mutated check and meets its saved verdict too.
 //!
@@ -214,10 +211,7 @@ impl HostProbe {
         true
     }
 
-    /// Issue 323: the one per-check bound this probe's checks run under at
-    /// every site: its site's own limit ([`probe_check_cap_secs`]), and in a
-    /// freeze never more than the budget's share of its window
-    /// ([`FreezeBudget::check_bound`]).
+    /// The site's full per-check no-progress window at every probe site.
     pub(super) fn check_bound_secs(&self) -> u64 {
         if self.memo {
             self.resume.budget.check_bound(self.check_cap_secs)

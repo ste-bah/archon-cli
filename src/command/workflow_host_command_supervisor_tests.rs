@@ -229,3 +229,6 @@ mod descriptors;
 
 #[path = "workflow_host_command_supervisor_limit_tests.rs"]
 mod limit;
+
+#[path = "workflow_host_command_idle_tests.rs"]
+mod idle;
