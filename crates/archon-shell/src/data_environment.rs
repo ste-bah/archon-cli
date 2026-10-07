@@ -322,13 +322,20 @@ const FAMILIES: &[Family] = &[
             "CONTAINER_CONNECTION",
             "CONTAINER_SSHKEY",
             "BUILDKIT_HOST",
+            "_EXPERIMENTAL_DAGGER_RUNNER_HOST",
         ],
         prefixes: &[],
     },
     Family {
         reason: "package managers and browser installers read these bindings to choose \
                  where they download the code or binaries a check then runs",
-        names: &["PDM_PYPI_URL", "DOWNLOAD_HOST"],
+        names: &[
+            "PDM_PYPI_URL",
+            "DOWNLOAD_HOST",
+            "PUB_HOSTED_URL",
+            "FLUTTER_STORAGE_BASE_URL",
+            "HF_ENDPOINT",
+        ],
         // Playwright, Puppeteer, Selenium Manager and sharp read every binding
         // in their namespace as install/runtime configuration (download hosts,
         // per-browser mirrors, executable paths).

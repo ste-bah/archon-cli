@@ -34,7 +34,7 @@ pub const MAX_PROJECT_INPUT_BYTES: u64 = 1 << 30;
 /// The acceptance policy's project inputs, as the run recorded them at
 /// launch (`v2/generated-metadata.json`, the observer snapshot's native
 /// execution binding): the same set acceptance scratch copies.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectInputPolicy {
     /// The project root, canonical.
     pub project: PathBuf,
@@ -427,12 +427,18 @@ pub fn write_file(
         .open(&temporary)?;
     std::io::Write::write_all(&mut file, bytes)?;
     drop(file);
-    if let Err(error) = std::fs::rename(&temporary, destination) {
+    crate::durable_io::sync_file(&temporary).map_err(std::io::Error::other)?;
+    if let Err(error) = crate::store::rename_durable(&temporary, destination) {
         let _ = std::fs::remove_file(&temporary);
-        return Err(error);
+        return Err(std::io::Error::other(error));
     }
     // Batch G: the tripwire must tell the host's own writes from a call's.
     super::input_tripwire::note_host_write(destination, blake3::hash(bytes).to_hex().as_ref());
+    // The repair and every newly created directory must survive before its
+    // pending comparison can be durably removed (also across volumes).
+    for dir in parent.ancestors().take_while(|dir| dir.starts_with(root)) {
+        crate::durable_io::sync_dir(dir).map_err(std::io::Error::other)?;
+    }
     Ok(before)
 }
 

@@ -289,7 +289,6 @@ impl BlobStore {
         let digest = content_digest(bytes);
         let path = self.dir.join(&digest);
         if self.get(&digest).is_none() {
-            let _ = std::fs::create_dir_all(&self.dir);
             let _ = write_atomically(&path, bytes);
         }
         digest

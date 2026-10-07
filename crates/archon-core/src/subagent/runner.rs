@@ -178,6 +178,16 @@ impl SubagentRunner {
         self.runner_agent_id = Some(agent_id);
     }
 
+    pub(crate) fn set_activity_sink(
+        &mut self,
+        sink: Option<std::sync::Arc<dyn archon_observability::AgentActivitySink>>,
+    ) {
+        let mut config = (*self.agent_config).clone();
+        config.activity_sink = sink.clone();
+        self.agent_config = std::sync::Arc::new(config);
+        self.tool_context.activity_sink = sink;
+    }
+
     pub fn set_activity_actor(&mut self, actor_id: String, actor_name: String) {
         self.activity_actor_id = Some(actor_id);
         self.activity_actor_name = Some(actor_name);

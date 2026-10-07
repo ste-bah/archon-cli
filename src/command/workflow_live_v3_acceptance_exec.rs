@@ -214,6 +214,12 @@ pub(super) fn resolve_context(
 pub(super) fn load_contract(
     context: &StageContext,
 ) -> WorkflowResult<(AcceptanceContract, String, bool)> {
+    archon_workflow::stage_write::with_write(|| load_contract_owned(context))
+}
+
+fn load_contract_owned(
+    context: &StageContext,
+) -> WorkflowResult<(AcceptanceContract, String, bool)> {
     // Issue 294: contract, lock, pin and lineage are read as one version.
     let _read = crate::command::workflow_task_set::ChainRead::workflow(
         &context.project,
@@ -383,8 +389,10 @@ pub(super) async fn observe_in_scratch_at(
         crate::command::acceptance_scratch_guardian::launch_selected(request, Some(selection))
             .await;
     if let Ok(bytes) = std::fs::read(evidence.join("observation.json")) {
-        let _ = std::fs::create_dir_all(evidence_dir);
-        let _ = std::fs::write(evidence_dir.join("scratch-observation.json"), bytes);
+        archon_workflow::stage_write::write_bytes(
+            &evidence_dir.join("scratch-observation.json"),
+            &bytes,
+        )?;
     }
     let result = result?;
     // #356: an observation that made no progress is the host's: it pauses.

@@ -29,6 +29,87 @@ pub async fn watch<T>(
     watch_inner(run_root, label, &[], work).await
 }
 
+/// Reconcile an earlier evaluation before any new round reserves evidence
+/// or repairs inputs. Only the current owner can settle the pending map.
+pub fn reconcile_owned(
+    writer: &crate::stage_write::StageWriter,
+    root: &Path,
+) -> crate::WorkflowResult<()> {
+    crate::stage_write::with_writer(writer, || {
+        super::pending::reconcile(root).map_err(|error| {
+            crate::WorkflowError::ControlPaused(format!(
+                "input comparison could not reconcile: {error}"
+            ))
+        })
+    })
+}
+
+/// A stage's tripwire mutations use its owner even on the blocking pool.
+/// A refused arm or check stops the stage; it is never an unwatched success.
+pub fn watch_owned<T>(
+    writer: crate::stage_write::StageWriter,
+    run_root: Option<&Path>,
+    label: &str,
+    work: impl std::future::Future<Output = T>,
+) -> impl std::future::Future<Output = crate::WorkflowResult<(T, Option<EnvironmentViolation>)>> {
+    // Box before entering the async frame, as the run-control race does.
+    watch_owned_inner(
+        writer,
+        run_root.map(Path::to_path_buf),
+        label.to_string(),
+        Box::pin(work),
+    )
+}
+
+async fn watch_owned_inner<T>(
+    writer: crate::stage_write::StageWriter,
+    root: Option<PathBuf>,
+    label: String,
+    work: std::pin::Pin<Box<impl std::future::Future<Output = T>>>,
+) -> crate::WorkflowResult<(T, Option<EnvironmentViolation>)> {
+    let arm_writer = writer.clone();
+    let arm_label = label.clone();
+    let tripwire = tokio::task::spawn_blocking(move || {
+        crate::stage_write::with_writer(&arm_writer, || {
+            root.as_deref()
+                .map(|root| super::pending::arm(root, &arm_label))
+                .transpose()
+                .map(Option::flatten)
+                .map_err(|error| {
+                    crate::WorkflowError::ControlPaused(format!(
+                        "input comparison could not arm: {error}"
+                    ))
+                })
+        })
+    })
+    .await
+    .map_err(|error| {
+        crate::WorkflowError::HostOperational(format!("input tripwire could not arm: {error}"))
+    })??;
+    let out = crate::stage_write::scope(writer.clone(), work).await;
+    let violation = tokio::task::spawn_blocking(move || {
+        crate::stage_write::with_writer(&writer, || {
+            tripwire
+                .map(|tripwire| tripwire.check())
+                .transpose()
+                .map(Option::flatten)
+                .map_err(|error| {
+                    crate::WorkflowError::ControlPaused(format!(
+                        "input comparison could not complete: {error}"
+                    ))
+                })
+        })
+    })
+    .await
+    .map_err(|error| {
+        crate::WorkflowError::HostOperational(format!("input tripwire could not check: {error}"))
+    })??;
+    if let Some(violation) = &violation {
+        eprintln!("{label}: {}", violation.message());
+    }
+    Ok((out, violation))
+}
+
 /// [`watch`] for a write-capable call, whose changes under `own` (its
 /// working tree and stamped deliveries) are its work
 /// ([`InputTripwire::exempting`]).

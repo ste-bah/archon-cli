@@ -230,9 +230,11 @@ fn append(path: &Path, value: &serde_json::Value) -> std::io::Result<()> {
     }
     let mut line = serde_json::to_vec(value)?;
     line.push(b'\n');
-    std::fs::OpenOptions::new()
+    let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(path)?
-        .write_all(&line)
+        .open(path)?;
+    file.write_all(&line)?;
+    drop(file);
+    crate::durable_io::sync_file(path).map_err(std::io::Error::other)
 }

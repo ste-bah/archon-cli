@@ -394,3 +394,7 @@ mod identity_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_environment_tests.rs"]
 mod environment_tests;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_sites_recorded_binding_tests.rs"]
+mod recorded_binding_tests;

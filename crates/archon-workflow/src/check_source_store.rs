@@ -101,6 +101,17 @@ impl PinStore {
         prior: Option<&CheckSourcePins>,
         pins: &CheckSourcePins,
     ) -> Result<Repin, PublishLockError> {
+        crate::stage_write::mapped(
+            || self.replace_owned(prior, pins),
+            |error| PublishLockError::Failed(error.to_string()),
+        )
+    }
+
+    fn replace_owned(
+        &self,
+        prior: Option<&CheckSourcePins>,
+        pins: &CheckSourcePins,
+    ) -> Result<Repin, PublishLockError> {
         let bytes = Self::bytes(pins);
         if let Ok(prior) = std::fs::read(&self.sidecar) {
             self.blobs.put(&prior);
@@ -269,6 +280,16 @@ pub fn chain_lock(pin_path: &Path) -> Result<ChainLockGuard, String> {
 }
 
 pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    crate::stage_write::mapped(
+        || write_atomically_owned(path, bytes),
+        std::io::Error::other,
+    )
+}
+
+fn write_atomically_owned(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let tmp = path.with_file_name(format!(
         ".{}.{}.tmp",
         path.file_name().unwrap_or_default().to_string_lossy(),

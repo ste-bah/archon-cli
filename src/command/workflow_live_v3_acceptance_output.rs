@@ -34,17 +34,13 @@ pub(super) fn write_repairs(evidence_dir: &Path, repairs: &[String]) {
     if repairs.is_empty() {
         return;
     }
-    let _ = std::fs::create_dir_all(evidence_dir);
-    let _ = std::fs::write(
-        evidence_dir.join("host-environment-repairs.json"),
-        serde_json::to_vec_pretty(repairs).unwrap_or_default(),
+    archon_workflow::stage_write::best_effort_bytes(
+        &evidence_dir.join("host-environment-repairs.json"),
+        &serde_json::to_vec_pretty(repairs).unwrap_or_default(),
     );
 }
 
 pub(super) fn write_output_files(dir: &Path, result: &CheckResult) {
-    if std::fs::create_dir_all(dir).is_err() {
-        return;
-    }
     let safe: String = result
         .acceptance_id
         .chars()
@@ -56,8 +52,14 @@ pub(super) fn write_output_files(dir: &Path, result: &CheckResult) {
             }
         })
         .collect();
-    let _ = std::fs::write(dir.join(format!("{safe}.stdout")), &result.stdout);
-    let _ = std::fs::write(dir.join(format!("{safe}.stderr")), &result.stderr);
+    archon_workflow::stage_write::best_effort_bytes(
+        &dir.join(format!("{safe}.stdout")),
+        &result.stdout,
+    );
+    archon_workflow::stage_write::best_effort_bytes(
+        &dir.join(format!("{safe}.stderr")),
+        &result.stderr,
+    );
 }
 
 /// The contract this round executed, as the stage held it in memory (after

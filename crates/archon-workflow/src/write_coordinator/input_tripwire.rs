@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::project_inputs::{ProjectInputPolicy, read_no_follow, refuse_links, write_file};
 
@@ -224,18 +224,21 @@ pub struct InputTripwire {
 }
 
 /// One input a call changed, and what the host did about it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChangedInput {
     pub path: String,
     pub before: String,
     pub after: String,
     pub restored: bool,
-    #[serde(skip_serializing_if = "String::is_empty")]
+    /// Exact changed-copy receipt; older records use `backup_dir/path`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub note: String,
 }
 
 /// A call that changed the project's inputs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnvironmentViolation {
     pub call: String,
     pub changed: Vec<ChangedInput>,
@@ -335,147 +338,15 @@ impl InputTripwire {
         }
         self
     }
-
-    /// Compare with now. `Some` when something other than the host changed
-    /// an input since [`Self::arm`]; every such change is restored where it
-    /// safely can be, and the violation is logged under the run.
-    pub fn check(self, call: &str) -> Option<EnvironmentViolation> {
-        let _section = host_write_section();
-        let detected_at = host_sequence();
-        let (now_paths, _) = walk(&self.policy);
-        let mut all: Vec<String> = self.files.keys().cloned().collect();
-        all.extend(now_paths);
-        all.sort();
-        all.dedup();
-        let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
-        let backup_dir = self
-            .run_root
-            .join("write-coordination")
-            .join("environment-violations")
-            .join(format!("{}-{stamp}", sanitize(call)));
-        let mut changed = Vec::new();
-        for rel in all {
-            let destination = self.policy.project.join(&rel);
-            let before = match self.files.get(&rel) {
-                Some(state) => state.clone(),
-                // Past the recorded cap: never judged.
-                None if !self.complete => continue,
-                None => "absent".to_string(),
-            };
-            let (after, bytes) = state_of(&destination);
-            if after == before {
-                continue;
-            }
-            // A write-capable call's own delivery: its work, recorded so the
-            // divergence repair knows who put that copy there.
-            if self.exempt.iter().any(|root| destination.starts_with(root)) {
-                let _ = delivered(&self.run_root, call, &rel, &after);
-                continue;
-            }
-            // Another write call in flight owns this path: its work, judged
-            // by its own tripwire, never restored from under it.
-            if in_flight_owns(&destination) {
-                continue;
-            }
-            let (host, reaches) = host_writes_since(&destination, self.armed_at);
-            if reaches && host.last() == Some(&after) {
-                continue;
-            }
-            let mut change = ChangedInput {
-                path: rel.clone(),
-                before: before.clone(),
-                after,
-                restored: false,
-                note: String::new(),
-            };
-            if let Some(bytes) = &bytes {
-                let backup = backup_dir.join(super::project_inputs::external::stored(&rel));
-                let kept = backup
-                    .parent()
-                    .map_or(Ok(()), std::fs::create_dir_all)
-                    .and_then(|()| std::fs::write(&backup, bytes));
-                if let Err(error) = kept {
-                    change.note = format!("its changed copy could not be kept: {error}");
-                    changed.push(change);
-                    continue;
-                }
-            }
-            change.note = match self.restore(&destination, &before, &host, reaches) {
-                Ok(()) => {
-                    change.restored = true;
-                    String::new()
-                }
-                Err(why) => why,
-            };
-            changed.push(change);
-        }
-        if !changed.is_empty() {
-            remember_violation(detected_at, &self.policy.project, call, &changed);
-        }
-        let own = changed.len();
-        // Overlapping calls cannot be told apart: a change another call's
-        // check found (and the host restored) inside this call's window fails
-        // this call too, so the culprit never passes on a restored file.
-        for (other, change) in recent_violations_since(self.armed_at, &self.policy.project, call) {
-            if !changed.iter().any(|mine| mine.path == change.path) {
-                changed.push(ChangedInput {
-                    note: format!(
-                        "changed during this call; found and handled when {other} was checked"
-                    ),
-                    ..change
-                });
-            }
-        }
-        if changed.is_empty() {
-            return None;
-        }
-        let attributed = own > 0 && changed.len() == own && !self.window.overlapped();
-        let violation = EnvironmentViolation {
-            call: call.to_string(),
-            changed,
-            backup_dir,
-            attributed,
-        };
-        let _ = log(&self.run_root, &violation);
-        Some(violation)
-    }
-
-    fn restore(
-        &self,
-        destination: &Path,
-        before: &str,
-        host: &[String],
-        reaches: bool,
-    ) -> Result<(), String> {
-        if !host.is_empty() || !reaches {
-            return Err(
-                "the host itself wrote this file during the call; putting back the pre-call copy would undo that, so a person must look".into(),
-            );
-        }
-        // Issue-226: an external file is restored within its own tree.
-        let project = (self.policy.external.tree_of(destination)).unwrap_or(&self.policy.project);
-        if before == "absent" {
-            refuse_links(project, destination).map_err(|e| e.to_string())?;
-            return remove_input(destination).map_err(|e| e.to_string());
-        }
-        let object = objects_dir(&self.run_root).join(before);
-        let bytes = read_no_follow(&object)
-            .ok()
-            .filter(|bytes| blake3::hash(bytes).to_hex().to_string() == before)
-            .ok_or_else(|| format!("no kept copy of its pre-call state ({})", short(before)))?;
-        if std::fs::symlink_metadata(destination).is_ok_and(|m| m.is_dir()) {
-            return Err("a directory now stands where the file was".into());
-        }
-        write_file(project, destination, &bytes)
-            .map(|_| ())
-            .map_err(|e| e.to_string())
-    }
 }
 
 /// Remove a project input as the host, recording that it did.
 pub fn remove_input(path: &Path) -> std::io::Result<()> {
     std::fs::remove_file(path)?;
     note_host_write(path, "absent");
+    if let Some(parent) = path.parent() {
+        crate::durable_io::sync_dir(parent).map_err(std::io::Error::other)?;
+    }
     Ok(())
 }
 
@@ -486,9 +357,16 @@ pub use records::{
     remember_violation,
 };
 use records::{delivered, in_flight_owns, log, objects_dir, sanitize, store_object};
+#[path = "input_tripwire_check.rs"]
+mod check;
+#[path = "input_tripwire_pending.rs"]
+mod pending;
 #[path = "input_tripwire_scope.rs"]
 mod scope;
-pub use scope::{LandingSection, landing_section, watch, watch_exempting, watch_sync};
+pub use scope::{
+    LandingSection, landing_section, reconcile_owned, watch, watch_exempting, watch_owned,
+    watch_sync,
+};
 
 #[cfg(test)]
 #[path = "input_tripwire_tests.rs"]

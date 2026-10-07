@@ -54,6 +54,7 @@ impl TuiEvent {
             Self::OpenViewRows { .. } => "OpenViewRows",
             Self::VideoIngestProgress(_) => "VideoIngestProgress",
             Self::AgentActivity(_) => "AgentActivity",
+            Self::AgentActivitySnapshot(_) => "AgentActivitySnapshot",
             Self::ActivityStream(_) => "ActivityStream",
             Self::ContextPressureUpdated { .. } => "ContextPressureUpdated",
             Self::SetVimMode(_) => "SetVimMode",

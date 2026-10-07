@@ -159,6 +159,10 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
                 + option_string_bytes(&update.provider)
                 + option_string_bytes(&update.model)
         }
+        TuiEvent::AgentActivitySnapshot(rows) => rows
+            .iter()
+            .map(|row| heap_bytes(&TuiEvent::AgentActivity(row.clone())))
+            .sum(),
         TuiEvent::ActivityStream(update) => {
             string_bytes(&update.id)
                 + string_bytes(&update.name)

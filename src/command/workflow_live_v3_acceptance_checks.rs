@@ -130,11 +130,10 @@ pub(in crate::command) async fn execute_checks(
     )
     .await?;
     if !host_repairs.is_empty() {
-        let _ = std::fs::create_dir_all(evidence_dir);
-        let _ = std::fs::write(
-            evidence_dir.join("host-input-repairs.json"),
-            serde_json::to_vec_pretty(&host_repairs).unwrap_or_default(),
-        );
+        archon_workflow::stage_write::write_bytes(
+            &evidence_dir.join("host-input-repairs.json"),
+            &serde_json::to_vec_pretty(&host_repairs).unwrap_or_default(),
+        )?;
     }
     Ok(Executed {
         results: if site_errors.is_empty() {
@@ -153,10 +152,20 @@ async fn restore_diverged(
 ) -> Result<Vec<archon_workflow::write_coordinator::input_divergence::InputDivergence>, String> {
     let run_root = run_root.to_path_buf();
     let policy = binding.policy.clone();
+    let writer = archon_workflow::stage_write::current();
     tokio::task::spawn_blocking(move || {
-        archon_workflow::write_coordinator::input_divergence::restore_diverged_tracked_inputs(
-            &run_root, &policy, &head,
-        )
+        let restore = || {
+            archon_workflow::write_coordinator::input_divergence::restore_diverged_tracked_inputs(
+                &run_root, &policy, &head,
+            )
+        };
+        match writer {
+            Some(writer) => {
+                archon_workflow::stage_write::with_writer(&writer, || WorkflowResult::Ok(restore()))
+                    .map_err(|e| e.to_string())?
+            }
+            None => restore(),
+        }
     })
     .await
     .map_err(|e| e.to_string())?

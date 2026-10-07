@@ -165,6 +165,10 @@ pub struct AcceptanceRoundRecordV1 {
     pub call_id: String,
     pub round: u32,
     pub attempt: u32,
+    /// Recording-order frontier at reservation. Concurrent observations of
+    /// the same state from this frontier count once toward the stall budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress_frontier: Option<u64>,
     pub max_rounds: u32,
     pub contract_present: bool,
     /// The ids this round was asked to run; empty means every check.
@@ -317,8 +321,10 @@ fn highest_attempt(dir: &Path) -> Option<u32> {
         .filter_map(|entry| {
             let name = entry.file_name();
             let name = name.to_str()?;
-            name.strip_prefix("attempt-")?
-                .strip_suffix(".json")?
+            let number = name.strip_prefix("attempt-")?;
+            number
+                .strip_suffix(".json")
+                .unwrap_or(number)
                 .parse::<u32>()
                 .ok()
         })
@@ -372,6 +378,10 @@ fn attempt_taken(dir: &Path, attempt: u32) -> WorkflowResult<bool> {
     Ok(path
         .try_exists()
         .map_err(|source| WorkflowError::io(&path, source))?
+        || dir
+            .join(format!("attempt-{attempt:02}"))
+            .try_exists()
+            .map_err(|source| WorkflowError::io(dir, source))?
         || progress::quarantined_attempt(dir, attempt)?)
 }
 
@@ -385,8 +395,8 @@ fn land_locked(
     let path = dir.join(attempt_file_name(record.attempt));
     let bytes = serde_json::to_vec_pretty(record)?;
     // The order entry first, synced: a record never exists without its
-    // place in the recording order unless the log itself failed.
-    progress::note_recorded_locked(run_dir, record.round, record.attempt);
+    // durable place in the recording order. An append failure lands nothing.
+    progress::note_recorded_locked(run_dir, record.round, record.attempt)?;
     // The staging name is never an `attempt-*.json`: a crash before the
     // rename leaves no record.
     let staging = dir.join(format!(
@@ -443,3 +453,7 @@ mod record_round_tests;
 #[cfg(test)]
 #[path = "acceptance_stage_tests.rs"]
 mod tests;
+
+#[path = "acceptance_round_reservation.rs"]
+mod reservation;
+pub use reservation::{RoundReservation, reserve_round};

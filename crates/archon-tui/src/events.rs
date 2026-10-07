@@ -258,6 +258,7 @@ pub enum TuiEvent {
     VideoIngestProgress(VideoIngestProgressEvent),
     /// Update a visible parent/subagent/background activity row.
     AgentActivity(AgentActivityUpdate),
+    AgentActivitySnapshot(Vec<AgentActivityUpdate>),
     /// Append/update the foreground activity stream buffer.
     ActivityStream(ActivityStreamUpdate),
     ContextPressureUpdated {

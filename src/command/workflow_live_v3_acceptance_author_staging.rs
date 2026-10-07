@@ -74,6 +74,13 @@ impl Staged {
 
     /// Persist what is staged (write, then rename).
     pub(in super::super) fn save(&self, run_dir: &Path) -> Result<(), String> {
+        archon_workflow::stage_write::with_write(|| {
+            archon_workflow::WorkflowResult::Ok(self.save_owned(run_dir))
+        })
+        .map_err(|error| error.to_string())?
+    }
+
+    fn save_owned(&self, run_dir: &Path) -> Result<(), String> {
         let path = staging_path(run_dir);
         let fail = |error: std::io::Error| {
             format!(
@@ -161,6 +168,13 @@ impl Staged {
 
     /// Clear everything once it is published; why it could not be, if so.
     pub(in super::super) fn clear(run_dir: &Path) -> Option<String> {
+        archon_workflow::stage_write::with_write(|| {
+            archon_workflow::WorkflowResult::Ok(Self::clear_owned(run_dir))
+        })
+        .unwrap_or_else(|error| Some(error.to_string()))
+    }
+
+    fn clear_owned(run_dir: &Path) -> Option<String> {
         match std::fs::remove_file(staging_path(run_dir)) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Some(format!(
                 "the published checks' staging {} could not be cleared: {error}",

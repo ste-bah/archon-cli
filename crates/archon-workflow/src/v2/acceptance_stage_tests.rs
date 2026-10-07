@@ -53,6 +53,7 @@ fn record(
         call_id: format!("{ACCEPTANCE_STAGE_CALL_PREFIX}{round}"),
         round,
         attempt,
+        progress_frontier: None,
         max_rounds: ACCEPTANCE_MAX_ROUNDS,
         contract_present: true,
         requested_check_ids: Vec::new(),

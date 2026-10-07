@@ -312,10 +312,6 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
         &context.project,
         &context.task_root,
     );
-    let read = crate::command::workflow_task_set::ChainRead::workflow_at(&pin, &context.task_root)?;
-    if context.task_root.join(ACCEPTANCE_LOCK_FILE).exists() || pin.exists() {
-        return Ok(None);
-    }
     let failed = |why: String| {
         Ok(Some(Authored {
             repair: None,
@@ -325,28 +321,11 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
             )],
         }))
     };
-    // An unfrozen candidate names its PRD; otherwise the task set's
-    // decomposition recorded it. A candidate that cannot be read names
-    // nothing the host may trust: never a guess.
-    let named = match std::fs::read(context.contract_path()) {
-        Ok(bytes) => match serde_json::from_slice::<AcceptanceContract>(&bytes) {
-            Ok(candidate) => Some(super::drift::prd_path(context, &candidate)),
-            Err(error) => {
-                return failed(format!(
-                    "the unfrozen candidate {} is not an acceptance contract ({error}), so the PRD it answers to is not recorded",
-                    context.contract_path().display()
-                ));
-            }
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => {
-            return failed(format!(
-                "the unfrozen candidate {} cannot be read: {error}",
-                context.contract_path().display()
-            ));
-        }
+    let named = match recovery::candidate(context, &pin)? {
+        recovery::Candidate::Frozen => return Ok(None),
+        recovery::Candidate::Named(named) => named,
+        recovery::Candidate::Invalid(why) => return failed(why),
     };
-    drop(read);
     // The run store this run lives in holds every decomposition record.
     let Some(runs) = site.run_dir.parent() else {
         return failed(
@@ -485,3 +464,10 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
 #[cfg(test)]
 #[path = "workflow_live_v3_acceptance_author_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workflow_live_v3_acceptance_author_recovery_tests.rs"]
+mod recovery_tests;
+
+#[path = "workflow_live_v3_acceptance_author_recovery.rs"]
+mod recovery;

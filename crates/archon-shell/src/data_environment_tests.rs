@@ -271,3 +271,47 @@ fn cluster_bindings_and_download_sources_are_refused() {
         assert!(check_data_variable(name).is_ok(), "{name} was refused");
     }
 }
+
+#[test]
+fn gc_download_and_execution_endpoints_are_controls() {
+    let accepted: Vec<_> = [
+        "PUB_HOSTED_URL",
+        "FLUTTER_STORAGE_BASE_URL",
+        "_EXPERIMENTAL_DAGGER_RUNNER_HOST",
+        "HF_ENDPOINT",
+    ]
+    .into_iter()
+    .filter(|name| check_data_variable(name).is_ok())
+    .collect();
+    assert!(accepted.is_empty(), "accepted controls: {accepted:?}");
+}
+
+#[test]
+fn gc_endpoint_controls_are_case_insensitive() {
+    let accepted: Vec<_> = [
+        "pub_hosted_url",
+        "Flutter_Storage_Base_Url",
+        "_experimental_dagger_runner_host",
+        "hf_endpoint",
+    ]
+    .into_iter()
+    .filter(|name| check_data_variable(name).is_ok())
+    .collect();
+    assert!(accepted.is_empty(), "accepted controls: {accepted:?}");
+}
+
+#[test]
+fn gc_control_refusals_name_the_binding_and_reason() {
+    let invalid: Vec<_> = ["PUB_HOSTED_URL", "FLUTTER_STORAGE_BASE_URL", "HF_ENDPOINT"]
+        .into_iter()
+        .filter(|name| {
+            !check_data_variable(name).err().is_some_and(|error| {
+                error.contains(name) && (error.contains("code") || error.contains("execution"))
+            })
+        })
+        .collect();
+    assert!(
+        invalid.is_empty(),
+        "missing refusal diagnostics: {invalid:?}"
+    );
+}

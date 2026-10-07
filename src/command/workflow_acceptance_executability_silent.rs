@@ -169,7 +169,10 @@ pub(super) fn settle_timed_out(
 
 /// Forget the stall strike of check `id` on `commit`: it ran to an end there.
 pub(super) fn ran(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) {
-    let _ = std::fs::remove_file(stall_strike(probe, commit, contract, id));
+    let path = stall_strike(probe, commit, contract, id);
+    if let Err(error) = archon_workflow::stage_write::remove_file(&path) {
+        probe.unproven(id, format!("stall strike could not be cleared: {error}"));
+    }
 }
 
 /// Whether saving a first strike is progress for the staged freeze.
@@ -207,52 +210,65 @@ fn struck(
     texts: impl FnOnce() -> (String, String),
 ) -> Option<String> {
     let (finding, unproven) = texts();
-    let previous = std::fs::File::open(path).and_then(|file| {
-        let mut prefix = Vec::new();
-        file.take(128).read_to_end(&mut prefix)?;
-        Ok(prefix)
+    let unsaved = format!("{unproven}; its strike could not be saved, so it stays the host's");
+    // Read, decide and write under the run's ownership fence, so a strike is
+    // never settled by a stale owner, and written whole then renamed.
+    let settled = archon_workflow::stage_write::with_write(|| {
+        match std::fs::symlink_metadata(path) {
+            Ok(meta) if meta.is_file() => {
+                let mut prefix = Vec::new();
+                std::fs::File::open(path)
+                    .and_then(|file| file.take(128).read_to_end(&mut prefix))
+                    .map_err(|source| archon_workflow::WorkflowError::io(path, source))?;
+                // Old binaries saved total-clock cutoffs as strikes. They are
+                // not evidence against the author, even if a later failure is
+                // non-clock.
+                if !prefix.starts_with(b"it ran past the probe's per-check bound") {
+                    probe.resume.progress.reused(false);
+                    return Ok(Some(finding));
+                }
+            }
+            Ok(_) => {
+                return Err(archon_workflow::WorkflowError::StateCorrupt(format!(
+                    "probe strike {} is not a regular file",
+                    path.display()
+                )));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => return Err(archon_workflow::WorkflowError::io(path, source)),
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)
+                .map_err(|source| archon_workflow::WorkflowError::io(dir, source))?;
+        }
+        archon_workflow::stage_write::write_bytes(path, why.as_bytes())?;
+        if credit == Credit::Saved {
+            probe.resume.progress.saved(false);
+        }
+        probe.unproven(id, unproven);
+        archon_workflow::WorkflowResult::Ok(None)
     });
-    match previous {
-        // Old binaries saved total-clock cutoffs as strikes. They are not
-        // evidence against the author, even if a later failure is non-clock.
-        Ok(prefix) if prefix.starts_with(b"it ran past the probe's per-check bound") => {}
-        Ok(_) => {
-            probe.resume.progress.reused(false);
-            return Some(finding);
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+    match settled {
+        Ok(finding) => finding,
         Err(error) => {
-            probe.unproven(
-                id,
-                format!("the earlier probe strike is unreadable: {error}"),
-            );
-            return None;
+            probe.unproven(id, format!("{unsaved}: {error}"));
+            None
         }
     }
-    let staged = path.with_extension("strike.tmp");
-    let saved = (path.parent()).is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
-        && std::fs::write(&staged, why).is_ok()
-        && std::fs::rename(&staged, path).is_ok();
-    if !saved {
-        let _ = std::fs::remove_file(&staged);
-        probe.unproven(
-            id,
-            format!("{unproven}; its strike could not be saved, so it stays the host's"),
-        );
-        return None;
-    }
-    if credit == Credit::Saved {
-        probe.resume.progress.saved(false);
-    }
-    probe.unproven(id, unproven);
-    None
 }
 
 /// Forget any strike of check `id` on `commit`: it gave a verdict there.
 pub(super) fn clear(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) {
-    let _ = std::fs::remove_file(strike(probe, commit, contract, id));
+    let path = strike(probe, commit, contract, id);
+    let cleared = archon_workflow::stage_write::remove_file(&path);
+    if let Err(error) = cleared {
+        probe.unproven(id, format!("baseline strike could not be cleared: {error}"));
+    }
 }
 
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_clock_strike_tests.rs"]
 mod clock_strike_tests;
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_silent_fence_tests.rs"]
+mod fence_tests;

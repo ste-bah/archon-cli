@@ -8,7 +8,10 @@
 //! regression, every round that repairs one check more reaches a new state
 //! and is progress, though it fails more than the best round before it.
 //! A round that reaches a state already reached counts toward the stall;
-//! a new state resets the count. The first revisit escalates (the failing
+//! a new state resets the count. Concurrent identical observations from the
+//! same reserved recording frontier count once: remediation had no chance
+//! to happen between them. Legacy records with no frontier retain their
+//! original counting rule. The first revisit escalates (the failing
 //! checks go to every owner together); the [`ACCEPTANCE_STALL_LIMIT`]th in
 //! a row PAUSES the run with its evidence: it never ends the loop and never
 //! fails the run. No round count ends or pauses it. The states reached and
@@ -75,6 +78,8 @@ pub struct ProgressLedger {
 pub struct ObservedState {
     pub round: u32,
     pub attempt: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress_frontier: Option<u64>,
     pub state: Vec<String>,
 }
 
@@ -97,17 +102,38 @@ impl ProgressLedger {
         ledger
     }
 
+    #[cfg(test)]
+    pub fn observe_at(
+        &mut self,
+        run_dir: &Path,
+        round: &AcceptanceRoundRecordV1,
+    ) -> crate::WorkflowResult<u32> {
+        let mut round = round.clone();
+        round.progress_frontier =
+            super::reservation::frontier(run_dir, round.round, round.attempt)?;
+        Ok(self.observe(&round))
+    }
+
     /// Records `round`; returns the revisits in a row, 0 for a new state.
     pub fn observe(&mut self, round: &AcceptanceRoundRecordV1) -> u32 {
         self.observe_state(ObservedState {
             round: round.round,
             attempt: round.attempt,
+            progress_frontier: round.progress_frontier,
             state: state_key(round),
         })
     }
 
     fn observe_state(&mut self, observed: ObservedState) -> u32 {
-        if self.seen.insert(observed.state.clone()) {
+        let simultaneous_duplicate = observed.progress_frontier.is_some()
+            && self.observed.iter().any(|earlier| {
+                earlier.progress_frontier == observed.progress_frontier
+                    && earlier.state == observed.state
+            });
+        if simultaneous_duplicate {
+            // Overlapping observations are one opportunity for remediation,
+            // not sequential failed attempts at making progress.
+        } else if self.seen.insert(observed.state.clone()) {
             self.revisits = 0;
         } else {
             self.revisits = self.revisits.saturating_add(1);
@@ -129,11 +155,20 @@ impl ProgressLedger {
             .join(PROGRESS_LEDGER_FILE)
     }
 
-    /// The ledger as last saved; `None` when absent or unreadable (it is a
-    /// copy: the records are authoritative).
-    fn saved(run_dir: &Path) -> Option<Self> {
-        let bytes = std::fs::read(Self::path(run_dir)).ok()?;
-        serde_json::from_slice(&bytes).ok()
+    /// The saved copy: absence is distinct from damage or an I/O fault.
+    fn saved(run_dir: &Path) -> crate::WorkflowResult<Option<Self>> {
+        let path = Self::path(run_dir);
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(crate::WorkflowError::io(&path, error)),
+        };
+        serde_json::from_slice(&bytes).map(Some).map_err(|error| {
+            crate::WorkflowError::StateCorrupt(format!(
+                "acceptance progress ledger {} will not parse: {error}",
+                path.display()
+            ))
+        })
     }
 
     /// Records are authoritative: the record is written before the ledger,
@@ -162,13 +197,13 @@ impl ProgressLedger {
 mod heal;
 pub use heal::{
     HealedLedger, QUARANTINE_DIR, QuarantinedRecordV1, acknowledge_quarantined,
-    record_quarantine_events,
+    record_quarantine_events, record_quarantine_events_owned,
 };
 pub(super) use heal::{highest_quarantined_attempt, quarantined_attempt};
 
 #[path = "acceptance_record_order.rs"]
 mod order;
-pub(super) use order::{note_recorded_locked, under_order_lock};
+pub(super) use order::{frontier_locked, note_recorded_locked, under_order_lock};
 
 /// Whether `current` reached a failing state none of `history` reached.
 pub fn made_progress(
@@ -245,4 +280,4 @@ mod heal_evidence_tests;
 mod heal_tests;
 #[cfg(test)]
 #[path = "acceptance_progress_tests.rs"]
-mod tests;
+pub(super) mod tests;

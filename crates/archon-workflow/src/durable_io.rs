@@ -26,15 +26,9 @@ pub(crate) fn sync_file(path: &Path) -> WorkflowResult<()> {
 }
 
 /// Sync the directory `dir`, so the names created, renamed or removed in it
-/// are durable. Directories cannot be opened for syncing on Windows; there
-/// this is a no-op.
+/// are durable, using the store's platform-aware directory flush.
 pub(crate) fn sync_dir(dir: &Path) -> WorkflowResult<()> {
-    #[cfg(unix)]
-    {
-        File::open(dir)
-            .and_then(|file| file.sync_all())
-            .map_err(|err| WorkflowError::io(dir, err))?;
-    }
+    crate::store::sync_dir(dir)?;
     note_synced(dir);
     Ok(())
 }

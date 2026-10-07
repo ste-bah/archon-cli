@@ -141,7 +141,6 @@ pub(super) async fn recorded_verdict(
         reason: verdict.reason.clone(),
         counterexample: verdict.counterexample.clone(),
     };
-    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     crate::check_source_pins::write_atomically(
         &path,
         &serde_json::to_vec_pretty(&recorded).expect("a verdict serializes"),

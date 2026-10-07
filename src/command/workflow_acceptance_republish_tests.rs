@@ -250,3 +250,78 @@ async fn reauthor_dry_run_against_a_copied_task_directory() {
 
 #[path = "workflow_acceptance_republish_tests_b.rs"]
 mod safety;
+
+async fn gc_refused_publication(case: u8) {
+    use archon_workflow::{
+        LifecycleAction, LifecycleController, RunStatus, WorkflowSpec, WorkflowStore,
+    };
+    let set = frozen_set(&[
+        ("AC-F-001", "jq -e '.a == true' out.json", true),
+        ("AC-F-002", "jq -e '.b == true' out.json", false),
+    ]);
+    let before = set.contract_bytes();
+    let store = WorkflowStore::project(set.project.path());
+    let mut run = store
+        .create_run(WorkflowSpec {
+            schema: archon_workflow::spec::WORKFLOW_SCHEMA.into(),
+            name: "publication".into(),
+            task: "test".into(),
+            target_repository_root: None,
+            max_parallelism: 1,
+            max_agents: 1,
+            stages: Vec::new(),
+            permissions: Default::default(),
+            learning_hooks: Vec::new(),
+        })
+        .unwrap();
+    run.status = RunStatus::Running;
+    store.save_state(&run).unwrap();
+    let generation = run.generation;
+    let controller = LifecycleController::new(store.clone());
+    controller
+        .apply(
+            &run.id,
+            if case == 2 {
+                LifecycleAction::Cancel
+            } else {
+                LifecycleAction::Pause
+            },
+        )
+        .unwrap();
+    if case == 0 {
+        controller.apply(&run.id, LifecycleAction::Resume).unwrap();
+    }
+    let writer = archon_workflow::stage_write::StageWriter {
+        store,
+        run_id: run.id,
+        owner: archon_workflow::control_pause::PauseOwner::Generation(generation),
+    };
+    let named = ids(&["AC-F-002"]);
+    let client = ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, "jq -e '.b == true and .d == 1' out.json"),
+        |_, _| true,
+    );
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd);
+    let result = archon_workflow::stage_write::scope(
+        writer,
+        reauthor_and_republish(&client, request(&set, &named), &scope),
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "a stopped executor published a repaired contract"
+    );
+    assert_eq!(set.contract_bytes(), before);
+}
+#[tokio::test]
+async fn gc_obsolete_executor_cannot_republish_contract() {
+    gc_refused_publication(0).await;
+}
+#[tokio::test]
+async fn gc_paused_executor_cannot_republish_contract() {
+    gc_refused_publication(1).await;
+}
+#[tokio::test]
+async fn gc_cancelled_executor_cannot_republish_contract() {
+    gc_refused_publication(2).await;
+}

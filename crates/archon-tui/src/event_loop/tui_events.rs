@@ -203,6 +203,13 @@ pub(super) async fn handle_tui_event(
         TuiEvent::AgentActivity(update) => {
             app.on_agent_activity(update);
         }
+        TuiEvent::AgentActivitySnapshot(rows) => {
+            app.agent_activity
+                .retain(|row| row.role == crate::events::AgentActivityRole::Parent);
+            for row in rows {
+                app.on_agent_activity(row);
+            }
+        }
         TuiEvent::ActivityStream(update) => {
             app.on_activity_stream_update(update);
         }

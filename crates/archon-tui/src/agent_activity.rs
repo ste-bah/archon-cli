@@ -15,6 +15,8 @@ use ratatui::{
 use crate::events::{AgentActivityRole, AgentActivityStatus, AgentActivityUpdate};
 use crate::theme::Theme;
 
+pub(crate) const MAX_ACTIVITY_ROWS: usize = 12;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentActivityRow {
     pub id: String,
@@ -216,7 +218,7 @@ fn remove_row(rows: &mut Vec<AgentActivityRow>, id: &str) {
     rows.retain(|row| row.id != id);
 }
 
-fn is_terminal_non_parent(role: AgentActivityRole, status: AgentActivityStatus) -> bool {
+pub(crate) fn is_terminal_non_parent(role: AgentActivityRole, status: AgentActivityStatus) -> bool {
     !matches!(role, AgentActivityRole::Parent)
         && matches!(
             status,
@@ -227,9 +229,8 @@ fn is_terminal_non_parent(role: AgentActivityRole, status: AgentActivityStatus) 
 }
 
 fn trim_rows(rows: &mut Vec<AgentActivityRow>) {
-    const MAX_ROWS: usize = 12;
-    if rows.len() > MAX_ROWS {
-        rows.drain(0..rows.len() - MAX_ROWS);
+    if rows.len() > MAX_ACTIVITY_ROWS {
+        rows.drain(0..rows.len() - MAX_ACTIVITY_ROWS);
     }
 }
 

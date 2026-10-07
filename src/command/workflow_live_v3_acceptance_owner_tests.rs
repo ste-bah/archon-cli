@@ -67,6 +67,7 @@ fn record(
         &run_dir,
         record,
         true,
+        None,
     )
 }
 
@@ -301,4 +302,53 @@ async fn the_host_dispatch_runs_the_round_under_its_dispatch_generation() {
         .expect("the new owner's dispatch records");
     assert!(on_disk(&fixture, 1).is_some());
     assert_not_paused(&fixture);
+}
+
+async fn gc_obsolete_output(case: u8) {
+    let fixture = fixture(true);
+    let (old, _) = pause_and_resume(&fixture);
+    let dir = fixture
+        .store
+        .run_dir(&fixture.run_id)
+        .join("obsolete-evidence");
+    let writer = archon_workflow::stage_write::StageWriter {
+        store: fixture.store.clone(),
+        run_id: fixture.run_id.clone(),
+        owner: archon_workflow::control_pause::PauseOwner::Generation(old),
+    };
+    archon_workflow::stage_write::scope(writer, async {
+        if case == 0 {
+            super::super::output::write_repairs(&dir, &["repair".into()]);
+        } else {
+            let result = archon_workflow::acceptance_scratch::CheckResult {
+                acceptance_id: "AC-X".into(),
+                exit_code: Some(1),
+                quota_walk_count: 0,
+                stdout: b"output".to_vec(),
+                stderr: b"error".to_vec(),
+                operational_error: None,
+                classification: None,
+            };
+            super::super::output::write_output_files(&dir, &result);
+        }
+    })
+    .await;
+    let name = match case {
+        0 => "host-environment-repairs.json",
+        1 => "AC-X.stdout",
+        _ => "AC-X.stderr",
+    };
+    assert!(!dir.join(name).exists(), "obsolete stage wrote {name}");
+}
+#[tokio::test]
+async fn gc_obsolete_repair_evidence_is_fenced() {
+    gc_obsolete_output(0).await;
+}
+#[tokio::test]
+async fn gc_obsolete_stdout_is_fenced() {
+    gc_obsolete_output(1).await;
+}
+#[tokio::test]
+async fn gc_obsolete_stderr_is_fenced() {
+    gc_obsolete_output(2).await;
 }

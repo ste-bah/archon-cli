@@ -21,8 +21,8 @@ use archon_workflow::acceptance_scratch::CheckResult;
 use archon_workflow::task_set_contract::AcceptanceCriterion;
 use archon_workflow::task_universe::WorkflowV2TaskUniverse;
 use archon_workflow::v2::acceptance_stage::{
-    ACCEPTANCE_MAX_ROUNDS, ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION, ACCEPTANCE_STAGE_TOOL,
-    AcceptanceRoundRecordV1, next_attempt, relative_record_path, round_dir,
+    ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION, AcceptanceRoundRecordV1, relative_record_path,
+    round_dir,
 };
 use archon_workflow::{
     WorkflowError, WorkflowResult, WorkflowStore, WorkflowV2CallExecution, WorkflowV2Result,
@@ -58,6 +58,8 @@ mod result;
 use check_rec::check_record;
 #[path = "workflow_live_v3_acceptance_sources.rs"]
 mod sources;
+#[cfg(test)]
+use archon_workflow::v2::acceptance_stage::ACCEPTANCE_STAGE_TOOL;
 #[cfg(all(test, unix))]
 use archon_workflow::v2::acceptance_stage::{AcceptanceCheckRecordV1, AcceptanceCheckStatus};
 use output::{with_frozen_identity, write_output_files, write_repairs};
@@ -67,45 +69,9 @@ pub(super) fn is_acceptance_stage_call(execution: &WorkflowV2CallExecution) -> b
     archon_workflow::v2::script::is_acceptance_stage_call(&execution.call)
 }
 
-struct StageRequest {
-    round: u32,
-    max_rounds: u32,
-    check_ids: Vec<String>,
-}
-
-fn parse_request(execution: &WorkflowV2CallExecution) -> WorkflowResult<StageRequest> {
-    let extra = &execution.call.options.extra;
-    let round = extra
-        .get("round")
-        .and_then(serde_json::Value::as_u64)
-        .filter(|round| *round >= 1)
-        .ok_or_else(|| {
-            WorkflowError::SpecInvalid(format!(
-                "{ACCEPTANCE_STAGE_TOOL} requires a positive `round`; the prelude's acceptance() primitive supplies it"
-            ))
-        })?;
-    // Recorded only: the loop's budget follows progress (A2), never a count.
-    let max_rounds = extra
-        .get("maxRounds")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(u64::from(ACCEPTANCE_MAX_ROUNDS))
-        .clamp(1, u64::from(u32::MAX));
-    let check_ids = extra
-        .get("checkIds")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(str::to_string)
-        .collect();
-    Ok(StageRequest {
-        round: u32::try_from(round).unwrap_or(u32::MAX),
-        max_rounds: max_rounds as u32,
-        check_ids,
-    })
-}
+#[path = "workflow_live_v3_acceptance_request.rs"]
+mod request;
+use request::{StageRequest, parse_request};
 
 /// Run one acceptance round and record it for `owner`: the generation the host
 /// dispatched it at, or the executor of a run end (Issue 316).
@@ -121,13 +87,20 @@ pub(super) async fn run_acceptance_stage(
     let request = parse_request(execution)?;
     let call_id = execution.call.id.clone();
     let run_dir = store.run_dir(run_id);
-    let attempt = next_attempt(&run_dir, request.round);
+    let writer = archon_workflow::stage_write::StageWriter {
+        store: store.clone(),
+        run_id: run_id.to_string(),
+        owner,
+    };
+    let reservation = request::reserve(&writer, &run_dir, request.round).await?;
+    let attempt = reservation.attempt;
     let mut record = AcceptanceRoundRecordV1 {
         schema_version: ACCEPTANCE_ROUND_RECORD_SCHEMA_VERSION,
         run_id: run_id.to_string(),
         call_id: call_id.clone(),
         round: request.round,
         attempt,
+        progress_frontier: Some(reservation.frontier),
         max_rounds: request.max_rounds,
         contract_present: false,
         requested_check_ids: request.check_ids.clone(),
@@ -139,12 +112,19 @@ pub(super) async fn run_acceptance_stage(
     };
     // Batch L (L1): no round runs on a tree that holds a remediation its
     // verifier refused. Whatever cannot be taken back out holds the round.
-    let refused = archon_workflow::v2::script::refused_landings::revert_refused_landings(
-        &archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2")),
-        runtime.target_repository_root.as_deref().map(Path::new),
-    );
+    let refused = archon_workflow::stage_write::scope(writer.clone(), async {
+        archon_workflow::stage_write::with_write(|| {
+            WorkflowResult::Ok(
+                archon_workflow::v2::script::refused_landings::revert_refused_landings(
+                    &archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2")),
+                    runtime.target_repository_root.as_deref().map(Path::new),
+                ),
+            )
+        })
+    })
+    .await?;
     let mut frozen = None;
-    let rounds = evaluate(
+    let rounds = Box::pin(evaluate(
         runtime,
         store,
         run_id,
@@ -155,14 +135,23 @@ pub(super) async fn run_acceptance_stage(
         &run_dir,
         &mut record,
         &mut frozen,
-    );
+    ));
     // Batch G: what the round starts on the host is watched for input changes.
-    let (evaluation, violation) = archon_workflow::write_coordinator::input_tripwire::watch(
+    let (evaluation, violation) = archon_workflow::write_coordinator::input_tripwire::watch_owned(
+        writer.clone(),
         Some(&run_dir),
         &format!("acceptance round {} ({call_id})", request.round),
-        archon_workflow::control_race::until_run_stops(store, run_id, &call_id, rounds),
+        archon_workflow::control_race::until_run_stops(
+            store,
+            run_id,
+            &call_id,
+            archon_workflow::stage_write::scope(writer, async {
+                rounds.await?;
+                archon_workflow::stage_write::with_write(|| WorkflowResult::Ok(()))
+            }),
+        ),
     )
-    .await;
+    .await?;
     // A pause or cancel unwinds without a record: the round re-enters on
     // resume as the next attempt. Anything else is the round's own outcome.
     evaluation?;
@@ -176,8 +165,15 @@ pub(super) async fn run_acceptance_stage(
     // Issue 262 (round 8): damaged history heals or pauses, never fails.
     // Issue 320: without a task set, a context that will not resolve is final.
     let task_set = task_universe.is_some();
-    let ledger::Decided { decision, path } =
-        ledger::record_and_decide(store, run_id, owner, &run_dir, &mut record, task_set)?;
+    let ledger::Decided { decision, path } = ledger::record_and_decide(
+        store,
+        run_id,
+        owner,
+        &run_dir,
+        &mut record,
+        task_set,
+        Some(&reservation),
+    )?;
     // Issue 262: a stall (or the runaway guard) pauses the run with the
     // round's record as evidence; it never ends the loop or fails the run.
     if let Some(cause) = decision.pause {
@@ -340,9 +336,8 @@ async fn evaluate(
     }
     let evidence_dir =
         round_dir(run_dir, request.round).join(format!("attempt-{:02}", record.attempt));
-    // Every round runs the WHOLE contract: a fix can regress a check that passed in an
-    // earlier round, and a round re-running only the named ones would record that nowhere,
-    // so the final round covers every check. A contract defect cannot run: it is recorded.
+    // Run the whole contract so a fix cannot hide a regression in another check.
+    // A contract defect cannot run: it is recorded.
     let mut results = {
         let selected: Vec<&AcceptanceCriterion> = (contract.acceptance.iter())
             .chain(&contract.supplementary)
@@ -464,7 +459,10 @@ async fn evaluate(
     // ACC-H3: every grant goes through the chained scope-amendment ledger,
     // one link per check, so the write fan-out's amended universe holds it
     // and stored project data lands through the audited project inputs.
-    routing::record_routed_grants(run_dir, task_universe, &context.repository, record);
+    archon_workflow::stage_write::with_write(|| {
+        routing::record_routed_grants(run_dir, task_universe, &context.repository, record);
+        WorkflowResult::Ok(())
+    })?;
     // A7: the contract is held to the PRD as it is now (what the in-round
     // authoring still owes is already a round error per check).
     // M3: always, on the contract as finally reloaded.

@@ -120,6 +120,7 @@ pub fn host_round(f: &Fixture, stderr: &str) -> (AcceptanceRoundRecordV1, Value)
         call_id: "acceptance-contract-run-1".into(),
         round: 1,
         attempt: 1,
+        progress_frontier: None,
         max_rounds: 2,
         contract_present: true,
         requested_check_ids: Vec::new(),

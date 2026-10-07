@@ -225,3 +225,25 @@ fn two_writers_of_one_attempt_never_both_succeed() {
         serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     assert_eq!(state_key(&on_disk), vec![winner.to_string()]);
 }
+
+#[test]
+fn gc_empty_history_never_defaults_a_damaged_ledger() {
+    let mut errors = Vec::new();
+    for bytes in [b"{".as_slice(), b"", b"{\"seen\":[],\"revisits\":\"bad\"}"] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join(ACCEPTANCE_RECORDS_DIR)
+            .join(PROGRESS_LEDGER_FILE);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+        let result = ProgressLedger::load_healing(dir.path());
+        errors.push(result.err().map(|error| error.to_string()));
+    }
+    assert!(
+        errors
+            .iter()
+            .all(|error| error.as_ref().is_some_and(|error| error.contains("ledger"))),
+        "silently defaulted damaged ledger variants: {errors:?}"
+    );
+}

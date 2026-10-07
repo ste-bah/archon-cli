@@ -58,7 +58,14 @@ pub(super) async fn apply(
         repository: &context.repository,
         project: &context.project,
     };
-    let (store, pins) = match load_for_run(run_dir, &context.project, &context.task_root, &roots) {
+    let (store, pins) = match archon_workflow::stage_write::with_write(|| {
+        WorkflowResult::Ok(load_for_run(
+            run_dir,
+            &context.project,
+            &context.task_root,
+            &roots,
+        ))
+    })? {
         Ok(Some(loaded)) => loaded,
         Ok(None) => return Ok(Outcome::default()),
         Err(PublishLockError::Unsettled(evidence)) => return Err(paused(&evidence)),
