@@ -242,7 +242,7 @@ async fn an_old_binary_fault_record_never_replays_on_resume() {
             }
             let v2 = v2_store(&store, &run_id);
             v2.restore_call_record(&record).unwrap();
-            super::super::workflow_live_v2_script::HostPauseCoverage::snapshot(&v2)
+            super::super::workflow_live_v2_script::HostPauseCoverage::snapshot(&v2, None)
                 .record(&store, &run_id, "probe", None);
         },
     )

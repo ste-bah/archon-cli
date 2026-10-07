@@ -16,8 +16,9 @@
 //! ran for an hour too.
 
 use crate::WorkflowError;
-use crate::v2::WorkflowV2Result;
+use crate::v2::review_findings::HOST_REVIEW_FINDINGS_KEY;
 use crate::v2::script::failed_v2_result;
+use crate::v2::{WorkflowV2EvidenceKind, WorkflowV2Result};
 
 /// The marker this crate stamps on a result for a call that never executed.
 pub const HOST_FAULT_NO_VERDICT_MARKER: &str = "host_fault_no_verdict";
@@ -60,24 +61,55 @@ pub fn result_carries_no_verdict(call_id: &str, result: &WorkflowV2Result) -> bo
 }
 
 /// A dispatch error as a binary before [`HOST_DISPATCH_ERROR_MARKER`] wrote
-/// it: exactly the [`failed_v2_result`] of this call for its own recorded
-/// error -- status, summary, evidence, residual gap and data, rebuilt from
-/// the call id and compared whole, never matched on its text. A run started
-/// on such a binary may resume on this one, so its fault records must not
-/// replay as verdicts. Every result this build makes from `failed_v2_result`
-/// carries a marker of its kind (a dispatch error, or an invalid answer), so
-/// the rule never reads a result of this build.
+/// it: the [`failed_v2_result`] of this call for its own recorded error,
+/// rebuilt from the call id and compared on every field, never matched on
+/// its text. A run started on such a binary may resume on this one, so its
+/// fault records must not replay as verdicts. Every result this build makes
+/// from `failed_v2_result` carries a marker of its kind (a dispatch error, or
+/// an invalid answer), and a marker is no key the rule allows, so the rule
+/// never reads a result of this build.
+///
+/// The old binary (8b7a3c13f) changed the result after it built it, in
+/// `workflow_live_v2_script_host_exec.rs:403-413`: the normalizers of
+/// `helpers_a.rs:400-428` attach the host review findings to `data` under
+/// [`HOST_REVIEW_FINDINGS_KEY`] (`review_findings.rs:338`) for a call with a
+/// review contract, and `mark_unresolved_dependency_metadata`
+/// (`helpers_a.rs:430-466`) appends one review evidence and one review gap
+/// for a dynamic wave. Its other normalizers change only accepted results,
+/// artifacts, task coverage or `data.items`, none of which a failed result
+/// has. So the rule allows exactly those additions: that key in `data`, and
+/// evidence of kind review and gaps of severity review after the built ones.
 fn legacy_dispatch_error(call_id: &str, result: &WorkflowV2Result) -> bool {
-    let Some(error) = result
-        .data
-        .as_object()
-        .filter(|data| data.len() == 1)
-        .and_then(|data| data.get("error"))
-        .and_then(serde_json::Value::as_str)
-    else {
+    let Some(data) = result.data.as_object() else {
         return false;
     };
-    *result == failed_v2_result(call_id, error)
+    if data
+        .keys()
+        .any(|key| key != "error" && key != HOST_REVIEW_FINDINGS_KEY)
+    {
+        return false;
+    }
+    let Some(error) = data.get("error").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    let built = failed_v2_result(call_id, error);
+    let mut stable = result.clone();
+    let added_evidence = stable
+        .evidence
+        .split_off(built.evidence.len().min(stable.evidence.len()));
+    let added_gaps = stable
+        .residual_gaps
+        .split_off(built.residual_gaps.len().min(stable.residual_gaps.len()));
+    if let Some(data) = stable.data.as_object_mut() {
+        data.remove(HOST_REVIEW_FINDINGS_KEY);
+    }
+    added_evidence
+        .iter()
+        .all(|evidence| evidence.kind == WorkflowV2EvidenceKind::Review)
+        && added_gaps
+            .iter()
+            .all(|gap| gap.severity.as_deref() == Some("review"))
+        && stable == built
 }
 
 /// The result for a call whose own answer failed validation: failed, and

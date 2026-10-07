@@ -21,6 +21,8 @@ mod workflow_live_v2_script_fixed_progress_tests;
 mod workflow_live_v2_script_host_command_tests;
 #[path = "workflow_live_v2_script_host_operational_tests.rs"]
 mod workflow_live_v2_script_host_operational_tests;
+#[path = "workflow_live_v2_script_judged_resume_tests.rs"]
+mod workflow_live_v2_script_judged_resume_tests;
 #[path = "workflow_live_v2_script_pause_tests.rs"]
 mod workflow_live_v2_script_pause_tests;
 #[path = "workflow_live_v2_script_stale_executor_tests.rs"]

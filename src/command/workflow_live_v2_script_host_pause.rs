@@ -179,6 +179,7 @@ impl WorkflowScriptHost {
                 generation: run.generation,
                 covered,
                 host_taken: false,
+                judged_at_pause: Default::default(),
             };
             if let Err(error) = locked.write_run_json(run_id, &record_path, &record) {
                 // Not recorded means a resume asks again and pauses once more:

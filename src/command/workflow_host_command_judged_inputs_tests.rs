@@ -1,8 +1,7 @@
-//! Issue 337 round 5 (review finding 3): an unpublished outcome of a gate
-//! that takes a candidate replays only while the task-root content it judged
-//! is unchanged. Its call identity binds the candidate, the PRD digest and
-//! the paths, not that content, so the content digest is stamped on the
-//! outcome and compared again at replay.
+//! Issue 337: what the gate of an unpublished outcome reads, for the real
+//! executor. The host-taken pause records this digest, and a resume replays
+//! the outcome only while the digest now is the one at the pause
+//! (`workflow_live_v2_script_judged_resume_tests` drives that end to end).
 
 use std::sync::Arc;
 
@@ -13,7 +12,7 @@ use super::workflow_host_command_catalog::{
 };
 use super::workflow_host_command_exec::{FixedHostCommandExecutor, WorkflowHostCommandExecutor};
 use super::workflow_host_command_exec_tests::{PreparedBodyProcess, context, seed_frozen_chain};
-use super::workflow_host_command_judged_inputs::{JUDGED_INPUTS, answers_current_inputs, stamp};
+use super::workflow_host_command_judged_inputs::identity_holds;
 use super::workflow_host_command_terminal_stop_tests::CANDIDATE;
 
 struct Fixture {
@@ -71,15 +70,12 @@ fn fixture() -> Fixture {
 }
 
 impl Fixture {
-    /// The unpublished outcome of `request` as the host records it now:
-    /// filed under its identity, stamped with what it judged (if anything).
+    /// The unpublished outcome of `request`, filed under its identity.
     fn record(&self, request: &HostCommandRequest) -> WorkflowV2CallRecord {
         let mut options = archon_workflow::WorkflowV2HostOptions::default();
         options.host_command = Some(request.clone());
         let mut result = archon_workflow::WorkflowV2Result::default();
         result.data = serde_json::json!({ "exitCode": 1 });
-        let judged = self.executor.judged_inputs(request).unwrap();
-        stamp(&mut result.data, judged.clone(), judged);
         WorkflowV2CallRecord::new(
             &self.run_id,
             archon_workflow::WorkflowV2HostCall {
@@ -95,8 +91,9 @@ impl Fixture {
         )
     }
 
-    fn answers(&self, record: &WorkflowV2CallRecord) -> bool {
-        answers_current_inputs(&self.executor, record).unwrap()
+    /// What the gate of `request` reads now, as a pause records it.
+    fn judged(&self, request: &HostCommandRequest) -> Option<String> {
+        self.executor.judged_inputs(request).unwrap()
     }
 
     fn write(&self, name: &str, bytes: &[u8]) {
@@ -105,105 +102,77 @@ impl Fixture {
 }
 
 /// The reviewer's case: a freeze refusal that the task root caused; the
-/// operator repairs the task root. The stale refusal no longer answers; the
-/// same content again answers again.
+/// operator repairs the task root after the pause. The digest the pause
+/// recorded no longer matches; the same content again matches again. The
+/// run's own log in the task root is no input.
 #[test]
-fn a_freeze_refusal_answers_only_while_the_task_root_it_judged_is_unchanged() {
+fn a_freeze_gate_reads_the_task_root_the_pause_recorded() {
     use archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE;
     for command in ["freeze-acceptance", "freeze-skeleton"] {
         let fixture = fixture();
         let request = HostCommandRequest::new(command, Some("candidate".into())).unwrap();
-        let record = fixture.record(&request);
-        assert!(record.result.data[JUDGED_INPUTS].is_string(), "{command}");
-        assert!(fixture.answers(&record), "{command}: nothing changed");
+        let at_pause = fixture.judged(&request);
+        assert!(at_pause.is_some(), "{command}");
+        assert_eq!(fixture.judged(&request), at_pause, "{command}: unchanged");
 
         let original = std::fs::read(fixture.context.task_root.join(ACCEPTANCE_CONTRACT_FILE));
         fixture.write(ACCEPTANCE_CONTRACT_FILE, b"{\"repaired\":true}");
-        assert!(!fixture.answers(&record), "{command}: the repair voids it");
+        assert_ne!(fixture.judged(&request), at_pause, "{command}: a repair");
+        fixture.write(ACCEPTANCE_CONTRACT_FILE, &original.unwrap());
         fixture.write("TASK-X-020.md", b"a new task file");
-        assert!(!fixture.answers(&record), "{command}: a new task file too");
+        assert_ne!(fixture.judged(&request), at_pause, "{command}: a new task");
 
         std::fs::remove_file(fixture.context.task_root.join("TASK-X-020.md")).unwrap();
-        fixture.write(ACCEPTANCE_CONTRACT_FILE, &original.unwrap());
-        assert!(
-            fixture.answers(&record),
-            "{command}: the same content again"
-        );
-        // The run's own log in the task root is no input.
+        assert_eq!(fixture.judged(&request), at_pause, "{command}: restored");
         fixture.write(".decompose.log", b"progress line");
-        assert!(fixture.answers(&record), "{command}: the log is not judged");
+        assert_eq!(fixture.judged(&request), at_pause, "{command}: the log");
     }
 }
 
-/// A body refusal judged the frozen body it would replace: a changed body,
-/// or a changed frozen chain, voids it; a changed candidate is a new call.
+/// A body gate reads the frozen body it would replace; a changed candidate
+/// is a new call, so an outcome filed under another candidate answers
+/// nothing by identity.
 #[test]
-fn a_body_refusal_answers_only_while_its_frozen_body_is_unchanged() {
+fn a_body_gate_reads_its_frozen_body_and_answers_only_its_own_candidate() {
     let fixture = fixture();
     let request = HostCommandRequest::new("land-task-body", Some(CANDIDATE.into())).unwrap();
-    let record = fixture.record(&request);
-    assert!(record.result.data[JUDGED_INPUTS].is_string());
-    assert!(fixture.answers(&record));
+    let at_pause = fixture.judged(&request);
+    assert!(at_pause.is_some());
 
     fixture.write("TASK-X-010.md", b"live-after");
-    assert!(!fixture.answers(&record), "the frozen body changed");
+    assert_ne!(
+        fixture.judged(&request),
+        at_pause,
+        "the frozen body changed"
+    );
     fixture.write("TASK-X-010.md", b"live-before");
-    assert!(fixture.answers(&record));
+    assert_eq!(fixture.judged(&request), at_pause);
 
+    let record = fixture.record(&request);
+    assert!(identity_holds(&fixture.executor, &record).unwrap());
     let other = HostCommandRequest::new("land-task-body", Some(format!("{CANDIDATE}\n"))).unwrap();
     let mut asked = fixture.record(&other);
     asked.call.options.host_command = Some(request.clone());
     assert!(
-        !fixture.answers(&asked),
+        !identity_holds(&fixture.executor, &asked).unwrap(),
         "an outcome filed under another candidate answers nothing"
     );
 }
 
-/// No stamp, no replay: an older binary's record, a pure host read, and a
-/// candidate the host could not bind all run again.
+/// No digest, no replay: a pure host read and a candidate the host could
+/// not bind have none. A set gate has one, over the whole task set.
 #[test]
-fn an_outcome_without_a_known_judged_content_never_answers() {
+fn only_a_gate_that_reads_the_task_root_has_a_digest() {
     let fixture = fixture();
-    let request = HostCommandRequest::new("freeze-skeleton", Some("candidate".into())).unwrap();
-    let mut old = fixture.record(&request);
-    old.result
-        .data
-        .as_object_mut()
-        .unwrap()
-        .remove(JUDGED_INPUTS);
-    assert!(!fixture.answers(&old), "an older binary's record");
-
     let verify = HostCommandRequest::new("verify-frozen-skeleton", None).unwrap();
-    assert_eq!(fixture.executor.judged_inputs(&verify).unwrap(), None);
-    assert!(!fixture.answers(&fixture.record(&verify)), "a host read");
-
+    assert_eq!(fixture.judged(&verify), None, "a host read");
     let unbound =
         HostCommandRequest::new("land-task-body", Some("# no frozen subject\n".into())).unwrap();
-    assert_eq!(fixture.executor.judged_inputs(&unbound).unwrap(), None);
-    assert!(
-        !fixture.answers(&fixture.record(&unbound)),
-        "an unbound body"
-    );
+    assert_eq!(fixture.judged(&unbound), None, "an unbound body");
 
-    // A set gate keeps its content manifest identity and is stamped too.
     let lint = HostCommandRequest::new("task-set-lint", None).unwrap();
-    let record = fixture.record(&lint);
-    assert!(fixture.answers(&record));
+    let at_pause = fixture.judged(&lint);
+    assert!(at_pause.is_some());
     fixture.write("TASK-X-010.md", b"edited");
-    assert!(!fixture.answers(&record), "a set gate after an edit");
-}
-
-/// Content that changed while the call ran is not known: no stamp.
-#[test]
-fn a_stamp_needs_the_same_content_before_and_after_the_call() {
-    let stamped = |before: Option<&str>, after: Option<&str>| {
-        let mut data = serde_json::json!({ "exitCode": 1 });
-        stamp(&mut data, before.map(Into::into), after.map(Into::into));
-        data.get(JUDGED_INPUTS).cloned()
-    };
-    assert_eq!(stamped(Some("a"), Some("a")), Some(serde_json::json!("a")));
-    assert_eq!(stamped(Some("a"), Some("b")), None);
-    assert_eq!(stamped(Some("a"), None), None);
-    assert_eq!(stamped(None, Some("a")), None);
-    assert_eq!(stamped(None, None), None);
+    assert_ne!(fixture.judged(&lint), at_pause, "a set gate after an edit");
 }

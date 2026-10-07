@@ -41,7 +41,8 @@ use super::workflow_host_secrets::{HostSecrets, utf8};
 pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn call_identity(&self, request: &HostCommandRequest) -> WorkflowResult<String>;
     /// Issue 337: the digest of the content a call of `request` judges
-    /// (`workflow_host_command_judged_inputs`); `None`: never replayed.
+    /// (`workflow_host_command_judged_inputs`), recorded at a host pause and
+    /// read again at the resume; `None`: an unpublished outcome never replays.
     fn judged_inputs(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
         Ok(None)
     }

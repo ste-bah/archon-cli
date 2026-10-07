@@ -112,10 +112,12 @@ impl WorkflowScriptHost {
         // recorded, as a `w.pause` does, so a resume replays a judge's
         // refusal or a failed author call verbatim instead of re-asking it.
         // A v3 script keeps its Issue 335 contract: failed calls run again.
-        let coverage = self
-            .runner
-            .raw_outcomes_allowed
-            .then(|| HostPauseCoverage::snapshot(&self.runner.v2_store));
+        let coverage = self.runner.raw_outcomes_allowed.then(|| {
+            HostPauseCoverage::snapshot(
+                &self.runner.v2_store,
+                self.runner.host_command_executor.as_ref(),
+            )
+        });
         // An unreadable record is evidence lost, not state: counted afresh.
         let prior = std::fs::read(store.run_dir(run_id).join(SCRIPT_ERROR_PAUSE_RECORD))
             .ok()

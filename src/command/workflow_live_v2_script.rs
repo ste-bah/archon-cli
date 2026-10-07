@@ -95,6 +95,8 @@ pub(super) struct WorkflowV2ScriptRunner {
     /// evidence. Off for the v3 authoring bootstrap only, whose own loop
     /// re-authors on a script that came back without a result.
     pauses_on_script_error: bool,
+    /// Issue 337: covered unpublished host-command outcomes vs the content at the pause.
+    judged_at_resume: std::sync::OnceLock<workflow_live_v2_script_host::JudgedAtResume>,
 }
 
 impl WorkflowV2ScriptRunner {
@@ -130,6 +132,7 @@ impl WorkflowV2ScriptRunner {
             pending_calls: Arc::default(),
             stops_on_host_fault: false,
             pauses_on_script_error: true,
+            judged_at_resume: std::sync::OnceLock::new(),
         }
     }
 
@@ -234,6 +237,8 @@ impl WorkflowV2ScriptRunner {
         });
         // Issue-213 C5: record any call a previous host process died under.
         host.record_orphaned_calls();
+        // Issue 337: the content at the resume, before any call changes it.
+        host.judged_at_resume();
         let runtime = AsyncRuntime::new()
             .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs runtime failed: {err}")))?;
         // Issue 332: a CPU-time budget of the script thread, so machine load

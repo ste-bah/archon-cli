@@ -146,7 +146,10 @@ impl WorkflowScriptHost {
         run: &archon_workflow::WorkflowRun,
         reason: &str,
     ) -> archon_workflow::WorkflowResult<()> {
-        let coverage = HostPauseCoverage::snapshot(&self.runner.v2_store);
+        let coverage = HostPauseCoverage::snapshot(
+            &self.runner.v2_store,
+            self.runner.host_command_executor.as_ref(),
+        );
         archon_workflow::control_pause::record_terminal_stop(locked, run, reason)?;
         coverage.record(locked, &run.id, "terminal-stop", None);
         Ok(())
@@ -206,7 +209,10 @@ impl WorkflowScriptHost {
             record.call.id
         );
         tracing::warn!(run_id, "{refusal}");
-        let coverage = HostPauseCoverage::snapshot(&self.runner.v2_store);
+        let coverage = HostPauseCoverage::snapshot(
+            &self.runner.v2_store,
+            self.runner.host_command_executor.as_ref(),
+        );
         let paused = archon_workflow::control_pause::pause_owned_then(
             &self.runner.workflow_store,
             run_id,

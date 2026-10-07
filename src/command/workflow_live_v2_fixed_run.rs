@@ -29,6 +29,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         },
     };
     let execution_generation = run.generation;
+    let pause_executor = host_command_executor.clone();
     let runner = fixed_runner(
         &run,
         &plan,
@@ -70,7 +71,10 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
                 crate::command::workflow_decompose_events::bounded_log_field(&error.to_string());
             // Issue 337: this pause covers what the run recorded, as any
             // script-error pause of a fixed script does.
-            let coverage = super::workflow_live_v2_script::HostPauseCoverage::snapshot(&v2_store);
+            let coverage = super::workflow_live_v2_script::HostPauseCoverage::snapshot(
+                &v2_store,
+                Some(&pause_executor),
+            );
             // Written in the pause's own lock section (no resume between).
             let paused = archon_workflow::control_pause::pause_owned_then(
                 store,
