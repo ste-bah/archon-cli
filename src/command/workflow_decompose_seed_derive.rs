@@ -4,8 +4,15 @@
 //! candidate the old runtime produced, the gates that judged it and the
 //! replies authored since, and checks every carried acceptance entry with this
 //! build's freeze entry validator. The script turns that into its loop state
-//! with its own rules (`workflow_decompose_v1_seed.js`), and the gate judges
-//! the candidate again before any phase ends.
+//! with its own rules (`workflow_decompose_v1_seed.js`). The acceptance
+//! candidate it assembles goes to the gate again; a submission whose bytes a
+//! recorded gate already judged keeps that recorded verdict (Issue 361).
+//!
+//! Order is the script's own, never the wall clock: an author reply's place is
+//! its call ordinal (`round * stride + 1` for acceptance), and a gate's place
+//! is the reply round its candidate holds. Start times only order records the
+//! ordinals cannot tell apart (gates of identical candidates, one round's
+//! replies).
 //!
 //! The call-id families are the fixed decomposition script's own:
 //! `acceptance-author-<entry id>-<n>` per acceptance entry, `<subject>-author-<n>`
@@ -263,7 +270,7 @@ pub(crate) fn derive(
         let slot = derived.pause_ordinals.entry(subject).or_default();
         *slot = (*slot).max(ordinal);
     }
-    let mut artifacts: BTreeMap<String, &WorkflowV2CallRecord> = BTreeMap::new();
+    let mut artifacts: BTreeMap<String, (u64, &WorkflowV2CallRecord)> = BTreeMap::new();
     for record in records
         .iter()
         .filter(|r| r.call.method == WorkflowV2HostMethod::Agent)
@@ -274,8 +281,14 @@ pub(crate) fn derive(
         };
         let slot = derived.author_ordinals.entry(subject.clone()).or_default();
         *slot = (*slot).max(ordinal);
-        if entry.is_none() && reply_content(record).is_some() {
-            artifacts.insert(subject, record);
+        // The latest complete reply is the highest ordinal, whenever it started.
+        if entry.is_none()
+            && reply_content(record).is_some()
+            && artifacts
+                .get(&subject)
+                .is_none_or(|(held, _)| *held <= ordinal)
+        {
+            artifacts.insert(subject, (ordinal, record));
         }
     }
     let gates: Vec<Gate<'_>> = records
@@ -284,7 +297,7 @@ pub(crate) fn derive(
             judged_gate(record).map(|(command, stdin, gate)| (*record, command, stdin, gate))
         })
         .collect();
-    for (subject, record) in artifacts {
+    for (subject, (_, record)) in artifacts {
         let candidate = reply_content(record).unwrap_or_default();
         // The last judgment of exactly these bytes, whichever reply held them.
         let gate = gates
@@ -309,24 +322,93 @@ pub(crate) fn derive(
 /// A judged gate: its record, command, stdin and what the script saw.
 type Gate<'a> = (&'a WorkflowV2CallRecord, &'a str, &'a str, GateSeed);
 
+/// An acceptance author reply the script can read: its entry, with the
+/// host-owned fields of an owed check set, and its call ordinal.
+struct Reply<'a> {
+    record: &'a WorkflowV2CallRecord,
+    id: String,
+    ordinal: u64,
+    text: &'a str,
+    entry: Value,
+}
+
+/// The reply round a gate's candidate holds: the latest round after which
+/// the loop's entries (each entry's latest reply up to that round) are the
+/// candidate's. Only rounds that leave every entry as it was (a reply that
+/// repeats its entry byte for byte) share it, and which of them holds the
+/// gate changes nothing: the carried entries are the same.
+fn gate_round(candidate: &BTreeMap<String, Value>, replies: &[Reply<'_>]) -> u64 {
+    let mut state: BTreeMap<&str, &Value> = BTreeMap::new();
+    let mut round = 0;
+    for (index, reply) in replies.iter().enumerate() {
+        state.insert(&reply.id, &reply.entry);
+        let round_ends = replies
+            .get(index + 1)
+            .is_none_or(|next| next.ordinal != reply.ordinal);
+        if round_ends
+            && state
+                .iter()
+                .all(|(id, entry)| candidate.get(*id) == Some(*entry))
+        {
+            round = reply.ordinal;
+        }
+    }
+    round
+}
+
 fn acceptance(
     records: &[&WorkflowV2CallRecord],
     gates: &[Gate<'_>],
     criteria: &BTreeSet<String>,
 ) -> Result<Option<SubjectSeed>> {
-    let judged: Vec<_> = gates
+    let mut replies_read = Vec::new();
+    let mut any_reply = false;
+    for record in records {
+        let Some((_, Some(id), ordinal)) = author_call(&record.call.id) else {
+            continue;
+        };
+        let Some(content) = reply_content(record) else {
+            continue;
+        };
+        any_reply = true;
+        let text = extract_object(content);
+        if let Some(entry) = reply_entry(text, &id) {
+            let entry = owe(entry, &id, criteria);
+            replies_read.push(Reply {
+                record,
+                id,
+                ordinal,
+                text,
+                entry,
+            });
+        }
+    }
+    // Oldest first by ordinal; one round's replies keep their start order.
+    replies_read.sort_by_key(|reply| reply.ordinal);
+    let mut judged = Vec::new();
+    for gate in gates
         .iter()
-        .filter(|(_, command, _, _)| *command == ACCEPTANCE_GATE)
-        .collect();
+        .filter(|(_, command, ..)| *command == ACCEPTANCE_GATE)
+    {
+        let (record, _, stdin, _) = gate;
+        let entries = candidate_entries(stdin, &record.call.id)?;
+        let by_id = entries
+            .iter()
+            .map(|(id, entry, _)| (id.clone(), entry.clone()))
+            .collect();
+        judged.push((gate_round(&by_id, &replies_read), gate, entries));
+    }
+    // A stable sort: gates of one round keep their start order.
+    judged.sort_by_key(|(round, ..)| *round);
     let last = judged.last();
     let mut entries: BTreeMap<String, Value> = BTreeMap::new();
-    if let Some((record, _, stdin, _)) = last {
-        for (id, entry, supplementary) in candidate_entries(stdin, &record.call.id)? {
+    if let Some((_, (record, ..), candidate)) = last {
+        for (id, entry, supplementary) in candidate.iter().cloned() {
             // A supplementary check is carried only as the check a gate said
             // is owed: the script authors it against that requirement text.
             let prefix = format!("check '{id}': PRD requirement ");
             if supplementary
-                && !judged.iter().any(|(_, _, _, gate)| {
+                && !judged.iter().any(|(_, (.., gate), _)| {
                     gate.findings
                         .iter()
                         .any(|f| f["text"].as_str().is_some_and(|t| t.starts_with(&prefix)))
@@ -340,37 +422,18 @@ fn acceptance(
             entries.insert(id, entry);
         }
     }
-    // Replies the last gate's candidate already holds are its evidence.
-    let after = match last {
-        Some((record, ..)) => Some(started(record)?),
-        None => None,
-    };
+    // Replies of the rounds the last gate's candidate holds are its evidence;
+    // later rounds are the replies since, the latest per entry.
+    let after = last.map_or(0, |(round, ..)| *round);
     let mut replies: BTreeMap<String, ReplySeed> = BTreeMap::new();
-    let mut any_reply = false;
-    for record in records {
-        let Some((_, Some(id), _)) = author_call(&record.call.id) else {
-            continue;
-        };
-        let Some(content) = reply_content(record) else {
-            continue;
-        };
-        any_reply = true;
-        if let Some(gate) = after
-            && started(record)? <= gate
-        {
-            continue;
-        }
-        let text = extract_object(content);
-        let Some(entry) = reply_entry(text, &id) else {
-            continue;
-        };
-        entries.insert(id.clone(), owe(entry, &id, criteria));
+    for reply in replies_read.iter().filter(|reply| reply.ordinal > after) {
+        entries.insert(reply.id.clone(), reply.entry.clone());
         replies.insert(
-            id.clone(),
+            reply.id.clone(),
             ReplySeed {
-                call_id: record.call.id.clone(),
-                id,
-                text: text.to_string(),
+                call_id: reply.record.call.id.clone(),
+                id: reply.id.clone(),
+                text: reply.text.to_string(),
             },
         );
     }
@@ -385,8 +448,11 @@ fn acceptance(
         }
     }
     Ok(Some(SubjectSeed::Entries {
-        gates: judged.iter().map(|(.., gate)| gate.clone()).collect(),
-        candidate: last.map(|(_, _, stdin, _)| stdin.to_string()),
+        gates: judged
+            .iter()
+            .map(|(_, (.., gate), _)| gate.clone())
+            .collect(),
+        candidate: last.map(|(_, (_, _, stdin, _), _)| stdin.to_string()),
         replies: replies.into_values().collect(),
         invalid,
         carried: entries.len(),

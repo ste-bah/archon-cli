@@ -68,6 +68,36 @@ async function unchangedReplyIsNoRepair() {
   assert.deepEqual(seen.agents, ['acceptance-author-B-28']);
 }
 
+// The last gate refused the candidate with a finding that names no entry. The
+// live loop then re-authors every entry; the seed does the same for each entry
+// not re-authored (changed) since, and never re-submits the refused candidate.
+async function unattributableRefusalReauthorsAsTheLoopDoes() {
+  const candidate = JSON.stringify({ entries: [entry('A'), entry('B'), entry('C')], supplementary: [] });
+  const whole = finding('candidate artifact was refused: the contract as a whole proves nothing about the PRD');
+  const subjects = (replies, findings = [whole]) => ({ acceptance: { kind: 'entries', candidate, replies, invalid: {}, carried: 3,
+    gates: [{ call_id: 'g', published: false, findings }] } });
+  const criteria = { A: 'a', B: 'b', C: 'c' };
+  // No reply since the refusal: every entry, and a candidate unlike the refused one.
+  let run = await seeded(subjects([]), criteria);
+  assert.deepEqual(run.seen.agents, ['acceptance-author-A-28', 'acceptance-author-B-28', 'acceptance-author-C-28']);
+  assert.notEqual(run.seen.gates[0].stdin, candidate, 'the refused candidate is never re-submitted unchanged');
+  // A changed reply since is that round's work: kept, the others authored.
+  run = await seeded(subjects([{ call_id: 'acceptance-author-B-25', id: 'B', text: JSON.stringify(entry('B', 7)) }]), criteria);
+  assert.deepEqual(run.seen.agents, ['acceptance-author-A-28', 'acceptance-author-C-28']);
+  assert.deepEqual(JSON.parse(run.seen.gates[0].stdin).entries.map((e) => e.check.command), ['t A 1', 't B 7', 't C 1']);
+  // A reply that repeats the refused entry repairs nothing.
+  run = await seeded(subjects([{ call_id: 'acceptance-author-B-25', id: 'B', text: JSON.stringify(entry('B')) }]), criteria);
+  assert.deepEqual(run.seen.agents, ['acceptance-author-A-28', 'acceptance-author-B-28', 'acceptance-author-C-28']);
+  // Beside a finding that names one entry, the unattributable one still sends back all.
+  run = await seeded(subjects([], [finding("check 'B' was refuted by the host judge; reason: weak", 'B'), whole]), criteria);
+  assert.deepEqual(run.seen.agents, ['acceptance-author-A-28', 'acceptance-author-B-28', 'acceptance-author-C-28']);
+  // An unattributable finding of an EARLIER gate only registers owed checks.
+  const gates = [{ call_id: 'g0', published: false, findings: [whole] },
+    { call_id: 'g', published: false, findings: [finding("check 'B' was refuted by the host judge; reason: weak", 'B')] }];
+  run = await seeded({ acceptance: { kind: 'entries', candidate, replies: [], invalid: {}, carried: 3, gates } }, criteria);
+  assert.deepEqual(run.seen.agents, ['acceptance-author-B-28']);
+}
+
 async function invalidEntryOnly() {
   const candidate = JSON.stringify({ entries: [entry('A'), entry('B')], supplementary: [] });
   const { seen } = await seeded({ acceptance: { kind: 'entries', candidate, replies: [], carried: 2,
@@ -144,7 +174,7 @@ async function sample() {
 }
 
 (async () => {
-  for (const test of [refutedEntryOnly, unchangedReplyIsNoRepair, invalidEntryOnly, pointerRefusalRepairedSince, neverFrozen, artifactSeeds, pausesContinue, sample]) {
+  for (const test of [refutedEntryOnly, unchangedReplyIsNoRepair, unattributableRefusalReauthorsAsTheLoopDoes, invalidEntryOnly, pointerRefusalRepairedSince, neverFrozen, artifactSeeds, pausesContinue, sample]) {
     await test();
     console.log(`ok ${test.name}`);
   }

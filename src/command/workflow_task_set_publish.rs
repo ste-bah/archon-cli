@@ -462,3 +462,9 @@ pub(crate) use read_settle_tests::crash_publish;
 pub(crate) fn reader_test_step(step: &str) {
     crash_point(step);
 }
+
+/// The directories flushed on this thread since the last call.
+#[cfg(test)]
+pub(crate) fn take_synced_dirs() -> Vec<std::path::PathBuf> {
+    journal::test_hooks::SYNCS.with(|paths| std::mem::take(&mut *paths.borrow_mut()))
+}

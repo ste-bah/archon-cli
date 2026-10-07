@@ -162,7 +162,13 @@ fn a_crash_between_the_seed_record_and_its_event_writes_the_event_once() {
     let (_temp, store, run_id, log) = fixture();
     record_transitions(&store, &run_id, &[("new-script", "next-rev")]);
     // Crash after the record, before its event.
-    let derived = derive_seed(&store, &run_id, 0, &criteria()).unwrap();
+    let derived = derive_seed(
+        &store,
+        &run_id,
+        (0, identity("new-script", "next-rev")),
+        &criteria(),
+    )
+    .unwrap();
     write_seed(&store, &run_id, &derived).unwrap();
     let seed = current_seed(&store, &run_id, &log, &criteria())
         .unwrap()
@@ -219,7 +225,9 @@ fn a_second_upgrade_derives_a_new_seed_from_the_seeded_round_and_keeps_the_first
     };
     assert_eq!(replies[0].call_id, "acceptance-author-AC-2-28");
     assert_eq!(
-        read_seed(&store, &run_id, 0).unwrap().unwrap(),
+        read_seed(&store, &run_id, 0, &identity("new-script", "next-rev"))
+            .unwrap()
+            .unwrap(),
         first,
         "the first seed stays as evidence"
     );
@@ -248,7 +256,9 @@ fn an_unreadable_seed_record_pauses_the_resume() {
     let (_temp, store, run_id, log) = fixture();
     record_transitions(&store, &run_id, &[("new-script", "next-rev")]);
     current_seed(&store, &run_id, &log, &criteria()).unwrap();
-    let path = store.run_dir(&run_id).join(seed_path(0));
+    let path = store
+        .run_dir(&run_id)
+        .join(seed_path(0, &identity("new-script", "next-rev")));
     let mut value: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     value["schema_version"] = json!(99);
@@ -256,4 +266,114 @@ fn an_unreadable_seed_record_pauses_the_resume() {
     let error = current_seed(&store, &run_id, &log, &criteria()).unwrap_err();
     assert!(format!("{error:#}").contains("paused"), "{error:#}");
     assert!(status_lines(&store, &run_id).contains("unreadable"));
+}
+
+/// L1: the seeds directory's own entry is flushed into `decomposition/` with
+/// every seed write, so a power loss never loses the seed that started a
+/// seeded round (its next derivation would see the seeded calls).
+#[test]
+fn every_seed_write_connects_the_seeds_directory_durably() {
+    let take = crate::command::workflow_task_set::take_synced_dirs;
+    let (_temp, store, run_id, log) = fixture();
+    let run_dir = store.run_dir(&run_id);
+    let (decomposition, seeds) = (run_dir.join("decomposition"), run_dir.join(SEEDS_DIR));
+    let flushed = |synced: Vec<std::path::PathBuf>| {
+        assert!(synced.contains(&decomposition), "{synced:?}");
+        assert!(synced.contains(&seeds), "{synced:?}");
+    };
+    // The first seed creates the directory.
+    record_transitions(&store, &run_id, &[("new-script", "next-rev")]);
+    take();
+    current_seed(&store, &run_id, &log, &criteria()).unwrap();
+    flushed(take());
+    // A crash left the directory created but its entry unflushed.
+    std::fs::remove_dir_all(&seeds).unwrap();
+    std::fs::create_dir_all(&seeds).unwrap();
+    take();
+    current_seed(&store, &run_id, &log, &criteria()).unwrap();
+    flushed(take());
+    // A second upgrade writes into the existing directory.
+    record_transitions(
+        &store,
+        &run_id,
+        &[("new-script", "next-rev"), ("newer-script", "next-rev")],
+    );
+    take();
+    current_seed(&store, &run_id, &log, &criteria()).unwrap();
+    flushed(take());
+}
+
+/// L3: a seed names the runtime it was derived for and is read back for that
+/// runtime only.
+#[test]
+fn a_seed_is_read_back_only_for_the_runtime_it_was_derived_for() {
+    let (_temp, store, run_id, log) = fixture();
+    record_transitions(&store, &run_id, &[("new-script", "next-rev")]);
+    let first = current_seed(&store, &run_id, &log, &criteria())
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.runtime, identity("new-script", "next-rev"));
+    let mut repaired = entry("AC-2");
+    repaired["check"]["command"] = json!("stronger");
+    save(
+        &store,
+        &run_id,
+        &reply(
+            "acceptance-author-AC-2-28",
+            "03:00:00",
+            &repaired.to_string(),
+        ),
+    );
+    // The transition record was lost and rebuilt on another runtime at the
+    // same index: that runtime's own seed, derived from every record.
+    record_transitions(&store, &run_id, &[("other-script", "other-rev")]);
+    let other = current_seed(&store, &run_id, &log, &criteria())
+        .unwrap()
+        .unwrap();
+    assert_eq!(other.transition_index, 0);
+    assert_eq!(other.runtime.script_digest, "other-script");
+    assert_eq!(
+        other.author_ordinals["acceptance"], 28,
+        "never the other runtime's older candidate and ordinals"
+    );
+    let SubjectSeed::Entries { replies, .. } = &other.subjects["acceptance"] else {
+        panic!()
+    };
+    assert_eq!(replies[0].call_id, "acceptance-author-AC-2-28");
+    assert_eq!(
+        read_seed(&store, &run_id, 0, &first.runtime)
+            .unwrap()
+            .unwrap(),
+        first,
+        "the first runtime's seed stays as evidence"
+    );
+    let events = seed_events(&store, &run_id);
+    assert_eq!(events.len(), 2, "its own event");
+    assert_eq!(
+        events[1]["detail"]["runtime"]["script_digest"],
+        "other-script"
+    );
+    assert_ne!(events[0]["detail"]["record"], events[1]["detail"]["record"]);
+    // Rebuilt on the first runtime (another binary revision): its seed and
+    // its event, read back.
+    record_transitions(&store, &run_id, &[("new-script", "later-rev")]);
+    let back = current_seed(&store, &run_id, &log, &criteria())
+        .unwrap()
+        .unwrap();
+    assert_eq!(back, first);
+    assert_eq!(seed_events(&store, &run_id).len(), 2);
+    // A record whose content names another runtime than its file pauses.
+    let path = store.run_dir(&run_id).join(seed_path(0, &first.runtime));
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    value["runtime"]["catalog_digest"] = json!("edited-catalog");
+    std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let error = format!(
+        "{:#}",
+        current_seed(&store, &run_id, &log, &criteria()).unwrap_err()
+    );
+    assert!(
+        error.contains("paused") && error.contains("never used for another runtime"),
+        "{error}"
+    );
 }

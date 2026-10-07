@@ -104,9 +104,7 @@ async fn resume_upgraded(component: &str) {
         .unwrap()
         .unwrap();
     assert!(
-        status.contains(
-            "phase_seed: transition=0 record=decomposition/phase-seeds/transition-0.json"
-        ),
+        status.contains("phase_seed: transition=0 record=decomposition/phase-seeds/transition-0-"),
         "{status}"
     );
     assert_eq!(

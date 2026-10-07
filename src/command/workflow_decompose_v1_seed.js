@@ -12,10 +12,13 @@
 //
 // Nothing carried is accepted here. An acceptance entry is carried only when
 // this build's entry validator passes it and the last gate did not refute it
-// (or it was re-authored since); every other entry is authored again. A whole
-// artifact the last gate judged with findings is authored again with them;
-// one never judged, or judged clean, goes to the gate again as it is. The
-// gate judges the carried candidate before any phase can end.
+// (or it was re-authored since); every other entry is authored again, and the
+// assembled candidate goes to the acceptance gate. A whole artifact the last
+// gate judged with findings is authored again with them; one never judged, or
+// judged clean, is submitted as it is. A submission whose bytes a recorded
+// gate already judged keeps that recorded verdict: the host replays it, so a
+// completed skeleton or body is not judged again by this build's gate
+// (Issue 361 tracks re-judging it under a changed gate).
 
 // Subjects whose seed this run applied: a subject the set gate re-opens later
 // continues from its live state, not from the seed again.
@@ -68,6 +71,8 @@ function seedEntries(seed, policy, state) {
   const gates = Array.isArray(seed.gates) ? seed.gates : [];
   // Every gate registers the supplementary checks it says are owed, in order,
   // as the loop did; the last one also names the entries it sent back.
+  // `null` from the last gate: a finding no rule attributes to one entry, which
+  // the live loop answers by authoring every entry again.
   let refuted = new Set();
   gates.forEach((gate, index) => {
     const last = index === gates.length - 1;
@@ -91,7 +96,11 @@ function seedEntries(seed, policy, state) {
     state.entries.set(reply.id, entry);
   }
   const invalid = seed.invalid && typeof seed.invalid === "object" ? seed.invalid : {};
-  state.retryIds = new Set([...[...refuted].filter((id) => !repaired.has(id)), ...Object.keys(invalid), ...unreadable]);
+  // Refuted (every carried entry, for an unattributable refusal) and not
+  // repaired since: that round's work is kept, the rest is authored again, so
+  // the refused candidate is never submitted unchanged.
+  const sentBack = refuted === null ? listed.map((entry) => entry.id) : [...refuted];
+  state.retryIds = new Set([...sentBack.filter((id) => !repaired.has(id)), ...Object.keys(invalid), ...unreadable]);
   const last = gates[gates.length - 1];
   const feedback = [
     ...(last ? seedRepairFindings(last, policy).map((finding) => String(finding.text)) : []),
@@ -103,9 +112,8 @@ function seedEntries(seed, policy, state) {
 // A shape refusal names its entry by a pointer into the refused candidate's
 // own lists (`supplementary/0/criterion ...`); resolved against that
 // candidate, it sends back the one entry. Every other finding is read as the
-// loop reads it (acceptanceRepairIds). A finding no rule attributes to an
-// entry sends none back: each carried entry has passed the entry validator,
-// and the gate judges the candidate again.
+// loop reads it (acceptanceRepairIds): one no rule attributes to an entry
+// returns null, "every entry", exactly as the live loop reads it.
 const SEED_POINTER = /^(?:candidate artifact (?:was refused|rejected):\s*)?\/?(entries|supplementary)\/(0|[1-9]\d*)(?=[/\s]|$)/;
 
 function seedRepairIds(findings, ids, published, candidate) {
@@ -118,7 +126,9 @@ function seedRepairIds(findings, ids, published, candidate) {
     if (entry && typeof entry.id === "string") named.add(entry.id);
     else rest.push(finding);
   }
-  for (const id of acceptanceRepairIds(rest, ids, published, candidate) || []) named.add(id);
+  const attributed = acceptanceRepairIds(rest, ids, published, candidate);
+  if (attributed === null) return null;
+  for (const id of attributed) named.add(id);
   return named;
 }
 

@@ -156,12 +156,16 @@ impl WorkflowScriptHost {
         }
         let slots = self.runner.v2_store.load_call_records()?;
         // Issue 360: a run seeded after an upgrade replays none of the history
-        // before it, so a pause taken then credits nothing now.
+        // before it, so a pause taken then credits nothing now (the history
+        // floor itself: `predates_phase_seed`).
         let floor = self
-            .runner
-            .script_args
-            .as_ref()
-            .and_then(|args| args["phaseSeed"]["pause_generation_floor"].as_u64());
+            .phase_seed()
+            .map(|seed| {
+                seed["pause_generation_floor"]
+                    .as_u64()
+                    .ok_or_else(|| malformed_seed("pause_generation_floor"))
+            })
+            .transpose()?;
         let covered = pauses.iter().any(|pause| {
             floor.is_none_or(|floor| pause.generation > floor)
                 && pause.covered.contains(&wanted)
@@ -173,4 +177,44 @@ impl WorkflowScriptHost {
         self.mark_reused(&record, generation).await?;
         Ok(Some(self.result_view(&record)?))
     }
+
+    /// The phase seed this run started from, when it is a seeded resume.
+    fn phase_seed(&self) -> Option<&serde_json::Value> {
+        self.runner
+            .script_args
+            .as_ref()
+            .map(|args| &args["phaseSeed"])
+            .filter(|seed| !seed.is_null())
+    }
+
+    /// Issue 360: whether `record` is an attempt recorded before the seed this
+    /// run started from. A seeded run replays none of that history: content-
+    /// keyed calls (a gate asked a byte-identical candidate) would otherwise
+    /// answer from an older runtime's record, an outage included.
+    pub(super) fn predates_phase_seed(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        let Some(seed) = self.phase_seed() else {
+            return Ok(false);
+        };
+        let floor = seed["history_attempts"]
+            .as_object()
+            .ok_or_else(|| malformed_seed("history_attempts"))?;
+        Ok(match floor.get(&record.call.id) {
+            None => false,
+            Some(attempt) => {
+                u64::from(record.attempt)
+                    <= attempt
+                        .as_u64()
+                        .ok_or_else(|| malformed_seed("history_attempts"))?
+            }
+        })
+    }
+}
+
+fn malformed_seed(field: &str) -> WorkflowError {
+    WorkflowError::SpecInvalid(format!(
+        "the phaseSeed argument has no readable {field}; the resume that seeds the run sets it"
+    ))
 }

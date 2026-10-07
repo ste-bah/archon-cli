@@ -97,6 +97,8 @@ fn entries_seed(
 
 #[test]
 fn the_last_gate_candidate_is_carried_with_the_replies_authored_since() {
+    let mut repaired = entry("AC-2");
+    repaired["check"]["command"] = json!("stronger");
     let candidate =
         json!({"entries": [entry("AC-1"), entry("AC-2")], "supplementary": []}).to_string();
     let records = vec![
@@ -124,7 +126,7 @@ fn the_last_gate_candidate_is_carried_with_the_replies_authored_since() {
         reply(
             "acceptance-author-AC-2-7",
             "03:00:00",
-            &format!("```json\n{}\n```", entry("AC-2")),
+            &format!("```json\n{repaired}\n```"),
         ),
     ];
     let derived = derive(&records, &[], &criteria(&["AC-1", "AC-2"])).unwrap();
@@ -139,7 +141,7 @@ fn the_last_gate_candidate_is_carried_with_the_replies_authored_since() {
     assert_eq!(replies[0].call_id, "acceptance-author-AC-2-7");
     assert_eq!(
         serde_json::from_str::<Value>(&replies[0].text).unwrap(),
-        entry("AC-2")
+        repaired
     );
     assert!(invalid.is_empty(), "{invalid:?}");
     assert_eq!(carried, 2);
@@ -381,3 +383,6 @@ fn reply_extraction_reads_what_the_script_reads() {
         Some(("body-TASK-1".into(), 3))
     );
 }
+
+#[path = "workflow_decompose_seed_order_tests.rs"]
+mod order;

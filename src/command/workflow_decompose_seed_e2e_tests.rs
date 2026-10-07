@@ -490,3 +490,6 @@ async fn completed_phases_are_kept_and_the_open_body_resumes_from_its_findings()
     );
     assert!(run.calls().contains("body-TASK-1-author-5"));
 }
+
+#[path = "workflow_decompose_seed_history_e2e_tests.rs"]
+mod history;
