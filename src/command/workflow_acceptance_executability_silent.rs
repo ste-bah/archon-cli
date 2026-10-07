@@ -253,6 +253,6 @@ pub(super) fn clear(probe: &HostProbe, commit: &str, contract: &AcceptanceContra
     let _ = std::fs::remove_file(strike(probe, commit, contract, id));
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_clock_strike_tests.rs"]
 mod clock_strike_tests;
