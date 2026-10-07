@@ -94,7 +94,6 @@ fn run_js(driver: &str) -> String {
         "recordRound",
         "restoreFloor",
         "creditedRound",
-        "windowHasOutage",
         "NO_ROUND",
         "authorRoundReport",
         "recordStep",
@@ -271,31 +270,33 @@ fn a_prd_input_finding_stops_the_phase_in_observe_mode() {
     );
 }
 
-/// Observe mode still never blocks: a loop that stops making progress falls
-/// back to the best committed artifact rather than pausing or failing the run.
-/// Issue 261: one baseline attempt and the stall window, not a fixed budget.
+/// A committed artifact is not a finished one: an observe loop that stops
+/// making progress pauses (resumable) instead of returning it (Issue 288; it
+/// used to fall back), and never fails the run. Issue 261: one baseline
+/// attempt and the stall window, not a fixed budget.
 #[test]
-fn observe_falls_back_to_the_last_committed_artifact_when_the_loop_stalls() {
+fn observe_pauses_instead_of_returning_the_committed_artifact_when_the_loop_stalls() {
     let out = run_js(&driver(
         r#"[{ "text": "floor is not falsifiable", "remediation_scope": "candidate_artifact" }]"#,
         2,
         true,
     ));
     assert_eq!(
-        out, r#"{"authorCalls":4,"committed":true}"#,
-        "observe must repair until the loop stalls and then return the committed artifact: {out}"
+        out, r#"{"authorCalls":4,"error":"paused","terminalStops":[]}"#,
+        "observe must repair until the loop stalls and then pause: {out}"
     );
 }
 
-/// A stalled observe loop returns the LATEST committed artifact (Issue 261
-/// round 8). Every publication replaces the live tree, so an earlier outcome
-/// with fewer findings would hand on a receipt and subjects for a skeleton
-/// the tree no longer holds.
+/// A stalled observe loop pauses with the LATEST round's findings as its
+/// evidence (Issue 261 round 8; Issue 288: it used to return the latest
+/// committed artifact). Every publication replaces the live tree, so an
+/// earlier round with fewer findings would describe a tree that is gone.
 #[test]
-fn a_stalled_observe_loop_returns_the_latest_committed_artifact() {
+fn a_stalled_observe_loop_pauses_with_the_latest_findings() {
     let driver = r#"
 globalThis.args = { gateMode: "observe" };
 let call = 0;
+let paused = null;
 const finding = (n) => Array.from({ length: n }, (_, i) => ({
   text: "defect " + i, remediation_scope: "candidate_artifact",
 }));
@@ -305,6 +306,7 @@ const w = {
     return { status: "accepted", stopReason: "end_turn", content: "{}" };
   },
   // Two findings, then one, then two: the live tree holds the last one.
+  pause: async (id, evidence) => { paused = { id, last: evidence.last_findings }; throw new Error("paused"); },
   hostCommand: async () => ({
     publicationReceipt: { id: "commit-" + call },
     postcondition: { satisfied: true },
@@ -320,13 +322,13 @@ const policy = {
 };
 authorCandidate(w, policy).then(
   (outcome) => console.log(JSON.stringify({ kept: outcome.publicationReceipt.id })),
-  (error) => console.log(JSON.stringify({ error: String(error && error.message) })),
+  (error) => console.log(JSON.stringify({ error: String(error && error.message), calls: call, last: paused && paused.last })),
 );
 "#;
     assert_eq!(
         run_js(driver),
-        r#"{"kept":"commit-4"}"#,
-        "the phase must return the outcome that describes the live tree"
+        r#"{"error":"paused","calls":4,"last":["defect 0","defect 1"]}"#,
+        "the stalled phase must pause with the findings of the live tree"
     );
 }
 

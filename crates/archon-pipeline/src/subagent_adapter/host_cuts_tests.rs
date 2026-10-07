@@ -123,15 +123,34 @@ async fn a_long_in_flight_tool_call_is_activity_and_silence_counts_from_its_resu
 }
 
 /// The two bounds end a session with records that cannot be confused.
+/// Issue 288 round 2: the wall clock is a no-progress window that activity
+/// renews, so a session active for longer than it is not cut; a tool round
+/// that never returns holds the inactivity clock open and renews nothing, so
+/// only the wall clock can end it.
 #[tokio::test(start_paused = true)]
 async fn wall_clock_and_inactivity_cuts_are_told_apart() {
-    // Active throughout, so only the wall clock can end it.
-    let (wall_outcome, wall_cut, wall_elapsed) = drive_bounded(
+    // Active throughout, for longer than the wall clock: renewed, never cut.
+    let (active_outcome, active_cut, active_elapsed) = drive_bounded(
         async {
-            loop {
+            for _ in 0..200 {
                 tokio::time::sleep(secs(60)).await;
                 subagent_activity::note();
             }
+        },
+        Some(N),
+        Some(7_200),
+    )
+    .await;
+    assert_eq!(active_cut, None);
+    assert!(matches!(active_outcome, SubagentOutcome::Completed(_)));
+    assert_eq!(active_elapsed, secs(12_000));
+
+    // A tool round that never returns: only the wall clock can end it.
+    let (wall_outcome, wall_cut, wall_elapsed) = drive_bounded(
+        async {
+            subagent_activity::note();
+            let _round = subagent_activity::tool_round();
+            std::future::pending::<()>().await;
         },
         Some(N),
         Some(7_200),

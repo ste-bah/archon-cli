@@ -127,14 +127,17 @@ fn pause_evidence_carries_no_retired_attempt_bound() {
     );
 }
 
+/// Issue 288: a staged stall pauses observe (resumable), never falls back.
 #[test]
-fn observe_mode_falls_back_to_the_best_committed_artifact_on_a_stall() {
+fn observe_mode_pauses_on_a_staged_stall_instead_of_falling_back() {
     let out = run(
         "observe",
         &format!(r##"(() => {{ {HELPERS} return {{ findings: () => [named(1)] }}; }})()"##),
         BODY,
     );
-    assert_eq!(out["accepted"], true, "{out}");
+    assert_paused(&out);
+    assert!(out.get("accepted").is_none(), "{out}");
     assert_eq!(out["calls"], 4, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_eq!(pause_ids(&out), ["pause-body-TASK-X-010-1"], "{out}");
+    assert_eq!(evidence(&out, 0)["reason"], "no_progress", "{out}");
 }

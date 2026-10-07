@@ -356,10 +356,8 @@ async function authorCandidate(w, policy) {
       authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content));
     }
     // A committed artifact is not the finished one: repairable findings are
-    // still fed back below in either mode. Every publication replaces the
-    // live tree, so observe's fallback is the LATEST committed outcome: only
-    // its receipt and subjects describe what the tree now holds (an earlier
-    // outcome with fewer findings would name a skeleton that is gone).
+    // still fed back below in either mode, and a loop that stalls on them
+    // pauses (resumable) in either mode.
     if (routed.fatal.length > 0) {
       await stopFixed(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
     }

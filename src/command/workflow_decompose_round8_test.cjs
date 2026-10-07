@@ -1,4 +1,5 @@
-// Issue 261 round 8: the binding progress measure and observe's fallback.
+// Issue 261 round 8: the binding progress measure, and (Issue 288) observe's
+// stall pause.
 // Progress = a higher tier, OR a later first failing deterministic stage, OR
 // at the same first failing stage a smaller TOTAL of distinct deterministic
 // defects across all stages. Judge text is not measured.
@@ -69,22 +70,26 @@ async function sameStageTotalMustFall() {
   assert.equal(out.error, 'paused');
   assert.equal(out.calls, 4);
 }
-// Finding 5: observe returns the latest publication, whose subjects match
-// the live tree, not an earlier one with fewer findings.
-async function observeLatest() {
+// Finding 5, under the Issue 288 rule: a stalled observe loop pauses
+// (resumable) and returns no artifact. Its evidence names the LATEST round's
+// findings, which match the live tree, not an earlier round with fewer.
+async function observeStallPausesWithLatestFindings() {
   const out = await author(n => range(n === 2 ? 1 : 2, i => det('invalid_verifier', `TASK-X-${i}`, 'contracts')), {
     mode: 'observe',
     outcome: n => ({ subjects: n === 2 ? [{ taskId: 'TASK-X-001' }] : [{ taskId: 'TASK-X-001' }, { taskId: 'TASK-X-002' }] }),
   });
-  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
-  assert.equal(out.result.publicationReceipt.call_id, `publication-${out.calls}`);
-  assert.deepEqual(Array.from(out.result.subjects, s => s.taskId), ['TASK-X-001', 'TASK-X-002']);
+  assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
+  assert.equal(out.result, undefined);
+  assert.equal(out.calls, 5);
+  assert.equal(out.pauses.length, 1);
+  assert.equal(out.pauses[0].reason, 'no_progress');
+  assert.deepEqual(Array.from(out.pauses[0].last_findings), ['invalid_verifier TASK-X-0', 'invalid_verifier TASK-X-1']);
 }
 (async () => {
   let failed = 0;
   for (const [name, test] of [['finding 2 later-stage repairs', laterStageRepairs],
     ['finding 1 ownership identities', ownership], ['finding 3 element shapes', shapes],
-    ['same-stage total must fall', sameStageTotalMustFall], ['finding 5 observe latest', observeLatest]]) {
+    ['same-stage total must fall', sameStageTotalMustFall], ['finding 5 observe stall pauses with the latest findings', observeStallPausesWithLatestFindings]]) {
     try { await test(); console.log(`PASS ${name}`); }
     catch (error) { failed++; console.error(`FAIL ${name}: ${error.message}`); }
   }

@@ -308,13 +308,6 @@ function recordOperational(progress, call, summary, advanced = false, round = NO
   return creditedRound(progress, { call, kind: "operational", findings: null, progress: false, summary: boundText(summary) }, round, advanced);
 }
 
-// Observe may end a stalled loop on its latest commit only when every attempt
-// of the window was answered: an outage never judged what it would have
-// produced, so a window that holds one pauses in either mode.
-function windowHasOutage(progress) {
-  return progress.stalledOperational > 0;
-}
-
 // Why the loop must stop now, or null while it may make another attempt.
 function stallReason(progress) {
   if (progress.stalled >= STALL_ATTEMPTS) {
