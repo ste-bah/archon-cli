@@ -114,6 +114,18 @@ impl WorkflowHostCommandExecutor for CatalogHost {
     ) -> archon_workflow::WorkflowResult<Option<serde_json::Value>> {
         self.keys.limits_fingerprint(request)
     }
+    fn logic_version(
+        &self,
+        request: &archon_workflow::HostCommandRequest,
+    ) -> archon_workflow::WorkflowResult<Option<u32>> {
+        self.keys.logic_version(request)
+    }
+    fn outcome_logic_holds(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        self.keys.outcome_logic_holds(record)
+    }
     async fn execute(
         &self,
         request: archon_workflow::HostCommandRequest,
@@ -292,3 +304,5 @@ async fn upgrade_358_catalog_environment_reruns_freeze_only() {
 
 #[path = "workflow_live_v2_upgrade_limit_tests.rs"]
 mod limit_tests;
+#[path = "workflow_live_v2_upgrade_logic_tests.rs"]
+mod logic_tests;

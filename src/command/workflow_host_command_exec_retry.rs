@@ -7,6 +7,7 @@ use crate::command::workflow_host_command_operational::{
     pause_for_unsettled_publish, pause_run, record_retry, reported_progress, require_run_owned,
     unsettled_publish_evidence,
 };
+use crate::command::workflow_host_command_supervisor::HostCommandControlHandle;
 
 impl FixedHostCommandExecutor {
     /// Runs `command` until it completes. A timeout or an incomplete,
@@ -122,6 +123,56 @@ impl FixedHostCommandExecutor {
                         &report,
                         cause,
                     ));
+                }
+            }
+        }
+    }
+
+    /// One attempt of `request`, signalled when the run is paused or
+    /// cancelled meanwhile (moved from `workflow_host_command_exec.rs`).
+    async fn execute_process_with_run_control(
+        &self,
+        request: ResolvedHostCommand,
+        control: HostCommandControl,
+        handle: HostCommandControlHandle,
+        expected_generation: u64,
+    ) -> WorkflowResult<SupervisedProcessOutput> {
+        let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
+        let run_id = self
+            .run_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                WorkflowError::StateCorrupt(
+                    "fixed HostCommand run root has no UTF-8 run id".to_string(),
+                )
+            })?
+            .to_string();
+        // A run paused meanwhile reports the pause, never a cancellation.
+        crate::command::workflow_host_command_operational::require_run_owned(
+            &store,
+            &run_id,
+            expected_generation,
+        )?;
+        let work = self.process.execute(request, control);
+        tokio::pin!(work);
+        let mut poll = tokio::time::interval(std::time::Duration::from_millis(100));
+        loop {
+            tokio::select! {
+                biased;
+                result = &mut work => return result,
+                _ = poll.tick() => {
+                    let Ok(run) = store.load_state(&run_id) else {
+                        continue;
+                    };
+                    if let Some(signal) = crate::command::workflow_host_command_operational::supervisor_signal(
+                        &store,
+                        &run,
+                        expected_generation,
+                    ) {
+                        handle.signal(signal)?;
+                        return work.await;
+                    }
                 }
             }
         }

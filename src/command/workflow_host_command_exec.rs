@@ -30,7 +30,7 @@ use super::workflow_host_command_publish::{
     LiveMutationSentinels, audit_prepared_publication, prepare_staging, publish_audited,
 };
 use super::workflow_host_command_supervisor::{
-    HostCommandControl, HostCommandControlHandle, SupervisedProcessOutput, supervise_process_group,
+    HostCommandControl, SupervisedProcessOutput, supervise_process_group,
 };
 use super::workflow_host_envelope_seal::{
     ENVELOPE_FILE, EnvelopeCleanup, owner_only, seal_staged_envelope,
@@ -65,6 +65,16 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
         _request: &HostCommandRequest,
     ) -> WorkflowResult<Option<serde_json::Value>> {
         Ok(None)
+    }
+    /// Issue 361: the logic version a call of `request` is judged by,
+    /// stamped into its outcome; `None` for an executor that versions none.
+    fn logic_version(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<u32>> {
+        Ok(None)
+    }
+    /// Issue 361: whether a recorded outcome was judged by the logic this
+    /// build runs; every reuse and replay path asks before answering from it.
+    fn outcome_logic_holds(&self, _record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        Ok(true)
     }
 
     async fn execute(
@@ -104,6 +114,8 @@ impl HostCommandProcessAdapter for DirectHostCommandProcessAdapter {
 pub(crate) struct FixedHostCommandExecutor {
     catalog: CommandCapabilityCatalog,
     launch_catalog: Option<CommandCapabilityCatalog>,
+    /// Issue 361: each capability's logic version, part of its reuse key.
+    logic: BTreeMap<String, u32>,
     context: HostCommandResolutionContext,
     run_root: PathBuf,
     process: Arc<dyn HostCommandProcessAdapter>,
@@ -134,6 +146,7 @@ impl FixedHostCommandExecutor {
         Self {
             catalog,
             launch_catalog: None,
+            logic: super::workflow_host_command_logic::versions(),
             context,
             run_root,
             process,
@@ -162,54 +175,6 @@ impl FixedHostCommandExecutor {
         call_id: &str,
     ) -> WorkflowResult<ResolvedHostCommand> {
         resolve_host_command(request, &self.catalog, context, call_id)
-    }
-
-    async fn execute_process_with_run_control(
-        &self,
-        request: ResolvedHostCommand,
-        control: HostCommandControl,
-        handle: HostCommandControlHandle,
-        expected_generation: u64,
-    ) -> WorkflowResult<SupervisedProcessOutput> {
-        let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
-        let run_id = self
-            .run_root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                WorkflowError::StateCorrupt(
-                    "fixed HostCommand run root has no UTF-8 run id".to_string(),
-                )
-            })?
-            .to_string();
-        // A run paused meanwhile reports the pause, never a cancellation.
-        crate::command::workflow_host_command_operational::require_run_owned(
-            &store,
-            &run_id,
-            expected_generation,
-        )?;
-        let work = self.process.execute(request, control);
-        tokio::pin!(work);
-        let mut poll = tokio::time::interval(std::time::Duration::from_millis(100));
-        loop {
-            tokio::select! {
-                biased;
-                result = &mut work => return result,
-                _ = poll.tick() => {
-                    let Ok(run) = store.load_state(&run_id) else {
-                        continue;
-                    };
-                    if let Some(signal) = super::workflow_host_command_operational::supervisor_signal(
-                        &store,
-                        &run,
-                        expected_generation,
-                    ) {
-                        handle.signal(signal)?;
-                        return work.await;
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -266,6 +231,14 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         request: &HostCommandRequest,
     ) -> WorkflowResult<Option<serde_json::Value>> {
         self.limits_fingerprint_for(request)
+    }
+
+    fn logic_version(&self, request: &HostCommandRequest) -> WorkflowResult<Option<u32>> {
+        self.logic_version_for(&request.command_id).map(Some)
+    }
+
+    fn outcome_logic_holds(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        self.outcome_logic_holds_for(record)
     }
 
     async fn execute(

@@ -6,7 +6,8 @@
 //! build's freeze entry validator. The script turns that into its loop state
 //! with its own rules (`workflow_decompose_v1_seed.js`). The acceptance
 //! candidate it assembles goes to the gate again; a submission whose bytes a
-//! recorded gate already judged keeps that recorded verdict (Issue 361).
+//! recorded gate already judged keeps that recorded verdict while the gate's
+//! logic version is unchanged (Issue 361, `workflow_host_command_logic`).
 //!
 //! Order is the script's own, never the wall clock: an author reply's place is
 //! its call ordinal (`round * stride + 1` for acceptance), and a gate's place
