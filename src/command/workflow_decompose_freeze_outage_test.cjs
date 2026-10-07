@@ -69,12 +69,14 @@ async function twoOutagesInARow() {
 }
 
 // A persisting outage pauses with the operational reason; the resumed run
-// retries the freeze, still without an author call.
+// retries the freeze, still without an author call. The first outage credits
+// the round that added the missing entries; the next three stall the window.
 async function persistingOutagePausesThenResumes() {
-  const out = await run([outage, outage, outage, clean]);
+  const out = await run([outage, outage, outage, outage, clean]);
   assert.equal(out.error, undefined);
   assert.deepEqual(out.authored, ['A', 'B', 'C']);
-  assert.equal(out.stdins.length, 4);
+  assert.equal(out.stdins.length, 5);
+  assert.deepEqual(Array.from(out.pauses[0].progress_history, step => step.progress), [true, false, false, false]);
   assert.equal(out.pauses.length, 1);
   assert.equal(out.pauses[0].reason, 'operational_no_progress');
 }

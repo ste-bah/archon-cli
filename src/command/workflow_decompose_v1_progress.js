@@ -301,8 +301,9 @@ function recordAnswered(progress, call, kind, advanced = false, answered = true,
 
 // Records an author call the provider never answered, or a gate that never
 // judged the candidate; `round` is the author round that made the attempt. A
-// pass in it is progress whatever the gate does next: an outage measures
-// nothing, and a pass is credited once per episode, so this stays bounded.
+// pass in it, or a previously missing entry it added (`advanced`), is
+// progress whatever the gate does next: an outage measures nothing, a pass is
+// credited once per episode and an entry is added once, so this stays bounded.
 function recordOperational(progress, call, summary, advanced = false, round = NO_ROUND) {
   return creditedRound(progress, { call, kind: "operational", findings: null, progress: false, summary: boundText(summary) }, round, advanced);
 }

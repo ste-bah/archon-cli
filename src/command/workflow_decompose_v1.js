@@ -341,10 +341,10 @@ async function authorCandidate(w, policy) {
     const outcome = await w.hostCommand(policy.capability, { stdin: authored.content });
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     if (routed.operational) {
-      // The gate never judged the candidate; only a pass in the round that
-      // made it can be progress.
+      // The gate never judged the candidate; only the round that made it can
+      // be progress: a pass in it, or a previously missing entry it added.
       if (!measuredReplies) progress.answered += 1;
-      recordOperational(progress, call, routed.operational, false, round);
+      recordOperational(progress, call, routed.operational, advanced, round);
       lastFindings = [`host gate operational failure: ${routed.operational}`];
       continue;
     }
@@ -370,6 +370,8 @@ async function authorCandidate(w, policy) {
     history.push({ attempt, findings: routed.retry.slice() });
     feedback = routed.retry;
     lastFindings = routed.retry.slice();
+    // `advanced` is not credited here on purpose: the gate measured the whole
+    // candidate, and that measure decides (Issue 261).
     recordAttempt(progress, call, routed.retryFindings, !measuredReplies, round);
     openRepairEpisode(progress);
   }

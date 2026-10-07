@@ -18,6 +18,9 @@ const clean = () => ({publicationReceipt:{call_id:'freeze'}, postcondition:{sati
 const outage = () => ({gateEnvelope:{operational_error:{text:'judge down'}}});
 const refute = ids => () => ({...clean(), gateEnvelope:{policy_findings:ids.map(id => ({
   text:`check '${id}' was refuted: repair ${id}`, subject:id, remediation_scope:'candidate_artifact'}))}});
+// The judge names an owed supplementary entry for a PRD requirement.
+const owe = req => () => ({gateEnvelope:{policy_findings:[{remediation_scope:'candidate_artifact', subject:'SUP',
+  text:`check 'SUP-${req}': PRD requirement ${req} is covered by no acceptance check; author it: must hold ${req}`}]}});
 
 // script[id][version - 1]: 'ok', a shape defect count, 'bad' (unparseable)
 // or 'down' (the call fails in transport); the last value repeats. A
@@ -26,7 +29,7 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
   const ids = Object.keys(script);
   const decided = new Map();
   const at = (id, version, task) => typeof script[id] === 'function' ? script[id](version, task)
-    : script[id][Math.min(version, script[id].length) - 1];
+    : !script[id] ? 'ok' : script[id][Math.min(version, script[id].length) - 1];
   const ctx = {args:{acceptanceCriteria:Object.fromEntries(ids.map(id => [id, id])), authorMaxParallelism:cap, gateMode:mode},
     __archonValidateAcceptanceEntry: (id, serialized) => {
       const value = decided.get(`${id}@${JSON.parse(serialized).version}`);
@@ -212,6 +215,30 @@ async function observeJudgedReturns() {
   assert.equal(out.gate, 4, 'first refutation, then 3 judged repeats');
 }
 
+// N1: an owed entry completed in a clean round is progress even when the
+// freeze then has an outage (the round added a previously missing entry).
+async function newEntryBeforeOutages() {
+  const out = await run({A:['ok']}, [refute(['A']), owe('REQ-1'), outage, outage, clean]);
+  assert.equal(out.error, undefined, `must return, got ${JSON.stringify(out.history)}`);
+  assert.equal(out.gate, 5);
+  assert.deepEqual(out.history, [], 'no pause');
+}
+// A round that adds no entry and passes nothing is not progress at an outage.
+async function noNewEntryOutageIsNotProgress() {
+  const out = await run({A:['ok']}, [refute(['A']), refute(['A']), outage, outage, outage, clean]);
+  assert.equal(out.error, 'paused');
+  assert.deepEqual(out.history.map(step => step.kind), ['judged', 'judged', 'operational', 'operational']);
+  assert.deepEqual(out.flags, [true, false, false, false]);
+}
+// The added entry is credited at the first outage only; later outages stall.
+async function newEntryCreditedOnce() {
+  const out = await run({A:['ok']}, [refute(['A']), owe('REQ-1'), outage, outage, outage, outage, clean]);
+  assert.equal(out.error, 'paused', 'bounded: repeated outages after one credit pause');
+  assert.deepEqual(out.history.map(step => step.kind),
+    ['judged', 'judged', 'operational', 'operational', 'operational', 'operational']);
+  assert.deepEqual(out.flags, [true, false, true, false, false, false]);
+}
+
 const tests = [
   ['A passes while B is unparseable: progress', passBesideUnparseable],
   ['A passes while B is down in transport: progress', passBesideTransport],
@@ -234,6 +261,9 @@ const tests = [
   ['observe pauses on outages after a judged repeat', observeOutagePauses],
   ['observe pauses on one outage inside a judged window', observeOneOutagePauses],
   ['observe returns the latest commit on judged repeats (control)', observeJudgedReturns],
+  ['N1 probe: a new entry in a clean round before two outages is progress', newEntryBeforeOutages],
+  ['N1 edge: a round with no new entry before an outage is not progress', noNewEntryOutageIsNotProgress],
+  ['N1 edge: a new entry before outages is credited once', newEntryCreditedOnce],
 ];
 module.exports = tests;
 if (require.main === module) (async () => {
