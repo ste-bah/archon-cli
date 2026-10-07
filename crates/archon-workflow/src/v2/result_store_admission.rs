@@ -37,13 +37,36 @@ impl WorkflowV2ResultStore {
         Ok(record)
     }
     fn admission_path(&self, record: &WorkflowV2CallRecord) -> PathBuf {
-        let identity = format!(
-            "{}:{}:{}",
-            record.call.id, record.attempt, record.input_hash
-        );
+        self.admission_path_for(&record.call.id, record.attempt, &record.input_hash)
+    }
+    fn admission_path_for(&self, call_id: &str, attempt: u32, input_hash: &str) -> PathBuf {
+        let identity = format!("{call_id}:{attempt}:{input_hash}");
         self.root
             .join("admissions")
             .join(format!("{}.json", blake3::hash(identity.as_bytes())))
+    }
+    /// The attempt a NEW dispatch of `call_id` with `input_hash` takes. An
+    /// admission that never got a call record (a dispatch an edit superseded,
+    /// or one a crash interrupted) used its attempt: the new dispatch takes
+    /// the next one, so it gets its own admission order and start time
+    /// instead of inheriting the old dispatch's. The old admission stays as
+    /// evidence.
+    pub fn next_dispatch_attempt(&self, call_id: &str, input_hash: &str) -> WorkflowResult<u32> {
+        let mut attempt = self.next_attempt(call_id)?;
+        loop {
+            let path = self.admission_path_for(call_id, attempt, input_hash);
+            match fs::symlink_metadata(&path) {
+                Ok(_) => {
+                    attempt = attempt.checked_add(1).ok_or_else(|| {
+                        WorkflowError::StateCorrupt(format!(
+                            "call {call_id} has no attempt number left"
+                        ))
+                    })?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(attempt),
+                Err(error) => return Err(WorkflowError::io(&path, error)),
+            }
+        }
     }
     /// Record the start without exposing a pending call as a completed result.
     pub fn save_call_admission(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<()> {
@@ -73,3 +96,7 @@ impl WorkflowV2ResultStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "result_store_admission_tests.rs"]
+mod admission_tests;

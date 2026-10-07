@@ -32,9 +32,15 @@ pub(crate) fn run_store_scope(
         // A malformed store is a refusal, never an unguarded dispatch.
         scope.admission = Some(match v2.session_workflow_store() {
             Ok(store) => store.admission_fence(&v2.run_id()),
-            Err(error) => archon_tools::workflow_read_guard::AdmissionFence::new(move |_| {
-                Err(error.to_string())
-            }),
+            Err(error) => {
+                let reason = error.to_string();
+                archon_tools::workflow_read_guard::AdmissionFence::new(v2.run_id(), move || {
+                    Err(archon_tools::workflow_read_guard::AdmissionStop {
+                        kind: archon_tools::workflow_read_guard::StopKind::Refused,
+                        reason: reason.clone(),
+                    })
+                })
+            }
         });
     }
     match artifacts.filter(|context| !context.is_empty()) {

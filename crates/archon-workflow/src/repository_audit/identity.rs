@@ -64,14 +64,44 @@ pub(super) fn require_current_generation(
 }
 
 impl super::runtime::AuditRuntime {
-    /// Capture audit artifacts while this handle still owns the run.
+    /// Capture audit artifacts while this handle still owns the run. The
+    /// capture's git work holds no run lock; ownership is checked in short
+    /// critical sections before and after it (Issue 291).
     pub fn capture_snapshot(
         &self,
         root: &std::path::Path,
         paths: &[String],
         store: &crate::WorkflowV2ResultStore,
     ) -> WorkflowResult<super::runtime::Snapshot> {
-        self.with_executor_lock(|| super::runtime::Snapshot::capture(root, paths, store))
+        self.fenced_snapshot(root, || {
+            super::runtime::Snapshot::capture(root, paths, store)
+        })
+    }
+    /// A view of already captured wave source, fenced the same way.
+    pub fn snapshot_from_sealed(
+        &self,
+        root: &std::path::Path,
+        source: &crate::write_coordinator::worktree_isolation::SealedSource,
+        plan: &crate::write_coordinator::WritePlan,
+        store: &crate::WorkflowV2ResultStore,
+    ) -> WorkflowResult<super::runtime::Snapshot> {
+        self.fenced_snapshot(root, || {
+            super::runtime::Snapshot::from_sealed(root, source, plan, store)
+        })
+    }
+    fn fenced_snapshot(
+        &self,
+        root: &std::path::Path,
+        capture: impl FnOnce() -> WorkflowResult<super::runtime::Snapshot>,
+    ) -> WorkflowResult<super::runtime::Snapshot> {
+        self.with_executor_lock(|| Ok(()))?;
+        let snapshot = capture()?;
+        if let Err(refused) = self.with_executor_lock(|| Ok(())) {
+            // Not this handle's to publish: the private view goes too.
+            super::snapshot::discard(root, &snapshot.root);
+            return Err(refused);
+        }
+        Ok(snapshot)
     }
     pub(super) fn require_executor(&self) -> WorkflowResult<()> {
         crate::control_pause::require_executor(

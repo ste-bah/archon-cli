@@ -65,6 +65,22 @@ impl Tool for BlockedTool {
         ToolResult::success("executed")
     }
 }
+/// Bound every wait: a regression must fail the child, never hang it.
+async fn bounded<T>(what: &str, work: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(std::time::Duration::from_secs(60), work)
+        .await
+        .unwrap_or_else(|_| panic!("{what} did not happen within 60 s"))
+}
+
+/// What a spawned path reported: kept (with its text), a control stop, or an
+/// ordinary failure.
+#[derive(Debug, PartialEq)]
+enum Seen {
+    Kept,
+    Stopped,
+    Failed(String),
+}
+
 async fn probe(case: &str) {
     let (temp, store, id) = new_run();
     set_status(&store, &id, RunStatus::Running);
@@ -78,74 +94,110 @@ async fn probe(case: &str) {
         ..Default::default()
     };
     let barrier = Arc::new(Barrier::default());
-    let (work, expected): (tokio::task::JoinHandle<bool>, usize) = if case.starts_with("provider") {
-        let expected = 0;
+    let provider = case.starts_with("provider");
+    if provider {
         install_subagent_executor(Arc::new(Executor(barrier.clone())));
-        let request: SubagentRequest = serde_json::from_value(serde_json::json!({
-            "prompt":"inspect", "max_turns":100, "timeout_secs":86400
-        }))
-        .unwrap();
-        (
-            tokio::spawn(async move {
-                matches!(
-                    archon_tools::agent_tool::run_subagent_foreground_with_system(
-                        "owned-execution".into(),
-                        request,
-                        Vec::new(),
-                        Default::default(),
-                        ctx,
-                    )
-                    .await,
-                    SubagentOutcome::Failed(_)
-                )
-            }),
-            expected,
-        )
-    } else {
+    }
+    let dispatch = |ctx: ToolContext| {
+        let barrier = barrier.clone();
         let level = match case {
             "tool_risky" => PermissionLevel::Risky,
             "tool_dangerous" => PermissionLevel::Dangerous,
             _ => PermissionLevel::Safe,
         };
-        let mut registry = archon_core::dispatch::ToolRegistry::new();
-        registry.register(Box::new(BlockedTool(barrier.clone(), level)));
-        (
-            tokio::spawn(async move {
-                registry
+        tokio::spawn(async move {
+            if provider {
+                let request: SubagentRequest = serde_json::from_value(serde_json::json!({
+                    "prompt":"inspect", "max_turns":100, "timeout_secs":86400
+                }))
+                .unwrap();
+                match archon_tools::agent_tool::run_subagent_foreground_with_system(
+                    "owned-execution".into(),
+                    request,
+                    Vec::new(),
+                    Default::default(),
+                    ctx,
+                )
+                .await
+                {
+                    SubagentOutcome::Completed(_) => Seen::Kept,
+                    SubagentOutcome::Cancelled => Seen::Stopped,
+                    other => Seen::Failed(format!("{other:?}")),
+                }
+            } else {
+                let mut registry = archon_core::dispatch::ToolRegistry::new();
+                registry.register(Box::new(BlockedTool(barrier, level)));
+                let result = registry
                     .dispatch("Probe", serde_json::json!({}), &ctx)
-                    .await
-                    .is_error
-            }),
-            0,
-        )
+                    .await;
+                match (result.is_error, result.content.as_str()) {
+                    (false, _) => Seen::Kept,
+                    (true, text) if text.contains("workflow run control:") => Seen::Stopped,
+                    (true, text) => Seen::Failed(text.to_string()),
+                }
+            }
+        })
     };
-    barrier.entered.notified().await;
+    let work = dispatch(ctx.clone());
+    bounded(
+        "admission of the first dispatch",
+        barrier.entered.notified(),
+    )
+    .await;
     assert_eq!(
         barrier.admitted.load(Ordering::SeqCst),
-        expected,
+        0,
         "named await reached"
     );
     let ctl = archon_workflow::LifecycleController::new(store);
+    let superseded = !matches!(case, "provider_pause" | "provider_cancel" | "tool_pause");
     if case == "provider_cancel" {
         ctl.apply(&id, archon_workflow::LifecycleAction::Cancel)
             .unwrap();
     } else {
         ctl.apply(&id, archon_workflow::LifecycleAction::Pause)
             .unwrap();
-        if case != "provider_pause" {
+        if superseded {
             ctl.apply(&id, archon_workflow::LifecycleAction::Resume)
                 .unwrap();
         }
     }
     barrier.release.notify_one();
-    assert!(
-        work.await.unwrap(),
-        "the spawned path must refuse its old owner"
-    );
+    let seen = bounded("the first dispatch's end", work).await.unwrap();
+    if superseded {
+        // A new executor owns the run: the old owner's work is a typed stop,
+        // never a failure, and it did not go on.
+        assert_eq!(seen, Seen::Stopped, "{case}");
+        assert_eq!(barrier.admitted.load(Ordering::SeqCst), 0, "no progress");
+    } else {
+        // Admitted before a pause or cancel of its own owner: the work that
+        // finished before the fence looked is kept; otherwise it is a typed
+        // stop. Which one depends on when the fence looks (the deterministic
+        // order is covered by `archon_tools` admission tests); never a failure.
+        let finished = barrier.admitted.load(Ordering::SeqCst) == 1;
+        match seen {
+            Seen::Kept => assert!(finished, "{case}: a kept result finished"),
+            Seen::Stopped => {}
+            Seen::Failed(text) => panic!("{case}: a pause is never a failure: {text}"),
+        }
+    }
+    // Nothing new is admitted after the stop: a second dispatch never enters.
+    let second = bounded("the refused second dispatch", dispatch(ctx))
+        .await
+        .unwrap();
     assert_eq!(
-        barrier.admitted.load(Ordering::SeqCst),
-        expected,
-        "no subsequent admission"
+        second,
+        Seen::Stopped,
+        "{case}: a new admission is a typed stop"
+    );
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            barrier.entered.notified()
+        )
+        .await
+        .is_err(),
+        "{case}: the second dispatch never entered its executor or tool"
     );
 }
 
@@ -160,7 +212,11 @@ fn round3_spawned_admission_child() {
         .enable_all()
         .build()
         .unwrap()
-        .block_on(probe(&case));
+        .block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(240), probe(&case))
+                .await
+                .expect("the probe must end; a hang is a failure")
+        });
 }
 fn child(case: &str) {
     let output = archon_shell::spawn::command(std::env::current_exe().unwrap())
@@ -197,4 +253,8 @@ fn round3_spawned_risky_tool() {
 #[test]
 fn round3_spawned_dangerous_tool() {
     child("tool_dangerous");
+}
+#[test]
+fn round4_spawned_tool_pause_is_a_stop_not_a_tool_failure() {
+    child("tool_pause");
 }

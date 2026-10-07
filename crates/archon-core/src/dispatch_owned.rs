@@ -13,7 +13,12 @@ impl ToolRegistry {
             .as_ref()
             .and_then(|store| store.admission.as_ref())
         {
-            Some(fence) => fence.execute(work).await.unwrap_or_else(ToolResult::error),
+            // A control stop reaches here only without an enclosing fence;
+            // its text names the control decision, never a tool failure.
+            Some(fence) => fence
+                .execute(work)
+                .await
+                .unwrap_or_else(|stop| ToolResult::error(stop.to_string())),
             None => work.await,
         }
     }

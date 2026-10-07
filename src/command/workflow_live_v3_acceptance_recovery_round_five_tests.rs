@@ -183,8 +183,11 @@ fn recovery_refreeze_reruns_skeleton_coverage() {
     );
 }
 
+/// The pin file is keyed by the canonical task root, so a pending record of
+/// another root is damaged evidence: it refuses by name with its remedy, and
+/// is never skipped silently into an ordinary freeze (round 4, Issue 305).
 #[test]
-fn stale_recovery_root_does_not_block_a_fresh_freeze() {
+fn stale_recovery_root_refuses_a_fresh_freeze_by_name() {
     let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
     recover(&run);
     let (path, mut value) = receipt(&run);
@@ -199,9 +202,22 @@ fn stale_recovery_root_does_not_block_a_fresh_freeze() {
         None,
     )
     .unwrap();
+    let refused = prepared
+        .record_recovery_refreeze()
+        .expect_err("a foreign pending authority must not be skipped");
+    let text = refused.to_string();
     assert!(
-        prepared.record_recovery_refreeze().is_ok(),
-        "stale authority is skipped, logged and retained for retry"
+        text.contains("names task root /missing-old-task-root"),
+        "{text}"
+    );
+    assert!(
+        text.contains("re-freeze the task set and start a new run"),
+        "{text}"
+    );
+    let (_, retained) = receipt(&run);
+    assert_eq!(
+        retained, value,
+        "the authority is retained unchanged for the operator"
     );
 }
 
@@ -332,4 +348,84 @@ async fn moved_aside_pin_digest_is_bound_before_adoption() {
         "untrusted evidence must refuse before re-freeze"
     );
     assert_eq!(run.set.contract_bytes(), contract_before);
+}
+
+/// The completed receipt binds the actual moved-aside pin digest. Even a
+/// writer who rewrites the receipt AND its unfreeze-log authority together
+/// cannot point the moved pin at other bytes, at no bytes, or at nothing
+/// (round 4 restores this coverage; the earlier refusal now stops the
+/// inspection-file case before the receipt check is reached).
+#[tokio::test]
+async fn adopted_receipt_binds_the_moved_pin_digest() {
+    for (mode, named) in [
+        (
+            "other-preimage",
+            "recovery prior pin does not match its moved-aside digest",
+        ),
+        ("missing-preimage", "recovery evidence preimage is missing"),
+        ("removed", "recovery prior has no moved-aside pin digest"),
+    ] {
+        let run = run_fixture_with(&[("AC-F-001", "test -f present", true)]);
+        let launch = run.set.pin().identity();
+        pre_implementation_head(&run);
+        recover(&run);
+        stage(&run, &accepting()).await;
+        verify(&run, &launch).expect("the untampered recovery must be adoptable");
+        let pin_name = run
+            .set
+            .pin_path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let digest = match mode {
+            "other-preimage" => {
+                // A real pin, but not the one recovery moved aside.
+                let other = std::fs::read(run.set.pin_path()).unwrap();
+                let history =
+                    archon_workflow::task_set_lineage::ChainHistory::for_pin(&run.set.pin_path());
+                Some(history.put(&other).unwrap().0)
+            }
+            "missing-preimage" => Some(archon_workflow::task_set_contract::content_digest(
+                b"absent",
+            )),
+            _ => None,
+        };
+        let retarget = |evidence: &mut serde_json::Value| {
+            let evidence = evidence.as_object_mut().unwrap();
+            let key = evidence
+                .keys()
+                .find(|target| target.ends_with(&pin_name))
+                .cloned()
+                .expect("the receipt names the moved pin");
+            match &digest {
+                Some(digest) => evidence.insert(key, digest.clone().into()),
+                None => evidence.remove(&key),
+            };
+        };
+        let (path, mut value) = receipt(&run);
+        retarget(&mut value[0]["evidence"]);
+        std::fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let log = run.set.pin_path().with_extension("publish-recovery.log");
+        let rewritten = std::fs::read_to_string(&log)
+            .unwrap()
+            .lines()
+            .map(
+                |line| match serde_json::from_str::<serde_json::Value>(line) {
+                    Ok(mut event)
+                        if event
+                            .get("authority")
+                            .is_some_and(|a| a.get("evidence").is_some()) =>
+                    {
+                        retarget(&mut event["authority"]["evidence"]);
+                        format!("{event}\n")
+                    }
+                    _ => format!("{line}\n"),
+                },
+            )
+            .collect::<String>();
+        std::fs::write(&log, rewritten).unwrap();
+        let refused = verify(&run, &launch).expect_err("the receipt must bind the moved pin");
+        assert!(refused.contains(named), "{mode}: {refused}");
+    }
 }

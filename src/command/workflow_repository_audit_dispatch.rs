@@ -17,7 +17,30 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
         store: Option<&WorkflowV2ResultStore>,
         _: Option<&WorkflowV2TaskUniverse>,
     ) -> WorkflowResult<WorkflowV2Result> {
-        require_owner(store)?;
+        // The one ownership fence (Issue 291): the session's bound store
+        // checks before every poll of the whole audit call, and never
+        // recreates a run directory a successor removed.
+        let work = self.run_owned(task, root, execution, adapter, store);
+        match store {
+            Some(v2) => {
+                v2.session_workflow_store()?
+                    .execute_owned(&v2.run_id(), work)
+                    .await
+            }
+            None => work.await,
+        }
+    }
+}
+
+impl AuditDispatch {
+    async fn run_owned(
+        &self,
+        task: &str,
+        root: Option<String>,
+        execution: &WorkflowV2CallExecution,
+        adapter: &WorkflowV2AgentAdapter,
+        store: Option<&WorkflowV2ResultStore>,
+    ) -> WorkflowResult<WorkflowV2Result> {
         let run_store = super::super::super::run_store_scope(store, root.as_deref(), None);
         let mut request =
             archon_workflow::v2::call_data::v2_agent_request(task, root, execution, None);
@@ -59,7 +82,6 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
             )))
             .await
             .map_err(|error| WorkflowError::NotificationDelivery(error.to_string()))?;
-        require_owner(store)?;
         let started = std::time::Instant::now();
         let mut client = self.0.with_timeout_secs(timeout, timeout_source);
         if let Some(v2) = store {
@@ -70,21 +92,11 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
             Box::pin(adapter.run_with_repair(&client, &request)),
         );
         let call = async {
-            let work = async {
-                match &scope {
-                    Some(s) => s.run(call).await,
-                    None => call.await,
-                }
-                .map_err(archon_workflow::WorkflowV2AgentError::into_workflow_error)
-            };
-            match store {
-                Some(v2) => {
-                    v2.session_workflow_store()?
-                        .execute_owned(&v2.run_id(), work)
-                        .await
-                }
-                None => work.await,
+            match &scope {
+                Some(s) => s.run(call).await,
+                None => call.await,
             }
+            .map_err(archon_workflow::WorkflowV2AgentError::into_workflow_error)
         };
         let result = if let Some(landing) = archon_workflow::repository_audit::landing::current() {
             let seconds = execution
@@ -102,7 +114,6 @@ impl archon_workflow::WorkflowAgentDispatch for AuditDispatch {
         } else {
             call.await
         };
-        require_owner(store)?;
         self.0
             .ui_sink
             .emit(WorkflowUiEvent::Text(format!(
@@ -150,24 +161,4 @@ impl archon_tools::audit_landing::LandingHost for LandingBridge {
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
-}
-
-fn require_owner(store: Option<&WorkflowV2ResultStore>) -> WorkflowResult<()> {
-    let Some(v2) = store else {
-        return Ok(());
-    };
-    let root = v2
-        .root()
-        .parent()
-        .and_then(std::path::Path::parent)
-        .ok_or_else(|| WorkflowError::StateCorrupt("audit store has no run directory".into()))?;
-    let workflows = WorkflowStore::new(root);
-    workflows.with_run_lock(&v2.run_id(), |locked| {
-        v2.require_session_owner()?;
-        if let Some(executor) = v2.session_executor() {
-            archon_workflow::control_pause::PauseOwner::Executor(executor)
-                .require_pauser(&locked.load_state(&v2.run_id())?)?;
-        }
-        Ok(())
-    })
 }

@@ -25,7 +25,7 @@ mod records;
 mod repeat;
 #[path = "workflow_read_guard_run_store.rs"]
 mod run_store;
-pub use admission::AdmissionFence;
+pub use admission::{AdmissionFence, AdmissionStop, FenceKind, FenceStop, StopKind, drive_fenced};
 #[path = "workflow_read_guard_settings.rs"]
 mod settings;
 #[path = "workflow_read_guard_shell.rs"]

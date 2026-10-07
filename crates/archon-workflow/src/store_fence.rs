@@ -1,12 +1,23 @@
 //! One captured-owner boundary for run writes and asynchronous admission.
-//! A lock lives only for a synchronous operation/poll, never across Pending.
+//!
+//! Every durable write of an executor-bound store takes the run lock for the
+//! write alone and re-checks ownership inside it. Asynchronous work (a host
+//! call, a provider stream, a tool or a spawned agent) is checked before each
+//! poll by a short locked read and then polled with NO lock held: a
+//! synchronous verifier or git snapshot inside the work never makes `pause`,
+//! `cancel` or `resume` wait (Issue 291). The poll rule itself is
+//! `archon_tools::workflow_read_guard::drive_fenced`, shared with the fences
+//! carried into spawned agent and tool contexts.
 use super::*;
-use std::{cell::RefCell, future::Future, task::Poll, time::Duration};
+use archon_tools::workflow_read_guard::{
+    AdmissionFence, AdmissionStop, FenceKind, FenceStop, StopKind, drive_fenced,
+};
+use std::{cell::RefCell, future::Future, sync::Arc};
 
 thread_local! {
-    // Only synchronous nesting on the same thread is reentrant. Async tasks
-    // release this entry before returning Pending; other threads/processes
-    // still take the OS lock. Canonical paths unify /var and /private/var.
+    // Only synchronous nesting on the same thread is reentrant. No entry
+    // outlives a synchronous operation; other threads/processes still take
+    // the OS lock. Canonical paths unify /var and /private/var.
     static HELD: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
 }
 struct Held;
@@ -15,6 +26,17 @@ impl Drop for Held {
         HELD.with(|held| {
             held.borrow_mut().pop();
         });
+    }
+}
+
+/// A fence refusal: the typed workflow error and its run-control meaning.
+pub(crate) struct OwnerRefusal {
+    kind: StopKind,
+    error: WorkflowError,
+}
+impl FenceStop for OwnerRefusal {
+    fn stop_kind(&self) -> StopKind {
+        self.kind
     }
 }
 
@@ -47,85 +69,129 @@ impl WorkflowStore {
             work()
         }
     }
-    /// Each poll includes actual provider/tool admission, continuations and
-    /// retries after any await. The watchdog only wakes pending work; it is
-    /// never the ownership fence. Errors remain control errors.
+    /// Provider/tool admission: stops for a pause, cancel or new executor.
+    /// Work admitted before a pause may finish; its result is returned.
     pub async fn execute_owned<T>(
         &self,
         run_id: &str,
         work: impl Future<Output = WorkflowResult<T>>,
     ) -> WorkflowResult<T> {
-        self.execute_fenced(run_id, work, true).await
+        // Boxed at once (#246): inner fence frames hold a pointer, never a
+        // second copy of the caller's call tree.
+        let work = Box::pin(work);
+        self.execute_fenced(run_id, work, FenceKind::Admission)
+            .await
     }
-    /// Ownership-only polling permits the current executor to preserve partial
-    /// work while unwinding a pause. Resume still fences every subsequent poll.
+    /// Ownership only: a paused executor may preserve partial work while it
+    /// unwinds; a new executor stops it.
     pub async fn execute_writer<T>(
         &self,
         run_id: &str,
         work: impl Future<Output = WorkflowResult<T>>,
     ) -> WorkflowResult<T> {
-        self.execute_fenced(run_id, work, false).await
+        // Boxed at once (#246): inner fence frames hold a pointer, never a
+        // second copy of the caller's call tree.
+        let work = Box::pin(work);
+        self.execute_fenced(run_id, work, FenceKind::Ownership)
+            .await
     }
     /// Carry this exact owner boundary into independently spawned execution.
-    pub fn admission_fence(
-        &self,
-        run_id: &str,
-    ) -> archon_tools::workflow_read_guard::AdmissionFence {
+    pub fn admission_fence(&self, run_id: &str) -> AdmissionFence {
         let (store, id) = (self.clone(), run_id.to_string());
-        archon_tools::workflow_read_guard::AdmissionFence::new(move |work| {
+        AdmissionFence::new(self.fence_owner(run_id), move || {
             store
-                .with_admission(&id, || {
-                    work();
-                    Ok(())
+                .owner_check(&id, FenceKind::Admission)
+                .map_err(|refused| AdmissionStop {
+                    kind: refused.kind,
+                    reason: refused.error.to_string(),
                 })
-                .map_err(|error| error.to_string())
         })
     }
-    fn with_admission<T>(
-        &self,
-        run_id: &str,
-        work: impl FnOnce() -> WorkflowResult<T>,
-    ) -> WorkflowResult<T> {
-        self.with_run_lock(run_id, |locked| {
-            if let Some((_, generation)) = self.executor {
-                crate::control_pause::PauseOwner::Executor(generation)
-                    .require_pauser(&locked.load_state(run_id)?)?;
+    /// Fails unless this store's executor may still admit work for `run_id`:
+    /// the same check every fenced poll makes.
+    pub fn require_admission(&self, run_id: &str) -> WorkflowResult<()> {
+        self.owner_check(run_id, FenceKind::Admission)
+            .map_err(|refused| refused.error)
+    }
+
+    fn fence_owner(&self, run_id: &str) -> Arc<str> {
+        let generation = self.executor.as_ref().map(|(_, generation)| *generation);
+        // Canonical, so every store spelling of one run names one owner.
+        let dir = self.run_dir(run_id);
+        let dir = dir.canonicalize().unwrap_or(dir);
+        Arc::from(format!(
+            "{}#{}",
+            dir.display(),
+            generation.map_or_else(|| "unbound".to_string(), |g| g.to_string())
+        ))
+    }
+
+    /// One locked state read, then the owner rule for `kind`. A bound store
+    /// never creates the run directory: a run its successor removed is gone.
+    fn owner_check(&self, run_id: &str, kind: FenceKind) -> Result<(), OwnerRefusal> {
+        let Some((_, generation)) = &self.executor else {
+            return Ok(());
+        };
+        let generation = *generation;
+        let refused = |kind, error| Err(OwnerRefusal { kind, error });
+        let run = match lock_run(self, run_id, || self.load_state(run_id)) {
+            Ok(run) => run,
+            // The run directory itself is gone: its successor removed it.
+            Err(WorkflowError::Io { .. }) if !self.run_dir(run_id).exists() => {
+                return refused(
+                    StopKind::Superseded,
+                    WorkflowError::ControlCancelled(format!(
+                        "run {run_id} no longer exists; executor generation {generation} stops"
+                    )),
+                );
             }
-            work()
-        })
+            Err(error) => return refused(StopKind::Refused, error),
+        };
+        if let Err(error) = crate::control_pause::require_executor(&run, generation) {
+            return refused(StopKind::Superseded, error);
+        }
+        if kind == FenceKind::Admission {
+            let stop = match run.status {
+                RunStatus::Paused => StopKind::Paused,
+                RunStatus::Cancelled => StopKind::Cancelled,
+                _ => return Ok(()),
+            };
+            if let Err(error) =
+                crate::control_pause::PauseOwner::Executor(generation).require_pauser(&run)
+            {
+                return refused(stop, error);
+            }
+        }
+        Ok(())
     }
 
     async fn execute_fenced<T>(
         &self,
         run_id: &str,
         work: impl Future<Output = WorkflowResult<T>>,
-        admission: bool,
+        kind: FenceKind,
     ) -> WorkflowResult<T> {
-        let mut work = Box::pin(work);
-        let mut watch = tokio::time::interval(Duration::from_secs(2));
-        watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        std::future::poll_fn(|cx| {
-            while watch.poll_tick(cx).is_ready() {}
-            let mut poll = || Ok(work.as_mut().poll(cx));
-            let polled = if admission {
-                self.with_admission(run_id, poll)
-            } else {
-                self.with_run_lock(run_id, |_| poll())
-            };
-            match polled {
-                Ok(Poll::Ready(out)) => Poll::Ready(out),
-                Ok(Poll::Pending) => Poll::Pending,
-                Err(error) => Poll::Ready(Err(error)),
-            }
-        })
+        if self.executor.is_none() {
+            // An unbound store has no captured owner to fence.
+            return work.await;
+        }
+        drive_fenced(
+            self.fence_owner(run_id),
+            kind,
+            || self.owner_check(run_id, kind),
+            work,
+        )
         .await
+        .map_err(|refused| refused.error)?
     }
 }
 
-pub(super) fn with_run_lock<T>(
+/// The run lock for one synchronous operation, with no ownership check and,
+/// for a bound store, no directory creation.
+fn lock_run<T>(
     store: &WorkflowStore,
     run_id: &str,
-    operation: impl FnOnce(&WorkflowStore) -> WorkflowResult<T>,
+    operation: impl FnOnce() -> WorkflowResult<T>,
 ) -> WorkflowResult<T> {
     let run_dir = store.run_dir(run_id);
     if let Some((id, _)) = &store.executor {
@@ -144,8 +210,7 @@ pub(super) fn with_run_lock<T>(
         .map_err(|e| WorkflowError::io(&run_dir, e))?
         .join(".control.lock");
     if HELD.with(|held| held.borrow().contains(&path)) {
-        store.require_writer(run_id)?;
-        return operation(store);
+        return operation();
     }
     let file = OpenOptions::new()
         .create(true)
@@ -158,6 +223,20 @@ pub(super) fn with_run_lock<T>(
     let _guard = lock.write().map_err(|e| WorkflowError::io(&path, e))?;
     HELD.with(|held| held.borrow_mut().push(path));
     let _held = Held;
-    store.require_writer(run_id)?;
-    operation(store)
+    operation()
 }
+
+pub(super) fn with_run_lock<T>(
+    store: &WorkflowStore,
+    run_id: &str,
+    operation: impl FnOnce(&WorkflowStore) -> WorkflowResult<T>,
+) -> WorkflowResult<T> {
+    lock_run(store, run_id, || {
+        store.require_writer(run_id)?;
+        operation(store)
+    })
+}
+
+#[cfg(test)]
+#[path = "store_fence_tests.rs"]
+mod tests;

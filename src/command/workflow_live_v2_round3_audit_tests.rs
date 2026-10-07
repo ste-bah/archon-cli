@@ -155,7 +155,7 @@ async fn round3_291_host_cache_capture_takeover() {
         &["config", "user.email", "test@local"],
     ] {
         assert!(
-            std::process::Command::new("git")
+            archon_shell::spawn::command("git")
                 .arg("-C")
                 .arg(&root)
                 .args(args)
@@ -168,7 +168,7 @@ async fn round3_291_host_cache_capture_takeover() {
     std::fs::write(root.join("a.txt"), "source\n").unwrap();
     for args in [&["add", "."][..], &["commit", "-qm", "source"]] {
         assert!(
-            std::process::Command::new("git")
+            archon_shell::spawn::command("git")
                 .arg("-C")
                 .arg(&root)
                 .args(args)

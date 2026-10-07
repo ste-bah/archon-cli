@@ -136,11 +136,19 @@ pub(crate) fn authority(pin: &Path, transaction: &str) -> Result<Option<serde_js
 }
 
 pub(super) fn validate(record: &Recovery, pin: &Path, tasks: &Path) -> Result<()> {
-    if record.task_root != tasks.canonicalize().map(archon_shell::paths::plain)?
-        || !super::super::publish::valid_recovery_transaction(&record.transaction)
-    {
+    let task_root = tasks.canonicalize().map(archon_shell::paths::plain)?;
+    if record.task_root != task_root {
         return Err(anyhow!(
-            "recovery authority has a different task root or invalid transaction"
+            "pending recovery authority in {} names task root {}, not {}; the pin is not this task set's recovery evidence. Restore the pin and its recovery evidence from backup, or re-freeze the task set and start a new run",
+            pin.display(),
+            record.task_root.display(),
+            task_root.display()
+        ));
+    }
+    if !super::super::publish::valid_recovery_transaction(&record.transaction) {
+        return Err(anyhow!(
+            "recovery authority in {} has an invalid transaction id; restore the recovery evidence from backup, or re-freeze the task set and start a new run",
+            pin.display()
         ));
     }
     let mut anchor = record.clone();
@@ -243,11 +251,12 @@ pub(crate) fn refreeze_base(
     tasks: &Path,
 ) -> Result<Option<archon_workflow::task_set_contract::AcceptanceContract>> {
     let (records, _) = read(pin)?;
-    let task_root = tasks.canonicalize().map(archon_shell::paths::plain)?;
+    // Every pending record is checked: one naming another task root refuses
+    // by name below, never a silent skip into ordinary publication.
     let Some(record) = records
         .iter()
         .rev()
-        .find(|record| record.completed.is_none() && record.task_root == task_root)
+        .find(|record| record.completed.is_none())
     else {
         return Ok(None);
     };
@@ -299,13 +308,43 @@ pub(super) fn bound_skeleton(
         }
     };
     if let Some(live) = live {
-        if !authenticates_skeleton(record, anchor, &live, &bytes)? {
+        // The same authority capture used: the anchor's own shape, or the
+        // skeleton of any captured authorized launch (Issue 301, round 4).
+        if !authenticates_skeleton(record, anchor, &live, &bytes)?
+            && !authenticated_by_a_launch(record, &live, pin)?
+        {
             return Err(anyhow!(
                 "chain check skeleton_changed failed: live skeleton shape or contract binding is not authenticated by a captured launch"
             ));
         }
     }
     Ok(Some(skeleton))
+}
+
+/// Whether `live` is a captured authorized launch's skeleton: byte-identical
+/// to it, or its shape with an authenticated contract binding.
+fn authenticated_by_a_launch(record: &Recovery, live: &[u8], pin: &Path) -> Result<bool> {
+    let digest = content_digest(live);
+    let history = ChainHistory::for_pin(pin);
+    let launches = record
+        .prior
+        .iter()
+        .map(AcceptancePin::identity)
+        .chain(record.runs.values().cloned());
+    for launch in launches {
+        let Some(bound) = &launch.skeleton_digest else {
+            continue;
+        };
+        if *bound == digest {
+            return Ok(true);
+        }
+        if let Some(preimage) = history.get(bound)?
+            && authenticates_skeleton(record, &launch, live, &preimage)?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The same authority for capture and publication: archived shape belongs to

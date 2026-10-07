@@ -339,3 +339,70 @@ fn round3_301_changed_shape_rebound_with_serialization() {
 fn round3_301_changed_shape_rebound_missing_preimage() {
     combined_rebound(true, true, true);
 }
+
+/// Round 4 (review minor 8): with a prior pin the anchor is the prior pin,
+/// but the live skeleton may be another captured authorized launch's own
+/// skeleton (an interrupted re-freeze back to an earlier task shape). Capture
+/// authenticates it, so publication must too; a byte-different shape is
+/// still refused.
+fn prior_pin_live_launch_skeleton(tampered: bool) {
+    let run = run_fixture_with(&[
+        ("AC-F-001", "test -f present", true),
+        ("AC-F-002", "test -f present", true),
+    ]);
+    let original = run.set.pin().identity();
+    metadata(&run, "a-original-run", &original);
+    let history = archon_workflow::task_set_lineage::ChainHistory::for_pin(&run.set.pin_path());
+    let path = run.set.tasks.join(TASK_SKELETON_FILE);
+    let bytes = std::fs::read(&path).unwrap();
+    history.put(&bytes).unwrap();
+    let mut skeleton: archon_workflow::task_skeleton::TaskSkeleton =
+        serde_json::from_slice(&bytes).unwrap();
+    skeleton.tasks.reverse();
+    let earlier = serde_json::to_vec_pretty(&skeleton).unwrap();
+    let mut authorized = original.clone();
+    authorized.freeze_event_id = "earlier-shape-freeze".into();
+    authorized.skeleton_digest = Some(history.put(&earlier).unwrap().0);
+    metadata(&run, "z-earlier-run", &authorized);
+    let live = if tampered {
+        skeleton.tasks[0]
+            .implements
+            .push("tampered-obligation".into());
+        serde_json::to_vec_pretty(&skeleton).unwrap()
+    } else {
+        earlier
+    };
+    std::fs::write(&path, live).unwrap();
+    let receipt = recover(&run);
+    assert!(
+        !receipt[0]["prior"].is_null(),
+        "the prior pin anchors this recovery"
+    );
+    if tampered {
+        let mut prepared = crate::command::workflow_task_set::prepare_from_judged(
+            run.set.project.path(),
+            &run.set.tasks,
+            &run.set.prd,
+            archon_core::config::GateMode::Observe,
+            &run.set.contract(),
+            None,
+        )
+        .unwrap();
+        let error = prepared
+            .record_recovery_refreeze()
+            .expect_err("an unauthorized shape must be refused");
+        assert!(error.to_string().contains("skeleton_changed"), "{error}");
+    } else {
+        refreeze(&run);
+        verify(&run, "a-original-run", &original)
+            .expect("the prior pin's launch stays provable after the re-freeze");
+    }
+}
+#[test]
+fn round4_301_prior_pin_accepts_a_captured_launch_skeleton() {
+    prior_pin_live_launch_skeleton(false);
+}
+#[test]
+fn round4_301_prior_pin_still_refuses_a_tampered_shape() {
+    prior_pin_live_launch_skeleton(true);
+}

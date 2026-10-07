@@ -321,5 +321,7 @@ mod review_races;
 mod round3_audit;
 #[path = "workflow_live_v2_round3_gate_tests.rs"]
 mod round3_gates;
+#[path = "workflow_live_v2_round4_fence_tests.rs"]
+mod round4_fences;
 #[path = "workflow_live_v2_spawn_fence_tests.rs"]
 mod spawned_admission;
