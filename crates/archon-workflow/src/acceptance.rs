@@ -13,6 +13,10 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+#[path = "acceptance_unavailable_tests.rs"]
+mod unavailable_environment_tests;
+
 /// A fingerprint of a single target path. `None` means the path is absent.
 pub type TargetFingerprints = BTreeMap<String, Option<String>>;
 
@@ -21,6 +25,8 @@ pub type TargetFingerprints = BTreeMap<String, Option<String>>;
 pub enum AcceptanceOutcome {
     Accepted,
     Rejected(String),
+    /// Verification could not be launched or its operator environment was unavailable.
+    Unavailable(String),
 }
 
 /// Captured result for a focused stage verification command.
@@ -41,7 +47,9 @@ impl AcceptanceOutcome {
     pub fn reason(&self) -> Option<&str> {
         match self {
             AcceptanceOutcome::Accepted => None,
-            AcceptanceOutcome::Rejected(reason) => Some(reason.as_str()),
+            AcceptanceOutcome::Rejected(reason) | AcceptanceOutcome::Unavailable(reason) => {
+                Some(reason.as_str())
+            }
         }
     }
 }
@@ -145,13 +153,10 @@ pub(crate) fn run_verify_command_capture(
         .current_dir(root)
         .output()
         .map_err(|err| format!("verify_command failed to launch: {err}"))?;
-    let mut stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     let environment_note = (!output.status.success())
         .then(|| environment.note(&[&output.stdout, &output.stderr]))
         .flatten();
-    if let Some(note) = &environment_note {
-        stderr.push_str(&format!("\n{note}"));
-    }
     Ok(Some(VerifyCommandReport {
         command: command.to_string(),
         exit_code: output.status.code(),
@@ -244,9 +249,12 @@ pub fn evaluate_with_policy(
             missing.join(", ")
         ));
     }
-    match run_verify_command_with_policy(root, verify_command, policy) {
-        Ok(()) => AcceptanceOutcome::Accepted,
-        Err(reason) => AcceptanceOutcome::Rejected(reason),
+    match run_verify_command_capture(root, verify_command, policy) {
+        Err(reason) => AcceptanceOutcome::Unavailable(reason),
+        Ok(Some(report)) if !report.success() => {
+            AcceptanceOutcome::Rejected(report.failure_reason())
+        }
+        Ok(_) => AcceptanceOutcome::Accepted,
     }
 }
 

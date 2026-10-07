@@ -245,6 +245,17 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         Path::new(&state.log_path),
         &state.identity,
     )?;
+    let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
+    let check_policy_value = metadata.get("check_environment_policy").ok_or_else(|| {
+        anyhow!("fixed decomposition launch metadata has no check policy binding")
+    })?;
+    let check_policy: Option<archon_workflow::acceptance_check_environment::CheckPolicy> =
+        serde_json::from_value(check_policy_value.clone()).map_err(|error| {
+            anyhow!("fixed decomposition check policy binding is invalid: {error}")
+        })?;
+    if let Some(policy) = &check_policy {
+        super::super::acceptance_check_policy::validate_persisted(policy)?;
+    }
     let expected_metadata = serde_json::json!({
         "schema_version": "workflow-generated-v2-metadata-v1",
         "run_kind": "fixed_decomposition_v1",
@@ -252,8 +263,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         "scaffold_hash": workflow_scaffold_hash(FIXED_SCRIPT_SOURCE),
         "script_args": expected_arguments,
         "script_lifecycle": true,
+        "check_environment_policy": check_policy,
     });
-    let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
     if metadata != expected_metadata {
         return Err(anyhow!(
             "fixed decomposition generated metadata differs from its canonical launch snapshot"
@@ -264,6 +275,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &arguments,
         &persisted_catalog,
         &persisted_route,
+        &check_policy,
     )?;
     let anchored_digest = compiled_spec
         .permissions

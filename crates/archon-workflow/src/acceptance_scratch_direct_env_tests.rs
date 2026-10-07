@@ -184,6 +184,9 @@ async fn a_failure_reading_a_withheld_variable_keeps_exit_and_note() {
     let error = String::from_utf8_lossy(&result.stderr);
     assert!(error.contains("MY_SERVICE_TOKEN"), "{error}");
     assert!(!error.contains("service-secret-value-345"), "{error}");
+    let note = result.environment_note.as_deref().expect("separate note");
+    assert!(note.contains("MY_SERVICE_TOKEN"), "{note}");
+    assert!(!error.contains("Note: output mentions"), "{error}");
     for verdict in [
         "test -f absent",
         // MY_PAT has no data suffix: the allowlist could never forward it.

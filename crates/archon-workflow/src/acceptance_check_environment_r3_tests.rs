@@ -189,3 +189,30 @@ fn r3_configured_host_offline_cargo_dependency() {
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("offline-fixture"));
 }
+
+#[test]
+fn r3_shell_maintained_names_are_not_candidates() {
+    let host = BTreeMap::from([
+        ("_".into(), "shell-command".into()),
+        ("PWD".into(), "/tmp".into()),
+        ("OLDPWD".into(), "/".into()),
+        ("SHLVL".into(), "2".into()),
+        ("FIXTURE_API_KEY".into(), "secret".into()),
+    ]);
+    let note = withheld_note(
+        &[b"ordinary_snake_case failed"],
+        &withheld(&host, &BTreeMap::new()),
+    );
+    assert_eq!(note, None);
+}
+
+#[test]
+fn r3_variable_names_require_identifier_boundaries() {
+    let withheld = BTreeSet::from(["FIXTURE_API_KEY".into()]);
+    assert!(withheld_note(&[b"FIXTURE_API_KEY"], &withheld).is_some());
+    assert!(withheld_note(&[b"(FIXTURE_API_KEY)"], &withheld).is_some());
+    assert_eq!(
+        withheld_note(&[b"prefix_FIXTURE_API_KEY_suffix"], &withheld),
+        None
+    );
+}

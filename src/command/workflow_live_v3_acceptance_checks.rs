@@ -61,6 +61,7 @@ fn operational(id: &str, error: String) -> CheckResult {
         stdout: vec![],
         stderr: vec![],
         operational_error: Some(error),
+        environment_note: None,
     }
 }
 

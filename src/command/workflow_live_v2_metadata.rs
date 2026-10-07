@@ -154,10 +154,8 @@ fn persist_with_check_policy(
     metadata: &GeneratedV2Metadata,
 ) -> archon_workflow::WorkflowResult<()> {
     let mut value = serde_json::to_value(metadata).expect("generated metadata serializes");
-    if let Some(binding) = &plan.check_policy {
-        value["check_environment_policy"] =
-            serde_json::to_value(binding).expect("check policy serializes");
-    }
+    value["check_environment_policy"] =
+        serde_json::to_value(&plan.check_policy).expect("check policy serializes");
     store.write_run_json(run_id, GENERATED_V2_METADATA_PATH, &value)
 }
 

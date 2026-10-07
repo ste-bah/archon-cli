@@ -148,6 +148,7 @@ async fn verdicts_for(
                 passed_tests: passed_ids,
                 passed_ids_kept: true,
                 error: run.error,
+                environment_note: run.note,
                 cached: false,
                 diagnostic_files: diagnostics,
                 not_a_command: CommandBaseline::program_not_found(

@@ -246,3 +246,37 @@ fn validate_audit_layer(path: &Path, value: &Value) -> Result<(), ConfigError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod strict_loading_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_missing_settings_layer_is_an_error() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("missing.toml");
+        let error = load_layered_config(None, root.path(), Some(&missing), Some(&[]))
+            .expect_err("an explicit settings path must exist");
+        assert!(error.to_string().contains("could not be read"));
+    }
+
+    #[test]
+    fn malformed_selected_settings_layer_is_an_error() {
+        let root = tempfile::tempdir().unwrap();
+        let settings = root.path().join("settings.toml");
+        fs::write(&settings, "[workflow\ninvalid = true").unwrap();
+        let error = load_layered_config(None, root.path(), Some(&settings), Some(&[]))
+            .expect_err("a malformed selected layer must not be skipped");
+        assert!(error.to_string().contains("could not be parsed"));
+    }
+
+    #[test]
+    fn malformed_selected_user_layer_is_an_error() {
+        let root = tempfile::tempdir().unwrap();
+        let user = root.path().join("user.toml");
+        fs::write(&user, "[workflow\ninvalid = true").unwrap();
+        let error = load_layered_config(Some(&user), root.path(), None, Some(&[ConfigLayer::User]))
+            .expect_err("a malformed selected user layer must not be skipped");
+        assert!(error.to_string().contains("could not be parsed"));
+    }
+}

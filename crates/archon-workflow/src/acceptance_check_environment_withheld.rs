@@ -14,6 +14,7 @@ pub fn withheld(
 ) -> BTreeSet<String> {
     (host.keys())
         .filter(|name| lookup(environment, name).is_none())
+        .filter(|name| !process_maintained_name(name))
         .cloned()
         .collect()
 }
@@ -38,11 +39,34 @@ pub(super) fn withheld_note_with_remedy(
         .filter(|name| {
             outputs
                 .iter()
-                .any(|output| String::from_utf8_lossy(output).contains(name.as_str()))
+                .any(|output| contains_identifier(output, name.as_bytes()))
         })
         .map(String::as_str)
         .collect();
     (!named.is_empty()).then(|| format!(
         "Note: output mentions withheld variable(s) {}. This note does not establish the cause of failure; the verifier's real result is retained. {remedy}.", named.join(", ")
     ))
+}
+
+fn process_maintained_name(name: &str) -> bool {
+    name.len() <= 1 || matches!(name, "PWD" | "OLDPWD" | "SHLVL")
+}
+
+fn contains_identifier(output: &[u8], name: &[u8]) -> bool {
+    if name.is_empty() || name.len() > output.len() {
+        return false;
+    }
+    output
+        .windows(name.len())
+        .enumerate()
+        .any(|(index, found)| {
+            if found != name {
+                return false;
+            }
+            let identifier = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+            let before = index.checked_sub(1).and_then(|i| output.get(i));
+            let after = output.get(index + name.len());
+            !before.is_some_and(|byte| identifier(*byte))
+                && !after.is_some_and(|byte| identifier(*byte))
+        })
 }

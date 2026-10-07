@@ -30,6 +30,8 @@ pub(crate) struct CommandRun {
     pub(crate) duration_ms: u64,
     /// stdout then stderr, each bounded by [`MAX_STREAM_BYTES`].
     pub(crate) output: String,
+    /// Withheld-name diagnostic kept out of test-harness output.
+    pub(crate) note: Option<String>,
     /// Why there is no verdict: spawn failure, or the timeout that ended it.
     pub(crate) error: Option<String>,
 }
@@ -83,24 +85,19 @@ async fn run_unwatched(
 ) -> CommandRun {
     let started = Instant::now();
     let env = dispatch.host_command_env(worktree).await;
-    let host = crate::acceptance_check_environment::host_environment();
-    let mut policy = policy
-        .cloned()
-        .unwrap_or_else(|| crate::acceptance_check_environment::CheckPolicy::default_for(&host));
-    policy.bind_dispatch(&env.vars);
-    let environment = match crate::acceptance_check_environment::CommandEnvironment::from_host(
-        &host,
-        Some(&policy),
-    ) {
-        Ok(environment) => environment.with_remedy(remedy),
-        Err(error) => {
-            return CommandRun {
-                error: Some(error),
-                duration_ms: elapsed_ms(started),
-                ..CommandRun::default()
-            };
-        }
-    };
+    let environment =
+        match crate::acceptance_check_environment::CommandEnvironment::capture_with_dispatch(
+            policy, &env.vars,
+        ) {
+            Ok(environment) => environment.with_remedy(remedy),
+            Err(error) => {
+                return CommandRun {
+                    error: Some(error),
+                    duration_ms: elapsed_ms(started),
+                    ..CommandRun::default()
+                };
+            }
+        };
     let mut process = environment.tokio_command(archon_shell::resolve_posix_shell());
     process
         .arg("-c")
@@ -168,14 +165,12 @@ async fn run_unwatched(
             Some(format!("baseline command could not be waited on: {error}")),
         ),
     };
-    if let Some(note) = note {
-        output.push_str(&format!("\n{note}"));
-    }
     CommandRun {
         exit_code,
         timed_out,
         duration_ms: elapsed_ms(started),
         output,
+        note,
         error,
     }
 }

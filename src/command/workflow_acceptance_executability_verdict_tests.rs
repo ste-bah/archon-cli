@@ -15,6 +15,7 @@ fn run(code: Option<i32>, stdout: &str, stderr: &str) -> CheckResult {
         quota_walk_count: 0,
         operational_error: None,
         classification: None,
+        environment_note: None,
     }
 }
 

@@ -32,6 +32,19 @@ pub(crate) fn from_config(config: &ArchonConfig) -> Result<Option<CheckPolicy>> 
         .transpose()
 }
 
+/// Validate the launch policy loaded from a fixed run's authenticated metadata.
+pub(crate) fn validate_persisted(policy: &CheckPolicy) -> Result<()> {
+    validate_operator_bindings(
+        policy
+            .toolchain_path
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("configured check policy has no toolchain PATH"))?,
+        &policy.bound,
+        &policy.forwarded,
+    )
+    .map_err(|reason| anyhow::anyhow!("invalid persisted check policy: {reason}"))
+}
+
 /// CLI uses its already-resolved config, including settings overlays.
 pub(crate) fn for_config_action(
     action: &archon_workflow::CommandAction,

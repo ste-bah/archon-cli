@@ -44,6 +44,10 @@ use std::path::Path;
 
 use crate::acceptance_scratch::ScratchPolicy;
 
+#[cfg(test)]
+#[path = "acceptance_check_environment_note_tests.rs"]
+mod note_channel_tests;
+
 /// Host variables every site keeps, when the host has them: what a process
 /// needs to start on this platform. None outside Windows.
 pub const SYSTEM_VARIABLES: &[&str] = if cfg!(windows) {
@@ -380,6 +384,14 @@ pub struct CommandEnvironment {
 
 impl CommandEnvironment {
     pub fn capture(policy: Option<&CheckPolicy>) -> Result<Self, String> {
+        Self::capture_with_dispatch(policy, &[])
+    }
+
+    /// Capture the OS environment once and apply approved dispatch locators.
+    pub fn capture_with_dispatch(
+        policy: Option<&CheckPolicy>,
+        dispatch: &[(String, String)],
+    ) -> Result<Self, String> {
         // One OS snapshot for bindings and withheld names. A non-Unicode
         // value cannot be forwarded, but its Unicode name still needs a note.
         let host: Vec<_> = std::env::vars_os().collect();
@@ -387,7 +399,12 @@ impl CommandEnvironment {
             .iter()
             .filter_map(|(name, _)| name.to_str().map(str::to_owned))
             .collect();
-        let mut environment = Self::from_host(&unicode_environment(host), policy)?;
+        let unicode = unicode_environment(host);
+        let mut effective = policy
+            .cloned()
+            .unwrap_or_else(|| CheckPolicy::default_for(&unicode));
+        effective.bind_dispatch(dispatch);
+        let mut environment = Self::from_host(&unicode, Some(&effective))?;
         environment.withheld.extend(
             names
                 .into_iter()
@@ -453,7 +470,7 @@ impl CommandEnvironment {
     pub fn note(&self, outputs: &[&[u8]]) -> Option<String> {
         let note = withheld::withheld_note_with_remedy(outputs, &self.withheld, self.remedy);
         if let Some(note) = &note {
-            eprintln!("{note}");
+            tracing::warn!(target: "archon_workflow::check_environment", "{note}");
         }
         note
     }

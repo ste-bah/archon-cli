@@ -99,3 +99,4 @@ archon-test-support = { path = "../archon-test-support" }
 # Same one-liner archon-core, archon-llm and archon-pipeline already carry.
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
+tracing-subscriber.workspace = true

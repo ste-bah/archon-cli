@@ -130,6 +130,7 @@ pub(super) fn result(code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> CheckRe
         quota_walk_count: 0,
         operational_error: None,
         classification: None,
+        environment_note: None,
     }
 }
 

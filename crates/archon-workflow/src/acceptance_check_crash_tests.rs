@@ -11,6 +11,7 @@ fn result(exit: Option<i32>, stderr: &str) -> CheckResult {
         stdout: Vec::new(),
         stderr: stderr.as_bytes().to_vec(),
         operational_error: None,
+        environment_note: None,
     }
 }
 
