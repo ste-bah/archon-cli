@@ -136,6 +136,14 @@ impl WorkflowHostCommandExecutor for RefuseThenFault {
         Ok(true)
     }
 
+    /// The gate judges the same, unchanging content.
+    fn judged_inputs(
+        &self,
+        _: &HostCommandRequest,
+    ) -> archon_workflow::WorkflowResult<Option<String>> {
+        Ok(Some("unchanged task root".into()))
+    }
+
     async fn execute(
         &self,
         request: HostCommandRequest,

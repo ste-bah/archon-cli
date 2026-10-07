@@ -91,32 +91,20 @@ impl FixedHostCommandExecutor {
 }
 
 impl FixedHostCommandExecutor {
-    /// Issue 337: an unpublished outcome answers the inputs it was asked
-    /// about while the call's identity, which binds what it judged, is
-    /// unchanged: a candidate's bytes (its stdin) or, for a set gate, the
-    /// task set's content manifest, with the PRD digest and the paths. A
-    /// command without either reads disk content its identity does not bind
-    /// (a frozen-chain verify): its answer may be stale after a repair, so it
-    /// never replays; it runs again, as any host read can.
-    pub(super) fn answers_current_inputs(
+    /// Issue 337: what a call of `request` judges, in the context the host
+    /// binds it to. A candidate the host cannot bind judged no content.
+    pub(super) fn judged_inputs_for(
         &self,
-        record: &WorkflowV2CallRecord,
-    ) -> WorkflowResult<bool> {
-        let Some(request) = record.call.options.host_command.as_ref() else {
-            return Ok(false);
-        };
-        if request.stdin.is_none()
-            && !crate::command::workflow_host_command_catalog::is_set_gate_command(
-                &request.command_id,
-            )
-        {
-            return Ok(false);
+        request: &HostCommandRequest,
+    ) -> WorkflowResult<Option<String>> {
+        match self.context_for_request(request) {
+            Ok(context) => {
+                crate::command::workflow_host_command_judged_inputs::judged_inputs_digest(
+                    &context, request,
+                )
+            }
+            Err(WorkflowError::SpecInvalid(_)) => Ok(None),
+            Err(error) => Err(error),
         }
-        Ok(
-            crate::command::workflow_host_command_occurrence::record_identity_matches(
-                record,
-                &self.call_identity(request)?,
-            ),
-        )
     }
 }

@@ -31,6 +31,8 @@ mod workflow_live_v2_script_terminal_race_tests;
 mod workflow_live_v2_script_tests_b;
 #[path = "workflow_live_v2_script_tests_c.rs"]
 mod workflow_live_v2_script_tests_c;
+#[path = "workflow_live_v2_script_unpersisted_stop_tests.rs"]
+mod workflow_live_v2_script_unpersisted_stop_tests;
 use workflow_live_v2_script_tests_b::*;
 #[path = "workflow_live_v2_script_tests_d.rs"]
 mod workflow_live_v2_script_tests_d;

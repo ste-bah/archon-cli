@@ -103,6 +103,40 @@ impl WorkflowScriptHost {
 }
 
 impl WorkflowScriptHost {
+    /// The stop a terminal call's record makes (an unsatisfied final report
+    /// or human gate): recorded (`mark_terminal`), reported, and returned as
+    /// the error that unwinds the script. Issue 337: the same whether the
+    /// call ran now or its covered verdict is replayed on a resume, so a
+    /// replayed stop never lets the script go on past it.
+    pub(in super::super) async fn stop_on_terminal_call(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> WorkflowError {
+        let path = self.runner.v2_store.result_path(&record.call.id);
+        let next_action = next_action_for_terminal_call(&record.call.id, record.status);
+        self.mark_terminal(record, path.display().to_string(), next_action.clone())
+            .await;
+        self.emit_v2_event(
+            if record.status == WorkflowV2Status::Failed {
+                WorkflowEventKind::StageFailed
+            } else {
+                WorkflowEventKind::StageStalled
+            },
+            serde_json::json!({
+                "event": "script_stopped",
+                "call_id": record.call.id.clone(),
+                "method": record.call.method.as_str(),
+                "status": record.status,
+                "result_path": path.display().to_string(),
+                "next_action": next_action,
+            }),
+        );
+        WorkflowError::TerminalHostCall(format!(
+            "{} ended with {:?}",
+            record.call.id, record.status
+        ))
+    }
+
     /// Persists a terminal stop of `run` (its lock held, ownership checked):
     /// the coverage snapshot, then the stop record. The record is the
     /// authority; the coverage is replay evidence and never fails the stop.
@@ -122,8 +156,8 @@ impl WorkflowScriptHost {
     /// fixed host only, like `terminalStop`. A stop that cannot be persisted
     /// fails safe, as `terminalStop` does: the run PAUSES with the refusal as
     /// evidence (a stored pause outranks this session's in-memory stop), so
-    /// no sibling can end it unrecorded and a resume decides again.
-    pub(super) fn persist_call_terminal_stop(&self, record: &WorkflowV2CallRecord) {
+    /// no sibling can end it unrecorded ([`Self::pause_unpersisted_stop`]).
+    pub(in super::super) fn persist_call_terminal_stop(&self, record: &WorkflowV2CallRecord) {
         if !self.runner.raw_outcomes_allowed {
             return;
         }
@@ -138,32 +172,53 @@ impl WorkflowScriptHost {
             }
             self.persist_terminal_stop(locked, &run, &reason)
         });
-        let Err(error) = persisted else {
-            return;
-        };
+        match persisted {
+            Ok(()) => {}
+            // The run's own control decision stands: a session a resume
+            // replaced changes nothing (Issue 291), a paused run stays so.
+            Err(
+                control @ (WorkflowError::ControlCancelled(_) | WorkflowError::ControlPaused(_)),
+            ) => {
+                tracing::warn!(%control, run_id = %self.runner.run_id, "terminal stop not persisted: this session does not own a running run");
+            }
+            Err(error) => self.pause_unpersisted_stop(record, &error),
+        }
+    }
+
+    /// Pauses the run whose stop by `record` could not be persisted. The
+    /// pause is this session's own: owned by the generation it samples only
+    /// while its executor owns the run (`owned_generation`) and fenced again
+    /// under the run lock, so a session a resume replaced pauses nothing. It
+    /// records the coverage of the verdicts the run holds, as a crash pause
+    /// does, so a resume replays the verdict that decided the stop and
+    /// reaches the same stop instead of asking it again.
+    fn pause_unpersisted_stop(&self, record: &WorkflowV2CallRecord, error: &WorkflowError) {
         let run_id = &self.runner.run_id;
+        let generation = match self.owned_generation() {
+            Ok(generation) => generation,
+            Err(refused) => {
+                tracing::warn!(%refused, run_id, "the unpersisted terminal stop pauses nothing");
+                return;
+            }
+        };
         let refusal = format!(
             "the terminal stop of call {} could not be persisted ({error}); run {run_id} is paused, not ended: repair the run store, then archon workflow resume --live --yes {run_id}",
             record.call.id
         );
         tracing::warn!(run_id, "{refusal}");
-        let paused = self
-            .runner
-            .workflow_store
-            .load_state(run_id)
-            .and_then(|run| {
-                archon_workflow::control_pause::pause_with_evidence(
-                    &self.runner.workflow_store,
-                    run_id,
-                    run.generation,
-                    serde_json::json!({
-                        "event": "terminal_stop_unpersisted",
-                        "call_id": record.call.id,
-                        "status": record.status,
-                        "refusal": refusal,
-                    }),
-                )
-            });
+        let coverage = HostPauseCoverage::snapshot(&self.runner.v2_store);
+        let paused = archon_workflow::control_pause::pause_owned_then(
+            &self.runner.workflow_store,
+            run_id,
+            archon_workflow::control_pause::PauseOwner::Generation(generation),
+            serde_json::json!({
+                "event": "terminal_stop_unpersisted",
+                "call_id": record.call.id,
+                "status": record.status,
+                "refusal": refusal,
+            }),
+            |locked, seq| coverage.record(locked, run_id, "terminal-stop-unpersisted", seq),
+        );
         if let Err(error) = paused {
             tracing::warn!(%error, run_id, "the unpersisted terminal stop could not pause the run");
         }

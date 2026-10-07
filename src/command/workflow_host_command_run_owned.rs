@@ -2,6 +2,8 @@
 
 use archon_workflow::{RunStatus, WorkflowError, WorkflowResult, WorkflowRun, WorkflowStore};
 
+use crate::command::workflow_host_command_supervisor::HostCommandSignal;
+
 /// Fails unless `expected_generation` still owns a running run, with the
 /// run's actual control decision: a paused run reports a pause (so the call
 /// is recorded interrupted as paused), a cancelled or superseded one a
@@ -41,12 +43,43 @@ fn caller(expected_generation: u64) -> String {
     format!("fixed HostCommand generation {expected_generation}")
 }
 
+/// The signal a host command supervisor sends its child once a poll read
+/// `run`: none while `expected_generation` still owns it, the pause of a
+/// paused run, and a cancellation of a cancelled or superseded one. Issue
+/// 337: a deliberate stop of this generation cancels the call, and an
+/// unreadable stop record pauses it -- the checks [`require_run_owned`]
+/// makes before every attempt, on the state the poll already read.
+pub(crate) fn supervisor_signal(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    expected_generation: u64,
+) -> Option<HostCommandSignal> {
+    let owned = owned(run, expected_generation).and_then(|()| {
+        archon_workflow::control_pause::require_no_terminal_stop(
+            store,
+            run,
+            "a host command in flight",
+        )
+    });
+    match owned {
+        Ok(()) => None,
+        Err(WorkflowError::ControlPaused(_)) => Some(HostCommandSignal::Paused),
+        Err(_) => Some(HostCommandSignal::Cancelled),
+    }
+}
+
 fn owned_run(
     store: &WorkflowStore,
     run_id: &str,
     expected_generation: u64,
 ) -> WorkflowResult<WorkflowRun> {
     let run = store.load_state(run_id)?;
+    owned(&run, expected_generation)?;
+    Ok(run)
+}
+
+fn owned(run: &WorkflowRun, expected_generation: u64) -> WorkflowResult<()> {
+    let run_id = &run.id;
     match run.status {
         RunStatus::Paused => Err(WorkflowError::ControlPaused(format!(
             "run {run_id} is paused; fixed HostCommand generation {expected_generation} stops"
@@ -60,6 +93,6 @@ fn owned_run(
                 run.generation
             )))
         }
-        _ => Ok(run),
+        _ => Ok(()),
     }
 }

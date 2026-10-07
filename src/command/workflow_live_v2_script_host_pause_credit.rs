@@ -147,7 +147,10 @@ impl HostPauseCoverage {
                     // A dispatch error or a never-ran fault is no answer:
                     // a resume asks it again (Issue 337 round 3).
                     records.retain(|record| {
-                        !archon_workflow::v2::host_fault::result_carries_no_verdict(&record.result)
+                        !archon_workflow::v2::host_fault::result_carries_no_verdict(
+                            &record.call.id,
+                            &record.result,
+                        )
                     });
                     covered_attempts(&records)
                 })
@@ -232,6 +235,10 @@ impl WorkflowScriptHost {
             return Ok(None);
         }
         self.mark_reused(&record, generation).await?;
+        // Issue 337: a replayed terminal verdict stops the script again.
+        if terminal_stop_for_call(&record.call, record.status) {
+            return Err(self.stop_on_terminal_call(&record).await);
+        }
         Ok(Some(self.result_view(&record)?))
     }
 }
@@ -244,9 +251,9 @@ impl WorkflowScriptHost {
     /// (a dispatch error or a never-ran fault, marked or in an older binary's
     /// shape) never replays. A host command's PUBLISHED outcome replays only
     /// while it is still what is on disk (`record_is_live`); an unpublished
-    /// one only while it still answers the inputs as they are now
-    /// (`record_answers_current_inputs`), so a crash a disk state caused
-    /// heals once the disk is repaired. Any other call passes the audit
+    /// one only while its identity and the content it judged are unchanged
+    /// (`workflow_host_command_judged_inputs`), so a crash a disk state
+    /// caused heals once the disk is repaired. Any other call passes the audit
     /// admission of a cached answer.
     async fn covered_answer_holds(
         &self,
@@ -260,7 +267,10 @@ impl WorkflowScriptHost {
         }) {
             return Ok(true);
         }
-        if archon_workflow::v2::host_fault::result_carries_no_verdict(&record.result) {
+        if archon_workflow::v2::host_fault::result_carries_no_verdict(
+            &record.call.id,
+            &record.result,
+        ) {
             return Ok(false);
         }
         if record.call.method != WorkflowV2HostMethod::HostCommand {
@@ -270,7 +280,10 @@ impl WorkflowScriptHost {
             return Ok(false);
         };
         if record.result.data["publicationReceipt"].is_null() {
-            executor.record_answers_current_inputs(record)
+            crate::command::workflow_host_command_judged_inputs::answers_current_inputs(
+                executor.as_ref(),
+                record,
+            )
         } else {
             executor.record_is_live(record)
         }

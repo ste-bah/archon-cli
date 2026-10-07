@@ -30,8 +30,7 @@ use super::workflow_host_command_publish::{
     LiveMutationSentinels, audit_prepared_publication, prepare_staging, publish_audited,
 };
 use super::workflow_host_command_supervisor::{
-    HostCommandControl, HostCommandControlHandle, HostCommandSignal, SupervisedProcessOutput,
-    supervise_process_group,
+    HostCommandControl, HostCommandControlHandle, SupervisedProcessOutput, supervise_process_group,
 };
 use super::workflow_host_envelope_seal::{
     ENVELOPE_FILE, EnvelopeCleanup, owner_only, seal_staged_envelope,
@@ -41,11 +40,10 @@ use super::workflow_host_secrets::{HostSecrets, utf8};
 #[async_trait]
 pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn call_identity(&self, request: &HostCommandRequest) -> WorkflowResult<String>;
-    /// Issue 337: whether an UNPUBLISHED recorded outcome still answers the
-    /// call's inputs as they are now, so a covered replay may give it again.
-    /// Defaults to the reuse test.
-    fn record_answers_current_inputs(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
-        self.record_is_reusable(record)
+    /// Issue 337: the digest of the content a call of `request` judges
+    /// (`workflow_host_command_judged_inputs`); `None`: never replayed.
+    fn judged_inputs(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
+        Ok(None)
     }
 
     fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool>;
@@ -186,26 +184,11 @@ impl FixedHostCommandExecutor {
                     let Ok(run) = store.load_state(&run_id) else {
                         continue;
                     };
-                    let signal = match run.status {
-                        archon_workflow::RunStatus::Paused => Some(HostCommandSignal::Paused),
-                        archon_workflow::RunStatus::Cancelled => Some(HostCommandSignal::Cancelled),
-                        _ if run.generation != expected_generation =>
-                        {
-                            Some(HostCommandSignal::Cancelled)
-                        }
-                        // Issue 337: a deliberate stop of this generation
-                        // cancels the call; an unreadable record pauses the run.
-                        _ => match archon_workflow::control_pause::require_no_terminal_stop(
-                            &store,
-                            &run,
-                            "a host command in flight",
-                        ) {
-                            Ok(()) => None,
-                            Err(WorkflowError::ControlPaused(_)) => Some(HostCommandSignal::Paused),
-                            Err(_) => Some(HostCommandSignal::Cancelled),
-                        },
-                    };
-                    if let Some(signal) = signal {
+                    if let Some(signal) = super::workflow_host_command_operational::supervisor_signal(
+                        &store,
+                        &run,
+                        expected_generation,
+                    ) {
                         handle.signal(signal)?;
                         return work.await;
                     }
@@ -257,8 +240,8 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         self.record_is_reusable_live(record, false)
     }
 
-    fn record_answers_current_inputs(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
-        self.answers_current_inputs(record)
+    fn judged_inputs(&self, request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
+        self.judged_inputs_for(request)
     }
 
     fn record_is_live(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {

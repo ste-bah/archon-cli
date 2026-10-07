@@ -21,6 +21,9 @@ impl WorkflowScriptHost {
         // changed the project's acceptance inputs is restored and fails.
         let run_root = self.runner.v2_store.run_root().to_path_buf();
         let label = format!("host command {command_id} ({})", execution.call.id);
+        // Issue 337: what the call judges, read before and after it runs.
+        let judged =
+            crate::command::workflow_host_command_judged_inputs::read(executor.as_ref(), &request);
         let (outcome, violation) = archon_workflow::write_coordinator::input_tripwire::watch(
             Some(&run_root),
             &label,
@@ -78,6 +81,17 @@ impl WorkflowScriptHost {
                     description: violation.message(),
                     severity: Some("high".to_string()),
                 });
+        }
+        if let Some(request) = execution.call.options.host_command.as_ref() {
+            let after = crate::command::workflow_host_command_judged_inputs::read(
+                executor.as_ref(),
+                request,
+            );
+            crate::command::workflow_host_command_judged_inputs::stamp(
+                &mut result.data,
+                judged,
+                after,
+            );
         }
         Ok(result)
     }

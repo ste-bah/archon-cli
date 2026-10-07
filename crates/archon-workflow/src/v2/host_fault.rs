@@ -39,10 +39,11 @@ pub const HOST_DISPATCH_ERROR_MARKER: &str = "host_dispatch_error";
 /// keeps such a result apart from the unmarked legacy dispatch-error shape.
 pub const INVALID_ANSWER_MARKER: &str = "invalid_answer";
 
-/// Does this recorded result carry no verdict on the work: a dispatch error,
-/// a never-ran fault, or a refunded no-verdict attempt -- marked, or in the
-/// unmarked shape an older binary wrote for a dispatch error?
-pub fn result_carries_no_verdict(result: &WorkflowV2Result) -> bool {
+/// Does the result recorded for call `call_id` carry no verdict on the work:
+/// a dispatch error, a never-ran fault, or a refunded no-verdict attempt --
+/// marked, or in the unmarked shape an older binary wrote for a dispatch
+/// error?
+pub fn result_carries_no_verdict(call_id: &str, result: &WorkflowV2Result) -> bool {
     [
         HOST_DISPATCH_ERROR_MARKER,
         HOST_FAULT_NO_VERDICT_MARKER,
@@ -55,21 +56,28 @@ pub fn result_carries_no_verdict(result: &WorkflowV2Result) -> bool {
             .get(*marker)
             .and_then(serde_json::Value::as_bool)
             == Some(true)
-    }) || legacy_dispatch_error(result)
+    }) || legacy_dispatch_error(call_id, result)
 }
 
 /// A dispatch error as a binary before [`HOST_DISPATCH_ERROR_MARKER`] wrote
-/// it ([`failed_v2_result`] unmarked): Failed, data exactly `{"error": ...}`,
-/// and the failed-call summary. A run started on such a binary may resume on
-/// this one, so its fault records must not replay as verdicts.
-fn legacy_dispatch_error(result: &WorkflowV2Result) -> bool {
-    result.status == crate::v2::WorkflowV2Status::Failed
-        && result
-            .data
-            .as_object()
-            .is_some_and(|data| data.len() == 1 && data.contains_key("error"))
-        && result.summary.starts_with("workflow v2 call '")
-        && result.summary.contains("' failed: ")
+/// it: exactly the [`failed_v2_result`] of this call for its own recorded
+/// error -- status, summary, evidence, residual gap and data, rebuilt from
+/// the call id and compared whole, never matched on its text. A run started
+/// on such a binary may resume on this one, so its fault records must not
+/// replay as verdicts. Every result this build makes from `failed_v2_result`
+/// carries a marker of its kind (a dispatch error, or an invalid answer), so
+/// the rule never reads a result of this build.
+fn legacy_dispatch_error(call_id: &str, result: &WorkflowV2Result) -> bool {
+    let Some(error) = result
+        .data
+        .as_object()
+        .filter(|data| data.len() == 1)
+        .and_then(|data| data.get("error"))
+        .and_then(serde_json::Value::as_str)
+    else {
+        return false;
+    };
+    *result == failed_v2_result(call_id, error)
 }
 
 /// The result for a call whose own answer failed validation: failed, and

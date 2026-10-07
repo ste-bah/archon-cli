@@ -35,6 +35,14 @@ impl WorkflowHostCommandExecutor for RefusingGate {
         Ok(true)
     }
 
+    /// Every gate here judges the same, unchanging content.
+    fn judged_inputs(
+        &self,
+        _request: &archon_workflow::HostCommandRequest,
+    ) -> archon_workflow::WorkflowResult<Option<String>> {
+        Ok(Some("unchanged task root".into()))
+    }
+
     async fn execute(
         &self,
         request: archon_workflow::HostCommandRequest,
@@ -320,4 +328,101 @@ async fn a_stop_whose_finalization_was_lost_replays_its_verdict_on_resume() {
     assert_eq!(counters.ran(), ["task-set-lint"], "the verdict is replayed");
     assert_eq!(summary.status, WorkflowV2Status::Failed);
     assert_eq!(summary.script_error.as_deref(), Some("refused: refusal 1"));
+}
+
+const REFUSAL_AUTHOR_FINAL_REPORT: &str = r#"
+async function workflow(w) {
+  const gate = await w.hostCommand("task-set-lint", { stdin: null });
+  const authored = await w.agent("acceptance-author-1", {
+    task: "Author the contract", tier: "planner", resultMode: "rawOutcome"
+  });
+  await w.finalReport("stopped", {
+    status: "needs_review", inputs: { gate: gate.stdout, author: authored.status }, task: "Stop for review"
+  });
+}
+"#;
+
+/// Round 5 (review findings 2 and 5): a final report's stop that cannot be
+/// persisted pauses the run with the coverage of the verdicts it holds. The
+/// resume after the store is repaired replays the gate's refusal that decided
+/// the stop (never re-asked), asks the failed author dispatch again (it holds
+/// no verdict), and reaches the same stop, persisted this time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unpersisted_stop_pause_replays_the_deciding_verdict_on_resume() {
+    let (_temp, store, run_id, counters) = setup();
+    let held = store.run_dir(&run_id).join("v2/terminal-stop.json");
+    std::fs::create_dir_all(held.join("held")).unwrap();
+    let (runner, _ui) = fixed_runner(&store, &run_id, &counters, serde_json::json!({}));
+    let paused = runner.run(REFUSAL_AUTHOR_FINAL_REPORT).await;
+    assert!(
+        matches!(paused, Err(WorkflowError::ControlPaused(_))),
+        "{paused:?}"
+    );
+    let coverage = std::fs::read_dir(store.run_dir(&run_id).join("v2/script-pauses"))
+        .unwrap()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("host-terminal-stop-unpersisted-g")
+        })
+        .count();
+    assert_eq!(coverage, 1, "the pause records what it covers");
+    let authored = counters.author.load(Ordering::SeqCst);
+    // The pause keeps an unreadable stop record aside; the store is repaired.
+    if held.exists() {
+        std::fs::remove_dir_all(&held).unwrap();
+    }
+    resume(&store, &run_id);
+
+    let (runner, _ui) = fixed_runner(&store, &run_id, &counters, serde_json::json!({}));
+    let summary = runner
+        .run(REFUSAL_AUTHOR_FINAL_REPORT)
+        .await
+        .expect("the same stop");
+
+    assert_eq!(counters.ran(), ["task-set-lint"], "the refusal is replayed");
+    assert!(
+        counters.author.load(Ordering::SeqCst) > authored,
+        "a failed dispatch carries no verdict: it is asked again"
+    );
+    assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(summary.failed_call.as_deref(), Some("stopped"));
+    assert!(held.is_file(), "the stop is persisted on the resume");
+    assert_ne!(
+        store.load_state(&run_id).unwrap().status,
+        archon_workflow::RunStatus::Paused
+    );
+}
+
+/// Round 5: a final report's stop was persisted, then its finalization was
+/// lost and stale-owner recovery paused the run. The resume replays the
+/// covered final report, and the replay stops the script again: it never
+/// goes on past the stop.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_replayed_final_report_stop_stops_the_script_again() {
+    let (_temp, store, run_id, counters) = setup();
+    let (runner, _ui) = fixed_runner(&store, &run_id, &counters, serde_json::json!({}));
+    let summary = runner
+        .run(REFUSAL_AUTHOR_FINAL_REPORT)
+        .await
+        .expect("the stop");
+    assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
+    // No finalization: the process died. Stale-owner recovery's transition.
+    let mut run = store.load_state(&run_id).unwrap();
+    run.generation += 1;
+    run.status = archon_workflow::RunStatus::Paused;
+    store.save_state(&run).unwrap();
+    resume(&store, &run_id);
+
+    let (runner, _ui) = fixed_runner(&store, &run_id, &counters, serde_json::json!({}));
+    let summary = runner
+        .run(REFUSAL_AUTHOR_FINAL_REPORT)
+        .await
+        .expect("the same stop");
+
+    assert_eq!(counters.ran(), ["task-set-lint"], "the refusal is replayed");
+    assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(summary.failed_call.as_deref(), Some("stopped"));
 }

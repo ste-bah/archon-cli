@@ -361,6 +361,9 @@ pub(crate) mod workflow_host_command_groups;
 pub(crate) mod workflow_host_command_integrity;
 #[cfg(test)]
 mod workflow_host_command_integrity_tests;
+pub(crate) mod workflow_host_command_judged_inputs;
+#[cfg(test)]
+mod workflow_host_command_judged_inputs_tests;
 pub(crate) mod workflow_host_command_manifest;
 pub(crate) mod workflow_host_command_occurrence;
 pub(crate) mod workflow_host_command_operational;

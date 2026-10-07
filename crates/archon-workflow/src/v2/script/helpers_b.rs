@@ -161,7 +161,11 @@ pub fn sanitize_v2_gap_id(raw: &str) -> String {
 /// caller that has to agree with the gap ids `helpers_a` already mints for the
 /// same call; the binary carried a byte-identical private copy of the
 /// sanitizer until this moved.
-pub fn failed_v2_result(call_id: &str, err: impl std::fmt::Display) -> WorkflowV2Result {
+/// The unmarked failed result of a call. Crate-private (Issue 337): an
+/// unmarked result of this shape reads as an older binary's dispatch error
+/// (`host_fault::result_carries_no_verdict`), so every producer marks its
+/// kind (`host_fault::v2_result_for_call_error`, `invalid_answer_result`).
+pub(crate) fn failed_v2_result(call_id: &str, err: impl std::fmt::Display) -> WorkflowV2Result {
     let error = err.to_string();
     WorkflowV2Result {
         status: WorkflowV2Status::Failed,

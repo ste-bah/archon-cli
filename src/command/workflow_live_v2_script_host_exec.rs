@@ -451,29 +451,7 @@ impl WorkflowScriptHost {
         self.emit_call_finished_event(&record);
         poll_v2_run_control(&self.runner.workflow_store, &self.runner.run_id, "")?;
         if terminal_stop_for_call(&record.call, record.status) {
-            let path = self.runner.v2_store.result_path(&record.call.id);
-            let next_action = next_action_for_terminal_call(&record.call.id, record.status);
-            self.mark_terminal(&record, path.display().to_string(), next_action.clone())
-                .await;
-            self.emit_v2_event(
-                if record.status == WorkflowV2Status::Failed {
-                    WorkflowEventKind::StageFailed
-                } else {
-                    WorkflowEventKind::StageStalled
-                },
-                serde_json::json!({
-                    "event": "script_stopped",
-                    "call_id": record.call.id.clone(),
-                    "method": record.call.method.as_str(),
-                    "status": record.status,
-                    "result_path": path.display().to_string(),
-                    "next_action": next_action,
-                }),
-            );
-            return Err(WorkflowError::TerminalHostCall(format!(
-                "{} ended with {:?}",
-                record.call.id, record.status
-            )));
+            return Err(self.stop_on_terminal_call(&record).await);
         }
         self.result_view_in_generation(&record, view_generation)
     }
