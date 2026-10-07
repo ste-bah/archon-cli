@@ -30,9 +30,14 @@ const SCHEMA_CONTEXT: &str = "docs schema creation";
 pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
     let config = archon_cozo::bound_guard_config(db, SCHEMA_CONTEXT)?;
     match config.write_lock_path.as_deref() {
-        Some(path) => {
-            archon_cozo::with_write_lock_blocking(path, SCHEMA_CONTEXT, || create_doc_relations(db))
-        }
+        Some(path) => archon_cozo::with_write_lock_resuming(
+            path,
+            SCHEMA_CONTEXT,
+            config
+                .write_lock_wait
+                .unwrap_or(archon_cozo::DEFAULT_WRITE_LOCK_WAIT),
+            || create_doc_relations(db),
+        ),
         // An in-memory store is reachable only from this process's handle, so
         // there is no cross-handle race to serialise.
         None => create_doc_relations(db),

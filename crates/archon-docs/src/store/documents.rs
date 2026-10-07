@@ -119,8 +119,7 @@ const RESERVATION_CONTEXT: &str = "reserve document content hash";
 /// Run `reserve` with exclusive access to the backing database.
 ///
 /// The blocking write lock keeps the read and write in one exclusive window.
-/// Acquisition expiry returns retryable `StoreBusy`; the caller can restart
-/// the reservation without interleaving its read and write. It is re-entrant, so a reservation nested
+/// A no-progress pause resumes acquisition without dropping the reservation. It is re-entrant, so a reservation nested
 /// inside an already-guarded mutable operation on the same database runs inline
 /// rather than blocking on the lock its own thread holds.
 ///
@@ -135,7 +134,14 @@ fn with_reservation_lock_held<T>(
 ) -> Result<T> {
     let config = archon_cozo::bound_guard_config(db, RESERVATION_CONTEXT)?;
     match config.write_lock_path.as_deref() {
-        Some(path) => archon_cozo::with_write_lock_blocking(path, RESERVATION_CONTEXT, reserve),
+        Some(path) => archon_cozo::with_write_lock_resuming(
+            path,
+            RESERVATION_CONTEXT,
+            config
+                .write_lock_wait
+                .unwrap_or(archon_cozo::DEFAULT_WRITE_LOCK_WAIT),
+            reserve,
+        ),
         None => reserve(),
     }
 }

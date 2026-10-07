@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum WriteLockKey {
@@ -230,12 +230,7 @@ fn open_write_lock_file(path: &Path, context: &str) -> Result<File> {
         .write(true)
         .truncate(false)
         .open(path)
-        .map_err(|error| {
-            anyhow!(
-                "{context}: open Cozo write lock {}: {error}",
-                path.display()
-            )
-        })
+        .with_context(|| format!("{context}: open Cozo write lock {}", path.display()))
 }
 
 pub(crate) fn with_write_lock<T>(
@@ -244,12 +239,26 @@ pub(crate) fn with_write_lock<T>(
     run: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
     let file = open_write_lock_file(path, context)?;
+    with_file_write_lock(file, path, context, run)
+}
+
+pub(crate) fn with_file_write_lock<T>(
+    file: File,
+    path: &Path,
+    context: &str,
+    run: impl FnOnce() -> Result<T>,
+) -> Result<T> {
     let mut lock = fd_lock::RwLock::new(file);
     let _guard = lock.try_write().map_err(|error| {
-        anyhow!(
-            "{context}: Cozo write lock unavailable at {}: {error}",
+        let category = if error.kind() == std::io::ErrorKind::WouldBlock {
+            "unavailable"
+        } else {
+            "failed"
+        };
+        anyhow::Error::new(error).context(format!(
+            "{context}: Cozo write lock {category} at {}",
             path.display()
-        )
+        ))
     })?;
     tracing::trace!(context, lock_path = %path.display(), "acquired Cozo write lock");
     run()
@@ -262,8 +271,7 @@ pub(crate) fn with_write_lock<T>(
 /// evidence that the holder stopped progressing.
 pub(crate) const WRITE_LOCK_WAIT_EXPIRED: &str = "was still held";
 
-/// Run `run` while holding the write lock for `path`, waiting up to `wait` for
-/// a current holder to finish.
+/// Run `run` while holding the write lock for `path`, waiting until the holder has made no progress for `wait`.
 ///
 /// This is the serialising sibling of [`with_write_lock`], which fails fast so
 /// its callers can retry with backoff. Callers that need an actual mutual
@@ -275,7 +283,8 @@ pub(crate) const WRITE_LOCK_WAIT_EXPIRED: &str = "was still held";
 ///
 /// * **Resumable.** An acquisition window that expires returns retryable
 ///   `StoreBusy`, naming the lock file, without claiming the holder is stuck.
-///   `wait` bounds one acquisition call, never the operation or `run`.
+///   Successful statements and database/journal changes reset `wait`; it never
+///   caps the operation or `run`.
 /// * **Re-entrant.** On Windows `LockFileEx` byte-range locks conflict between
 ///   handles *within one process*, so a thread that already owns this lock and
 ///   re-enters would block on itself forever. The thread-local ownership set
@@ -303,9 +312,9 @@ pub(crate) fn with_write_lock_blocking<T>(
         return run();
     }
 
-    let deadline = Instant::now() + wait;
+    let mut window = crate::progress::Window::new(path, wait);
     let process_lock = process_write_lock(&key);
-    let _process_guard = acquire_process_lock(&process_lock, path, context, wait, deadline)?;
+    let _process_guard = acquire_process_lock(&process_lock, path, context, wait, &mut window)?;
     let _held_lock = HeldWriteLock::enter(key);
     let mut lock = fd_lock::RwLock::new(open_write_lock_file(path, context)?);
     let mut run = Some(run);
@@ -328,14 +337,11 @@ pub(crate) fn with_write_lock_blocking<T>(
                 if error.kind() != std::io::ErrorKind::WouldBlock {
                     return Err(error.into());
                 }
-                let Some(remaining) = deadline
-                    .checked_duration_since(Instant::now())
-                    .filter(|remaining| !remaining.is_zero())
-                else {
+                let Some(remaining) = window.remaining() else {
                     return Err(crate::busy::lock_window_busy(
                         context,
                         format!(
-                            "Cozo write lock at {} was still held after waiting {}ms: {error}",
+                            "Cozo write lock at {} was still held after waiting {}ms since last observed progress: {error}",
                             path.display(),
                             wait.as_millis()
                         ),
@@ -351,7 +357,7 @@ pub(crate) fn with_write_lock_blocking<T>(
 /// Take the process-wide mutex for a lock key without waiting forever.
 ///
 /// `std::sync::Mutex` has no timed acquire, so this polls `try_lock` under the
-/// same deadline as the file lock. A poisoned mutex is recovered rather than
+/// same no-progress window as the file lock. A poisoned mutex is recovered rather than
 /// propagated, matching [`lock_recovering_poison`]: the data is `()`, so a
 /// panicking holder leaves nothing inconsistent behind.
 fn acquire_process_lock<'a>(
@@ -359,7 +365,7 @@ fn acquire_process_lock<'a>(
     path: &Path,
     context: &str,
     wait: Duration,
-    deadline: Instant,
+    window: &mut crate::progress::Window,
 ) -> Result<MutexGuard<'a, ()>> {
     let mut backoff = ACQUIRE_POLL_FLOOR;
     loop {
@@ -368,14 +374,11 @@ fn acquire_process_lock<'a>(
             Err(TryLockError::Poisoned(poisoned)) => return Ok(poisoned.into_inner()),
             Err(TryLockError::WouldBlock) => {}
         }
-        let Some(remaining) = deadline
-            .checked_duration_since(Instant::now())
-            .filter(|remaining| !remaining.is_zero())
-        else {
+        let Some(remaining) = window.remaining() else {
             return Err(crate::busy::lock_window_busy(
                 context,
                 format!(
-                    "Cozo write lock at {} was still held by this process after waiting {}ms",
+                    "Cozo write lock at {} was still held by this process after waiting {}ms since last observed progress",
                     path.display(),
                     wait.as_millis()
                 ),
@@ -383,5 +386,31 @@ fn acquire_process_lock<'a>(
         };
         std::thread::sleep(backoff.min(remaining));
         backoff = (backoff * 2).min(ACQUIRE_POLL_CEILING);
+    }
+}
+
+/// Batch callers pause acquisition and resume it without unwinding their job.
+pub(crate) fn with_write_lock_resuming<T>(
+    path: &Path,
+    context: &str,
+    wait: Duration,
+    run: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let mut run = Some(run);
+    loop {
+        let mut entered = false;
+        let result = with_write_lock_blocking(path, context, wait, || {
+            entered = true;
+            run.take().expect("acquisition body runs once")()
+        });
+        match result {
+            Err(error) if !entered && crate::StoreBusy::find(error.as_ref()).is_some() => {
+                tracing::info!(context, %error, "Cozo acquisition paused; resuming pending operation");
+                #[cfg(any(test, feature = "test-support"))]
+                crate::busy_observer::notify(context, &format!("{error:#}"));
+                std::thread::sleep(ACQUIRE_POLL_FLOOR);
+            }
+            result => return result,
+        }
     }
 }

@@ -14,3 +14,8 @@ use super::*;
 mod busy_outcome;
 
 mod progress_retry;
+
+#[cfg(unix)]
+mod permanent_lock;
+
+mod contended_mutation;

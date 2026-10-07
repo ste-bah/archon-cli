@@ -76,6 +76,11 @@ pub(super) async fn prepare_command(
             .join("\n");
         format!("{exports}\n{command}")
     };
+    for (name, value) in &mut env_vars {
+        *value = archon_shell::jobserver::sanitize_variable(name.as_ref(), value.clone().into())
+            .into_string()
+            .expect("sanitization preserves UTF-8");
+    }
     Ok(PreparedBashCommand {
         command,
         env_vars,
@@ -298,6 +303,7 @@ pub(super) fn spawn_bash_child(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
+    archon_shell::jobserver::sanitize_environment(command.as_std_mut());
     spawn_wrapped_child(command)
 }
 

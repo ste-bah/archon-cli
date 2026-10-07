@@ -10,7 +10,7 @@ pub(crate) fn run_script_guarded(
     mutability: ScriptMutability,
     context: &str,
 ) -> Result<NamedRows> {
-    archon_cozo::run_bound_script_guarded(db, script, params, mutability, context)
+    archon_cozo::run_bound_script_resuming(db, script, params, mutability, context)
 }
 
 #[cfg(test)]

@@ -104,3 +104,6 @@ pub fn run_cozo_script_guarded(
 ) -> anyhow::Result<cozo::NamedRows> {
     cozo_retry::run_script_guarded(db, script, params, mutability, context)
 }
+
+#[cfg(test)]
+mod ingest_contention_tests;

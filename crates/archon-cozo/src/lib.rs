@@ -6,15 +6,18 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 mod busy_observer;
-#[cfg(feature = "test-support")]
+#[cfg(any(test, feature = "test-support"))]
 pub use busy_observer::{with_busy_observer, with_guarded_failure};
 mod busy;
 pub use busy::StoreBusy;
 mod guard_registry;
 mod in_memory_identity;
 mod locking;
+mod progress;
+mod resuming;
+pub use resuming::{run_bound_script_resuming, with_write_lock_resuming};
 mod panic_guard;
 mod retry;
 
@@ -30,7 +33,7 @@ pub use guarded_run::{run_guarded, run_guarded_async};
 #[cfg(test)]
 use retry::initial_backoff_ramp;
 
-/// Default acquisition window for [`with_write_lock_blocking`]. Expiry
+/// Default no-progress acquisition window for [`with_write_lock_blocking`]. Expiry
 /// returns retryable [`StoreBusy`]; elapsed time alone cannot prove the holder
 /// is stuck. It never caps the operation once the lock has been acquired.
 pub const DEFAULT_WRITE_LOCK_WAIT: Duration = Duration::from_secs(60);
@@ -58,7 +61,7 @@ pub struct CozoGuardConfig {
     /// lands in a gap. Increasing attempts on that same cadence does not
     /// improve fairness; raw contention now retries without a total limit.
     ///
-    /// Setting this polls at 1-25ms under a bounded deadline instead, which
+    /// Setting this polls at 1-25ms under a no-progress window instead, which
     /// catches the microsecond gap between the peer's transactions, so both
     /// processes interleave and make progress. It is opt-in because an
     /// interactive caller would rather report a busy store promptly than block
@@ -102,7 +105,7 @@ impl CozoGuardConfig {
         self
     }
 
-    /// Wait up to `wait` for the cross-process write lock rather than failing
+    /// Wait for a `wait` no-progress window for the cross-process lock rather than failing
     /// fast. See [`CozoGuardConfig::write_lock_wait`].
     pub fn with_write_lock_wait(mut self, wait: Duration) -> Self {
         self.write_lock_wait = Some(wait);
@@ -188,8 +191,9 @@ pub fn run_bound_script_guarded(
     mutability: ScriptMutability,
     context: &str,
 ) -> Result<NamedRows> {
-    let config = bound_guard_config(db, context)?;
-    run_script_guarded(db, script, params, mutability, context, &config)
+    // Bound store callers retain their operation while a queued acquisition
+    // pauses. Direct run_script_guarded remains the API for exposing a pause.
+    run_bound_script_resuming(db, script, params, mutability, context)
 }
 
 pub fn run_bound_guarded<T>(
@@ -218,8 +222,12 @@ pub fn open_sqlite_guarded(
     config: &CozoGuardConfig,
 ) -> Result<DbInstance> {
     run_guarded(context, ScriptMutability::Mutable, config, || {
-        DbInstance::new("sqlite", path, "")
-            .map_err(|error| anyhow!("open sqlite-backed Cozo store failed: {error}"))
+        DbInstance::new("sqlite", path, "").map_err(|error| {
+            anyhow!(
+                "open sqlite-backed Cozo store failed: {}",
+                render_cozo_error(&error)
+            )
+        })
     })
 }
 
@@ -239,8 +247,12 @@ pub async fn open_sqlite_guarded_async(
 ) -> Result<DbInstance> {
     let path = path.to_string();
     run_guarded_async(context, ScriptMutability::Mutable, config, move || {
-        DbInstance::new("sqlite", &path, "")
-            .map_err(|error| anyhow!("open sqlite-backed Cozo store failed: {error}"))
+        DbInstance::new("sqlite", &path, "").map_err(|error| {
+            anyhow!(
+                "open sqlite-backed Cozo store failed: {}",
+                render_cozo_error(&error)
+            )
+        })
     })
     .await
 }
@@ -255,7 +267,13 @@ pub fn run_script_guarded(
 ) -> Result<NamedRows> {
     run_guarded(context, mutability, config, || {
         db.run_script(script, params.clone(), mutability)
-            .map_err(|error| anyhow!("{error}"))
+            .map_err(|error| anyhow!(render_cozo_error(&error)))
+            .and_then(|rows| {
+                if matches!(mutability, ScriptMutability::Mutable) {
+                    progress::record(config);
+                }
+                Ok(rows)
+            })
     })
 }
 
@@ -268,9 +286,16 @@ pub async fn run_script_guarded_async(
     config: &CozoGuardConfig,
 ) -> Result<NamedRows> {
     let script = script.into();
+    let progress_config = config.clone();
     run_guarded_async(context, mutability, config, move || {
         db.run_script(&script, params.clone(), mutability)
-            .map_err(|error| anyhow!("{error}"))
+            .map_err(|error| anyhow!(render_cozo_error(&error)))
+            .and_then(|rows| {
+                if matches!(mutability, ScriptMutability::Mutable) {
+                    progress::record(&progress_config);
+                }
+                Ok(rows)
+            })
     })
     .await
 }
@@ -317,6 +342,7 @@ fn run_guarded_once<T>(
     context: &str,
     mutability: ScriptMutability,
     config: &CozoGuardConfig,
+    resume_acquisition: bool,
     run: &mut impl FnMut() -> Result<T>,
 ) -> Result<T> {
     // One-shot: the flag is cleared *before* panicking, not after. The process
@@ -331,7 +357,7 @@ fn run_guarded_once<T>(
         );
     }
 
-    #[cfg(feature = "test-support")]
+    #[cfg(any(test, feature = "test-support"))]
     if let Some(error) = busy_observer::failure(context) {
         return Err(error);
     }
@@ -348,6 +374,11 @@ fn run_guarded_once<T>(
         if let (Some(path), Some(wait)) =
             (config.write_lock_path.as_deref(), config.write_lock_wait)
         {
+            if resume_acquisition {
+                return locking::with_write_lock_resuming(path, context, wait, || {
+                    catch_guarded_operation(context, run)
+                });
+            }
             return locking::with_write_lock_blocking(path, context, wait, || {
                 catch_guarded_operation(context, run)
             });
@@ -396,9 +427,9 @@ pub fn with_write_lock_blocking<T>(
     with_write_lock_blocking_timeout(path, context, DEFAULT_WRITE_LOCK_WAIT, run)
 }
 
-/// [`with_write_lock_blocking`] with an explicit ceiling on the acquire.
+/// [`with_write_lock_blocking`] with an explicit no-progress window.
 ///
-/// `wait` bounds only the acquisition. Once the lock is held, `run` is allowed
+/// Writer progress resets `wait`. Once the lock is held, `run` is allowed
 /// to take as long as it needs.
 pub fn with_write_lock_blocking_timeout<T>(
     path: &Path,
