@@ -29,9 +29,9 @@ use tokio::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
 struct State {
-    /// Execution time counted before the current run began.
+    /// Elapsed time in the current no-progress window before its latest start.
     spent: Duration,
-    /// When the current run began; `None` while pending or in a slot wait.
+    /// When the current no-progress window began; `None` while pending or in a slot wait.
     running_since: Option<Instant>,
     /// Whether the executor reported that the session took its slot.
     admitted: bool,
@@ -80,7 +80,7 @@ impl State {
 /// How a dispatch clock ended a call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchCut {
-    /// The call executed for the whole limit after it took its slot.
+    /// The call made no progress for the whole limit after it took its slot.
     Execution(Duration),
     /// The executor reported neither a slot nor a wait for one for the whole
     /// limit: its admission report is missing.
@@ -92,7 +92,7 @@ impl std::fmt::Display for DispatchCut {
         match self {
             Self::Execution(limit) => write!(
                 f,
-                "executed for {}s after taking its subagent slot",
+                "made no progress for {}s after taking its subagent slot",
                 limit.as_secs()
             ),
             Self::NeverAdmitted(limit) => write!(
@@ -124,7 +124,7 @@ impl DispatchClock {
         Arc::new(Self { state })
     }
 
-    /// Execution time counted so far.
+    /// Time in the current no-progress window.
     pub fn elapsed(&self) -> Duration {
         self.state.borrow().elapsed(Instant::now())
     }
@@ -153,6 +153,16 @@ impl DispatchClock {
         });
     }
 
+    /// A host-observed progress event renews the no-progress window.
+    pub fn progress(&self) {
+        self.state.send_modify(|state| {
+            if state.admitted {
+                state.spent = Duration::ZERO;
+                state.running_since = (state.waits == 0).then(Instant::now);
+            }
+        });
+    }
+
     /// Stop the clock until the returned guard drops.
     pub fn pause_for_slot(self: &Arc<Self>) -> ClockPause {
         self.state.send_modify(|state| {
@@ -162,7 +172,7 @@ impl DispatchClock {
         ClockPause(Arc::clone(self))
     }
 
-    /// Resolves once the call has executed for `limit`. Never resolves
+    /// Resolves once the call has made no progress for `limit`. Never resolves
     /// before admission or while a slot wait stops the clock.
     pub async fn exceeding(&self, limit: Duration) {
         self.until(limit, State::elapsed, |state| state.running_since.is_some())
@@ -288,7 +298,7 @@ pub fn current_call() -> Option<Arc<DispatchClock>> {
     CALL.try_with(Arc::clone).ok()
 }
 
-/// Run `work` under an outer deadline of `limit` execution time, counted
+/// Run `work` under an outer no-progress deadline of `limit`, counted
 /// from the first admission of a session it starts; the cut when the
 /// deadline passed first. Slot waits inside `work` do not count.
 pub async fn within<T>(
@@ -312,6 +322,13 @@ pub fn admitted(agent_id: &str) -> bool {
         session.clocks.iter().for_each(|clock| clock.admit());
         true
     })
+}
+
+/// Renew the clocks for the current admitted session after a progress event.
+pub fn progress() {
+    if let Ok(session) = SESSION.try_with(Clone::clone) {
+        session.clocks.iter().for_each(|clock| clock.progress());
+    }
 }
 
 /// Session `agent_id` waits for a slot: stop every clock installed for it

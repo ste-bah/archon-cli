@@ -278,7 +278,6 @@ async function authorCandidate(w, policy) {
   // Seeded feedback is attempt 0 of the history: every later prompt in this
   // phase keeps showing the finding the phase was opened to repair.
   const history = feedback.length > 0 ? [{ attempt: 0, findings: feedback.slice() }] : [];
-  let lastCommitted = null;
   let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
   let lastFindings = feedback.slice();
@@ -291,11 +290,8 @@ async function authorCandidate(w, policy) {
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
-      // Observe never blocks on the artifact's quality: a loop that stopped
-      // improving returns the artifact the tree holds now. An outage says
-      // nothing about the artifact, so a window that holds one pauses in
-      // either mode (resumable), whatever the rest of the window was.
-      if (args.gateMode === "observe" && lastCommitted && !windowHasOutage(progress)) return lastCommitted;
+      // A stalled artifact is never accepted, even in observe mode. Keep the
+      // run resumable so repair findings remain attached to the author loop.
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
     }
     const carry = carried;
@@ -364,7 +360,6 @@ async function authorCandidate(w, policy) {
     // live tree, so observe's fallback is the LATEST committed outcome: only
     // its receipt and subjects describe what the tree now holds (an earlier
     // outcome with fewer findings would name a skeleton that is gone).
-    if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true) lastCommitted = outcome;
     if (routed.fatal.length > 0) {
       await stopFixed(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
     }

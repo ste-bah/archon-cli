@@ -90,6 +90,7 @@ pub struct ToolRoundGuard(Arc<ActivityClock>);
 impl Drop for ToolRoundGuard {
     fn drop(&mut self) {
         self.0.touch();
+        crate::subagent_dispatch_clock::progress();
         self.0.tool_rounds.fetch_sub(1, Ordering::SeqCst);
     }
 }
@@ -178,6 +179,7 @@ pub async fn inherit<T>(
 pub fn note() {
     if let Some(clock) = current() {
         clock.touch();
+        crate::subagent_dispatch_clock::progress();
     }
 }
 

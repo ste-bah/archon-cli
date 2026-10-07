@@ -4,6 +4,24 @@ fn secs(value: u64) -> Duration {
     Duration::from_secs(value)
 }
 
+async fn host_progress_scope<T>(
+    agent_id: &str,
+    clock: Arc<DispatchClock>,
+    work: impl std::future::Future<Output = T>,
+) -> T {
+    let activity = subagent_activity::ActivityClock::new();
+    let activity_session = subagent_activity::SessionClock {
+        agent_id: agent_id.to_string(),
+        clock: activity,
+    };
+    scope_session(
+        agent_id.to_string(),
+        vec![clock],
+        subagent_activity::scope(activity_session, work),
+    )
+    .await
+}
+
 /// Issue 288: a clock is pending until its call takes a slot. Dispatch,
 /// setup and a queue before admission count nothing; the run time starts at
 /// admission, once (a retry admitted again changes nothing).
@@ -122,22 +140,82 @@ async fn within_excludes_slot_waits_reported_by_a_session() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn within_still_cuts_execution_past_the_limit() {
+async fn within_cuts_only_after_a_full_no_progress_window() {
     let started = Instant::now();
     let output = within(secs(100), async {
         let call = current_call().expect("the call clock is installed");
-        scope_session("agent-a", vec![call], async {
+        host_progress_scope("agent-a", call, async {
             assert!(admitted("agent-a"));
-            tokio::time::sleep(secs(1_000)).await;
+            tokio::time::sleep(secs(90)).await;
+            subagent_activity::note();
+            tokio::time::sleep(secs(90)).await;
+            subagent_activity::note();
+            tokio::time::sleep(secs(90)).await;
         })
         .await
     })
     .await;
-    assert_eq!(output, Err(DispatchCut::Execution(secs(100))));
-    assert_eq!(Instant::now() - started, secs(100));
+    assert_eq!(output, Ok(()), "progress renews the window repeatedly");
+    assert_eq!(Instant::now() - started, secs(270));
     // Work that never reaches an executor is cut too, and named.
     let output = within(secs(100), tokio::time::sleep(secs(1_000))).await;
     assert_eq!(output, Err(DispatchCut::NeverAdmitted(secs(100))));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_progress_event_resets_the_deadline_and_a_later_stall_is_bounded() {
+    let clock = DispatchClock::new();
+    host_progress_scope("progress", Arc::clone(&clock), async {
+        clock.admit();
+        tokio::time::sleep(secs(99)).await;
+        subagent_activity::note();
+        tokio::time::sleep(secs(99)).await;
+        assert_eq!(clock.elapsed(), secs(99));
+        assert_eq!(
+            clock.cut(secs(100)).await,
+            DispatchCut::Execution(secs(100))
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn repeated_progress_events_keep_a_long_call_alive_without_removing_its_bound() {
+    let clock = DispatchClock::new();
+    host_progress_scope("repeated-progress", Arc::clone(&clock), async {
+        clock.admit();
+        for _ in 0..5 {
+            tokio::time::sleep(secs(99)).await;
+            subagent_activity::note();
+            assert_eq!(clock.elapsed(), Duration::ZERO);
+        }
+        tokio::time::sleep(secs(100)).await;
+        assert_eq!(
+            clock.cut(secs(100)).await,
+            DispatchCut::Execution(secs(100))
+        );
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn progress_during_a_slot_wait_renews_the_window_after_admission_resumes() {
+    let clock = DispatchClock::new();
+    host_progress_scope("wait-progress", Arc::clone(&clock), async {
+        clock.admit();
+        tokio::time::sleep(secs(80)).await;
+        let pause = clock.pause_for_slot();
+        tokio::time::sleep(secs(500)).await;
+        subagent_activity::note();
+        drop(pause);
+        tokio::time::sleep(secs(99)).await;
+        assert_eq!(clock.elapsed(), secs(99));
+        assert_eq!(
+            clock.cut(secs(100)).await,
+            DispatchCut::Execution(secs(100))
+        );
+    })
+    .await;
 }
 
 #[tokio::test]
