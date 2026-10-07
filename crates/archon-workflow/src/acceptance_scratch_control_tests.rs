@@ -136,16 +136,32 @@ fn commit(root: &Path, hooks: &Path) -> WorkflowResult<String> {
     )
 }
 
+/// The child's window starts at spawn. A freshly written hook script is a
+/// new executable, and on macOS the first exec of a new executable is slow
+/// under concurrency (measured with 40 at once: up to 4.8 s, against 0.14 s
+/// for the same hooks run again), so a hook could miss even a 3 s window
+/// before it printed anything. The talking child is therefore a shell alias
+/// run by git (system binaries only, no new file), and the window is a few
+/// times its spawn latency under load.
+#[cfg(unix)]
+const TALKING_WINDOW_SECS: u64 = 2;
+
 #[cfg(unix)]
 #[test]
 fn issue356_a_git_child_that_keeps_talking_outlives_the_window() {
-    let (dir, root) =
-        repo_with_hook("for i in 1 2 3 4 5 6 7; do echo working >&2; sleep 0.3; done");
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    git(dir.path(), &["init", "-q", root.to_str().unwrap()], &[]).unwrap();
+    // 24 lines 0.2 s apart: every gap far inside the window, the total
+    // (at least 4.8 s) more than twice it.
+    let talk =
+        "alias.talk=!i=0; while [ $i -lt 24 ]; do echo working >&2; sleep 0.2; i=$((i+1)); done";
     let started = Instant::now();
-    let done = Control::new(1, cancel()).run(|| commit(&root, &dir.path().join("hooks")));
+    let done =
+        Control::new(TALKING_WINDOW_SECS, cancel()).run(|| git(&root, &["-c", talk, "talk"], &[]));
     assert!(done.is_ok(), "{done:?}");
     assert!(
-        started.elapsed() > Duration::from_secs(2),
+        started.elapsed() > 2 * Duration::from_secs(TALKING_WINDOW_SECS),
         "past the window in total"
     );
 }

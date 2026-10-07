@@ -29,6 +29,10 @@ fn shared_content_hash() -> String {
     crate::hash::sha256_str(SHARED_CONTENT)
 }
 
+// Both tests ingest through the shipping path, which embeds with the
+// process-global provider into the env-selected default vector store, so
+// they share the docs global-state lane with every test that installs either.
+
 /// Two ingests of identical content, on independent handles to one file.
 ///
 /// The handles are deliberately not shared: `acquire_docs_db` hands one
@@ -36,6 +40,7 @@ fn shared_content_hash() -> String {
 /// would prove nothing about the case that actually occurs — a second `archon`
 /// process, or any caller that opens the store itself.
 #[test]
+#[serial_test::serial(docs_global_state)]
 fn concurrent_handles_register_one_document_for_one_content_hash() {
     let temp = tempfile::tempdir().expect("temp database directory");
     let path = temp.path().join("docs.db");
@@ -98,6 +103,7 @@ fn concurrent_handles_register_one_document_for_one_content_hash() {
 /// watchdog rather than a plain call: a regression here hangs, and a hung job is
 /// far worse to diagnose in CI than a failed assertion.
 #[test]
+#[serial_test::serial(docs_global_state)]
 fn reservation_inside_a_guarded_operation_does_not_self_deadlock() {
     let temp = tempfile::tempdir().expect("temp database directory");
     let path = temp.path().join("docs.db");
