@@ -264,8 +264,10 @@ fn windows_profile_variables_point_at_the_site_home() {
 #[path = "acceptance_check_environment_r3_tests.rs"]
 mod round_three;
 
+/// Round 5 rule: a withheld name is noted only where it appears as a whole
+/// identifier (case-sensitive, no prose parsing); values are never shown.
 #[test]
-fn r4_notes_are_case_sensitive_substrings_without_parsing() {
+fn r5_notes_are_case_sensitive_identifier_matches_without_parsing() {
     let env = CommandEnvironment::from_host(
         &host(&[
             ("PATH", "/bin"),
@@ -278,15 +280,34 @@ fn r4_notes_are_case_sensitive_substrings_without_parsing() {
     for text in [
         "E AssertionError: expected FIXTURE_API_KEY environment variable is not set in stderr",
         "FIXTURE_API_KEY environment variable is not set",
-        "prefixFIXTURE_API_KEYsuffix BASH_ENV",
+        r#"{"failures":["FIXTURE_API_KEY"]}"#,
     ] {
         let note = env.note(&[text.as_bytes()]).expect(text);
-        assert!(note.contains("FIXTURE_API_KEY") && !note.contains("hidden-data"));
-        if text.contains("BASH_ENV") {
-            assert!(note.contains("BASH_ENV") && !note.contains("hidden-script"));
-        }
+        assert!(note.contains("FIXTURE_API_KEY"), "{note}");
+        assert!(
+            !note.contains("hidden-data") && !note.contains("BASH_ENV"),
+            "{note}"
+        );
     }
-    assert!(env.note(&[b"fixture_api_key is missing"]).is_none());
+    let note = env
+        .note(&[b"prefixFIXTURE_API_KEYsuffix BASH_ENV"])
+        .expect("whole identifier BASH_ENV is noted");
+    assert!(
+        note.contains("BASH_ENV") && !note.contains("hidden-script"),
+        "{note}"
+    );
+    assert!(
+        !note.contains("FIXTURE_API_KEY"),
+        "embedded name noted: {note}"
+    );
+    for text in [
+        "prefixFIXTURE_API_KEYsuffix",
+        "MY_FIXTURE_API_KEY_2",
+        "fixture_api_key is missing",
+        "Fixture_Api_Key is missing",
+    ] {
+        assert!(env.note(&[text.as_bytes()]).is_none(), "{text}");
+    }
 }
 
 #[cfg(unix)]
@@ -333,6 +354,11 @@ fn non_unicode_note_case(case: &str, text: &str) {
         .expect("withheld name survives non-Unicode value");
     assert!(note.contains("FIXTURE_API_KEY") && !note.contains('\u{fffd}'));
     assert!(environment.note(&[b"fixture_api_key"]).is_none());
+    assert!(
+        environment
+            .note(&[b"prefixFIXTURE_API_KEYsuffix"])
+            .is_none()
+    );
 }
 
 #[cfg(unix)]
@@ -353,9 +379,9 @@ fn r4_non_unicode_json_note() {
 }
 #[cfg(unix)]
 #[test]
-fn r4_non_unicode_substring_note() {
+fn r5_non_unicode_punctuated_identifier_note() {
     non_unicode_note_case(
-        "r4_non_unicode_substring_note",
-        "prefixFIXTURE_API_KEYsuffix",
+        "r5_non_unicode_punctuated_identifier_note",
+        "prefix-FIXTURE_API_KEY-suffix",
     );
 }

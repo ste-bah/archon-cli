@@ -85,14 +85,16 @@ fn wave_missing_path_refuses_before_execution() {
 }
 
 #[test]
-fn stage_reports_forwardable_missing_data_without_values() {
+fn stage_keeps_failure_and_notes_forwardable_name_without_values() {
     operator(
-        "stage_reports_forwardable_missing_data_without_values",
+        "stage_keeps_failure_and_notes_forwardable_name_without_values",
         true,
         |root| {
             let error = run_verify_command(root, Some("test -n \"${FIXTURE_API_KEY-}\" || { echo 'FIXTURE_API_KEY is not set' >&2; exit 1; }")).unwrap_err();
             assert!(
-                error.contains("FIXTURE_API_KEY") && error.contains("no verdict"),
+                error.starts_with("verify_command exited with status 1\nNote:")
+                    && error.contains("FIXTURE_API_KEY")
+                    && !error.contains("no verdict"),
                 "{error}"
             );
             assert!(!error.contains("data-secret"));
@@ -101,14 +103,16 @@ fn stage_reports_forwardable_missing_data_without_values() {
 }
 
 #[test]
-fn wave_reports_forwardable_missing_data_without_values() {
+fn wave_keeps_failure_and_notes_forwardable_name_without_values() {
     operator(
-        "wave_reports_forwardable_missing_data_without_values",
+        "wave_keeps_failure_and_notes_forwardable_name_without_values",
         true,
         |root| {
             let error = run_wave_verify(root, Some("test -n \"${FIXTURE_API_KEY-}\" || { echo 'FIXTURE_API_KEY is not set' >&2; exit 1; }"), 1, root, "stage").unwrap_err().to_string();
             assert!(
-                error.contains("FIXTURE_API_KEY") && error.contains("no verdict"),
+                error.starts_with(
+                    "wave verify failed (exit 1): FIXTURE_API_KEY is not set\n\nNote: output mentions withheld variable(s) FIXTURE_API_KEY."
+                ) && !error.contains("no verdict"),
                 "{error}"
             );
             assert!(!error.contains("data-secret"));

@@ -190,14 +190,28 @@ fn review349_recorded_policy_reaches_host_verifiers() {
     );
 }
 
+/// Round 5 rule: the withheld-name note is kept in its own field; verifier
+/// output is stored unchanged and the note is rendered after it.
 fn stage_note_case(case: &str, message: &str) {
     operator(case, true, |root| {
         let command = format!("printf '%s\\n' '{}'; exit 3", message);
+        let printed = format!("{message}\n");
         let report = crate::acceptance::run_verify_command_capture(root, Some(&command), None)
             .expect("failure is still a captured result")
             .unwrap();
         assert_eq!(report.exit_code, Some(3));
-        assert!(report.stderr.contains("Note:") && report.stderr.contains("FIXTURE_API_KEY"));
+        assert_eq!(report.stdout, printed, "verifier output changed");
+        assert!(!report.stderr.contains("Note:"), "{}", report.stderr);
+        let note = report
+            .environment_note
+            .clone()
+            .expect("withheld name noted");
+        assert!(note.contains("FIXTURE_API_KEY") && !note.contains("hidden-data"));
+        let reason = report.failure_reason();
+        assert!(
+            reason.starts_with("verify_command exited with status 3\nNote:"),
+            "{reason}"
+        );
         let run = root.join("wave-run");
         let error = crate::write_coordinator::patch_apply::run_wave_verify(
             root,
@@ -207,38 +221,46 @@ fn stage_note_case(case: &str, message: &str) {
             "stage",
         )
         .unwrap_err();
-        assert!(
-            matches!(
-                error,
-                crate::write_coordinator::ApplyError::VerifyFailed { exit: 3, .. }
-            ),
-            "{error}"
-        );
-        let persisted =
-            std::fs::read_to_string(run.join("write-coordination/stages/stage/tests/0.json"))
-                .unwrap();
-        assert!(persisted.contains("Note:") && persisted.contains("FIXTURE_API_KEY"));
-        assert!(!persisted.contains("hidden-data"));
+        let rendered = error.to_string();
+        let crate::write_coordinator::ApplyError::VerifyFailed {
+            exit: 3,
+            stderr_tail,
+            environment_note: Some(wave_note),
+        } = error
+        else {
+            panic!("unexpected wave verify error: {rendered}");
+        };
+        assert!(!stderr_tail.contains("Note:"), "{stderr_tail}");
+        assert!(wave_note.contains("FIXTURE_API_KEY") && !wave_note.contains("hidden-data"));
+        assert!(rendered.ends_with(&format!("\n{wave_note}")), "{rendered}");
+        let persisted: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(run.join("write-coordination/stages/stage/tests/0.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(persisted["stdout_tail"], printed.as_str(), "{persisted}");
+        assert!(!persisted["stderr_tail"].as_str().unwrap().contains("Note:"));
+        assert_eq!(persisted["environment_note"], wave_note.as_str());
+        assert!(!persisted.to_string().contains("hidden-data"));
     });
 }
 #[test]
-fn r4_stage_pytest_expectation() {
+fn r5_stage_pytest_expectation_note_is_separate() {
     stage_note_case(
-        "r4_stage_pytest_expectation",
+        "r5_stage_pytest_expectation_note_is_separate",
         "E AssertionError: expected FIXTURE_API_KEY environment variable is not set in stderr",
     );
 }
 #[test]
-fn r4_stage_actual_diagnostic() {
+fn r5_stage_actual_diagnostic_note_is_separate() {
     stage_note_case(
-        "r4_stage_actual_diagnostic",
+        "r5_stage_actual_diagnostic_note_is_separate",
         "FIXTURE_API_KEY environment variable is not set",
     );
 }
 #[test]
-fn r4_stage_actual_after_expectation() {
+fn r5_stage_actual_after_expectation_note_is_separate() {
     stage_note_case(
-        "r4_stage_actual_after_expectation",
+        "r5_stage_actual_after_expectation_note_is_separate",
         "E AssertionError: expected FIXTURE_API_KEY environment variable is not set in stderr\nFIXTURE_API_KEY environment variable is not set",
     );
 }

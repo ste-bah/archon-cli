@@ -2,7 +2,9 @@
 //! A failed child may mention host variables it was actually denied. Report
 //! their names separately so the operator can consider forwarding them. Even
 //! expectations, quoted JSON and framework prefixes use the same literal,
-//! case-sensitive substring rule. Never parse prose or disclose host values.
+//! case-sensitive rule: a name counts only as a whole identifier (no
+//! [A-Za-z0-9_] byte before or after it). Shell-maintained names are skipped.
+//! Never parse prose or disclose host values.
 
 use super::lookup;
 use std::collections::{BTreeMap, BTreeSet};
