@@ -136,7 +136,10 @@ pub(super) async fn finish_pipe_tasks(
     drained.unwrap_or_else(|_| {
         stdout.abort();
         stderr.abort();
-        Err("host command output pipes stayed open after teardown: a process outside its tree still holds them".to_string())
+        Err(
+            "host command output pipes stayed open after teardown: a process still holds them"
+                .to_string(),
+        )
     })
 }
 

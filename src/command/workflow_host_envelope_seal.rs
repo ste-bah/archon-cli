@@ -18,9 +18,10 @@ pub(crate) struct EnvelopeCleanup<'a> {
 
 impl Drop for EnvelopeCleanup<'_> {
     fn drop(&mut self) {
-        if let Err(error) = seal_staged_envelope(self.path, self.secrets, None) {
+        if let Err(error) = self.secrets.seal_staged_evidence(self.path, None) {
             let _ = std::fs::remove_file(self.path);
-            tracing::warn!(%error, "sealing an exiting call's staged envelope failed");
+            let evidence = self.secrets.text(&error.to_string());
+            tracing::warn!(error = %evidence, "sealing an exiting call's staged envelope failed");
         }
     }
 }
@@ -103,11 +104,9 @@ fn seal_bytes(raw: &[u8], secrets: &HostSecrets) -> WorkflowResult<Vec<u8>> {
         if verified != envelope || secrets.envelope_holds_secret(&envelope) {
             return refusal_envelope();
         }
-        return if changed {
-            Ok(serde_json::to_vec_pretty(&value)?)
-        } else {
-            Ok(raw.to_vec())
-        };
+        // Persist only the verified typed value. Parsing may discard duplicate
+        // keys and normalize numeric tokens even when redaction changed nothing.
+        return Ok(serde_json::to_vec_pretty(&verified)?);
     }
     // A redaction refusal is valid operational evidence, never JSON null.
     if secrets.holds_serialized_secret(&serde_json::to_vec(&value)?) {
@@ -115,6 +114,46 @@ fn seal_bytes(raw: &[u8], secrets: &HostSecrets) -> WorkflowResult<Vec<u8>> {
     }
     let sealed = serde_json::to_vec_pretty(&value)?;
     Ok(sealed)
+}
+
+pub(crate) fn refuse_staged_evidence(
+    path: &Path,
+    prepared: Option<&mut PreparedPublicationV1>,
+) -> WorkflowResult<()> {
+    let bytes = refusal_envelope()?;
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => write_owner_only(path, &bytes)?,
+        metadata => {
+            use std::io::Write;
+            let io = |source| WorkflowError::Io {
+                path: path.into(),
+                source,
+            };
+            match metadata {
+                Ok(_) => std::fs::remove_file(path).map_err(io)?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(io(error)),
+            }
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(path).map_err(io)?;
+            file.write_all(&bytes).map_err(io)?;
+            file.sync_all().map_err(io)?;
+        }
+    }
+    if let Some(prepared) = prepared {
+        for entry in &mut prepared.entries {
+            if entry.relative_path == ENVELOPE_FILE {
+                (entry.byte_len, entry.blake3) = identity(&bytes);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn refusal_envelope() -> WorkflowResult<Vec<u8>> {

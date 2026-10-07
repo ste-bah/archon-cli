@@ -3,9 +3,8 @@
 //! and the policy live in `workflow_host_command_operational`.
 use super::*;
 use crate::command::workflow_host_command_operational::{
-    NextStep, OperationalAttempt, OperationalReport, classify, next_step, pause_for_stall,
-    pause_for_unsettled_publish, pause_run, record_retry, reported_progress, require_run_owned,
-    unsettled_publish_evidence,
+    NextStep, OperationalAttempt, OperationalReport, next_step, pause_for_stall,
+    pause_for_unsettled_publish, pause_run, record_retry, require_run_owned,
 };
 
 impl FixedHostCommandExecutor {
@@ -19,7 +18,9 @@ impl FixedHostCommandExecutor {
         command: &ResolvedHostCommand,
         call_id: &str,
         expected_generation: u64,
-    ) -> WorkflowResult<SupervisedProcessOutput> {
+        secrets: &HostSecrets,
+        envelope: &std::path::Path,
+    ) -> WorkflowResult<crate::command::workflow_host_secrets::SealedProcessOutput> {
         let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
         let run_id = self
             .run_root
@@ -52,7 +53,6 @@ impl FixedHostCommandExecutor {
             let observed = match observed {
                 Ok(observed) => observed,
                 Err(error @ (WorkflowError::Io { .. } | WorkflowError::HostOperational(_))) => {
-                    let secrets = HostSecrets::of(&self.context, &command.environment);
                     let evidence = secrets.text(&error.to_string());
                     let resume = format!("archon workflow resume --live --yes {run_id}");
                     let message = format!(
@@ -71,16 +71,17 @@ impl FixedHostCommandExecutor {
                     }
                     return Err(WorkflowError::ControlPaused(message));
                 }
-                Err(error) => return Err(error),
+                Err(error) => return Err(secrets.error(error)),
             };
-            let Some(kind) = classify(&observed) else {
+            let observed = secrets.seal_process_output(observed, envelope, &command.command_id)?;
+            let Some(kind) = observed.kind else {
                 return Ok(observed);
             };
             history.push(OperationalAttempt {
                 attempt,
                 reason: kind.label(),
                 elapsed_secs: started.elapsed().as_secs(),
-                progress: reported_progress(&observed.stderr),
+                progress: observed.progress,
             });
             let report = OperationalReport {
                 run_id: &run_id,
@@ -121,19 +122,18 @@ impl FixedHostCommandExecutor {
                     &self.run_root,
                     expected_generation,
                     &report,
-                    &evidence,
+                    &secrets.text(&evidence),
                 ));
             }
             // A child that read nothing over a journal no read could settle
             // already retried the settlement: pause now (Issue 338).
-            if let Some(evidence) = unsettled_publish_evidence(observed.exit_code, &observed.stderr)
-            {
+            if let Some(evidence) = &observed.unsettled_publish {
                 return Err(pause_for_unsettled_publish(
                     &store,
                     &self.run_root,
                     expected_generation,
                     &report,
-                    &evidence,
+                    &secrets.text(&evidence),
                 ));
             }
             match next_step(&history) {

@@ -382,3 +382,6 @@ fn a_legacy_ambiguous_marker_stays_closed_after_owner_exit() {
 
 #[path = "workflow_host_command_groups_regression_tests.rs"]
 mod regression_tests;
+
+#[path = "workflow_host_records_r4_tests.rs"]
+mod records_r4_tests;

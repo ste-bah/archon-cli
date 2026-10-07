@@ -304,6 +304,8 @@ pub(crate) async fn supervise_process_group(
         }
     };
 
+    #[cfg(all(test, unix))]
+    r4_tests::before_teardown(&mut group_guard.tree);
     match outcome {
         Outcome::Completed(exit) => {
             // Torn down before the leader is reaped, then reaped.
@@ -315,7 +317,7 @@ pub(crate) async fn supervise_process_group(
                     teardown.and_stalled(format!("waiting for host command failed: {error}"));
             }
             if let Err(evidence) = &status {
-                teardown = teardown.and_stalled(evidence.clone());
+                teardown = teardown.and_unfinished_io(evidence.clone());
             }
             // The exit is polled first, so an overflow or a stdin failure may
             // still be queued, or not yet seen at all, when it wins. Each is
@@ -330,7 +332,7 @@ pub(crate) async fn supervise_process_group(
                 .into_iter()
                 .flatten()
             {
-                teardown = teardown.and_stalled(evidence.clone());
+                teardown = teardown.and_unfinished_io(evidence.clone());
             }
             if let Some(evidence) = group_guard.settle(teardown).await? {
                 return Ok(stalled_output(&evidence, pipes.ok(), false));
@@ -366,7 +368,7 @@ pub(crate) async fn supervise_process_group(
             let pipes = finish_pipe_tasks(stdout_task, stderr_task).await;
             let teardown = match &pipes {
                 Ok(_) => teardown,
-                Err(evidence) => teardown.and_stalled(evidence.clone()),
+                Err(evidence) => teardown.and_unfinished_io(evidence.clone()),
             };
             if let Some(evidence) = group_guard.settle(teardown).await? {
                 return Ok(stalled_output(&evidence, pipes.ok(), true));
@@ -397,7 +399,7 @@ pub(crate) async fn supervise_process_group(
             // record is written and a clean user cancel becomes a failure.
             let teardown = match pipes {
                 Ok(_) => teardown,
-                Err(evidence) => teardown.and_stalled(evidence),
+                Err(evidence) => teardown.and_unfinished_io(evidence),
             };
             if let Some(evidence) = group_guard.settle(teardown).await? {
                 tracing::warn!(%evidence, "host command teardown stalled after a control interruption");
@@ -427,7 +429,7 @@ pub(crate) async fn supervise_process_group(
             let pipes = finish_pipe_tasks(stdout_task, stderr_task).await;
             let teardown = match &pipes {
                 Ok(_) => teardown,
-                Err(evidence) => teardown.and_stalled(evidence.clone()),
+                Err(evidence) => teardown.and_unfinished_io(evidence.clone()),
             };
             // A stall outranks the failure: the tree is not gone, and only a
             // resumable outcome keeps the run from ending on it.
@@ -442,3 +444,7 @@ pub(crate) async fn supervise_process_group(
 
 #[cfg(all(test, unix))]
 pub(crate) use termination::checkpoint_contention;
+
+#[cfg(all(test, unix))]
+#[path = "workflow_host_supervisor_r4_tests.rs"]
+mod r4_tests;

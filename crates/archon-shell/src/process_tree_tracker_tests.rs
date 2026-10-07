@@ -411,3 +411,6 @@ fn a_stopped_child_has_not_exited() {
         "a stopped child was reported as exited"
     );
 }
+
+#[path = "process_tree_recording_r4_tests.rs"]
+mod recording_r4_tests;

@@ -3,7 +3,7 @@
 //! A child's stdout, stderr and gate envelope are persisted with the call. The
 //! child runs with the configured acceptance allowlist and, for provider
 //! profiles, the provider credentials, and anything it prints or reports can
-//! carry secret values. Credential names select values to replace at this boundary.
+//! carry secret values. Credential names and URL credentials select values to replace at this boundary.
 //! PATH, HOME and the other process essentials are not secrets and stay as
 //! they are; they never enter an identity or digest in the first place.
 use std::collections::BTreeMap;
@@ -55,7 +55,12 @@ impl HostSecrets {
     }
 
     pub(crate) fn text(&self, text: &str) -> String {
-        self.0.text(text)
+        let clean = self.0.text(text);
+        if self.holds_serialized_secret(clean.as_bytes()) {
+            String::new()
+        } else {
+            clean
+        }
     }
 
     /// Whether `bytes` hold any secret value in clear.
@@ -184,3 +189,7 @@ mod tests;
 #[cfg(test)]
 #[path = "workflow_host_secrets_regression_tests.rs"]
 mod regression_tests;
+
+#[path = "workflow_host_evidence_boundary.rs"]
+mod boundary;
+pub(crate) use boundary::SealedProcessOutput;

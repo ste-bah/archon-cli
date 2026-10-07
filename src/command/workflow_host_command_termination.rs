@@ -63,16 +63,32 @@ impl Teardown {
         }
     }
 
-    /// This outcome, with `evidence` added as a further cause of a stall
-    /// whose survivors are not known.
+    /// Add a diagnostic without erasing already-established membership.
+    /// After a confirmed teardown, unfinished I/O is unknown membership;
+    /// after a known stall, those survivors already explain unfinished I/O.
     pub(super) fn and_stalled(self, evidence: impl Into<String>) -> Self {
         let evidence = evidence.into();
         match self {
             Self::Confirmed => Self::stalled(evidence),
             Self::Stalled {
-                evidence: earlier, ..
-            } => Self::stalled(format!("{earlier}; {evidence}")),
+                evidence: earlier,
+                survivors,
+            } => Self::Stalled {
+                evidence: format!("{earlier}; {evidence}"),
+                survivors,
+            },
         }
+    }
+    /// Unfinished I/O is explained by known live survivors. With no known
+    /// survivor, it is evidence of newly unknown membership instead.
+    pub(super) fn and_unfinished_io(self, evidence: impl Into<String>) -> Self {
+        let mut teardown = self.and_stalled(evidence);
+        if let Self::Stalled { survivors, .. } = &mut teardown
+            && survivors.as_ref().is_some_and(Vec::is_empty)
+        {
+            *survivors = None;
+        }
+        teardown
     }
 }
 
@@ -80,6 +96,8 @@ impl Teardown {
 #[derive(Clone)]
 pub(super) struct Tree {
     leader: Option<u32>,
+    #[cfg(all(test, unix))]
+    pub(super) test_job: Option<Arc<dyn job::JobOps>>,
     pub(super) evidence: Option<super::super::workflow_host_command_groups::GroupEvidence>,
     #[cfg(unix)]
     pub(super) tracker: Arc<Mutex<Tracker>>,
@@ -135,6 +153,8 @@ pub(super) fn confine(child: &mut tokio::process::Child) -> WorkflowResult<Tree>
     });
     Ok(Tree {
         leader,
+        #[cfg(test)]
+        test_job: None,
         evidence: None,
         reaped: tracker.reap_token(),
         tracker: Arc::new(Mutex::new(tracker)),
@@ -194,38 +214,56 @@ impl Tree {
     async fn run(
         &self,
         bound: Duration,
-        work: impl FnOnce(&mut Tracker, Instant) -> Teardown + Send + 'static,
+        work: impl FnOnce(&mut Tracker, Instant, bool) -> Teardown + Send + 'static,
     ) -> Teardown {
+        #[cfg(test)]
+        if let Some(job) = &self.test_job {
+            return job::kill_job_off_thread(job.clone(), self.evidence.clone(), bound).await;
+        }
         // Disable before the first termination scan, including the TERM
         // grace. Outstanding scanners recheck this after acquiring the lock.
         self.abandoned.store(true, Ordering::SeqCst);
-        let evidence = self.evidence.clone();
+        // Checkpoint admission/I/O has its own watchdog. It must never spend
+        // termination's budget or prevent that phase from being scheduled.
+        let persistence = if let Some(evidence) = self.evidence.clone() {
+            let progress = archon_shell::teardown_progress::Progress::new(bound);
+            let worker = progress.clone();
+            progress
+                .watch(tokio::task::spawn_blocking(move || {
+                    evidence.begin_observed(&worker)
+                }))
+                .await
+                .and_then(|result| result)
+                .err()
+        } else {
+            None
+        };
+        let can_checkpoint = persistence.is_none();
         let tracker = self.tracker.clone();
         let progress = archon_shell::teardown_progress::Progress::new(bound);
         let worker_progress = progress.clone();
         let task = tokio::task::spawn_blocking(move || {
-            // Admission, lock contention and checkpoint I/O are all watched.
-            // Initial durable evidence is incomplete even before this runs.
-            let persistence = evidence
-                .as_ref()
-                .and_then(|e| e.begin_observed(&worker_progress).err());
-            if let Some(error) = persistence {
-                return Teardown::stalled(format!("recording teardown identities failed: {error}"));
-            }
             let deadline = Instant::now() + worker_progress.remaining();
-            let teardown = match lock_until(&tracker, deadline) {
-                Ok(mut tracker) => work(&mut tracker, deadline),
+            match lock_until(&tracker, deadline) {
+                Ok(mut tracker) => work(&mut tracker, deadline, can_checkpoint),
                 Err(error) => {
                     Teardown::stalled(format!("host command tree tracker unavailable: {error}"))
                 }
-            };
-            teardown
+            }
         });
-        match progress.watch(task).await {
-            Ok(teardown) => teardown,
-            Err(error) => Teardown::stalled(format!(
+        let teardown = progress.watch(task).await.unwrap_or_else(|error| {
+            Teardown::stalled(format!(
                 "host command teardown stalled; survivors unknown: {error}"
-            )),
+            ))
+        });
+        if let Some(error) = persistence {
+            // A failed checkpoint leaves authoritative incomplete evidence.
+            // Termination was still attempted; never report a false confirmation.
+            Teardown::stalled(format!(
+                "recording teardown identities failed: {error}; {teardown:?}"
+            ))
+        } else {
+            teardown
         }
     }
 }
@@ -246,6 +284,9 @@ fn kill_tracked(
     evidence: Option<&super::super::workflow_host_command_groups::GroupEvidence>,
 ) -> Teardown {
     let killed = tracker.kill(bound);
+    if let Some(error) = tracker.recording_failure() {
+        return Teardown::stalled(format!("recording teardown identities failed: {error}"));
+    }
     if let Ok(survivors) = &killed
         && let Some(evidence) = evidence
     {
@@ -277,7 +318,7 @@ fn kill_tracked(
 #[cfg(unix)]
 pub(super) async fn terminate_and_reap(child: &mut tokio::process::Child, tree: &Tree) -> Teardown {
     let term = tree
-        .run(SCAN_BUDGET, |tracker, deadline| {
+        .run(SCAN_BUDGET, |tracker, deadline, _| {
             match tracker.signal(libc::SIGTERM, deadline) {
                 Ok(_) => Teardown::Confirmed,
                 Err(error) => Teardown::stalled(format!("host command TERM scan failed: {error}")),
@@ -287,11 +328,11 @@ pub(super) async fn terminate_and_reap(child: &mut tokio::process::Child, tree: 
     tokio::time::sleep(CLEANUP_GRACE).await;
     let evidence = tree.evidence.clone();
     let teardown = tree
-        .run(REAP_DEADLINE, move |tracker, deadline| {
+        .run(REAP_DEADLINE, move |tracker, deadline, checkpoint| {
             kill_tracked(
                 tracker,
                 deadline.saturating_duration_since(Instant::now()),
-                evidence.as_ref(),
+                if checkpoint { evidence.as_ref() } else { None },
             )
         })
         .await;
@@ -310,11 +351,11 @@ pub(super) async fn terminate_and_reap(child: &mut tokio::process::Child, tree: 
 #[cfg(unix)]
 pub(super) async fn terminate_completed_group(tree: &Tree) -> Teardown {
     let evidence = tree.evidence.clone();
-    tree.run(REAP_DEADLINE, move |tracker, deadline| {
+    tree.run(REAP_DEADLINE, move |tracker, deadline, checkpoint| {
         kill_tracked(
             tracker,
             deadline.saturating_duration_since(Instant::now()),
-            evidence.as_ref(),
+            if checkpoint { evidence.as_ref() } else { None },
         )
     })
     .await
@@ -358,7 +399,7 @@ pub(super) async fn reap(
 
 #[cfg(any(windows, test))]
 #[path = "workflow_host_command_termination_job.rs"]
-mod job;
+pub(super) mod job;
 
 #[cfg(all(test, unix))]
 pub(crate) async fn checkpoint_contention(

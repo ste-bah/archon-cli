@@ -103,7 +103,35 @@ impl GroupRecordGuard {
         let mut settled = self.record.clone();
         settled.stalled = true;
         settled.survivors_unknown = survivors.is_none();
-        settled.survivors = survivors.map(<[_]>::to_vec).unwrap_or_default();
+        settled.survivors = match survivors {
+            Some(pins) => pins.to_vec(),
+            None => match self
+                .marker
+                .as_ref()
+                .map(GroupEvidence::retained_identities)
+                .transpose()
+            {
+                Ok(pins) => pins.unwrap_or_else(|| self.record.survivors.clone()),
+                Err(error) => {
+                    // Keep the last durable pins without letting a previously
+                    // complete marker heal newly incomplete membership after a crash.
+                    let unknown = unknown_path(&self.path);
+                    let renamed = std::fs::rename(&self.path, &unknown);
+                    let retained = if renamed.is_ok() {
+                        &unknown
+                    } else {
+                        &self.path
+                    };
+                    return Some(format!(
+                        "{error}; survivor evidence retained in {} and {}; marking unknown membership: {renamed:?}; verify the tree, then remove {} and {} and resume again",
+                        retained.display(),
+                        self.pending.display(),
+                        retained.display(),
+                        self.pending.display()
+                    ));
+                }
+            },
+        };
         // The marker is settled first, through the handle already open: if
         // the record rewrite then fails, the marker can no longer still say
         // "supervised", which a reader would judge as a crash once this
@@ -252,6 +280,20 @@ impl GroupEvidence {
         });
         acquired.recv().unwrap();
         thread
+    }
+    #[cfg(all(test, unix))]
+    pub(crate) fn fail_writes(&self, pending: &Path) {
+        // A read-only handle models EROFS without changing the durable marker.
+        self.0.lock().unwrap().file = Some(std::fs::File::open(pending).unwrap());
+    }
+    fn retained_identities(&self) -> Result<Vec<(u32, u64)>, String> {
+        self.0
+            .try_lock()
+            .map(|state| state.record.survivors.clone())
+            .map_err(|_| {
+                "survivor marker lock unavailable; existing identities must not be overwritten"
+                    .into()
+            })
     }
     pub(crate) fn failure(&self) -> Option<String> {
         self.0.try_lock().ok().and_then(|state| state.fault.clone())

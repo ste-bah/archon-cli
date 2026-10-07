@@ -4,7 +4,7 @@ use crate::command::workflow_host_command_groups::GroupEvidence;
 use archon_shell::teardown_progress::Progress;
 use std::{io, sync::Arc, time::Duration};
 
-pub(super) trait JobOps: Send + Sync + 'static {
+pub(in super::super) trait JobOps: Send + Sync + 'static {
     fn process_identities_observed(&self, progress: &Progress) -> io::Result<Vec<(u32, u64)>>;
     fn kill_and_confirm_observed(&self, progress: &Progress) -> io::Result<u32>;
 }
@@ -32,7 +32,7 @@ async fn phase<T: Send + 'static>(
 }
 
 pub(super) async fn kill_job_off_thread(
-    job: Arc<impl JobOps>,
+    job: Arc<impl JobOps + ?Sized>,
     evidence: Option<GroupEvidence>,
     bound: Duration,
 ) -> Teardown {
@@ -60,32 +60,41 @@ pub(super) async fn kill_job_off_thread(
     .await;
     // Expired accounting says nothing about how long collecting identities
     // will take. Collection has a fresh clock AND its own async watchdog.
-    let collecting_evidence = evidence.clone();
     let confirmed = matches!(killed, Ok(0));
     let collected = phase(bound, move |progress| {
         let pins = if confirmed { Vec::new() } else { job.process_identities_observed(&progress)? };
-        // A nonzero accounting result with no live identities is inconclusive.
         if !confirmed && pins.is_empty() {
             return Err(io::Error::other("job accounting has not confirmed exit and no survivor identities could be collected"));
         }
-        if preparation.is_ok() {
-            if let Some(evidence) = &collecting_evidence { evidence.complete(&pins)?; }
-        }
         progress.check()?;
-        Ok((pins, preparation))
+        Ok(pins)
     }).await;
-    let (pins, preparation) = match collected {
-        Ok(collected) => collected,
+    let pins = match collected {
+        Ok(pins) => pins,
         Err(error) => {
             return Teardown::stalled(format!(
                 "job survivor collection stalled; survivors unknown: {error}"
             ));
         }
     };
-    if let Err(error) = preparation {
-        return Teardown::stalled(format!(
-            "recording job identities failed; survivors unknown: {error}"
-        ));
+    // Membership collection and persistence are different facts. A failed or
+    // stuck checkpoint cannot replace a successful identity read with unknown.
+    let checkpoint = if let Some(evidence) = evidence {
+        let saved = pins.clone();
+        phase(bound, move |_| evidence.complete(&saved)).await
+    } else {
+        Ok(())
+    };
+    let faults: Vec<_> = [preparation.err(), checkpoint.err()]
+        .into_iter()
+        .flatten()
+        .map(|error| error.to_string())
+        .collect();
+    if !faults.is_empty() {
+        return Teardown::Stalled {
+            evidence: format!("recording job identities failed: {}", faults.join("; ")),
+            survivors: Some(pins),
+        };
     }
     match killed {
         Ok(0) => Teardown::Confirmed,

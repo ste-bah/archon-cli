@@ -102,7 +102,7 @@ fn check_deadline(deadline: Instant) -> io::Result<()> {
 }
 
 /// Receives each adopted identity before the tracker can signal it.
-/// Persistence errors are scan errors, never permission to forget a member.
+/// Persistence errors must be reported, but cannot prevent bounded termination.
 pub trait IdentityRecorder: std::fmt::Debug + Send {
     fn checkpoint(&mut self, pinned: &[Pinned]) -> io::Result<()>;
 }
@@ -118,6 +118,7 @@ pub struct Tracker {
     sessions: Vec<u32>,
     members: BTreeMap<u32, Member>,
     recorder: Option<Box<dyn IdentityRecorder>>,
+    recording_failure: Option<String>,
 }
 
 impl Tracker {
@@ -134,6 +135,7 @@ impl Tracker {
             sessions,
             members: BTreeMap::new(),
             recorder: None,
+            recording_failure: None,
         };
         tracker.members.insert(root.pid, Member::adopt(root));
         tracker
@@ -141,9 +143,18 @@ impl Tracker {
 
     /// Install durable identity recording before any scan or teardown.
     pub fn set_recorder(&mut self, mut recorder: Box<dyn IdentityRecorder>) -> io::Result<()> {
-        recorder.checkpoint(&self.pinned())?;
-        self.recorder = Some(recorder);
-        Ok(())
+        let recorded = recorder.checkpoint(&self.pinned());
+        if let Err(error) = &recorded {
+            self.recording_failure = Some(error.to_string());
+        } else {
+            self.recorder = Some(recorder);
+        }
+        recorded
+    }
+
+    /// Durable recording failed; callers must retain incomplete recovery evidence.
+    pub fn recording_failure(&self) -> Option<&str> {
+        self.recording_failure.as_deref()
     }
 
     /// A tracker for a child that is no longer known to be unreaped: no root
@@ -260,8 +271,13 @@ impl Tracker {
             self.members.insert(pinned.pid, Member::adopt(pinned));
             if self.recorder.is_some() {
                 let pins = self.pinned();
-                if let Some(recorder) = &mut self.recorder {
-                    recorder.checkpoint(&pins)?;
+                if let Some(recorder) = &mut self.recorder
+                    && let Err(error) = recorder.checkpoint(&pins)
+                {
+                    self.recording_failure = Some(error.to_string());
+                    // The durable marker stays incomplete. Continue adoption
+                    // and termination instead of retrying failed I/O per pin.
+                    self.recorder = None;
                 }
             }
         }
@@ -303,7 +319,15 @@ impl Tracker {
 
     /// Send `signal` to every live member once; returns the members found.
     pub fn signal(&mut self, signal: i32, deadline: Instant) -> io::Result<Vec<Pinned>> {
-        let members = self.refresh(deadline)?;
+        let scanned = self.refresh(deadline);
+        if scanned.is_err() {
+            // A scan/checkpoint may expire after adopting members. Still send
+            // the requested signal to the finite identity-pinned set.
+            for member in self.pinned() {
+                self.send(member, signal);
+            }
+        }
+        let members = scanned?;
         for member in &members {
             check_deadline(deadline)?;
             self.send(*member, signal);
@@ -342,7 +366,13 @@ impl Tracker {
     ) -> io::Result<Vec<Pinned>> {
         let deadline = Instant::now() + bound;
         loop {
-            let members = self.refresh(deadline)?;
+            let scanned = self.refresh(deadline);
+            if scanned.is_err() {
+                for member in self.pinned() {
+                    self.send(member, libc::SIGKILL);
+                }
+            }
+            let members = scanned?;
             if members.is_empty() || Instant::now() >= deadline {
                 return Ok(members);
             }

@@ -327,13 +327,20 @@ async fn published_envelope_is_redacted_and_its_receipt_still_verifies() {
 }
 
 #[tokio::test]
-async fn an_envelope_without_secrets_is_published_byte_for_byte() {
+async fn an_envelope_without_secrets_is_published_canonically() {
     let ran = run(Child::Clean).await;
     ran.result.as_ref().expect("published");
     assert_eq!(
         std::fs::read(&ran.envelope).unwrap(),
-        envelope(Child::Clean, CANARY),
-        "nothing to redact, nothing rewritten"
+        serde_json::to_vec_pretty(
+            &serde_json::from_slice::<archon_workflow::GateEnvelopeV1>(&envelope(
+                Child::Clean,
+                CANARY
+            ))
+            .unwrap()
+        )
+        .unwrap(),
+        "the verified typed envelope is always re-serialized"
     );
 }
 
@@ -478,3 +485,6 @@ mod r2_tests;
 
 #[path = "workflow_host_envelope_r3_tests.rs"]
 mod r3_tests;
+
+#[path = "workflow_host_boundary_r4_tests.rs"]
+mod boundary_r4_tests;

@@ -65,24 +65,53 @@ impl SecretValues {
         self
     }
 
-    /// URL userinfo passwords are credentials regardless of the variable name
-    /// or password length. Register the address and both password spellings.
+    /// Credential-bearing URLs are secrets regardless of the variable name.
+    /// Register the complete address and encoded/decoded credential values.
     pub fn with_url_credentials(mut self, value: &str) -> Self {
+        let mut found = false;
         if let Some((_, rest)) = value.split_once("://") {
             let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
             if let Some((userinfo, _)) = authority.rsplit_once('@')
                 && let Some((_, password)) = userinfo.split_once(':')
                 && !password.is_empty()
             {
-                self.add(value);
-                self.add(password);
-                if let Ok(decoded) = urlencoding::decode(password) {
-                    self.add(&decoded);
+                found = true;
+                self.add_url_credential(password, false);
+            }
+            // Query values use form encoding: '+' means space. Decode names
+            // as well, so encoded names cannot evade the credential rule.
+            if let Some((_, query)) = rest.split('#').next().unwrap_or_default().split_once('?') {
+                for parameter in query.split('&') {
+                    if let Some((name, credential)) = parameter.split_once('=') {
+                        let name = name.replace('+', " ");
+                        if let Ok(name) = urlencoding::decode(&name)
+                            && is_credential_name(&name)
+                            && !credential.is_empty()
+                        {
+                            found = true;
+                            self.add_url_credential(credential, true);
+                        }
+                    }
                 }
-                self.normalize();
             }
         }
+        if found {
+            self.add(value);
+        }
+        self.normalize();
         self
+    }
+
+    fn add_url_credential(&mut self, credential: &str, form: bool) {
+        self.add(credential);
+        let value = if form {
+            credential.replace('+', " ")
+        } else {
+            credential.to_string()
+        };
+        if let Ok(decoded) = urlencoding::decode(&value) {
+            self.add(&decoded);
+        }
     }
 
     fn add(&mut self, value: &str) {
