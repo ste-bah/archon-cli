@@ -126,7 +126,10 @@ anchor = crates/archon-llm/src/anthropic.rs :: crate::transport_evidence::stream
 anchor = crates/archon-llm/src/transport_evidence.rs :: inner: response\.bytes_stream\(\)\.boxed\(\)
 anchor = crates/archon-llm/src/anthropic_stream.rs :: chunk = stream\.next\(\)
 # Finding 18 rode with 17: a read error now becomes a visible error event.
-anchor = crates/archon-llm/src/anthropic_stream.rs :: send_stream_error\(&tx, "network", error\)
+# #356 split the class only: a reqwest read timeout is reported as
+# "transport_idle", every other read error still as "network"; both branches
+# send the error event and end the reader, so no read error is swallowed.
+anchor = crates/archon-llm/src/anthropic_stream.rs :: send_stream_error\(&tx, if idle \{ "transport_idle" \} else \{ "network" \}, error\)
 absent = crates/archon-llm/src/anthropic_stream.rs :: \.text\(\)\.await
 absent = crates/archon-llm/src/anthropic_stream.rs :: unwrap_or_default
 wired = crates/archon-llm/src/anthropic.rs :: return self\.spawn_stream_reader\(response, auth_header_value\)\.await

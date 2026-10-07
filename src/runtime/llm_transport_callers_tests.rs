@@ -56,17 +56,29 @@ async fn silent_stream_ends_at(callers: TransportCallers, local: bool, ends: u64
     }
     // Timer and wake-up granularity: the bound holds within a minute either side.
     tokio::time::advance(Duration::from_secs(120)).await;
-    // The expiry crosses reqwest, the provider task and two adapters: give the
-    // wake-up chain scheduler turns (not time) to arrive.
-    for _ in 0..20 {
-        if call.is_finished() {
-            break;
-        }
+    // The expiry crosses reqwest, the provider task, the provider observer and
+    // two adapters. The observer persists the stream error on a blocking
+    // thread before it forwards it (`provider_observer_stream.rs`), and that
+    // write takes real time, so a fixed count of scheduler turns is a race
+    // with the disk. Wait for the outcome itself with the virtual clock held
+    // at the bound plus a minute: yielding keeps the paused clock from
+    // auto-advancing, and the clock is checked unmoved below, so only the
+    // configured bound can have ended the stream. The real-time limit only
+    // turns a hang into a failure.
+    let at_bound = tokio::time::Instant::now();
+    let waiting = std::time::Instant::now();
+    while !call.is_finished() {
+        assert!(
+            waiting.elapsed() < Duration::from_secs(30),
+            "{callers:?} dead stream outlived its {ends}s bound"
+        );
         settle().await;
+        std::thread::sleep(Duration::from_millis(1));
     }
-    assert!(
-        call.is_finished(),
-        "{callers:?} dead stream outlived its {ends}s bound"
+    assert_eq!(
+        tokio::time::Instant::now(),
+        at_bound,
+        "{callers:?} stream ended only after the clock moved past {ends}s + 60s"
     );
     let error = call
         .await

@@ -64,13 +64,57 @@ pub(super) async fn hold_until_started(marker: &Path) -> u32 {
 /// test's favour. A signal that works only when the machine is busy is the same
 /// defect wearing the opposite sign. This asks the operating system the question
 /// directly instead.
+///
+/// On unix the process table is still not that question. macOS stops
+/// answering `proc_pidinfo` for a process while its exit is in progress,
+/// before `waitpid` can report it: a probe of 400 forked children that exit
+/// saw the table call them gone while `waitid` still said "not yet" 392
+/// times. The gate then found the child running and requested termination
+/// instead of reporting `AlreadyExited`. The gate runs in this process, so
+/// this process is the child's parent and can ask `waitid` itself, with
+/// `WNOWAIT` so the status stays for the gate to reap.
 pub(super) async fn hold_until_exited(pid: u32) {
-    let pid = sysinfo::Pid::from_u32(pid);
-    let mut system = sysinfo::System::new();
-    while process_is_running(&mut system, pid) {
+    while !direct_child_exited(pid) {
         tokio::task::yield_now().await;
         std::thread::sleep(POLL_INTERVAL);
     }
+}
+
+/// Whether the gate's direct child `pid` is reapable now, without reaping it.
+/// ECHILD means the gate already reaped it: `pid` came from the child's own
+/// marker, and only this process ever spawned it.
+#[cfg(unix)]
+fn direct_child_exited(pid: u32) -> bool {
+    let pid = libc::id_t::try_from(pid).expect("child pid fits id_t");
+    // SAFETY: zeroed siginfo is valid output space for waitid.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    // SAFETY: plain integers and a valid pointer to owned output space.
+    let waited = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    if waited == 0 {
+        // SAFETY: waitid filled the record (si_pid stays 0 when not yet exited).
+        return unsafe { info.si_pid() } != 0;
+    }
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error() {
+        Some(libc::ECHILD) => true,
+        Some(libc::EINTR) => false,
+        _ => panic!("waitid on the direct child failed: {error}"),
+    }
+}
+
+/// Windows has no zombie state: a process that has exited is not running.
+#[cfg(not(unix))]
+fn direct_child_exited(pid: u32) -> bool {
+    let pid = sysinfo::Pid::from_u32(pid);
+    let mut system = sysinfo::System::new();
+    !process_is_running(&mut system, pid)
 }
 
 /// Bring on the gate's deadline, now that the state it should act against holds.

@@ -149,14 +149,12 @@ pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
+    GitTree::prepare(&mut command);
     let mut child = command.spawn().map_err(|e| WorkflowError::io(root, e))?;
-    #[cfg(unix)]
-    let pgid = child.id() as i32;
+    let mut tree = GitTree::confine(&mut child).map_err(|e| {
+        let _ = child.kill();
+        WorkflowError::io(root, e)
+    })?;
     // Output bytes and the child's CPU time are its progress.
     let received = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let drain = |mut pipe: Box<dyn Read + Send>| {
@@ -188,12 +186,6 @@ pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult
         last: Arc::new(Mutex::new(Instant::now())),
         cancel: (phase.as_ref()).map_or_else(Default::default, |c| c.cancel.clone()),
     };
-    let leader = child.id();
-    let pin = archon_shell::process_tree::Pinned {
-        pid: leader,
-        start: archon_shell::process_tree::start_of(leader).unwrap_or_default(),
-    };
-    let mut cpu = archon_shell::process_tree::Activity::default();
     let (mut seen, mut sampled) = (0, Instant::now());
     let outcome = loop {
         let bytes = received.load(Ordering::SeqCst);
@@ -202,8 +194,8 @@ pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult
         if sampled.elapsed() >= Duration::from_secs(1) {
             sampled = Instant::now();
             // An unreadable sample never manufactures progress.
-            active |= cpu
-                .observe(&[pin], sampled + Duration::from_secs(2))
+            active |= tree
+                .active(sampled + Duration::from_secs(2))
                 .unwrap_or(false);
         }
         if active {
@@ -222,14 +214,9 @@ pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult
         }
         std::thread::sleep(Duration::from_millis(10));
     };
-    // Unix reaps the whole group; Windows has no process group to signal, so
-    // only a leader that is still running can be killed there.
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(-pgid, libc::SIGKILL);
-    }
-    #[cfg(not(unix))]
-    let _ = child.kill();
+    // Every process the git child started ends here, not only the leader.
+    tree.terminate()
+        .map_err(|e| invalid(format!("scratch git teardown unverified: {e}")))?;
     let reap = Instant::now() + Duration::from_secs(3);
     while child
         .try_wait()
@@ -262,6 +249,103 @@ pub(super) fn git(root: &Path, args: &[&str], paths: &[&Path]) -> WorkflowResult
         )));
     }
     Ok(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// A git child's whole process tree. Unix: its own process group, with the
+/// leader's CPU time as activity. Windows: an owned Job Object the child
+/// joins before it runs any code, with the job's CPU and process accounting
+/// as activity. Teardown ends every process the child started on both.
+struct GitTree {
+    #[cfg(unix)]
+    pgid: i32,
+    #[cfg(unix)]
+    pin: archon_shell::process_tree::Pinned,
+    #[cfg(unix)]
+    cpu: archon_shell::process_tree::Activity,
+    #[cfg(windows)]
+    job: archon_shell::job_object::Job,
+    #[cfg(windows)]
+    last: Option<(i64, i64, u32, u32)>,
+}
+
+impl GitTree {
+    /// Spawn flags [`GitTree::confine`] relies on: a new process group, or a
+    /// suspended start so the child joins its job before it runs.
+    fn prepare(command: &mut std::process::Command) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(archon_shell::job_object::CREATE_SUSPENDED_FLAG);
+        }
+    }
+
+    #[cfg(unix)]
+    fn confine(child: &mut std::process::Child) -> std::io::Result<Self> {
+        let leader = child.id();
+        Ok(Self {
+            pgid: leader as i32,
+            pin: archon_shell::process_tree::Pinned {
+                pid: leader,
+                start: archon_shell::process_tree::start_of(leader).unwrap_or_default(),
+            },
+            cpu: Default::default(),
+        })
+    }
+
+    /// Adopt the suspended child into a fresh job, then let it run. A child
+    /// that cannot be adopted is terminated by the adoption: it never runs
+    /// unconfined.
+    #[cfg(windows)]
+    fn confine(child: &mut std::process::Child) -> std::io::Result<Self> {
+        use std::os::windows::io::AsRawHandle;
+        let job = archon_shell::job_object::Job::create(None)?;
+        job.adopt_suspended(child.as_raw_handle(), child.id())?;
+        Ok(Self { job, last: None })
+    }
+
+    /// Whether the tree used CPU (or, on Windows, started or ended a
+    /// process) since the previous sample. The first sample is a baseline.
+    fn active(&mut self, deadline: Instant) -> std::io::Result<bool> {
+        #[cfg(unix)]
+        {
+            self.cpu.observe(&[self.pin], deadline)
+        }
+        #[cfg(windows)]
+        {
+            let _ = deadline;
+            let stamp = self.job.activity_stamp()?;
+            let changed = self.last.is_some_and(|last| last != stamp);
+            self.last = Some(stamp);
+            Ok(changed)
+        }
+    }
+
+    /// End every process in the tree. Unix signals the whole group (a group
+    /// already gone is the goal reached); Windows terminates the job and
+    /// confirms it empty within a bound.
+    fn terminate(&self) -> Result<(), String> {
+        #[cfg(unix)]
+        {
+            // SAFETY: kill has no memory-safety preconditions.
+            unsafe {
+                libc::kill(-self.pgid, libc::SIGKILL);
+            }
+            Ok(())
+        }
+        #[cfg(windows)]
+        {
+            match self.job.kill_and_confirm(Duration::from_secs(3)) {
+                Ok(0) => Ok(()),
+                Ok(active) => Err(format!("{active} process(es) still in the git job")),
+                Err(error) => Err(error.to_string()),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
