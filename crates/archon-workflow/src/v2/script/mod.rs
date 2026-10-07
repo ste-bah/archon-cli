@@ -50,6 +50,7 @@ mod dry_run_b;
 mod helpers_a;
 mod helpers_b;
 pub mod history_replay;
+pub mod host_call_yield;
 mod host_command;
 pub mod js_cpu_clock;
 pub mod refused_landings;

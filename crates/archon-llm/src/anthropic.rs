@@ -457,5 +457,9 @@ mod transport_backstop_tests {
     }
 }
 
+#[cfg(test)]
+#[path = "anthropic_dead_connection_tests.rs"]
+mod dead_connection_tests;
+
 #[path = "anthropic_body.rs"]
 mod body;

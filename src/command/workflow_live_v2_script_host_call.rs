@@ -54,6 +54,10 @@ impl ScriptHostCallBridge {
             if host.accumulator.lock().await.session_stopped() {
                 watchdog.start_terminal_budget();
             }
+            // Issue 364: a call that finished on its first poll must still
+            // give the thread's timers and sockets a turn, or a script looping
+            // over such calls holds the whole runtime.
+            archon_workflow::v2::script::host_call_yield::yield_to_script_runtime().await;
             watchdog.resume();
             if let Err(WorkflowError::NotificationDelivery(message)) = &result
                 && let Ok(mut slot) = notification.lock()

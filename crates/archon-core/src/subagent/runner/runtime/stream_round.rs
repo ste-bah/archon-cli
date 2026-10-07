@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use super::stream_idle_window::within;
 use super::*;
 
 const STREAM_RECONNECT_BACKOFF: Duration = Duration::from_secs(1);
@@ -58,7 +59,7 @@ pub(super) async fn collect_stream_round(
         } else {
             projected_request(runner, messages.as_slice(), &template)
         };
-        match tokio::time::timeout(
+        match within(
             stream_idle_timeout(runner),
             open_stream_with_retries(
                 runner,
@@ -97,7 +98,9 @@ pub(super) async fn collect_stream_round(
     let mut terminal_marker = false;
 
     loop {
-        let received = tokio::time::timeout(stream_idle_timeout(runner), rx.recv()).await;
+        // Issue 364: idle by either clock, so a stream silent across a sleep
+        // is resent soon after the wake.
+        let received = within(stream_idle_timeout(runner), rx.recv()).await;
         let transport_failure = matches!(&received, Ok(Some(StreamEvent::Error { error_type, message }))
             if matches!(error_type.as_str(), "network" | "http_error") || error_type == "protocol" && message.contains("stream ended before message_stop"));
         let empty_terminal = text_content.trim().is_empty()
@@ -137,7 +140,7 @@ pub(super) async fn collect_stream_round(
             usage_acc = archon_llm::usage::UsageAccumulator::default();
             loop {
                 tokio::time::sleep(STREAM_RECONNECT_BACKOFF * reconnects as u32).await;
-                let opened = tokio::time::timeout(
+                let opened = within(
                     stream_idle_timeout(runner),
                     runner.provider.stream(request.clone()),
                 )
