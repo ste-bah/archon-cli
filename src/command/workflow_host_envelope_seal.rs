@@ -14,10 +14,21 @@ pub(crate) const ENVELOPE_FILE: &str = "gate-envelope.json";
 pub(crate) struct EnvelopeCleanup<'a> {
     pub(crate) path: &'a Path,
     pub(crate) secrets: &'a HostSecrets,
+    pub(crate) armed: bool,
+}
+
+impl EnvelopeCleanup<'_> {
+    pub(crate) fn finish(mut self) -> WorkflowResult<()> {
+        self.armed = false;
+        self.secrets.seal_staged_evidence(self.path, None)
+    }
 }
 
 impl Drop for EnvelopeCleanup<'_> {
     fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
         if let Err(error) = self.secrets.seal_staged_evidence(self.path, None) {
             let _ = std::fs::remove_file(self.path);
             let evidence = self.secrets.text(&error.to_string());

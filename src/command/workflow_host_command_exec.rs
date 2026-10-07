@@ -299,12 +299,13 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
         // What the call records never holds a secret value the child was given.
         let secrets = HostSecrets::of(&context, &command.environment);
+        let staged_envelope = staging.root.join(ENVELOPE_FILE);
+        let cleanup = EnvelopeCleanup {
+            path: &staged_envelope,
+            secrets: &secrets,
+            armed: true,
+        };
         let result = async {
-            let staged_envelope = staging.root.join(ENVELOPE_FILE);
-            let _cleanup = EnvelopeCleanup {
-                path: &staged_envelope,
-                secrets: &secrets,
-            };
             // Issue #255: an operational ending is retried or pauses the run.
             let sealed = self
                 .execute_with_operational_retry(
@@ -464,6 +465,11 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             })
         }
         .await;
+        let cleanup_result = cleanup.finish();
+        let result = match cleanup_result {
+            Err(cleanup_error) => Err(cleanup_error),
+            Ok(()) => result,
+        };
         result.map_err(|error| secrets.error(error))
     }
 }

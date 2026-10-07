@@ -46,6 +46,9 @@ enum Child {
     ScalarOperational,
     ScalarFailed,
     ScalarVersion,
+    UnreadableStaging,
+    UnreadableNestedStaging,
+    UnreadableDeepStaging,
 }
 
 struct SecretPrintingProcess(Child);
@@ -122,6 +125,45 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
                 stderr_bytes: output.stderr.len() as u64,
                 stderr: output.stderr,
                 stdout: output.stdout,
+            });
+        }
+        if matches!(
+            self.0,
+            Child::UnreadableStaging
+                | Child::UnreadableNestedStaging
+                | Child::UnreadableDeepStaging
+        ) {
+            let envelope = request
+                .declared_write_set
+                .iter()
+                .find(|path| {
+                    path.file_name()
+                        .is_some_and(|name| name == "gate-envelope.json")
+                })
+                .expect("declared envelope");
+            let root = envelope.parent().unwrap();
+            let locked = match self.0 {
+                Child::UnreadableStaging => root.to_path_buf(),
+                Child::UnreadableNestedStaging => root.join("locked"),
+                Child::UnreadableDeepStaging => root.join("nested").join("locked"),
+                _ => unreachable!(),
+            };
+            std::fs::create_dir_all(&locked).unwrap();
+            let artifact = locked.join("secret-artifact.txt");
+            std::fs::write(artifact, secret).unwrap();
+            std::fs::write(envelope, b"{}").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0)).unwrap();
+            }
+            return Ok(SupervisedProcessOutput {
+                exit_code: Some(1),
+                timed_out: false,
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
             });
         }
         let mut entries = Vec::new();
@@ -389,44 +431,6 @@ async fn a_manifest_that_misstates_the_envelope_is_still_refused() {
 }
 
 #[tokio::test]
-async fn round2_json_escaped_credentials_are_sealed() {
-    for secret in [
-        "credential-quote\"-canary",
-        "credential-backslash\\-canary",
-        "credential-newline\n-canary",
-    ] {
-        let ran = run_secret(Child::Published, secret).await;
-        ran.result.as_ref().unwrap();
-        let escaped = serde_json::to_string(secret).unwrap();
-        for needle in [secret.as_bytes(), &escaped.as_bytes()[1..escaped.len() - 1]] {
-            assert!(
-                clear_copies(ran.temp.path(), needle).is_empty(),
-                "{secret:?}"
-            );
-        }
-    }
-}
-
-#[tokio::test]
-async fn round2_object_keys_are_sealed() {
-    let ran = run(Child::SecretKey).await;
-    ran.result.as_ref().unwrap();
-    assert_no_clear_copy(&ran);
-    let value: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&ran.envelope).unwrap()).unwrap();
-    assert_eq!(value["report"]["[REDACTED]"], "failure");
-}
-
-#[tokio::test]
-async fn round2_interrupted_temporary_envelopes_are_removed() {
-    for child in [Child::Interrupted, Child::Paused, Child::Cancelled] {
-        let ran = run(child).await;
-        assert!(ran.result.is_err());
-        assert_no_clear_copy(&ran);
-    }
-}
-
-#[tokio::test]
 async fn round2_manifest_claiming_sealed_identity_is_refused() {
     for child in [Child::SealedIdentity, Child::CanonicalIdentity] {
         let ran = run(child).await;
@@ -488,3 +492,6 @@ mod r3_tests;
 
 #[path = "workflow_host_boundary_r4_tests.rs"]
 mod boundary_r4_tests;
+
+#[path = "workflow_host_boundary_r5_tests.rs"]
+mod boundary_r5_tests;

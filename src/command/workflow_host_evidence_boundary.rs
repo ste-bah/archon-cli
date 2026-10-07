@@ -78,21 +78,71 @@ impl HostSecrets {
         envelope: &Path,
         mut prepared: Option<&mut PreparedPublicationV1>,
     ) -> WorkflowResult<()> {
-        seal_staged_envelope(envelope, self, prepared.as_deref_mut())?;
-        if self.remove_unsafe_artifacts(
-            envelope.parent().expect("staged envelope has a root"),
-            envelope,
-        )? {
-            refuse_staged_evidence(envelope, prepared.as_deref_mut())?;
-            if let Some(prepared) = prepared {
-                // Do not persist raw digests of refused secret-bearing files.
-                prepared.entries.retain(|entry| {
-                    entry.relative_path
-                        == crate::command::workflow_host_envelope_seal::ENVELOPE_FILE
-                });
+        let root = envelope.parent().expect("staged envelope has a root");
+        let seal = (|| {
+            seal_staged_envelope(envelope, self, prepared.as_deref_mut())?;
+            if self.remove_unsafe_artifacts(root, envelope)? {
+                refuse_staged_evidence(envelope, prepared.as_deref_mut())?;
+                if let Some(prepared) = prepared {
+                    // Do not persist raw digests of refused secret-bearing files.
+                    prepared.entries.retain(|entry| {
+                        entry.relative_path
+                            == crate::command::workflow_host_envelope_seal::ENVELOPE_FILE
+                    });
+                }
             }
+            Ok(())
+        })();
+        if let Err(error) = seal {
+            if let Err(cleanup) = Self::remove_staging_tree(root) {
+                return Err(WorkflowError::ControlPaused(format!(
+                    "host command refused because secret-bearing staging could not be removed at '{}': {cleanup}",
+                    root.display()
+                )));
+            }
+            return Err(error);
         }
         Ok(())
+    }
+
+    /// Restore directory traversal and write access before removing the entire
+    /// call tree. A child may have changed permissions after writing secrets.
+    fn remove_staging_tree(root: &Path) -> std::io::Result<()> {
+        fn make_accessible(path: &Path) -> std::io::Result<()> {
+            let metadata = std::fs::symlink_metadata(path)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Ok(());
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+            }
+            #[cfg(not(unix))]
+            {
+                let mut permissions = metadata.permissions();
+                permissions.set_readonly(false);
+                std::fs::set_permissions(path, permissions)?;
+            }
+            for entry in std::fs::read_dir(path)? {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() {
+                    make_accessible(&entry.path())?;
+                }
+            }
+            Ok(())
+        }
+
+        match std::fs::symlink_metadata(root) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return std::fs::remove_file(root);
+            }
+            Ok(_) => {}
+        }
+        make_accessible(root)?;
+        std::fs::remove_dir_all(root)
     }
 
     /// Signed/non-envelope artifacts cannot be rewritten without invalidating
