@@ -3,6 +3,27 @@ use super::*;
 use archon_workflow::repository_audit::{reuse, runtime::Snapshot};
 
 impl WorkflowScriptHost {
+    /// The reuse admission of a fixed run's recorded call: a host command by
+    /// its executor's reuse test, any other call by the audit (moved here from
+    /// `workflow_live_v2_script_host_exec.rs` to hold its line ceiling).
+    pub(super) async fn fixed_host_record_reusable(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        if record.call.method != WorkflowV2HostMethod::HostCommand {
+            return self.refresh_audit_for_cache(record).await;
+        }
+        self.runner
+            .host_command_executor
+            .as_ref()
+            .ok_or_else(|| {
+                WorkflowError::PolicyDenied(
+                    "HostCommand reuse requires the trusted fixed executor".to_string(),
+                )
+            })?
+            .record_is_reusable(record)
+    }
+
     fn audit_cache_paths(record: &WorkflowV2CallRecord) -> Vec<String> {
         let mut paths = record.call.options.target_files.clone();
         paths.extend(

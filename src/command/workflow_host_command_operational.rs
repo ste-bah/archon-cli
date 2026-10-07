@@ -54,7 +54,7 @@
 use std::path::Path;
 
 use archon_workflow::{
-    RunStatus, WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowResult, WorkflowStore,
+    WorkflowError, WorkflowEventKind, WorkflowEventLog, WorkflowResult, WorkflowStore,
 };
 
 use super::workflow_host_command_supervisor::SupervisedProcessOutput;
@@ -213,32 +213,9 @@ impl OperationalReport<'_> {
     }
 }
 
-/// Fails unless `expected_generation` still owns a running run, with the
-/// run's actual control decision: a paused run reports a pause (so the call
-/// is recorded interrupted as paused), a cancelled or superseded one a
-/// cancellation. Checked before every attempt and before publication.
-pub(crate) fn require_run_owned(
-    store: &WorkflowStore,
-    run_id: &str,
-    expected_generation: u64,
-) -> WorkflowResult<()> {
-    let run = store.load_state(run_id)?;
-    match run.status {
-        RunStatus::Paused => Err(WorkflowError::ControlPaused(format!(
-            "run {run_id} is paused; fixed HostCommand generation {expected_generation} stops"
-        ))),
-        RunStatus::Cancelled => Err(WorkflowError::ControlCancelled(format!(
-            "run {run_id} is cancelled; fixed HostCommand generation {expected_generation} stops"
-        ))),
-        _ if run.generation != expected_generation => {
-            Err(WorkflowError::ControlCancelled(format!(
-                "fixed HostCommand generation {expected_generation} no longer owns run {run_id}; current generation is {}",
-                run.generation
-            )))
-        }
-        _ => Ok(()),
-    }
-}
+#[path = "workflow_host_command_run_owned.rs"]
+mod run_owned;
+pub(crate) use run_owned::{require_run_owned, require_run_owned_locked, supervisor_signal};
 
 /// Records that the last attempt of `report` ended operationally and the call
 /// runs again. Evidence only: a failure to record never stops the retry.

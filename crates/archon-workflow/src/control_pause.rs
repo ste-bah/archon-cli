@@ -158,11 +158,33 @@ pub fn pause_owned(
     store: &WorkflowStore,
     run_id: &str,
     owner: PauseOwner,
+    detail: serde_json::Value,
+) -> WorkflowResult<WorkflowResult<u64>> {
+    pause_owned_then(store, run_id, owner, detail, |_, _| {})
+}
+
+/// [`pause_owned`], then `in_force` in the SAME run-lock section once the
+/// pause is in force (Issue 337): what the pause leaves for a resume (its
+/// replay coverage) is written before any resume can take the run. It gets
+/// the locked store and the evidence event's sequence.
+pub fn pause_owned_then(
+    store: &WorkflowStore,
+    run_id: &str,
+    owner: PauseOwner,
     mut detail: serde_json::Value,
+    in_force: impl FnOnce(&WorkflowStore, Option<u64>),
 ) -> WorkflowResult<WorkflowResult<u64>> {
     let owned = store.with_run_lock(run_id, |locked| {
         let mut run = locked.load_state(run_id)?;
         owner.require_pauser(&run)?;
+        // Issue 337: a call of the generation a deliberate stop ended never
+        // pauses it; a run end, after its script settled, still may.
+        let unreadable_stop = terminal_stop_before_pause(
+            locked,
+            &run,
+            "its pause",
+            matches!(owner, PauseOwner::Executor(_)),
+        )?;
         let paused_by = run.generation;
         apply_pause(&mut run);
         locked.save_state(&run)?;
@@ -173,9 +195,14 @@ pub fn pause_owned(
             if let PauseOwner::Executor(executor) = owner {
                 object.insert("paused_by_executor".into(), executor.into());
             }
+            if let Some(evidence) = unreadable_stop {
+                object.insert("terminal_stop_unreadable".into(), evidence);
+            }
         }
         // The run is paused from here whatever happens to the evidence.
-        Ok(emit(locked, run_id, detail))
+        let event = emit(locked, run_id, detail);
+        in_force(locked, event.as_ref().ok().copied());
+        Ok(event)
     });
     if let Err(refused) = &owned {
         tracing::warn!(
@@ -186,6 +213,176 @@ pub fn pause_owned(
         );
     }
     owned
+}
+
+/// Where a run's validated terminal stop is recorded, relative to its run
+/// directory (Issue 337).
+pub const TERMINAL_STOP_RECORD: &str = "v2/terminal-stop.json";
+
+/// A deliberate terminal stop the script host validated, recorded under the
+/// run lock at the generation it ended (Issue 337).
+///
+/// The run stays `Running`, at that generation, until the stopping executor
+/// finalizes it, so the run state alone cannot tell a call still in flight
+/// that the run has ended. This record does: while it binds the run's
+/// generation, no call of that generation pauses the run (a pause would leave
+/// the deliberate verdict resumable), no host command publishes into it, and
+/// a host command supervisor ends its process. A lifecycle edit -- an
+/// operator's pause or cancel -- moves the generation and outranks it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TerminalStopRecord {
+    pub generation: u64,
+    pub reason: String,
+}
+
+/// Records `reason` as the terminal stop of `run` at its generation. The
+/// caller holds the run lock and has checked that it owns the run.
+pub fn record_terminal_stop(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    reason: &str,
+) -> WorkflowResult<()> {
+    let record = TerminalStopRecord {
+        generation: run.generation,
+        reason: reason.to_string(),
+    };
+    store.write_run_json(&run.id, TERMINAL_STOP_RECORD, &record)
+}
+
+/// What a run's terminal stop record says for `run` now (Issue 337).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalStopState {
+    /// No stop binds the run: none recorded, or one a lifecycle edit made
+    /// stale, or the run no longer runs.
+    Clear,
+    /// A stop recorded at the run's current generation while it runs.
+    InForce(TerminalStopRecord),
+    /// The record exists but cannot be read: it may hold a stop.
+    Unreadable(String),
+}
+
+/// Reads the stop record for `run`; reports nothing (see the callers).
+pub fn terminal_stop_state(store: &WorkflowStore, run: &WorkflowRun) -> TerminalStopState {
+    if !matches!(run.status, RunStatus::Planned | RunStatus::Running) {
+        return TerminalStopState::Clear;
+    }
+    let path = store.run_dir(&run.id).join(TERMINAL_STOP_RECORD);
+    let read = match std::fs::read(&path) {
+        Ok(raw) => serde_json::from_slice::<TerminalStopRecord>(&raw).map_err(|e| e.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return TerminalStopState::Clear;
+        }
+        Err(error) => Err(error.to_string()),
+    };
+    match read {
+        Ok(record) if record.generation == run.generation => TerminalStopState::InForce(record),
+        Ok(_) => TerminalStopState::Clear,
+        Err(error) => TerminalStopState::Unreadable(error),
+    }
+}
+
+fn stopped_refusal(run: &WorkflowRun, stop: &TerminalStopRecord, caller: &str) -> WorkflowError {
+    WorkflowError::ControlCancelled(format!(
+        "run {} stopped terminally at generation {}: {}; {caller} stops",
+        run.id, stop.generation, stop.reason
+    ))
+}
+
+/// Moves an unreadable record aside, kept as evidence, and reports it ONCE:
+/// no later reader finds it. The caller holds the run lock and pauses the
+/// run with the evidence returned.
+fn set_aside_unreadable(
+    locked: &WorkflowStore,
+    run: &WorkflowRun,
+    error: &str,
+) -> serde_json::Value {
+    let dir = locked.run_dir(&run.id);
+    let kept = format!("{TERMINAL_STOP_RECORD}.unreadable-g{}", run.generation);
+    let moved = std::fs::rename(dir.join(TERMINAL_STOP_RECORD), dir.join(&kept));
+    tracing::warn!(
+        run_id = %run.id,
+        error,
+        kept = %kept,
+        moved = moved.is_ok(),
+        "terminal stop record unreadable: the run pauses, the record is kept"
+    );
+    serde_json::json!({
+        "event": "terminal_stop_unreadable",
+        "error": error,
+        "kept_at": moved.as_ref().ok().map(|_| kept.clone()),
+        "set_aside_error": moved.err().map(|e| e.to_string()),
+    })
+}
+
+/// For a pause the caller takes under the run lock. A stop in force refuses
+/// the pause of a call of its generation (a run end, `run_end`, still
+/// pauses). An unreadable record is set aside; its evidence is returned for
+/// the pause to carry.
+pub fn terminal_stop_before_pause(
+    locked: &WorkflowStore,
+    run: &WorkflowRun,
+    caller: &str,
+    run_end: bool,
+) -> WorkflowResult<Option<serde_json::Value>> {
+    match terminal_stop_state(locked, run) {
+        TerminalStopState::Clear => Ok(None),
+        TerminalStopState::InForce(stop) if !run_end => Err(stopped_refusal(run, &stop, caller)),
+        TerminalStopState::InForce(_) => Ok(None),
+        TerminalStopState::Unreadable(error) => Ok(Some(set_aside_unreadable(locked, run, &error))),
+    }
+}
+
+/// For a writer of `run` (a host command's start or publication); the caller
+/// holds the run lock and loaded `run` under it. A stop in force refuses it
+/// as a cancel. An unreadable record may hold a stop, so the writer never
+/// continues past it: the run pauses here with that evidence (the record set
+/// aside), and the writer is refused with the pause.
+pub fn require_no_terminal_stop_locked(
+    locked: &WorkflowStore,
+    run: &WorkflowRun,
+    caller: &str,
+) -> WorkflowResult<()> {
+    match terminal_stop_state(locked, run) {
+        TerminalStopState::Clear => Ok(()),
+        TerminalStopState::InForce(stop) => Err(stopped_refusal(run, &stop, caller)),
+        TerminalStopState::Unreadable(error) => {
+            let mut detail = set_aside_unreadable(locked, run, &error);
+            let mut paused = run.clone();
+            apply_pause(&mut paused);
+            locked.save_state(&paused)?;
+            detail["action"] = "pause".into();
+            detail["generation"] = paused.generation.into();
+            detail["caller"] = caller.into();
+            if let Err(error) = emit(locked, &run.id, detail) {
+                tracing::warn!(%error, run_id = %run.id, "unreadable stop pause event not recorded");
+            }
+            Err(WorkflowError::ControlPaused(format!(
+                "run {} is paused: its terminal stop record could not be read ({error}), so it may hold a deliberate stop; the record is kept beside it as {TERMINAL_STOP_RECORD}.unreadable-g{}. Inspect it, then resume; {caller} stops",
+                run.id, run.generation
+            )))
+        }
+    }
+}
+
+/// [`require_no_terminal_stop_locked`] for a caller without the run lock:
+/// the lock is taken only when the record is not clear.
+pub fn require_no_terminal_stop(
+    store: &WorkflowStore,
+    run: &WorkflowRun,
+    caller: &str,
+) -> WorkflowResult<()> {
+    match terminal_stop_state(store, run) {
+        TerminalStopState::Clear => Ok(()),
+        TerminalStopState::InForce(stop) => Err(stopped_refusal(run, &stop, caller)),
+        TerminalStopState::Unreadable(_) => store.with_run_lock(&run.id, |locked| {
+            let current = locked.load_state(&run.id)?;
+            // Moved on meanwhile: the caller's own ownership check decides.
+            if current.generation != run.generation {
+                return Ok(());
+            }
+            require_no_terminal_stop_locked(locked, &current, caller)
+        }),
+    }
 }
 
 fn emit(store: &WorkflowStore, run_id: &str, detail: serde_json::Value) -> WorkflowResult<u64> {
@@ -199,6 +396,9 @@ fn emit(store: &WorkflowStore, run_id: &str, detail: serde_json::Value) -> Workf
     Ok(seq)
 }
 
+#[cfg(test)]
+#[path = "control_pause_terminal_stop_tests.rs"]
+mod terminal_stop_tests;
 #[cfg(test)]
 #[path = "control_pause_tests.rs"]
 mod tests;

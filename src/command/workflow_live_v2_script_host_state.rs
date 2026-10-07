@@ -402,6 +402,8 @@ impl WorkflowScriptHost {
         if acc.terminal_locked() {
             return;
         }
+        // Issue 337: persisted like a deliberate stop (one mechanism).
+        self.persist_call_terminal_stop(record);
         acc.terminal_host_stop = true;
         if record.call.method == WorkflowV2HostMethod::FinalReport {
             acc.status = record.status;

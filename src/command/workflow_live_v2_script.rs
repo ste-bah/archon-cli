@@ -95,6 +95,8 @@ pub(super) struct WorkflowV2ScriptRunner {
     /// evidence. Off for the v3 authoring bootstrap only, whose own loop
     /// re-authors on a script that came back without a result.
     pauses_on_script_error: bool,
+    /// Issue 337: covered unpublished host-command outcomes vs the content at the pause.
+    judged_at_resume: std::sync::OnceLock<workflow_live_v2_script_host::JudgedAtResume>,
 }
 
 impl WorkflowV2ScriptRunner {
@@ -130,6 +132,7 @@ impl WorkflowV2ScriptRunner {
             pending_calls: Arc::default(),
             stops_on_host_fault: false,
             pauses_on_script_error: true,
+            judged_at_resume: std::sync::OnceLock::new(),
         }
     }
 
@@ -234,6 +237,8 @@ impl WorkflowV2ScriptRunner {
         });
         // Issue-213 C5: record any call a previous host process died under.
         host.record_orphaned_calls();
+        // Issue 337: the content at the resume, before any call changes it.
+        host.judged_at_resume();
         let runtime = AsyncRuntime::new()
             .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs runtime failed: {err}")))?;
         // Issue 332: a CPU-time budget of the script thread, so machine load
@@ -361,26 +366,17 @@ impl WorkflowV2ScriptRunner {
                     .ok()
                     .and_then(|slot| slot.clone());
                 if let Some(message) = recorded {
-                    return Err(WorkflowError::NotificationDelivery(message));
+                    if !host.runner.raw_outcomes_allowed {
+                        return Err(WorkflowError::NotificationDelivery(message));
+                    }
+                    return host
+                        .finish_script_error(
+                            &format!("{error}; host notification delivery failed: {message}"),
+                            unevaluable,
+                        )
+                        .await;
                 }
-                // Issue 335: a source that cannot be evaluated fails the
-                // run, since a resume evaluates it unchanged; a runtime error
-                // pauses it with its evidence, and a resume reuses the
-                // calls it recorded. The pause falls back to the failure only
-                // when it cannot be recorded.
-                if unevaluable {
-                    let error = format!(
-                        "workflow.js cannot be evaluated (a syntax or top-level error, before any call); a resume evaluates the same source and cannot change it, so fix the script source: {error}"
-                    );
-                    return Ok(host.mark_script_failure(&error).await);
-                }
-                if host.pauses_on_script_errors()
-                    && let Some(stop) = host.pause_on_script_error(&error).await
-                {
-                    return Err(stop);
-                }
-                let summary = host.mark_script_failure(&error).await;
-                Ok(summary)
+                host.finish_script_error(&error, unevaluable).await
             }
         }
     }
@@ -407,6 +403,7 @@ use workflow_live_v2_script_control::{
 
 #[path = "workflow_live_v2_script_host.rs"]
 mod workflow_live_v2_script_host;
+pub(super) use workflow_live_v2_script_host::HostPauseCoverage;
 use workflow_live_v2_script_host::*;
 
 #[path = "workflow_live_v2_script_host_call.rs"]
@@ -414,8 +411,8 @@ mod workflow_live_v2_script_host_call;
 use workflow_live_v2_script_host_call::ScriptHostCallBridge;
 
 use archon_workflow::v2::host_fault::{
-    NeverStartedStreak, is_never_started_fault, result_reports_never_started,
-    v2_result_for_call_error,
+    NeverStartedStreak, invalid_answer_result, is_never_started_fault,
+    result_reports_never_started, v2_result_for_call_error,
 };
 
 // The workflow.js script bridge — payload parsing, source composition, the
@@ -425,9 +422,9 @@ use archon_workflow::v2::host_fault::{
 // siblings into one namespace every child inherited through `use super::*`.
 use archon_workflow::v2::script::{
     ScriptEnvelopeShape, ScriptHostRequest, V3_AUTHOR_BOOTSTRAP, completion_evidence_from_result,
-    compose_author_brief, evidence_snapshot_hash, failed_v2_result,
-    frontier_resume_record_reusable, is_reusable_status, mark_unresolved_dependency_metadata,
-    merge_v2_status, next_action_for_terminal_call, normalize_and_attach_review_findings,
+    compose_author_brief, evidence_snapshot_hash, frontier_resume_record_reusable,
+    is_reusable_status, mark_unresolved_dependency_metadata, merge_v2_status,
+    next_action_for_terminal_call, normalize_and_attach_review_findings,
     parse_host_command_request, parse_script_options, record_tasks_all_completed,
     render_author_waves, result_view_json_shaped, reusable_record_has_required_completion_evidence,
     run_terminal_status_contribution, sanitize_v2_gap_id, script_envelope_shape, script_source,

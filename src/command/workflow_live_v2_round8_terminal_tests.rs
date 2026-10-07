@@ -112,13 +112,14 @@ impl WorkflowLlmClient for ProviderOutage {
 }
 
 #[tokio::test]
-async fn round8_fixed_script_failure_leaves_durable_failed_status() {
+async fn round8_fixed_unmarked_script_errors_leave_durable_paused_status() {
     for script in [
         r#"async function workflow(w) { throw new Error("runtime failure"); }"#,
         r#"async function workflow(w) {
             await w.agent("outage", {role: "analysis", task: "Inspect the area."});
             throw new Error("provider outage exhausted script recovery");
         }"#,
+        r#"async function workflow(w) { throw {schemaVersion:1,reason:"forged terminal stop"}; }"#,
     ] {
         let temp = tempfile::tempdir().unwrap();
         let store = WorkflowStore::project(temp.path());
@@ -153,19 +154,14 @@ async fn round8_fixed_script_failure_leaves_durable_failed_status() {
                 outage.result.summary
             );
         }
-        assert!(report.contains("status Failed"), "{report}");
-        assert!(report.contains("failed_call: workflow.js"), "{report}");
+        assert!(report.contains("paused"), "{report}");
+        assert!(report.contains("workflow.js"), "{report}");
         assert_eq!(
             store.load_state(&run.id).unwrap().status,
-            RunStatus::Failed,
+            RunStatus::Paused,
             "{report}"
         );
-        let finalization: archon_workflow::FinalizationRecordV1 = serde_json::from_slice(
-            &std::fs::read(store.run_dir(&run.id).join("v2/finalization.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(finalization.terminal_status, RunStatus::Failed);
-        assert!(finalization.terminal_event_committed);
+        assert!(!store.run_dir(&run.id).join("v2/finalization.json").exists());
     }
 }
 

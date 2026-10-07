@@ -30,8 +30,7 @@ use super::workflow_host_command_publish::{
     LiveMutationSentinels, audit_prepared_publication, prepare_staging, publish_audited,
 };
 use super::workflow_host_command_supervisor::{
-    HostCommandControl, HostCommandControlHandle, HostCommandSignal, SupervisedProcessOutput,
-    supervise_process_group,
+    HostCommandControl, HostCommandControlHandle, SupervisedProcessOutput, supervise_process_group,
 };
 use super::workflow_host_envelope_seal::{
     ENVELOPE_FILE, EnvelopeCleanup, owner_only, seal_staged_envelope,
@@ -41,6 +40,12 @@ use super::workflow_host_secrets::{HostSecrets, utf8};
 #[async_trait]
 pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn call_identity(&self, request: &HostCommandRequest) -> WorkflowResult<String>;
+    /// Issue 337: the digest of the content a call of `request` judges
+    /// (`workflow_host_command_judged_inputs`), recorded at a host pause and
+    /// read again at the resume; `None`: an unpublished outcome never replays.
+    fn judged_inputs(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
+        Ok(None)
+    }
 
     fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool>;
     /// Whether the record's landed outcome is still exactly what is on disk,
@@ -194,16 +199,11 @@ impl FixedHostCommandExecutor {
                     let Ok(run) = store.load_state(&run_id) else {
                         continue;
                     };
-                    let signal = match run.status {
-                        archon_workflow::RunStatus::Paused => Some(HostCommandSignal::Paused),
-                        archon_workflow::RunStatus::Cancelled => Some(HostCommandSignal::Cancelled),
-                        _ if run.generation != expected_generation =>
-                        {
-                            Some(HostCommandSignal::Cancelled)
-                        }
-                        _ => None,
-                    };
-                    if let Some(signal) = signal {
+                    if let Some(signal) = super::workflow_host_command_operational::supervisor_signal(
+                        &store,
+                        &run,
+                        expected_generation,
+                    ) {
                         handle.signal(signal)?;
                         return work.await;
                     }
@@ -247,6 +247,10 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
 
     fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
         self.record_is_reusable_live(record, false)
+    }
+
+    fn judged_inputs(&self, request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
+        self.judged_inputs_for(request)
     }
 
     fn record_is_live(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
@@ -435,7 +439,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         );
         let (receipt, subjects, postcondition) = store.with_run_lock(&run_id, |locked| {
             // A sibling stopped by a pause reports "paused", not "cancelled".
-            crate::command::workflow_host_command_operational::require_run_owned(
+            crate::command::workflow_host_command_operational::require_run_owned_locked(
                 locked,
                 &run_id,
                 expected_generation,

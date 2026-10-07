@@ -29,6 +29,7 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         },
     };
     let execution_generation = run.generation;
+    let pause_executor = host_command_executor.clone();
     let runner = fixed_runner(
         &run,
         &plan,
@@ -60,15 +61,62 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
             ));
         }
         Err(error) => {
-            super::workflow_live_v2_finalizer::finalize_run_status(
+            // An unplanned host/runtime fault carries no terminal verdict.
+            // If even the pause cannot be stored, report that fault explicitly;
+            // never fall back to terminal failure.
+            if lost_ownership(store, &run.id, execution_generation).is_some() {
+                return Ok(lost_ownership_report(LABEL, &run.id, &error.to_string()));
+            }
+            let text =
+                crate::command::workflow_decompose_events::bounded_log_field(&error.to_string());
+            // Issue 337: this pause covers what the run recorded, as any
+            // script-error pause of a fixed script does.
+            let coverage = super::workflow_live_v2_script::HostPauseCoverage::snapshot(
+                &v2_store,
+                Some(&pause_executor),
+            );
+            // Written in the pause's own lock section (no resume between).
+            let paused = archon_workflow::control_pause::pause_owned_then(
                 store,
                 &run.id,
-                archon_workflow::WorkflowRunKind::FixedDecompositionV1,
-                RunStatus::Failed,
-                &error.to_string(),
-                Some(execution_generation),
-            )?;
-            return Err(error.into());
+                archon_workflow::control_pause::PauseOwner::Executor(execution_generation),
+                serde_json::json!({"event":"fixed_host_error_pause","error":text}),
+                |locked, seq| coverage.record(locked, &run.id, "boundary-error", seq),
+            );
+            match paused {
+                Ok(Ok(_)) => {
+                    return Ok(format!(
+                        "Fixed decomposition paused: {}\n{}\nResume with: archon workflow resume --live --yes {}\n",
+                        run.id, text, run.id
+                    ));
+                }
+                Ok(Err(evidence_error)) => {
+                    return Err(anyhow::anyhow!(
+                        "fixed decomposition {} is paused after {text}, but its pause evidence could not be recorded: {evidence_error}",
+                        run.id
+                    ));
+                }
+                Err(WorkflowError::ControlPaused(message)) => {
+                    return Ok(format!(
+                        "Fixed decomposition paused: {}\n{}\n",
+                        run.id, message
+                    ));
+                }
+                Err(WorkflowError::ControlCancelled(message)) => {
+                    return Ok(
+                        if lost_ownership(store, &run.id, execution_generation).is_some() {
+                            lost_ownership_report(LABEL, &run.id, &message)
+                        } else {
+                            format!("Fixed decomposition cancelled: {}\n{}\n", run.id, message)
+                        },
+                    );
+                }
+                Err(pause_error) => {
+                    return Err(anyhow::anyhow!(
+                        "fixed decomposition host error: {text}; its pause could not be persisted: {pause_error}"
+                    ));
+                }
+            }
         }
     };
     super::workflow_live_v2_finalizer::finalize_summary(
@@ -203,6 +251,12 @@ pub(super) fn persist_fixed_start(
     })
 }
 
+#[cfg(test)]
+#[path = "workflow_live_v2_fixed_error_pause_tests.rs"]
+mod error_pause_tests;
+#[cfg(test)]
+#[path = "workflow_live_v2_fixed_replay_guard_tests.rs"]
+mod replay_guard_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_fixed_start_tests.rs"]
 mod start_tests;

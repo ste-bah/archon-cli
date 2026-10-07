@@ -89,3 +89,22 @@ impl FixedHostCommandExecutor {
         fixed_subject_is_terminal(&self.run_root, &request.command_id, &outcome)
     }
 }
+
+impl FixedHostCommandExecutor {
+    /// Issue 337: what a call of `request` judges, in the context the host
+    /// binds it to. A candidate the host cannot bind judged no content.
+    pub(super) fn judged_inputs_for(
+        &self,
+        request: &HostCommandRequest,
+    ) -> WorkflowResult<Option<String>> {
+        match self.context_for_request(request) {
+            Ok(context) => {
+                crate::command::workflow_host_command_judged_inputs::judged_inputs_digest(
+                    &context, request,
+                )
+            }
+            Err(WorkflowError::SpecInvalid(_)) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+}

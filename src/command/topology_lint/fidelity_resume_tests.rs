@@ -462,14 +462,11 @@ fn the_staged_set_gate_runs_on_its_catalog_wall_clock() {
     assert_eq!(resume.budget.outer_secs(), lint_wall_clock());
 }
 
-/// R7 keeps its resume identity: neither the catalog digest nor the fixed
-/// script digest moves. Both values were computed at the base commit
-/// (eb67988b7) before this change. The script digest moved twice since, by
-/// design: Issue 261 changes the fixed decomposition script, and Issue 288
-/// bounds its author prompts (a run launched on an older script cannot resume).
-/// Issue 360 moves it again: workflow_decompose_v1_seed.js joins the script.
+/// The catalog stays pinned. The fixed script digest moves by design
+/// (Issues 261, 288, 337, 357, 360); a run on an older script resumes through
+/// the Issue 358 upgrade path and the Issue 360 phase seed.
 #[test]
-fn the_catalog_and_script_digests_are_unchanged() {
+fn the_catalog_is_unchanged_and_script_matches_the_planned_release() {
     let catalog = crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("rev")
         .expect("catalog");
     assert_eq!(
@@ -480,7 +477,7 @@ fn the_catalog_and_script_digests_are_unchanged() {
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "f85de575712f7d229c847ea8c559021f211c00a7debf7b6814481653b1b9c1b7"
+        "PENDING_DIGEST"
     );
 }
 

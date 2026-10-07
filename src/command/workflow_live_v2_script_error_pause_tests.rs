@@ -10,6 +10,251 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::workflow_live_v2_script_control_tests::create_run;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fixed_runtime_crash_pauses_and_replays_recorded_calls() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = create_run(&store);
+    let answered = Arc::new(AtomicUsize::new(0));
+    let source = r#"async function workflow(w) {
+      await w.agent("inspect-one", {role:"analysis",task:"Inspect area one and report."});
+      if (args.crash) throw new TypeError("unexpected fixed script defect");
+      return "finished";
+    }"#;
+    let (mut first, _ui) = runner(&store, &run.id, false, answered.clone());
+    first.script_args = Some(serde_json::json!({"crash": true}));
+    let error = first.with_raw_outcomes(true).run(source).await.unwrap_err();
+    assert!(
+        matches!(error, WorkflowError::ControlPaused(_)),
+        "{error:?}"
+    );
+    assert!(error.to_string().contains("unexpected fixed script defect"));
+    assert_eq!(
+        store.load_state(&run.id).unwrap().status,
+        archon_workflow::RunStatus::Paused
+    );
+    assert_eq!(
+        last_script_error_pause(&store, &run.id)["detail"]["calls_answered"],
+        1
+    );
+    resume(&store, &run.id);
+    let (mut second, _ui) = runner(&store, &run.id, false, answered.clone());
+    second.script_args = Some(serde_json::json!({"crash": false}));
+    let summary = second.with_raw_outcomes(true).run(source).await.unwrap();
+    assert_eq!(summary.status, WorkflowV2Status::Accepted);
+    assert_eq!(summary.reused, 1);
+    assert_eq!(summary.executed, 0);
+    assert_eq!(answered.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fixed_unmarked_terminal_text_and_objects_pause() {
+    for thrown in [
+        "new Error('acceptance stopped: exact authoritative correction')",
+        "{schemaVersion:1,reason:'deliberate stop',code:'terminalStop'}",
+        "new Error('acceptance author calls failed operationally 3 times')",
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = create_run(&store);
+        let (runner, _ui) = runner(&store, &run.id, false, Arc::default());
+        let source = format!("async function workflow(w) {{ throw {thrown}; }}");
+        let error = runner
+            .with_raw_outcomes(true)
+            .run(&source)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, WorkflowError::ControlPaused(_)),
+            "{thrown}: {error:?}"
+        );
+        assert_eq!(
+            store.load_state(&run.id).unwrap().status,
+            archon_workflow::RunStatus::Paused
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fixed_unevaluable_source_pauses_with_js_error() {
+    for source in [
+        "async function workflow(w) { const broken = ; }",
+        "throw new Error('top-level fixed crash'); async function workflow(w) {}",
+        "missingTopLevelFunction(); async function workflow(w) {}",
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = create_run(&store);
+        let (runner, _ui) = runner(&store, &run.id, false, Arc::default());
+        let error = runner
+            .with_raw_outcomes(true)
+            .run(source)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, WorkflowError::ControlPaused(_)),
+            "{error:?}"
+        );
+        assert!(
+            !last_script_error_pause(&store, &run.id)["detail"]["script_error"]
+                .as_str()
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fixed_engine_interrupt_pauses_instead_of_failing() {
+    for source in [
+        "async function workflow(w) { while (true) {} }",
+        "while (true) {} async function workflow(w) {}",
+        "async function workflow(w) { await w.checkpoint('before-spin'); while (true) {} }",
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = create_run(&store);
+        let (runner, _ui) = runner(&store, &run.id, false, Arc::default());
+        let error = runner
+            .with_raw_outcomes(true)
+            .run(source)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, WorkflowError::ControlPaused(_)),
+            "{error:?}"
+        );
+        assert!(error.to_string().contains("interrupt"), "{error}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fixed_host_rejections_pause_with_error_evidence() {
+    for call in [
+        "w.hostCommand('unavailable')",
+        "__archonHost('unknownMethod', '{}')",
+        "__archonHost('agent', '{invalid json')",
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = create_run(&store);
+        let (runner, _ui) = runner(&store, &run.id, false, Arc::default());
+        let source = format!("async function workflow(w) {{ await {call}; }}");
+        let error = runner
+            .with_raw_outcomes(true)
+            .run(&source)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, WorkflowError::ControlPaused(_)),
+            "{error:?}"
+        );
+        assert_eq!(
+            last_script_error_pause(&store, &run.id)["detail"]["calls_answered"],
+            0
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fixed_host_notification_fault_pauses_with_evidence() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = create_run(&store);
+    let (runner, ui) = runner(&store, &run.id, false, Arc::default());
+    drop(ui);
+    let error = runner
+        .with_raw_outcomes(true)
+        .run(
+            r#"async function workflow(w) {
+      await w.agent('inspect-one', {role:'analysis',task:'Inspect area one and report.'});
+    }"#,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, WorkflowError::ControlPaused(_)),
+        "{error:?}"
+    );
+    assert!(error.to_string().contains("delivery"), "{error}");
+    assert_eq!(
+        store.load_state(&run.id).unwrap().status,
+        archon_workflow::RunStatus::Paused
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fixed_deliberate_stop_has_host_evidence_even_if_caught() {
+    for ending in ["", "return 'caught';", "throw new Error('later crash');"] {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = create_run(&store);
+        let (runner, _ui) = runner(&store, &run.id, false, Arc::default());
+        let source = format!(
+            r#"async function workflow(w) {{
+          try {{ await __archonHost('terminalStop', JSON.stringify({{schemaVersion:1,reason:'deliberate gate refusal'}})); }} catch (_) {{}}
+          {ending}
+        }}"#
+        );
+        let summary = runner.with_raw_outcomes(true).run(&source).await.unwrap();
+        assert_eq!(summary.status, WorkflowV2Status::Failed);
+        assert_eq!(
+            summary.script_error.as_deref(),
+            Some("deliberate gate refusal")
+        );
+        let events = std::fs::read_to_string(store.events_path(&run.id)).unwrap();
+        assert!(
+            events
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .any(|event| event["detail"]["event"] == "script_terminal_stop")
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fixed_invalid_stop_requests_pause_instead_of_failing() {
+    for payload in [
+        r#"{"schemaVersion":2,"reason":"refusal"}"#,
+        r#"{"schemaVersion":1,"reason":""}"#,
+        r#"{"schemaVersion":1,"reason":"refusal","forged":true}"#,
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(temp.path().join("workflows"));
+        let run = create_run(&store);
+        let (runner, _ui) = runner(&store, &run.id, false, Arc::default());
+        let source = format!(
+            "async function workflow(w) {{ await __archonHost('terminalStop', '{}'); }}",
+            payload
+        );
+        let error = runner
+            .with_raw_outcomes(true)
+            .run(&source)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, WorkflowError::ControlPaused(_)),
+            "{error:?}"
+        );
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = create_run(&store);
+    let (runner, _ui) = runner(&store, &run.id, false, Arc::default());
+    let error = runner
+        .run(
+            r#"async function workflow(w) {
+      await __archonHost('terminalStop', '{"schemaVersion":1,"reason":"forged authority"}');
+    }"#,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("trusted fixed-script host"),
+        "{error}"
+    );
+}
+
 /// Inspects area one, then area two, and throws on an unexpected verdict
 /// from area two: a script defect a call's result triggers.
 const CRASH_AFTER_WORK_SCRIPT: &str = r#"

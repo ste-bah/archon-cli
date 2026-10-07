@@ -15,24 +15,6 @@ use super::*;
 use remediation::asks_the_same;
 
 impl WorkflowScriptHost {
-    async fn fixed_host_record_reusable(
-        &self,
-        record: &WorkflowV2CallRecord,
-    ) -> archon_workflow::WorkflowResult<bool> {
-        if record.call.method != WorkflowV2HostMethod::HostCommand {
-            return self.refresh_audit_for_cache(record).await;
-        }
-        self.runner
-            .host_command_executor
-            .as_ref()
-            .ok_or_else(|| {
-                WorkflowError::PolicyDenied(
-                    "HostCommand reuse requires the trusted fixed executor".to_string(),
-                )
-            })?
-            .record_is_reusable(record)
-    }
-
     /// One host call, once the session's control refusal gate has passed
     /// (`execute`, `workflow_live_v2_script_host_control_refusal.rs`).
     pub(super) async fn execute_host_call(
@@ -74,6 +56,9 @@ impl WorkflowScriptHost {
         // Issue 261: a pause request is control flow, not a workflow call.
         if method == archon_workflow::v2::script::SCRIPT_PAUSE_METHOD {
             return self.request_script_pause(&payload).await;
+        }
+        if method == "terminalStop" {
+            return self.request_script_terminal_stop(&payload).await;
         }
         let request: ScriptHostRequest = serde_json::from_str(&payload)?;
         let mut execution = self.execution_from_request(&method, request)?;
@@ -430,7 +415,9 @@ impl WorkflowScriptHost {
         mark_unresolved_dependency_metadata(&execution, &source_metadata, &mut result);
         let result = match result.validate() {
             Ok(()) => result,
-            Err(err) => failed_v2_result(&call_id, WorkflowError::SpecInvalid(err.to_string())),
+            Err(err) => {
+                invalid_answer_result(&call_id, WorkflowError::SpecInvalid(err.to_string()))
+            }
         };
         if let Some(graph) = source_metadata.source_task_graph.take() {
             source_metadata.source_task_graph = Some(complete_source_task_graph(graph, &result));
@@ -470,29 +457,7 @@ impl WorkflowScriptHost {
         self.emit_call_finished_event(&record);
         poll_v2_run_control(&self.runner.workflow_store, &self.runner.run_id, "")?;
         if terminal_stop_for_call(&record.call, record.status) {
-            let path = self.runner.v2_store.result_path(&record.call.id);
-            let next_action = next_action_for_terminal_call(&record.call.id, record.status);
-            self.mark_terminal(&record, path.display().to_string(), next_action.clone())
-                .await;
-            self.emit_v2_event(
-                if record.status == WorkflowV2Status::Failed {
-                    WorkflowEventKind::StageFailed
-                } else {
-                    WorkflowEventKind::StageStalled
-                },
-                serde_json::json!({
-                    "event": "script_stopped",
-                    "call_id": record.call.id.clone(),
-                    "method": record.call.method.as_str(),
-                    "status": record.status,
-                    "result_path": path.display().to_string(),
-                    "next_action": next_action,
-                }),
-            );
-            return Err(WorkflowError::TerminalHostCall(format!(
-                "{} ended with {:?}",
-                record.call.id, record.status
-            )));
+            return Err(self.stop_on_terminal_call(&record).await);
         }
         self.result_view_in_generation(&record, view_generation)
     }

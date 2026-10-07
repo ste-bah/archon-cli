@@ -108,3 +108,118 @@ fn a_zero_limit_still_stops_on_the_first_never_started_call() {
 
     assert!(streak.record_never_started());
 }
+
+/// The record an older binary (8b7a3c13f) wrote on a live run for an author
+/// call whose provider stream gave up: unmarked. Copied from that run, with
+/// the task prompt and the session id removed.
+const OLD_BINARY_RECORD: &str =
+    include_str!("../../tests/fixtures/v2_old_binary_dispatch_error_record.json");
+
+fn old_binary_record() -> crate::v2::WorkflowV2CallRecord {
+    serde_json::from_str(OLD_BINARY_RECORD).expect("the old record still deserializes")
+}
+
+/// Issue 337 round 5 (review findings 4 and 6): the old unmarked dispatch
+/// error is recognised by its structure, rebuilt from the record's own call
+/// id and compared whole, on the real record such a binary wrote.
+#[test]
+fn an_old_binary_dispatch_error_record_carries_no_verdict() {
+    let record = old_binary_record();
+    assert_eq!(record.result.status, WorkflowV2Status::Failed);
+    assert!(result_carries_no_verdict(&record.call.id, &record.result));
+}
+
+/// Text that only looks like it is a verdict: the same result filed under
+/// another call, or a result that differs from the producer's in any part.
+#[test]
+fn a_result_that_only_reads_like_an_old_dispatch_error_keeps_its_verdict() {
+    let record = old_binary_record();
+    assert!(
+        !result_carries_no_verdict("acceptance-author-other", &record.result),
+        "another call's text"
+    );
+    let mut gap = record.result.clone();
+    gap.residual_gaps[0].severity = Some("high".into());
+    assert!(!result_carries_no_verdict(&record.call.id, &gap), "a gap");
+    let mut evidence = record.result.clone();
+    evidence.evidence.clear();
+    assert!(
+        !result_carries_no_verdict(&record.call.id, &evidence),
+        "no evidence"
+    );
+    let mut data = record.result.clone();
+    data.data = serde_json::json!({ "error": "another error" });
+    assert!(!result_carries_no_verdict(&record.call.id, &data), "data");
+    let mut status = record.result.clone();
+    status.status = WorkflowV2Status::NeedsReview;
+    assert!(
+        !result_carries_no_verdict(&record.call.id, &status),
+        "status"
+    );
+}
+
+/// Issue 337 round 6 (review finding 4): the old binary changed a
+/// dispatch-error result after it built it -- the review findings attached
+/// to `data`, a review evidence and gap appended for a dynamic wave. Such a
+/// record still carries no verdict; any other change keeps its verdict.
+#[test]
+fn an_old_dispatch_error_the_old_normalizers_changed_carries_no_verdict() {
+    let record = old_binary_record();
+    let mut changed = record.result.clone();
+    changed.data[crate::v2::review_findings::HOST_REVIEW_FINDINGS_KEY] =
+        serde_json::json!({ "findings": [] });
+    changed.evidence.push(crate::v2::WorkflowV2Evidence::new(
+        crate::v2::WorkflowV2EvidenceKind::Review,
+        "dynamic implementation wave has unresolved dependency references: X",
+    ));
+    changed
+        .residual_gaps
+        .push(crate::v2::WorkflowV2ResidualGap {
+            id: "unresolved_dynamic_wave_dependencies_x".into(),
+            description: "unresolved dependency references".into(),
+            severity: Some("review".into()),
+        });
+    assert!(result_carries_no_verdict(&record.call.id, &changed));
+
+    let mut evidence = changed.clone();
+    evidence.evidence.push(crate::v2::WorkflowV2Evidence::new(
+        crate::v2::WorkflowV2EvidenceKind::Implementation,
+        "work",
+    ));
+    assert!(
+        !result_carries_no_verdict(&record.call.id, &evidence),
+        "added work evidence"
+    );
+    let mut gap = changed.clone();
+    gap.residual_gaps[1].severity = Some("blocking".into());
+    assert!(
+        !result_carries_no_verdict(&record.call.id, &gap),
+        "an added blocking gap"
+    );
+    let mut data = changed.clone();
+    data.data["items"] = serde_json::json!([]);
+    assert!(
+        !result_carries_no_verdict(&record.call.id, &data),
+        "another data key"
+    );
+    let mut first = changed;
+    first.evidence.swap(0, 1);
+    assert!(
+        !result_carries_no_verdict(&record.call.id, &first),
+        "the built evidence is not first"
+    );
+}
+
+/// What this build writes: a dispatch error is marked, an invalid answer
+/// is marked as the answer it is.
+#[test]
+fn this_builds_failed_results_are_classified_by_their_marker() {
+    let error = WorkflowError::StageFailed("agent transport failed".into());
+    let fault = v2_result_for_call_error("author-1", &error);
+    assert!(result_carries_no_verdict("author-1", &fault));
+    let invalid = invalid_answer_result(
+        "author-1",
+        WorkflowError::SpecInvalid("answer has no status".into()),
+    );
+    assert!(!result_carries_no_verdict("author-1", &invalid));
+}

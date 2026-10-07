@@ -16,8 +16,9 @@
 //! ran for an hour too.
 
 use crate::WorkflowError;
-use crate::v2::WorkflowV2Result;
+use crate::v2::review_findings::HOST_REVIEW_FINDINGS_KEY;
 use crate::v2::script::failed_v2_result;
+use crate::v2::{WorkflowV2EvidenceKind, WorkflowV2Result};
 
 /// The marker this crate stamps on a result for a call that never executed.
 pub const HOST_FAULT_NO_VERDICT_MARKER: &str = "host_fault_no_verdict";
@@ -28,6 +29,101 @@ pub const HOST_FAULT_NO_VERDICT_MARKER: &str = "host_fault_no_verdict";
 /// a never-ran result joins that pool instead of inventing a second one the
 /// primitives cannot see.
 pub const NO_VERDICT_REFUND_MARKER: &str = "transport_failure_no_verdict";
+
+/// Issue 337: the marker on EVERY result the host made from a dispatch error
+/// (a provider, transport or host fault): the call returned no answer of its
+/// own. Such a record is history, never a verdict a resume may replay.
+pub const HOST_DISPATCH_ERROR_MARKER: &str = "host_dispatch_error";
+
+/// The marker on a result this build made from a call's own answer that
+/// failed validation: the model answered, wrongly, so it IS a verdict. It
+/// keeps such a result apart from the unmarked legacy dispatch-error shape.
+pub const INVALID_ANSWER_MARKER: &str = "invalid_answer";
+
+/// Does the result recorded for call `call_id` carry no verdict on the work:
+/// a dispatch error, a never-ran fault, or a refunded no-verdict attempt --
+/// marked, or in the unmarked shape an older binary wrote for a dispatch
+/// error?
+pub fn result_carries_no_verdict(call_id: &str, result: &WorkflowV2Result) -> bool {
+    [
+        HOST_DISPATCH_ERROR_MARKER,
+        HOST_FAULT_NO_VERDICT_MARKER,
+        NO_VERDICT_REFUND_MARKER,
+    ]
+    .iter()
+    .any(|marker| {
+        result
+            .data
+            .get(*marker)
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+    }) || legacy_dispatch_error(call_id, result)
+}
+
+/// A dispatch error as a binary before [`HOST_DISPATCH_ERROR_MARKER`] wrote
+/// it: the [`failed_v2_result`] of this call for its own recorded error,
+/// rebuilt from the call id and compared on every field, never matched on
+/// its text. A run started on such a binary may resume on this one, so its
+/// fault records must not replay as verdicts. Every result this build makes
+/// from `failed_v2_result` carries a marker of its kind (a dispatch error, or
+/// an invalid answer), and a marker is no key the rule allows, so the rule
+/// never reads a result of this build.
+///
+/// The old binary (8b7a3c13f) changed the result after it built it, in
+/// `workflow_live_v2_script_host_exec.rs:403-413`: the normalizers of
+/// `helpers_a.rs:400-428` attach the host review findings to `data` under
+/// [`HOST_REVIEW_FINDINGS_KEY`] (`review_findings.rs:338`) for a call with a
+/// review contract, and `mark_unresolved_dependency_metadata`
+/// (`helpers_a.rs:430-466`) appends one review evidence and one review gap
+/// for a dynamic wave. Its other normalizers change only accepted results,
+/// artifacts, task coverage or `data.items`, none of which a failed result
+/// has. So the rule allows exactly those additions: that key in `data`, and
+/// evidence of kind review and gaps of severity review after the built ones.
+fn legacy_dispatch_error(call_id: &str, result: &WorkflowV2Result) -> bool {
+    let Some(data) = result.data.as_object() else {
+        return false;
+    };
+    if data
+        .keys()
+        .any(|key| key != "error" && key != HOST_REVIEW_FINDINGS_KEY)
+    {
+        return false;
+    }
+    let Some(error) = data.get("error").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    let built = failed_v2_result(call_id, error);
+    let mut stable = result.clone();
+    let added_evidence = stable
+        .evidence
+        .split_off(built.evidence.len().min(stable.evidence.len()));
+    let added_gaps = stable
+        .residual_gaps
+        .split_off(built.residual_gaps.len().min(stable.residual_gaps.len()));
+    if let Some(data) = stable.data.as_object_mut() {
+        data.remove(HOST_REVIEW_FINDINGS_KEY);
+    }
+    added_evidence
+        .iter()
+        .all(|evidence| evidence.kind == WorkflowV2EvidenceKind::Review)
+        && added_gaps
+            .iter()
+            .all(|gap| gap.severity.as_deref() == Some("review"))
+        && stable == built
+}
+
+/// The result for a call whose own answer failed validation: failed, and
+/// marked as the answer it is ([`INVALID_ANSWER_MARKER`]).
+pub fn invalid_answer_result(call_id: &str, error: WorkflowError) -> WorkflowV2Result {
+    let mut result = failed_v2_result(call_id, error);
+    if let Some(object) = result.data.as_object_mut() {
+        object.insert(
+            INVALID_ANSWER_MARKER.to_string(),
+            serde_json::Value::Bool(true),
+        );
+    }
+    result
+}
 
 /// Did this error end the call before anything could produce a verdict?
 ///
@@ -46,6 +142,12 @@ pub fn is_never_started_fault(error: &WorkflowError) -> bool {
 /// charged for one that did not happen.
 pub fn v2_result_for_call_error(call_id: &str, error: &WorkflowError) -> WorkflowV2Result {
     let mut result = failed_v2_result(call_id, error);
+    if let Some(object) = result.data.as_object_mut() {
+        object.insert(
+            HOST_DISPATCH_ERROR_MARKER.to_string(),
+            serde_json::Value::Bool(true),
+        );
+    }
     // Batch G2: the host's own operational error produced no verdict on the
     // work: refunded like a dropped transport and typed `execution`, so the
     // script retries it without spending a round and no task is charged.

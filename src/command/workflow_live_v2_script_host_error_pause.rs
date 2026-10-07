@@ -7,11 +7,12 @@
 //! the top, and every call it recorded complete answers from its record, so
 //! only the work after the crash runs again.
 //!
-//! Two hosts keep the failure ([`WorkflowScriptHost::pauses_on_script_errors`]).
-//! A source that cannot be evaluated at all (a syntax or top-level error,
-//! before the script's promise exists and before any call) still FAILS the
+//! The authoring bootstrap keeps the failure so its caller can re-author.
+//! Outside the fixed host, a source that cannot be evaluated (a syntax or
+//! top-level error, before the script's promise exists and before any call) FAILS the
 //! run: a resume evaluates the same source and cannot change it. The caller
-//! makes that distinction; this module handles the runtime case only.
+//! makes that distinction. The fixed host pauses these errors too; only a
+//! validated terminal-stop request ends its script terminally.
 //!
 //! A deterministic crash recurs on resume. Each pause records the error and
 //! the point it stopped at (the calls answered so far, and the last one) in
@@ -19,6 +20,12 @@
 //! the same point, the pause says so: it counts the recurrences and tells
 //! the operator that a resume alone re-runs it unchanged. The run stays
 //! paused (never failed, never resumed by itself), so nothing loops.
+//!
+//! Issue 337: a fixed script's pause here (and the fixed run boundary's)
+//! records the attempts it covers exactly as a `w.pause` does
+//! (`HostPauseCoverage`), so a resume replays every recorded answer of that
+//! script verbatim -- refusals and failed calls too -- and only the work
+//! after the crash runs again.
 
 use super::*;
 
@@ -41,21 +48,41 @@ struct ScriptErrorPauseRecord {
 }
 
 impl WorkflowScriptHost {
-    /// Whether a runtime error of this host's script pauses its run. Two
-    /// hosts keep the failure: the v3 authoring bootstrap, whose own loop
-    /// re-authors on a script that came back without a result, and the fixed
-    /// decomposition host (the only one allowed raw outcomes), whose
-    /// immutable script ends its run by throwing its verdict -- a designed
-    /// terminal outcome a live decomposition depends on, not a crash.
+    /// The authoring bootstrap re-authors on error. Fixed scripts pause on
+    /// every unmarked error; deliberate stops are validated by the host API.
     pub(in super::super) fn pauses_on_script_errors(&self) -> bool {
-        self.runner.pauses_on_script_error && !self.runner.raw_outcomes_allowed
+        self.runner.pauses_on_script_error
+    }
+
+    pub(in super::super) async fn finish_script_error(
+        &self,
+        error: &str,
+        unevaluable: bool,
+    ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+        if unevaluable && !self.runner.raw_outcomes_allowed {
+            let error = format!(
+                "workflow.js cannot be evaluated (a syntax or top-level error, before any call); a resume evaluates the same source and cannot change it, so fix the script source: {error}"
+            );
+            return Ok(self.mark_script_failure(&error).await);
+        }
+        if self.pauses_on_script_errors() {
+            if let Some(stop) = self.pause_on_script_error(error).await {
+                return Err(stop);
+            }
+            if self.runner.raw_outcomes_allowed {
+                return Err(WorkflowError::SpecInvalid(format!(
+                    "workflow.js error: {error}; the host could not persist its script-error pause"
+                )));
+            }
+        }
+        Ok(self.mark_script_failure(error).await)
     }
 
     /// Pauses the run on the runtime error `error` of its workflow.js and
     /// returns the pause as the error the session ends with. A session that
     /// no longer owns the run changes nothing and gets the run's own control
-    /// decision. `None` when nothing could be recorded: the caller then fails
-    /// the run as before, carrying the error.
+    /// decision. `None` when nothing could be recorded: the fixed caller
+    /// reports the persistence fault; other callers keep their prior policy.
     pub(in super::super) async fn pause_on_script_error(
         &self,
         error: &str,
@@ -81,6 +108,16 @@ impl WorkflowScriptHost {
         if let Err(refused) = self.runner.v2_store.require_session_executor(&run) {
             return Some(refused);
         }
+        // Issue 337: a fixed script's crash pause covers what the run
+        // recorded, as a `w.pause` does, so a resume replays a judge's
+        // refusal or a failed author call verbatim instead of re-asking it.
+        // A v3 script keeps its Issue 335 contract: failed calls run again.
+        let coverage = self.runner.raw_outcomes_allowed.then(|| {
+            HostPauseCoverage::snapshot(
+                &self.runner.v2_store,
+                self.runner.host_command_executor.as_ref(),
+            )
+        });
         // An unreadable record is evidence lost, not state: counted afresh.
         let prior = std::fs::read(store.run_dir(run_id).join(SCRIPT_ERROR_PAUSE_RECORD))
             .ok()
@@ -118,11 +155,18 @@ impl WorkflowScriptHost {
             "record_path": SCRIPT_ERROR_PAUSE_RECORD,
             "resume": resume,
         });
-        match archon_workflow::control_pause::pause_with_evidence(
+        // The coverage is written in the pause's own lock section, so no
+        // resume can take the run before its replay record exists.
+        match archon_workflow::control_pause::pause_owned_then(
             store,
             run_id,
-            run.generation,
+            archon_workflow::control_pause::PauseOwner::Generation(run.generation),
             detail,
+            |locked, seq| {
+                if let Some(coverage) = coverage {
+                    coverage.record(locked, run_id, "script-error", seq);
+                }
+            },
         ) {
             Ok(event) => {
                 if let Err(error) = event {

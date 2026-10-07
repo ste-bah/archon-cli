@@ -1,0 +1,50 @@
+{
+  "run_id": "wf-a4cfb5c4-6a90-42e9-a447-6f05558a763a",
+  "call": {
+    "id": "acceptance-author-SUP-REQ-DL-071-13",
+    "method": "agent",
+    "options": {
+      "result_mode": "rawOutcome",
+      "role": "planner",
+      "task": "<task prompt removed from the fixture: it named project paths>",
+      "target_files": [],
+      "target_files_from_item": false,
+      "extra": {}
+    }
+  },
+  "attempt": 1,
+  "schema_version": "workflow-result-v2",
+  "started_at": "2026-10-05T16:42:09.007431+00:00",
+  "finished_at": "2026-10-05T16:42:09.007431+00:00",
+  "input_hash": "b0bd02978e474133cabf3d324257892666a3b499910cca33d3c09af7ee53ebb1",
+  "output_hash": "77c43269118ca578b2fa0a29f9836412d466928e5ab391640c8ec5855ed40be5",
+  "status": "failed",
+  "result": {
+    "status": "failed",
+    "summary": "workflow v2 call 'acceptance-author-SUP-REQ-DL-071-13' failed: workflow stage failed: agent transport failed: workflow stage failed: subagent failed: Subagent failed: subagent stream retry exhausted after 3 retries: incomplete response; prior conversation retained",
+    "evidence": [
+      {
+        "kind": "blocker",
+        "summary": "workflow stage failed: agent transport failed: workflow stage failed: subagent failed: Subagent failed: subagent stream retry exhausted after 3 retries: incomplete response; prior conversation retained"
+      }
+    ],
+    "artifacts": [],
+    "commands_run": [],
+    "files_read": [],
+    "files_changed": [],
+    "task_coverage": [],
+    "residual_gaps": [
+      {
+        "id": "v2_call_failed_acceptance-author-SUP-REQ-DL-071-13",
+        "description": "workflow stage failed: agent transport failed: workflow stage failed: subagent failed: Subagent failed: subagent stream retry exhausted after 3 retries: incomplete response; prior conversation retained",
+        "severity": "blocking"
+      }
+    ],
+    "data": {
+      "error": "workflow stage failed: agent transport failed: workflow stage failed: subagent failed: Subagent failed: subagent stream retry exhausted after 3 retries: incomplete response; prior conversation retained"
+    }
+  },
+  "depends_on": [],
+  "agent_session_id": "session-redacted",
+  "scaffold_hash": "5564154c6205773b215bb3b54b390c981166e41e3384cfdd53b7f13b4b31f5a4"
+}

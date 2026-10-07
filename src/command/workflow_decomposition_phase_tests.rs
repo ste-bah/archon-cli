@@ -426,7 +426,11 @@ async fn acceptance_without_committed_receipt_cannot_start_skeleton() {
     )
     .await;
 
-    assert_eq!(result.unwrap().status, WorkflowV2Status::Failed);
+    assert!(
+        matches!(result, Err(WorkflowError::ControlPaused(_))),
+        "{result:?}"
+    );
+    assert!(events.contains("script_error_pause"), "{events}");
     assert!(
         events.contains("no committed publication receipt"),
         "{events}"

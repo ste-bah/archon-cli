@@ -75,6 +75,7 @@ fn run_js(driver: &str) -> String {
         "PACKAGING_REFUSAL",
         "AUTHOR_CALLS",
         "routeFindings",
+        "stopFixed",
         "requireCommitted",
         "authorPrompt",
         // Issue 288: the bounded earlier-attempt history authorPrompt shows.
@@ -88,6 +89,19 @@ fn run_js(driver: &str) -> String {
         script.push_str(&decl(name));
         script.push('\n');
     }
+    script.push_str(
+        r#"
+globalThis.terminalStops = [];
+async function __archonHost(method, payload) {
+  const stop = JSON.parse(payload);
+  if (method !== "terminalStop" || stop.schemaVersion !== 1 || typeof stop.reason !== "string") {
+    throw new Error("invalid terminal-stop request");
+  }
+  globalThis.terminalStops.push(stop);
+  throw new Error(stop.reason);
+}
+"#,
+    );
     script.push_str(driver);
     script.push('\n');
     let dir = tempfile::tempdir().expect("tmp");
@@ -180,7 +194,7 @@ const policy = {{
 }};
 authorCandidate(w, policy).then(
   (outcome) => console.log(JSON.stringify({{ authorCalls, committed: Boolean(outcome && outcome.publicationReceipt) }})),
-  (error) => console.log(JSON.stringify({{ authorCalls, error: String(error && error.message) }})),
+  (error) => console.log(JSON.stringify({{ authorCalls, error: String(error && error.message), terminalStops: globalThis.terminalStops }})),
 );
 "#
     )
@@ -203,6 +217,10 @@ fn a_prd_input_finding_stops_the_phase_in_observe_mode() {
     assert!(
         out.contains("\"authorCalls\":1"),
         "it must stop on the first attempt, not consume the budget: {out}"
+    );
+    assert!(
+        out.contains("\"schemaVersion\":1"),
+        "the refusal must use the typed stop: {out}"
     );
 }
 

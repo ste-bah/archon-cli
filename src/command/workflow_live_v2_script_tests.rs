@@ -11,6 +11,8 @@ mod workflow_decomposition_phase_tests;
 mod workflow_live_v2_model_inflight_tests;
 #[path = "workflow_live_v2_script_control_refusal_tests.rs"]
 mod workflow_live_v2_script_control_refusal_tests;
+#[path = "workflow_live_v2_script_crash_replay_tests.rs"]
+mod workflow_live_v2_script_crash_replay_tests;
 #[path = "workflow_live_v2_script_delivery_tests.rs"]
 mod workflow_live_v2_script_delivery_tests;
 #[path = "workflow_live_v2_script_fixed_progress_tests.rs"]
@@ -19,14 +21,20 @@ mod workflow_live_v2_script_fixed_progress_tests;
 mod workflow_live_v2_script_host_command_tests;
 #[path = "workflow_live_v2_script_host_operational_tests.rs"]
 mod workflow_live_v2_script_host_operational_tests;
+#[path = "workflow_live_v2_script_judged_resume_tests.rs"]
+mod workflow_live_v2_script_judged_resume_tests;
 #[path = "workflow_live_v2_script_pause_tests.rs"]
 mod workflow_live_v2_script_pause_tests;
 #[path = "workflow_live_v2_script_stale_executor_tests.rs"]
 mod workflow_live_v2_script_stale_executor_tests;
+#[path = "workflow_live_v2_script_terminal_race_tests.rs"]
+mod workflow_live_v2_script_terminal_race_tests;
 #[path = "workflow_live_v2_script_tests_b.rs"]
 mod workflow_live_v2_script_tests_b;
 #[path = "workflow_live_v2_script_tests_c.rs"]
 mod workflow_live_v2_script_tests_c;
+#[path = "workflow_live_v2_script_unpersisted_stop_tests.rs"]
+mod workflow_live_v2_script_unpersisted_stop_tests;
 use workflow_live_v2_script_tests_b::*;
 #[path = "workflow_live_v2_script_tests_d.rs"]
 mod workflow_live_v2_script_tests_d;

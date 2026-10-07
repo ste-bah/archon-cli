@@ -357,7 +357,7 @@ async function authorCandidate(w, policy) {
     // outcome with fewer findings would name a skeleton that is gone).
     if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true) lastCommitted = outcome;
     if (routed.fatal.length > 0) {
-      throw new Error(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
+      await stopFixed(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
     }
     if (routed.retry.length === 0) {
       requireCommitted(outcome, policy.phase);
@@ -382,9 +382,16 @@ async function runSetGate(w, capability) {
   // loop (Batch O), never shadowed past.
   const routed = routeFindings(outcome, SET_GATE_RETRY_SCOPES, new Set(["skeleton"]));
   if (routed.fatal.length > 0) {
-    throw new Error(`${capability} stopped: ${routed.fatal.join(" | ")}`);
+    await stopFixed(`${capability} stopped: ${routed.fatal.join(" | ")}`);
   }
   return { capability, outcome, routed };
+}
+
+// Protocol v1 deliberately changes the embedded script digest for a planned release.
+// Only an actual validated host request makes this stop terminal; error text cannot.
+async function stopFixed(reason) {
+  await __archonHost("terminalStop", JSON.stringify({ schemaVersion: 1, reason: String(reason).slice(0, 4096) }));
+  throw new Error("host returned without honoring the terminal stop");
 }
 
 // Batch O: a set gate is accepted only with no finding open, in either
