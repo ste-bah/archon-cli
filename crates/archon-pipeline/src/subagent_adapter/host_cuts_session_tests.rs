@@ -56,6 +56,7 @@ impl SubagentExecutor for ScriptedRunner {
             // runs well inside the wall clock once it has the slot.
             let paused = dispatch_clock::slot_wait(&agent_id);
             tokio::time::sleep(Duration::from_secs(WALL * 2)).await;
+            dispatch_clock::admitted(&agent_id);
             drop(paused);
             for _ in 0..RUN_ROUNDS {
                 subagent_activity::note();
@@ -63,6 +64,8 @@ impl SubagentExecutor for ScriptedRunner {
             }
             return Ok("ran after the queue".into());
         }
+        // A free slot, taken at once and reported as the executor does.
+        dispatch_clock::admitted(&agent_id);
         if request.prompt.contains("NO-CLOCK-EXPECTED") {
             assert!(subagent_activity::current().is_none(), "bound is off");
             tokio::time::sleep(Duration::from_secs(BOUND * 5)).await;

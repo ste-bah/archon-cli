@@ -1,10 +1,11 @@
 // Issue 337: deliberate refusals use a typed host request, never error text.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 
 async function refusal(scope, setGate, frozen = false) {
@@ -15,7 +16,7 @@ async function refusal(scope, setGate, frozen = false) {
       requests.push({ method, payload: JSON.parse(payload) });
       throw stopped;
     } };
-  vm.createContext(ctx);
+  vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   const w = {
     agent: async () => ({status:'accepted',stopReason:'end_turn',content:'{}'}),
@@ -35,7 +36,7 @@ async function refusal(scope, setGate, frozen = false) {
 
 async function unhonoredRequestCannotReturnSuccess() {
   const ctx = { __archonHost: async () => '{}' };
-  vm.createContext(ctx);
+  vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   await assert.rejects(async () => ctx.stopFixed('refusal'), /host returned without honoring the terminal stop/);
 }
@@ -44,7 +45,7 @@ async function stopReasonIsBounded() {
   let payload;
   const stopped = new Error('host stopped');
   const ctx = { __archonHost: async (_, value) => { payload = JSON.parse(value); throw stopped; } };
-  vm.createContext(ctx);
+  vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   await assert.rejects(async () => ctx.stopFixed('x'.repeat(20000)), error => error === stopped);
   assert.equal(payload.schemaVersion, 1);

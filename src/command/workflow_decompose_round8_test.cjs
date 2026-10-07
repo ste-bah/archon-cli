@@ -3,19 +3,20 @@
 // at the same first failing stage a smaller TOTAL of distinct deterministic
 // defects across all stages. Judge text is not measured.
 // Runs the script from ARCHON_TEST_SCRIPT_ROOT (default: this directory).
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const det = (code, subject, stage, text = `${code} ${subject}`) => ({ text, subject,
   remediation_scope: 'candidate_artifact',
   deterministic_defect: { provenance: 'host_validator', code, subject, location: 'slot', stage } });
 async function author(findings, { mode = 'enforce', outcome } = {}) {
   const ctx = { args: { gateMode: mode } };
-  vm.createContext(ctx);
+  vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   let calls = 0;
   const pauses = [];

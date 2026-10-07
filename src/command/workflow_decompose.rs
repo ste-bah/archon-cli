@@ -31,6 +31,8 @@ pub(crate) const FIXED_SCRIPT_SOURCE: &str = concat!(
     include_str!("workflow_decompose_v1_progress.js"),
     "\n",
     include_str!("workflow_decompose_v1_seed.js"),
+    "\n",
+    include_str!("workflow_decompose_v1_context.js"),
 );
 pub(crate) const FIXED_DECOMPOSITION_STATE_PATH: &str = "decomposition/state.json";
 pub(crate) const FIXED_CATALOG_PATH: &str = "decomposition/command-catalog.json";
@@ -277,7 +279,10 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
                 // The authors work in the project directory and read the
                 // repository (Issue-56): without this every Read of it was
                 // refused and the bodies were written around the refusal.
-                read_roots: read_roots.clone(),
+                read_roots: super::workflow_read_scope::with_author_context(
+                    read_roots.clone(),
+                    &store.run_dir(&run_id),
+                )?,
             })
             .await
             .context("building the fixed decomposition provider client")?;

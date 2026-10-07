@@ -137,3 +137,94 @@ async fn a_round_with_only_operational_errors_the_host_keeps_open_goes_on() {
     let result: serde_json::Value = serde_json::from_str(&result).expect("accounting json");
     assert_eq!(result["acceptance_gate"]["complete"], true);
 }
+
+/// Drives the loop with `first` as round 1's reply and `final: true` after.
+async fn host_contract_run(first: serde_json::Value) -> (Vec<(String, serde_json::Value)>, String) {
+    run_scripted(
+        &script("schema: 2, ", ACCEPTANCE_TAIL),
+        move |method, payload| {
+            let id = payload["id"].as_str().unwrap_or_default();
+            if method == "pause" {
+                return serde_json::json!({ "resumed": true, "pause_id": id });
+            }
+            match id {
+                "acceptance-contract-run-1" => first.clone(),
+                id if id.starts_with("acceptance-contract-run-") => {
+                    acceptance_reply(2, serde_json::json!([]), true)
+                }
+                _ => view(
+                    serde_json::json!({ "items": [], "outcomes": [] }),
+                    "accepted",
+                ),
+            }
+        },
+    )
+    .await
+}
+
+fn host_contract_pause(calls: &[(String, serde_json::Value)]) -> serde_json::Value {
+    assert_eq!(
+        ids(calls, "pause"),
+        ["acceptance-host-contract-1"],
+        "{calls:#?}"
+    );
+    let pause = calls.iter().find(|(m, _)| m == "pause").unwrap();
+    pause.1["options"]["evidence"].clone()
+}
+
+/// Issue 288: a reply whose `final` is not `true` or `false` used to END the
+/// loop as if the host had ended it. Only the host ends the loop: the run
+/// pauses on the host-contract fault, and the resumed run runs the round again.
+#[tokio::test]
+async fn a_reply_without_a_final_flag_pauses_and_never_completes_the_loop() {
+    let mut reply = acceptance_reply(1, serde_json::json!([]), false);
+    reply["final"] = serde_json::Value::Null;
+    let (calls, result) = host_contract_run(reply).await;
+    let evidence = host_contract_pause(&calls);
+    assert_eq!(evidence["reason"], "host_contract");
+    assert_eq!(evidence["final"], serde_json::Value::Null);
+    assert_eq!(
+        rounds(&calls),
+        ["acceptance-contract-run-1", "acceptance-contract-run-2"]
+    );
+    let result: serde_json::Value = serde_json::from_str(&result).expect("accounting json");
+    assert_eq!(result["acceptance_gate"]["complete"], true);
+}
+
+/// A reply that keeps the loop open (`final: false`) with nothing failing
+/// and no operational error contradicts itself: it used to end the loop.
+#[tokio::test]
+async fn an_open_reply_with_nothing_to_run_pauses_and_the_loop_goes_on() {
+    let (calls, _) = host_contract_run(acceptance_reply(1, serde_json::json!([]), false)).await;
+    let evidence = host_contract_pause(&calls);
+    assert_eq!(evidence["final"], false);
+    assert_eq!(evidence["failing_check_ids"], serde_json::json!([]));
+    assert_eq!(
+        rounds(&calls),
+        ["acceptance-contract-run-1", "acceptance-contract-run-2"]
+    );
+}
+
+/// A reply without a `final` flag that names a failing check pauses too, and
+/// the check is still routed to its owner before the next round runs.
+#[tokio::test]
+async fn a_reply_without_a_final_flag_that_names_a_failure_pauses_then_remediates() {
+    let failing = serde_json::json!([{ "check_id": "REQ-1", "criterion": "one", "kind": "command",
+        "status": "failed", "exit_code": 1, "owning_tasks": ["TASK-Q-001"] }]);
+    let mut reply = acceptance_reply(1, failing, false);
+    reply["final"] = serde_json::Value::Null;
+    let (calls, _) = host_contract_run(reply).await;
+    let evidence = host_contract_pause(&calls);
+    assert_eq!(evidence["failing_check_ids"], serde_json::json!(["REQ-1"]));
+    let pause_at = calls.iter().position(|(m, _)| m == "pause").unwrap();
+    let round_two = calls
+        .iter()
+        .position(|(_, p)| p["id"] == "acceptance-contract-run-2")
+        .unwrap();
+    assert!(
+        calls[pause_at..round_two]
+            .iter()
+            .any(|(_, p)| p.to_string().contains("acceptance-req-1")),
+        "the failing check is remediated between the pause and the next round: {calls:#?}"
+    );
+}

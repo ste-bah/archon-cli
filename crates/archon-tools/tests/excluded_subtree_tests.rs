@@ -107,3 +107,34 @@ async fn ordinary_context_keeps_existing_access() {
             .is_error
     );
 }
+
+/// Issue 288: a host-written context directory under `.archon`, named as a
+/// read root of its own, is readable by exact path; every sibling under
+/// `.archon` stays refused, and a path that climbs out of it is refused too.
+#[tokio::test]
+async fn a_read_root_beneath_an_excluded_directory_admits_only_itself() {
+    let (root, mut ctx) = fixture();
+    let context = root.path().join(".archon/workflows/run/author-context");
+    std::fs::create_dir_all(&context).unwrap();
+    std::fs::write(context.join("abc.json"), "{\"id\":\"AC-1\"}").unwrap();
+    ctx.extra_dirs = vec![context.clone()];
+    let read = ReadTool
+        .execute(json!({"file_path": context.join("abc.json")}), &ctx)
+        .await;
+    assert!(!read.is_error, "{}", read.content);
+    assert!(read.content.contains("AC-1"));
+    let sibling = root
+        .path()
+        .join(".archon/workflows/old/v2/worktrees/src/stale.rs");
+    let climbed = context.join("../../old/v2/worktrees/src/stale.rs");
+    for path in [sibling, climbed] {
+        let refused = ReadTool.execute(json!({"file_path": path}), &ctx).await;
+        assert!(
+            refused.is_error,
+            "admitted {}: {}",
+            path.display(),
+            refused.content
+        );
+        assert!(!refused.content.contains("STALE needle"));
+    }
+}

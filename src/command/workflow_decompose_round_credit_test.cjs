@@ -2,12 +2,13 @@
 // kind of failed round (a sibling refused, unparseable or never answered);
 // each entry's note stays in its own slot and the shared repair list stays
 // the gate's findings; observe pauses on a window that holds an outage.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const fields = ['check/command', 'check/cwd', 'check/kind'];
 const shape = (id, field) => ({text:`acceptance entry '${id}' was refused: ${field} invalid`,
@@ -35,7 +36,7 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
       const value = decided.get(`${id}@${JSON.parse(serialized).version}`);
       return JSON.stringify(typeof value === 'number' ? fields.slice(0, value).map(field => shape(id, field)) : []);
     }};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
   let calls = 0, gate = 0, error, result;
   const versions = new Map(), pauses = [], prompts = [];
   try {

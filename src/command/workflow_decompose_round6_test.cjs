@@ -1,10 +1,11 @@
 // Issue 261 round 6: only a higher tier or a smaller distinct defect count progresses.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const scriptRoot = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${scriptRoot}/${name}`, 'utf8')).join('\n');
 const defect = (task, value = 'bad') => ({
   text: `candidate artifact was refused: task '${task}' file_name '${value}' is invalid`,
@@ -13,7 +14,7 @@ const defect = (task, value = 'bad') => ({
 });
 async function author(findings, resumed = [], mode = 'enforce') {
   const ctx = { args: { gateMode: mode } };
-  vm.createContext(ctx);
+  vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   let calls = 0;
   const pauses = [];

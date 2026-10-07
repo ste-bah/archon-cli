@@ -361,17 +361,17 @@
       const failing = acceptanceFailing(last);
       const entry = { round, failing_check_ids: failing.map((f) => f.check_id), remediation: null };
       rounds.push(entry);
-      // The host says when the loop ends; a reply without the flag (an older
-      // host) ends it too rather than looping on a shape it does not know.
-      // Issue 320: a round with no failing check but operational errors the
-      // host keeps open (`final: false`) goes on; the host's no-progress
-      // ledger, not this script, pauses a run whose errors repeat.
-      if (last.final !== false) break;
-      if (failing.length === 0) {
-        if (!(Array.isArray(last.operational_errors) && last.operational_errors.length > 0)) break;
-        checkIds = [];
-        continue;
+      // Issue 288: only the host ends the loop (`final: true`). A reply with
+      // no flag, or one held open with nothing failing and no operational
+      // error, is a host-contract fault, never a completion: the run pauses
+      // and a resumed run runs the round again. Issue 320: a round open on
+      // operational errors goes on; the host's ledger pauses repeats.
+      if (last.final === true) break;
+      if (last.final !== false || (failing.length === 0 && !(Array.isArray(last.operational_errors) && last.operational_errors.length > 0))) {
+        await w.pause(`acceptance-host-contract-${round}`, { reason: "host_contract", round, final: last.final === undefined ? null : last.final, failing_check_ids: failing.map((f) => f && f.check_id),
+          recovery: "The run is paused, not failed: the host's acceptance reply neither ended the loop (final: true) nor named anything to run again. Resume the run; the acceptance loop runs the round again." });
       }
+      if (failing.length === 0) { checkIds = []; continue; }
       // Belt to the host's budget: a round that saw exactly what the last
       // round that ran checks saw, with nothing sent between them, made no
       // progress. A round that evaluated no check (every failing one is an

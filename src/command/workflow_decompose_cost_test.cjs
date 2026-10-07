@@ -1,13 +1,14 @@
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const scriptRoot = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
-const scriptSource = () => ['workflow_decompose_v1.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js','workflow_decompose_v1_progress.js'].map(f=>fs.readFileSync(scriptRoot+'/'+f,'utf8')).join('\n');
+const scriptSource = () => ['workflow_decompose_v1.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js','workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js'].map(f=>fs.readFileSync(scriptRoot+'/'+f,'utf8')).join('\n');
 async function run(globalFinding = false, structural = false, refusal = null) {
  const criteria = Object.fromEntries(Array.from({length:9},(_,i)=>[`AC-X-${i+1}`,`criterion ${i+1}`]));
  const context = {args:{projectRoot:'/p',repositoryRoot:'/r',prdPath:'/p/prd',prdDigest:'x',taskRoot:'/p/tasks',gateMode:'observe',acceptanceCriteria:criteria,authorMaxParallelism:4}, console};
  context.__archonValidateAcceptanceEntry = () => '[]';
- vm.createContext(context);
+ vm.createContext(withAuthorContext(context));
  vm.runInContext(scriptSource(),context);
  let active=0,peak=0,round=0; const calls=[],assembled=[];
  const w={
@@ -34,12 +35,12 @@ async function run(globalFinding = false, structural = false, refusal = null) {
   assert.equal(calls.filter(x=>x.round===1)[0].key,'AC-X-5');
   assert.equal(assembled[1].entries.find(x=>x.id==='AC-X-1').version,0,'clean entry retained byte-for-byte');
  }
- assert(calls.find(x=>x.key==='AC-X-9'&&x.round===0).task.includes('\n- {"id":"AC-X-1"'),'an entry past the window sees the entries before it (Issue 288: one JSON line each)');
+ assert(/\n- AC-X-1 sha256:[0-9a-f]{64} /.test(calls.find(x=>x.key==='AC-X-9'&&x.round===0).task),'an entry past the window sees the entries before it (Issue 288: one record line each)');
 }
 async function failedEntry() {
  const context={args:{acceptanceCriteria:{A:'a',B:'b',C:'c',D:'d'},authorMaxParallelism:3},console};
  context.__archonValidateAcceptanceEntry = () => '[]';
- vm.createContext(context);vm.runInContext(scriptSource(),context);
+ vm.createContext(withAuthorContext(context));vm.runInContext(scriptSource(),context);
  const calls={};let fail=true;
  const w={agent:async(_,options)=>{
   const id=options.task.match(/Author ONLY entry ([^:]+):/)[1];calls[id]=(calls[id]||0)+1;
@@ -55,7 +56,7 @@ async function failedEntry() {
  assert.deepEqual(calls,{A:1,B:2,C:1,D:1},'every entry that succeeded is kept');
 }
 async function structuralRouting() {
- const ctx={};vm.createContext(ctx);vm.runInContext(scriptSource(),ctx);
+ const ctx={};vm.createContext(withAuthorContext(ctx));vm.runInContext(scriptSource(),ctx);
  const known=new Set(['A','B','C']);
  const route=text=>ctx.acceptanceRepairIds([{text,subject:'acceptance',remediation_scope:'candidate_artifact'}],known,false);
  assert.deepEqual([...route("candidate artifact was refused: candidate artifact rejected: check 'A': invalid; check 'B': invalid")],['A','B']);
@@ -76,7 +77,7 @@ async function invalidAuthor(command, envelope = false) {
  // Mock only the native boundary. The Rust shape corpus tests the validator;
  // these tests prove the author uses its refusal rather than accepting an id.
  ctx.__archonValidateAcceptanceEntry = (_, serialized) => {validations++; return commandRefusal(JSON.parse(serialized));};
- vm.createContext(ctx);vm.runInContext(scriptSource(),ctx);
+ vm.createContext(withAuthorContext(ctx));vm.runInContext(scriptSource(),ctx);
  const state={entries:new Map(),retryIds:null};let calls=0;
  const check={kind:'command',cwd:'project_root',...command};
  const w={agent:async()=>{
@@ -122,7 +123,7 @@ async function hostCriterion(value, envelope = false) {
   return JSON.stringify(typeof entry.criterion === 'string' ? [] : [{text:'criterion invalid',
    deterministic_defect:{provenance:'host_validator',code:'invalid_candidate_shape',subject:'entries/0/criterion',location:'shape',stage:'shape'}}]);
  };
- vm.createContext(ctx);vm.runInContext(scriptSource(),ctx);
+ vm.createContext(withAuthorContext(ctx));vm.runInContext(scriptSource(),ctx);
  const state={entries:new Map(),retryIds:null};let calls=0;
  const w={agent:async()=>{
   calls++;
@@ -136,7 +137,7 @@ async function hostCriterion(value, envelope = false) {
 }
 async function supplementaryPointer() {
  const ctx={args:{acceptanceCriteria:{A:'a'},authorMaxParallelism:1},__archonValidateAcceptanceEntry:()=> '[]'};
- vm.createContext(ctx);vm.runInContext(scriptSource(),ctx);
+ vm.createContext(withAuthorContext(ctx));vm.runInContext(scriptSource(),ctx);
  ctx.owedSupplementary().set('SUP-REQ-X',{requirement:'REQ-X',text:'x'});
  const candidate={entries:[{id:'A'}],supplementary:[{id:'SUP-REQ-X'}]};
  const route=texts=>ctx.acceptanceRepairIds(texts.map(text=>({text})),new Set(['A']),false,candidate);

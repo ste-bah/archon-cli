@@ -145,7 +145,7 @@ mod batch_tests;
 
 #[cfg(test)]
 #[path = "v3_prelude_cross_task_tests.rs"]
-mod cross_task_tests;
+pub(in crate::v2::script) mod cross_task_tests;
 
 #[cfg(test)]
 #[path = "v3_prelude_label_tests.rs"]

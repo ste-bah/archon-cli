@@ -10,13 +10,18 @@ fn secs(value: u64) -> Duration {
 }
 
 /// A session that honours cancellation the way the executor does: whatever it
-/// was doing, a cancel ends it as `Cancelled`.
+/// was doing, a cancel ends it as `Cancelled`. It takes its slot at once, and
+/// says so, as the executor does (Issue 288).
 fn session(
     cancel: &CancellationToken,
     work: impl Future<Output = ()> + Send + 'static,
 ) -> SessionRun {
     let cancel = cancel.clone();
     Box::pin(async move {
+        assert!(
+            subagent_dispatch_clock::admitted("session"),
+            "clocks installed"
+        );
         tokio::select! {
             _ = cancel.cancelled() => SubagentOutcome::Cancelled,
             () = work => SubagentOutcome::Completed("done".into()),
@@ -223,4 +228,95 @@ fn a_completed_session_is_never_reported_inactive() {
     assert!(inactivity_failure(&SubagentOutcome::Completed("x".into()), cut).is_none());
     assert!(inactivity_failure(&SubagentOutcome::Cancelled, cut).is_some());
     assert!(inactivity_failure(&SubagentOutcome::Cancelled, Some(HostCut::WallClock)).is_none());
+}
+
+/// Issue 288: a session whose executor reports neither a slot nor a wait for
+/// one is not timed from dispatch in silence, nor left unbounded: it is cut at
+/// its wall clock with a diagnosis naming the missing admission report.
+#[tokio::test(start_paused = true)]
+async fn a_session_never_admitted_is_cut_with_its_own_diagnosis() {
+    let cancel = CancellationToken::new();
+    let inner = cancel.clone();
+    let run: SessionRun = Box::pin(async move {
+        inner.cancelled().await;
+        SubagentOutcome::Cancelled
+    });
+    let started = Instant::now();
+    let (clock, run) = install_dispatch_clock("session", run);
+    let (outcome, cut) = drive(run, &cancel, &clock, Some(600), None).await;
+    assert_eq!(Instant::now() - started, secs(600));
+    assert_eq!(cut, Some(HostCut::NeverAdmitted { limit: secs(600) }));
+    assert_eq!(
+        clock.elapsed(),
+        Duration::ZERO,
+        "its run time never started"
+    );
+    let error = inactivity_failure(&outcome, cut).expect("named as an error");
+    assert!(
+        error.to_string().contains("missing admission report"),
+        "{error}"
+    );
+}
+
+/// The session clock and the outer call clock start at the same instant:
+/// when the session takes its slot, not when it was dispatched. Time spent
+/// before the slot is taken inside a reported wait counts on neither.
+#[tokio::test(start_paused = true)]
+async fn session_and_outer_clocks_start_together_at_admission() {
+    let outer = DispatchClock::new();
+    let cancel = CancellationToken::new();
+    let inner = cancel.clone();
+    let run: SessionRun = Box::pin(async move {
+        let wait = subagent_dispatch_clock::slot_wait("session").expect("clocks installed");
+        tokio::time::sleep(secs(5_000)).await;
+        assert!(subagent_dispatch_clock::admitted("session"));
+        drop(wait);
+        tokio::select! {
+            _ = inner.cancelled() => SubagentOutcome::Cancelled,
+            () = tokio::time::sleep(secs(30)) => SubagentOutcome::Completed("done".into()),
+        }
+    });
+    let started = Instant::now();
+    let (clock, run) = subagent_dispatch_clock::scope_call(Arc::clone(&outer), async {
+        install_dispatch_clock("session", run)
+    })
+    .await;
+    let (outcome, cut) = subagent_dispatch_clock::scope_call(
+        Arc::clone(&outer),
+        drive(run, &cancel, &clock, Some(60), None),
+    )
+    .await;
+    assert_eq!(cut, None, "5000s queued is not 60s of run time");
+    assert!(matches!(outcome, SubagentOutcome::Completed(_)));
+    assert_eq!(Instant::now() - started, secs(5_030));
+    assert_eq!(clock.elapsed(), secs(30));
+    assert_eq!(
+        outer.elapsed(),
+        secs(30),
+        "the outer clock started at the same instant"
+    );
+}
+
+/// A session cancelled while it waits for its slot settles without ever
+/// starting its clock.
+#[tokio::test(start_paused = true)]
+async fn a_session_cancelled_before_its_slot_never_starts_its_clock() {
+    let cancel = CancellationToken::new();
+    let inner = cancel.clone();
+    let run: SessionRun = Box::pin(async move {
+        let _wait = subagent_dispatch_clock::slot_wait("session").expect("clocks installed");
+        inner.cancelled().await;
+        SubagentOutcome::Cancelled
+    });
+    let (clock, run) = install_dispatch_clock("session", run);
+    let stop = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(secs(9_000)).await;
+        stop.cancel();
+    });
+    let (outcome, cut) = drive(run, &cancel, &clock, Some(60), None).await;
+    assert!(matches!(outcome, SubagentOutcome::Cancelled));
+    assert_eq!(cut, None, "neither bound fired while it queued");
+    assert!(!clock.is_admitted());
+    assert_eq!(clock.elapsed(), Duration::ZERO);
 }

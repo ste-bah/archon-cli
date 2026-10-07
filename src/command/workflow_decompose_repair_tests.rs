@@ -17,6 +17,7 @@ fn script_source() -> std::borrow::Cow<'static, str> {
         "workflow_decompose_v1_acceptance.js",
         "workflow_decompose_v1_set_gate.js",
         "workflow_decompose_v1_progress.js",
+        "workflow_decompose_v1_context.js",
     ]
     .iter()
     .map(|name| std::fs::read_to_string(std::path::Path::new(&root).join(name)).unwrap())
@@ -114,10 +115,21 @@ fn run_js(driver: &str) -> String {
         "requireCommitted",
         "authorPrompt",
         // Issue 288: the bounded earlier-attempt history authorPrompt shows.
-        "HISTORY_SHOWN",
-        "HISTORY_TEXT",
+        "HISTORY_SHARE",
+        "PRIOR_SHARE",
+        "CATALOGUE_SHARE",
+        "CONTEXT_BUDGET",
+        "HISTORY_RECORD_BYTES",
+        "CUT_MARK",
+        "AUTHOR_PROMPT_LIMIT",
+        "utf8Bytes",
+        "clipBytes",
+        "fitLines",
+        "CONTEXT_FILES",
+        "contextFile",
         "historyKey",
         "earlierFindings",
+        "requireDispatchable",
         "authorCandidate",
         "acceptanceRepairIds",
     ] {

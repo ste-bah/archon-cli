@@ -380,11 +380,31 @@ pub(crate) async fn reauthor(
                 .join(", ")
         )
     };
-    Err(anyhow!(
-        "{}\nthe re-author stopped after {attempt} attempt(s): the last {REAUTHOR_ATTEMPTS} repaired no named check{escalation}",
-        report(&lines, attempt)
-    ))
+    Err(ReauthorStalled {
+        report: format!(
+            "{}\nthe re-author stopped after {attempt} attempt(s): the last {REAUTHOR_ATTEMPTS} repaired no named check{escalation}",
+            report(&lines, attempt)
+        ),
+        pending: pending.into_iter().collect(),
+    }
+    .into())
 }
+
+/// No progress on `pending` for [`REAUTHOR_ATTEMPTS`] attempts: a stall (Issue 288).
+#[derive(Debug)]
+pub(crate) struct ReauthorStalled {
+    report: String,
+    pub(crate) pending: Vec<String>,
+}
+
+impl std::fmt::Display for ReauthorStalled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let pending = self.pending.join(", ");
+        write!(f, "{}\nstill pending: {pending}", self.report)
+    }
+}
+
+impl std::error::Error for ReauthorStalled {}
 
 /// The host-owned parts of a re-authored entry are never the author's:
 /// criterion text and gap declaration stay frozen, the judgment is the

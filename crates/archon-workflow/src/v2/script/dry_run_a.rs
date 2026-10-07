@@ -111,6 +111,7 @@ pub(super) async fn dry_run_on_current_thread(
     let recorder_for_js = recorder.clone();
     let js_result = context
         .async_with(async move |ctx| {
+            super::author_context::install_preview(&ctx)?; // Issue 288: nothing written.
             ctx.globals().set(
                 "__archonHost",
                 Func::from(Async(move |method: String, payload: String| {
@@ -171,11 +172,10 @@ pub(super) fn record_dry_run_call(
     method: &str,
     payload: &str,
 ) -> WorkflowResult<String> {
-    // #189 Phase 4. A dry run validates a script's shape without doing
-    // anything, so a tool call is answered rather than executed — running it
-    // would make validating a script a way to run commands. It is also not
-    // recorded as a host call: the plan is the set of agent calls, and a
-    // `Read` is not one of them.
+    // #189 Phase 4. A dry run validates a script's shape without doing anything,
+    // so a tool call is answered rather than executed — running it would make
+    // validating a script a way to run commands. It is also not recorded as a
+    // host call: the plan is the set of agent calls, and a `Read` is not one.
     //
     // The stand-in is marked, not empty. A script that branches on tool output
     // will take an arbitrary branch here, which is a real limit of dry-running

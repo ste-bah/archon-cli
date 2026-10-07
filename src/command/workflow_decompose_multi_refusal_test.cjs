@@ -3,12 +3,13 @@
 // least one entry beating its own best (a first pass counts); an entry worse
 // than its best does not cancel it. Bests only improve over a finite measure,
 // so the loop stays bounded. The two-entry cases are the round-4 review probe.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const fields = ['check/command', 'check/cwd', 'check/kind', 'gap_permitted', 'covers/0'];
 const shape = (id, field) => ({text:`acceptance entry '${id}' was refused: ${field} invalid`,
@@ -27,7 +28,7 @@ async function run(seq, cap) {
       const n = entry.version === 1 ? 0 : seq[id](entry.version - 1);
       return JSON.stringify(fields.slice(0, n).map(field => shape(id, field)));
     }};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
   let calls = 0, gates = 0, error;
   const versions = new Map(), pauses = [], prompts = [];
   try {

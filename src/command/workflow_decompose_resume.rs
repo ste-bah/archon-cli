@@ -428,10 +428,13 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             cwd: project_root.clone(),
             origin: "workflow_decompose_v1".to_string(),
             session_id: run.id.clone(),
-            read_roots: crate::command::workflow_read_scope::read_roots(
-                &project_root,
-                run.spec.target_repository_root.as_deref(),
-            ),
+            read_roots: crate::command::workflow_read_scope::with_author_context(
+                crate::command::workflow_read_scope::read_roots(
+                    &project_root,
+                    run.spec.target_repository_root.as_deref(),
+                ),
+                &store.run_dir(&run.id),
+            )?,
         })
         .await
         .context("building the fixed decomposition resume provider client")?;

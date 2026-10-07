@@ -1,12 +1,13 @@
 // Issue 362: a clean author round leaves nothing to re-author. A freeze that
 // fails operationally (no findings) is retried with the same entries and no
 // author call; a persisting outage pauses (resumable), never re-authors.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const clean = () => ({publicationReceipt:{call_id:'freeze'}, postcondition:{satisfied:true},
   gateEnvelope:{policy_findings:[]}});
@@ -18,7 +19,7 @@ const refute = id => ({...clean(), gateEnvelope:{policy_findings:[{
 async function run(gates) {
   const ctx = {args:{acceptanceCriteria:{A:'a', B:'b', C:'c'}, authorMaxParallelism:1, gateMode:'enforce'},
     __archonValidateAcceptanceEntry: () => '[]'};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
   const authored = [], stdins = [], pauses = [];
   let error;
   try {

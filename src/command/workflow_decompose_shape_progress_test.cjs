@@ -1,11 +1,12 @@
 // Issue 357 rounds 2-3: author shape repairs use the freeze progress measure,
 // within the repair episode of the entry they repair.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const shape = (field, text = `${field} invalid`) => ({
   text: `candidate artifact was refused: ${text}`,
@@ -24,7 +25,7 @@ async function run(sequence, {supplementary = false, wrapper = false, resumed = 
       const entry = JSON.parse(serialized);
       return JSON.stringify(entry.id === 'A' && supplementary ? [] : sequence(entry.version));
     }};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
   if (supplementary) ctx.owedSupplementary().set('SUP-REQ-X', {requirement:'REQ-X',text:'x'});
   let calls = 0, freezes = 0;
   const versions = new Map();
@@ -124,7 +125,7 @@ async function refuted(sequence, {ids = ['A'], always = false, resumed = false} 
       const entry = JSON.parse(serialized);
       return JSON.stringify(entry.version === 1 ? [] : sequence(entry.version - 1));
     }};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
   let calls = 0, gates = 0, error;
   const versions = new Map(), pauses = [];
   try {

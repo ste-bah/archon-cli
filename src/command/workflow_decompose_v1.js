@@ -306,7 +306,7 @@ async function authorCandidate(w, policy) {
     const authored = carry !== null ? { status: "accepted", stopReason: "end_turn", content: carry } : policy.author
       ? await policy.author(w, prompt, call, authorState)
       : await w.agent(`${policy.phase}-author-${call}`, {
-          task: prompt, tier: "planner", resultMode: "rawOutcome",
+          task: await requireDispatchable(w, `${policy.phase}-prompt`, prompt), tier: "planner", resultMode: "rawOutcome",
           ...(policy.phase === "skeleton" ? { recordLanding: "skeleton" } : {})
         });
     const measuredReplies = policy.author && authorState.roundCalls !== undefined;
@@ -483,27 +483,4 @@ function requireSubject(subject) {
   if (!subject || typeof subject.taskId !== "string" || typeof subject.fileName !== "string") {
     throw new Error("frozen skeleton returned a malformed host-read subject");
   }
-}
-
-function authorPrompt(base, attempt, feedback, history) {
-  if (feedback.length === 0) return `${base}\nLogical attempt: ${attempt}.`;
-  const earlier = earlierFindings(history, feedback);
-  const repeat = (text) => {
-    const seen = earlier.repeats.get(historyKey(text));
-    return seen ? ` (a repeat: seen in ${seen.count} earlier attempt${seen.count === 1 ? "" : "s"}, ${seen.first === seen.last ? `attempt ${seen.last}` : `attempts ${seen.first}-${seen.last}`})` : "";
-  };
-  let prompt = `${base}\nLogical attempt: ${attempt}. Repair these exact authoritative findings:\n- ${feedback.map((text) => `${text}${repeat(text)}`).join("\n- ")}`;
-  // Two gates can be individually satisfiable and jointly hard. Without the
-  // history an author repairs the finding in front of it, trips the other, and
-  // alternates until its budget is spent -- a live acceptance phase did exactly
-  // that for all six attempts. Showing what earlier attempts already triggered
-  // is what lets it satisfy both at once instead of trading one for the other.
-  // Issue 288: each earlier finding once, bounded (earlierFindings).
-  if (earlier.lines.length > 0) {
-    prompt += `\nEarlier attempts in this phase already triggered the following. Satisfy every one of them at once; repairing the finding above by reverting an earlier repair will not converge:\n- ${earlier.lines.join("\n- ")}`;
-  }
-  if (earlier.omitted > 0) {
-    prompt += `\n${earlier.omitted} older distinct findings (${earlier.omittedOccurrences} occurrences, attempts ${earlier.omittedRange}) are not repeated here.`;
-  }
-  return prompt;
 }

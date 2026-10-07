@@ -38,6 +38,23 @@ pub(crate) fn read_roots(cwd: &Path, target_repository_root: Option<&str>) -> Ve
     vec![root]
 }
 
+/// `roots` plus the run's author-context directory (Issue 288), created now
+/// so the guard can resolve it. Author prompts name files there by exact
+/// path. It sits under `.archon`, a host-excluded name; as a read root of its
+/// own the exclusions apply only below it, where there are none, and every
+/// sibling under `.archon` stays refused.
+pub(crate) fn with_author_context(mut roots: Vec<PathBuf>, run_dir: &Path) -> Result<Vec<PathBuf>> {
+    let dir = archon_workflow::v2::script::author_context::author_context_dir(run_dir);
+    std::fs::create_dir_all(&dir).map_err(|error| {
+        anyhow!(
+            "creating author context directory {}: {error}",
+            dir.display()
+        )
+    })?;
+    roots.push(dir);
+    Ok(roots)
+}
+
 fn same_directory(a: &Path, b: &Path) -> bool {
     let canonical = |path: &Path| {
         std::fs::canonicalize(path)
@@ -121,6 +138,29 @@ mod tests {
         );
         assert!(read_roots(&project, None).is_empty());
         assert!(read_roots(&project, Some("  ")).is_empty());
+    }
+
+    /// Issue 288: the author-context directory is created and added last,
+    /// beside whatever roots the run already had.
+    #[test]
+    fn the_author_context_directory_is_created_and_added_as_a_read_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join(".archon/workflows/wf-1");
+        let repo = temp.path().join("repo");
+        let roots = with_author_context(vec![repo.clone()], &run_dir).unwrap();
+        let context = run_dir.join("author-context");
+        assert_eq!(roots, vec![repo, context.clone()]);
+        assert!(context.is_dir());
+        assert_eq!(
+            with_author_context(Vec::new(), &run_dir).unwrap(),
+            vec![context]
+        );
+        let blocker = temp.path().join("file");
+        std::fs::write(&blocker, "x").unwrap();
+        assert!(
+            with_author_context(Vec::new(), &blocker).is_err(),
+            "an uncreatable directory is an error"
+        );
     }
 
     #[test]

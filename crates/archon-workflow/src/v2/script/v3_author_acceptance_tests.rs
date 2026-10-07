@@ -160,6 +160,19 @@ async fn the_dry_run_plans_exactly_one_clean_round_as_the_last_call() {
 
 /// Run a v3 script against a scripted host: every host call is recorded and
 /// answered by `answer(method, payload)`.
+/// The live host always says whether an acceptance round ends the loop
+/// (`final`, workflow_live_v3_acceptance_result.rs); a stub reply that does
+/// not say is that host's last round. A test of a reply that breaks the
+/// contract sends a `final` that is not a boolean.
+fn host_sets_final(payload: &serde_json::Value, reply: &mut serde_json::Value) {
+    let round = payload["id"]
+        .as_str()
+        .is_some_and(|id| id.starts_with("acceptance-contract-run-"));
+    if let (true, Some(object)) = (round, reply.as_object_mut()) {
+        object.entry("final").or_insert(serde_json::json!(true));
+    }
+}
+
 pub(super) async fn run_scripted(
     source: &str,
     answer: impl Fn(&str, &serde_json::Value) -> serde_json::Value + Send + Sync + 'static,
@@ -187,7 +200,9 @@ pub(super) async fn run_scripted(
                                 .lock()
                                 .unwrap()
                                 .push((method.clone(), payload.clone()));
-                            Ok::<_, rquickjs::Error>(answer(&method, &payload).to_string())
+                            let mut reply = answer(&method, &payload);
+                            host_sets_final(&payload, &mut reply);
+                            Ok::<_, rquickjs::Error>(reply.to_string())
                         }
                     })),
                 )
