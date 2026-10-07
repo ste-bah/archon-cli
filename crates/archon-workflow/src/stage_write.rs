@@ -96,6 +96,24 @@ pub fn write_bytes(path: &std::path::Path, bytes: &[u8]) -> crate::WorkflowResul
         )
     })
 }
+
+/// Remove a stage-owned file durably under the ownership fence. A successful
+/// unlink is not durable until its parent directory is synced.
+pub fn remove_file(path: &std::path::Path) -> crate::WorkflowResult<()> {
+    with_write(|| {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(source) => return Err(crate::WorkflowError::io(path, source)),
+        }
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        crate::durable_io::sync_dir(parent)
+    })
+}
+
 pub fn best_effort_bytes(path: &std::path::Path, bytes: &[u8]) {
     if let Err(error) = write_bytes(path, bytes) {
         tracing::warn!(%error, path = %path.display(), "stage evidence not written");

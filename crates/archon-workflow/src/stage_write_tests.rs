@@ -1,6 +1,38 @@
 use super::*;
 use crate::{LifecycleAction, LifecycleController, RunStatus, WorkflowSpec};
 
+#[test]
+fn file_removal_syncs_its_parent_directory() {
+    for relative in ["strike", "nested/strike", "deeper/nested/strike"] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"first strike").unwrap();
+        crate::durable_io::take_synced();
+
+        crate::stage_write::remove_file(&path).unwrap();
+
+        assert!(!path.exists(), "{} remains", path.display());
+        assert_eq!(
+            crate::durable_io::take_synced(),
+            vec![path.parent().unwrap().to_path_buf()],
+            "{} was removed without durably syncing its parent",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn removing_an_absent_file_does_not_claim_a_durable_unlink() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("absent-strike");
+    crate::durable_io::take_synced();
+
+    crate::stage_write::remove_file(&path).unwrap();
+
+    assert!(crate::durable_io::take_synced().is_empty());
+}
+
 fn running(store: &WorkflowStore) -> (String, u64) {
     let mut run = store
         .create_run(WorkflowSpec {

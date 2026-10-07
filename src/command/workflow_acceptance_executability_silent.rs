@@ -178,14 +178,7 @@ fn strike_or_unproven(
 /// Forget any strike of check `id` on `commit`: it gave a verdict there.
 pub(super) fn clear(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) {
     let path = strike(probe, commit, contract, id);
-    let cleared = archon_workflow::stage_write::with_write(|| match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(archon_workflow::WorkflowError::Io {
-            path: path.clone(),
-            source,
-        }),
-    });
+    let cleared = archon_workflow::stage_write::remove_file(&path);
     if let Err(error) = cleared {
         probe.unproven(id, format!("baseline strike could not be cleared: {error}"));
     }
