@@ -22,11 +22,14 @@ async fn replay(script: &str) {
     )
     .await
     .unwrap();
+    // Issue 337: an unplanned workflow.js throw pauses the run resumably and
+    // commits no terminal finalization.
     let path = store.run_dir(&run.id).join("v2/finalization.json");
-    let before = std::fs::read(&path).unwrap();
-    let committed: archon_workflow::FinalizationRecordV1 = serde_json::from_slice(&before).unwrap();
-    assert_eq!(committed.terminal_status, RunStatus::Failed);
-    assert!(committed.terminal_event_committed);
+    assert!(
+        !path.exists(),
+        "an unplanned throw must not finalize the run"
+    );
+    assert_eq!(store.load_state(&run.id).unwrap().status, RunStatus::Paused);
     LifecycleController::new(store.clone())
         .apply(&run.id, LifecycleAction::Resume)
         .unwrap();
@@ -55,15 +58,14 @@ async fn replay(script: &str) {
                 && call.attempt >= 2),
         "provider failure must be dispatched again after resume"
     );
-    assert!(report.contains("status Failed"), "{report}");
-    assert_eq!(
-        std::fs::read(path).unwrap(),
-        before,
-        "committed outcome replayed"
+    assert!(report.contains("paused"), "{report}");
+    assert!(
+        !path.exists(),
+        "the replayed throw must not finalize the run"
     );
     assert_eq!(
         store.load_state(&run.id).unwrap().status,
-        RunStatus::Failed,
+        RunStatus::Paused,
         "replay must synchronize durable state: {report}"
     );
 }
