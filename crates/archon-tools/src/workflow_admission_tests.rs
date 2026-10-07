@@ -104,7 +104,7 @@ async fn a_new_owner_drops_even_finished_work() {
 }
 
 #[tokio::test]
-async fn an_unreadable_state_is_an_ordinary_refusal() {
+async fn a_refused_check_without_a_control_decision_is_an_ordinary_error() {
     let (state, checks) = (Arc::new(AtomicU8::new(UNREADABLE)), Arc::default());
     let result = bounded(fence(&state, &checks).execute(async {})).await;
     let refused = result.unwrap_err();

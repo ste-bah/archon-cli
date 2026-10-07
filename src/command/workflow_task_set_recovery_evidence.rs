@@ -307,49 +307,22 @@ pub(super) fn bound_skeleton(
                 .with_context(|| format!("reading recovery skeleton {}", live_path.display()));
         }
     };
-    if let Some(live) = live {
-        // The same authority capture used: the anchor's own shape, or the
-        // skeleton of any captured authorized launch (Issue 301, round 4).
-        if !authenticates_skeleton(record, anchor, &live, &bytes)?
-            && !authenticated_by_a_launch(record, &live, pin)?
-        {
-            return Err(anyhow!(
-                "chain check skeleton_changed failed: live skeleton shape or contract binding is not authenticated by a captured launch"
-            ));
-        }
+    if let Some(live) = live
+        && !authenticates_skeleton(record, anchor, &live, &bytes)?
+    {
+        // Only the anchor's own shape (the newest launch of the authenticated
+        // history) is accepted. Another launch's skeleton is a rollback and
+        // is refused by name (Issue 301, round-4 review minor 6).
+        return Err(super::skeleton_rollback::refusal(
+            record, anchor, &live, &live_path, pin,
+        )?);
     }
     Ok(Some(skeleton))
 }
 
-/// Whether `live` is a captured authorized launch's skeleton: byte-identical
-/// to it, or its shape with an authenticated contract binding.
-fn authenticated_by_a_launch(record: &Recovery, live: &[u8], pin: &Path) -> Result<bool> {
-    let digest = content_digest(live);
-    let history = ChainHistory::for_pin(pin);
-    let launches = record
-        .prior
-        .iter()
-        .map(AcceptancePin::identity)
-        .chain(record.runs.values().cloned());
-    for launch in launches {
-        let Some(bound) = &launch.skeleton_digest else {
-            continue;
-        };
-        if *bound == digest {
-            return Ok(true);
-        }
-        if let Some(preimage) = history.get(bound)?
-            && authenticates_skeleton(record, &launch, live, &preimage)?
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 /// The same authority for capture and publication: archived shape belongs to
 /// its launch contract; live binding may name any captured authorized contract.
-fn authenticates_skeleton(
+pub(super) fn authenticates_skeleton(
     record: &Recovery,
     anchor: &PortableAcceptanceIdentityV1,
     live: &[u8],

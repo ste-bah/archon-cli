@@ -64,7 +64,9 @@ impl WorkflowScriptHost {
         if let Some(refusal) = refused {
             return Err(self.repeated_refusal(&method, refusal));
         }
-        let result = self.execute_host_call(method, payload).await;
+        // On the heap (#246): three host frames above would each hold it.
+        let result =
+            archon_workflow::heap_future::on_heap(|| self.execute_host_call(method, payload)).await;
         let refusal = match &result {
             Err(WorkflowError::ControlPaused(message)) => Some((true, message)),
             Err(WorkflowError::ControlCancelled(message)) => Some((false, message)),

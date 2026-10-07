@@ -42,10 +42,15 @@ impl WorkflowV2ScriptRunner {
                         "decomposed lifecycle local async runtime failed: {err}"
                     ))
                 })?;
-            runtime.block_on(self.run_decomposed_lifecycle_on_current_thread(
+            // Boxed (#246, round-4 review minor 1): `block_on` would keep the
+            // root future by value on this blocking thread's stack. Measured,
+            // this alone moved little: the depth came from the poll frames of
+            // the call chain, which build their large children with
+            // `archon_workflow::heap_future::on_heap`.
+            runtime.block_on(Box::pin(self.run_decomposed_lifecycle_on_current_thread(
                 &harness_source,
                 governed_learning_context,
-            ))
+            )))
         })
         .await
         .map_err(|err| {

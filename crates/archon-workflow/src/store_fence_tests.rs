@@ -172,3 +172,150 @@ fn a_removed_run_stops_its_executor_without_recreating_the_directory() {
     assert!(bound.require_admission(&id).is_err());
     assert!(!store.run_dir(&id).exists(), "the fence created nothing");
 }
+
+/// Review minor 3 (round 5): a state read that fails for any reason but a
+/// removed run (EMFILE, a disk fault, a corrupt file) says nothing about run
+/// control. It must not end fenced work as a plain error, which fails the
+/// run: a stall pauses, never fails. The fence pauses the run with the read
+/// error as evidence and stops the work with a typed pause.
+fn fault_next_reads(count: u32) {
+    OWNER_READ_FAULTS.with(|faults| faults.set(count));
+}
+
+fn events(store: &WorkflowStore, id: &str) -> String {
+    std::fs::read_to_string(store.events_path(id)).unwrap_or_default()
+}
+
+fn fenced(
+    bound: &WorkflowStore,
+    id: &str,
+    kind: FenceKind,
+    polled: &std::sync::atomic::AtomicBool,
+) -> WorkflowResult<&'static str> {
+    let work = async {
+        polled.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok("done")
+    };
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            match kind {
+                FenceKind::Admission => bound.execute_owned(id, work).await,
+                FenceKind::Ownership => bound.execute_writer(id, work).await,
+            }
+        })
+}
+
+#[test]
+fn a_transient_state_read_error_pauses_the_run_resumably() {
+    for kind in [FenceKind::Admission, FenceKind::Ownership] {
+        let (_temp, store, id, generation) = running_run();
+        let bound = store.for_executor(&id, generation);
+        let polled = std::sync::atomic::AtomicBool::new(false);
+        fault_next_reads(1);
+        let result = fenced(&bound, &id, kind, &polled);
+        let Err(WorkflowError::ControlPaused(message)) = &result else {
+            panic!("{kind:?}: a read error must stop as a pause, got {result:?}");
+        };
+        assert!(message.contains("could not be read"), "{kind:?}: {message}");
+        assert!(
+            message.contains("the pause is recorded"),
+            "{kind:?}: {message}"
+        );
+        assert!(
+            message.contains(&format!("archon workflow resume --live --yes {id}")),
+            "{kind:?}: {message}"
+        );
+        assert!(
+            !polled.load(std::sync::atomic::Ordering::SeqCst),
+            "{kind:?}"
+        );
+        let run = store.load_state(&id).unwrap();
+        assert_eq!(run.status, RunStatus::Paused, "{kind:?}: resumable pause");
+        assert!(events(&store, &id).contains("state_read_pause"), "{kind:?}");
+    }
+}
+
+#[test]
+fn a_persistently_unreadable_state_stops_as_a_pause_it_names_unrecorded() {
+    let (_temp, store, id, generation) = running_run();
+    let bound = store.for_executor(&id, generation);
+    let state = store.run_dir(&id).join("state.json");
+    std::fs::write(&state, b"{ torn").unwrap();
+    let polled = std::sync::atomic::AtomicBool::new(false);
+    let result = fenced(&bound, &id, FenceKind::Admission, &polled);
+    let Err(WorkflowError::ControlPaused(message)) = &result else {
+        panic!("an unreadable state must stop as a pause, got {result:?}");
+    };
+    assert!(message.contains("not recorded"), "{message}");
+    assert!(
+        message.contains("corrupt"),
+        "names the read error: {message}"
+    );
+    assert!(message.contains("resume"), "{message}");
+    assert!(!polled.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(
+        std::fs::read(&state).unwrap(),
+        b"{ torn",
+        "nothing rewrote it"
+    );
+}
+
+#[test]
+fn a_read_error_under_a_newer_executor_pauses_nothing() {
+    let (_temp, store, id, generation) = running_run();
+    let bound = store.for_executor(&id, generation);
+    let mut run = store.load_state(&id).unwrap();
+    run.generation += 3;
+    run.executor_generation = Some(run.generation);
+    store.save_state(&run).unwrap();
+    let polled = std::sync::atomic::AtomicBool::new(false);
+    fault_next_reads(1);
+    let result = fenced(&bound, &id, FenceKind::Admission, &polled);
+    assert!(
+        matches!(result, Err(WorkflowError::ControlCancelled(_))),
+        "the newer owner's decision answers: {result:?}"
+    );
+    let after = store.load_state(&id).unwrap();
+    assert_eq!(
+        after.status,
+        RunStatus::Running,
+        "the stale fence paused nothing"
+    );
+    assert_eq!(after.generation, run.generation);
+    assert!(!events(&store, &id).contains("state_read_pause"));
+}
+
+#[test]
+fn a_read_error_while_admitted_work_runs_keeps_its_finished_result_and_pauses() {
+    let (_temp, store, id, generation) = running_run();
+    let bound = store.for_executor(&id, generation);
+    let mut polls = 0;
+    let work = std::future::poll_fn(|cx| {
+        polls += 1;
+        if polls == 1 {
+            // The next owner check (this wake) meets a read error.
+            fault_next_reads(1);
+            cx.waker().wake_by_ref();
+            return std::task::Poll::Pending;
+        }
+        std::task::Poll::Ready(Ok("finished"))
+    });
+    let result = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(bound.execute_owned(&id, work));
+    assert_eq!(
+        result.unwrap(),
+        "finished",
+        "admitted work keeps its result"
+    );
+    assert_eq!(store.load_state(&id).unwrap().status, RunStatus::Paused);
+    assert!(
+        bound.require_admission(&id).is_err(),
+        "nothing new is admitted"
+    );
+}

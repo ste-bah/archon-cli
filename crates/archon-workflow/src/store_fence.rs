@@ -20,6 +20,11 @@ thread_local! {
     // the OS lock. Canonical paths unify /var and /private/var.
     static HELD: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
 }
+#[cfg(test)]
+thread_local! {
+    /// Test fault: the next owner-check state reads on this thread fail.
+    static OWNER_READ_FAULTS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
 struct Held;
 impl Drop for Held {
     fn drop(&mut self) {
@@ -133,36 +138,91 @@ impl WorkflowStore {
             return Ok(());
         };
         let generation = *generation;
-        let refused = |kind, error| Err(OwnerRefusal { kind, error });
-        let run = match lock_run(self, run_id, || self.load_state(run_id)) {
-            Ok(run) => run,
+        match self.owner_state(run_id) {
+            Ok(run) => owner_rule(&run, generation, kind),
             // The run directory itself is gone: its successor removed it.
-            Err(WorkflowError::Io { .. }) if !self.run_dir(run_id).exists() => {
-                return refused(
-                    StopKind::Superseded,
-                    WorkflowError::ControlCancelled(format!(
-                        "run {run_id} no longer exists; executor generation {generation} stops"
-                    )),
-                );
+            Err(WorkflowError::Io { .. }) if !self.run_dir(run_id).exists() => Err(OwnerRefusal {
+                kind: StopKind::Superseded,
+                error: WorkflowError::ControlCancelled(format!(
+                    "run {run_id} no longer exists; executor generation {generation} stops"
+                )),
+            }),
+            Err(error @ (WorkflowError::Io { .. } | WorkflowError::StateCorrupt(_))) => {
+                Err(self.pause_on_unreadable_state(run_id, generation, kind, error))
             }
-            Err(error) => return refused(StopKind::Refused, error),
+            Err(error) => Err(OwnerRefusal {
+                kind: StopKind::Refused,
+                error,
+            }),
+        }
+    }
+
+    /// The fence's one locked state read.
+    fn owner_state(&self, run_id: &str) -> WorkflowResult<WorkflowRun> {
+        #[cfg(test)]
+        if OWNER_READ_FAULTS.with(|faults| {
+            let left = faults.get();
+            faults.set(left.saturating_sub(1));
+            left > 0
+        }) {
+            return Err(WorkflowError::io(
+                self.state_path(run_id),
+                std::io::Error::other("injected transient read fault"),
+            ));
+        }
+        lock_run(self, run_id, || self.load_state(run_id))
+    }
+
+    /// Review minor 3 (round 5): a state read that fails (a descriptor limit,
+    /// a disk fault, a corrupt file) says nothing about run control, and the
+    /// fence cannot let work go on unverified. Nor may it end the work as a
+    /// plain error, which fails the run: a stall pauses, never fails. The
+    /// fence pauses the run with the read error as evidence (when the state
+    /// reads again for the pause) and stops the work as paused. When the
+    /// pause cannot be recorded, the stop is still a typed pause that says
+    /// so: the run end records it, or the operator resumes the run.
+    fn pause_on_unreadable_state(
+        &self,
+        run_id: &str,
+        generation: u64,
+        kind: FenceKind,
+        error: WorkflowError,
+    ) -> OwnerRefusal {
+        let resume = format!("archon workflow resume --live --yes {run_id}");
+        let detail = serde_json::json!({
+            "event": "state_read_pause",
+            "cause": "state_unreadable",
+            "error": error.to_string(),
+            "executor_generation": generation,
+            "resume": resume,
+        });
+        let owner = crate::control_pause::PauseOwner::Executor(generation);
+        let recorded = match crate::control_pause::pause_owned(self, run_id, owner, detail) {
+            Ok(_) => "the pause is recorded".to_string(),
+            // The state reads again and holds another control decision (a
+            // pause, a cancel or a newer executor): that decision answers.
+            Err(
+                refused @ (WorkflowError::ControlPaused(_) | WorkflowError::ControlCancelled(_)),
+            ) => {
+                let decided = self
+                    .owner_state(run_id)
+                    .ok()
+                    .and_then(|run| owner_rule(&run, generation, kind).err());
+                return decided.unwrap_or(OwnerRefusal {
+                    kind: StopKind::Superseded,
+                    error: refused,
+                });
+            }
+            Err(unrecorded) => format!("the pause is not recorded ({unrecorded})"),
         };
-        if let Err(error) = crate::control_pause::require_executor(&run, generation) {
-            return refused(StopKind::Superseded, error);
+        OwnerRefusal {
+            kind: StopKind::Paused,
+            error: WorkflowError::ControlPaused(format!(
+                "the state of run {run_id} could not be read by executor generation {generation} \
+                 ({error}); a stall pauses, never fails, so the fenced work stopped and {recorded}. \
+                 When the state file reads again: {resume}"
+            )),
         }
-        if kind == FenceKind::Admission {
-            let stop = match run.status {
-                RunStatus::Paused => StopKind::Paused,
-                RunStatus::Cancelled => StopKind::Cancelled,
-                _ => return Ok(()),
-            };
-            if let Err(error) =
-                crate::control_pause::PauseOwner::Executor(generation).require_pauser(&run)
-            {
-                return refused(stop, error);
-            }
-        }
-        Ok(())
     }
 
     async fn execute_fenced<T>(
@@ -184,6 +244,27 @@ impl WorkflowStore {
         .await
         .map_err(|refused| refused.error)?
     }
+}
+
+/// The owner rule for `kind` on a state the fence read.
+fn owner_rule(run: &WorkflowRun, generation: u64, kind: FenceKind) -> Result<(), OwnerRefusal> {
+    let refused = |kind, error| Err(OwnerRefusal { kind, error });
+    if let Err(error) = crate::control_pause::require_executor(run, generation) {
+        return refused(StopKind::Superseded, error);
+    }
+    if kind == FenceKind::Admission {
+        let stop = match run.status {
+            RunStatus::Paused => StopKind::Paused,
+            RunStatus::Cancelled => StopKind::Cancelled,
+            _ => return Ok(()),
+        };
+        if let Err(error) =
+            crate::control_pause::PauseOwner::Executor(generation).require_pauser(run)
+        {
+            return refused(stop, error);
+        }
+    }
+    Ok(())
 }
 
 /// The run lock for one synchronous operation, with no ownership check and,

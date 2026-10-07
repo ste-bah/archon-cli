@@ -90,11 +90,14 @@ pub(crate) fn declared_max_turns(call: &archon_workflow::WorkflowV2HostCall) -> 
         .map(|turns| u32::try_from(turns).unwrap_or(u32::MAX))
 }
 
-/// Run `work` under the turn bound `call` declared, or unchanged.
-pub(crate) async fn bounded<T>(
+/// Run the future `work` makes under the turn bound `call` declared, or
+/// unchanged. Built on the heap (#246): the agent dispatch is the largest
+/// future of a call, and three wrapper frames would each hold a copy.
+pub(crate) async fn bounded<'a, F: std::future::Future + Send + 'a>(
     call: &archon_workflow::WorkflowV2HostCall,
-    work: impl std::future::Future<Output = T>,
-) -> T {
+    work: impl FnOnce() -> F,
+) -> F::Output {
+    let work = archon_workflow::heap_future::on_heap(work);
     archon_tools::host_max_turns::inherit(declared_max_turns(call), work).await
 }
 
@@ -154,13 +157,13 @@ mod tests {
         call.options
             .extra
             .insert("max_turns".to_string(), serde_json::json!(25));
-        let seen = bounded(&call, async {
+        let seen = bounded(&call, || async {
             archon_tools::host_max_turns::resolve(100_000, 100_000)
         })
         .await;
         assert_eq!(seen, 25);
         call.options.extra.clear();
-        let unbounded = bounded(&call, async {
+        let unbounded = bounded(&call, || async {
             archon_tools::host_max_turns::resolve(100_000, 100_000)
         })
         .await;

@@ -340,12 +340,14 @@ fn round3_301_changed_shape_rebound_missing_preimage() {
     combined_rebound(true, true, true);
 }
 
-/// Round 4 (review minor 8): with a prior pin the anchor is the prior pin,
-/// but the live skeleton may be another captured authorized launch's own
-/// skeleton (an interrupted re-freeze back to an earlier task shape). Capture
-/// authenticates it, so publication must too; a byte-different shape is
-/// still refused.
-fn prior_pin_live_launch_skeleton(tampered: bool) {
+/// Round 5 (round-4 review minor 6): with a prior pin the anchor is the
+/// prior pin, the newest launch of the task set's authenticated history. A
+/// live skeleton that is another launch's own skeleton is a rollback (an
+/// interrupted re-freeze back to an earlier task shape). It refuses by name
+/// with the remedy, whether that launch is a captured run outside the
+/// history (`unrelated`) or one the pin's lineage moved on from
+/// (`superseded`); a byte-different shape still refuses as unauthenticated.
+fn prior_pin_live_launch_skeleton(mode: &str) {
     let run = run_fixture_with(&[
         ("AC-F-001", "test -f present", true),
         ("AC-F-002", "test -f present", true),
@@ -364,7 +366,19 @@ fn prior_pin_live_launch_skeleton(tampered: bool) {
     authorized.freeze_event_id = "earlier-shape-freeze".into();
     authorized.skeleton_digest = Some(history.put(&earlier).unwrap().0);
     metadata(&run, "z-earlier-run", &authorized);
-    let live = if tampered {
+    if mode == "superseded" {
+        // The pin's own lineage moved on from the earlier launch.
+        let mut pin = run.set.pin();
+        pin.lineage = vec![archon_workflow::task_set_lineage::PinTransition::extending(
+            &[],
+            authorized.clone(),
+            pin.identity(),
+            Default::default(),
+            "test-republish",
+        )];
+        std::fs::write(run.set.pin_path(), serde_json::to_vec_pretty(&pin).unwrap()).unwrap();
+    }
+    let live = if mode == "tampered" {
         skeleton.tasks[0]
             .implements
             .push("tampered-obligation".into());
@@ -372,37 +386,54 @@ fn prior_pin_live_launch_skeleton(tampered: bool) {
     } else {
         earlier
     };
-    std::fs::write(&path, live).unwrap();
+    std::fs::write(&path, &live).unwrap();
     let receipt = recover(&run);
     assert!(
         !receipt[0]["prior"].is_null(),
         "the prior pin anchors this recovery"
     );
-    if tampered {
-        let mut prepared = crate::command::workflow_task_set::prepare_from_judged(
-            run.set.project.path(),
-            &run.set.tasks,
-            &run.set.prd,
-            archon_core::config::GateMode::Observe,
-            &run.set.contract(),
-            None,
-        )
-        .unwrap();
-        let error = prepared
-            .record_recovery_refreeze()
-            .expect_err("an unauthorized shape must be refused");
-        assert!(error.to_string().contains("skeleton_changed"), "{error}");
-    } else {
-        refreeze(&run);
-        verify(&run, "a-original-run", &original)
-            .expect("the prior pin's launch stays provable after the re-freeze");
-    }
+    let mut prepared = crate::command::workflow_task_set::prepare_from_judged(
+        run.set.project.path(),
+        &run.set.tasks,
+        &run.set.prd,
+        archon_core::config::GateMode::Observe,
+        &run.set.contract(),
+        None,
+    )
+    .unwrap();
+    let error = prepared
+        .record_recovery_refreeze()
+        .expect_err("a rollback or an unauthorized shape must be refused")
+        .to_string();
+    assert!(error.contains("skeleton_changed"), "{mode}: {error}");
+    let named = match mode {
+        "unrelated" => {
+            "launch earlier-shape-freeze of run z-earlier-run, which is not in this task set's authenticated launch history"
+        }
+        "superseded" => "launch earlier-shape-freeze, which launch",
+        _ => "is not authenticated by a captured launch",
+    };
+    assert!(error.contains(named), "{mode}: {error}");
+    assert!(
+        error.contains(&format!("anchor launch {}", original.freeze_event_id))
+            && error.contains("re-freeze the task set and start a new run"),
+        "{mode}: the remedy names the anchor: {error}"
+    );
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        live,
+        "{mode}: nothing published"
+    );
 }
 #[test]
-fn round4_301_prior_pin_accepts_a_captured_launch_skeleton() {
-    prior_pin_live_launch_skeleton(false);
+fn round5_301_prior_pin_refuses_a_rollback_to_an_unrelated_launch() {
+    prior_pin_live_launch_skeleton("unrelated");
+}
+#[test]
+fn round5_301_prior_pin_refuses_a_rollback_to_a_superseded_launch() {
+    prior_pin_live_launch_skeleton("superseded");
 }
 #[test]
 fn round4_301_prior_pin_still_refuses_a_tampered_shape() {
-    prior_pin_live_launch_skeleton(true);
+    prior_pin_live_launch_skeleton("tampered");
 }

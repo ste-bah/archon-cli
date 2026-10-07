@@ -24,6 +24,8 @@ const TRIGGER: &str = "recovery-refreeze:";
 mod anchors;
 #[path = "workflow_task_set_recovery_evidence.rs"]
 mod evidence;
+#[path = "workflow_task_set_recovery_rollback.rs"]
+mod skeleton_rollback;
 pub(crate) use evidence::{authority, cleanup_adopted, refreeze_base};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

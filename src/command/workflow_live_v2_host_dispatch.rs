@@ -11,6 +11,7 @@ pub(super) use local_tools::execute_declared_local_tool;
 mod call_records;
 #[path = "workflow_live_v3_regression_slot.rs"]
 mod regression_slot;
+use archon_workflow::heap_future::on_heap;
 pub(super) use call_records::{host_call_timeout_record, is_host_call_timeout};
 pub(crate) use call_records::{save_rejected_output, save_rejected_write_result};
 
@@ -29,7 +30,10 @@ pub(super) async fn execute_v2_live_call(
     raw_outcomes_allowed: bool,
     dispatch_generation: u64,
 ) -> archon_workflow::WorkflowResult<WorkflowV2Result> {
-    regression_slot::prepare(runtime, &execution, v2_store, task_universe, client).await?;
+    // Each child below is built on the heap from a short frame (#246): this
+    // poll frame is on the stack for every poll of the whole call tree.
+    on_heap(|| regression_slot::prepare(runtime, &execution, v2_store, task_universe, client))
+        .await?;
     if matches!(
         execution.call.method,
         WorkflowV2HostMethod::Checkpoint
@@ -52,16 +56,18 @@ pub(super) async fn execute_v2_live_call(
     // call — real checks against the repository, no agent — routed before
     // the allowlisted local pseudo-tools it would otherwise be refused by.
     if super::workflow_live_v3_acceptance::is_acceptance_stage_call(&execution) {
-        // Boxed (#246): the round's state is most of this future's size.
-        return Box::pin(super::workflow_live_v3_acceptance::run_acceptance_stage(
-            runtime,
-            &execution,
-            store_for_control,
-            run_id,
-            archon_workflow::control_pause::PauseOwner::Generation(dispatch_generation),
-            task_universe,
-            Some(client.llm.as_ref()),
-        ))
+        // On the heap (#246): the round's state is most of this future's size.
+        return on_heap(|| {
+            super::workflow_live_v3_acceptance::run_acceptance_stage(
+                runtime,
+                &execution,
+                store_for_control,
+                run_id,
+                archon_workflow::control_pause::PauseOwner::Generation(dispatch_generation),
+                task_universe,
+                Some(client.llm.as_ref()),
+            )
+        })
         .await;
     }
     if execution.call.method == WorkflowV2HostMethod::Tool {
@@ -75,26 +81,8 @@ pub(super) async fn execute_v2_live_call(
         )
         && runtime.target_repository_root.is_some()
     {
-        return audited_direct::run(
-            task,
-            runtime,
-            execution,
-            adapter,
-            client,
-            v2_store,
-            store_for_control,
-            run_id,
-            workspace_boundary_supported,
-            task_universe,
-            source_task_graph,
-        )
-        .await;
-    }
-    match execution.call.method {
-        WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel
-            if execution.call.write_mode.is_none() =>
-        {
-            run_read_only_v2_fanout(
+        return on_heap(move || {
+            audited_direct::run(
                 task,
                 runtime,
                 execution,
@@ -103,8 +91,30 @@ pub(super) async fn execute_v2_live_call(
                 v2_store,
                 store_for_control,
                 run_id,
+                workspace_boundary_supported,
                 task_universe,
+                source_task_graph,
             )
+        })
+        .await;
+    }
+    match execution.call.method {
+        WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel
+            if execution.call.write_mode.is_none() =>
+        {
+            on_heap(move || {
+                run_read_only_v2_fanout(
+                    task,
+                    runtime,
+                    execution,
+                    adapter,
+                    client,
+                    v2_store,
+                    store_for_control,
+                    run_id,
+                    task_universe,
+                )
+            })
             .await
         }
         WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel => {
@@ -112,34 +122,39 @@ pub(super) async fn execute_v2_live_call(
             // shared with read-only fan-out and resolves stored source
             // expressions, which is host policy about where items come from.
             let branches = fanout_items_for_call(&execution, v2_store)?;
-            run_write_capable_v2_fanout(
-                task,
-                runtime.target_repository_root.as_deref(),
-                execution,
-                adapter,
-                &super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
-                    .with_generated_config(&runtime.generated_config),
-                v2_store,
-                store_for_control,
-                run_id,
-                workspace_boundary_supported,
-                branches,
-                task_universe,
-                source_task_graph,
-            )
+            let dispatch = super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
+                .with_generated_config(&runtime.generated_config);
+            on_heap(|| {
+                run_write_capable_v2_fanout(
+                    task,
+                    runtime.target_repository_root.as_deref(),
+                    execution,
+                    adapter,
+                    &dispatch,
+                    v2_store,
+                    store_for_control,
+                    run_id,
+                    workspace_boundary_supported,
+                    branches,
+                    task_universe,
+                    source_task_graph,
+                )
+            })
             .await
         }
         _ => {
-            run_single_v2_agent_call(
-                task,
-                runtime.target_repository_root.clone(),
-                &execution,
-                &adapter,
-                client,
-                Some(v2_store),
-                task_universe,
-                raw_outcomes_allowed,
-            )
+            on_heap(|| {
+                run_single_v2_agent_call(
+                    task,
+                    runtime.target_repository_root.clone(),
+                    &execution,
+                    &adapter,
+                    client,
+                    Some(v2_store),
+                    task_universe,
+                    raw_outcomes_allowed,
+                )
+            })
             .await
         }
     }
@@ -287,7 +302,7 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                     run_store,
                     archon_tools::workflow_read_guard::scope_read_only_boundary(
                         read_only,
-                        Box::pin(client.run_agent_raw_request(&request, request.task.clone())),
+                        on_heap(|| client.run_agent_raw_request(&request, request.task.clone())),
                     ),
                 ),
             )
@@ -337,12 +352,14 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
             run_store,
             archon_tools::workflow_read_guard::scope_read_only_boundary(
                 read_only,
-                Box::pin(run_v2_agent_call_with_rejected_output_log(
-                    adapter,
-                    &call_client,
-                    &request,
-                    v2_store,
-                )),
+                on_heap(|| {
+                    run_v2_agent_call_with_rejected_output_log(
+                        adapter,
+                        &call_client,
+                        &request,
+                        v2_store,
+                    )
+                }),
             ),
         )
         .await
@@ -371,12 +388,14 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
     };
     // Batch G: every agent call, of every kind, under the project-input
     // tripwire.
-    let invoke = Box::pin(super::workflow_live_v2_call_boundary::with_input_tripwire(
-        v2_store,
-        &execution.call.id,
-        &own_work,
-        || Box::pin(invoke()),
-    ));
+    let invoke = on_heap(|| {
+        super::workflow_live_v2_call_boundary::with_input_tripwire(
+            v2_store,
+            &execution.call.id,
+            &own_work,
+            || on_heap(|| invoke()),
+        )
+    });
     match scope {
         Some(scope) => {
             let started = std::time::Instant::now();
@@ -412,11 +431,8 @@ pub(super) async fn run_v2_agent_call_with_rejected_output_log(
     let mut request = request.clone();
     let records = stage_landing::prepare(&mut request, v2_store)
         .map_err(|e| WorkflowV2AgentError::InvalidResult(e.to_string()))?;
-    stage_landing::scope(
-        records,
-        run_logged_agent_inner(adapter, client, &request, v2_store),
-    )
-    .await
+    let work = on_heap(|| run_logged_agent_inner(adapter, client, &request, v2_store));
+    stage_landing::scope(records, work).await
 }
 
 async fn run_logged_agent_inner(
@@ -450,14 +466,16 @@ async fn run_logged_agent_inner(
             }
             Err(first_error) => {
                 save_rejected_output(v2_store, request, "first", &first, &first_error);
-                run_v2_agent_repair_with_rejected_output_log(
-                    adapter,
-                    client,
-                    request,
-                    v2_store,
-                    first,
-                    first_error,
-                )
+                on_heap(|| {
+                    run_v2_agent_repair_with_rejected_output_log(
+                        adapter,
+                        client,
+                        request,
+                        v2_store,
+                        first,
+                        first_error,
+                    )
+                })
                 .await
             }
         }
@@ -465,36 +483,9 @@ async fn run_logged_agent_inner(
     .await
 }
 
-pub(crate) fn provider_tier_for_v2_request(
-    request: &archon_workflow::WorkflowV2AgentRequest,
-) -> ProviderTier {
-    match request.role.to_ascii_lowercase().as_str() {
-        "planner" => ProviderTier::Planner,
-        "researcher" => ProviderTier::Researcher,
-        "coder" | "implementation" => ProviderTier::Coder,
-        "critic" => ProviderTier::Critic,
-        "reducer" => ProviderTier::Reducer,
-        "cheap" => ProviderTier::Cheap,
-        "local" | "tool" => ProviderTier::Local,
-        "vision" => ProviderTier::Vision,
-        _ => match request.call.method {
-            WorkflowV2HostMethod::Implementation => ProviderTier::Coder,
-            WorkflowV2HostMethod::Reduce | WorkflowV2HostMethod::FinalReport => {
-                ProviderTier::Reducer
-            }
-            WorkflowV2HostMethod::QualityGate | WorkflowV2HostMethod::HumanGate => {
-                ProviderTier::Critic
-            }
-            WorkflowV2HostMethod::Tool
-            | WorkflowV2HostMethod::HostCommand
-            | WorkflowV2HostMethod::SaveArtifact
-            | WorkflowV2HostMethod::RequireArtifact
-            | WorkflowV2HostMethod::Checkpoint => ProviderTier::Local,
-            WorkflowV2HostMethod::Fanout | WorkflowV2HostMethod::Parallel => ProviderTier::Coder,
-            WorkflowV2HostMethod::Agent => ProviderTier::Researcher,
-        },
-    }
-}
+#[path = "workflow_live_v2_provider_tier.rs"]
+mod provider_tier;
+pub(crate) use provider_tier::provider_tier_for_v2_request;
 
 #[path = "workflow_repository_audit_direct.rs"]
 mod audited_direct;

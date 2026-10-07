@@ -8,8 +8,10 @@
 //! Durable writes fence themselves at the write.
 //!
 //! A refusal never turns into an ordinary failure:
-//! - `Refused` (no control decision, e.g. an unreadable state file) is an
-//!   ordinary error of the fenced work.
+//! - `Refused` (no control decision, e.g. a store bound to another run) is
+//!   an ordinary error of the fenced work. The run store's fence never
+//!   refuses for an unreadable state: it pauses the run instead (a stall
+//!   pauses, never fails).
 //! - A pause or cancel of a still-owned run lets work that was already
 //!   admitted finish in one last poll; a finished result is kept as evidence.
 //!   Nothing new is admitted: nested fences see the same stop.
@@ -36,7 +38,7 @@ pub enum StopKind {
     /// A newer executor owns the run, or the run is gone. Nothing of this
     /// owner is polled again.
     Superseded,
-    /// No run-control decision (e.g. state unreadable): an ordinary error.
+    /// No run-control decision (e.g. a fence misuse): an ordinary error.
     Refused,
 }
 

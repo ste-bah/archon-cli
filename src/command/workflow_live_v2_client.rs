@@ -253,22 +253,6 @@ impl LiveV2AgentClient {
     }
 }
 
-/// One definition, shared with the shape tuner.
-///
-/// The learner's baseline has to be the cap this function returns, or a
-/// "narrowing" could be reported against a number the runtime never used. Two
-/// copies of this resolution is how that happens, so there is one.
-fn live_v2_subagent_max_concurrency() -> Option<usize> {
-    crate::command::sona_workflow_shape_tuning::resolved_subagent_cap()
-}
-
-fn read_only_v2_fanout_parallelism(requested: Option<usize>, subagent_cap: Option<usize>) -> usize {
-    let cap = subagent_cap
-        .unwrap_or(archon_core::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT)
-        .max(1);
-    requested.map_or(cap, |requested| requested.max(1).min(cap))
-}
-
 impl LiveV2AgentClient {
     async fn dispatch_request(
         &self,
@@ -445,7 +429,10 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
         request: &WorkflowV2AgentRequest,
         prompt: String,
     ) -> Result<String, WorkflowV2AgentError> {
-        call_sessions::bounded(&request.call, self.dispatch_request(request, prompt, false)).await
+        call_sessions::bounded(&request.call, || {
+            self.dispatch_request(request, prompt, false)
+        })
+        .await
     }
 
     async fn continue_agent_request(
@@ -453,7 +440,10 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
         request: &WorkflowV2AgentRequest,
         prompt: String,
     ) -> Result<String, WorkflowV2AgentError> {
-        call_sessions::bounded(&request.call, self.dispatch_request(request, prompt, true)).await
+        call_sessions::bounded(&request.call, || {
+            self.dispatch_request(request, prompt, true)
+        })
+        .await
     }
 
     async fn run_agent(&self, prompt: String) -> std::result::Result<String, WorkflowV2AgentError> {
