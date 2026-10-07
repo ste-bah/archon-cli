@@ -313,19 +313,19 @@ async function authorCandidate(w, policy) {
     // a previously missing entry lowers the outstanding-entry count. A
     // rewrite alone clears no defect; every failure shares the same window.
     const advanced = (authorState.added || 0) > addedBefore;
+    const round = authorRoundReport(policy, authorState);
     if (authored.status === "failed") {
-      // Every kind of failed round credits the entries that passed in it.
-      // Each entry reads its own refusal or note; the shared feedback stays
-      // the gate's findings.
-      const passed = policy.author ? authorState.roundPassed : [];
+      // Every kind of failed round credits the entries that passed in it and
+      // counts any outage in it. Each entry reads its own refusal or note;
+      // the shared feedback stays the gate's findings.
       if (authored.refusals) {
-        recordRepairs(progress, call, authored.refusals, passed, !measuredReplies, advanced);
+        recordRepairs(progress, call, authored.refusals, round, !measuredReplies, advanced);
         lastFindings = authored.findings.map(progressText);
       } else if (authored.malformed) {
-        recordAnswered(progress, call, "entries", advanced, !measuredReplies, passed);
+        recordAnswered(progress, call, "entries", advanced, !measuredReplies, round);
         lastFindings = [authored.summary || "malformed replies"];
       } else {
-        recordOperational(progress, call, authored.summary, advanced, passed);
+        recordOperational(progress, call, authored.summary, advanced, round);
         lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
       }
       continue;
@@ -341,9 +341,10 @@ async function authorCandidate(w, policy) {
     const outcome = await w.hostCommand(policy.capability, { stdin: authored.content });
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     if (routed.operational) {
-      // The gate never judged the candidate: the attempt makes no progress.
+      // The gate never judged the candidate; only a pass in the round that
+      // made it can be progress.
       if (!measuredReplies) progress.answered += 1;
-      recordOperational(progress, call, routed.operational);
+      recordOperational(progress, call, routed.operational, false, round);
       lastFindings = [`host gate operational failure: ${routed.operational}`];
       continue;
     }
@@ -369,7 +370,7 @@ async function authorCandidate(w, policy) {
     history.push({ attempt, findings: routed.retry.slice() });
     feedback = routed.retry;
     lastFindings = routed.retry.slice();
-    recordAttempt(progress, call, routed.retryFindings, !measuredReplies);
+    recordAttempt(progress, call, routed.retryFindings, !measuredReplies, round);
     openRepairEpisode(progress);
   }
 }

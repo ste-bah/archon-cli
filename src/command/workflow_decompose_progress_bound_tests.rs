@@ -168,23 +168,44 @@ fn round3_regression_suite_passes() {
     );
 }
 
-/// Issue 357 round 7: a pass is progress in every kind of failed round, each
-/// entry's note stays its own, and observe pauses on a window with an outage.
-#[test]
-fn round_credit_regression_suite_passes() {
+/// Runs one node suite of the fixed script; it fails on any failing case.
+fn node_suite_passes(file: &str) {
+    let path = format!("{}/src/command/{file}", env!("CARGO_MANIFEST_DIR"));
     let output = std::process::Command::new("node")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/command/workflow_decompose_round_credit_test.cjs"
-        ))
+        .arg(&path)
         .output()
         .expect("node must be available");
     assert!(
         output.status.success(),
-        "{}{}",
+        "{path}: {}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// Issue 357 rounds 7-8: a pass is progress in every kind of round, each
+/// entry's note stays its own, and an outage in a window pauses observe.
+#[test]
+fn round_credit_regression_suite_passes() {
+    node_suite_passes("workflow_decompose_round_credit_test.cjs");
+}
+
+/// Issue 362: a freeze outage retries the freeze, never the author.
+#[test]
+fn freeze_outage_regression_suite_passes() {
+    node_suite_passes("workflow_decompose_freeze_outage_test.cjs");
+}
+
+/// Issue 357: every refusal of a round is measured against its own best.
+#[test]
+fn multi_refusal_regression_suite_passes() {
+    node_suite_passes("workflow_decompose_multi_refusal_test.cjs");
+}
+
+/// Issue 357: shape repairs use the freeze progress measure per episode.
+#[test]
+fn shape_progress_regression_suite_passes() {
+    node_suite_passes("workflow_decompose_shape_progress_test.cjs");
 }
 
 // --- round 5: deterministic refusals and gate operational errors -------------

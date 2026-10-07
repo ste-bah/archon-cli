@@ -89,8 +89,11 @@ fn run_js(driver: &str) -> String {
         // Issue 357 round 7: every failed round credits its passes.
         "creditPassed",
         "recordRound",
+        "restoreFloor",
         "creditedRound",
         "windowHasOutage",
+        "NO_ROUND",
+        "authorRoundReport",
         "recordStep",
         "recordAttempt",
         "recordAnswered",

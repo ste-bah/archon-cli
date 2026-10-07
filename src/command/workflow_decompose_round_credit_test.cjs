@@ -20,13 +20,16 @@ const refute = ids => () => ({...clean(), gateEnvelope:{policy_findings:ids.map(
   text:`check '${id}' was refuted: repair ${id}`, subject:id, remediation_scope:'candidate_artifact'}))}});
 
 // script[id][version - 1]: 'ok', a shape defect count, 'bad' (unparseable)
-// or 'down' (the call fails in transport); the last value repeats.
+// or 'down' (the call fails in transport); the last value repeats. A
+// function script[id](version, task) decides from the prompt it is shown.
 async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
   const ids = Object.keys(script);
-  const at = (id, version) => script[id][Math.min(version, script[id].length) - 1];
+  const decided = new Map();
+  const at = (id, version, task) => typeof script[id] === 'function' ? script[id](version, task)
+    : script[id][Math.min(version, script[id].length) - 1];
   const ctx = {args:{acceptanceCriteria:Object.fromEntries(ids.map(id => [id, id])), authorMaxParallelism:cap, gateMode:mode},
     __archonValidateAcceptanceEntry: (id, serialized) => {
-      const value = at(id, JSON.parse(serialized).version);
+      const value = decided.get(`${id}@${JSON.parse(serialized).version}`);
       return JSON.stringify(typeof value === 'number' ? fields.slice(0, value).map(field => shape(id, field)) : []);
     }};
   vm.createContext(ctx); vm.runInContext(source, ctx);
@@ -39,7 +42,8 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
         const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];
         const version = (versions.get(id) || 0) + 1; versions.set(id, version);
         prompts.push({id, version, task:options.task});
-        const value = at(id, version);
+        const value = at(id, version, options.task);
+        decided.set(`${id}@${version}`, value);
         if (value === 'down') return {status:'failed', summary:'transport'};
         if (value === 'bad') return {status:'accepted', stopReason:'end_turn', content:'not json'};
         return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id, version, criterion:''})};
@@ -113,19 +117,79 @@ async function malformedNoteIsPerEntry() {
   assert.doesNotMatch(c3, /acceptance entry B returned no complete entry/, 'C reads no sibling note');
   const gate = /Repair these exact authoritative findings:\n- check 'B' was refuted: repair B\n- check 'C' was refuted: repair C/;
   assert.match(c3, gate, 'the repair list is still the gate findings');
-  assert.match(b3, /refused this entry's previous reply[\s\S]*acceptance entry B returned no complete entry/, 'B reads its own note');
+  assert.match(b3, /refused this entry's last answered reply[\s\S]*acceptance entry B returned no complete entry/, 'B reads its own note');
   assert.match(b3, gate, 'B still reads the gate findings');
 }
 
-// B's shape refusal is replaced by its later note of another kind: an
-// unparseable reply shows its own note, a transport failure clears it.
-async function staleRefusalCleared(kind) {
+// An unparseable reply is an answered reply: its note replaces B's shape
+// refusal. A call never answered leaves the refusal of B's last answered
+// reply in place (review r357g F1).
+async function refusalAfterOtherFailure(kind) {
   const out = await run({B:['ok', 1, kind, 'ok']}, [refute(['B']), clean], {cap:1});
   assert.equal(out.error, undefined, JSON.stringify(out.pauses));
   assert.match(out.prompt('B', 3), /check\/command invalid/, 'the refusal reaches the next reply');
-  assert.doesNotMatch(out.prompt('B', 4), /check\/command invalid/, 'the stale refusal is gone');
-  if (kind === 'bad') assert.match(out.prompt('B', 4), /acceptance entry B returned no complete entry/);
-  else assert.doesNotMatch(out.prompt('B', 4), /refused this entry's previous reply/);
+  if (kind === 'bad') {
+    assert.doesNotMatch(out.prompt('B', 4), /check\/command invalid/, 'the replaced refusal is gone');
+    assert.match(out.prompt('B', 4), /acceptance entry B returned no complete entry/);
+  } else {
+    assert.match(out.prompt('B', 4), /refused this entry's last answered reply[\s\S]*check\/command invalid/, 'the refusal survives an outage');
+  }
+}
+
+// Review r357g F1 probe: the author repairs the defect only when its prompt
+// shows it. A transport failure between the refusal and the repair must not
+// hide it, so the repair lands and the run completes.
+async function refusalSurvivesOutage() {
+  const reply = (v, task) => v <= 2 ? 'ok' : v === 3 ? 1 : v === 4 ? 'down' : (/check\/command invalid/.test(task) ? 'ok' : 1);
+  const out = await run({A:reply}, [refute(['A']), refute(['A']), clean]);
+  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
+  assert.equal(out.gate, 3);
+}
+
+// Review r357g F2 probe: A is repaired in a clean round and the freeze then
+// has two outages. A's pass is progress whatever the gate does next, so the
+// window is not spent and the third freeze completes.
+async function cleanPassBeforeOutages() {
+  const out = await run({A:['ok', 'ok', 1, 'ok']}, [refute(['A']), refute(['A']), outage, outage, clean]);
+  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
+  assert.equal(out.gate, 5);
+}
+// F2 control: the same pass beside a sibling's transport failure.
+async function cleanPassControl() {
+  const out = await run({A:['ok', 'ok', 1, 'ok'], Z:['ok', 'ok', 'ok', 'down', 'ok']},
+    [refute(['A', 'Z']), refute(['A', 'Z']), outage, clean]);
+  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
+}
+// The judged path credits a clean pass too, but a judged repeat still adds
+// one to the next floor: A's pass forgives its stalled refusal (window 1 -> 0)
+// and the refutation then counts (0 -> 1), so A gets one more stalled round.
+async function cleanPassBeforeJudgedRepeat() {
+  const out = await run({A:['ok', 1, 1, 'ok', 1]}, [refute(['A'])]);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.calls, 7, 'judged, 1, 1, pass+judged, then 1 x3 from floor 1');
+  assert.deepEqual(credited(out.history[3]), [['A', true]]);
+  assert.equal(out.history[3].progress, false, 'the judged repeat is no progress');
+}
+// Bound: a judge that refutes every candidate, with a shape repair between,
+// still pauses: each judged repeat raises the next floor.
+async function endlessRefutationPauses() {
+  const out = await run({A:(v) => v % 2 ? 'ok' : 1}, [refute(['A'])]);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.calls, 7);
+}
+
+// Review r357g F3: an outage in a round whose first failure is a refusal or
+// an unparseable reply is still an outage of the window, so observe pauses.
+async function hiddenOutagePauses(kind) {
+  const out = await run({A:['ok', 1, kind, 1], B:['ok', 1, 'down', 1]}, [refute(['A', 'B'])], {mode:'observe'});
+  assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
+  assert.equal(out.history[2].outage, true, JSON.stringify(out.history[2]));
+}
+// F3 control: the same window without the transport failure returns.
+async function noOutageReturns() {
+  const out = await run({A:['ok', 1], B:['ok', 1]}, [refute(['A', 'B'])], {mode:'observe'});
+  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
+  assert.equal(out.result.publicationReceipt.call_id, 'freeze');
 }
 
 // Observe: a window that ends on outages after a judged repeat pauses
@@ -157,8 +221,16 @@ const tests = [
   ['an unmeasured rewrite beside an unparseable reply is not credited', () => unmeasuredRewriteIsNotCredited('bad')],
   ['an unmeasured rewrite beside a transport failure is not credited', () => unmeasuredRewriteIsNotCredited('down')],
   ['an unparseable reply is noted for its own entry only', malformedNoteIsPerEntry],
-  ['a refusal is replaced by an unparseable note', () => staleRefusalCleared('bad')],
-  ['a refusal is cleared by a transport failure', () => staleRefusalCleared('down')],
+  ['a refusal is replaced by an unparseable note', () => refusalAfterOtherFailure('bad')],
+  ['a refusal survives a transport failure', () => refusalAfterOtherFailure('down')],
+  ['F1 probe: a repair after an outage still reads its refusal', refusalSurvivesOutage],
+  ['F2 probe: a clean pass before two freeze outages is progress', cleanPassBeforeOutages],
+  ['F2 control: the pass beside a sibling outage', cleanPassControl],
+  ['a clean pass before a judged repeat: credited, the repeat still counts', cleanPassBeforeJudgedRepeat],
+  ['an endless refutation with repairs between pauses', endlessRefutationPauses],
+  ['F3: an outage behind a refusal pauses observe', () => hiddenOutagePauses(1)],
+  ['F3: an outage behind an unparseable reply pauses observe', () => hiddenOutagePauses('bad')],
+  ['F3 control: the window without an outage returns', noOutageReturns],
   ['observe pauses on outages after a judged repeat', observeOutagePauses],
   ['observe pauses on one outage inside a judged window', observeOneOutagePauses],
   ['observe returns the latest commit on judged repeats (control)', observeJudgedReturns],

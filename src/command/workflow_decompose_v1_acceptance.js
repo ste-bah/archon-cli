@@ -114,7 +114,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   // Each entry reads only its own shape refusal: a sibling's names another
   // entry and is not this entry's repair.
   const refused = state.refusals && state.refusals.get(id);
-  const own = refused ? `\nThe host refused this entry's previous reply. Repair exactly these findings:\n- ${refused.join("\n- ")}` : "";
+  const own = refused ? `\nThe host refused this entry's last answered reply. Repair exactly these findings:\n- ${refused.join("\n- ")}` : "";
   const result = await w.agent(`acceptance-author-${id}-${round * STALL_ATTEMPTS + 1}`, {
     task: `${prompt}\nAuthor ONLY entry ${id}: ${text}${own}\nAll criterion IDs and text (for consistency): ${JSON.stringify(criteria)}\n${priorText(prior)}`,
     tier: "planner", resultMode: "rawOutcome"
@@ -210,10 +210,10 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   const refusals = settled.filter(result => result && result.status === "fulfilled" && result.value.failure?.findings)
     .map(result => ({entryId:result.value.failure.entryId, findings:result.value.failure.findings}));
   state.roundPassed = pending.filter((_, index) => succeeded(settled[index]));
-  // Each entry's slot holds the note of its latest attempt only: a shape
-  // refusal, or the note of a reply that held no complete entry. A pass, or a
-  // call never answered, leaves no note, so a stale refusal is never shown as
-  // the previous reply's.
+  // Each entry's slot holds the note of its last answered reply: a shape
+  // refusal, or the note of a reply that held no complete entry. A pass
+  // clears it; a call never answered leaves it, since that reply's refusal is
+  // still the one to repair.
   state.refusals = state.refusals || new Map();
   pending.forEach((id, index) => {
     const result = settled[index];
@@ -221,7 +221,13 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
     const failure = result.value.failure;
     if (failure && failure.entryId === id && Array.isArray(failure.findings)) state.refusals.set(id, failure.findings.map(progressText));
     else if (failure && failure.malformed) state.refusals.set(id, [failure.summary]);
-    else state.refusals.delete(id);
+    else if (!failure) state.refusals.delete(id);
+  });
+  // A call that failed in transport is an outage of the round, whatever the
+  // first failure is (refused or unparseable replies hide no outage).
+  state.roundOutage = pending.some((_, index) => {
+    const failure = settled[index]?.status === "fulfilled" ? settled[index].value.failure : null;
+    return Boolean(failure) && failure.malformed !== true;
   });
   // A thrown call (a pause or cancel the host observed, or a host error)
   // outranks a failed reply at any index: returned as a failed value it would
