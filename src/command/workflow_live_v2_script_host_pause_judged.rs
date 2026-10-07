@@ -22,9 +22,7 @@
 
 use std::collections::BTreeMap;
 
-use super::workflow_live_v2_script_host_pause_credit::{
-    CoveredAttempt, ScriptPauseRecord, pause_records,
-};
+use super::workflow_live_v2_script_host_pause_credit::{CoveredAttempt, ScriptPauseRecord};
 use super::*;
 
 type Executor = dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor;
@@ -145,24 +143,23 @@ impl WorkflowScriptHost {
     /// What a host-taken pause's unpublished outcomes judged, against the
     /// content as it is when this run starts: computed once, at the start
     /// (`run_on_current_thread`), before any call of this run can change it.
-    /// An unreadable store is logged and replays none of them.
+    /// Pauses before a phase seed count for nothing (`pauses_after_seed`). An
+    /// unreadable store is logged and replays none of them.
     pub(in super::super) fn judged_at_resume(&self) -> &JudgedAtResume {
         self.runner.judged_at_resume.get_or_init(|| {
-            let built = pause_records(&self.runner.workflow_store, &self.runner.run_id).and_then(
-                |pauses| {
-                    if !pauses.iter().any(|pause| pause.host_taken) {
-                        return Ok(JudgedAtResume::default());
-                    }
-                    let records = self.runner.v2_store.load_call_records()?;
-                    Ok(JudgedAtResume::build(
-                        &pauses,
-                        &records,
-                        self.runner.host_command_executor.as_deref(),
-                    ))
-                },
-            );
+            let built = self.pauses_after_seed().and_then(|pauses| {
+                if !pauses.iter().any(|pause| pause.host_taken) {
+                    return Ok(JudgedAtResume::default());
+                }
+                let records = self.runner.v2_store.load_call_records()?;
+                Ok(JudgedAtResume::build(
+                    &pauses,
+                    &records,
+                    self.runner.host_command_executor.as_deref(),
+                ))
+            });
             built.unwrap_or_else(|error| {
-                tracing::warn!(%error, run_id = %self.runner.run_id, "pause records unreadable; every covered unpublished host-command outcome is asked again");
+                tracing::warn!(%error, run_id = %self.runner.run_id, "pause records or phase seed unreadable; every covered unpublished host-command outcome is asked again");
                 JudgedAtResume::default()
             })
         })

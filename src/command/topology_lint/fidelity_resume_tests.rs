@@ -477,7 +477,7 @@ fn the_catalog_is_unchanged_and_script_matches_the_planned_release() {
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "PENDING_DIGEST"
+        "4d047cba287c395fec671826258286fab3b52bed11fad11bb4ae8bd74b414887"
     );
 }
 

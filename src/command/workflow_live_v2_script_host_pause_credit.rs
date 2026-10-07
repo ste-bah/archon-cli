@@ -246,13 +246,18 @@ impl WorkflowScriptHost {
         input_hash: &str,
         generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<Option<String>> {
-        let pauses = pause_records(&self.runner.workflow_store, &self.runner.run_id)?;
+        let pauses = self.pauses_after_seed()?;
         if pauses.is_empty() {
             return Ok(None);
         }
         let Some(record) = self.runner.v2_store.load_call_record(&execution.call.id)? else {
             return Ok(None);
         };
+        // Issue 360: a pause taken after the seed also covers the attempts
+        // still standing from before it; none of them replays either.
+        if self.predates_phase_seed(&record)? {
+            return Ok(None);
+        }
         let wanted = CoveredAttempt {
             call_id: record.call.id.clone(),
             attempt: record.attempt,
@@ -262,22 +267,9 @@ impl WorkflowScriptHost {
             return Ok(None);
         }
         let slots = self.runner.v2_store.load_call_records()?;
-        // Issue 360: a run seeded after an upgrade replays none of the history
-        // before it, so a pause taken then credits nothing now (the history
-        // floor itself: `predates_phase_seed`).
-        let floor = self
-            .phase_seed()
-            .map(|seed| {
-                seed["pause_generation_floor"]
-                    .as_u64()
-                    .ok_or_else(|| malformed_seed("pause_generation_floor"))
-            })
-            .transpose()?;
-        let covered = pauses.iter().any(|pause| {
-            floor.is_none_or(|floor| pause.generation > floor)
-                && pause.covered.contains(&wanted)
-                && credit_holds(pause, &slots)
-        });
+        let covered = pauses
+            .iter()
+            .any(|pause| pause.covered.contains(&wanted) && credit_holds(pause, &slots));
         if !covered || !self.outcome_limits_hold(&record)? {
             return Ok(None);
         }
@@ -294,6 +286,24 @@ impl WorkflowScriptHost {
             return Err(self.stop_on_terminal_call(&record).await);
         }
         Ok(Some(self.result_view(&record)?))
+    }
+
+    /// Issue 360: the pauses this run may credit. A run seeded after an
+    /// upgrade replays none of the history before its seed, so a pause taken
+    /// then (a `w.pause` or a host-taken one) counts for nothing now: not as
+    /// coverage, not as a verbatim replay, not as the content its gate read
+    /// (the history floor itself: `predates_phase_seed`).
+    pub(super) fn pauses_after_seed(
+        &self,
+    ) -> archon_workflow::WorkflowResult<Vec<ScriptPauseRecord>> {
+        let mut pauses = pause_records(&self.runner.workflow_store, &self.runner.run_id)?;
+        if let Some(seed) = self.phase_seed() {
+            let floor = seed["pause_generation_floor"]
+                .as_u64()
+                .ok_or_else(|| malformed_seed("pause_generation_floor"))?;
+            pauses.retain(|pause| pause.generation > floor);
+        }
+        Ok(pauses)
     }
 
     /// The phase seed this run started from, when it is a seeded resume.

@@ -426,3 +426,6 @@ async fn a_replayed_final_report_stop_stops_the_script_again() {
     assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
     assert_eq!(summary.failed_call.as_deref(), Some("stopped"));
 }
+
+#[path = "workflow_live_v2_script_seed_floor_replay_tests.rs"]
+mod workflow_live_v2_script_seed_floor_replay_tests;
