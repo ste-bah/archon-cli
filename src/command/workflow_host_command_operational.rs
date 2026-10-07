@@ -444,7 +444,7 @@ fn progress_text(progress: Option<u64>) -> String {
     progress.map_or_else(|| "none".to_string(), |value| value.to_string())
 }
 
-fn emit(
+pub(crate) fn emit(
     store: &WorkflowStore,
     run_id: &str,
     kind: WorkflowEventKind,
@@ -462,7 +462,7 @@ fn emit(
 
 /// Appends `line` to the fixed decomposition's operator log, when the run is
 /// one. Evidence only: a missing or unreadable log never changes the outcome.
-fn append_log(run_root: &Path, line: &str) {
+pub(crate) fn append_log(run_root: &Path, line: &str) {
     let state_path = run_root.join(super::workflow_decompose_state::FIXED_STATE_PATH);
     let Ok(raw) = std::fs::read(&state_path) else {
         return;

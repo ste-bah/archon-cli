@@ -19,7 +19,8 @@ impl FixedHostCommandExecutor {
         call_id: &str,
         expected_generation: u64,
         secrets: &HostSecrets,
-        envelope: &std::path::Path,
+        anchor: &crate::command::workflow_host_staging_anchor::StagingAnchor,
+        pause: &crate::command::workflow_host_staging_pause::StagingPause,
     ) -> WorkflowResult<crate::command::workflow_host_secrets::SealedProcessOutput> {
         let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
         let run_id = self
@@ -37,8 +38,16 @@ impl FixedHostCommandExecutor {
                 require_run_owned(&store, &run_id, expected_generation)?;
                 // The killed attempt's partial staging must not reach the
                 // audit, which requires the staged set to match the manifest.
-                prepare_staging(&self.run_root, call_id)
-                    .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+                // Cleared through the anchor: a link the killed attempt left
+                // is removed, never followed, and the run pauses when it cannot be.
+                anchor.reset().map_err(|error| {
+                    pause.pause(
+                        anchor.root(),
+                        "staging could not be cleared for the retry",
+                        &secrets.text(&error.to_string()),
+                        true,
+                    )
+                })?;
             }
             let (control, handle) = HostCommandControl::new();
             let started = std::time::Instant::now();
@@ -73,7 +82,8 @@ impl FixedHostCommandExecutor {
                 }
                 Err(error) => return Err(secrets.error(error)),
             };
-            let observed = secrets.seal_process_output(observed, envelope, &command.command_id)?;
+            let observed =
+                secrets.seal_process_output(observed, anchor, pause, &command.command_id)?;
             let Some(kind) = observed.kind else {
                 return Ok(observed);
             };

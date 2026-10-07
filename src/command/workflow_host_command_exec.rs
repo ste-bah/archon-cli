@@ -26,7 +26,7 @@ use super::workflow_host_command_postcondition::{
     evaluate_postcondition, fixed_subject_is_terminal, receipt_matches_live,
 };
 use super::workflow_host_command_publish::{
-    LiveMutationSentinels, audit_prepared_publication, prepare_staging, publish_audited,
+    LiveMutationSentinels, audit_prepared_publication, publish_audited,
 };
 use super::workflow_host_command_supervisor::{
     HostCommandControl, HostCommandControlHandle, HostCommandSignal, SupervisedProcessOutput,
@@ -281,8 +281,15 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             &host_command_identity_tokens(&context, &request.command_id)?,
             request.stdin.as_deref().unwrap_or_default().as_bytes(),
         );
-        let staging = prepare_staging(&self.run_root, &call_id)
-            .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+        let pause = super::workflow_host_staging_pause::StagingPause::new(
+            &self.context.project_root,
+            &self.run_root,
+            expected_generation,
+            &call_id,
+            &request.command_id,
+        )?;
+        // Stale staging a cancelled call left is cleared, or the run pauses (#297).
+        let staging = pause.prepare(&self.run_root)?;
         let command = self.resolved(&request, &context, &call_id)?;
         if command
             .declared_write_set
@@ -301,8 +308,9 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         let secrets = HostSecrets::of(&context, &command.environment);
         let staged_envelope = staging.root.join(ENVELOPE_FILE);
         let cleanup = EnvelopeCleanup {
-            path: &staged_envelope,
+            anchor: &staging.anchor,
             secrets: &secrets,
+            pause: &pause,
             armed: true,
         };
         let result = async {
@@ -313,7 +321,8 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                     &call_id,
                     expected_generation,
                     &secrets,
-                    &staged_envelope,
+                    &staging.anchor,
+                    &pause,
                 )
                 .await?;
             let truncated = sealed.truncated;
@@ -343,8 +352,16 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                     "successful host call has no manifest".into(),
                 ));
             };
+            let staged = staging.anchor.read_file(ENVELOPE_FILE).and_then(|bytes| {
+                bytes.ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "the staged envelope is not a regular file",
+                    )
+                })
+            });
             let envelope: GateEnvelopeV1 = secrets.parse_json(
-                &std::fs::read(&staged_envelope).map_err(|source| WorkflowError::Io {
+                &staged.map_err(|source| WorkflowError::Io {
                     path: staged_envelope.clone(),
                     source,
                 })?,
@@ -423,6 +440,10 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                     &run_id,
                     expected_generation,
                 )?;
+                // The audit reads by path: refuse a tree swapped since creation.
+                staging.anchor.verify().map_err(|error| {
+                    WorkflowError::ArtifactInvalid(format!("host command staging refused: {error}"))
+                })?;
                 let audited = audit_prepared_publication(&staging, &prepared, &command, sentinels)
                     .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
                 let receipt = publish_audited(audited, &destinations, &pin, &context.task_root)

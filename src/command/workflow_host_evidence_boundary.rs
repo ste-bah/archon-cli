@@ -6,7 +6,9 @@ use crate::command::{
         OperationalKind, classify, reported_progress, unsettled_publish_evidence,
     },
     workflow_host_command_supervisor::SupervisedProcessOutput,
-    workflow_host_envelope_seal::{refuse_staged_evidence, seal_staged_envelope},
+    workflow_host_envelope_seal::{ENVELOPE_FILE, refuse_staged_evidence, seal_staged_envelope},
+    workflow_host_staging_anchor::StagingAnchor,
+    workflow_host_staging_pause::StagingPause,
 };
 use archon_workflow::{PreparedPublicationV1, WorkflowError, WorkflowResult};
 use std::path::Path;
@@ -23,7 +25,8 @@ impl HostSecrets {
     pub(crate) fn seal_process_output(
         &self,
         mut output: SupervisedProcessOutput,
-        envelope: &Path,
+        anchor: &StagingAnchor,
+        pause: &StagingPause,
         command_id: &str,
     ) -> WorkflowResult<SealedProcessOutput> {
         // Control facts are interpreted before scrubbing. Credentials can
@@ -53,7 +56,7 @@ impl HostSecrets {
         } else {
             None
         };
-        self.seal_staged_evidence(envelope, prepared.as_mut())?;
+        self.seal_staged_evidence(anchor, prepared.as_mut(), pause)?;
         if let Some(manifest) = &prepared {
             output.stdout = serde_json::to_vec(manifest)?;
         }
@@ -73,107 +76,65 @@ impl HostSecrets {
         })
     }
 
+    /// Seals the call's staging. On a failure the whole tree is removed;
+    /// a removal failure or an I/O failure pauses the run naming the path
+    /// (#297), and only an integrity refusal (a dishonest manifest) fails.
     pub(crate) fn seal_staged_evidence(
         &self,
-        envelope: &Path,
+        anchor: &StagingAnchor,
         mut prepared: Option<&mut PreparedPublicationV1>,
+        pause: &StagingPause,
     ) -> WorkflowResult<()> {
-        let root = envelope.parent().expect("staged envelope has a root");
-        let seal = (|| {
-            seal_staged_envelope(envelope, self, prepared.as_deref_mut())?;
-            if self.remove_unsafe_artifacts(root, envelope)? {
-                refuse_staged_evidence(envelope, prepared.as_deref_mut())?;
+        let seal: WorkflowResult<()> = (|| {
+            seal_staged_envelope(anchor, self, prepared.as_deref_mut())?;
+            if self.remove_unsafe_artifacts(anchor)? {
+                refuse_staged_evidence(anchor, prepared.as_deref_mut())?;
                 if let Some(prepared) = prepared {
                     // Do not persist raw digests of refused secret-bearing files.
-                    prepared.entries.retain(|entry| {
-                        entry.relative_path
-                            == crate::command::workflow_host_envelope_seal::ENVELOPE_FILE
-                    });
+                    prepared
+                        .entries
+                        .retain(|entry| entry.relative_path == ENVELOPE_FILE);
                 }
             }
             Ok(())
         })();
-        if let Err(error) = seal {
-            if let Err(cleanup) = Self::remove_staging_tree(root) {
-                return Err(WorkflowError::ControlPaused(format!(
-                    "host command refused because secret-bearing staging could not be removed at '{}': {cleanup}",
-                    root.display()
-                )));
-            }
-            return Err(error);
+        let Err(error) = seal else {
+            return Ok(());
+        };
+        let evidence = self.text(&error.to_string());
+        match anchor.remove_tree() {
+            Err(cleanup) => Err(pause.pause(
+                anchor.root(),
+                "refused because secret-bearing staging could not be removed",
+                &format!(
+                    "{evidence}; removing it failed: {}",
+                    self.text(&cleanup.to_string())
+                ),
+                true,
+            )),
+            Ok(()) if matches!(error, WorkflowError::Io { .. }) => Err(pause.pause(
+                anchor.root(),
+                "staging could not be sealed (it was removed)",
+                &evidence,
+                false,
+            )),
+            Ok(()) => Err(error),
         }
-        Ok(())
-    }
-
-    /// Restore directory traversal and write access before removing the entire
-    /// call tree. A child may have changed permissions after writing secrets.
-    fn remove_staging_tree(root: &Path) -> std::io::Result<()> {
-        fn make_accessible(path: &Path) -> std::io::Result<()> {
-            let metadata = std::fs::symlink_metadata(path)?;
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Ok(());
-            }
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
-            }
-            #[cfg(not(unix))]
-            {
-                let mut permissions = metadata.permissions();
-                permissions.set_readonly(false);
-                std::fs::set_permissions(path, permissions)?;
-            }
-            for entry in std::fs::read_dir(path)? {
-                let entry = entry?;
-                if entry.file_type()?.is_dir() {
-                    make_accessible(&entry.path())?;
-                }
-            }
-            Ok(())
-        }
-
-        match std::fs::symlink_metadata(root) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error),
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-                return std::fs::remove_file(root);
-            }
-            Ok(_) => {}
-        }
-        make_accessible(root)?;
-        std::fs::remove_dir_all(root)
     }
 
     /// Signed/non-envelope artifacts cannot be rewritten without invalidating
     /// their contracts. Remove unsafe staging and return a canonical operational
     /// refusal before any publication, using the same secret verification.
-    fn remove_unsafe_artifacts(&self, root: &Path, envelope: &Path) -> WorkflowResult<bool> {
-        let io = |path: &Path, source| WorkflowError::Io {
-            path: path.into(),
-            source,
-        };
-        let entries = match std::fs::read_dir(root) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(io(root, error)),
-        };
-        let mut refused = false;
-        for entry in entries {
-            let entry = entry.map_err(|error| io(root, error))?;
-            let path = entry.path();
-            let kind = entry.file_type().map_err(|error| io(&path, error))?;
-            if kind.is_dir() {
-                refused |= self.remove_unsafe_artifacts(&path, envelope)?;
-            } else if kind.is_file() && path != envelope {
-                let bytes = std::fs::read(&path).map_err(|error| io(&path, error))?;
-                if self.holds_serialized_secret(&bytes) {
-                    std::fs::remove_file(&path).map_err(|error| io(&path, error))?;
-                    refused = true;
-                }
-            }
-        }
-        Ok(refused)
+    fn remove_unsafe_artifacts(&self, anchor: &StagingAnchor) -> WorkflowResult<bool> {
+        anchor
+            .scan(true, &mut |relative, bytes| {
+                relative != Path::new(ENVELOPE_FILE)
+                    && bytes.is_some_and(|bytes| self.holds_serialized_secret(bytes))
+            })
+            .map_err(|source| WorkflowError::Io {
+                path: anchor.root().into(),
+                source,
+            })
     }
 
     /// Retain control/operational classification while scrubbing all error

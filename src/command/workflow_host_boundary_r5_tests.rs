@@ -60,3 +60,8 @@ async fn round2_interrupted_temporary_envelopes_are_removed() {
         assert_no_clear_copy(&ran);
     }
 }
+
+// The link and permission cases are Unix; Windows keeps its documented limit.
+#[cfg(unix)]
+#[path = "workflow_host_boundary_r7_tests.rs"]
+mod boundary_r7_tests;

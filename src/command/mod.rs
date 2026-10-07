@@ -398,3 +398,7 @@ pub(crate) mod workflow_host_envelope_seal;
 mod workflow_host_envelope_seal_tests;
 pub(crate) mod workflow_host_environment;
 pub(crate) mod workflow_host_secrets;
+pub(crate) mod workflow_host_staging_anchor;
+#[cfg(unix)]
+mod workflow_host_staging_anchor_unix;
+pub(crate) mod workflow_host_staging_pause;
