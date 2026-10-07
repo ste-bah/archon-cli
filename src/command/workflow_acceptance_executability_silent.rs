@@ -219,7 +219,10 @@ fn struck(
                 let mut prefix = Vec::new();
                 std::fs::File::open(path)
                     .and_then(|file| file.take(128).read_to_end(&mut prefix))
-                    .map_err(|source| archon_workflow::WorkflowError::io(path, source))?;
+                    .map_err(|source| archon_workflow::WorkflowError::Io {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
                 // Old binaries saved total-clock cutoffs as strikes. They are
                 // not evidence against the author, even if a later failure is
                 // non-clock.
@@ -235,11 +238,18 @@ fn struck(
                 )));
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(source) => return Err(archon_workflow::WorkflowError::io(path, source)),
+            Err(source) => {
+                return Err(archon_workflow::WorkflowError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                });
+            }
         }
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)
-                .map_err(|source| archon_workflow::WorkflowError::io(dir, source))?;
+            std::fs::create_dir_all(dir).map_err(|source| archon_workflow::WorkflowError::Io {
+                path: dir.to_path_buf(),
+                source,
+            })?;
         }
         archon_workflow::stage_write::write_bytes(path, why.as_bytes())?;
         if credit == Credit::Saved {
