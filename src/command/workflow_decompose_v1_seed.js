@@ -84,6 +84,12 @@ function seedEntries(seed, policy, state) {
   // A reply authored after that gate is the entry's latest version, and a
   // repair only when it differs from what the gate judged: a gate asked the
   // same candidate again answers from its record, which keeps its old time.
+  // Both sides are compared as the author step keeps an entry, with its
+  // host-owned fields set (Issue 357): an older runtime's candidate may
+  // predate that, and a reply is the raw text. The judged entry itself is
+  // carried as it was, so an unchanged candidate keeps its recorded verdict.
+  const criteria = args.acceptanceCriteria || {};
+  const kept = (entry) => acceptanceEntryKey(setHostOwnedFields(JSON.parse(JSON.stringify(entry)), criteria));
   const repaired = new Set();
   const unreadable = [];
   for (const reply of Array.isArray(seed.replies) ? seed.replies : []) {
@@ -91,8 +97,8 @@ function seedEntries(seed, policy, state) {
     try { entry = unwrapEntry(JSON.parse(reply.text), reply.id); } catch (_) { entry = null; }
     if (!entry || entry.id !== reply.id) { unreadable.push(reply.id); continue; }
     const judged = state.entries.get(reply.id);
-    seedOwe(entry);
-    if (!judged || acceptanceEntryKey(judged) !== acceptanceEntryKey(entry)) repaired.add(reply.id);
+    setHostOwnedFields(entry, criteria);
+    if (!judged || kept(judged) !== acceptanceEntryKey(entry)) repaired.add(reply.id);
     state.entries.set(reply.id, entry);
   }
   const invalid = seed.invalid && typeof seed.invalid === "object" ? seed.invalid : {};
@@ -130,17 +136,6 @@ function seedRepairIds(findings, ids, published, candidate) {
   if (attributed === null) return null;
   for (const id of attributed) named.add(id);
   return named;
-}
-
-// The host-owned fields of an owed supplementary check, as the author step
-// sets them before it keeps an entry.
-function seedOwe(entry) {
-  const sup = owedSupplementary().get(entry.id);
-  if (!sup) return entry;
-  const covers = Array.isArray(entry.covers) ? entry.covers.filter((c) => typeof c === "string") : [];
-  entry.covers = [sup.requirement, ...covers.filter((c) => c !== sup.requirement)];
-  entry.gap_permitted = false;
-  return entry;
 }
 
 function seedArtifact(seed, policy) {

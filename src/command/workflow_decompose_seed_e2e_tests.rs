@@ -266,7 +266,9 @@ impl Run {
     /// What `workflow decompose resume` does after recording `steps`.
     fn upgrade(&self, steps: &[(&str, &str)]) -> serde_json::Value {
         record_transitions(&self.store, &self.run_id, steps);
-        let criteria: BTreeSet<String> = ["AC-1", "AC-2", "AC-3"].map(String::from).into();
+        let criteria = [("AC-1", "one"), ("AC-2", "two"), ("AC-3", "three")]
+            .map(|(id, text)| (id.into(), text.into()))
+            .into();
         let seed = current_seed(
             &self.store,
             &self.run_id,
@@ -395,25 +397,28 @@ async fn a_seeded_round_interrupted_and_resumed_replays_its_own_calls() {
         "pause-acceptance-2",
         "the old pause is not passed as taken"
     );
-    assert_eq!(
-        acceptance_tasks(&run.authors.tasks()[6..]),
-        ["AC-2", "AC-2", "AC-2"]
-    );
+    // Issue 362: the freeze retried after each outage authors nothing more.
+    assert_eq!(acceptance_tasks(&run.authors.tasks()[6..]), ["AC-2"]);
+    assert!(run.calls().contains("acceptance-author-AC-2-16"));
     // The same runtime: the same seed, so the seeded calls answer from their records.
     run.judge.outage.store(false, Ordering::SeqCst);
     let tasks = run.authors.tasks().len();
+    let freezes = run.judge.runs("freeze-acceptance");
     let args = run.upgrade(&[("new-script", "next-rev")]);
     let summary = run
         .run(FIXED_SCRIPT_SOURCE, args)
         .await
         .expect("the resumed seeded run completes");
     assert_eq!(summary.status, WorkflowV2Status::Accepted, "{summary:?}");
-    assert_eq!(
-        acceptance_tasks(&run.authors.tasks()[tasks..]),
-        ["AC-2"],
-        "one new attempt after the pause, none replayed"
+    assert!(
+        acceptance_tasks(&run.authors.tasks()[tasks..]).is_empty(),
+        "the seeded AC-2 reply answers from its record, and nothing is re-authored"
     );
-    assert!(run.calls().contains("acceptance-author-AC-2-25"));
+    assert_eq!(
+        run.judge.runs("freeze-acceptance"),
+        freezes + 1,
+        "after the pause, one freeze judges the seeded candidate"
+    );
 }
 
 #[tokio::test]

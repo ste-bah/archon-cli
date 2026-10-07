@@ -18,7 +18,7 @@
 //! `acceptance-author-<entry id>-<n>` per acceptance entry, `<subject>-author-<n>`
 //! for a whole artifact (the skeleton, each body), `pause-<subject>-<n>` for a
 //! pause. No PRD, project or task name is known here.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use anyhow::Result;
 use archon_workflow::{WorkflowV2CallRecord, WorkflowV2HostMethod, WorkflowV2Status};
@@ -26,6 +26,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::seed_unmapped as unmapped;
+#[path = "workflow_decompose_seed_host_owned.rs"]
+mod host_owned;
+use host_owned::HostOwned;
 
 /// The acceptance gate. Its stdin is the candidate the script assembled.
 const ACCEPTANCE_GATE: &str = "freeze-acceptance";
@@ -182,26 +185,6 @@ fn reply_entry(text: &str, id: &str) -> Option<Value> {
     }
 }
 
-/// What the script sets on a supplementary entry before it keeps it: it
-/// covers exactly the requirement it is owed for and permits no gap.
-fn owe(mut entry: Value, id: &str, criteria: &BTreeSet<String>) -> Value {
-    let Some(requirement) = id.strip_prefix("SUP-").filter(|_| !criteria.contains(id)) else {
-        return entry;
-    };
-    let mut covers = vec![Value::from(requirement)];
-    if let Some(listed) = entry["covers"].as_array() {
-        covers.extend(
-            listed
-                .iter()
-                .filter(|c| c.is_string() && c.as_str() != Some(requirement))
-                .cloned(),
-        );
-    }
-    entry["covers"] = Value::Array(covers);
-    entry["gap_permitted"] = Value::Bool(false);
-    entry
-}
-
 /// This build's freeze shape refusals of one carried entry.
 fn entry_refusals(id: &str, entry: &Value) -> Result<Vec<String>> {
     let candidate = serde_json::to_vec(&serde_json::json!({ "entries": [entry] }))?;
@@ -262,7 +245,7 @@ fn ordered(records: &[WorkflowV2CallRecord]) -> Result<Vec<&WorkflowV2CallRecord
 pub(crate) fn derive(
     records: &[WorkflowV2CallRecord],
     pause_ids: &[String],
-    criteria: &BTreeSet<String>,
+    criteria: &BTreeMap<String, String>,
 ) -> Result<Derived> {
     let records = ordered(records)?;
     let mut derived = Derived::default();
@@ -313,7 +296,7 @@ pub(crate) fn derive(
             },
         );
     }
-    if let Some(seed) = acceptance(&records, &gates, criteria)? {
+    if let Some(seed) = acceptance(&records, &gates, &HostOwned::new(criteria, &gates))? {
         derived.subjects.insert("acceptance".into(), seed);
     }
     Ok(derived)
@@ -359,7 +342,7 @@ fn gate_round(candidate: &BTreeMap<String, Value>, replies: &[Reply<'_>]) -> u64
 fn acceptance(
     records: &[&WorkflowV2CallRecord],
     gates: &[Gate<'_>],
-    criteria: &BTreeSet<String>,
+    host: &HostOwned<'_>,
 ) -> Result<Option<SubjectSeed>> {
     let mut replies_read = Vec::new();
     let mut any_reply = false;
@@ -373,7 +356,7 @@ fn acceptance(
         any_reply = true;
         let text = extract_object(content);
         if let Some(entry) = reply_entry(text, &id) {
-            let entry = owe(entry, &id, criteria);
+            let entry = host.stamp(entry, &id);
             replies_read.push(Reply {
                 record,
                 id,
@@ -392,9 +375,11 @@ fn acceptance(
     {
         let (record, _, stdin, _) = gate;
         let entries = candidate_entries(stdin, &record.call.id)?;
+        // Compared as the loop kept them: a candidate an older runtime
+        // assembled may predate the host-owned stamp.
         let by_id = entries
             .iter()
-            .map(|(id, entry, _)| (id.clone(), entry.clone()))
+            .map(|(id, entry, _)| (id.clone(), host.stamp(entry.clone(), id)))
             .collect();
         judged.push((gate_round(&by_id, &replies_read), gate, entries));
     }
@@ -419,6 +404,7 @@ fn acceptance(
                     "no recorded gate names this supplementary check as owed",
                 ));
             }
+            let entry = host.stamp(entry, &id);
             entries.insert(id, entry);
         }
     }

@@ -11,7 +11,9 @@ const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js
   .map((name) => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 
 function context(criteria, phaseSeed) {
-  const ctx = { args: { acceptanceCriteria: criteria, gateMode: 'enforce', authorMaxParallelism: 2, phaseSeed } };
+  // Issue 357's native entry validator; its rules are tested by shape_tests.
+  const ctx = { args: { acceptanceCriteria: criteria, gateMode: 'enforce', authorMaxParallelism: 2, phaseSeed },
+    __archonValidateAcceptanceEntry: () => '[]' };
   vm.createContext(ctx);
   vm.runInContext(source, ctx);
   if (phaseSeed) ctx.applySeedOrdinals();

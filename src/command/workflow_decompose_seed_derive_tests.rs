@@ -70,8 +70,11 @@ pub(crate) fn entry(id: &str) -> Value {
     })
 }
 
-fn criteria(ids: &[&str]) -> BTreeSet<String> {
-    ids.iter().map(|id| id.to_string()).collect()
+/// Each criterion's text, as `entry` carries it.
+fn criteria(ids: &[&str]) -> BTreeMap<String, String> {
+    ids.iter()
+        .map(|id| (id.to_string(), format!("criterion of {id}")))
+        .collect()
 }
 
 fn entries_seed(
@@ -148,11 +151,46 @@ fn the_last_gate_candidate_is_carried_with_the_replies_authored_since() {
     assert_eq!(derived.author_ordinals["acceptance"], 7);
 }
 
+/// Issue 357 stamps the host criterion before it keeps an entry, so the
+/// gate's candidate holds the criterion text while the replies hold the
+/// author's. The gate still holds that round: no reply is "since" it.
+#[test]
+fn a_gate_holds_the_round_whose_replies_it_stamped() {
+    let raw = |id: &str| {
+        let mut entry = entry(id);
+        entry["criterion"] = json!("the author's own words");
+        entry.to_string()
+    };
+    let candidate = json!({"entries": [entry("AC-1"), entry("AC-2")]}).to_string();
+    let records = vec![
+        reply("acceptance-author-AC-1-4", "01:00:00", &raw("AC-1")),
+        reply("acceptance-author-AC-2-4", "01:01:00", &raw("AC-2")),
+        gate(
+            "freeze-acceptance",
+            "02:00:00",
+            &candidate,
+            Vec::new(),
+            false,
+        ),
+    ];
+    let derived = derive(&records, &[], &criteria(&["AC-1", "AC-2"])).unwrap();
+    let (_, _, replies, invalid, carried) = entries_seed(&derived);
+    assert!(replies.is_empty(), "{replies:?}");
+    assert!(invalid.is_empty(), "{invalid:?}");
+    assert_eq!(carried, 2);
+}
+
 #[test]
 fn a_carried_entry_this_build_refuses_is_named_invalid() {
     let mut bad = entry("SUP-REQ-1");
-    bad.as_object_mut().unwrap().remove("criterion");
-    let candidate = json!({"entries": [entry("AC-1")], "supplementary": [bad]}).to_string();
+    bad.as_object_mut().unwrap().remove("check");
+    // The criterion is host-owned (Issue 357): the author step sets it before
+    // it validates, so an entry carried without one is stamped, not refused.
+    let mut unstamped = entry("AC-1");
+    unstamped.as_object_mut().unwrap().remove("criterion");
+    let mut no_criterion = bad.clone();
+    no_criterion.as_object_mut().unwrap().remove("criterion");
+    let candidate = json!({"entries": [unstamped], "supplementary": [no_criterion]}).to_string();
     let owed = finding(
         "check 'SUP-REQ-1': PRD requirement REQ-1 is covered by no acceptance check; author supplementary check SUP-REQ-1 with covers [\"REQ-1\"] that fails whenever REQ-1 is violated: the requirement",
         "SUP-REQ-1",
@@ -170,7 +208,7 @@ fn a_carried_entry_this_build_refuses_is_named_invalid() {
             "02:00:00",
             &candidate,
             vec![finding(
-                "candidate artifact was refused: supplementary/0/criterion is missing or has an invalid type or value",
+                "candidate artifact was refused: supplementary/0/check is missing or has an invalid type or value",
                 "acceptance",
             )],
             false,
@@ -181,7 +219,12 @@ fn a_carried_entry_this_build_refuses_is_named_invalid() {
     assert_eq!(gates.len(), 2, "every gate, for the owed checks they name");
     assert_eq!(carried, 2);
     assert_eq!(invalid.keys().collect::<Vec<_>>(), ["SUP-REQ-1"]);
-    assert!(invalid["SUP-REQ-1"][0].contains("criterion"), "{invalid:?}");
+    assert!(
+        invalid["SUP-REQ-1"]
+            .iter()
+            .all(|refusal| refusal.contains("entry/check") && !refusal.contains("criterion")),
+        "{invalid:?}"
+    );
 }
 
 #[test]

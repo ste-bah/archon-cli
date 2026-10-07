@@ -340,10 +340,16 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             .await
             .map_err(|error| anyhow!("reporting the runtime transition: {error}"))?;
     }
-    // Issue 360: after an upgrade the script starts from the phase seed.
+    // Issue 360: after an upgrade the script starts from the phase seed. The
+    // criteria texts are the host-owned criterion the script stamps (#357).
     let criteria = expected_arguments["acceptanceCriteria"]
         .as_object()
-        .map(|criteria| criteria.keys().cloned().collect())
+        .map(|criteria| {
+            criteria
+                .iter()
+                .filter_map(|(id, text)| Some((id.clone(), text.as_str()?.to_string())))
+                .collect()
+        })
         .unwrap_or_default();
     let seed = crate::command::workflow_decompose_seed::current_seed(
         &store, run_id, &log_path, &criteria,

@@ -327,14 +327,24 @@ fn fixed_catalog_declared_write_sets_match_child_manifest_shapes() {
 #[path = "workflow_host_environment_tests.rs"]
 mod environment_tests;
 
+/// A schema-1 (total-clock) catalog resumes under schema 2 (#358): the
+/// schema changes limits only. An unstamped outcome that schema 1's total
+/// clock cut short never answers again under schema 2, even with the same
+/// timeout values; a completed one does.
 #[test]
-fn issue356_old_total_catalog_cannot_resume_as_idle_catalog() {
+fn issue356_old_total_catalog_resumes_but_its_timeouts_do_not_replay() {
+    use super::workflow_host_command_exec::identity::catalog_schema_readable;
+    use super::workflow_host_command_exec::{
+        FixedHostCommandExecutor, WorkflowHostCommandExecutor,
+    };
     use archon_workflow::{FixedRunIdentityV1, verify_fixed_resume_identity};
+    let temp = tempfile::tempdir().unwrap();
     for revision in ["old-build", "second-build", ""] {
         let current = fixed_decomposition_catalog(revision).unwrap();
         let mut old = current.clone();
         old.schema_version = 1;
         old.recompute_digest().unwrap();
+        assert_ne!(old.digest, current.digest);
         let identity = |digest| FixedRunIdentityV1 {
             template_version: "v1".into(),
             starting_binary_revision: revision.into(),
@@ -344,12 +354,51 @@ fn issue356_old_total_catalog_cannot_resume_as_idle_catalog() {
             prd_identity: "/prd".into(),
             task_root_identity: "/tasks".into(),
         };
-        let error = verify_fixed_resume_identity(&identity(old.digest), &identity(current.digest))
-            .expect_err("old total-clock semantics must be rejected");
         assert!(
-            error
-                .to_string()
-                .contains("resume identity mismatch for catalog_digest")
+            verify_fixed_resume_identity(
+                &identity(old.digest.clone()),
+                &identity(current.digest.clone())
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(catalog_schema_readable(1, current.schema_version));
+        let executor = FixedHostCommandExecutor::new(
+            current.clone(),
+            context(temp.path()),
+            temp.path().join("run"),
+        )
+        .with_launch_catalog(old);
+        let record = |data: serde_json::Value| {
+            let mut call = archon_workflow::WorkflowV2HostCall {
+                id: "host-command:freeze-acceptance".into(),
+                method: archon_workflow::WorkflowV2HostMethod::HostCommand,
+                write_mode: None,
+                options: Default::default(),
+            };
+            call.options.host_command =
+                Some(HostCommandRequest::new("freeze-acceptance", Some("c".into())).unwrap());
+            archon_workflow::WorkflowV2CallRecord::new(
+                "run",
+                call,
+                1,
+                "hash".into(),
+                archon_workflow::WorkflowV2Result {
+                    data,
+                    ..Default::default()
+                },
+                Vec::new(),
+            )
+        };
+        let timed_out = record(serde_json::json!({"exitCode": null, "timedOut": true}));
+        assert!(
+            !executor.outcome_limits_hold(&timed_out).unwrap(),
+            "{revision}"
+        );
+        let completed = record(serde_json::json!({"exitCode": 0, "timedOut": false}));
+        assert!(
+            executor.outcome_limits_hold(&completed).unwrap(),
+            "{revision}"
         );
     }
 }

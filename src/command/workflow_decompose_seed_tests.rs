@@ -85,8 +85,10 @@ fn fixture() -> (tempfile::TempDir, WorkflowStore, String, std::path::PathBuf) {
     (temp, store, run.id, log)
 }
 
-fn criteria() -> BTreeSet<String> {
-    ["AC-1".to_string(), "AC-2".to_string()].into()
+fn criteria() -> BTreeMap<String, String> {
+    ["AC-1", "AC-2"]
+        .map(|id| (id.to_string(), format!("criterion of {id}")))
+        .into()
 }
 
 fn seed_events(store: &WorkflowStore, run_id: &str) -> Vec<serde_json::Value> {

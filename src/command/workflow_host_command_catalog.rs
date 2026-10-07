@@ -48,7 +48,9 @@ pub(crate) struct ResolvedHostCommand {
 
 /// No-progress window for provider-backed capabilities. Binary-only: the catalog
 /// digest includes the schema and window. Schema 2 interprets host timeouts as
-/// renewable no-progress windows rather than total clocks, refusing old resumes.
+/// renewable no-progress windows rather than total clocks. It changes limits
+/// only (reuse meaning 1, `KNOWN_CATALOG_SCHEMAS`), so a schema-1 run resumes;
+/// an outcome a limit cut short replays only under its own limits stamp.
 /// The provider has its own shorter idle window so it can save/report a stall
 /// before the host tears down the child. Neither window limits active work.
 const FREEZE_CAPABILITY_TIMEOUT_SECS: u64 = 7_800;

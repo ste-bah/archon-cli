@@ -25,7 +25,7 @@
 //! Visible as one event (kind `BinaryRevisionDrift`, `detail.event =
 //! decomposition_phase_seeded`), one `.decompose.log` line and the status
 //! lines below, each written once per seed.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::Result;
@@ -195,7 +195,7 @@ fn derive_seed(
     store: &WorkflowStore,
     run_id: &str,
     (index, runtime): (usize, FixedRunIdentityV1),
-    criteria: &BTreeSet<String>,
+    criteria: &BTreeMap<String, String>,
 ) -> Result<PhaseSeed> {
     let results = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
     let records = results.load_call_records()?;
@@ -227,7 +227,7 @@ pub(crate) fn current_seed(
     store: &WorkflowStore,
     run_id: &str,
     log_path: &Path,
-    criteria: &BTreeSet<String>,
+    criteria: &BTreeMap<String, String>,
 ) -> Result<Option<PhaseSeed>> {
     let Some((index, runtime)) = seeded_transition(store, run_id)? else {
         return Ok(None);
