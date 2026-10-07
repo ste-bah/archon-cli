@@ -376,29 +376,30 @@ fn accepted_with_patch_landed(outcome: &WorkflowV2BranchOutcome) -> bool {
 
 /// Every record a later save replaced for this branch, newest first, from the
 /// call's `superseded/` directory (`result_store::archive_superseded_json`,
-/// which renames and so keeps each record's own write time). An unreadable
-/// archived file is skipped: the archive is history.
+/// which renames and so keeps each record's own write time), as `store_file`
+/// reads them in the call directory; the rest is reported (Issue-292).
 fn superseded_records_for(
     v2_store: &WorkflowV2ResultStore,
     call_id: &str,
     item_id: &str,
 ) -> Vec<WorkflowV2BranchOutcome> {
     let current = v2_store.branch_outcome_path(call_id, item_id);
-    let Some(dir) = current.parent().map(|parent| parent.join("superseded")) else {
+    let Some(call_dir) = current.parent() else {
         return Vec::new();
     };
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut records: Vec<(std::time::SystemTime, WorkflowV2BranchOutcome)> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let written = entry.metadata().and_then(|meta| meta.modified()).ok()?;
-            let bytes = std::fs::read(entry.path()).ok()?;
-            let outcome = serde_json::from_slice::<WorkflowV2BranchOutcome>(&bytes).ok()?;
-            (outcome.item_id == item_id).then_some((written, outcome))
-        })
-        .collect();
+    use crate::v2::store_file::{read_store_file_or_report, store_dir_entries};
+    let mut records: Vec<(std::time::SystemTime, WorkflowV2BranchOutcome)> =
+        store_dir_entries(&call_dir.join("superseded"))
+            .into_iter()
+            .filter_map(|path| {
+                let written = std::fs::symlink_metadata(&path)
+                    .and_then(|meta| meta.modified())
+                    .ok()?;
+                let bytes = read_store_file_or_report(&path, call_dir)?;
+                let outcome = serde_json::from_slice::<WorkflowV2BranchOutcome>(&bytes).ok()?;
+                (outcome.item_id == item_id).then_some((written, outcome))
+            })
+            .collect();
     records.sort_by_key(|(written, _)| std::cmp::Reverse(*written));
     records.into_iter().map(|(_, outcome)| outcome).collect()
 }

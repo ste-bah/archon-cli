@@ -4,6 +4,14 @@ use crate::command::workflow_decompose_transitions::{
     self as transitions, RuntimeTransition, RuntimeTransitions,
 };
 
+/// A result-store file's bytes, read as the store reads them (Issue-292): a
+/// FIFO or other refused entry fails the check, naming the file, instead of
+/// blocking it.
+fn read_named(path: &Path) -> Result<Vec<u8>> {
+    archon_workflow::v2::store_file::read_store_file(path)
+        .map_err(|error| anyhow!("{}: {error}", path.display()))
+}
+
 pub(crate) fn unmapped(field: &str, reason: &str) -> anyhow::Error {
     anyhow!(
         "fixed decomposition resume paused: cannot map {field}: {reason}; restore an intact record or install a compatible binary with an explicit migration, then resume this run"
@@ -40,7 +48,7 @@ pub(super) fn validate_result_state(store: &WorkflowStore, run_id: &str) -> Resu
     let root = store.run_dir(run_id).join("v2");
     let checkpoint = root.join("checkpoint.json");
     if checkpoint.exists() {
-        let value = serde_json::from_slice(&std::fs::read(&checkpoint)?)
+        let value = serde_json::from_slice(&read_named(&checkpoint)?)
             .map_err(|e| unmapped("v2/checkpoint.json", &e.to_string()))?;
         let _: archon_workflow::WorkflowV2Checkpoint = decode(value, "v2/checkpoint.json")?;
     }
@@ -71,7 +79,7 @@ fn validate_call_directory(
             .is_some_and(|extension| extension == "json")
         {
             let field = file.display().to_string();
-            let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&file)?)
+            let value: serde_json::Value = serde_json::from_slice(&read_named(&file)?)
                 .map_err(|e| unmapped(&field, &e.to_string()))?;
             // Missing schema is the explicitly supported pre-versioned v2
             // shape (the result store's existing default). Unknown is not.
@@ -330,4 +338,33 @@ pub(super) fn require_equal(
         field,
         "differs from the verified launch snapshot; restore the launch-bound input/configuration before resume",
     ))
+}
+
+#[cfg(all(test, unix))]
+mod store_read_tests {
+    use super::*;
+
+    /// Issue-292: a FIFO planted in the result store fails the upgrade
+    /// check at once, and the error names it.
+    #[test]
+    fn a_fifo_in_the_result_store_fails_the_check_naming_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let results = dir.path().join("results");
+        std::fs::create_dir(&results).unwrap();
+        let fifo = results.join("planted.json");
+        let raw = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(raw.as_ptr(), 0o600) }, 0);
+        let store = archon_workflow::WorkflowV2ResultStore::new(dir.path());
+        let (done, wait) = std::sync::mpsc::channel();
+        let at = results.clone();
+        std::thread::spawn(move || {
+            let checked = validate_call_directory(&at, &store, true).map_err(|e| e.to_string());
+            let _ = done.send(checked);
+        });
+        let error = wait
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the check blocked on a FIFO")
+            .expect_err("a FIFO is no record");
+        assert!(error.contains(&fifo.display().to_string()), "{error}");
+    }
 }

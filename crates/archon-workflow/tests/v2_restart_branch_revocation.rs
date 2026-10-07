@@ -132,39 +132,42 @@ fn an_unreadable_archived_outcome_fails_the_restart_and_revokes_nothing() {
     assert!(!current.parent().unwrap().join("revoked").exists());
 }
 
+/// A link the cache can reuse is one that resolves inside the archive
+/// (Issue-292: a link out of it is never read). Restart moves the link and
+/// the record it names, so neither stays reusable.
 #[cfg(unix)]
 #[test]
 fn restart_revokes_a_superseded_symlink_that_the_cache_can_reuse() {
     let temp = tempfile::tempdir().unwrap();
     let (store, run) = generated_run(&temp, &[CALL]);
     let v2 = v2_store(&store, &run);
-    let target = temp.path().join("landing.json");
-    std::fs::write(
-        &target,
-        serde_json::to_vec(&outcome("T-A", WorkflowV2Status::Accepted, "H1", true)).unwrap(),
-    )
-    .unwrap();
     let archive = v2
         .branch_outcome_path(CALL, &item("T-A").id)
         .parent()
         .unwrap()
         .join("superseded");
     std::fs::create_dir_all(&archive).unwrap();
+    let target = archive.join("landing.record");
+    std::fs::write(
+        &target,
+        serde_json::to_vec(&outcome("T-A", WorkflowV2Status::Accepted, "H1", true)).unwrap(),
+    )
+    .unwrap();
     let link = archive.join("landing.json");
     std::os::unix::fs::symlink(&target, &link).unwrap();
     assert_eq!(v2.load_superseded_branch_outcomes().len(), 1);
     assert_eq!(split(&v2, &["T-A"]).0.len(), 1);
     restart_generated_v2_task(&store, &run, "T-A").unwrap();
     assert!(
-        !link.exists(),
+        std::fs::symlink_metadata(&link).is_err(),
         "restart left a reusable symlink in the archive"
+    );
+    assert!(
+        !target.exists(),
+        "restart left the linked record in the archive"
     );
     assert_revoked(&v2, "T-A");
     assert!(v2.load_superseded_branch_outcomes().is_empty());
-    assert!(
-        target.exists(),
-        "revocation moves the link, not its external target"
-    );
 }
 
 #[cfg(unix)]

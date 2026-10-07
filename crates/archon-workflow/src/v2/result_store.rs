@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{WorkflowError, WorkflowResult};
 
+use super::store_file::{
+    read_store_file, read_store_file_in, read_store_file_or_report, read_store_text,
+    report_skipped_store_entry, report_skipped_store_entry_once, store_dir_entries,
+};
 use super::{WorkflowV2BranchOutcome, WorkflowV2HostCall, WorkflowV2Result, WorkflowV2Status};
 
 const RESULT_SCHEMA_VERSION: &str = "workflow-result-v2";
@@ -214,24 +218,17 @@ impl WorkflowV2ResultStore {
     /// `superseded/` directory. `load_branch_outcomes` is the current record
     /// per item; a partial captured by a replaced record (Issue-18) lives
     /// only here. An unreadable archived file is skipped, never fatal: the
-    /// archive is history, and one bad row must not hide the rest.
+    /// archive is history, and one bad row must not hide the rest. Only
+    /// regular files are read (`store_file`); any other entry is reported.
     pub fn load_superseded_branch_outcomes(&self) -> Vec<WorkflowV2BranchOutcome> {
-        let root = self.root.join("branches");
-        let Ok(calls) = fs::read_dir(&root) else {
-            return Vec::new();
-        };
         let mut outcomes = Vec::new();
-        for call_dir in calls.flatten() {
-            let Ok(entries) = fs::read_dir(call_dir.path().join("superseded")) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
+        for call_dir in store_dir_entries(&self.root.join("branches")) {
+            for path in store_dir_entries(&call_dir.join("superseded")) {
                 if path.extension().and_then(|value| value.to_str()) != Some("json") {
                     continue;
                 }
-                if let Ok(raw) = fs::read_to_string(&path)
-                    && let Ok(outcome) = serde_json::from_str(&raw)
+                if let Some(raw) = read_store_file_or_report(&path, &call_dir)
+                    && let Ok(outcome) = serde_json::from_slice(&raw)
                 {
                     outcomes.push(outcome);
                 }
@@ -288,15 +285,10 @@ impl WorkflowV2ResultStore {
         let mut records: Vec<WorkflowV2CallRecord> = Vec::new();
         for entry in fs::read_dir(&dir).map_err(|err| WorkflowError::io(&dir, err))? {
             let entry = entry.map_err(|err| WorkflowError::io(&dir, err))?;
-            if !entry
-                .file_type()
-                .map_err(|err| WorkflowError::io(entry.path(), err))?
-                .is_file()
-            {
-                continue;
-            }
             let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            if path.extension().and_then(|value| value.to_str()) != Some("json")
+                || !regular_or_reported(&entry)?
+            {
                 continue;
             }
             if let Some(record) = read_store_record(&path)? {
@@ -316,8 +308,8 @@ impl WorkflowV2ResultStore {
         if !path.exists() {
             return Ok(None);
         }
-        let raw = fs::read_to_string(&path).map_err(|err| WorkflowError::io(&path, err))?;
-        serde_json::from_str(&raw).map(Some).map_err(Into::into)
+        let raw = read_store_file(&path).map_err(|err| WorkflowError::io(&path, err))?;
+        serde_json::from_slice(&raw).map(Some).map_err(Into::into)
     }
 
     pub fn invalidate_call_and_dependents(
@@ -410,21 +402,27 @@ fn load_outcomes_from_dir(
 ) -> WorkflowResult<()> {
     for entry in fs::read_dir(dir).map_err(|err| WorkflowError::io(dir, err))? {
         let entry = entry.map_err(|err| WorkflowError::io(dir, err))?;
-        if !entry
-            .file_type()
-            .map_err(|err| WorkflowError::io(entry.path(), err))?
-            .is_file()
-        {
-            continue;
-        }
         let path = entry.path();
         if path.extension().and_then(|value| value.to_str()) == Some("json")
+            && regular_or_reported(&entry)?
             && let Some(outcome) = read_store_record(&path)?
         {
             outcomes.push(outcome);
         }
     }
     Ok(())
+}
+
+/// Whether a listed record entry is a regular file. Listings of current
+/// records read only those; any other entry is reported, never silent.
+fn regular_or_reported(entry: &fs::DirEntry) -> WorkflowResult<bool> {
+    let kind = entry
+        .file_type()
+        .map_err(|err| WorkflowError::io(entry.path(), err))?;
+    if !kind.is_file() {
+        report_skipped_store_entry(&entry.path(), &"not a regular file");
+    }
+    Ok(kind.is_file())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -447,7 +445,7 @@ fn load_rejected_output_log(path: &Path) -> WorkflowResult<WorkflowV2RejectedOut
             rejections: Vec::new(),
         });
     }
-    let raw = fs::read_to_string(path).map_err(|err| WorkflowError::io(path, err))?;
+    let raw = read_store_text(path).map_err(|err| WorkflowError::io(path, err))?;
     serde_json::from_str(&raw).map_err(Into::into)
 }
 

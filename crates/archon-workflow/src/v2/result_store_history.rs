@@ -93,7 +93,10 @@ impl WorkflowV2ResultStore {
             if path.extension().and_then(|value| value.to_str()) != Some("json") {
                 continue;
             }
-            let raw = fs::read_to_string(&path).ok();
+            // An entry `store_file` refuses is reported and, like any file
+            // that will not read, leaves a gap in the call's history.
+            let raw =
+                read_store_file_or_report(&path, &dir).and_then(|raw| String::from_utf8(raw).ok());
             match raw.as_deref().and_then(|raw| parse_call_record(raw, &path)) {
                 Some(record) if record.call.id == call_id => archived.records.push((path, record)),
                 Some(_) => {}
@@ -110,11 +113,13 @@ impl WorkflowV2ResultStore {
     }
 
     /// Every record of `call_id`: the slot's and each archived one. `None`
-    /// when an archived file of the call cannot be read: a history with a
-    /// gap proves nothing.
+    /// when an archived file of the call cannot be read, or when the slot
+    /// holds an entry the store's readers refuse (Issue-292: a directory, a
+    /// FIFO, a link out of `results/`): a history with a gap proves nothing,
+    /// so an older archived record never answers in its place.
     fn call_history(&self, call_id: &str) -> WorkflowResult<Option<Vec<WorkflowV2CallRecord>>> {
         let archived = self.archived_call_records(call_id)?;
-        if !archived.unreadable.is_empty() {
+        if !archived.unreadable.is_empty() || self.slot_refused(call_id) {
             return Ok(None);
         }
         let mut records = self
@@ -123,6 +128,18 @@ impl WorkflowV2ResultStore {
             .collect::<Vec<_>>();
         records.extend(archived.records.into_iter().map(|(_, record)| record));
         Ok(Some(records))
+    }
+
+    /// Whether `call_id`'s slot holds something that is not a readable
+    /// record file: a refused entry, or a link that does not resolve.
+    fn slot_refused(&self, call_id: &str) -> bool {
+        let slot = self.result_path(call_id);
+        let root = slot.parent().unwrap_or(&self.root);
+        fs::symlink_metadata(&slot).is_ok()
+            && !matches!(
+                super::store_file::classify_store_entry(&slot, root),
+                Ok(None)
+            )
     }
 
     /// Every call record this store holds: each slot's and every readable
@@ -143,15 +160,28 @@ impl WorkflowV2ResultStore {
             let dir = call_dir
                 .map_err(|err| WorkflowError::io(&root, err))?
                 .path();
-            let Ok(entries) = fs::read_dir(&dir) else {
-                continue;
+            // What cannot be listed or read is reported, never skipped
+            // silently; its call has a gap (above).
+            let entries = match fs::read_dir(&dir) {
+                Ok(entries) => entries,
+                Err(err) => {
+                    report_skipped_store_entry(&dir, &err);
+                    continue;
+                }
             };
-            for path in entries.flatten().map(|entry| entry.path()) {
+            for entry in entries {
+                let path = match entry {
+                    Ok(entry) => entry.path(),
+                    Err(err) => {
+                        report_skipped_store_entry(&dir, &err);
+                        continue;
+                    }
+                };
                 if path.extension().and_then(|value| value.to_str()) != Some("json") {
                     continue;
                 }
-                if let Some(record) = fs::read_to_string(&path)
-                    .ok()
+                if let Some(record) = read_store_file_or_report(&path, &dir)
+                    .and_then(|raw| String::from_utf8(raw).ok())
                     .and_then(|raw| parse_call_record(&raw, &path))
                 {
                     records.push(record);
