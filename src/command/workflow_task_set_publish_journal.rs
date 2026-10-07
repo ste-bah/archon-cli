@@ -428,6 +428,16 @@ fn open_dir_for_sync(dir: &Path) -> std::io::Result<std::fs::File> {
         .open(dir)
 }
 
+/// Flush a file's bytes and metadata. The handle is opened for write
+/// (never truncating): FlushFileBuffers on Windows refuses a read-only one.
+pub(crate) fn sync_file(path: &Path) -> Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .and_then(|handle| handle.sync_all())
+        .with_context(|| format!("flushing file {}", path.display()))
+}
+
 pub(crate) fn sync_parent(path: &Path) -> Result<()> {
     match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => sync_dir(parent),

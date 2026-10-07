@@ -40,7 +40,7 @@ use journal::{
     Journal, JournalEntry, JournalPaths, JournalState, PublishLock, crash_point, digest_of,
     recover_journal, remove_if_present, rename, sibling_transaction_path, sync_parents,
 };
-pub(crate) use journal::{create_dir_all_durably, sync_parent, write_durably};
+pub(crate) use journal::{create_dir_all_durably, sync_file, sync_parent, write_durably};
 use recover::recover_before_publish;
 #[cfg(test)]
 pub(crate) use recover::recovery_log_path;

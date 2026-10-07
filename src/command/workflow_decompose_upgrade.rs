@@ -242,7 +242,7 @@ fn emit_transition(
             "current": transition.new.starting_binary_revision,
         }),
     )?;
-    std::fs::File::open(store.events_path(run_id))?.sync_all()?;
+    crate::command::workflow_task_set::sync_file(&store.events_path(run_id))?;
     #[cfg(unix)]
     std::fs::File::open(store.run_dir(run_id))?.sync_all()?;
     Ok(seq)

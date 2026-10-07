@@ -310,7 +310,7 @@ fn emit_event(store: &WorkflowStore, run_id: &str, seed: &PhaseSeed) -> Result<u
             "subjects": subject_lines(seed),
         }),
     )?;
-    std::fs::File::open(store.events_path(run_id))?.sync_all()?;
+    crate::command::workflow_task_set::sync_file(&store.events_path(run_id))?;
     Ok(seq)
 }
 
