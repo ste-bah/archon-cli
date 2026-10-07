@@ -432,18 +432,19 @@ async fn a_manifest_that_misstates_the_envelope_is_still_refused() {
 
 #[tokio::test]
 async fn round2_manifest_claiming_sealed_identity_is_refused() {
-    for child in [Child::SealedIdentity, Child::CanonicalIdentity] {
+    for child in [
+        Child::SealedIdentity,
+        Child::CanonicalIdentity,
+        Child::Lying,
+    ] {
         let ran = run(child).await;
         assert!(ran.result.is_err(), "raw mismatch accepted");
         assert!(!ran.envelope.exists());
+        assert!(
+            !ran.staged.parent().unwrap().exists(),
+            "refused secret-bearing staging tree remains on disk"
+        );
         assert_no_clear_copy(&ran);
-        if child == Child::CanonicalIdentity {
-            assert_eq!(
-                std::fs::read(&ran.staged).unwrap(),
-                claimed_envelope(child),
-                "the dishonest manifest names exactly the current sealed bytes"
-            );
-        }
     }
 }
 
