@@ -11,7 +11,8 @@ impl WorkflowScriptHost {
     /// history exactly as an accepted one is, and replaying it verbatim is
     /// what keeps the phase's budget and best artifact the same across a
     /// pause. Agent calls and host commands alike; the live paths below never
-    /// see a superseded record.
+    /// see a superseded record. A run seeded after an upgrade has no such
+    /// history from before its seed (`predates_phase_seed`).
     pub(super) async fn replay_superseded_history(
         &self,
         execution: &WorkflowV2CallExecution,
@@ -29,9 +30,14 @@ impl WorkflowScriptHost {
         if self.answer_predates_question(execution, &record)? {
             return Ok(None);
         }
-        if !replayable_history(&record, &records, input_hash)
-            && !self.landed_record_still_on_disk(&record, input_hash)?
-        {
+        // Issue 360: a seeded run replays no attempt recorded before its seed;
+        // a landing the executor finds still live is the artifact on disk.
+        let history = !self.predates_phase_seed(&record)?
+            && replayable_history(&record, &records, input_hash);
+        if !history && !self.landed_record_still_on_disk(&record, input_hash)? {
+            return Ok(None);
+        }
+        if !self.outcome_limits_hold(&record)? {
             return Ok(None);
         }
         if !self.refresh_audit_for_cache(&record).await? {

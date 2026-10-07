@@ -98,7 +98,7 @@ fn identity_baseline() -> FixedRunIdentityV1 {
 }
 
 #[test]
-fn fixed_resume_identity_requires_every_replay_component_except_binary_revision() {
+fn fixed_resume_identity_requires_matching_run_roots() {
     use archon_workflow::verify_fixed_resume_identity;
 
     let baseline = identity_baseline();
@@ -108,27 +108,6 @@ fn fixed_resume_identity_requires_every_replay_component_except_binary_revision(
     );
 
     for (field, changed) in [
-        (
-            "template_version",
-            FixedRunIdentityV1 {
-                template_version: "fixed-decomposition-v2".into(),
-                ..baseline.clone()
-            },
-        ),
-        (
-            "script_digest",
-            FixedRunIdentityV1 {
-                script_digest: "script-2".into(),
-                ..baseline.clone()
-            },
-        ),
-        (
-            "catalog_digest",
-            FixedRunIdentityV1 {
-                catalog_digest: "catalog-2".into(),
-                ..baseline.clone()
-            },
-        ),
         (
             "project_root_identity",
             FixedRunIdentityV1 {
@@ -153,7 +132,7 @@ fn fixed_resume_identity_requires_every_replay_component_except_binary_revision(
     ] {
         let error = verify_fixed_resume_identity(&baseline, &changed).unwrap_err();
         assert!(error.to_string().contains(field), "{field}: {error}");
-        assert!(error.to_string().contains("do not deploy"), "{error}");
+        assert!(error.to_string().contains("restore"), "{error}");
     }
 }
 
@@ -179,41 +158,28 @@ fn fixed_resume_identity_reports_binary_revision_drift_instead_of_refusing() {
     );
 }
 
-/// Tolerating the binary revision must not mask a changed replay key: a
-/// drifted build whose embedded script or host-command catalog also changed
-/// is still refused with the pinned message.
+/// Issue 358: the live launch shape remains readable across harness upgrades.
 #[test]
-fn fixed_resume_identity_still_refuses_replay_key_drift_alongside_binary_drift() {
-    use archon_workflow::verify_fixed_resume_identity;
-
-    let baseline = identity_baseline();
-    for (field, changed) in [
-        (
-            "script_digest",
-            FixedRunIdentityV1 {
-                starting_binary_revision: "rev-2".into(),
-                script_digest: "script-2".into(),
-                ..baseline.clone()
-            },
-        ),
-        (
-            "catalog_digest",
-            FixedRunIdentityV1 {
-                starting_binary_revision: "rev-2".into(),
-                catalog_digest: "catalog-2".into(),
-                ..baseline.clone()
-            },
-        ),
-    ] {
-        let error = verify_fixed_resume_identity(&baseline, &changed).unwrap_err();
-        let message = error.to_string();
+fn upgrade_358_live_launch_accepts_script_catalog_and_template_changes() {
+    let state: FixedDecompositionStateV1 =
+        serde_json::from_str(include_str!("fixtures/fixed-decomposition-launch-v1.json")).unwrap();
+    assert_eq!(state.schema_version, 1);
+    assert_eq!(state.identity.starting_binary_revision, "8b7a3c13f");
+    for component in ["script", "catalog", "template", "all"] {
+        let mut current = state.identity.clone();
+        current.starting_binary_revision = "new-build".into();
+        if component == "script" || component == "all" {
+            current.script_digest = "new-script".into();
+        }
+        if component == "catalog" || component == "all" {
+            current.catalog_digest = "new-catalog".into();
+        }
+        if component == "template" || component == "all" {
+            current.template_version = "new-template".into();
+        }
         assert!(
-            message.contains(&format!(
-                "fixed decomposition resume identity mismatch for {field}"
-            )),
-            "{field}: {message}"
+            archon_workflow::verify_fixed_resume_identity(&state.identity, &current).is_ok(),
+            "{component}"
         );
-        assert!(!message.contains("starting_binary_revision"), "{message}");
-        assert!(message.contains("do not deploy"), "{message}");
     }
 }

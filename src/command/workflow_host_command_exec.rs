@@ -49,6 +49,18 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn record_is_live(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
         self.record_is_reusable(record)
     }
+    /// Whether a recorded outcome that a limit cut short was cut by the
+    /// limits this build applies; replay paths ask before answering from it.
+    fn outcome_limits_hold(&self, _record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        Ok(true)
+    }
+    /// The limits a call of `request` runs under, stamped into its outcome.
+    fn limits_fingerprint(
+        &self,
+        _request: &HostCommandRequest,
+    ) -> WorkflowResult<Option<serde_json::Value>> {
+        Ok(None)
+    }
 
     async fn execute(
         &self,
@@ -86,6 +98,7 @@ impl HostCommandProcessAdapter for DirectHostCommandProcessAdapter {
 
 pub(crate) struct FixedHostCommandExecutor {
     catalog: CommandCapabilityCatalog,
+    launch_catalog: Option<CommandCapabilityCatalog>,
     context: HostCommandResolutionContext,
     run_root: PathBuf,
     process: Arc<dyn HostCommandProcessAdapter>,
@@ -115,6 +128,7 @@ impl FixedHostCommandExecutor {
     ) -> Self {
         Self {
             catalog,
+            launch_catalog: None,
             context,
             run_root,
             process,
@@ -228,13 +242,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             Err(WorkflowError::SpecInvalid(_)) => self.unbound_context(),
             Err(error) => return Err(error),
         };
-        Ok(host_command_call_id(
-            &request.command_id,
-            &self.catalog.digest,
-            &self.catalog.starting_binary_revision,
-            &host_command_identity_tokens(&context, &request.command_id)?,
-            request.stdin.as_deref().unwrap_or_default().as_bytes(),
-        ))
+        self.content_identity(request, &context)
     }
 
     fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
@@ -243,6 +251,17 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
 
     fn record_is_live(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
         self.record_is_reusable_live(record, true)
+    }
+
+    fn outcome_limits_hold(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        self.outcome_limits_hold_for(record)
+    }
+
+    fn limits_fingerprint(
+        &self,
+        request: &HostCommandRequest,
+    ) -> WorkflowResult<Option<serde_json::Value>> {
+        self.limits_fingerprint_for(request)
     }
 
     async fn execute(
@@ -277,13 +296,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             }
             Err(error) => return Err(error),
         };
-        let call_id = host_command_call_id(
-            &request.command_id,
-            &self.catalog.digest,
-            &self.catalog.starting_binary_revision,
-            &host_command_identity_tokens(&context, &request.command_id)?,
-            request.stdin.as_deref().unwrap_or_default().as_bytes(),
-        );
+        let call_id = self.content_identity(&request, &context)?;
         let staging = prepare_staging(&self.run_root, &call_id)
             .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
         let command = self.resolved(&request, &context, &call_id)?;
@@ -468,3 +481,6 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         })
     }
 }
+
+#[path = "workflow_host_command_exec_identity.rs"]
+pub(crate) mod identity;

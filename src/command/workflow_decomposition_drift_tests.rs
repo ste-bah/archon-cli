@@ -1,11 +1,11 @@
 //! Issue-59: a resume on an upgraded binary records the revision drift instead
-//! of refusing, while a changed replay key is still refused.
+//! of refusing, while a corrupted launch identity is still refused.
 
 use super::*;
 
 /// Runs one launch with this binary and pauses it, returning the store, the
 /// run id and the log that the launch wrote.
-async fn launch_and_pause(project: &Path) -> (WorkflowStore, String, String) {
+pub(super) async fn launch_and_pause(project: &Path) -> (WorkflowStore, String, String) {
     let first = BarrierFactory::launch(
         project
             .canonicalize()
@@ -142,7 +142,7 @@ async fn fixed_resume_on_same_binary_records_no_drift() {
 }
 
 #[tokio::test]
-async fn fixed_resume_on_upgraded_binary_still_refuses_changed_script_digest() {
+async fn fixed_resume_on_upgraded_binary_refuses_corrupted_launch_script_digest() {
     let project = fixture_project();
     let (store, run_id, _) = launch_and_pause(project.path()).await;
     let path = store.run_dir(&run_id).join(FIXED_DECOMPOSITION_STATE_PATH);
@@ -173,7 +173,7 @@ async fn fixed_resume_on_upgraded_binary_still_refuses_changed_script_digest() {
     .unwrap_err();
 
     assert!(error.to_string().contains("script_digest"), "{error:#}");
-    assert!(error.to_string().contains("do not deploy"), "{error:#}");
+    assert!(error.to_string().contains("restore"), "{error:#}");
     assert_eq!(factory.builds.load(Ordering::SeqCst), 0);
     let events = std::fs::read_to_string(store.events_path(&run_id)).unwrap();
     assert!(!events.contains("binary_revision_drift"), "{events}");

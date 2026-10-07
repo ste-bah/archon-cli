@@ -393,3 +393,6 @@ async fn fixed_launch_writes_identity_log_header_before_provider_construction() 
     assert!(first.contains(&state.identity.script_digest), "{log}");
     assert!(first.contains(&state.identity.catalog_digest), "{log}");
 }
+
+#[path = "workflow_decomposition_upgrade_tests.rs"]
+mod workflow_decomposition_upgrade_tests;

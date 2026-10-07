@@ -99,7 +99,7 @@ async fn fixed_decomposition_resume_refuses_identity_mismatch_before_provider() 
     .unwrap_err();
 
     assert!(error.to_string().contains("script_digest"), "{error:#}");
-    assert!(error.to_string().contains("do not deploy"), "{error:#}");
+    assert!(error.to_string().contains("restore"), "{error:#}");
     assert_eq!(factory.builds.load(Ordering::SeqCst), 0);
 }
 

@@ -29,6 +29,8 @@ pub(crate) const FIXED_SCRIPT_SOURCE: &str = concat!(
     include_str!("workflow_decompose_v1_set_gate.js"),
     "\n",
     include_str!("workflow_decompose_v1_progress.js"),
+    "\n",
+    include_str!("workflow_decompose_v1_seed.js"),
 );
 pub(crate) const FIXED_DECOMPOSITION_STATE_PATH: &str = "decomposition/state.json";
 pub(crate) const FIXED_CATALOG_PATH: &str = "decomposition/command-catalog.json";
@@ -464,8 +466,10 @@ pub(crate) fn is_fixed_decomposition_run(cwd: &Path, run_id: &str) -> Result<boo
 
 #[path = "workflow_decompose_resume.rs"]
 mod resume;
+// Issue 360: the seed reads its records under the resume's own rules.
 #[cfg(test)]
 pub(crate) use resume::resume_fixed_decomposition_at_binary_revision;
+pub(crate) use resume::upgrade::{decode, unmapped};
 pub(crate) use resume::{
     resume_fixed_decomposition_with_factory, resume_fixed_decomposition_with_factory_and_sink,
 };

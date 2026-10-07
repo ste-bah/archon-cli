@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "run_kind": "fixed_decomposition_v1",
+  "identity": {
+    "template_version": "fixed-decomposition-v1",
+    "starting_binary_revision": "8b7a3c13f",
+    "script_digest": "5564154c6205773b215bb3b54b390c981166e41e3384cfdd53b7f13b4b31f5a4",
+    "catalog_digest": "bf90959a51c7d0d96fe2893a6d0759ade20374bf182eec26ae8a456049e90f56",
+    "project_root_identity": "/fixture/project",
+    "prd_identity": "/fixture/project/prds/PRD.md",
+    "task_root_identity": "/fixture/project/tasks/run"
+  },
+  "phase": "acceptance",
+  "attempts": {
+    "acceptance": {
+      "logical_attempt": 25,
+      "interrupted": false
+    }
+  },
+  "dispositions": {
+    "acceptance": "pending"
+  },
+  "log_path": "/fixture/project/tasks/run/.decompose.log"
+}

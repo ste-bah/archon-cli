@@ -335,6 +335,7 @@ pub(crate) mod workflow_decompose_log;
 pub(crate) mod workflow_decompose_owner;
 pub(crate) mod workflow_decompose_progress;
 pub(crate) mod workflow_decompose_repository;
+pub(crate) mod workflow_decompose_seed;
 pub(crate) mod workflow_decompose_stale_owner;
 pub(crate) mod workflow_decompose_state;
 #[cfg(test)]
@@ -344,6 +345,7 @@ mod workflow_decompose_state_tests;
 pub(crate) mod workflow_decompose_status;
 #[cfg(test)]
 mod workflow_decompose_tests;
+pub(crate) mod workflow_decompose_transitions;
 pub(crate) mod workflow_executor_lease;
 pub(crate) mod workflow_freeze_budget;
 pub(crate) mod workflow_freeze_candidate;

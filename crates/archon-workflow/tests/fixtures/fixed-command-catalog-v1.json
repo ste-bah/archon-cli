@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "starting_binary_revision": "8b7a3c13f",
+  "digest": "bf90959a51c7d0d96fe2893a6d0759ade20374bf182eec26ae8a456049e90f56",
+  "capabilities": {
+    "freeze-acceptance": {
+      "id": "freeze-acceptance",
+      "argv_template": [
+        "workflow",
+        "freeze-acceptance",
+        "--tasks",
+        "{TASK_ROOT}",
+        "--prd",
+        "{PRD_PATH}",
+        "--candidate-stdin",
+        "--call-id",
+        "{CALL_ID}",
+        "--staging-root",
+        "{COMMAND_STAGING}",
+        "--gate-envelope",
+        "{GATE_ENVELOPE}"
+      ],
+      "stdin_delivery": "utf8_bytes",
+      "environment_profile": "freeze_provider",
+      "timeout_secs": 7800,
+      "max_stdin_bytes": 2097152,
+      "max_stdout_bytes": 2097152,
+      "max_stderr_bytes": 2097152,
+      "declared_write_set": [
+        "{COMMAND_STAGING}/acceptance-contract.json",
+        "{COMMAND_STAGING}/acceptance-contract.lock",
+        "{COMMAND_STAGING}/acceptance-pin.json",
+        "{GATE_ENVELOPE}"
+      ],
+      "remediation_scopes": [
+        "candidate_artifact",
+        "prd_input",
+        "inherited_predecessor",
+        "operational"
+      ],
+      "detaches": false
+    },
+    "freeze-skeleton": {
+      "id": "freeze-skeleton",
+      "argv_template": [
+        "workflow",
+        "freeze-skeleton",
+        "--tasks",
+        "{TASK_ROOT}",
+        "--prd",
+        "{PRD_PATH}",
+        "--candidate-stdin",
+        "--call-id",
+        "{CALL_ID}",
+        "--staging-root",
+        "{COMMAND_STAGING}",
+        "--gate-envelope",
+        "{GATE_ENVELOPE}"
+      ],
+      "stdin_delivery": "utf8_bytes",
+      "environment_profile": "none",
+      "timeout_secs": 7800,
+      "max_stdin_bytes": 2097152,
+      "max_stdout_bytes": 2097152,
+      "max_stderr_bytes": 2097152,
+      "declared_write_set": [
+        "{COMMAND_STAGING}/task-skeleton.json",
+        "{COMMAND_STAGING}/task-skeleton.lock",
+        "{COMMAND_STAGING}/acceptance-pin.json",
+        "{GATE_ENVELOPE}"
+      ],
+      "remediation_scopes": [
+        "candidate_artifact",
+        "skeleton",
+        "prd_input",
+        "inherited_predecessor",
+        "operational"
+      ],
+      "detaches": false
+    },
+    "land-task-body": {
+      "id": "land-task-body",
+      "argv_template": [
+        "workflow",
+        "lint",
+        "--task-file",
+        "{FROZEN_TASK_FILE}",
+        "--candidate-stdin",
+        "--call-id",
+        "{CALL_ID}",
+        "--staging-root",
+        "{COMMAND_STAGING}",
+        "--gate-envelope",
+        "{GATE_ENVELOPE}"
+      ],
+      "stdin_delivery": "utf8_bytes",
+      "environment_profile": "freeze_provider",
+      "timeout_secs": 7800,
+      "max_stdin_bytes": 1048576,
+      "max_stdout_bytes": 1048576,
+      "max_stderr_bytes": 1048576,
+      "declared_write_set": [
+        "{COMMAND_STAGING}/{FROZEN_TASK_FILE_NAME}",
+        "{GATE_ENVELOPE}"
+      ],
+      "remediation_scopes": [
+        "skeleton",
+        "prd_input",
+        "body",
+        "inherited_predecessor",
+        "operational"
+      ],
+      "detaches": false
+    },
+    "requirements-trace": {
+      "id": "requirements-trace",
+      "argv_template": [
+        "requirements",
+        "trace",
+        "--prd",
+        "{PRD_PATH}",
+        "--tasks",
+        "{TASK_ROOT}",
+        "--gate-envelope",
+        "{GATE_ENVELOPE}",
+        "--call-id",
+        "{CALL_ID}"
+      ],
+      "stdin_delivery": "none",
+      "environment_profile": "none",
+      "timeout_secs": 300,
+      "max_stdin_bytes": 0,
+      "max_stdout_bytes": 4194304,
+      "max_stderr_bytes": 4194304,
+      "declared_write_set": [
+        "{GATE_ENVELOPE}"
+      ],
+      "remediation_scopes": [
+        "skeleton",
+        "prd_input",
+        "body",
+        "operational"
+      ],
+      "detaches": false
+    },
+    "task-set-lint": {
+      "id": "task-set-lint",
+      "argv_template": [
+        "workflow",
+        "lint",
+        "--tasks",
+        "{TASK_ROOT}",
+        "--gate-envelope",
+        "{GATE_ENVELOPE}",
+        "--call-id",
+        "{CALL_ID}"
+      ],
+      "stdin_delivery": "none",
+      "environment_profile": "freeze_provider",
+      "timeout_secs": 7800,
+      "max_stdin_bytes": 0,
+      "max_stdout_bytes": 4194304,
+      "max_stderr_bytes": 4194304,
+      "declared_write_set": [
+        "{GATE_ENVELOPE}"
+      ],
+      "remediation_scopes": [
+        "skeleton",
+        "prd_input",
+        "body",
+        "inherited_predecessor",
+        "operational"
+      ],
+      "detaches": false
+    },
+    "verify-frozen-acceptance": {
+      "id": "verify-frozen-acceptance",
+      "argv_template": [
+        "workflow",
+        "verify-frozen-chain",
+        "--stage",
+        "acceptance",
+        "--tasks",
+        "{TASK_ROOT}",
+        "--prd",
+        "{PRD_PATH}",
+        "--gate-envelope",
+        "{GATE_ENVELOPE}",
+        "--call-id",
+        "{CALL_ID}"
+      ],
+      "stdin_delivery": "none",
+      "environment_profile": "none",
+      "timeout_secs": 300,
+      "max_stdin_bytes": 0,
+      "max_stdout_bytes": 1048576,
+      "max_stderr_bytes": 1048576,
+      "declared_write_set": [
+        "{GATE_ENVELOPE}"
+      ],
+      "remediation_scopes": [
+        "operational"
+      ],
+      "detaches": false
+    },
+    "verify-frozen-skeleton": {
+      "id": "verify-frozen-skeleton",
+      "argv_template": [
+        "workflow",
+        "verify-frozen-chain",
+        "--stage",
+        "skeleton",
+        "--tasks",
+        "{TASK_ROOT}",
+        "--prd",
+        "{PRD_PATH}",
+        "--gate-envelope",
+        "{GATE_ENVELOPE}",
+        "--call-id",
+        "{CALL_ID}"
+      ],
+      "stdin_delivery": "none",
+      "environment_profile": "none",
+      "timeout_secs": 300,
+      "max_stdin_bytes": 0,
+      "max_stdout_bytes": 1048576,
+      "max_stderr_bytes": 1048576,
+      "declared_write_set": [
+        "{GATE_ENVELOPE}"
+      ],
+      "remediation_scopes": [
+        "operational"
+      ],
+      "detaches": false
+    }
+  }
+}

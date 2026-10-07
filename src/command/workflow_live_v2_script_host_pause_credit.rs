@@ -119,6 +119,18 @@ pub(super) fn pause_records(
 }
 
 impl WorkflowScriptHost {
+    /// Issue 358: an answer a limit cut short is an answer about that limit;
+    /// after an upgrade changed it, the call runs again under the new one.
+    pub(super) fn outcome_limits_hold(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        match self.runner.host_command_executor.as_ref() {
+            Some(executor) => executor.outcome_limits_hold(record),
+            None => Ok(true),
+        }
+    }
+
     /// The recorded answer to `execution` when a pause whose credit holds
     /// covers the attempt its slot holds, asked with the same input.
     pub(super) async fn replay_covered_attempt(
@@ -143,13 +155,66 @@ impl WorkflowScriptHost {
             return Ok(None);
         }
         let slots = self.runner.v2_store.load_call_records()?;
-        let covered = pauses
-            .iter()
-            .any(|pause| pause.covered.contains(&wanted) && credit_holds(pause, &slots));
-        if !covered {
+        // Issue 360: a run seeded after an upgrade replays none of the history
+        // before it, so a pause taken then credits nothing now (the history
+        // floor itself: `predates_phase_seed`).
+        let floor = self
+            .phase_seed()
+            .map(|seed| {
+                seed["pause_generation_floor"]
+                    .as_u64()
+                    .ok_or_else(|| malformed_seed("pause_generation_floor"))
+            })
+            .transpose()?;
+        let covered = pauses.iter().any(|pause| {
+            floor.is_none_or(|floor| pause.generation > floor)
+                && pause.covered.contains(&wanted)
+                && credit_holds(pause, &slots)
+        });
+        if !covered || !self.outcome_limits_hold(&record)? {
             return Ok(None);
         }
         self.mark_reused(&record, generation).await?;
         Ok(Some(self.result_view(&record)?))
     }
+
+    /// The phase seed this run started from, when it is a seeded resume.
+    fn phase_seed(&self) -> Option<&serde_json::Value> {
+        self.runner
+            .script_args
+            .as_ref()
+            .map(|args| &args["phaseSeed"])
+            .filter(|seed| !seed.is_null())
+    }
+
+    /// Issue 360: whether `record` is an attempt recorded before the seed this
+    /// run started from. A seeded run replays none of that history: content-
+    /// keyed calls (a gate asked a byte-identical candidate) would otherwise
+    /// answer from an older runtime's record, an outage included.
+    pub(super) fn predates_phase_seed(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        let Some(seed) = self.phase_seed() else {
+            return Ok(false);
+        };
+        let floor = seed["history_attempts"]
+            .as_object()
+            .ok_or_else(|| malformed_seed("history_attempts"))?;
+        Ok(match floor.get(&record.call.id) {
+            None => false,
+            Some(attempt) => {
+                u64::from(record.attempt)
+                    <= attempt
+                        .as_u64()
+                        .ok_or_else(|| malformed_seed("history_attempts"))?
+            }
+        })
+    }
+}
+
+fn malformed_seed(field: &str) -> WorkflowError {
+    WorkflowError::SpecInvalid(format!(
+        "the phaseSeed argument has no readable {field}; the resume that seeds the run sets it"
+    ))
 }

@@ -191,7 +191,13 @@ impl WorkflowScriptHost {
                 && record.is_reusable_for_source_and_scaffold(
                     &input_hash,
                     source_metadata.source_fingerprint.as_deref(),
-                    Some(&self.scaffold_hash),
+                    // Fixed upgrades reuse only matching call inputs and sources.
+                    // The surrounding script is not this call's input.
+                    if self.runner.host_command_executor.is_some() {
+                        record.scaffold_hash.as_deref()
+                    } else {
+                        Some(&self.scaffold_hash)
+                    },
                 );
             // Frontier adoption must not resurrect results whose dynamic
             // source graph diverged: when this call requires source metadata,
