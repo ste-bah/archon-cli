@@ -12,6 +12,10 @@ struct Pending {
     label: String,
 }
 
+#[cfg(test)]
+#[path = "input_tripwire_pending_tests.rs"]
+mod tests;
+
 static ACTIVE: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 fn session() -> &'static str {
     static SESSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -29,7 +33,7 @@ fn save(path: &Path, bytes: &[u8]) -> WorkflowResult<()> {
     crate::store::write_atomic(&path.with_extension("tmp"), path, bytes)?;
     // The pending directory and its parents can all be new.
     for dir in path.parent().into_iter().flat_map(Path::ancestors).take(4) {
-        crate::store::sync_dir(dir)?;
+        crate::durable_io::sync_dir(dir)?;
     }
     Ok(())
 }
@@ -60,20 +64,102 @@ impl OwnedTripwire {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(WorkflowError::io(&report, error)),
         };
+        if let Some(violation) = &remembered {
+            let root = self.tripwire_root();
+            let origin = violation
+                .backup_dir
+                .ancestors()
+                .nth(3)
+                .ok_or_else(|| pause("a detected receipt has no backup root"))?;
+            if origin
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .map_err(pause)?
+                != root
+                    .canonicalize()
+                    .map(archon_shell::paths::plain)
+                    .map_err(pause)?
+            {
+                return Err(pause("a detected receipt names another run's backup root"));
+            }
+            let backups = origin.join("write-coordination/environment-violations");
+            for path in std::iter::once(&violation.backup_dir)
+                .chain(violation.changed.iter().filter_map(|c| c.backup.as_ref()))
+            {
+                if !path.starts_with(&backups)
+                    || path
+                        .components()
+                        .any(|c| matches!(c, std::path::Component::ParentDir))
+                {
+                    return Err(pause("a detected receipt names an invalid backup path"));
+                }
+                refuse_links(origin, path).map_err(pause)?;
+            }
+        }
         let same_process = self.pending.session == session();
         let violation = self
             .tripwire
             .take()
             .expect("one owned check")
-            .check_recording(&self.pending.label, same_process, |violation| {
+            .check_resuming(&self.pending.label, same_process, remembered, |violation| {
                 save(&report, &serde_json::to_vec(violation)?)
             })?;
-        let mut violation = violation.or(remembered);
+        let mut violation = violation;
         if let Some(violation) = &mut violation {
             // A crash after restoring but before recording completion must
             // still report the already detected violation on the next owner.
+            let backup_root = violation
+                .backup_dir
+                .ancestors()
+                .nth(3)
+                .expect("backup under run root");
             for change in &mut violation.changed {
-                if state_of(&self.pending.policy.project.join(&change.path)).0 == change.before {
+                let destination = self.pending.policy.project.join(&change.path);
+                let backup = change.backup.clone().unwrap_or_else(|| {
+                    violation
+                        .backup_dir
+                        .join(super::super::project_inputs::external::stored(&change.path))
+                });
+                if change.after.len() == 64 && change.after.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    crate::durable_io::sync_file(&backup)?;
+                    for dir in backup
+                        .parent()
+                        .into_iter()
+                        .flat_map(Path::ancestors)
+                        .take_while(|dir| dir.starts_with(backup_root))
+                    {
+                        crate::durable_io::sync_dir(dir)?;
+                    }
+                }
+                if state_of(&destination).0 == change.before {
+                    let project = self
+                        .pending
+                        .policy
+                        .external
+                        .tree_of(&destination)
+                        .unwrap_or(&self.pending.policy.project);
+                    refuse_links(project, &destination)
+                        .map_err(|e| WorkflowError::io(&destination, e))?;
+                    if change.before.len() == 64
+                        && change.before.bytes().all(|b| b.is_ascii_hexdigit())
+                    {
+                        crate::durable_io::sync_file(&destination)?;
+                    }
+                    for dir in destination
+                        .parent()
+                        .into_iter()
+                        .flat_map(Path::ancestors)
+                        .take_while(|dir| dir.starts_with(project))
+                    {
+                        match std::fs::metadata(dir) {
+                            Ok(meta) if meta.is_dir() => crate::durable_io::sync_dir(dir)?,
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                            Ok(_) => {
+                                return Err(pause("a repaired input parent is not a directory"));
+                            }
+                            Err(error) => return Err(WorkflowError::io(dir, error)),
+                        }
+                    }
                     change.restored = true;
                     change.note.clear();
                 }
@@ -83,16 +169,16 @@ impl OwnedTripwire {
             }
             log(&self.tripwire_root(), violation)
                 .map_err(|e| WorkflowError::io(self.tripwire_root(), e))?;
-            crate::store::sync_dir(&self.tripwire_root().join("write-coordination"))?;
+            crate::durable_io::sync_dir(&self.tripwire_root().join("write-coordination"))?;
             if !violation.restored() {
                 return Ok(Some(violation.clone()));
             }
         }
         std::fs::remove_file(&self.path).map_err(|e| WorkflowError::io(&self.path, e))?;
-        crate::store::sync_dir(self.path.parent().unwrap())?;
+        crate::durable_io::sync_dir(self.path.parent().unwrap())?;
         if report.exists() {
             std::fs::remove_file(&report).map_err(|e| WorkflowError::io(&report, e))?;
-            crate::store::sync_dir(report.parent().unwrap())?;
+            crate::durable_io::sync_dir(report.parent().unwrap())?;
         }
         Ok(violation)
     }
@@ -186,12 +272,10 @@ pub(super) fn arm(root: &Path, label: &str) -> WorkflowResult<Option<OwnedTripwi
         if kept_object(root, state).is_none() {
             return Err(pause(format!("pre-call object {state} is missing")));
         }
-        std::fs::File::open(&object)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| WorkflowError::io(&object, e))?;
+        crate::durable_io::sync_file(&object)?;
     }
     if objects_dir(root).exists() {
-        crate::store::sync_dir(&objects_dir(root))?;
+        crate::durable_io::sync_dir(&objects_dir(root))?;
     }
     let pending = Pending {
         policy: tripwire.policy.clone(),

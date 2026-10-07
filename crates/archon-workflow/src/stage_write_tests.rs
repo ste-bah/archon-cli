@@ -20,6 +20,9 @@ fn running(store: &WorkflowStore) -> (String, u64) {
     (run.id, run.generation)
 }
 
+#[path = "stage_write_cache_tests.rs"]
+mod cache_tests;
+
 async fn obsolete_write(relative: &str, resume: bool) {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowStore::project(temp.path());
@@ -296,7 +299,7 @@ async fn r2_tripwire_process_restart_keeps_comparison_and_requires_repair() {
     std::fs::write(&input, b"before").unwrap();
     crate::write_coordinator::project_inputs::write_test_policy(&root, temp.path(), &["inputs"]);
     let name = std::thread::current().name().unwrap().to_string();
-    let status = std::process::Command::new(std::env::current_exe().unwrap())
+    let status = archon_shell::spawn::command(std::env::current_exe().unwrap())
         .args(["--exact", &name])
         .env("ARCHON_R2_TRIPWIRE_CHILD_PROJECT", temp.path())
         .env("ARCHON_R2_TRIPWIRE_CHILD_RUN", &run_id)

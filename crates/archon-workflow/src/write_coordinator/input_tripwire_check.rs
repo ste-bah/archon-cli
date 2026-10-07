@@ -6,18 +6,29 @@ impl InputTripwire {
     /// an input since [`Self::arm`]; every such change is restored where it
     /// safely can be, and the violation is logged under the run.
     pub fn check(self, call: &str) -> Option<EnvironmentViolation> {
-        self.check_inner(call, true, false, |_| Ok(()))
+        self.check_inner(call, true, false, None, |_| Ok(()))
             .ok()
             .flatten()
     }
 
+    #[cfg(test)]
     pub(super) fn check_recording(
         self,
         call: &str,
         allow_restore: bool,
         record: impl FnMut(&EnvironmentViolation) -> crate::WorkflowResult<()>,
     ) -> crate::WorkflowResult<Option<EnvironmentViolation>> {
-        self.check_inner(call, allow_restore, true, record)
+        self.check_resuming(call, allow_restore, None, record)
+    }
+
+    pub(super) fn check_resuming(
+        self,
+        call: &str,
+        allow_restore: bool,
+        remembered: Option<EnvironmentViolation>,
+        record: impl FnMut(&EnvironmentViolation) -> crate::WorkflowResult<()>,
+    ) -> crate::WorkflowResult<Option<EnvironmentViolation>> {
+        self.check_inner(call, allow_restore, true, remembered, record)
     }
 
     fn check_inner(
@@ -25,6 +36,7 @@ impl InputTripwire {
         call: &str,
         allow_restore: bool,
         durable: bool,
+        remembered: Option<EnvironmentViolation>,
         mut record: impl FnMut(&EnvironmentViolation) -> crate::WorkflowResult<()>,
     ) -> crate::WorkflowResult<Option<EnvironmentViolation>> {
         let _section = host_write_section();
@@ -35,12 +47,23 @@ impl InputTripwire {
         all.sort();
         all.dedup();
         let stamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
-        let backup_dir = self
-            .run_root
-            .join("write-coordination")
-            .join("environment-violations")
-            .join(format!("{}-{stamp}", sanitize(call)));
-        let mut changed = Vec::new();
+        let backup_dir = remembered
+            .as_ref()
+            .map(|v| v.backup_dir.clone())
+            .unwrap_or_else(|| {
+                self.run_root
+                    .join("write-coordination")
+                    .join("environment-violations")
+                    .join(format!("{}-{stamp}", sanitize(call)))
+            });
+        let backup_root = backup_dir
+            .ancestors()
+            .nth(3)
+            .expect("backup under run root");
+        // Seed every checkpoint and the final report with earlier receipts.
+        // Restored paths will be skipped by this scan; they must not vanish.
+        let mut changed = remembered.map_or_else(Vec::new, |v| v.changed);
+        let remembered_count = changed.len();
         for rel in all {
             let destination = self.policy.project.join(&rel);
             let before = match self.files.get(&rel) {
@@ -72,32 +95,77 @@ impl InputTripwire {
             if reaches && host.last() == Some(&after) {
                 continue;
             }
+            let previous = changed
+                .iter()
+                .position(|c| c.path == rel && c.before == before && c.after == after);
+            let backup = bytes.as_ref().map(|_| {
+                let stored = crate::write_coordinator::project_inputs::external::stored(&rel);
+                if let Some(index) = previous {
+                    changed[index]
+                        .backup
+                        .clone()
+                        .unwrap_or_else(|| backup_dir.join(&stored))
+                } else if changed.iter().any(|c| c.path == rel) {
+                    // Another mutation of an already detected path gets its
+                    // own copy; never overwrite the earlier forensic bytes.
+                    backup_dir.join("versions").join(&after).join(&stored)
+                } else {
+                    backup_dir.join(&stored)
+                }
+            });
             let mut change = ChangedInput {
                 path: rel.clone(),
                 before: before.clone(),
                 after,
                 restored: false,
+                backup,
                 note: String::new(),
             };
             let mut detected = changed.clone();
-            detected.push(change.clone());
+            if let Some(index) = previous {
+                detected[index] = change.clone();
+            } else {
+                detected.push(change.clone());
+            }
             record(&EnvironmentViolation {
                 call: call.into(),
                 changed: detected,
                 backup_dir: backup_dir.clone(),
                 attributed: false,
             })?;
-            if let Some(bytes) = &bytes {
-                let backup = backup_dir.join(
-                    crate::write_coordinator::project_inputs::external::stored(&rel),
-                );
+            if let (Some(bytes), Some(backup)) = (&bytes, &change.backup) {
                 let kept = backup
                     .parent()
                     .map_or(Ok(()), std::fs::create_dir_all)
-                    .and_then(|()| std::fs::write(&backup, bytes));
+                    .and_then(|()| {
+                        crate::store::write_atomic(
+                            &backup.with_extension(format!("{}.tmp", uuid::Uuid::new_v4())),
+                            backup,
+                            bytes,
+                        )
+                        .map_err(std::io::Error::other)
+                    })
+                    .and_then(|()| {
+                        crate::durable_io::sync_file(backup).map_err(std::io::Error::other)
+                    })
+                    .and_then(|()| {
+                        for dir in backup
+                            .parent()
+                            .into_iter()
+                            .flat_map(Path::ancestors)
+                            .take_while(|dir| dir.starts_with(backup_root))
+                        {
+                            crate::durable_io::sync_dir(dir).map_err(std::io::Error::other)?;
+                        }
+                        Ok(())
+                    });
                 if let Err(error) = kept {
                     change.note = format!("its changed copy could not be kept: {error}");
-                    changed.push(change);
+                    if let Some(index) = previous {
+                        changed[index] = change;
+                    } else {
+                        changed.push(change);
+                    }
                     continue;
                 }
             }
@@ -112,7 +180,11 @@ impl InputTripwire {
                     Err(why) => why,
                 }
             };
-            changed.push(change);
+            if let Some(index) = previous {
+                changed[index] = change;
+            } else {
+                changed.push(change);
+            }
         }
         if !changed.is_empty() {
             remember_violation(detected_at, &self.policy.project, call, &changed);
@@ -134,7 +206,8 @@ impl InputTripwire {
         if changed.is_empty() {
             return Ok(None);
         }
-        let attributed = own > 0 && changed.len() == own && !self.window.overlapped();
+        let attributed =
+            remembered_count == 0 && own > 0 && changed.len() == own && !self.window.overlapped();
         let violation = EnvironmentViolation {
             call: call.to_string(),
             changed,

@@ -235,5 +235,6 @@ fn append(path: &Path, value: &serde_json::Value) -> std::io::Result<()> {
         .append(true)
         .open(path)?;
     file.write_all(&line)?;
-    file.sync_all()
+    drop(file);
+    crate::durable_io::sync_file(path).map_err(std::io::Error::other)
 }

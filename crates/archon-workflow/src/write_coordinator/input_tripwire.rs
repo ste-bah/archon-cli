@@ -230,6 +230,9 @@ pub struct ChangedInput {
     pub before: String,
     pub after: String,
     pub restored: bool,
+    /// Exact changed-copy receipt; older records use `backup_dir/path`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub note: String,
 }
@@ -341,6 +344,9 @@ impl InputTripwire {
 pub fn remove_input(path: &Path) -> std::io::Result<()> {
     std::fs::remove_file(path)?;
     note_host_write(path, "absent");
+    if let Some(parent) = path.parent() {
+        crate::durable_io::sync_dir(parent).map_err(std::io::Error::other)?;
+    }
     Ok(())
 }
 

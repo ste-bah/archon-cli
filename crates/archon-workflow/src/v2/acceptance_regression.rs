@@ -269,11 +269,16 @@ impl<'a> Observations<'a> {
                     }
                 }
                 let path = cache_path(self.run_dir, commit);
-                if let Some(parent) = path.parent()
-                    && std::fs::create_dir_all(parent).is_ok()
-                    && let Ok(bytes) = serde_json::to_vec_pretty(&known)
-                {
-                    let _ = std::fs::write(&path, bytes);
+                let bytes = match serde_json::to_vec_pretty(&known) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        tracing::warn!(%error, "regression observation could not be encoded");
+                        return None;
+                    }
+                };
+                if let Err(error) = crate::stage_write::write_bytes(&path, &bytes) {
+                    tracing::warn!(%error, path = %path.display(), "regression observation not published");
+                    return None;
                 }
             }
             self.barren = if added { 0 } else { self.barren + 1 };

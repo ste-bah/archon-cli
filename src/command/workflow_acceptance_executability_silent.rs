@@ -140,20 +140,57 @@ fn strike_or_unproven(
 ) -> Option<String> {
     let path = strike(probe, commit, contract, id);
     let (finding, unproven) = texts();
-    if path.is_file() {
-        probe.resume.progress.reused(false);
-        return Some(finding);
-    }
-    let saved = (path.parent()).is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
-        && std::fs::write(&path, why).is_ok();
-    if saved {
+    let settled = archon_workflow::stage_write::with_write(|| {
+        let exists = match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_file() => true,
+            Ok(_) => {
+                return Err(archon_workflow::WorkflowError::StateCorrupt(format!(
+                    "baseline strike {} is not a regular file",
+                    path.display()
+                )));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(source) => {
+                return Err(archon_workflow::WorkflowError::Io {
+                    path: path.clone(),
+                    source,
+                });
+            }
+        };
+        if exists {
+            probe.resume.progress.reused(false);
+            return Ok(Some(finding));
+        }
+        archon_workflow::stage_write::write_bytes(&path, why.as_bytes())?;
         probe.resume.progress.saved(false);
+        probe.unproven(id, unproven);
+        archon_workflow::WorkflowResult::Ok(None)
+    });
+    match settled {
+        Ok(finding) => finding,
+        Err(error) => {
+            probe.unproven(id, format!("baseline strike could not be settled: {error}"));
+            None
+        }
     }
-    probe.unproven(id, unproven);
-    None
 }
 
 /// Forget any strike of check `id` on `commit`: it gave a verdict there.
 pub(super) fn clear(probe: &HostProbe, commit: &str, contract: &AcceptanceContract, id: &str) {
-    let _ = std::fs::remove_file(strike(probe, commit, contract, id));
+    let path = strike(probe, commit, contract, id);
+    let cleared = archon_workflow::stage_write::with_write(|| match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(archon_workflow::WorkflowError::Io {
+            path: path.clone(),
+            source,
+        }),
+    });
+    if let Err(error) = cleared {
+        probe.unproven(id, format!("baseline strike could not be cleared: {error}"));
+    }
 }
+
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_silent_fence_tests.rs"]
+mod fence_tests;
