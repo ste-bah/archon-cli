@@ -16,6 +16,7 @@ pub struct AuditLanding {
     /// in `hint()` so the assessor does not gather them.
     carried: usize,
     lock: Mutex<()>,
+    owner: Option<super::runtime::AuditRuntime>,
 }
 tokio::task_local! { static LANDING: Arc<AuditLanding>; }
 pub async fn scope<T>(landing: Arc<AuditLanding>, work: impl std::future::Future<Output = T>) -> T {
@@ -49,6 +50,7 @@ impl AuditLanding {
             contract,
             carried: 0,
             lock: Mutex::new(()),
+            owner: None,
         })
     }
     /// Record how many declared paths this attempt carries forward (Issue-51).
@@ -56,7 +58,20 @@ impl AuditLanding {
         self.carried = carried;
         self
     }
+    pub(super) fn owned_by(mut self, owner: super::runtime::AuditRuntime) -> Self {
+        self.owner = Some(owner);
+        self
+    }
+    fn with_owner<T>(&self, operation: impl FnOnce() -> WorkflowResult<T>) -> WorkflowResult<T> {
+        match &self.owner {
+            Some(owner) => owner.with_executor_lock(operation),
+            None => operation(),
+        }
+    }
     pub fn land(&self, record: AuditRecord) -> WorkflowResult<()> {
+        self.with_owner(|| self.land_owned(record))
+    }
+    fn land_owned(&self, record: AuditRecord) -> WorkflowResult<()> {
         let _guard = self.lock.lock().map_err(invalid)?;
         if !self.contract.declared_paths.contains(&record.declared_path) {
             return Err(invalid("unexpected audit declared_path"));
@@ -103,6 +118,9 @@ impl AuditLanding {
         Ok(records)
     }
     pub fn remaining(&self) -> WorkflowResult<Vec<String>> {
+        if let Some(owner) = &self.owner {
+            owner.require_executor()?;
+        }
         let _guard = self.lock.lock().map_err(invalid)?;
         let records = self.records()?;
         Ok(self
@@ -114,6 +132,9 @@ impl AuditLanding {
             .collect())
     }
     pub fn report(&self) -> WorkflowResult<AuditReport> {
+        if let Some(owner) = &self.owner {
+            owner.require_executor()?;
+        }
         let _guard = self.lock.lock().map_err(invalid)?;
         let report = AuditReport {
             schema_version: 1,
@@ -254,7 +275,7 @@ pub(crate) fn record_rejection(output: &str, error: &crate::WorkflowV2AgentError
         .join(format!("rejected-{}.json", uuid::Uuid::new_v4()));
     let result = serde_json::to_vec(&json!({"error":error.to_string(),"output":output}))
         .map_err(invalid)
-        .and_then(|bytes| atomic(&path, &bytes));
+        .and_then(|bytes| landing.with_owner(|| atomic(&path, &bytes)));
     if let Err(e) = result {
         eprintln!("audit rejection evidence could not be persisted: {e}");
     }

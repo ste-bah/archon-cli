@@ -14,6 +14,28 @@ pub(crate) async fn execute_tool_attempt(
     ctx: &ToolContext,
     sandbox_prechecked: bool,
 ) -> ToolResult {
+    let work = execute_tool_attempt_owned(tool, input, ctx, sandbox_prechecked);
+    match ctx
+        .run_store
+        .as_ref()
+        .and_then(|store| store.admission.as_ref())
+    {
+        // A control stop reaches here only without an enclosing fence;
+        // its text names the control decision, never a tool failure.
+        Some(fence) => fence
+            .execute(work)
+            .await
+            .unwrap_or_else(|stop| ToolResult::error(stop.to_string())),
+        None => work.await,
+    }
+}
+
+async fn execute_tool_attempt_owned(
+    tool: &dyn Tool,
+    input: serde_json::Value,
+    ctx: &ToolContext,
+    sandbox_prechecked: bool,
+) -> ToolResult {
     let permission_level = tool.permission_level(&input);
     // Admission still runs only for non-`Safe` tools with a callback installed
     // — that is a policy decision and it has not changed. What changed is that

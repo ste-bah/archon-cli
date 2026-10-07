@@ -87,7 +87,7 @@ pub fn invalidate_generated_v2_restart_cache(
 ) -> WorkflowResult<Vec<String>> {
     match target {
         GeneratedV2RestartTarget::Call(call_id) => {
-            invalidate_generated_v2_call_cache(store, run, call_id, true)
+            invalidate_generated_v2_call_cache(store, run, call_id, true, true)
         }
         GeneratedV2RestartTarget::Item { call_id, item_id } => {
             let v2_store =
@@ -97,10 +97,14 @@ pub fn invalidate_generated_v2_restart_cache(
             // branch store is refused with nothing changed.
             let candidates = v2_branch_item_candidates(call_id, item_id);
             let plan = v2_store.plan_item_revocation(call_id, &candidates)?;
-            let mut invalidated = invalidate_generated_v2_call_cache(store, run, call_id, false)?;
+            let mut invalidated =
+                invalidate_generated_v2_call_cache(store, run, call_id, false, false)?;
             for item in v2_store.execute_item_revocation(plan)? {
                 invalidated.push(format!("{call_id}:{item}"));
             }
+            // Complete every mutation of this transaction before transferring
+            // its epoch. The operator's own revocation is fenced as a write too.
+            v2_store.bump_restart_epoch()?;
             Ok(invalidated)
         }
     }
@@ -264,6 +268,7 @@ fn invalidate_generated_v2_call_cache(
     run: &WorkflowRun,
     call_id: &str,
     clear_branch_outcomes: bool,
+    move_epoch: bool,
 ) -> WorkflowResult<Vec<String>> {
     if !is_generated_v2_bundle(store, run) {
         return Ok(Vec::new());
@@ -284,7 +289,9 @@ fn invalidate_generated_v2_call_cache(
     }
     // Round 2: a live session of any run kind stops writing once the epoch
     // moves (`require_session_restart_epoch`).
-    v2_store.bump_restart_epoch()?;
+    if move_epoch {
+        v2_store.bump_restart_epoch()?;
+    }
     Ok(invalidated.into_iter().collect())
 }
 

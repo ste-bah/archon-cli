@@ -146,7 +146,7 @@ pub(super) mod publication_hook {
         HOOKS.lock().expect("hooks").insert(path, hook);
     }
 
-    pub(super) fn run(path: PathBuf) {
+    pub(crate) fn run(path: PathBuf) {
         let hook = HOOKS.lock().expect("hooks").remove(&path);
         if let Some(hook) = hook {
             hook();

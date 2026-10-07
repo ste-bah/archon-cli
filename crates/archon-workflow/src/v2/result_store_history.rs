@@ -172,20 +172,22 @@ impl WorkflowV2ResultStore {
         call_id: &str,
         reason: &str,
     ) -> WorkflowResult<bool> {
-        let mut marked = false;
-        if let Some(mut record) = self.load_call_record(call_id)? {
-            record.invalidated_by = Some(reason.to_string());
-            self.save_call_record(&record)?;
-            marked = true;
-        }
-        for (path, mut record) in self.archived_call_records(call_id)?.records {
-            if record.invalidated_by.is_none() && accepted_grade(&record) {
+        self.with_session_write_lock(|| {
+            let mut marked = false;
+            if let Some(mut record) = self.load_call_record(call_id)? {
                 record.invalidated_by = Some(reason.to_string());
-                self.write_record(&path, &record)?;
+                self.save_call_record(&record)?;
                 marked = true;
             }
-        }
-        Ok(marked)
+            for (path, mut record) in self.archived_call_records(call_id)?.records {
+                if record.invalidated_by.is_none() && accepted_grade(&record) {
+                    record.invalidated_by = Some(reason.to_string());
+                    self.write_record(&path, &record)?;
+                    marked = true;
+                }
+            }
+            Ok(marked)
+        })
     }
 
     /// The last accepted record of `call_id`, when it answers `input_hash`
@@ -280,14 +282,16 @@ impl WorkflowV2ResultStore {
     /// session's ledger is not touched: the record is an earlier execution,
     /// not a new one.
     pub fn restore_call_record(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<()> {
-        let path = self.result_path(&record.call.id);
-        archive_superseded_json_into(
-            &path,
-            &self.call_history_dir(&record.call.id),
-            self.durable,
-            |existing: &WorkflowV2CallRecord| existing == record,
-        )?;
-        self.write_record(&path, record)
+        self.with_session_write_lock(|| {
+            let path = self.result_path(&record.call.id);
+            archive_superseded_json_into(
+                &path,
+                &self.call_history_dir(&record.call.id),
+                self.durable,
+                |existing: &WorkflowV2CallRecord| existing == record,
+            )?;
+            self.write_record(&path, record)
+        })
     }
 
     /// The attempt number the next execution of `call_id` takes: one past

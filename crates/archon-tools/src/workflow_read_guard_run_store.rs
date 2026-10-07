@@ -98,6 +98,7 @@ pub struct RunStoreScope {
     workspace: Vec<PathBuf>,
     /// The host's deliverable admission rule; see `with_admitted_writes`.
     admitted: Option<AdmittedWrites>,
+    pub admission: Option<super::AdmissionFence>,
 }
 
 /// A predicate over resolved absolute paths, supplied by the host.
@@ -178,6 +179,7 @@ impl RunStoreScope {
             roots,
             exempt,
             admitted: None,
+            admission: None,
         }
     }
 

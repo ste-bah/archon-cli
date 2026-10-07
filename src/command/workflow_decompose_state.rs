@@ -39,6 +39,9 @@ pub(crate) fn project_fixed_call(
         source,
     })?;
     let mut state: FixedDecompositionStateV1 = serde_json::from_slice(&raw)?;
+    let admitted = archon_workflow::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"))
+        .record_with_admission(record)?;
+    let record = &admitted;
     let projection = projection(record, kind)?;
     let previous_phase = state.phase;
     state.phase = projection.phase;
@@ -60,6 +63,13 @@ pub(crate) fn project_fixed_call(
         if persist {
             state.dispositions.insert(subject.clone(), *disposition);
         }
+    }
+    if record.call.options.host_command.is_some() {
+        let v2 = archon_workflow::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
+        let mut records = v2.load_call_records()?;
+        records.retain(|current| current.call.id != record.call.id);
+        records.push(record.clone());
+        reconcile_interrupted(&mut state.dispositions, &records)?;
     }
     store.write_run_json(run_id, FIXED_STATE_PATH, &state)?;
 

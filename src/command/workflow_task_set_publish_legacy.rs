@@ -47,13 +47,16 @@ pub(super) fn recover_legacy(
             Some(decision) => decision,
             None if found.backups.is_empty() => Decision::Discard,
             None if found.staged.is_empty() => {
-                // Old publishers linked every existing target, including
-                // unchanged files. Only the chain distinguishes completed
-                // publication from an interrupted rollback once staging is gone.
-                if verify_chain(pin_path, tasks_root).is_ok() {
-                    Decision::Forward
-                } else {
+                // No written digest survives. Existing targets may belong to
+                // a later publication; only an absent target authorizes restore.
+                if found
+                    .backups
+                    .iter()
+                    .any(|backup| !target_of(backup).exists())
+                {
                     Decision::Rollback
+                } else {
+                    Decision::Preserve
                 }
             }
             None => {
@@ -73,24 +76,76 @@ pub(super) fn recover_legacy(
                 }
             }
         };
-        let verify = decision != Decision::Discard
+        let verify = found
+            .staged
+            .iter()
+            .any(|(_, target)| chain.contains(target))
             || found
-                .staged
+                .backups
                 .iter()
-                .any(|(_, target)| chain.contains(target));
-        if verify {
-            let intent = marker.get_or_insert_with(|| Marker::new(&transaction));
-            intent.decisions.insert(transaction.clone(), decision);
+                .any(|backup| chain.contains(&target_of(backup)));
+        if decision != Decision::Discard || verify {
+            let intent = marker.get_or_insert_with(|| {
+                let mut intent = Marker::new(&transaction);
+                intent.verify_chain = false;
+                intent
+            });
+            if verify && !intent.verify_chain {
+                intent.transaction = transaction.clone();
+            }
+            intent.verify_chain |= verify;
+            if !intent.decisions.contains_key(&transaction) {
+                let mut written = BTreeMap::new();
+                if decision == Decision::Rollback {
+                    for backup in &found.backups {
+                        let target = target_of(backup);
+                        if digest_of(&target)?.is_none() {
+                            written.insert(target, None);
+                        }
+                    }
+                }
+                if decision == Decision::Preserve {
+                    for backup in &found.backups {
+                        let target = target_of(backup);
+                        written.insert(target.clone(), digest_of(&target)?);
+                    }
+                }
+                intent.written.insert(transaction.clone(), written);
+                intent.decisions.insert(transaction.clone(), decision);
+            }
             intent.save(&marker_path)?;
         }
         let mut files = Vec::new();
+        let mut preserved = Vec::new();
+        let mut restored = 0;
         if decision == Decision::Rollback {
             for (index, backup) in found.backups.iter().enumerate() {
                 let target = target_of(backup);
+                let current = digest_of(&target)?;
+                let expected = marker
+                    .as_ref()
+                    .and_then(|marker| marker.written.get(&transaction))
+                    .and_then(|written| written.get(&target));
+                // A retry never restores over bytes written after the decision.
+                // An older unbound marker can restore only a missing target.
+                if expected.map_or(current.is_some(), |expected| *expected != current) {
+                    preserved.push(format!(
+                        "{} preserved: {}",
+                        target.display(),
+                        if expected.is_none() {
+                            "no transaction-bound file evidence authorizes restoration"
+                        } else {
+                            "target changed since the transaction's recorded decision"
+                        }
+                    ));
+                    files.push(target);
+                    continue;
+                }
                 rename(backup, &target)?;
                 super::journal::sync_parent(&target)?;
                 super::journal::crash_point(&format!("legacy-restored-{index}"));
                 files.push(target);
+                restored += 1;
             }
         }
         for (index, (staged, target)) in found.staged.iter().enumerate() {
@@ -104,25 +159,55 @@ pub(super) fn recover_legacy(
             super::journal::sync_parent(staged)?;
             super::journal::crash_point(&format!("legacy-renamed-{index}"));
         }
+        if decision == Decision::Preserve {
+            for backup in &found.backups {
+                let target = target_of(backup);
+                preserved.push(format!(
+                    "{} preserved: no transaction-bound file evidence authorizes restoration",
+                    target.display()
+                ));
+                files.push(target);
+            }
+        }
         let event = RecoveryEvent {
             transaction,
             source: "legacy",
             outcome: match decision {
                 Decision::Discard => RecoveryOutcome::Discarded,
+                Decision::Preserve => RecoveryOutcome::Preserved,
                 Decision::Forward => RecoveryOutcome::RolledForward,
+                Decision::Rollback if restored == 0 && !preserved.is_empty() => {
+                    RecoveryOutcome::Preserved
+                }
                 Decision::Rollback => RecoveryOutcome::RolledBack,
             },
             files,
-            detail: Some(
-                if verify {
-                    "durable chain verification pending"
-                } else {
-                    "incomplete staging discarded; live files untouched"
-                }
-                .into(),
-            ),
+            detail: Some(if !preserved.is_empty() {
+                format!(
+                    "restored {restored} target(s); {}{}",
+                    preserved.join("; "),
+                    if verify {
+                        "; durable chain verification pending"
+                    } else {
+                        ""
+                    }
+                )
+            } else if verify {
+                "durable chain verification pending".into()
+            } else if decision == Decision::Preserve {
+                "live targets preserved; no transaction-bound evidence authorizes their rollback"
+                    .into()
+            } else {
+                "decision bound to this transaction's file evidence".into()
+            }),
         };
-        record(paths, &event)?;
+        super::recover::record_legacy_decision(
+            paths,
+            &event,
+            marker
+                .as_ref()
+                .and_then(|marker| marker.written.get(&event.transaction)),
+        )?;
         for backup in &found.backups {
             remove_if_present(backup)?;
         }
@@ -143,8 +228,11 @@ pub(super) fn recover_legacy(
                     .exists()
             })
         });
-        let reason = verify_chain(pin_path, tasks_root).err();
-        if interrupted || reason.is_some() {
+        let reason = marker
+            .verify_chain
+            .then(|| verify_chain(pin_path, tasks_root).err())
+            .flatten();
+        if marker.verify_chain && (interrupted || reason.is_some()) {
             match unfreeze(
                 paths,
                 pin_path,

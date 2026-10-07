@@ -1,6 +1,23 @@
 use super::*;
 
 impl LiveV2AgentClient {
+    pub(in super::super) fn with_owner_store(
+        mut self,
+        store: archon_workflow::WorkflowStore,
+    ) -> Self {
+        self.owner_store = Some(store);
+        self
+    }
+    pub(super) async fn admit_provider<T>(
+        &self,
+        work: impl std::future::Future<Output = archon_workflow::WorkflowResult<T>>,
+    ) -> archon_workflow::WorkflowResult<T> {
+        match &self.owner_store {
+            Some(store) => store.execute_owned(&self.run_id, work).await,
+            None => work.await,
+        }
+    }
+
     pub(in super::super) fn fanout_parallelism(&self, requested: Option<usize>) -> usize {
         read_only_v2_fanout_parallelism(requested, live_v2_subagent_max_concurrency())
     }
@@ -181,4 +198,23 @@ pub(super) fn stage_kind_for_v2_agent(request: &WorkflowV2AgentRequest) -> Stage
 
 pub(super) fn v2_system_context() -> &'static str {
     "You are an Archon dynamic workflow stage agent. Return exactly one JSON object matching the Workflow V2 result envelope from the user message."
+}
+
+/// One definition, shared with the shape tuner.
+///
+/// The learner's baseline has to be the cap this function returns, or a
+/// "narrowing" could be reported against a number the runtime never used. Two
+/// copies of this resolution is how that happens, so there is one.
+pub(super) fn live_v2_subagent_max_concurrency() -> Option<usize> {
+    crate::command::sona_workflow_shape_tuning::resolved_subagent_cap()
+}
+
+pub(super) fn read_only_v2_fanout_parallelism(
+    requested: Option<usize>,
+    subagent_cap: Option<usize>,
+) -> usize {
+    let cap = subagent_cap
+        .unwrap_or(archon_core::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT)
+        .max(1);
+    requested.map_or(cap, |requested| requested.max(1).min(cap))
 }

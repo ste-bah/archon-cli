@@ -1,5 +1,8 @@
 //! Provider-neutral dynamic workflow runtime for Archon.
 
+#[cfg(test)]
+extern crate self as archon_workflow;
+
 pub mod acceptance;
 pub mod acceptance_check_crash;
 pub mod acceptance_check_environment;
@@ -41,6 +44,7 @@ pub mod generated_contract;
 pub mod generated_lifecycle_remediation;
 pub mod generated_lifecycle_support;
 pub mod generated_workflow;
+pub mod heap_future;
 mod item_filter;
 pub mod learning;
 pub mod learning_lessons;

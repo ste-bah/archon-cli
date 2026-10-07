@@ -53,7 +53,8 @@ mod prd;
 mod publish;
 #[path = "workflow_live_v3_acceptance_author_staging.rs"]
 mod staging;
-use publish::{Refused, publish_fresh};
+use publish::Refused;
+pub(super) use publish::publish_fresh;
 pub(super) use staging::Staged;
 #[cfg(test)]
 use staging::staging_path;

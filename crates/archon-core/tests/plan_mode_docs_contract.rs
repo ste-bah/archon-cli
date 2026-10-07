@@ -104,7 +104,7 @@ fn production_plan_mode_wording_preserves_the_canonical_trust_boundary() {
         ),
         (
             "dispatch rejection",
-            read("crates/archon-core/src/dispatch.rs"),
+            read("crates/archon-core/src/dispatch_owned.rs"),
         ),
     ];
 

@@ -4,7 +4,11 @@ use archon_workflow::PortableAcceptanceIdentityV1;
 use archon_workflow::task_set_lineage::LaunchLineage;
 const TXN: &str = "aabbccddeeff00112233445566778899";
 
-fn metadata(run: &Run, id: &str, launch: &PortableAcceptanceIdentityV1) -> std::path::PathBuf {
+pub(super) fn metadata(
+    run: &Run,
+    id: &str,
+    launch: &PortableAcceptanceIdentityV1,
+) -> std::path::PathBuf {
     let path = run.store.run_dir(id).join("v2/generated-metadata.json");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, serde_json::json!({"observer_snapshot": {
@@ -16,7 +20,7 @@ fn metadata(run: &Run, id: &str, launch: &PortableAcceptanceIdentityV1) -> std::
     path
 }
 
-fn recover(run: &Run) -> serde_json::Value {
+pub(super) fn recover(run: &Run) -> serde_json::Value {
     let lock = run.set.tasks.join(ACCEPTANCE_LOCK_FILE);
     std::fs::write(
         lock.with_file_name(format!(".{ACCEPTANCE_LOCK_FILE}.{TXN}.old")),
@@ -37,7 +41,7 @@ fn recover(run: &Run) -> serde_json::Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
 
-fn refreeze(run: &Run) {
+pub(super) fn refreeze(run: &Run) {
     let mut contract = run.set.contract();
     let original = contract.clone();
     if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
@@ -85,7 +89,7 @@ fn refreeze(run: &Run) {
     );
 }
 
-fn verify(
+pub(super) fn verify(
     run: &Run,
     id: &str,
     launch: &PortableAcceptanceIdentityV1,

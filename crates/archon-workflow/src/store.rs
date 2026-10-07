@@ -46,11 +46,15 @@ struct ArtifactSidecar<'a> {
 #[derive(Debug, Clone)]
 pub struct WorkflowStore {
     root: PathBuf,
+    executor: Option<(String, u64)>,
 }
 
 impl WorkflowStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            executor: None,
+        }
     }
 
     pub fn project(project_root: impl AsRef<Path>) -> Self {
@@ -75,96 +79,24 @@ impl WorkflowStore {
 
     pub fn create_run(&self, spec: WorkflowSpec) -> WorkflowResult<WorkflowRun> {
         let run = WorkflowRun::new(spec, &self.root);
-        let dir = self.run_dir(&run.id);
-        if dir.exists() {
-            return Err(WorkflowError::RunAlreadyExists(run.id));
-        }
-        fs::create_dir_all(&dir).map_err(|e| WorkflowError::io(&dir, e))?;
-        for subdir in RUN_SUBDIRS {
-            let path = dir.join(subdir);
-            fs::create_dir_all(&path).map_err(|e| WorkflowError::io(path, e))?;
-        }
-        File::create(self.events_path(&run.id))
-            .map_err(|e| WorkflowError::io(self.events_path(&run.id), e))?;
-        self.write_manifest(&run)?;
-        self.write_spec(&run)?;
-        self.save_state(&run)?;
-        Ok(run)
-    }
-
-    pub fn save_state(&self, run: &WorkflowRun) -> WorkflowResult<()> {
-        if let Ok(current) = self.load_state(&run.id)
-            && current.generation > run.generation
-        {
-            return Err(WorkflowError::StateCorrupt(format!(
-                "stale workflow state generation for {}: local {}, current {}",
-                run.id, run.generation, current.generation
-            )));
-        }
-        let target = self.state_path(&run.id);
-        let tmp = target.with_extension("json.tmp");
-        let json = serde_json::to_vec_pretty(run)?;
-        write_atomic(&tmp, &target, &json)
-    }
-
-    pub(crate) fn restore_state_after_failed_transition(
-        &self,
-        prior: &WorkflowRun,
-        failed_generation: u64,
-    ) -> WorkflowResult<()> {
-        let current = self.load_state(&prior.id)?;
-        if current.generation != failed_generation {
-            return Err(WorkflowError::StateCorrupt(format!(
-                "cannot restore workflow {} after failed transition: expected generation {}, found {}",
-                prior.id, failed_generation, current.generation
-            )));
-        }
-        let target = self.state_path(&prior.id);
-        let tmp = target.with_extension("json.tmp");
-        let json = serde_json::to_vec_pretty(prior)?;
-        write_atomic(&tmp, &target, &json)
-    }
-
-    pub fn save_state_preserving_control(&self, run: &WorkflowRun) -> WorkflowResult<()> {
-        let mut writable = run.clone();
-        if let Ok(current) = self.load_state(&run.id)
-            && current.generation > run.generation
-        {
-            match current.status {
-                RunStatus::Paused | RunStatus::Cancelled => {
-                    writable.status = current.status;
-                    writable.generation = current.generation;
-                    writable.executor_generation = current.executor_generation;
-                    writable.updated_at = current.updated_at;
-                    for (stage_id, current_stage) in current.stages {
-                        if let Some(stage) = writable.stages.get_mut(&stage_id)
-                            && matches!(
-                                current_stage.status,
-                                crate::run::StageStatus::Paused
-                                    | crate::run::StageStatus::Cancelled
-                            )
-                        {
-                            *stage = current_stage;
-                        }
-                    }
-                    for (item_id, current_item) in current.items {
-                        if matches!(current_item.status, crate::run::StageStatus::Cancelled) {
-                            writable.items.insert(item_id, current_item);
-                        }
-                    }
-                }
-                _ => {
-                    return Err(WorkflowError::StateCorrupt(format!(
-                        "stale workflow state generation for {}: local {}, current {}",
-                        run.id, run.generation, current.generation
-                    )));
-                }
+        let run_id = run.id.clone();
+        self.with_writer(&run_id, || {
+            let dir = self.run_dir(&run.id);
+            if dir.exists() {
+                return Err(WorkflowError::RunAlreadyExists(run.id));
             }
-        }
-        let target = self.state_path(&writable.id);
-        let tmp = target.with_extension("json.tmp");
-        let json = serde_json::to_vec_pretty(&writable)?;
-        write_atomic(&tmp, &target, &json)
+            fs::create_dir_all(&dir).map_err(|e| WorkflowError::io(&dir, e))?;
+            for subdir in RUN_SUBDIRS {
+                let path = dir.join(subdir);
+                fs::create_dir_all(&path).map_err(|e| WorkflowError::io(path, e))?;
+            }
+            File::create(self.events_path(&run.id))
+                .map_err(|e| WorkflowError::io(self.events_path(&run.id), e))?;
+            self.write_manifest(&run)?;
+            self.write_spec(&run)?;
+            self.save_state(&run)?;
+            Ok(run)
+        })
     }
 
     pub fn with_store_lock<T>(
@@ -190,19 +122,7 @@ impl WorkflowStore {
         run_id: &str,
         operation: impl FnOnce(&WorkflowStore) -> WorkflowResult<T>,
     ) -> WorkflowResult<T> {
-        let run_dir = self.run_dir(run_id);
-        fs::create_dir_all(&run_dir).map_err(|e| WorkflowError::io(&run_dir, e))?;
-        let path = run_dir.join(".control.lock");
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&path)
-            .map_err(|e| WorkflowError::io(&path, e))?;
-        let mut lock = fd_lock::RwLock::new(file);
-        let _guard = lock.write().map_err(|e| WorkflowError::io(&path, e))?;
-        operation(self)
+        fence::with_run_lock(self, run_id, operation)
     }
 
     pub fn load_state(&self, run_id: &str) -> WorkflowResult<WorkflowRun> {
@@ -232,35 +152,37 @@ impl WorkflowStore {
     }
 
     pub fn append_event_line(&self, run_id: &str, json_line: &str) -> WorkflowResult<()> {
-        let path = self.events_path(run_id);
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .read(true)
-            .open(&path)
-            .map_err(|e| WorkflowError::io(&path, e))?;
-        let mut line = String::with_capacity(json_line.len() + 2);
-        if file
-            .metadata()
-            .map_err(|e| WorkflowError::io(&path, e))?
-            .len()
-            > 0
-        {
-            file.seek(SeekFrom::End(-1))
+        self.with_writer(run_id, || {
+            let path = self.events_path(run_id);
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .read(true)
+                .open(&path)
                 .map_err(|e| WorkflowError::io(&path, e))?;
-            let mut tail = [0];
-            file.read_exact(&mut tail)
-                .map_err(|e| WorkflowError::io(&path, e))?;
-            if tail[0] != b'\n' {
-                // Keep an interrupted append separate from the next event.
-                line.push('\n');
+            let mut line = String::with_capacity(json_line.len() + 2);
+            if file
+                .metadata()
+                .map_err(|e| WorkflowError::io(&path, e))?
+                .len()
+                > 0
+            {
+                file.seek(SeekFrom::End(-1))
+                    .map_err(|e| WorkflowError::io(&path, e))?;
+                let mut tail = [0];
+                file.read_exact(&mut tail)
+                    .map_err(|e| WorkflowError::io(&path, e))?;
+                if tail[0] != b'\n' {
+                    // Keep an interrupted append separate from the next event.
+                    line.push('\n');
+                }
             }
-        }
-        line.push_str(json_line);
-        line.push('\n');
-        file.write_all(line.as_bytes())
-            .map_err(|e| WorkflowError::io(&path, e))?;
-        Ok(())
+            line.push_str(json_line);
+            line.push('\n');
+            file.write_all(line.as_bytes())
+                .map_err(|e| WorkflowError::io(&path, e))?;
+            Ok(())
+        })
     }
 
     pub fn next_event_seq(&self, run_id: &str) -> WorkflowResult<u64> {
@@ -284,21 +206,23 @@ impl WorkflowStore {
         extension: &str,
         bytes: &[u8],
     ) -> WorkflowResult<ArtifactRef> {
-        let content_hash = blake3::hash(bytes).to_hex().to_string();
-        let safe_ext = extension.trim_start_matches('.').trim();
-        let suffix = if safe_ext.is_empty() { "bin" } else { safe_ext };
-        let id = format!("artifact-{content_hash}");
-        let rel = PathBuf::from("artifacts").join(format!("{id}.{suffix}"));
-        let target = self.run_dir(run_id).join(&rel);
-        let tmp = target.with_extension(format!("{suffix}.tmp"));
-        write_atomic(&tmp, &target, bytes)?;
-        Ok(ArtifactRef {
-            id,
-            path: rel,
-            content_hash,
-            producing_stage: producing_stage.to_string(),
-            source_input_hash: source_input_hash.to_string(),
-            accepted: false,
+        self.with_writer(run_id, || {
+            let content_hash = blake3::hash(bytes).to_hex().to_string();
+            let safe_ext = extension.trim_start_matches('.').trim();
+            let suffix = if safe_ext.is_empty() { "bin" } else { safe_ext };
+            let id = format!("artifact-{content_hash}");
+            let rel = PathBuf::from("artifacts").join(format!("{id}.{suffix}"));
+            let target = self.run_dir(run_id).join(&rel);
+            let tmp = target.with_extension(format!("{suffix}.tmp"));
+            write_atomic(&tmp, &target, bytes)?;
+            Ok(ArtifactRef {
+                id,
+                path: rel,
+                content_hash,
+                producing_stage: producing_stage.to_string(),
+                source_input_hash: source_input_hash.to_string(),
+                accepted: false,
+            })
         })
     }
 
@@ -313,39 +237,41 @@ impl WorkflowStore {
         bytes: &[u8],
         accepted: bool,
     ) -> WorkflowResult<ArtifactRef> {
-        let content_hash = blake3::hash(bytes).to_hex().to_string();
-        let safe_stage = safe_path_component(producing_stage);
-        let safe_key = safe_path_component(artifact_key);
-        let safe_ext = extension.trim_start_matches('.').trim();
-        let suffix = if safe_ext.is_empty() { "bin" } else { safe_ext };
-        let id = format!("{safe_stage}-{safe_key}-{}", &content_hash[..12]);
-        let rel = PathBuf::from("artifacts")
-            .join(&safe_stage)
-            .join(format!("{safe_key}.{suffix}"));
-        self.write_run_file(run_id, &rel, bytes)?;
-        let artifact = ArtifactRef {
-            id,
-            path: rel,
-            content_hash,
-            producing_stage: producing_stage.to_string(),
-            source_input_hash: source_input_hash.to_string(),
-            accepted,
-        };
-        let meta_rel = PathBuf::from("artifacts")
-            .join(&safe_stage)
-            .join(format!("{safe_key}.meta.json"));
-        let sidecar = ArtifactSidecar {
-            id: &artifact.id,
-            path: artifact.path.display().to_string(),
-            content_hash: &artifact.content_hash,
-            producing_stage,
-            artifact_key,
-            source_input_hash,
-            accepted,
-            created_at: Utc::now().to_rfc3339(),
-        };
-        self.write_run_json(run_id, &meta_rel, &sidecar)?;
-        Ok(artifact)
+        self.with_writer(run_id, || {
+            let content_hash = blake3::hash(bytes).to_hex().to_string();
+            let safe_stage = safe_path_component(producing_stage);
+            let safe_key = safe_path_component(artifact_key);
+            let safe_ext = extension.trim_start_matches('.').trim();
+            let suffix = if safe_ext.is_empty() { "bin" } else { safe_ext };
+            let id = format!("{safe_stage}-{safe_key}-{}", &content_hash[..12]);
+            let rel = PathBuf::from("artifacts")
+                .join(&safe_stage)
+                .join(format!("{safe_key}.{suffix}"));
+            self.write_run_file(run_id, &rel, bytes)?;
+            let artifact = ArtifactRef {
+                id,
+                path: rel,
+                content_hash,
+                producing_stage: producing_stage.to_string(),
+                source_input_hash: source_input_hash.to_string(),
+                accepted,
+            };
+            let meta_rel = PathBuf::from("artifacts")
+                .join(&safe_stage)
+                .join(format!("{safe_key}.meta.json"));
+            let sidecar = ArtifactSidecar {
+                id: &artifact.id,
+                path: artifact.path.display().to_string(),
+                content_hash: &artifact.content_hash,
+                producing_stage,
+                artifact_key,
+                source_input_hash,
+                accepted,
+                created_at: Utc::now().to_rfc3339(),
+            };
+            self.write_run_json(run_id, &meta_rel, &sidecar)?;
+            Ok(artifact)
+        })
     }
 
     pub fn write_run_json<T: Serialize>(
@@ -367,13 +293,15 @@ impl WorkflowStore {
         relative_path: impl AsRef<Path>,
         value: &T,
     ) -> WorkflowResult<()> {
-        let relative_path = relative_path.as_ref();
-        validate_run_relative_path(relative_path)?;
-        private::write_atomic(
-            &self.run_dir(run_id),
-            relative_path,
-            &serde_json::to_vec_pretty(value)?,
-        )
+        self.with_writer(run_id, || {
+            let relative_path = relative_path.as_ref();
+            validate_run_relative_path(relative_path)?;
+            private::write_atomic(
+                &self.run_dir(run_id),
+                relative_path,
+                &serde_json::to_vec_pretty(value)?,
+            )
+        })
     }
 
     pub fn write_run_file(
@@ -382,11 +310,13 @@ impl WorkflowStore {
         relative_path: impl AsRef<Path>,
         bytes: &[u8],
     ) -> WorkflowResult<()> {
-        let relative_path = relative_path.as_ref();
-        validate_run_relative_path(relative_path)?;
-        let target = self.run_dir(run_id).join(relative_path);
-        let tmp = target.with_extension("tmp");
-        write_atomic(&tmp, &target, bytes)
+        self.with_writer(run_id, || {
+            let relative_path = relative_path.as_ref();
+            validate_run_relative_path(relative_path)?;
+            let target = self.run_dir(run_id).join(relative_path);
+            let tmp = target.with_extension("tmp");
+            write_atomic(&tmp, &target, bytes)
+        })
     }
 
     pub fn validate_for_reuse(
@@ -478,3 +408,8 @@ pub(crate) use durable::{rename_durable, sync_dir, write_atomic};
 #[cfg(test)]
 #[path = "store_tail_tests.rs"]
 mod tail_tests;
+
+#[path = "store_fence.rs"]
+mod fence;
+#[path = "store_state.rs"]
+mod state;

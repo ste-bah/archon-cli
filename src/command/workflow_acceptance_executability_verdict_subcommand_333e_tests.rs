@@ -115,7 +115,10 @@ async fn a_listing_never_sees_the_hosts_environment() {
             super::super::super::baseline::originals(&probe.check_site(&check), &check, vec![odd])
                 .await;
         assert_eq!(held["AC-333"], Original::Defect, "{label}");
-        let seen = std::fs::read_to_string(&record).expect("it was listed");
+        let seen = std::fs::read_to_string(&record).unwrap_or_else(|error| {
+            let why = super::list::last_listing(&tool);
+            panic!("it was listed ({label}): {error}; listing diagnostic: {why:?}");
+        });
         // Nor a key or token the site forwards to its checks.
         assert!(
             !seen.contains(SECRET) && !seen.contains("s3cr3t-333"),

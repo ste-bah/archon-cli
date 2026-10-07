@@ -18,7 +18,7 @@ pub(crate) fn run_store_scope(
     working_root: Option<&str>,
     artifacts: Option<&WorkflowV2ProjectArtifactContext>,
 ) -> RunStoreScope {
-    let scope = RunStoreScope::new(
+    let mut scope = RunStoreScope::new(
         v2_store
             .map(|store| store.run_root().display().to_string())
             .as_deref(),
@@ -28,6 +28,21 @@ pub(crate) fn run_store_scope(
             .as_deref(),
         working_root,
     );
+    if let Some(v2) = v2_store.filter(|store| store.session_executor().is_some()) {
+        // A malformed store is a refusal, never an unguarded dispatch.
+        scope.admission = Some(match v2.session_workflow_store() {
+            Ok(store) => store.admission_fence(&v2.run_id()),
+            Err(error) => {
+                let reason = error.to_string();
+                archon_tools::workflow_read_guard::AdmissionFence::new(v2.run_id(), move || {
+                    Err(archon_tools::workflow_read_guard::AdmissionStop {
+                        kind: archon_tools::workflow_read_guard::StopKind::Refused,
+                        reason: reason.clone(),
+                    })
+                })
+            }
+        });
+    }
     match artifacts.filter(|context| !context.is_empty()) {
         Some(context) => {
             let context = context.clone();

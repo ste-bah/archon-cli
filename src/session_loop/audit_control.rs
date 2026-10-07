@@ -261,7 +261,9 @@ mod tests {
         assert!(pending.confirm(&confirmation).is_err());
         assert!(matches!(
             audit.state(),
-            Err(archon_workflow::WorkflowError::ControlPaused(_))
+            Err(archon_workflow::WorkflowError::ControlCancelled(message))
+                if message.contains("stale session changes nothing")
+                    && message.contains(&audit.run_id)
         ));
         assert_eq!(std::fs::read(&state_path).unwrap(), before);
     }

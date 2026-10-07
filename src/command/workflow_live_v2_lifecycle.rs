@@ -42,10 +42,15 @@ impl WorkflowV2ScriptRunner {
                         "decomposed lifecycle local async runtime failed: {err}"
                     ))
                 })?;
-            runtime.block_on(self.run_decomposed_lifecycle_on_current_thread(
+            // Boxed (#246, round-4 review minor 1): `block_on` would keep the
+            // root future by value on this blocking thread's stack. Measured,
+            // this alone moved little: the depth came from the poll frames of
+            // the call chain, which build their large children with
+            // `archon_workflow::heap_future::on_heap`.
+            runtime.block_on(Box::pin(self.run_decomposed_lifecycle_on_current_thread(
                 &harness_source,
                 governed_learning_context,
-            ))
+            )))
         })
         .await
         .map_err(|err| {
@@ -120,10 +125,20 @@ impl WorkflowV2ScriptRunner {
         } else {
             driver.run().await
         };
-        match outcome {
+        host.finish_lifecycle(outcome).await
+    }
+}
+
+impl WorkflowScriptHost {
+    pub(super) async fn finish_lifecycle(
+        &self,
+        outcome: archon_workflow::WorkflowResult<()>,
+    ) -> archon_workflow::WorkflowResult<WorkflowV2ScriptSummary> {
+        self.owned_generation()?;
+        let result = match outcome {
             Ok(()) => {
-                host.runner
-                    .finalize_repository_audit(host.summary().await)
+                self.runner
+                    .finalize_repository_audit(self.summary().await)
                     .await
             }
             Err(err) => {
@@ -134,15 +149,16 @@ impl WorkflowV2ScriptRunner {
                     return Err(err);
                 }
                 let error = err.to_string();
-                if error.contains(TERMINAL_HOST_CALL_MARKER) {
-                    return host
-                        .runner
-                        .finalize_repository_audit(host.summary().await)
-                        .await;
+                if self.accumulator.lock().await.terminal_host_stop {
+                    self.runner
+                        .finalize_repository_audit(self.summary().await)
+                        .await
+                } else {
+                    Ok(self.mark_script_failure(&error).await)
                 }
-                let summary = host.mark_script_failure(&error).await;
-                Ok(summary)
             }
-        }
+        };
+        self.owned_generation()?;
+        result
     }
 }

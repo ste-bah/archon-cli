@@ -170,7 +170,7 @@ fn committed_missing_staging_must_refuse_instead_of_accepting_mixed_set() {
 }
 
 /// Without backups, staging is discarded and the live files stay untouched.
-/// A leftover backup also requires verification of the live frozen chain.
+/// A body-only backup cannot authorize rollback or verification of an unrelated chain.
 #[test]
 fn legacy_absent_target_and_interrupted_rollback_self_heal() {
     for rollback in [false, true] {
@@ -180,8 +180,8 @@ fn legacy_absent_target_and_interrupted_rollback_self_heal() {
         if rollback {
             std::fs::rename(&b, sibling_transaction_path(&b, TXN, "old")).unwrap();
             std::fs::write(&b, b"new-b").unwrap();
-            expected[1] = OLD[1];
-            expected[3] = None;
+            expected[1] = NEW[1];
+            expected[3] = OLD[3];
         } else {
             std::fs::write(&c, b"new-c").unwrap();
             std::fs::write(sibling_transaction_path(&a, TXN, "new"), b"new-a").unwrap();

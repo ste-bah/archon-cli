@@ -72,7 +72,7 @@ struct StaleFixture {
 }
 
 /// The bytes of state.json and events.jsonl, and every file under v2/.
-type Snapshot = (Vec<u8>, Vec<u8>, Vec<String>);
+type Snapshot = (Vec<u8>, Vec<u8>, Vec<(String, Vec<u8>)>);
 
 /// state.json, events.jsonl and every file under v2/.
 fn snapshot(store: &WorkflowStore, run_id: &str) -> Snapshot {
@@ -85,7 +85,7 @@ fn snapshot(store: &WorkflowStore, run_id: &str) -> Snapshot {
             if path.is_dir() {
                 stack.push(path);
             } else {
-                v2.push(path.display().to_string());
+                v2.push((path.display().to_string(), std::fs::read(&path).unwrap()));
             }
         }
     }
@@ -260,3 +260,68 @@ async fn a_stale_executor_saves_no_interruption_record() {
     assert_stale(&saved);
     assert_eq!(snapshot(&fixture.store, &fixture.run_id), fixture.before);
 }
+
+#[tokio::test]
+async fn issue291_lifecycle_marker_text_without_host_stop_is_failed() {
+    for error in [
+        WorkflowError::StageFailed(TERMINAL_HOST_CALL_MARKER.into()),
+        WorkflowError::SpecInvalid(format!("provider echoed {TERMINAL_HOST_CALL_MARKER}")),
+        WorkflowError::TerminalHostCall("unrecorded typed stop".into()),
+    ] {
+        let (_temp, store, run_id) = new_run();
+        set_status(&store, &run_id, RunStatus::Running);
+        let (mut runner, _rx) = runner(&store, &run_id, Arc::new(PanicLlm), None, None);
+        runner.initialize_repository_audit().await.unwrap();
+        let host = host_of(runner);
+        let summary = host.finish_lifecycle(Err(error)).await.unwrap();
+        assert_eq!(summary.status, WorkflowV2Status::Failed);
+        assert_eq!(summary.failed_call.as_deref(), Some("workflow.js"));
+    }
+}
+
+#[tokio::test]
+async fn issue291_lifecycle_recorded_host_stop_survives_unrelated_error_text() {
+    let (_temp, store, run_id) = new_run();
+    set_status(&store, &run_id, RunStatus::Running);
+    let (mut runner, _rx) = runner(&store, &run_id, Arc::new(PanicLlm), None, None);
+    runner.initialize_repository_audit().await.unwrap();
+    let host = host_of(runner);
+    let mut stop = record(&run_id, "gate");
+    stop.status = WorkflowV2Status::NeedsReview;
+    stop.result.status = WorkflowV2Status::NeedsReview;
+    host.mark_terminal(&stop, "gate/result.json".into(), "review".into())
+        .await;
+    let summary = host
+        .finish_lifecycle(Err(WorkflowError::StageFailed(
+            "unrelated driver error".into(),
+        )))
+        .await
+        .unwrap();
+    assert_eq!(summary.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(summary.failed_call.as_deref(), Some("gate"));
+}
+
+#[tokio::test]
+async fn issue291_stale_lifecycle_cannot_decide_terminal_status() {
+    let fixture = stale_host(Arc::new(PanicLlm));
+    for outcome in [
+        Err(WorkflowError::StageFailed("failure".into())),
+        Err(WorkflowError::StageFailed(TERMINAL_HOST_CALL_MARKER.into())),
+        Ok(()),
+    ] {
+        assert_stale(&fixture.host.finish_lifecycle(outcome).await);
+    }
+    assert_eq!(snapshot(&fixture.store, &fixture.run_id), fixture.before);
+}
+
+#[path = "workflow_live_v2_review_race_tests.rs"]
+mod review_races;
+
+#[path = "workflow_live_v2_round3_audit_tests.rs"]
+mod round3_audit;
+#[path = "workflow_live_v2_round3_gate_tests.rs"]
+mod round3_gates;
+#[path = "workflow_live_v2_round4_fence_tests.rs"]
+mod round4_fences;
+#[path = "workflow_live_v2_spawn_fence_tests.rs"]
+mod spawned_admission;

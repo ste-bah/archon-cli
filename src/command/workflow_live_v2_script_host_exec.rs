@@ -283,7 +283,12 @@ impl WorkflowScriptHost {
                 "method": execution.call.method.as_str(),
             }),
         );
-        let attempt = self.runner.v2_store.next_attempt(&execution.call.id)?;
+        // A superseded or interrupted dispatch's admission keeps its attempt;
+        // this dispatch is a new admission (Issue 291, round 4).
+        let attempt = self
+            .runner
+            .v2_store
+            .next_dispatch_attempt(&execution.call.id, &input_hash)?;
         if self.generated_decomposed_prd_run()
             && source_metadata.source_metadata_required
             && source_metadata.source_fingerprint.is_none()

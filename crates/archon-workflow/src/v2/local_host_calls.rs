@@ -9,20 +9,22 @@ pub fn execute_local_host_call(
     v2_store: &WorkflowV2ResultStore,
     task_universe: Option<&WorkflowV2TaskUniverse>,
 ) -> crate::WorkflowResult<Option<WorkflowV2Result>> {
-    let result = match execution.call.method {
-        WorkflowV2HostMethod::Checkpoint => checkpoint_result(execution),
-        WorkflowV2HostMethod::SaveArtifact => save_artifact_result(execution, v2_store)?,
-        WorkflowV2HostMethod::RequireArtifact => require_artifact_result(execution, v2_store)?,
-        WorkflowV2HostMethod::FinalReport => {
-            final_report_result(execution, v2_store, task_universe)?
-        }
-        WorkflowV2HostMethod::QualityGate => {
-            quality_gate_result(execution, v2_store, task_universe)?
-        }
-        WorkflowV2HostMethod::HumanGate => human_gate_result(execution),
-        _ => return Ok(None),
-    };
-    Ok(Some(result))
+    v2_store.with_session_write_lock(|| {
+        let result = match execution.call.method {
+            WorkflowV2HostMethod::Checkpoint => checkpoint_result(execution),
+            WorkflowV2HostMethod::SaveArtifact => save_artifact_result(execution, v2_store)?,
+            WorkflowV2HostMethod::RequireArtifact => require_artifact_result(execution, v2_store)?,
+            WorkflowV2HostMethod::FinalReport => {
+                final_report_result(execution, v2_store, task_universe)?
+            }
+            WorkflowV2HostMethod::QualityGate => {
+                quality_gate_result(execution, v2_store, task_universe)?
+            }
+            WorkflowV2HostMethod::HumanGate => human_gate_result(execution),
+            _ => return Ok(None),
+        };
+        Ok(Some(result))
+    })
 }
 
 fn checkpoint_result(execution: &WorkflowV2CallExecution) -> WorkflowV2Result {

@@ -121,173 +121,180 @@ pub async fn run_write_capable_v2_fanout(
     task_universe: Option<&WorkflowV2TaskUniverse>,
     source_task_graph: Option<&WorkflowV2SourceTaskGraph>,
 ) -> WorkflowResult<WorkflowV2Result> {
-    let audit = dispatch.repository_audit();
-    let _audit_boundary = match &audit {
-        Some(audit) => Some(audit.lock_write_boundary().await),
-        None => None,
-    };
-    // FIRST, before any stamp below rewrites the input: the identity a stored
-    // outcome is reused under is the item as authored, not as stamped
-    // (Issue-24, `reuse_identity`). Every save site reads this same stamp.
-    stamp_reuse_input_hash(&mut branches);
-    crate::v2::branch_cache::stamp_drift_identities(&mut branches, &execution.call.id, v2_store)?;
-    branches = stamp_project_artifact_policy(branches, v2_store);
-    // Batch O: the run's scope amendments hold for everything below.
-    let amended = scope_amendment_stamps::apply(&mut branches, v2_store, task_universe)?;
-    let task_universe = amended.as_ref().or(task_universe);
-    apply_source_graph_targets_to_branches(&mut branches, source_task_graph);
-    // Authoritative tool binding does NOT depend on the source graph: v3
-    // authored write call ids (`implement-task-...`) are not recognized by
-    // dynamic_source_kind, so no graph exists for them and the graph-based
-    // stamp never runs. Stamp straight from the task universe instead.
-    stamp_required_tools_from_universe(&mut branches, task_universe);
-    // Batch O (I1): the tasks' declared focused tests, never an authored copy.
-    stamp_declared_focused_tests(&mut branches, task_universe);
-    // A host-planned residual round owes only the tools its gaps and files
-    // need; the adapter reads what the tasks' metadata ties each one to.
-    residual_tool_scope::stamp_residual_tool_scope(
-        &mut branches,
-        task_universe,
-        target_repository_root,
-    );
-    // A task states what it produces in `deliverable_contracts`. When one of
-    // those is repository source, the item that owns the task must be able to
-    // KEEP it: the write layer captures declared targets only, so a contract
-    // that never reached `target_files` was produced by the agent and then
-    // dropped with the worktree. One live task lost a 455-line source file
-    // and `coverage_tests.rs` exactly that way, then failed for their absence.
-    stamp_contract_code_targets(&mut branches, task_universe, v2_store);
-    // And the other declaration the task file makes: the files it expects to
-    // change. The verifier is already told that scope and judges the task by
-    // it, so a branch dispatched with less of it can neither satisfy the
-    // verifier nor fail — the paths it is refused are the ones it is required
-    // to fix. A floor: unioned with what the call declared, drawn only from
-    // the item's own tasks.
-    stamp_task_declared_targets(
-        &mut branches,
-        task_universe,
-        v2_store,
-        target_repository_root,
-    );
-    // The line cap is enforced when the manifest is validated — after the agent
-    // has written everything. Give it the budget first, or it discovers the cap
-    // by losing the whole patch.
-    // An agent that is not told where the repository is guesses the artifact
-    // root and hunts for `<project>/crates/...` files that cannot exist.
-    repository_root::stamp_target_repository_root(&mut branches, target_repository_root);
-    target_budgets::stamp_target_file_budgets(
-        &mut branches,
-        target_repository_root,
-        crate::write_coordinator::config::WriteCoordinatorConfig::default().max_source_file_lines,
-    );
-    // Replace the guessed write scope with an evidence-bound one BEFORE the
-    // plan is built. Everything downstream — the ownership rejection, the scope
-    // grant, the overlap guard, the stale-baseline recheck — exists to cope
-    // with planning "disjoint" waves out of scopes declared before anything
-    // read the code. Two items wanting the same undeclared file is not an edge
-    // case there, it is the guaranteed consequence.
-    //
-    // Best-effort: a branch whose pass fails keeps the scope it had, so the
-    // worst case is today's behaviour plus one read-only turn.
-    scope_discovery::discover_write_scopes(
-        &mut branches,
-        target_repository_root,
-        &execution,
-        &adapter,
-        dispatch,
-        v2_store,
-        task_universe,
-    )
-    .await;
-    let all_write_items =
-        write_items_for_branches(target_repository_root, &execution.call, &branches)?;
-    let call_directory = if cfg!(windows) {
-        // The logical call id remains in every record; only its directory is compact.
-        blake3::hash(execution.call.id.as_bytes()).to_hex()[..16].to_string()
-    } else {
-        sanitize_v2_path_segment(&execution.call.id)
-    };
-    let planner =
-        WorkflowV2WritePlanner::new(v2_store.root().join("worktrees").join(call_directory));
-    let all_plan = planner
-        .plan(&all_write_items)
-        .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
-    audit_cache::refresh(
-        &mut branches,
-        &all_write_items,
-        target_repository_root,
-        &execution.call.id,
-        v2_store,
-        dispatch,
-    )
-    .await?;
-    let all_branches = branches.clone();
-    let (reused_outcomes, branches) =
-        split_reusable_branch_outcomes(v2_store, &execution.call.id, branches)?;
-    let mut reused_results = branch_results_from_outcomes(&reused_outcomes);
-    if revalidate_reused_artifact_results(
-        &all_branches,
-        &mut reused_results,
-        target_repository_root,
-        v2_store.run_root(),
-    ) {
-        crate::v2::branch_cache::forget_fix_lineage(v2_store, &execution.call);
-    }
-    if branches.is_empty() {
-        return Ok(result_from_write_fanout(
-            &execution.call,
-            reused_results,
-            &all_plan,
-            0,
-            None,
-        ));
-    }
-    let write_items = write_items_for_branches(target_repository_root, &execution.call, &branches)?;
-    let plan = planner
-        .plan(&write_items)
-        .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
-    if let Some(result) = preflight_write_fanout_source_contract(
-        &execution.call,
-        &branches,
-        &write_items,
-        &plan,
-        target_repository_root,
-    ) {
-        return Ok(result);
-    }
-    let ctx = WriteFanoutContext {
-        task,
-        target_repository_root,
-        execution: &execution,
-        adapter,
-        dispatch,
-        v2_store,
-        store_for_control,
-        run_id,
-        task_universe,
-    };
-    if dispatch.repository_audit().is_some() && target_repository_root.is_some() {
-        return audit_modes::run(ctx, branches, plan, reused_results).await;
-    }
-    match (execution.call.write_mode, workspace_boundary_supported) {
-        (Some(WorkflowV2WriteMode::Coordinated), true) => {
-            run_coordinated_v2_write_fanout(ctx, branches, plan, reused_results).await
-        }
-        (Some(WorkflowV2WriteMode::Worktree), true) => {
-            run_worktree_v2_write_fanout(ctx, branches, plan, reused_results).await
-        }
-        (Some(WorkflowV2WriteMode::Serial), _) => {
-            run_serial_v2_write_fanout(ctx, branches, write_items, plan, None, reused_results).await
-        }
-        (_, false) => Err(WorkflowError::SpecInvalid(
-            "write-capable fanout requested coordinated/worktree isolation, but workspace boundary support is unavailable; workflow.js must choose an explicit safe mode or ask the user"
-                .to_string(),
-        )),
-        _ => Err(WorkflowError::SpecInvalid(format!(
-            "write-capable fanout '{}' requires explicit write mode serial, coordinated, or worktree",
-            execution.call.id
-        ))),
-    }
+    let owner = v2_store.session_workflow_store()?;
+    // Ownership only: a paused executor unwinds the wave; a new one stops it.
+    // No run lock is held while the wave runs (Issue 291).
+    owner
+        .execute_writer(&v2_store.run_id(), async {
+            let audit = dispatch.repository_audit();
+            let _audit_boundary = match &audit {
+                Some(audit) => Some(audit.lock_write_boundary().await),
+                None => None,
+            };
+            // FIRST, before any stamp below rewrites the input: the identity a stored
+            // outcome is reused under is the item as authored, not as stamped
+            // (Issue-24, `reuse_identity`). Every save site reads this same stamp.
+            stamp_reuse_input_hash(&mut branches);
+            crate::v2::branch_cache::stamp_drift_identities(&mut branches, &execution.call.id, v2_store)?;
+            branches = stamp_project_artifact_policy(branches, v2_store);
+            // Batch O: the run's scope amendments hold for everything below.
+            let amended = scope_amendment_stamps::apply(&mut branches, v2_store, task_universe)?;
+            let task_universe = amended.as_ref().or(task_universe);
+            apply_source_graph_targets_to_branches(&mut branches, source_task_graph);
+            // Authoritative tool binding does NOT depend on the source graph: v3
+            // authored write call ids (`implement-task-...`) are not recognized by
+            // dynamic_source_kind, so no graph exists for them and the graph-based
+            // stamp never runs. Stamp straight from the task universe instead.
+            stamp_required_tools_from_universe(&mut branches, task_universe);
+            // Batch O (I1): the tasks' declared focused tests, never an authored copy.
+            stamp_declared_focused_tests(&mut branches, task_universe);
+            // A host-planned residual round owes only the tools its gaps and files
+            // need; the adapter reads what the tasks' metadata ties each one to.
+            residual_tool_scope::stamp_residual_tool_scope(
+                &mut branches,
+                task_universe,
+                target_repository_root,
+            );
+            // A task states what it produces in `deliverable_contracts`. When one of
+            // those is repository source, the item that owns the task must be able to
+            // KEEP it: the write layer captures declared targets only, so a contract
+            // that never reached `target_files` was produced by the agent and then
+            // dropped with the worktree. One live task lost a 455-line source file
+            // and `coverage_tests.rs` exactly that way, then failed for their absence.
+            stamp_contract_code_targets(&mut branches, task_universe, v2_store);
+            // And the other declaration the task file makes: the files it expects to
+            // change. The verifier is already told that scope and judges the task by
+            // it, so a branch dispatched with less of it can neither satisfy the
+            // verifier nor fail — the paths it is refused are the ones it is required
+            // to fix. A floor: unioned with what the call declared, drawn only from
+            // the item's own tasks.
+            stamp_task_declared_targets(
+                &mut branches,
+                task_universe,
+                v2_store,
+                target_repository_root,
+            );
+            // The line cap is enforced when the manifest is validated — after the agent
+            // has written everything. Give it the budget first, or it discovers the cap
+            // by losing the whole patch.
+            // An agent that is not told where the repository is guesses the artifact
+            // root and hunts for `<project>/crates/...` files that cannot exist.
+            repository_root::stamp_target_repository_root(&mut branches, target_repository_root);
+            target_budgets::stamp_target_file_budgets(
+                &mut branches,
+                target_repository_root,
+                crate::write_coordinator::config::WriteCoordinatorConfig::default().max_source_file_lines,
+            );
+            // Replace the guessed write scope with an evidence-bound one BEFORE the
+            // plan is built. Everything downstream — the ownership rejection, the scope
+            // grant, the overlap guard, the stale-baseline recheck — exists to cope
+            // with planning "disjoint" waves out of scopes declared before anything
+            // read the code. Two items wanting the same undeclared file is not an edge
+            // case there, it is the guaranteed consequence.
+            //
+            // Best-effort: a branch whose pass fails keeps the scope it had, so the
+            // worst case is today's behaviour plus one read-only turn.
+            scope_discovery::discover_write_scopes(
+                &mut branches,
+                target_repository_root,
+                &execution,
+                &adapter,
+                dispatch,
+                v2_store,
+                task_universe,
+            )
+            .await;
+            let all_write_items =
+                write_items_for_branches(target_repository_root, &execution.call, &branches)?;
+            let call_directory = if cfg!(windows) {
+                // The logical call id remains in every record; only its directory is compact.
+                blake3::hash(execution.call.id.as_bytes()).to_hex()[..16].to_string()
+            } else {
+                sanitize_v2_path_segment(&execution.call.id)
+            };
+            let planner =
+                WorkflowV2WritePlanner::new(v2_store.root().join("worktrees").join(call_directory));
+            let all_plan = planner
+                .plan(&all_write_items)
+                .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
+            audit_cache::refresh(
+                &mut branches,
+                &all_write_items,
+                target_repository_root,
+                &execution.call.id,
+                v2_store,
+                dispatch,
+            )
+            .await?;
+            let all_branches = branches.clone();
+            let (reused_outcomes, branches) =
+                split_reusable_branch_outcomes(v2_store, &execution.call.id, branches)?;
+            let mut reused_results = branch_results_from_outcomes(&reused_outcomes);
+            if revalidate_reused_artifact_results(
+                &all_branches,
+                &mut reused_results,
+                target_repository_root,
+                v2_store.run_root(),
+            ) {
+                crate::v2::branch_cache::forget_fix_lineage(v2_store, &execution.call);
+            }
+            if branches.is_empty() {
+                return Ok(result_from_write_fanout(
+                    &execution.call,
+                    reused_results,
+                    &all_plan,
+                    0,
+                    None,
+                ));
+            }
+            let write_items = write_items_for_branches(target_repository_root, &execution.call, &branches)?;
+            let plan = planner
+                .plan(&write_items)
+                .map_err(|err| WorkflowError::SpecInvalid(err.to_string()))?;
+            if let Some(result) = preflight_write_fanout_source_contract(
+                &execution.call,
+                &branches,
+                &write_items,
+                &plan,
+                target_repository_root,
+            ) {
+                return Ok(result);
+            }
+            let ctx = WriteFanoutContext {
+                task,
+                target_repository_root,
+                execution: &execution,
+                adapter,
+                dispatch,
+                v2_store,
+                store_for_control,
+                run_id,
+                task_universe,
+            };
+            if dispatch.repository_audit().is_some() && target_repository_root.is_some() {
+                return audit_modes::run(ctx, branches, plan, reused_results).await;
+            }
+            match (execution.call.write_mode, workspace_boundary_supported) {
+                (Some(WorkflowV2WriteMode::Coordinated), true) => {
+                    run_coordinated_v2_write_fanout(ctx, branches, plan, reused_results).await
+                }
+                (Some(WorkflowV2WriteMode::Worktree), true) => {
+                    run_worktree_v2_write_fanout(ctx, branches, plan, reused_results).await
+                }
+                (Some(WorkflowV2WriteMode::Serial), _) => {
+                    run_serial_v2_write_fanout(ctx, branches, write_items, plan, None, reused_results).await
+                }
+                (_, false) => Err(WorkflowError::SpecInvalid(
+                    "write-capable fanout requested coordinated/worktree isolation, but workspace boundary support is unavailable; workflow.js must choose an explicit safe mode or ask the user"
+                        .to_string(),
+                )),
+                _ => Err(WorkflowError::SpecInvalid(format!(
+                    "write-capable fanout '{}' requires explicit write mode serial, coordinated, or worktree",
+                    execution.call.id
+                ))),
+            }
+        })
+        .await
 }
 
 fn revalidate_reused_artifact_results(
@@ -480,3 +487,8 @@ mod worktree_unapplied_tests;
 mod delivery_tests;
 #[cfg(test)]
 mod preserved_apply_tests;
+
+#[cfg(test)]
+mod audit_round3_hooks;
+#[cfg(test)]
+mod audit_round3_tests;

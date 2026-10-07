@@ -73,6 +73,12 @@ impl WorkflowScriptHost {
         &self,
         payload: &str,
     ) -> archon_workflow::WorkflowResult<String> {
+        let generation = self.owned_generation()?;
+        let executor = self
+            .runner
+            .v2_store
+            .session_executor()
+            .unwrap_or(generation);
         let host = match self.tool_host.get() {
             Some(host) => Arc::clone(host),
             None => {
@@ -98,17 +104,19 @@ impl WorkflowScriptHost {
                 self.tool_host.get().map_or(built, Arc::clone)
             }
         };
-        // Issue 299: sampled before the call, as every stall pause is: the
-        // generation that observed the stall is the one it may pause.
-        let generation = self
-            .runner
-            .workflow_store
-            .load_state(&self.runner.run_id)?
-            .generation;
-        let outcome = crate::command::workflow_live::workflow_script_tools::execute_run_tool(
-            &host,
-            &self.tool_budget,
-            payload,
+        #[cfg(test)]
+        crate::command::workflow_live::workflow_live_v2::workflow_live_v2_fixed_persistence::publication_hook::run(
+            self.runner.workflow_store.run_dir(&self.runner.run_id),
+        );
+        let outcome = tool_owner::execute(
+            &self.runner.workflow_store,
+            &self.runner.run_id,
+            executor,
+            crate::command::workflow_live::workflow_script_tools::execute_run_tool(
+                &host,
+                &self.tool_budget,
+                payload,
+            ),
         )
         .await;
         let Err(WorkflowError::ControlPaused(message)) = &outcome else {
@@ -180,3 +188,6 @@ mod error_pause;
 mod remediation_pause;
 #[path = "workflow_live_v2_script_host_terminal_stop.rs"]
 mod workflow_live_v2_script_host_terminal_stop;
+
+#[path = "workflow_live_v2_script_tool_owner.rs"]
+mod tool_owner;

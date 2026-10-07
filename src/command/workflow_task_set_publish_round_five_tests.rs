@@ -60,7 +60,7 @@ fn interrupted_legacy_rollback_restores_remaining_backups() {
     std::fs::write(&body, b"half rolled-back body").unwrap();
     std::fs::write(
         set.pin_path().with_extension("publish-verification"),
-        serde_json::json!({"transaction": TXN, "decisions": {TXN: "rollback"}}).to_string(),
+        serde_json::json!({"transaction": TXN, "decisions": {TXN: "rollback"}, "written": {TXN: {(body.display().to_string()): content_digest(b"half rolled-back body")}}}).to_string(),
     )
     .unwrap();
     recover_interrupted_publish(&set.pin_path(), &set.tasks).unwrap();
@@ -123,8 +123,8 @@ fn legacy_roll_decision_is_persisted_before_the_first_rename() {
                     if target == &a { b"old-a" } else { b"new-b" },
                 )
                 .unwrap();
-            } else if target == &b {
-                std::fs::write(target, b"new-b").unwrap();
+            } else {
+                std::fs::remove_file(target).unwrap();
             }
         }
         let evidence = s.root().join("crash-step");

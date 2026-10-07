@@ -3,6 +3,7 @@ use super::*;
 use std::sync::Mutex;
 
 type Hook = Box<dyn FnOnce() + Send>;
+static STOP: Mutex<BTreeMap<PathBuf, Hook>> = Mutex::new(BTreeMap::new());
 static UNWIND: Mutex<BTreeMap<PathBuf, Hook>> = Mutex::new(BTreeMap::new());
 
 pub(in super::super) fn on_unwind(path: PathBuf, hook: Hook) {
@@ -73,5 +74,15 @@ impl WorkflowLlmClient for PendingReply {
         _: &str,
     ) -> archon_workflow::WorkflowResult<archon_workflow::WorkflowAgentOutcome> {
         std::future::pending().await
+    }
+}
+
+pub(in super::super) fn on_stop(path: PathBuf, hook: Hook) {
+    STOP.lock().unwrap().insert(path, hook);
+}
+pub(in super::super) fn stop(path: PathBuf) {
+    let hook = STOP.lock().unwrap().remove(&path);
+    if let Some(hook) = hook {
+        hook();
     }
 }

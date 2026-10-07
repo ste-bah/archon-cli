@@ -225,16 +225,24 @@ fn hold_to_round(
         })
         .collect::<Vec<_>>()
         .join("; ");
-    let reason = if gate.failing_check_ids.is_empty() {
-        format!(
-            "the acceptance stage could not evaluate the frozen checks in round {}: {}",
-            record.round,
-            record.operational_errors.join("; ")
+    // An operational stop names its own remedy (missing recovery evidence,
+    // an unreadable store); only failing checks point at the tasks' code.
+    let (reason, remedy) = if gate.failing_check_ids.is_empty() {
+        (
+            format!(
+                "the acceptance stage could not evaluate the frozen checks in round {}: {}",
+                record.round,
+                record.operational_errors.join("; ")
+            ),
+            "resolve the operational errors above as each one says",
         )
     } else {
-        format!(
-            "frozen acceptance checks still fail after round {}: {owners}",
-            record.round
+        (
+            format!(
+                "frozen acceptance checks still fail after round {}: {owners}",
+                record.round
+            ),
+            "fix the named tasks' implementation against the contract",
         )
     };
     if matches!(
@@ -245,7 +253,7 @@ fn hold_to_round(
         summary.failed_call = Some(record.call_id.clone());
         summary.failed_result_path = Some(path.display().to_string());
         summary.next_action = Some(format!(
-            "{reason}; fix the named tasks' implementation against the contract and /workflow resume --live {run_id}, or inspect {record_path}"
+            "{reason}; {remedy} and /workflow resume --live {run_id}, or inspect {record_path}"
         ));
     }
     (summary, Some(gate))

@@ -99,6 +99,24 @@ pub(super) fn capture(pin: &Path, tasks: &Path, record: &mut Recovery) -> Result
             } else {
                 record.skeleton = serde_json::from_slice(&bytes).ok();
             }
+        } else if name == TASK_SKELETON_FILE {
+            // A changed serialization has no named digest. Authenticate its
+            // entire shape against launch preimages before choosing a source;
+            // directory ordering cannot select an incompatible older skeleton.
+            for anchor in &anchors {
+                let Some(digest) = &anchor.skeleton_digest else {
+                    continue;
+                };
+                let Some(preimage) = history.get(digest)? else {
+                    continue;
+                };
+                if authenticates_skeleton(record, anchor, &bytes, &preimage)? {
+                    // Retain the archived pair's binding, not the live rebound
+                    // binding. Anchor selection and completed adoption use it.
+                    record.skeleton = Some(serde_json::from_slice(&preimage)?);
+                    break;
+                }
+            }
         }
     }
     Ok(())
@@ -118,17 +136,32 @@ pub(crate) fn authority(pin: &Path, transaction: &str) -> Result<Option<serde_js
 }
 
 pub(super) fn validate(record: &Recovery, pin: &Path, tasks: &Path) -> Result<()> {
-    if record.task_root != tasks.canonicalize().map(archon_shell::paths::plain)?
-        || !super::super::publish::valid_recovery_transaction(&record.transaction)
-    {
+    let task_root = tasks.canonicalize().map(archon_shell::paths::plain)?;
+    if record.task_root != task_root {
         return Err(anyhow!(
-            "recovery authority has a different task root or invalid transaction"
+            "pending recovery authority in {} names task root {}, not {}; the pin is not this task set's recovery evidence. Restore the pin and its recovery evidence from backup, or re-freeze the task set and start a new run",
+            pin.display(),
+            record.task_root.display(),
+            task_root.display()
+        ));
+    }
+    if !super::super::publish::valid_recovery_transaction(&record.transaction) {
+        return Err(anyhow!(
+            "recovery authority in {} has an invalid transaction id; restore the recovery evidence from backup, or re-freeze the task set and start a new run",
+            pin.display()
         ));
     }
     let mut anchor = record.clone();
     anchor.completed = None;
     let expected = serde_json::to_value(&anchor)?;
-    let log = std::fs::read_to_string(pin.with_extension("publish-recovery.log"))?;
+    let log_path = pin.with_extension("publish-recovery.log");
+    let log = std::fs::read_to_string(&log_path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            missing(&log_path)
+        } else {
+            anyhow!("reading recovery evidence {}: {error}", log_path.display())
+        }
+    })?;
     let logged = log
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
@@ -218,6 +251,8 @@ pub(crate) fn refreeze_base(
     tasks: &Path,
 ) -> Result<Option<archon_workflow::task_set_contract::AcceptanceContract>> {
     let (records, _) = read(pin)?;
+    // Every pending record is checked: one naming another task root refuses
+    // by name below, never a silent skip into ordinary publication.
     let Some(record) = records
         .iter()
         .rev()
@@ -225,10 +260,7 @@ pub(crate) fn refreeze_base(
     else {
         return Ok(None);
     };
-    if let Err(error) = validate(record, pin, tasks) {
-        tracing::warn!(%error, "recovery template deferred; authority retained for retry");
-        return Ok(None);
-    }
+    validate(record, pin, tasks)?;
     let anchor = anchors::anchor(record, pin)?;
     let Some(anchor) = anchor else {
         return Ok(None);
@@ -237,4 +269,85 @@ pub(crate) fn refreeze_base(
         return Ok(None);
     };
     Ok(Some(serde_json::from_slice(&bytes)?))
+}
+
+/// A named refusal keeps evidence loss actionable while still failing closed.
+pub(super) fn missing(path: &Path) -> anyhow::Error {
+    anyhow!(
+        "recovery evidence file {} is missing; restore the recovery evidence from backup, or re-freeze the task set and start a new run",
+        path.display()
+    )
+}
+
+/// The anchor authenticates archived skeleton bytes even when the interrupted
+/// publish changed or removed the live copy. Never invent a skeleton-less hop.
+pub(super) fn bound_skeleton(
+    record: &Recovery,
+    anchor: &PortableAcceptanceIdentityV1,
+    pin: &Path,
+    tasks: &Path,
+) -> Result<Option<TaskSkeleton>> {
+    let Some(digest) = &anchor.skeleton_digest else {
+        return Ok(None);
+    };
+    let bytes = ChainHistory::for_pin(pin).get(digest)?
+        .ok_or_else(|| anyhow!("launch-bound recovery skeleton {digest} is missing; restore its archived preimage or re-freeze and start a new run"))?;
+    let skeleton: TaskSkeleton = serde_json::from_slice(&bytes)?;
+    if skeleton.acceptance_digest != anchor.acceptance_digest {
+        return Err(anyhow!(
+            "chain check skeleton_changed failed: archived skeleton does not bind its launch contract"
+        ));
+    }
+    let live_path = tasks.join(TASK_SKELETON_FILE);
+    let live = match std::fs::read(&live_path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("reading recovery skeleton {}", live_path.display()));
+        }
+    };
+    if let Some(live) = live
+        && !authenticates_skeleton(record, anchor, &live, &bytes)?
+    {
+        // Only the anchor's own shape (the newest launch of the authenticated
+        // history) is accepted. Another launch's skeleton is a rollback and
+        // is refused by name (Issue 301, round-4 review minor 6).
+        return Err(super::skeleton_rollback::refusal(
+            record, anchor, &live, &live_path, pin,
+        )?);
+    }
+    Ok(Some(skeleton))
+}
+
+/// The same authority for capture and publication: archived shape belongs to
+/// its launch contract; live binding may name any captured authorized contract.
+pub(super) fn authenticates_skeleton(
+    record: &Recovery,
+    anchor: &PortableAcceptanceIdentityV1,
+    live: &[u8],
+    archived: &[u8],
+) -> Result<bool> {
+    let expected: serde_json::Value = serde_json::from_slice(archived)?;
+    if expected["acceptance_digest"].as_str() != Some(&anchor.acceptance_digest) {
+        return Ok(false);
+    }
+    let Ok(mut live) = serde_json::from_slice::<serde_json::Value>(live) else {
+        return Ok(false);
+    };
+    let Some(binding) = live.get_mut("acceptance_digest") else {
+        return Ok(false);
+    };
+    if !binding.as_str().is_some_and(|digest| {
+        record
+            .prior
+            .iter()
+            .map(AcceptancePin::identity)
+            .chain(record.runs.values().cloned())
+            .any(|launch| launch.acceptance_digest == digest)
+    }) {
+        return Ok(false);
+    }
+    *binding = expected["acceptance_digest"].clone();
+    Ok(live == expected)
 }

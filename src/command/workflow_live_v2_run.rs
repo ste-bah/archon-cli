@@ -9,6 +9,8 @@ use workflow_live_v2_run_fold::fold_run_topology;
 #[path = "workflow_live_v2_run_control.rs"]
 mod run_control;
 use run_control::{generated_control_report, lost_ownership_report};
+#[path = "workflow_live_v2_run_engine.rs"]
+mod engine;
 
 #[cfg(test)]
 #[path = "workflow_live_v2_run_generation_tests.rs"]
@@ -299,6 +301,18 @@ async fn execute_generated_v2_run(
     adopt_accepted_cache: bool,
     executor_lease: Arc<crate::command::workflow_executor_lease::ExecutionLease>,
 ) -> Result<String> {
+    if let Err(WorkflowError::ControlCancelled(refused)) =
+        archon_workflow::control_pause::require_executor(
+            &store.load_state(&run.id)?,
+            run.generation,
+        )
+    {
+        return Ok(run_control::lost_ownership_report(
+            "Workflow", &run.id, &refused,
+        ));
+    }
+    let owner_store = store.for_executor(&run.id, run.generation);
+    let store = &owner_store;
     let adapter = WorkflowV2AgentAdapter::new();
     let runtime = WorkflowV2ScriptRuntime {
         target_repository_root: plan.target_repository_root.clone(),
@@ -338,8 +352,10 @@ async fn execute_generated_v2_run(
         runtime.target_repository_root.clone(),
         Some(u64::from(runtime.generated_config.host_call_timeout_secs)),
     )
-    .with_provider_env_resolution(provider_env_resolution);
+    .with_provider_env_resolution(provider_env_resolution)
+    .with_owner_store(store.clone());
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
+    v2_store.bind_session_executor(run.generation);
     v2_store.record_max_residual_passes(runtime.generated_config.max_residual_passes.into())?;
     let resume_completed_ids = if adopt_accepted_cache {
         plan.task_universe
@@ -367,24 +383,7 @@ async fn execute_generated_v2_run(
     .with_frontier_resume(adopt_accepted_cache)
     .with_resume_completed_ids(resume_completed_ids)
     .with_executor_lease(executor_lease, run.generation);
-    // Decomposed-PRD runs default to the Rust lifecycle. v3 script mode (ARCHON_SCRIPT_LIFECYCLE=1)
-    // instead AUTHORS a workflow.js from the task universe and executes it.
-    // Preserve the persisted engine/cache choice; only legacy runs read the environment.
-    let script_lifecycle = load_generated_v2_metadata(store, &run.id)
-        .ok()
-        .flatten()
-        .and_then(|metadata| metadata.script_lifecycle)
-        // Legacy runs created before the persisted field: a v3 run leaves an
-        // authored-workflow.js in its run dir — detect it so those continue as
-        // v3 too, rather than falling back to the env var and switching engine.
-        .or_else(|| {
-            store
-                .run_dir(&run.id)
-                .join("authored-workflow.js")
-                .exists()
-                .then_some(true)
-        })
-        .unwrap_or_else(script_lifecycle_from_env);
+    let script_lifecycle = engine::stored_engine_choice(store, &run.id);
     if let Some(root) = plan.target_repository_root.as_deref() {
         let trimmed = root.trim();
         if !trimmed.is_empty() && !std::path::Path::new(trimmed).join(".git").exists() {

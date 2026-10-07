@@ -56,12 +56,7 @@ pub(super) async fn prepare_worktree_wave(
     let source = capture_sealed_source(canonical_root, &union, cfg)
         .map_err(|err| WorkflowError::StageFailed(err.to_string()))?;
     if let Some(audit) = dispatch.repository_audit() {
-        let snapshot = crate::repository_audit::runtime::Snapshot::from_sealed(
-            canonical_root,
-            &source,
-            &union,
-            v2_store,
-        )?;
+        let snapshot = audit.snapshot_from_sealed(canonical_root, &source, &union, v2_store)?;
         let paths = union
             .target_files
             .iter()

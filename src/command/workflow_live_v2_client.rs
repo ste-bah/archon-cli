@@ -38,6 +38,7 @@ pub(super) struct LiveV2AgentClient {
     timeout_source: &'static str,
     provider_env_resolution: Option<ProviderEnvResolution>,
     fixed_raw_tool_policy: Option<Vec<String>>,
+    pub(super) owner_store: Option<archon_workflow::WorkflowStore>,
     pub(super) audit: Option<archon_workflow::repository_audit::runtime::AuditRuntime>,
 }
 
@@ -62,6 +63,7 @@ impl LiveV2AgentClient {
             provider_env_resolution: None,
             fixed_raw_tool_policy: None,
             audit: None,
+            owner_store: None,
         }
     }
 
@@ -120,6 +122,7 @@ impl LiveV2AgentClient {
             provider_env_resolution: self.provider_env_resolution.clone(),
             fixed_raw_tool_policy: self.fixed_raw_tool_policy.clone(),
             audit: self.audit.clone(),
+            owner_store: self.owner_store.clone(),
         }
     }
 
@@ -250,22 +253,6 @@ impl LiveV2AgentClient {
     }
 }
 
-/// One definition, shared with the shape tuner.
-///
-/// The learner's baseline has to be the cap this function returns, or a
-/// "narrowing" could be reported against a number the runtime never used. Two
-/// copies of this resolution is how that happens, so there is one.
-fn live_v2_subagent_max_concurrency() -> Option<usize> {
-    crate::command::sona_workflow_shape_tuning::resolved_subagent_cap()
-}
-
-fn read_only_v2_fanout_parallelism(requested: Option<usize>, subagent_cap: Option<usize>) -> usize {
-    let cap = subagent_cap
-        .unwrap_or(archon_core::subagent::SubagentManager::DEFAULT_MAX_CONCURRENT)
-        .max(1);
-    requested.map_or(cap, |requested| requested.max(1).min(cap))
-}
-
 impl LiveV2AgentClient {
     async fn dispatch_request(
         &self,
@@ -360,18 +347,20 @@ impl LiveV2AgentClient {
                 .clone()
                 .map(WorkflowProviderEnv::new),
         };
-        let response = match if continuing {
-            // Never retry a validation repair by spawning a fresh pipeline run.
-            self.llm.continue_agent(agent_request).await
-        } else {
-            run_agent_with_transient_retry(&self.llm, agent_request, |attempt| {
-                let client = self.clone();
-                let stage_request = stage_request.clone();
-                let agent_name = agent_name.clone();
-                let provider_id = provider_id.clone();
-                let resolved_model = resolved_model.clone();
-                async move {
-                    client
+        let provider_work =
+            async {
+                if continuing {
+                    // Never retry a validation repair by spawning a fresh pipeline run.
+                    self.llm.continue_agent(agent_request).await
+                } else {
+                    run_agent_with_transient_retry(&self.llm, agent_request, |attempt| {
+                        let client = self.clone();
+                        let stage_request = stage_request.clone();
+                        let agent_name = agent_name.clone();
+                        let provider_id = provider_id.clone();
+                        let resolved_model = resolved_model.clone();
+                        async move {
+                            client
                         .emit_required_activity(
                             &stage_request,
                             &agent_name,
@@ -386,10 +375,12 @@ impl LiveV2AgentClient {
                         .map_err(|error| {
                             archon_workflow::WorkflowError::NotificationDelivery(error.to_string())
                         })
+                        }
+                    })
+                    .await
                 }
-            })
-            .await
-        } {
+            };
+        let response = match self.admit_provider(provider_work).await {
             Ok(response) => response,
             Err(err) => {
                 // Before the emit below, which is itself a `?`.
@@ -438,7 +429,10 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
         request: &WorkflowV2AgentRequest,
         prompt: String,
     ) -> Result<String, WorkflowV2AgentError> {
-        call_sessions::bounded(&request.call, self.dispatch_request(request, prompt, false)).await
+        call_sessions::bounded(&request.call, || {
+            self.dispatch_request(request, prompt, false)
+        })
+        .await
     }
 
     async fn continue_agent_request(
@@ -446,7 +440,10 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
         request: &WorkflowV2AgentRequest,
         prompt: String,
     ) -> Result<String, WorkflowV2AgentError> {
-        call_sessions::bounded(&request.call, self.dispatch_request(request, prompt, true)).await
+        call_sessions::bounded(&request.call, || {
+            self.dispatch_request(request, prompt, true)
+        })
+        .await
     }
 
     async fn run_agent(&self, prompt: String) -> std::result::Result<String, WorkflowV2AgentError> {

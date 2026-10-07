@@ -336,28 +336,30 @@ pub(super) async fn run_read_only_v2_fanout(
     } else {
         // REM-5: a review map re-runs the branches a pass left without a
         // verdict, while each pass completes one of them.
-        review_passes::run_review_passes(
-            pending_items,
-            review_map,
-            |items| {
-                queued(&items);
-                scheduler.run_read_only_fanout_observed(items, &observer, &handler)
-            },
-            |incomplete| {
-                poll_v2_run_control(store_for_control, run_id, &execution.call.id)?;
-                emit_v2_branch_event(
-                    store_for_control,
-                    run_id,
-                    WorkflowEventKind::StageStarted,
-                    serde_json::json!({
-                        "event": "review_branches_rerun",
-                        "call_id": execution.call.id,
-                        "branch_ids": incomplete,
-                    }),
-                );
-                Ok(())
-            },
-        )
+        archon_workflow::heap_future::on_heap(|| {
+            review_passes::run_review_passes(
+                pending_items,
+                review_map,
+                |items| {
+                    queued(&items);
+                    scheduler.run_read_only_fanout_observed(items, &observer, &handler)
+                },
+                |incomplete| {
+                    poll_v2_run_control(store_for_control, run_id, &execution.call.id)?;
+                    emit_v2_branch_event(
+                        store_for_control,
+                        run_id,
+                        WorkflowEventKind::StageStarted,
+                        serde_json::json!({
+                            "event": "review_branches_rerun",
+                            "call_id": execution.call.id,
+                            "branch_ids": incomplete,
+                        }),
+                    );
+                    Ok(())
+                },
+            )
+        })
         .await?
     };
     let mut outcomes = reused_outcomes;
@@ -373,11 +375,13 @@ pub(super) async fn run_read_only_v2_fanout(
     // each branch's under the tripwire; Batch G2: one that changed the
     // project's inputs or gave no verdict is re-run alone, then left to the
     // host as an operational error -- no other branch is touched.
-    archon_workflow::v2::verification::enforce_declared_contracts_watched(
-        &mut outcomes,
-        &declared_contracts,
-        Some(v2_store.run_root()),
-    )
+    archon_workflow::heap_future::on_heap(|| {
+        archon_workflow::v2::verification::enforce_declared_contracts_watched(
+            &mut outcomes,
+            &declared_contracts,
+            Some(v2_store.run_root()),
+        )
+    })
     .await;
     // Issue-118: red tests the host itself finds red at the run's base
     // commit, in files the branch may not write, refuse nothing; they are
@@ -386,19 +390,22 @@ pub(super) async fn run_read_only_v2_fanout(
         Some(root) => {
             let dispatch = super::live_agent_dispatch::LiveAgentDispatch::new(client.clone())
                 .with_generated_config(&runtime.generated_config);
-            archon_workflow::v2::verification::excuse_run_base_red_tests(
-                &archon_workflow::v2::verification::RunBaseRedContext {
-                    store: v2_store,
-                    dispatch: &dispatch,
-                    universe: task_universe,
-                    repository_root: std::path::Path::new(root),
-                    call: &execution.call,
-                    judged_commit: judged_commit.as_deref(),
-                },
-                &outcomes,
-                &baseline_by_item,
-                &scope_by_item,
-            )
+            let context = archon_workflow::v2::verification::RunBaseRedContext {
+                store: v2_store,
+                dispatch: &dispatch,
+                universe: task_universe,
+                repository_root: std::path::Path::new(root),
+                call: &execution.call,
+                judged_commit: judged_commit.as_deref(),
+            };
+            archon_workflow::heap_future::on_heap(|| {
+                archon_workflow::v2::verification::excuse_run_base_red_tests(
+                    &context,
+                    &outcomes,
+                    &baseline_by_item,
+                    &scope_by_item,
+                )
+            })
             .await
         }
         None => Default::default(),

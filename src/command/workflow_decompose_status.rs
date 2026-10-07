@@ -24,7 +24,7 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
     crate::command::workflow_decompose_state::reconcile_interrupted(
         &mut state.dispositions,
         &records,
-    );
+    )?;
     let mut out = String::from("\nfixed decomposition:\n");
     out.push_str("run_kind: fixed_decomposition_v1\n");
     out.push_str(&format!(

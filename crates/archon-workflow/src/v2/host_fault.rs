@@ -200,10 +200,12 @@ pub fn copy_host_infrastructure_fault(error: &WorkflowError) -> Option<WorkflowE
 }
 
 impl crate::v2::WorkflowV2AgentError {
-    /// The agent-layer error for a failed provider call: a host fault keeps
-    /// its kind, anything else is transport, as before.
+    /// Host control and infrastructure faults keep their kind through the
+    /// agent layer. Only ordinary provider failures become transport.
     pub fn from_call_error(error: &WorkflowError) -> Self {
         match error {
+            WorkflowError::ControlPaused(message) => Self::ControlPaused(message.clone()),
+            WorkflowError::ControlCancelled(message) => Self::ControlCancelled(message.clone()),
             WorkflowError::Io { path, source } => Self::HostIo {
                 path: path.clone(),
                 kind: source.kind(),
@@ -218,10 +220,12 @@ impl crate::v2::WorkflowV2AgentError {
         matches!(self, Self::HostIo { .. } | Self::HostStateCorrupt(_))
     }
 
-    /// The run-level error for a failed agent call: a host fault as its own
-    /// kind again, anything else a failed stage with the agent error's text.
+    /// Recover typed host control and infrastructure faults at the run layer.
+    /// An ordinary agent failure remains a failed stage.
     pub fn into_workflow_error(self) -> WorkflowError {
         match self {
+            Self::ControlPaused(message) => WorkflowError::ControlPaused(message),
+            Self::ControlCancelled(message) => WorkflowError::ControlCancelled(message),
             Self::HostIo {
                 path,
                 kind,

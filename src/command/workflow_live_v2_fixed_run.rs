@@ -28,6 +28,8 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
             other => return Err(other.into()),
         },
     };
+    let owner_store = store.for_executor(&run.id, run.generation);
+    let store = &owner_store;
     let execution_generation = run.generation;
     let pause_executor = host_command_executor.clone();
     let runner = fixed_runner(
@@ -289,8 +291,12 @@ fn record_terminal_reason(
         return;
     };
     let text = crate::command::workflow_decompose_events::log_field(value);
-    let _ = crate::command::workflow_decompose_log::append_nofollow_line(
-        &log_path,
-        &format!("transition={transition} field={label} text={text}"),
-    );
+    if let Err(error) = store.with_run_lock(run_id, |_| {
+        crate::command::workflow_decompose_log::append_nofollow_line(
+            &log_path,
+            &format!("transition={transition} field={label} text={text}"),
+        )
+    }) {
+        tracing::warn!(%error, "terminal reason not appended");
+    }
 }

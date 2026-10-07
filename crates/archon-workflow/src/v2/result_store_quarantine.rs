@@ -92,46 +92,48 @@ impl WorkflowV2ResultStore {
         path: &Path,
         reason: String,
     ) -> WorkflowResult<Option<QuarantinedCallRecordV1>> {
-        let dir = self.call_quarantine_dir(call_id);
-        fs::create_dir_all(&dir).map_err(|err| WorkflowError::io(&dir, err))?;
-        let stem = uuid::Uuid::new_v4().to_string();
-        let moved = dir.join(format!("{stem}{CALL_DAMAGED_SUFFIX}"));
-        let relative = |path: &Path| {
-            let path = path.strip_prefix(&self.root).unwrap_or(path);
-            path.to_string_lossy().replace('\\', "/")
-        };
-        let evidence = QuarantinedCallRecordV1 {
-            event: CALL_QUARANTINE_EVENT.to_string(),
-            call_id: call_id.to_string(),
-            original: relative(path),
-            quarantined: relative(&moved),
-            reason,
-            quarantined_at: chrono::Utc::now().to_rfc3339(),
-        };
-        crate::store::write_atomic(
-            &dir.join(format!(".{stem}.tmp")),
-            &dir.join(format!("{stem}{CALL_EVIDENCE_SUFFIX}")),
-            &serde_json::to_vec_pretty(&evidence)?,
-        )?;
-        match crate::store::rename_durable(path, &moved) {
-            Err(WorkflowError::Io { source, .. })
-                if source.kind() == std::io::ErrorKind::NotFound =>
-            {
-                return Ok(None);
+        self.with_session_write_lock(|| {
+            let dir = self.call_quarantine_dir(call_id);
+            fs::create_dir_all(&dir).map_err(|err| WorkflowError::io(&dir, err))?;
+            let stem = uuid::Uuid::new_v4().to_string();
+            let moved = dir.join(format!("{stem}{CALL_DAMAGED_SUFFIX}"));
+            let relative = |path: &Path| {
+                let path = path.strip_prefix(&self.root).unwrap_or(path);
+                path.to_string_lossy().replace('\\', "/")
+            };
+            let evidence = QuarantinedCallRecordV1 {
+                event: CALL_QUARANTINE_EVENT.to_string(),
+                call_id: call_id.to_string(),
+                original: relative(path),
+                quarantined: relative(&moved),
+                reason,
+                quarantined_at: chrono::Utc::now().to_rfc3339(),
+            };
+            crate::store::write_atomic(
+                &dir.join(format!(".{stem}.tmp")),
+                &dir.join(format!("{stem}{CALL_EVIDENCE_SUFFIX}")),
+                &serde_json::to_vec_pretty(&evidence)?,
+            )?;
+            match crate::store::rename_durable(path, &moved) {
+                Err(WorkflowError::Io { source, .. })
+                    if source.kind() == std::io::ErrorKind::NotFound =>
+                {
+                    return Ok(None);
+                }
+                other => other?,
             }
-            other => other?,
-        }
-        crate::store::sync_dir(&dir)?;
-        if let Some(results) = path.parent() {
-            crate::store::sync_dir(results)?;
-        }
-        tracing::warn!(
-            call_id,
-            record = %evidence.original,
-            moved_to = %evidence.quarantined,
-            reason = %evidence.reason,
-            "damaged call record quarantined"
-        );
-        Ok(Some(evidence))
+            crate::store::sync_dir(&dir)?;
+            if let Some(results) = path.parent() {
+                crate::store::sync_dir(results)?;
+            }
+            tracing::warn!(
+                call_id,
+                record = %evidence.original,
+                moved_to = %evidence.quarantined,
+                reason = %evidence.reason,
+                "damaged call record quarantined"
+            );
+            Ok(Some(evidence))
+        })
     }
 }

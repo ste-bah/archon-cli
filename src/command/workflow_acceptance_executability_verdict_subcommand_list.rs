@@ -56,6 +56,18 @@ type Key = (Identity, BTreeMap<String, String>);
 static LISTED: LazyLock<Mutex<BTreeMap<Key, Listing>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
+#[cfg(test)]
+static LAST_LISTING: LazyLock<Mutex<BTreeMap<PathBuf, Listing>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+#[cfg(test)]
+pub(super) fn last_listing(program: &Path) -> Option<Listing> {
+    LAST_LISTING
+        .lock()
+        .unwrap()
+        .get(&program.canonicalize().ok()?)
+        .cloned()
+}
+
 /// `program`'s built-in commands at `at`'s site (see the module docs).
 pub(super) fn listing(program: &Path, at: &Context) -> Listing {
     let lock = || LISTED.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -73,6 +85,11 @@ pub(super) fn listing(program: &Path, at: &Context) -> Listing {
         return known.clone();
     }
     let listing = list(program, at).unwrap_or_else(Listing::NoAnswer);
+    #[cfg(test)]
+    LAST_LISTING
+        .lock()
+        .unwrap()
+        .insert(key.0.0.clone(), listing.clone());
     if !matches!(listing, Listing::NoAnswer(_)) {
         lock().insert(key, listing.clone());
     }

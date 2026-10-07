@@ -23,73 +23,6 @@ pub struct AuditRuntime {
     write_boundary_lock: Arc<tokio::sync::Mutex<()>>,
 }
 impl AuditRuntime {
-    pub fn initialize(
-        store: WorkflowStore,
-        run_id: String,
-        policy: AuditPolicy,
-    ) -> WorkflowResult<Self> {
-        let generation = store.load_state(&run_id)?.generation;
-        store.with_run_lock(&run_id, |locked| {
-            let path = locked.run_dir(&run_id).join(STATE_PATH);
-            let required = locked
-                .run_dir(&run_id)
-                .join("v2/repository-audit/required.json");
-            if required.exists() && !path.exists() {
-                return Err(WorkflowError::StateCorrupt(
-                    "mandatory repository audit state is missing".into(),
-                ));
-            }
-            if path.exists() {
-                let mut state: AuditState = serde_json::from_slice(
-                    &std::fs::read(&path).map_err(|e| WorkflowError::io(&path, e))?,
-                )?;
-                if state.schema_version != 1 {
-                    return Err(WorkflowError::StateCorrupt(
-                        "unsupported audit state schema".into(),
-                    ));
-                }
-                if state.generation != generation {
-                    state
-                        .budget
-                        .recover_interrupted(chrono::Utc::now().timestamp_millis())?;
-                    state.generation = generation;
-                    state.final_receipt = None;
-                }
-                locked.write_run_json(&run_id, STATE_PATH, &state)?;
-            } else {
-                locked.write_run_json(
-                    &run_id,
-                    STATE_PATH,
-                    &AuditState {
-                        schema_version: 1,
-                        generation,
-                        budget: AuditBudget::new(policy),
-                        ledger: AuditLedger::default(),
-                        declared_paths: BTreeSet::new(),
-                        snapshot: None,
-                        attempts: 0,
-                        last_error: None,
-                        final_receipt: None,
-                        operator_controls: vec![],
-                        policy_provenance: None,
-                    },
-                )?;
-            }
-            locked.write_run_json(
-                &run_id,
-                "v2/repository-audit/required.json",
-                &json!({"schema_version":1}),
-            )?;
-            Ok(())
-        })?;
-        Ok(Self {
-            store,
-            run_id,
-            generation,
-            assessment_lock: Arc::new(tokio::sync::Mutex::new(())),
-            write_boundary_lock: Arc::new(tokio::sync::Mutex::new(())),
-        })
-    }
     /// Keep the assessed view stable until all branches have applied and been reassessed.
     pub async fn lock_write_boundary(&self) -> tokio::sync::OwnedMutexGuard<()> {
         self.write_boundary_lock.clone().lock_owned().await
@@ -97,15 +30,10 @@ impl AuditRuntime {
     pub fn status(&self) -> WorkflowResult<serde_json::Value> {
         self.state()?.status()
     }
-    /// Issue-83: identity is the state file against the run's CURRENT
-    /// generation, never against the one this handle was built at. A handle
-    /// outlives every lifecycle action the run takes, each of which bumps
-    /// that generation, so the snapshot went stale for ordinary reasons and
-    /// took every write stage in a resumed run down with it — as corruption,
-    /// terminal and charged to the task's remediation budget. Supersession is
-    /// still refused, as the control condition that re-dispatches; an
-    /// unreadable file is still corruption. See [`super::identity`].
+    /// Check both the handle's captured executor and the durable audit state.
+    /// Operator edits retain ownership; a resumed executor gets a fresh handle.
     pub fn state(&self) -> WorkflowResult<AuditState> {
+        self.require_executor()?;
         let state = super::identity::read_state(&self.store, &self.run_id)?;
         super::identity::require_current_generation(&self.store, &self.run_id, &state)?;
         Ok(state)
@@ -115,9 +43,8 @@ impl AuditRuntime {
         f: impl FnOnce(&mut AuditState) -> WorkflowResult<T>,
     ) -> WorkflowResult<T> {
         self.store.with_run_lock(&self.run_id, |store| {
-            // `state()` carries the supersession refusal this used to make
-            // here, in the same control class, and is read under the lock so
-            // the check and the write cannot straddle another writer.
+            // Check the captured executor and shared state under the lock so
+            // the ownership check and write cannot straddle another writer.
             let mut state = self.state()?;
             let result = f(&mut state)?;
             store.write_run_json(&self.run_id, STATE_PATH, &state)?;
@@ -215,7 +142,7 @@ impl AuditRuntime {
         dispatch: &dyn WorkflowAgentDispatch,
     ) -> WorkflowResult<()> {
         let _guard = self.assessment_lock.lock().await;
-        poll_v2_run_control(&self.store, &self.run_id, "repository-audit")?;
+        self.require_active_executor()?;
         self.update(|state| {
             state.final_receipt = None;
             Ok(())
@@ -393,13 +320,18 @@ impl AuditRuntime {
                 input: json!({"snapshot":snapshot.identity,"audit_contract":contract}),
                 depends_on: vec![],
             };
+            self.require_active_executor()?;
             let v2 = WorkflowV2ResultStore::new(self.store.run_dir(&self.run_id).join("v2"));
+            v2.bind_session_executor(self.generation);
             let landing = Arc::new(
-                super::landing::AuditLanding::open(
-                    v2.root().join("repository-audit/records").join(&attempt_id),
-                    snapshot.root.clone(),
-                    contract.clone(),
-                )?
+                self.with_executor_lock(|| {
+                    super::landing::AuditLanding::open(
+                        v2.root().join("repository-audit/records").join(&attempt_id),
+                        snapshot.root.clone(),
+                        contract.clone(),
+                    )
+                })?
+                .owned_by(self.clone())
                 .carrying(plan.carried.len()),
             );
             let mut execution = execution;
@@ -412,6 +344,7 @@ impl AuditRuntime {
                         .max(1)
                 })),
             );
+            self.with_executor_lock(|| self.require_active_executor())?;
             let result = super::landing::scope(
                 landing,
                 dispatch.run_call(
@@ -482,3 +415,6 @@ impl AuditRuntime {
         result.map(|_| ())
     }
 }
+
+#[path = "runtime_init.rs"]
+mod init;

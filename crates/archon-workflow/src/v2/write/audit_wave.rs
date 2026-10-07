@@ -35,7 +35,9 @@ pub(super) async fn after_apply(
     }
     let state = audit.state()?;
     let paths = state.declared_paths.iter().cloned().collect::<Vec<_>>();
-    let snapshot = Snapshot::capture(&ctx.setup.canonical_root, &paths, ctx.v2_store)?;
+    #[cfg(test)]
+    super::audit_round3_hooks::run(ctx.v2_store.root(), "apply_capture");
+    let snapshot = audit.capture_snapshot(&ctx.setup.canonical_root, &paths, ctx.v2_store)?;
     let before = state.snapshot.as_ref().ok_or_else(|| {
         WorkflowError::StateCorrupt("postapply audit lacks dispatch snapshot".into())
     })?;
@@ -116,6 +118,8 @@ pub(super) async fn after_apply(
         unexpected_paths: unexpected.clone(),
         call_id: ctx.execution.call.id.clone(),
     };
+    #[cfg(test)]
+    super::audit_round3_hooks::run(ctx.v2_store.root(), "apply_receipt");
     audit.store.with_run_lock(&audit.run_id, |store| {
         store.write_run_json(
             &audit.run_id,

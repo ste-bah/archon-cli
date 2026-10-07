@@ -73,13 +73,7 @@ impl AuditRuntime {
         allowance: Option<u64>,
         work: impl std::future::Future<Output = WorkflowResult<T>>,
     ) -> WorkflowResult<T> {
-        let work = crate::control_race::until_run_stops_from_generation(
-            &self.store,
-            &self.run_id,
-            id,
-            Some(self.generation),
-            work,
-        );
+        let work = self.store.execute_owned(&self.run_id, work);
         tokio::pin!(work);
         let timeout = async {
             match allowance {
@@ -103,6 +97,7 @@ impl AuditRuntime {
         detail: serde_json::Value,
     ) -> WorkflowResult<()> {
         self.store.with_run_lock(&self.run_id, |store| {
+            self.require_executor()?;
             let seq = store.next_event_seq(&self.run_id)?;
             WorkflowEventLog::new(store.clone())
                 .emit(&self.run_id, seq, kind, detail)

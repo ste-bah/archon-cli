@@ -1,6 +1,5 @@
 //! Latch current source before deciding whether a stored branch grants credit.
 use super::*;
-use crate::repository_audit::runtime::Snapshot;
 
 pub(super) async fn refresh(
     branches: &mut [WorkflowV2FanoutItem],
@@ -34,6 +33,8 @@ pub(super) async fn refresh(
             .flat_map(|item| item.owned_targets.iter().cloned()),
     );
     let paths = paths.into_iter().collect::<Vec<_>>();
-    let snapshot = Snapshot::capture(Path::new(root), &paths, store)?;
+    #[cfg(test)]
+    super::audit_round3_hooks::run(store.root(), "cache_capture");
+    let snapshot = audit.capture_snapshot(Path::new(root), &paths, store)?;
     audit.assess(&snapshot, &paths, "cache", dispatch).await
 }

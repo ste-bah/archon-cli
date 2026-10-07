@@ -4,17 +4,24 @@ use super::journal::{is_transaction_id, rename, sync_parent, write_durably};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Deserialize)]
 pub(super) struct Marker {
     pub(super) transaction: String,
     pub(super) decisions: BTreeMap<String, Decision>,
+    /// Per-file preconditions and preserved digests, bound to each decision.
+    #[serde(default)]
+    pub(super) written: BTreeMap<String, BTreeMap<PathBuf, Option<String>>>,
+    /// Old markers always requested chain verification.
+    #[serde(default = "verify_by_default")]
+    pub(super) verify_chain: bool,
 }
 #[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(super) enum Decision {
     Forward,
+    Preserve,
     Rollback,
     Discard,
 }
@@ -43,6 +50,8 @@ impl Marker {
         Self {
             transaction: transaction.into(),
             decisions: BTreeMap::new(),
+            written: BTreeMap::new(),
+            verify_chain: true,
         }
     }
     pub(super) fn save(&self, path: &Path) -> Result<()> {
@@ -57,4 +66,8 @@ impl Marker {
         rename(&temp, path)?;
         sync_parent(path)
     }
+}
+
+fn verify_by_default() -> bool {
+    true
 }

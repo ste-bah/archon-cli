@@ -17,6 +17,7 @@ fn call_record(call_id: &str, outcomes: serde_json::Value) -> WorkflowV2CallReco
         },
         attempt: 1,
         schema_version: "workflow-v2-call-record-v1".to_string(),
+        admission_sequence: None,
         started_at: String::new(),
         finished_at: String::new(),
         input_hash: String::new(),

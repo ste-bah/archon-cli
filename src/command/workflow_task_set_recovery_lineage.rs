@@ -24,6 +24,8 @@ const TRIGGER: &str = "recovery-refreeze:";
 mod anchors;
 #[path = "workflow_task_set_recovery_evidence.rs"]
 mod evidence;
+#[path = "workflow_task_set_recovery_rollback.rs"]
+mod skeleton_rollback;
 pub(crate) use evidence::{authority, cleanup_adopted, refreeze_base};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,6 +228,7 @@ impl PreparedAcceptanceFreeze {
     pub(crate) fn record_recovery_refreeze(&mut self) -> Result<()> {
         let pin_path = super::acceptance_pin_path(&self.project_root, &self.tasks_root);
         let (mut records, digest) = read(&pin_path)?;
+        // A pending record of another task root refuses in `validate`.
         let Some(record) = records
             .iter_mut()
             .rev()
@@ -233,15 +236,13 @@ impl PreparedAcceptanceFreeze {
         else {
             return Ok(());
         };
-        if let Err(error) = evidence::validate(record, &pin_path, &self.tasks_root) {
-            tracing::warn!(%error, "recovery adoption deferred; pending authority retained for retry");
-            return Ok(());
-        }
+        evidence::validate(record, &pin_path, &self.tasks_root)?;
         let Some(from) = anchors::anchor(record, &pin_path)? else {
             return Ok(());
         };
         let mut files = Vec::new();
-        if let Some(skeleton) = &record.skeleton {
+        let skeleton = evidence::bound_skeleton(record, &from, &pin_path, &self.tasks_root)?;
+        if let Some(skeleton) = &skeleton {
             let mut skeleton = skeleton.clone();
             skeleton.acceptance_digest = self.pin.acceptance_digest.clone();
             let bytes = serde_json::to_vec_pretty(&skeleton)?;
@@ -330,7 +331,14 @@ pub(crate) fn verify(
     {
         return Ok(None);
     }
-    let (records, _) = read(pin_path)?;
+    let (records, receipt_digest) = read(pin_path)?;
+    if receipt_digest.is_none() {
+        return Err(anyhow!(
+            "{}; recovery also requires the durable unfreeze log {}",
+            evidence::missing(&path(pin_path)),
+            pin_path.with_extension("publish-recovery.log").display()
+        ));
+    }
     let root = tasks.canonicalize().map(archon_shell::paths::plain)?;
     for record in records.iter().rev() {
         let Some(done) = &record.completed else {
@@ -343,7 +351,7 @@ pub(crate) fn verify(
         if !anchors::authorized(record, pin_path, run, launch, launch_lineage)? {
             continue;
         }
-        let from = anchors::completed_anchor(record)?;
+        let from = anchors::completed_anchor(record, pin_path)?;
         let mut expected = record
             .prior
             .as_ref()

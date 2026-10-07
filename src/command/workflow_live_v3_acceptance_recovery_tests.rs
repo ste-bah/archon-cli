@@ -178,3 +178,9 @@ mod round_five;
 
 #[path = "workflow_live_v3_acceptance_recovery_round_six_tests.rs"]
 mod round_six;
+
+#[path = "workflow_live_v3_acceptance_recovery_issue_tests.rs"]
+mod issue_tests;
+
+#[path = "workflow_live_v3_acceptance_recovery_pending_tests.rs"]
+mod round3_pending;

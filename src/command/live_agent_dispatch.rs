@@ -210,6 +210,10 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
                 .with_timeout_secs(Some(secs), "timeout_retry_budget_secs"),
             None => self.client.clone(),
         };
+        let client = match v2_store {
+            Some(v2) => client.with_owner_store(v2.session_workflow_store()?),
+            None => client,
+        };
         let repository_root_for_guard = repository_root.clone();
         // Pinned to the heap before the guard scopes below take it by value.
         // This future is the whole live agent call, hundreds of kilobytes in a

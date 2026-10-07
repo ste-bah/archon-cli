@@ -93,38 +93,43 @@ impl WorkflowV2ResultStore {
         branch_id: &str,
         record: WorkflowV2RejectedOutput,
     ) -> WorkflowResult<PathBuf> {
-        let path = self.rejected_output_path(branch_id);
-        let mut log = load_rejected_output_log(&path)?;
-        log.branch_id = branch_id.to_string();
-        log.rejections.push(record);
-        write_json(&path, &log)?;
-        Ok(path)
+        self.with_session_write_lock(|| {
+            let path = self.rejected_output_path(branch_id);
+            let mut log = load_rejected_output_log(&path)?;
+            log.branch_id = branch_id.to_string();
+            log.rejections.push(record);
+            write_json(&path, &log)?;
+            Ok(path)
+        })
     }
 
     pub fn save_call_record(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<()> {
-        let path = self.result_path(&record.call.id);
-        // Stored exactly as produced: later stages, resume replay and the
-        // freeze inputs read this record back as data, so log redaction
-        // (`events::sanitize_value`) must never touch it (Issue-245). Public
-        // copies are redacted where they are written or served.
-        let mut clean = record.clone();
-        clean.output_hash = stable_result_hash(&clean.result);
-        self.stamp_answer_origin(&mut clean);
-        // Read the earlier session's finish time BEFORE the archive: a new
-        // attempt renames that record away, and read after it the past was
-        // lost, so no verdict could ever follow a fix replayed under its own
-        // id.
-        self.note_prior_finish(&path, &record.call.id);
-        archive_superseded_json_into(
-            &path,
-            &self.call_history_dir(&record.call.id),
-            self.durable,
-            |existing: &WorkflowV2CallRecord| {
-                existing.input_hash == clean.input_hash && existing.attempt == clean.attempt
-            },
-        )?;
-        self.note_session_call(&record.call.id);
-        self.write_record(&path, &clean)
+        self.with_session_write_lock(|| {
+            let path = self.result_path(&record.call.id);
+            // Stored exactly as produced: later stages, resume replay and the
+            // freeze inputs read this record back as data, so log redaction
+            // (`events::sanitize_value`) must never touch it (Issue-245). Public
+            // copies are redacted where they are written or served.
+            let mut clean = record.clone();
+            self.preserve_admission(&mut clean)?;
+            clean.output_hash = stable_result_hash(&clean.result);
+            self.stamp_answer_origin(&mut clean);
+            // Read the earlier session's finish time BEFORE the archive: a new
+            // attempt renames that record away, and read after it the past was
+            // lost, so no verdict could ever follow a fix replayed under its own
+            // id.
+            self.note_prior_finish(&path, &record.call.id);
+            archive_superseded_json_into(
+                &path,
+                &self.call_history_dir(&record.call.id),
+                self.durable,
+                |existing: &WorkflowV2CallRecord| {
+                    existing.input_hash == clean.input_hash && existing.attempt == clean.attempt
+                },
+            )?;
+            self.note_session_call(&record.call.id);
+            self.write_record(&path, &clean)
+        })
     }
 
     pub fn save_branch_outcome(
@@ -241,35 +246,39 @@ impl WorkflowV2ResultStore {
     }
 
     pub fn delete_branch_outcome(&self, call_id: &str, item_id: &str) -> WorkflowResult<bool> {
-        let path = self.branch_outcome_path(call_id, item_id);
-        if !path.exists() {
-            return Ok(false);
-        }
-        fs::remove_file(&path).map_err(|err| WorkflowError::io(&path, err))?;
-        Ok(true)
+        self.with_session_write_lock(|| {
+            let path = self.branch_outcome_path(call_id, item_id);
+            if !path.exists() {
+                return Ok(false);
+            }
+            fs::remove_file(&path).map_err(|err| WorkflowError::io(&path, err))?;
+            Ok(true)
+        })
     }
 
     pub fn delete_branch_outcomes_for_call(&self, call_id: &str) -> WorkflowResult<usize> {
-        let dir = self.root.join("branches").join(sanitize_call_id(call_id));
-        if !dir.exists() {
-            return Ok(0);
-        }
-        let mut deleted = 0usize;
-        for entry in fs::read_dir(&dir).map_err(|err| WorkflowError::io(&dir, err))? {
-            let entry = entry.map_err(|err| WorkflowError::io(&dir, err))?;
-            if entry
-                .file_type()
-                .map_err(|err| WorkflowError::io(entry.path(), err))?
-                .is_file()
-            {
-                deleted += 1;
+        self.with_session_write_lock(|| {
+            let dir = self.root.join("branches").join(sanitize_call_id(call_id));
+            if !dir.exists() {
+                return Ok(0);
             }
-        }
-        fs::remove_dir_all(&dir).map_err(|err| WorkflowError::io(&dir, err))?;
-        if self.durable {
-            crate::durable_io::sync_dir(&self.root.join("branches"))?;
-        }
-        Ok(deleted)
+            let mut deleted = 0usize;
+            for entry in fs::read_dir(&dir).map_err(|err| WorkflowError::io(&dir, err))? {
+                let entry = entry.map_err(|err| WorkflowError::io(&dir, err))?;
+                if entry
+                    .file_type()
+                    .map_err(|err| WorkflowError::io(entry.path(), err))?
+                    .is_file()
+                {
+                    deleted += 1;
+                }
+            }
+            fs::remove_dir_all(&dir).map_err(|err| WorkflowError::io(&dir, err))?;
+            if self.durable {
+                crate::durable_io::sync_dir(&self.root.join("branches"))?;
+            }
+            Ok(deleted)
+        })
     }
 
     pub fn load_call_record(&self, call_id: &str) -> WorkflowResult<Option<WorkflowV2CallRecord>> {
@@ -308,7 +317,7 @@ impl WorkflowV2ResultStore {
     }
 
     pub fn save_checkpoint(&self, checkpoint: &WorkflowV2Checkpoint) -> WorkflowResult<()> {
-        self.write_record(&self.checkpoint_path(), checkpoint)
+        self.with_session_write_lock(|| self.write_record(&self.checkpoint_path(), checkpoint))
     }
 
     pub fn load_checkpoint(&self) -> WorkflowResult<Option<WorkflowV2Checkpoint>> {
@@ -473,3 +482,5 @@ mod tests;
 #[cfg(test)]
 #[path = "result_store_race_tests.rs"]
 pub(crate) mod race_tests;
+
+include!("result_store_admission.rs");
