@@ -16,12 +16,13 @@ pub fn count_image_descriptions(db: &DbInstance) -> Result<usize> {
             }
             Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
         }
+        Err(e) if e.is::<archon_cozo::StoreBusy>() => Err(e),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains(crate::errors::COZO_RELATION_NOT_FOUND) {
                 Ok(0)
             } else {
-                Err(anyhow::anyhow!("count image descriptions failed: {msg}"))
+                Err(e.context("count image descriptions failed"))
             }
         }
     }
@@ -34,7 +35,7 @@ pub fn count_failed_chunks(db: &DbInstance) -> Result<usize> {
         ScriptMutability::Immutable,
         "count failed chunks",
     )
-    .map_err(|e| anyhow::anyhow!("count failed chunks failed: {e}"))?;
+    .map_err(|e| e.context("count failed chunks failed"))?;
     if result.rows.is_empty() {
         return Ok(0);
     }
@@ -50,7 +51,7 @@ pub fn count_pending_chunks(db: &DbInstance) -> Result<usize> {
         ScriptMutability::Immutable,
         "count pending chunks",
     )
-    .map_err(|e| anyhow::anyhow!("count pending chunks failed: {e}"))?;
+    .map_err(|e| e.context("count pending chunks failed"))?;
     if result.rows.is_empty() {
         return Ok(0);
     }
@@ -66,7 +67,7 @@ pub fn count_indexed_chunks(db: &DbInstance) -> Result<usize> {
         ScriptMutability::Immutable,
         "count indexed chunks",
     )
-    .map_err(|e| anyhow::anyhow!("count indexed chunks failed: {e}"))?;
+    .map_err(|e| e.context("count indexed chunks failed"))?;
     if result.rows.is_empty() {
         return Ok(0);
     }
@@ -89,12 +90,13 @@ pub fn count_chunks(db: &DbInstance) -> Result<usize> {
             }
             Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
         }
+        Err(e) if e.is::<archon_cozo::StoreBusy>() => Err(e),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains(crate::errors::COZO_RELATION_NOT_FOUND) {
                 Ok(0)
             } else {
-                Err(anyhow::anyhow!("count chunks failed: {msg}"))
+                Err(e.context("count chunks failed"))
             }
         }
     }
@@ -116,12 +118,13 @@ pub fn count_embeddings(db: &DbInstance) -> Result<usize> {
             }
             Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
         }
+        Err(e) if e.is::<archon_cozo::StoreBusy>() => Err(e),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains(crate::errors::COZO_RELATION_NOT_FOUND) {
                 Ok(0)
             } else {
-                Err(anyhow::anyhow!("count embeddings failed: {msg}"))
+                Err(e.context("count embeddings failed"))
             }
         }
     }
@@ -142,12 +145,13 @@ pub fn count_page_image_embeddings(db: &DbInstance) -> Result<usize> {
             }
             Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
         }
+        Err(e) if e.is::<archon_cozo::StoreBusy>() => Err(e),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains(crate::errors::COZO_RELATION_NOT_FOUND) {
                 Ok(0)
             } else {
-                Err(anyhow::anyhow!("count page image embeddings failed: {msg}"))
+                Err(e.context("count page image embeddings failed"))
             }
         }
     }

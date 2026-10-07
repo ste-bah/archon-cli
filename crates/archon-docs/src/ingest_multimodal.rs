@@ -93,9 +93,7 @@ pub(crate) fn persist_vlm_description(
         created_at: created_at.clone(),
         provenance_record_id: String::new(),
     };
-    store::insert_artifact(db, &artifact).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    store::insert_artifact(db, &artifact).map_err(DocsError::storage)?;
 
     store::insert_image_description(
         db,
@@ -113,9 +111,7 @@ pub(crate) fn persist_vlm_description(
             cost_usd: description.cost_usd,
         },
     )
-    .map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    .map_err(DocsError::storage)?;
 
     let page_offsets = vec![PageOffset {
         page: 1,
@@ -140,9 +136,7 @@ pub(crate) fn persist_vlm_description(
         .collect();
 
     for chunk in &chunks {
-        store::insert_chunk(db, chunk).map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
+        store::insert_chunk(db, chunk).map_err(DocsError::storage)?;
         if embed::get_provider().is_some()
             && let Err(e) = retrieval::index_chunk(db, chunk)
         {
@@ -157,9 +151,7 @@ pub(crate) fn persist_vlm_description(
                 db,
                 &make_edge(&chunk.chunk_id, page_id, ProvenanceEdgeType::Describes),
             )
-            .map_err(|e| DocsError::Storage {
-                message: e.to_string(),
-            })?;
+            .map_err(DocsError::storage)?;
         }
     }
 
@@ -167,9 +159,7 @@ pub(crate) fn persist_vlm_description(
         db,
         &make_edge(&artifact_id, document_id, ProvenanceEdgeType::DerivedFrom),
     )
-    .map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    .map_err(DocsError::storage)?;
 
     // Return the chunks so the caller can fold them into the document's chunks_root (V-1).
     Ok(chunks)

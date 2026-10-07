@@ -1,23 +1,23 @@
-//! How long a guarded operation waits, and what it is willing to wait for.
+//! Backoff and classification for contention recovery.
 //!
 //! Two separate judgements live here and they are deliberately not the same
 //! predicate. `is_retryable_cozo_error` answers "should the guard sleep and try
-//! this again?". `is_store_contention` answers "may the caller give up on this
-//! one item and keep going?" -- a broader question that also recognizes legacy
-//! wait-expiry strings. New exhausted windows return explicit retryable StoreBusy.
+//! this again?". `is_store_contention` also recognizes legacy acquisition
+//! wait-expiry strings. Raw busy retries have no total limit; explicit
+//! acquisition pauses return typed StoreBusy.
 
 use std::time::Duration;
 
 use crate::CozoGuardConfig;
 use crate::locking::WRITE_LOCK_WAIT_EXPIRED;
 
-pub(crate) fn normalized_attempts(config: &CozoGuardConfig) -> usize {
+pub(crate) fn backoff_steps(config: &CozoGuardConfig) -> usize {
     config.max_attempts.max(1)
 }
 
 #[cfg(test)]
-pub(crate) fn cumulative_backoff_budget(config: &CozoGuardConfig) -> Duration {
-    (0..normalized_attempts(config).saturating_sub(1))
+pub(crate) fn initial_backoff_ramp(config: &CozoGuardConfig) -> Duration {
+    (0..backoff_steps(config).saturating_sub(1))
         .map(|attempt| backoff_duration(config, attempt))
         .sum()
 }
@@ -26,17 +26,15 @@ pub(crate) fn retry_backoff(
     context: &str,
     config: &CozoGuardConfig,
     attempt: usize,
-    attempts: usize,
     error: &str,
 ) -> Option<Duration> {
-    if !is_retryable_cozo_error(error) || attempt + 1 >= attempts {
+    if !is_retryable_cozo_error(error) {
         return None;
     }
 
-    tracing::warn!(
+    tracing::trace!(
         context,
         attempt = attempt + 1,
-        max_attempts = attempts,
         error,
         "Cozo store busy; retrying guarded operation"
     );

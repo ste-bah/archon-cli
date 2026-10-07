@@ -9,7 +9,7 @@ use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 #[cfg(feature = "test-support")]
 mod busy_observer;
 #[cfg(feature = "test-support")]
-pub use busy_observer::with_busy_observer;
+pub use busy_observer::{with_busy_observer, with_guarded_failure};
 mod busy;
 pub use busy::StoreBusy;
 mod guard_registry;
@@ -28,22 +28,23 @@ mod guarded_run;
 pub use guarded_run::{run_guarded, run_guarded_async};
 
 #[cfg(test)]
-use retry::cumulative_backoff_budget;
+use retry::initial_backoff_ramp;
 
 /// Default acquisition window for [`with_write_lock_blocking`]. Expiry
 /// returns retryable [`StoreBusy`]; elapsed time alone cannot prove the holder
 /// is stuck. It never caps the operation once the lock has been acquired.
 pub const DEFAULT_WRITE_LOCK_WAIT: Duration = Duration::from_secs(60);
 
-const DEFAULT_MAX_ATTEMPTS: usize = 20;
-const INTERACTIVE_MAX_ATTEMPTS: usize = 10;
+const DEFAULT_BACKOFF_STEPS: usize = 20;
+const INTERACTIVE_BACKOFF_STEPS: usize = 10;
 const DEFAULT_INITIAL_BACKOFF_MS: u64 = 100;
 const DEFAULT_MAX_BACKOFF_MS: u64 = 2_000;
 
 #[derive(Clone, Debug)]
 pub struct CozoGuardConfig {
-    /// Busy observations per call before returning retryable `StoreBusy`.
-    /// This is a response window, not a lifetime limit on a caller's operation.
+    /// Legacy backoff ramp length, retained for caller compatibility.
+    /// This never limits attempts: raw busy cannot prove writer inactivity.
+    /// Explicit acquisition pauses are returned as typed `StoreBusy`.
     pub max_attempts: usize,
     pub initial_backoff: Duration,
     pub max_backoff: Duration,
@@ -54,9 +55,8 @@ pub struct CozoGuardConfig {
     /// retry backoff in between -- 100ms rising to 2s. Against a peer that
     /// takes the lock back to back, as a repository index does for every file
     /// it persists, sampling on that cadence starves: the loser almost never
-    /// lands in a gap, burns its whole 19s budget and fails while the winner
-    /// runs to completion. That is issue #140, and it is not a retry-count
-    /// problem -- more attempts on the same cadence starve just as reliably.
+    /// lands in a gap. Increasing attempts on that same cadence does not
+    /// improve fairness; raw contention now retries without a total limit.
     ///
     /// Setting this polls at 1-25ms under a bounded deadline instead, which
     /// catches the microsecond gap between the peer's transactions, so both
@@ -69,7 +69,7 @@ pub struct CozoGuardConfig {
 impl Default for CozoGuardConfig {
     fn default() -> Self {
         Self {
-            max_attempts: DEFAULT_MAX_ATTEMPTS,
+            max_attempts: DEFAULT_BACKOFF_STEPS,
             initial_backoff: Duration::from_millis(DEFAULT_INITIAL_BACKOFF_MS),
             max_backoff: Duration::from_millis(DEFAULT_MAX_BACKOFF_MS),
             write_lock_path: None,
@@ -85,7 +85,7 @@ impl CozoGuardConfig {
 
     pub fn for_interactive_db_path(path: impl AsRef<Path>) -> Self {
         Self {
-            max_attempts: INTERACTIVE_MAX_ATTEMPTS,
+            max_attempts: INTERACTIVE_BACKOFF_STEPS,
             ..Self::for_db_path(path)
         }
     }
@@ -329,6 +329,11 @@ fn run_guarded_once<T>(
         panic!(
             "guarded Cozo operation {context:?} ran on a path asserted to perform no database access"
         );
+    }
+
+    #[cfg(feature = "test-support")]
+    if let Some(error) = busy_observer::failure(context) {
+        return Err(error);
     }
 
     if matches!(mutability, ScriptMutability::Mutable) {

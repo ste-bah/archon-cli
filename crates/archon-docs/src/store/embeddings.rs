@@ -28,7 +28,7 @@ pub fn insert_chunk_embedding(
         ScriptMutability::Mutable,
         "insert chunk embedding",
     )
-    .map_err(|e| anyhow::anyhow!("insert chunk embedding failed: {e}"))?;
+    .map_err(|e| e.context("insert chunk embedding failed"))?;
     Ok(())
 }
 
@@ -71,7 +71,7 @@ pub fn insert_chunk_embeddings(
         ScriptMutability::Mutable,
         "bulk insert chunk embeddings",
     )
-    .map_err(|e| anyhow::anyhow!("bulk insert chunk embeddings failed: {e}"))?;
+    .map_err(|e| e.context("bulk insert chunk embeddings failed"))?;
     Ok(())
 }
 
@@ -87,7 +87,7 @@ pub fn get_chunk_embedding(db: &DbInstance, chunk_id: &str) -> Result<Option<Vec
         ScriptMutability::Immutable,
         "get chunk embedding",
     )
-    .map_err(|e| anyhow::anyhow!("get chunk embedding failed: {e}"))?;
+    .map_err(|e| e.context("get chunk embedding failed"))?;
 
     if result.rows.is_empty() {
         return Ok(None);
@@ -166,7 +166,7 @@ pub fn update_chunk_embedding_statuses(
         ScriptMutability::Mutable,
         "bulk update chunk embedding status",
     )
-    .map_err(|e| anyhow::anyhow!("bulk update chunk embedding status failed: {e}"))?;
+    .map_err(|e| e.context("bulk update chunk embedding status failed"))?;
     Ok(())
 }
 
@@ -191,6 +191,6 @@ pub fn insert_page_image_embedding(
         ScriptMutability::Mutable,
         "insert page image embedding",
     )
-    .map_err(|e| anyhow::anyhow!("insert page image embedding failed: {e}"))?;
+    .map_err(|e| e.context("insert page image embedding failed"))?;
     Ok(())
 }

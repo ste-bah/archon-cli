@@ -18,6 +18,12 @@ const FIRST_INHERITED: libc::c_int = 3;
 /// [`inherit_only_stdio`]. Read before the fork: nothing that reads it is
 /// async-signal safe.
 pub fn descriptor_ceiling() -> io::Result<libc::c_int> {
+    descriptor_ceiling_with(existing_descriptor_ceiling)
+}
+
+fn descriptor_ceiling_with(
+    existing: impl FnOnce() -> io::Result<libc::c_int>,
+) -> io::Result<libc::c_int> {
     if let Some(ceiling) = crate::process_nofile::ceiling() {
         return Ok(ceiling);
     }
@@ -30,7 +36,10 @@ pub fn descriptor_ceiling() -> io::Result<libc::c_int> {
         return Err(io::Error::last_os_error());
     }
     let soft = libc::c_int::try_from(limit.rlim_cur).unwrap_or(libc::c_int::MAX);
-    let existing = existing_descriptor_ceiling()?;
+    // Neither a lowered soft nor hard limit bounds inherited high fds.
+    // Cover the entire representable range if enumeration is unavailable;
+    // the Linux child still tries close_range before using this fallback.
+    let existing = existing().unwrap_or(libc::c_int::MAX);
     #[cfg(target_vendor = "apple")]
     {
         // SAFETY: getdtablesize takes no arguments and cannot fail.
@@ -153,3 +162,7 @@ mod tests;
 #[cfg(test)]
 #[path = "process_tree_descriptor_bound_tests.rs"]
 mod bound_tests;
+
+#[cfg(test)]
+#[path = "process_tree_procfs_tests.rs"]
+mod procfs_tests;

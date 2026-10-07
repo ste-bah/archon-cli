@@ -164,10 +164,8 @@ fn store_artifacts(
     Ok(())
 }
 
-fn storage(error: impl std::fmt::Display) -> DocsError {
-    DocsError::Storage {
-        message: error.to_string(),
-    }
+fn storage(error: anyhow::Error) -> DocsError {
+    DocsError::storage(error)
 }
 
 #[cfg(test)]

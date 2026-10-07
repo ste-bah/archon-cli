@@ -23,7 +23,7 @@ pub fn insert_locator(db: &DbInstance, l: &Locator) -> Result<()> {
         ScriptMutability::Mutable,
         "insert doc_locators",
     )
-    .map_err(|e| anyhow::anyhow!("insert doc_locators failed: {e}"))?;
+    .map_err(|e| e.context("insert doc_locators failed"))?;
     Ok(())
 }
 
@@ -39,7 +39,7 @@ pub fn list_locators_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<L
         ScriptMutability::Immutable,
         "list doc_locators",
     )
-    .map_err(|e| anyhow::anyhow!("list doc_locators failed: {e}"))?;
+    .map_err(|e| e.context("list doc_locators failed"))?;
     Ok(result
         .rows
         .iter()

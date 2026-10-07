@@ -115,6 +115,7 @@ pub async fn ingest_bytes_source_with_policy(
                 store::update_doc_status(db, &document_id, &DocumentStatus::Ingested)
                     .map_err(storage)?;
             }
+            Err(e @ DocsError::StoreBusy(_)) => return Err(e),
             Err(e) => {
                 pipeline_failed = true;
                 outcome.warnings.push(format!("OCR pipeline failed: {e}"));
@@ -172,10 +173,8 @@ fn media_type_suffix(media_type: &str) -> &'static str {
     }
 }
 
-fn storage(error: impl std::fmt::Display) -> DocsError {
-    DocsError::Storage {
-        message: error.to_string(),
-    }
+fn storage(error: anyhow::Error) -> DocsError {
+    DocsError::storage(error)
 }
 
 #[cfg(test)]

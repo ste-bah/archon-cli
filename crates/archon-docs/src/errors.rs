@@ -23,6 +23,9 @@ pub enum DocsError {
     #[error("OCR authentication failed: {message}")]
     OcrAuthentication { message: String },
 
+    #[error("{0}")]
+    StoreBusy(#[from] archon_cozo::StoreBusy),
+
     #[error("Storage error: {message}")]
     Storage { message: String },
 
@@ -79,3 +82,16 @@ pub const COZO_RELATION_NOT_FOUND: &str = "Cannot find requested stored relation
 /// Phrases Cozo 0.7.x uses for "relation already exists" errors.
 /// Used by `run_create` to suppress idempotent-create errors.
 pub const COZO_RELATION_ALREADY_EXISTS: &[&str] = &["conflicts with an existing", "already exists"];
+
+impl DocsError {
+    /// Preserve the retry/pause category across the anyhow/docs boundary.
+    pub(crate) fn storage(error: impl Into<anyhow::Error>) -> Self {
+        let error = error.into();
+        if let Some(busy) = archon_cozo::StoreBusy::find(error.as_ref()) {
+            return Self::StoreBusy(busy.clone());
+        }
+        Self::Storage {
+            message: format!("{error:#}"),
+        }
+    }
+}

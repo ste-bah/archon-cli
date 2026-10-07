@@ -1,10 +1,10 @@
-//! Retry transient contention; exhausted call windows remain resumable.
+//! Retry contention without a total attempt cap; explicit pauses stay typed.
 use std::thread;
 
 use anyhow::{Result, anyhow};
 use cozo::ScriptMutability;
 
-use crate::retry::{normalized_attempts, retry_backoff};
+use crate::retry::{backoff_steps, retry_backoff};
 use crate::{CozoGuardConfig, run_guarded_once};
 
 pub fn run_guarded<T>(
@@ -13,34 +13,35 @@ pub fn run_guarded<T>(
     config: &CozoGuardConfig,
     mut run: impl FnMut() -> Result<T>,
 ) -> Result<T> {
-    let attempts = normalized_attempts(config);
+    let ramp_steps = backoff_steps(config);
 
-    for attempt in 0..attempts {
+    let mut step = 0;
+    loop {
         match run_guarded_once(context, mutability, config, &mut run) {
             Ok(value) => return Ok(value),
             Err(error) => {
+                // A typed acquisition pause is authoritative and must retain
+                // its category. Raw SQLite busy says nothing about progress:
+                // even a writer completing no-op statements may not change
+                // its files. Never infer a stall from total attempts or time.
+                if crate::StoreBusy::find(error.as_ref()).is_some() {
+                    return Err(error);
+                }
                 let last_error = format!("{error:#}");
                 #[cfg(feature = "test-support")]
                 if crate::is_store_contention(&last_error) {
                     crate::busy_observer::notify(context, &last_error);
                 }
-                // A completed acquisition window is already an explicit busy
-                // response. Let the caller resume; don't restart it internally.
-                if error.is::<crate::StoreBusy>() {
-                    return Err(error);
-                }
-                if let Some(backoff) =
-                    retry_backoff(context, config, attempt, attempts, &last_error)
-                {
+                if let Some(backoff) = retry_backoff(context, config, step, &last_error) {
+                    step = step.saturating_add(1).min(ramp_steps - 1);
                     thread::sleep(backoff);
                     continue;
                 }
-                return Err(crate::busy::guarded_error(context, attempts, last_error));
+                let message = format!("{context}: {error:#}");
+                return Err(error.context(message));
             }
         }
     }
-
-    unreachable!("a guarded retry loop always returns from an attempt")
 }
 
 pub async fn run_guarded_async<T, Run>(
@@ -53,12 +54,13 @@ where
     T: Send + 'static,
     Run: FnMut() -> Result<T> + Send + 'static,
 {
-    let attempts = normalized_attempts(config);
+    let ramp_steps = backoff_steps(config);
     let context = context.to_string();
     let config = config.clone();
     let mut run = run;
 
-    for attempt in 0..attempts {
+    let mut step = 0;
+    loop {
         let attempt_context = context.clone();
         let attempt_config = config.clone();
         let attempt_result = tokio::task::spawn_blocking(move || {
@@ -72,26 +74,26 @@ where
         match attempt_result.1 {
             Ok(value) => return Ok(value),
             Err(error) => {
+                // A typed acquisition pause is authoritative and must retain
+                // its category. Raw SQLite busy says nothing about progress:
+                // even a writer completing no-op statements may not change
+                // its files. Never infer a stall from total attempts or time.
+                if crate::StoreBusy::find(error.as_ref()).is_some() {
+                    return Err(error);
+                }
                 let last_error = format!("{error:#}");
                 #[cfg(feature = "test-support")]
                 if crate::is_store_contention(&last_error) {
                     crate::busy_observer::notify(&context, &last_error);
                 }
-                // A completed acquisition window is already an explicit busy
-                // response. Let the caller resume; don't restart it internally.
-                if error.is::<crate::StoreBusy>() {
-                    return Err(error);
-                }
-                if let Some(backoff) =
-                    retry_backoff(&context, &config, attempt, attempts, &last_error)
-                {
+                if let Some(backoff) = retry_backoff(&context, &config, step, &last_error) {
+                    step = step.saturating_add(1).min(ramp_steps - 1);
                     tokio::time::sleep(backoff).await;
                     continue;
                 }
-                return Err(crate::busy::guarded_error(&context, attempts, last_error));
+                let message = format!("{context}: {error:#}");
+                return Err(error.context(message));
             }
         }
     }
-
-    unreachable!("a guarded retry loop always returns from an attempt")
 }

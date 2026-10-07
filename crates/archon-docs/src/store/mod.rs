@@ -31,3 +31,6 @@ mod tests;
 
 #[cfg(test)]
 mod busy_read_tests;
+
+#[cfg(test)]
+mod busy_category_tests;

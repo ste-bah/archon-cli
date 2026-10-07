@@ -74,7 +74,7 @@ fn aggregate_read_waits_for_a_long_write_transaction() {
 }
 
 #[test]
-fn lock_held_beyond_default_window_is_explicitly_retryable_busy() {
+fn progressing_long_write_is_retried_without_a_total_attempt_limit() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("docs.db");
     let db = crate::open_docs_db_for_test(&path).unwrap();
@@ -102,29 +102,25 @@ fn lock_held_beyond_default_window_is_explicitly_retryable_busy() {
     });
     started.recv_timeout(Duration::from_secs(5)).unwrap();
     let advance = step.clone();
-    let error = archon_cozo::with_busy_observer(
+    let mut observed = 0;
+    let result = archon_cozo::with_busy_observer(
         move |_, _| {
             // The holder demonstrably completes another write after every busy read.
-            advance.send(true).unwrap();
-            progress.recv_timeout(Duration::from_secs(5)).unwrap();
+            observed += 1;
+            advance.send(observed < 24).unwrap();
+            if observed < 24 {
+                progress.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
         },
         || super::count_chunks(&db),
-    )
-    .unwrap_err();
-    // The write lock stays held through all twenty attempts (~19s). Exhaustion
-    // must identify an incomplete operation the caller can retry, never zero rows.
-    let message = error.to_string();
-    step.send(false).unwrap();
+    );
+    let _ = step.send(false);
+    let updates = writer.join().unwrap();
     assert_eq!(
-        writer.join().unwrap(),
-        20,
-        "every busy attempt must observe holder progress"
+        updates, 23,
+        "writer continued beyond the old twenty-attempt cap"
     );
-    assert!(
-        message.contains("retryable store busy after 20 attempts"),
-        "{message}"
-    );
-    assert!(archon_cozo::is_retryable_cozo_error(&message));
+    assert_eq!(result.unwrap(), 1);
     assert_eq!(super::count_chunks(&db).unwrap(), 1);
 }
 

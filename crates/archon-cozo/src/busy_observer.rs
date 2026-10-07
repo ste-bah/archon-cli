@@ -27,3 +27,25 @@ pub(crate) fn notify(context: &str, error: &str) {
         }
     });
 }
+
+// Thread-local injection at a statement boundary, retaining the error category.
+type Failure = Box<dyn FnMut(&str) -> Option<anyhow::Error>>;
+thread_local! { static FAILURE: RefCell<Option<Failure>> = RefCell::new(None); }
+pub fn with_guarded_failure<T>(
+    failure: impl FnMut(&str) -> Option<anyhow::Error> + 'static,
+    run: impl FnOnce() -> T,
+) -> T {
+    struct Restore(Option<Failure>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            FAILURE.with(|s| {
+                s.replace(self.0.take());
+            });
+        }
+    }
+    let _restore = Restore(FAILURE.with(|s| s.replace(Some(Box::new(failure)))));
+    run()
+}
+pub(crate) fn failure(context: &str) -> Option<anyhow::Error> {
+    FAILURE.with(|s| s.borrow_mut().as_mut().and_then(|f| f(context)))
+}

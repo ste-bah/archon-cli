@@ -22,11 +22,18 @@ fn assert_busy(error: anyhow::Error) {
 }
 
 #[test]
-fn exhausted_read_returns_explicit_busy_then_can_be_retried() {
+fn paused_read_returns_explicit_busy_then_can_be_retried() {
     let config = config();
     assert_busy(
         run_guarded("read", ScriptMutability::Immutable, &config, || {
-            Err::<usize, _>(anyhow!("database is locked (code 5)"))
+            Err::<usize, _>(
+                StoreBusy {
+                    context: "read".into(),
+                    attempts: 2,
+                    detail: "acquisition paused".into(),
+                }
+                .into(),
+            )
         })
         .unwrap_err(),
     );
@@ -36,11 +43,18 @@ fn exhausted_read_returns_explicit_busy_then_can_be_retried() {
     );
 }
 #[tokio::test]
-async fn exhausted_async_read_returns_explicit_busy_then_can_be_retried() {
+async fn paused_async_read_returns_explicit_busy_then_can_be_retried() {
     let config = config();
     assert_busy(
         run_guarded_async("async read", ScriptMutability::Immutable, &config, || {
-            Err::<usize, _>(anyhow!("database is locked (code 5)"))
+            Err::<usize, _>(
+                StoreBusy {
+                    context: "read".into(),
+                    attempts: 2,
+                    detail: "acquisition paused".into(),
+                }
+                .into(),
+            )
         })
         .await
         .unwrap_err(),
@@ -55,14 +69,19 @@ async fn exhausted_async_read_returns_explicit_busy_then_can_be_retried() {
     );
 }
 #[test]
-fn exhausted_writer_returns_explicit_busy_then_can_be_retried() {
+fn paused_writer_returns_explicit_busy_then_can_be_retried() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("code500.lock");
     let lock = std::fs::File::create(&path).unwrap();
     let mut lock = fd_lock::RwLock::new(lock);
     let _held = lock.try_write().unwrap();
-    let config = config().with_write_lock_path(&path);
-    assert_busy(run_guarded("writer", ScriptMutability::Mutable, &config, || Ok(42)).unwrap_err());
+    let config = config()
+        .with_write_lock_path(&path)
+        .with_write_lock_wait(Duration::ZERO);
+    assert_busy_attempts(
+        run_guarded("writer", ScriptMutability::Mutable, &config, || Ok(42)).unwrap_err(),
+        1,
+    );
     drop(_held);
     assert_eq!(
         run_guarded("writer", ScriptMutability::Mutable, &config, || Ok(42)).unwrap(),

@@ -42,7 +42,7 @@ pub fn insert_page(db: &DbInstance, page: &PageArtifact) -> Result<()> {
         ScriptMutability::Mutable,
         "insert doc_pages",
     )
-    .map_err(|e| anyhow::anyhow!("insert doc_pages failed: {e}"))?;
+    .map_err(|e| e.context("insert doc_pages failed"))?;
     Ok(())
 }
 
@@ -59,7 +59,7 @@ pub fn list_pages_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<Page
         ScriptMutability::Immutable,
         "list pages for doc",
     )
-    .map_err(|e| anyhow::anyhow!("list pages failed: {e}"))?;
+    .map_err(|e| e.context("list pages failed"))?;
 
     Ok(result
         .rows

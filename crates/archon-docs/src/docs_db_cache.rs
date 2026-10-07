@@ -18,7 +18,7 @@ fn open(path: &Path) -> Result<Arc<GuardedDbInstance>> {
         "open document store",
         config,
     )
-    .map_err(|error| anyhow::anyhow!("open document store at {display}: {error}"))?;
+    .map_err(|error| error.context(format!("open document store at {display}")))?;
     crate::schema::ensure_doc_schema(&guarded)
         .with_context(|| format!("ensure document schema at {display}"))?;
     Ok(Arc::new(guarded))

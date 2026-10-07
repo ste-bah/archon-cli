@@ -86,9 +86,7 @@ pub(crate) fn persist_chunk_integrity(
                 commit_hash: commit.clone(),
             },
         )
-        .map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
+        .map_err(DocsError::storage)?;
         commits.push(commit);
     }
 
@@ -126,14 +124,9 @@ pub(crate) fn persist_chunk_integrity(
         timestamp: chrono::Utc::now().to_rfc3339(),
         chain_hash,
     };
-    prov_store::insert_record(db, &record).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
-    store::set_artifact_provenance_record(db, ocr_artifact_id, &record_id).map_err(|e| {
-        DocsError::Storage {
-            message: e.to_string(),
-        }
-    })?;
+    prov_store::insert_record(db, &record).map_err(DocsError::storage)?;
+    store::set_artifact_provenance_record(db, ocr_artifact_id, &record_id)
+        .map_err(DocsError::storage)?;
     Ok(record_id)
 }
 
@@ -145,17 +138,12 @@ pub fn verify_chunks_root(
     document_id: &str,
     record_id: &str,
 ) -> Result<bool, DocsError> {
-    let record = prov_store::get_record(db, record_id).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    let record = prov_store::get_record(db, record_id).map_err(DocsError::storage)?;
     let record = match record {
         Some(r) => r,
         None => return Ok(false),
     };
-    let commits =
-        store::get_doc_commit_hashes(db, document_id).map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
+    let commits = store::get_doc_commit_hashes(db, document_id).map_err(DocsError::storage)?;
     Ok(chunks_root(commits) == record.output_hash)
 }
 

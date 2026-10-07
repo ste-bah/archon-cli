@@ -81,6 +81,7 @@ fn run_create(db: &DbInstance, script: &str) -> Result<()> {
         "schema creation",
     ) {
         Ok(_) => Ok(()),
+        Err(e) if e.is::<archon_cozo::StoreBusy>() => Err(e),
         Err(e) => {
             let msg = e.to_string();
             if crate::errors::COZO_RELATION_ALREADY_EXISTS
@@ -89,7 +90,7 @@ fn run_create(db: &DbInstance, script: &str) -> Result<()> {
             {
                 Ok(())
             } else {
-                Err(anyhow::anyhow!("schema creation failed: {msg}"))
+                Err(e.context("schema creation failed"))
             }
         }
     }

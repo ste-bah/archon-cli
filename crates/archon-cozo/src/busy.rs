@@ -1,7 +1,7 @@
-//! An exhausted busy attempt window is a retryable outcome, never a completed operation.
+//! An acquisition pause is retryable, never a completed or failed operation.
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct StoreBusy {
     pub context: String,
     pub attempts: usize,
@@ -19,19 +19,6 @@ impl fmt::Display for StoreBusy {
 }
 impl std::error::Error for StoreBusy {}
 
-pub(crate) fn guarded_error(context: &str, attempts: usize, detail: String) -> anyhow::Error {
-    if crate::is_store_contention(&detail) {
-        StoreBusy {
-            context: context.into(),
-            attempts,
-            detail,
-        }
-        .into()
-    } else {
-        anyhow::anyhow!("{context}: {detail}")
-    }
-}
-
 pub(crate) fn lock_window_busy(context: &str, detail: String) -> anyhow::Error {
     StoreBusy {
         context: context.into(),
@@ -39,4 +26,16 @@ pub(crate) fn lock_window_busy(context: &str, detail: String) -> anyhow::Error {
         detail,
     }
     .into()
+}
+
+impl StoreBusy {
+    /// Find the typed pause even inside another library's error wrapper.
+    pub fn find<'a>(mut error: &'a (dyn std::error::Error + 'static)) -> Option<&'a Self> {
+        loop {
+            if let Some(busy) = error.downcast_ref::<Self>() {
+                return Some(busy);
+            }
+            error = error.source()?;
+        }
+    }
 }

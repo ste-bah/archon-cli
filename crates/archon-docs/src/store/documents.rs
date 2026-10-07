@@ -25,7 +25,7 @@ pub fn insert_doc_source(db: &DbInstance, doc: &SourceDocument) -> Result<()> {
         ScriptMutability::Mutable,
         "insert doc_sources",
     )
-    .map_err(|e| anyhow::anyhow!("insert doc_sources failed: {e}"))?;
+    .map_err(|e| e.context("insert doc_sources failed"))?;
     Ok(())
 }
 
@@ -42,7 +42,7 @@ pub fn get_doc_source(db: &DbInstance, document_id: &str) -> Result<Option<Sourc
         ScriptMutability::Immutable,
         "get doc source",
     )
-    .map_err(|e| anyhow::anyhow!("get doc_sources failed: {e}"))?;
+    .map_err(|e| e.context("get doc_sources failed"))?;
 
     if result.rows.is_empty() {
         return Ok(None);
@@ -67,7 +67,7 @@ pub fn list_doc_sources(db: &DbInstance) -> Result<Vec<SourceDocument>> {
         ScriptMutability::Immutable,
         "list doc sources",
     )
-    .map_err(|e| anyhow::anyhow!("list doc_sources failed: {e}"))?;
+    .map_err(|e| e.context("list doc_sources failed"))?;
 
     Ok(result
         .rows
@@ -153,7 +153,7 @@ pub fn get_doc_by_hash(db: &DbInstance, content_hash: &str) -> Result<Option<Sou
         ScriptMutability::Immutable,
         "get doc by hash",
     )
-    .map_err(|e| anyhow::anyhow!("get doc by hash failed: {e}"))?;
+    .map_err(|e| e.context("get doc by hash failed"))?;
     if result.rows.is_empty() {
         return Ok(None);
     }
@@ -201,7 +201,7 @@ pub fn assign_document_to_kb(db: &DbInstance, kb_id: &str, document_id: &str) ->
         ScriptMutability::Mutable,
         "assign document to kb",
     )
-    .map_err(|e| anyhow::anyhow!("assign document to kb failed: {e}"))?;
+    .map_err(|e| e.context("assign document to kb failed"))?;
     Ok(())
 }
 
@@ -215,7 +215,7 @@ pub fn list_kb_document_ids(db: &DbInstance, kb_id: &str) -> Result<Vec<String>>
         ScriptMutability::Immutable,
         "list kb document ids",
     )
-    .map_err(|e| anyhow::anyhow!("list kb documents failed: {e}"))?;
+    .map_err(|e| e.context("list kb documents failed"))?;
     Ok(result
         .rows
         .iter()
@@ -256,7 +256,7 @@ pub fn insert_ocr_run(db: &DbInstance, run: &OcrRun) -> Result<()> {
         ScriptMutability::Mutable,
         "insert doc_ocr_runs",
     )
-    .map_err(|e| anyhow::anyhow!("insert doc_ocr_runs failed: {e}"))?;
+    .map_err(|e| e.context("insert doc_ocr_runs failed"))?;
     Ok(())
 }
 
@@ -297,7 +297,7 @@ fn list_ocr_runs_for_ocr_id(db: &DbInstance, ocr_run_id: &str) -> Result<Vec<Ocr
         ScriptMutability::Immutable,
         "list ocr runs for ocr id",
     )
-    .map_err(|e| anyhow::anyhow!("list ocr_runs by id failed: {e}"))?;
+    .map_err(|e| e.context("list ocr_runs by id failed"))?;
     Ok(result
         .rows
         .iter()
@@ -337,7 +337,7 @@ pub fn list_ocr_runs_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<O
         ScriptMutability::Immutable,
         "list ocr runs for doc",
     )
-    .map_err(|e| anyhow::anyhow!("list ocr_runs failed: {e}"))?;
+    .map_err(|e| e.context("list ocr_runs failed"))?;
 
     Ok(result
         .rows
