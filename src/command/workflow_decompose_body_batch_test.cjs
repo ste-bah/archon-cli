@@ -11,6 +11,7 @@ const SUBJECTS = Array.from({length:7},(_,i)=>({taskId:`TASK-X-${i+1}`,fileName:
 
 function harness(cap, options = {}) {
  const context = {args:{projectRoot:'/p',repositoryRoot:'/r',prdPath:'/p/prd',prdDigest:'x',taskRoot:'/p/tasks',gateMode:'observe',acceptanceCriteria:{'AC-X-1':'c'},authorMaxParallelism:cap,frozenChain:options.frozenChain}, console};
+ context.__archonValidateAcceptanceEntry = () => '[]';
  vm.createContext(context);
  vm.runInContext(scriptSource(),context);
  let active=0,peak=0,failedAt=null,firstEndedAfterFourthStarted=null; const bodyCalls=[],landed=[];

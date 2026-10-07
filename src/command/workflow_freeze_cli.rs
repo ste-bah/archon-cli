@@ -325,7 +325,7 @@ fn exit_incomplete_resumable(
 
 #[path = "workflow_freeze_defects.rs"]
 mod defects;
-pub(crate) use defects::skeleton_document;
+pub(crate) use defects::{install_entry_validator, skeleton_document};
 #[path = "workflow_freeze_staged_output.rs"]
 mod staged_output;
 use staged_output::{

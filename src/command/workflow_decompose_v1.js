@@ -293,8 +293,9 @@ async function authorCandidate(w, policy) {
     if (stall) {
       // Observe never blocks on the artifact's quality: a loop that stopped
       // improving returns the artifact the tree holds now. An outage says
-      // nothing about the artifact, so it pauses in either mode.
-      if (stall !== "operational_no_progress" && args.gateMode === "observe" && lastCommitted) return lastCommitted;
+      // nothing about the artifact, so a window that holds one pauses in
+      // either mode (resumable), whatever the rest of the window was.
+      if (args.gateMode === "observe" && lastCommitted && !windowHasOutage(progress)) return lastCommitted;
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
     }
     const carry = carried;
@@ -317,12 +318,19 @@ async function authorCandidate(w, policy) {
     // a previously missing entry lowers the outstanding-entry count. A
     // rewrite alone clears no defect; every failure shares the same window.
     const advanced = (authorState.added || 0) > addedBefore;
+    const round = authorRoundReport(policy, authorState);
     if (authored.status === "failed") {
-      if (authored.malformed) {
-        recordAnswered(progress, call, "entries", advanced, !measuredReplies);
+      // Every kind of failed round credits the entries that passed in it and
+      // counts any outage in it. Each entry reads its own refusal or note;
+      // the shared feedback stays the gate's findings.
+      if (authored.refusals) {
+        recordRepairs(progress, call, authored.refusals, round, !measuredReplies, advanced);
+        lastFindings = authored.findings.map(progressText);
+      } else if (authored.malformed) {
+        recordAnswered(progress, call, "entries", advanced, !measuredReplies, round);
         lastFindings = [authored.summary || "malformed replies"];
       } else {
-        recordOperational(progress, call, authored.summary, advanced);
+        recordOperational(progress, call, authored.summary, advanced, round);
         lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
       }
       continue;
@@ -338,9 +346,10 @@ async function authorCandidate(w, policy) {
     const outcome = await w.hostCommand(policy.capability, { stdin: authored.content });
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     if (routed.operational) {
-      // The gate never judged the candidate: the attempt makes no progress.
+      // The gate never judged the candidate; only the round that made it can
+      // be progress: a pass in it, or a previously missing entry it added.
       if (!measuredReplies) progress.answered += 1;
-      recordOperational(progress, call, routed.operational);
+      recordOperational(progress, call, routed.operational, advanced, round);
       lastFindings = [`host gate operational failure: ${routed.operational}`];
       continue;
     }
@@ -348,7 +357,7 @@ async function authorCandidate(w, policy) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = (outcome.gateEnvelope?.policy_findings || [])
         .filter(finding => policy.retryScopes.has(finding.remediation_scope));
-      authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt));
+      authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content));
     }
     // A committed artifact is not the finished one: repairable findings are
     // still fed back below in either mode. Every publication replaces the
@@ -366,7 +375,10 @@ async function authorCandidate(w, policy) {
     history.push({ attempt, findings: routed.retry.slice() });
     feedback = routed.retry;
     lastFindings = routed.retry.slice();
-    recordAttempt(progress, call, routed.retryFindings, !measuredReplies);
+    // `advanced` is not credited here on purpose: the gate measured the whole
+    // candidate, and that measure decides (Issue 261).
+    recordAttempt(progress, call, routed.retryFindings, !measuredReplies, round);
+    openRepairEpisode(progress);
   }
 }
 

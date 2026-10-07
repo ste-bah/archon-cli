@@ -115,3 +115,129 @@ fn workflow_host_command_each_floor_contract_field_is_its_own_identity() {
     ];
     assert_converges(&ENTRY_SHAPE, candidate, &first, &repairs);
 }
+
+// The real native binding and the embedded author, not a Node mock. Allow
+// replaying the old JS to demonstrate these regressions fail before the fix.
+pub(super) fn script_source() -> String {
+    if let Ok(root) = std::env::var("ARCHON_TEST_SCRIPT_ROOT") {
+        [
+            "workflow_decompose_v1.js",
+            "workflow_decompose_v1_acceptance.js",
+            "workflow_decompose_v1_set_gate.js",
+            "workflow_decompose_v1_progress.js",
+        ]
+        .iter()
+        .map(|name| std::fs::read_to_string(std::path::Path::new(&root).join(name)).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n")
+    } else {
+        crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE.to_string()
+    }
+}
+
+fn assert_author_shape_refusal(entry: Value) {
+    let source = script_source();
+    let runtime = rquickjs::Runtime::new().unwrap();
+    let context = rquickjs::Context::full(&runtime).unwrap();
+    context.with(|ctx| {
+        install_entry_validator(&ctx).unwrap();
+        ctx.eval::<(), _>(format!("const args = {{}};\n{source}")).unwrap();
+        let candidate = serde_json::to_vec(&json!({"entries": [entry.clone()]})).unwrap();
+        // Each refusal names the entry (Issue 357 round 4), not `entries/0`.
+        let expected: Vec<_> = element_shape_defects(&candidate, &ENTRY_SHAPE)
+            .iter().map(|defect| super::entry_validator::refusal_text("A", defect)).collect();
+        assert!(!expected.is_empty(), "test entry must be invalid");
+        let script = format!(r#"(async () => {{
+            const entry = {entry};
+            const w = {{agent: async () => ({{status: 'accepted', stopReason: 'end_turn', content: JSON.stringify(entry)}})}};
+            const refused = await authorOne(w, 'author', 1, 'A', 'a', [], {{A:'a'}}, {{roundCalls:0, roundAnswered:0}});
+            entry.check = {{kind:'command', command:'test -f output', cwd:'project_root'}};
+            const repaired = await authorOne(w, 'repair', 2, 'A', 'a', [], {{A:'a'}}, {{roundCalls:0, roundAnswered:0}});
+            return JSON.stringify({{refused, repaired}});
+        }})()"#);
+        let promise: rquickjs::Promise = ctx.eval(script).unwrap();
+        let result: String = promise.finish().unwrap();
+        let result: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(result["refused"]["failure"]["malformed"], true, "{result}");
+        // Its repair is measured in the frontier of the entry it names.
+        assert_eq!(result["refused"]["failure"]["entryId"], "A", "{result}");
+        let summary = result["refused"]["failure"]["summary"].as_str().unwrap();
+        for message in expected { assert!(summary.contains(&message), "{summary}"); }
+        // The host-owned criterion is stamped, never repaired (round 5).
+        assert_eq!(result["repaired"]["entry"]["criterion"], "a", "{result}");
+    });
+}
+
+// Issue 357 round 5: criterion is host-owned (stamped before validation), so
+// these drive an author-owned field; the expected texts use the host value.
+#[test]
+fn acceptance_author_refuses_missing_command_with_freeze_validator() {
+    assert_author_shape_refusal(
+        json!({"id":"A", "criterion":"a", "check":{"kind":"command", "cwd":"project_root"}}),
+    );
+}
+
+#[test]
+fn acceptance_author_refuses_null_command_with_freeze_validator() {
+    assert_author_shape_refusal(
+        json!({"id":"A", "criterion":"a", "check":{"kind":"command", "command":null, "cwd":"project_root"}}),
+    );
+}
+
+#[test]
+fn acceptance_author_refuses_numeric_command_with_freeze_validator() {
+    assert_author_shape_refusal(
+        json!({"id":"A", "criterion":"a", "check":{"kind":"command", "command":42, "cwd":"project_root"}}),
+    );
+}
+
+// Issue 357 round 3: after the judge refutes a shape-valid entry, the native
+// validator's 5 -> 4 -> 3 -> 2 -> 1 -> 0 repair completes without a pause.
+#[test]
+fn native_refuted_entry_shape_repairs_decrease_five_to_zero_without_pause() {
+    let runtime = rquickjs::Runtime::new().unwrap();
+    let context = rquickjs::Context::full(&runtime).unwrap();
+    context.with(|ctx| {
+        install_entry_validator(&ctx).unwrap();
+        let script = format!(
+            r#"const args = {{acceptanceCriteria:{{A:'a'}},authorMaxParallelism:1,gateMode:'enforce'}};
+            {source}
+            (async () => {{
+                let calls = 0, freezes = 0;
+                const w = {{
+                    agent: async () => {{
+                        if (++calls > 12) throw Error('bounded test exhausted');
+                        const r = calls === 1 ? 6 : calls - 1;
+                        return {{status:'accepted',stopReason:'end_turn',content:JSON.stringify({{
+                            id:'A',
+                            check:{{kind:'command',command:r >= 2 ? 'test -f output' : 42,
+                                cwd:r >= 3 ? 'project_root' : null}},
+                            gap_permitted:r >= 4 ? false : 'false',
+                            covers:r >= 6 ? [] : r >= 5 ? ['REQ-Y', null] : [42, null]
+                        }})}};
+                    }},
+                    hostCommand: async () => {{
+                        freezes++;
+                        const findings = freezes > 1 ? [] : [{{text:"check 'A' was refuted: repair",
+                            subject:'A',remediation_scope:'candidate_artifact'}}];
+                        return {{publicationReceipt:{{call_id:'freeze'}},postcondition:{{satisfied:true}},
+                            gateEnvelope:{{policy_findings:findings}}}};
+                    }},
+                    pause: async () => {{throw Error('unexpected pause');}}
+                }};
+                let error = null;
+                try {{
+                    await authorCandidate(w, {{phase:'acceptance',prompt:()=> 'author',
+                        author:authorAcceptanceEntries,capability:'freeze-acceptance',
+                        retryScopes:new Set(['candidate_artifact'])}});
+                }} catch (e) {{ error = String(e.message); }}
+                return JSON.stringify({{calls,freezes,error}});
+            }})()"#,
+            source = script_source(),
+        );
+        let promise: rquickjs::Promise = ctx.eval(script).unwrap();
+        let result: String = promise.finish().unwrap();
+        let result: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(result, json!({"calls":7,"freezes":2,"error":null}));
+    });
+}

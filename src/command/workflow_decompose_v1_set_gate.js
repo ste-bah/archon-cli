@@ -42,12 +42,15 @@ function authorBatchSize() {
 //   so `settled[0..i-cap]` is fixed when i starts and anything i reads from it
 //   depends on its index, never on which sibling happened to finish first.
 //   A slow call delays only the calls behind it, not a whole batch.
-// After a failure (a rejection, or a value `failed` accepts) nothing new
-// starts, and every started call settles before this returns: a sibling agent
-// is never abandoned mid-call. An index already queued when a failure lands
-// is checked again just before its launch and skipped. `settled[i]` is
-// `{status, value|reason}` for a launched index and undefined for one never
-// launched; launched indices are always a prefix, `started` long.
+// After a rejection (or, without the window, a value `failed` accepts) nothing
+// new starts. With the window, a failed value at index f stops only the
+// indices whose fixed prefix holds it (i >= f + cap): whether i starts then
+// depends on the results it waits for, never on when f landed. Every started
+// call settles before this returns: a sibling agent is never abandoned
+// mid-call. An index already queued when a rejection lands is checked again
+// just before its launch and skipped. `settled[i]` is `{status,
+// value|reason}` for a launched index and undefined for one never launched;
+// launched indices are always a prefix, `started` long.
 function runBounded(count, cap, window, launch, failed = () => false) {
   return new Promise((resolve) => {
     const settled = new Array(count);
@@ -56,15 +59,22 @@ function runBounded(count, cap, window, launch, failed = () => false) {
     let running = 0;
     let prefix = 0;
     let stopped = false;
+    // Window: the lowest settled index whose value `failed` accepts.
+    let failedAt = count;
+    const open = () => !stopped && next < count && (!window || next < failedAt + cap);
     const finish = () => {
-      if (running === 0 && (stopped || next >= count)) resolve({ settled, started });
+      if (running === 0 && !open()) resolve({ settled, started });
     };
     const settle = (index, outcome) => {
       running -= 1;
       if (outcome) {
         settled[index] = outcome;
         try {
-          if (outcome.status === "rejected" || failed(outcome.value)) stopped = true;
+          if (outcome.status === "rejected") stopped = true;
+          else if (failed(outcome.value)) {
+            if (window) failedAt = Math.min(failedAt, index);
+            else stopped = true;
+          }
         } catch (reason) {
           // A predicate that throws must not strand the pool unresolved.
           settled[index] = { status: "rejected", reason };
@@ -76,7 +86,7 @@ function runBounded(count, cap, window, launch, failed = () => false) {
       finish();
     };
     const pump = () => {
-      while (!stopped && next < count && running < cap && (!window || next < prefix + cap)) {
+      while (open() && running < cap && (!window || next < prefix + cap)) {
         const index = next++;
         running += 1;
         Promise.resolve()

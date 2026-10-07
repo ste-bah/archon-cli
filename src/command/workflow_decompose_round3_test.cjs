@@ -8,6 +8,7 @@ const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js
   .map(name => fs.readFileSync(`${scriptRoot}/${name}`, 'utf8')).join('\n');
 function context(criteria = { A: 'a' }) {
   const ctx = { args: { acceptanceCriteria: criteria, gateMode: 'enforce', authorMaxParallelism: 1 } };
+  ctx.__archonValidateAcceptanceEntry = () => '[]';
   vm.createContext(ctx);
   vm.runInContext(source, ctx);
   return ctx;
@@ -67,7 +68,8 @@ async function partial(operational, replacing) {
 }
 async function unchangedReplacement() {
   const ctx = context({ A: 'a', B: 'b' });
-  const state = { entries: new Map([['A', { id: 'A', version: 0 }]]), retryIds: null };
+  // A kept entry always carries its host-owned criterion (Issue 357).
+  const state = { entries: new Map([['A', { id: 'A', version: 0, criterion: 'a' }]]), retryIds: null };
   const w = { agent: async id => id.includes('-A-')
     ? answer('{"version":0,"id":"A"}') : answer('malformed') };
   await ctx.authorAcceptanceEntries(w, 'author', 1, state);

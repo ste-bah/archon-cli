@@ -14,6 +14,15 @@
 // free-text findings are not measured at all: they neither credit nor block.
 // A stall PAUSES the run and resume opens a fresh window while preserving the
 // best measure reconstructed by replay.
+//
+// Issue 357: an entry the author step refuses for its shape is measured in its
+// own repair frontier, not against the candidate best: a judged candidate is a
+// higher tier than any entry shape refusal, so every shape repair after a
+// refutation used to measure as a regression. Each candidate measure opens a
+// repair episode (per-entry bests, and the window as that measure left it). An
+// entry's strictly better shape measure cancels only the no-progress attempts
+// of its episode; attempts before the episode still count, so a candidate
+// that keeps coming back refuted still pauses.
 
 // Consecutive attempts without progress that end a loop: every kind counts,
 // an outage, an incomplete reply and a judged repeat alike.
@@ -126,6 +135,7 @@ function findingKey(finding) {
 function newProgress(_seed) {
   return {
     best: null,
+    repair: newRepairEpisode(0, 0),
     history: [],
     stalled: 0,
     stalledOperational: 0,
@@ -134,23 +144,56 @@ function newProgress(_seed) {
   };
 }
 
+function newRepairEpisode(stalled, stalledOperational) {
+  return { bests: new Map(), stalled, stalledOperational };
+}
+
+// Opens the repair episode that follows a measured candidate.
+function openRepairEpisode(progress) {
+  progress.repair = newRepairEpisode(progress.stalled, progress.stalledOperational);
+}
+
 function recordStep(progress, entry) {
   if (entry.progress) {
     progress.stalled = 0;
     progress.stalledOperational = 0;
+    // Real progress empties the window, so no episode may restore it.
+    progress.repair.stalled = 0;
+    progress.repair.stalledOperational = 0;
   } else {
     progress.stalled += 1;
-    if (entry.kind === "operational") progress.stalledOperational += 1;
+    // A round with any outage is an outage of the window, whatever its first
+    // failure was (an author call failed in transport beside a refusal).
+    if (entry.kind === "operational" || entry.outage === true) progress.stalledOperational += 1;
   }
   progress.history.push(entry);
   return entry.progress;
 }
 
+// What one author round reports to the window: the entries that passed in
+// it and whether any of its calls failed in transport. A loop without an
+// entry author has no rounds (NO_ROUND).
+const NO_ROUND = Object.freeze({ passed: Object.freeze([]), outage: false });
+
+function authorRoundReport(policy, state) {
+  if (!policy.author) return NO_ROUND;
+  if (!Array.isArray(state.roundPassed) || typeof state.roundOutage !== "boolean") {
+    throw new Error("an author round reported no passed entries or outage");
+  }
+  return { passed: state.roundPassed, outage: state.roundOutage };
+}
+
 // Only a measure that beats every earlier attempt is progress. Trading,
 // renaming, rewording or revisiting defects cannot reset the window, and
-// neither can anything the judge says.
-function recordAttempt(progress, call, findings, answered = true) {
+// neither can anything the judge says. The entries that passed in the clean
+// round that made this candidate are credited first (creditPassed): that
+// restores the window to the episode floor, and the judged measure is then
+// recorded as usual, so a candidate the judge keeps refusing still raises
+// every next floor by one and the loop stays bounded.
+function recordAttempt(progress, call, findings, answered = true, round = NO_ROUND) {
   if (answered) progress.answered += 1;
+  const credited = creditPassed(progress.repair, round.passed);
+  if (credited.length > 0) restoreFloor(progress);
   const measure = attemptMeasure(findings);
   const better = isBetter(measure, progress.best);
   if (better) progress.best = measure;
@@ -159,21 +202,117 @@ function recordAttempt(progress, call, findings, answered = true) {
     kind: ["packaging", "refused", "judged"][measure.tier],
     stage: DEFECT_STAGES[measure.stage] || "passed",
     findings: measure.count,
-    progress: better
+    progress: better,
+    ...(credited.length > 0 ? { entries: credited } : {})
   });
+}
+
+// The measure of an entry that passed the author step: better than any refusal.
+const PASSED_MEASURE = { tier: JUDGED_TIER, stage: PASSED_STAGE, count: 0 };
+
+// Credits each entry that passed this round and was measured (refused) in
+// the current repair episode: its first pass beats its best. A pass is the
+// maximum, so each entry is credited at most once per episode. An entry with
+// no measure in the episode (a rewrite of one the judge sent back) is only
+// novelty until the judge accepts it (Issue 261). Returns the credited entries.
+function creditPassed(episode, passed) {
+  const credited = [];
+  if (!Array.isArray(passed)) throw new Error("an author round reported no passed entries");
+  for (const id of passed) {
+    const best = episode.bests.get(id);
+    if (!best || !isBetter(PASSED_MEASURE, best)) continue;
+    episode.bests.set(id, PASSED_MEASURE);
+    credited.push({ subject: id, findings: 0, progress: true, worse: false });
+  }
+  return credited;
+}
+
+// Closes one author round. `advanced` (a previously missing entry was
+// completed) empties the window. An entry that beat its own best restores the
+// window to where the repair episode opened, never below it, so attempts
+// before the episode still count. Otherwise the round is one more attempt
+// without progress.
+function recordRound(progress, entry, better, advanced, outage) {
+  entry.progress = better || Boolean(advanced);
+  if (outage) entry.outage = true;
+  if (advanced || !better) return recordStep(progress, entry);
+  restoreFloor(progress);
+  progress.history.push(entry);
+  return true;
+}
+
+function restoreFloor(progress) {
+  progress.stalled = Math.min(progress.stalled, progress.repair.stalled);
+  progress.stalledOperational = Math.min(progress.stalledOperational, progress.repair.stalledOperational);
+}
+
+// Records one author round that refused entries for their shape. Each refused
+// entry is measured against its own best in the current repair episode (a
+// first measure beats nothing), and each entry that passed this round is
+// credited (creditPassed). The round is progress when at least one entry beat
+// its own best. An entry worse than its best does not cancel another entry's
+// progress: each best only improves, over a finite measure (tier, stage, a
+// defect count >= 0; a pass is terminal), so an episode holds finitely many
+// improvements and the loop stays bounded, while a stuck or worse entry keeps
+// reading its own refusal. `worse` is kept per entry as evidence.
+function recordRepairs(progress, call, refusals, round = NO_ROUND, answered = true, advanced = false) {
+  if (answered) progress.answered += 1;
+  const episode = progress.repair;
+  let better = false;
+  const entries = [], measures = [];
+  for (const { entryId, findings } of refusals) {
+    if (typeof entryId !== "string" || entryId.length === 0) throw new Error("an entry shape refusal names no entry");
+    const measure = attemptMeasure(findings);
+    const best = episode.bests.get(entryId);
+    const improved = isBetter(measure, best);
+    const regressed = Boolean(best) && isBetter(best, measure);
+    if (improved) episode.bests.set(entryId, measure);
+    better = better || improved;
+    measures.push(measure);
+    entries.push({ subject: entryId, findings: measure.count, progress: improved, worse: regressed });
+  }
+  const credited = creditPassed(episode, round.passed);
+  entries.push(...credited);
+  const tier = Math.min(...measures.map(measure => measure.tier));
+  const stage = Math.min(...measures.map(measure => measure.stage));
+  return recordRound(progress, {
+    call, kind: ["packaging", "refused", "judged"][tier], subject: refusals.map(refusal => refusal.entryId).join(", "),
+    stage: DEFECT_STAGES[stage] || "passed", findings: measures.reduce((sum, measure) => sum + measure.count, 0),
+    progress: false, entries
+  }, better || credited.length > 0, advanced, round.outage);
+}
+
+// A round whose failures measured nothing (an unparseable reply, a call that
+// failed in transport) still credits the entries that passed in it.
+function creditedRound(progress, entry, round, advanced) {
+  const credited = creditPassed(progress.repair, round.passed);
+  if (credited.length > 0) entry.entries = credited;
+  return recordRound(progress, entry, credited.length > 0, advanced, round.outage && entry.kind !== "operational");
 }
 
 // Records an attempt the provider answered but nothing measured: an
 // incomplete reply, or an acceptance round that ended on malformed replies.
-// `advanced` is true only when the round completed a previously missing entry.
-function recordAnswered(progress, call, kind, advanced = false, answered = true) {
+// `advanced` is true only when the round completed a previously missing
+// entry; `round` is the author round's report (authorRoundReport).
+function recordAnswered(progress, call, kind, advanced = false, answered = true, round = NO_ROUND) {
   if (answered) progress.answered += 1;
-  return recordStep(progress, { call, kind, findings: null, progress: Boolean(advanced) });
+  return creditedRound(progress, { call, kind, findings: null, progress: false }, round, advanced);
 }
 
-// Records an author call the provider never answered.
-function recordOperational(progress, call, summary, advanced = false) {
-  return recordStep(progress, { call, kind: "operational", findings: null, progress: Boolean(advanced), summary: boundText(summary) });
+// Records an author call the provider never answered, or a gate that never
+// judged the candidate; `round` is the author round that made the attempt. A
+// pass in it, or a previously missing entry it added (`advanced`), is
+// progress whatever the gate does next: an outage measures nothing, a pass is
+// credited once per episode and an entry is added once, so this stays bounded.
+function recordOperational(progress, call, summary, advanced = false, round = NO_ROUND) {
+  return creditedRound(progress, { call, kind: "operational", findings: null, progress: false, summary: boundText(summary) }, round, advanced);
+}
+
+// Observe may end a stalled loop on its latest commit only when every attempt
+// of the window was answered: an outage never judged what it would have
+// produced, so a window that holds one pauses in either mode.
+function windowHasOutage(progress) {
+  return progress.stalledOperational > 0;
 }
 
 // Why the loop must stop now, or null while it may make another attempt.
@@ -233,6 +372,9 @@ async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra
   await pauseLoop(w, subject, { ...loopEvidence(progress, reason, lastFindings), ...(extra || {}) });
   progress.stalled = 0;
   progress.stalledOperational = 0;
+  // The fresh window is also the episode's floor; its per-entry bests stay.
+  progress.repair.stalled = 0;
+  progress.repair.stalledOperational = 0;
 }
 
 // Issue 288: what an author prompt shows of earlier attempts. Every attempt's

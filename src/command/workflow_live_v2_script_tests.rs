@@ -65,3 +65,13 @@ mod workflow_live_v2_blocking_gap_tests;
 mod never_started_dispatch_tests;
 #[path = "workflow_live_v2_script_remediation_pause_tests.rs"]
 mod remediation_pause_tests;
+
+/// A shape-valid authored acceptance entry. Since Issue 357 the author step
+/// runs freeze's entry validator, so a fixture entry carries a `criterion` and
+/// a `check`; an entry without them is refused at its own author call.
+fn authored_entry(mut entry: serde_json::Value) -> String {
+    entry["criterion"] = "fixture criterion".into();
+    entry["check"] =
+        serde_json::json!({"kind":"command","command":"test -f output","cwd":"project_root"});
+    entry.to_string()
+}

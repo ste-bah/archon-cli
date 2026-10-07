@@ -328,6 +328,11 @@ pub(crate) fn skeleton_document(document: &[u8]) -> Result<Value, serde_json::Er
     parse::parse(document, &Shape::Object(&schema::SKELETON), &mut Vec::new())
 }
 
+/// The refusal of a candidate whose bytes are not one readable JSON document.
+pub(crate) fn invalid_json_defect(message: String) -> ValidationDefect {
+    ValidationDefect::new("invalid_json", "candidate", "parse", message)
+}
+
 pub(crate) fn element_shape_defects(
     candidate: &[u8],
     shape: &ElementShape,
@@ -340,14 +345,7 @@ pub(crate) fn element_shape_defects(
     };
     let value = match parsed {
         Ok(value) => value,
-        Err(error) => {
-            return vec![ValidationDefect::new(
-                "invalid_json",
-                "candidate",
-                "parse",
-                error.to_string(),
-            )];
-        }
+        Err(error) => return vec![invalid_json_defect(error.to_string())],
     };
     // Assembly replaces the entire contract when entries is present, including
     // acceptance, PRD and gap policy, and stamps BOTH authored entry lists.

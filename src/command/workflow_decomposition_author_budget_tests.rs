@@ -45,7 +45,7 @@ impl WorkflowLlmClient for TransportLlm {
             ));
         }
         Ok(WorkflowAgentOutcome {
-            content: serde_json::json!({"id":"AC-X-001","ordinal":ordinal}).to_string(),
+            content: super::authored_entry(serde_json::json!({"id":"AC-X-001","ordinal":ordinal})),
             stop_reason: Some("end_turn".into()),
             ..WorkflowAgentOutcome::default()
         })

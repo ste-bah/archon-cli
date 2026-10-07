@@ -268,6 +268,7 @@ impl WorkflowV2ScriptRunner {
         };
         let js_result = context
             .async_with(async move |ctx| {
+                crate::command::workflow::install_entry_validator(&ctx)?;
                 ctx.globals().set(
                     "__archonHost",
                     Func::from(Async(move |method: String, payload: String| {

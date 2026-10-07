@@ -73,6 +73,10 @@ pub(crate) use shape::{
     ENTRY_SHAPE, ElementShape, TASK_SHAPE, element_shape_defects, skeleton_document,
 };
 
+#[path = "workflow_freeze_entry_validator.rs"]
+mod entry_validator;
+pub(crate) use entry_validator::install_entry_validator;
+
 /// Refuses the candidate with every element shape defect, or `None` when
 /// every element has the required shape.
 pub(super) fn refuse_element_shapes(
@@ -95,6 +99,10 @@ pub(super) fn refuse_element_shapes(
 #[cfg(test)]
 #[path = "workflow_freeze_shape_tests.rs"]
 mod shape_tests;
+
+#[cfg(test)]
+#[path = "workflow_freeze_entry_validator_tests.rs"]
+mod entry_validator_tests;
 
 #[cfg(test)]
 #[path = "workflow_freeze_round11_tests.rs"]

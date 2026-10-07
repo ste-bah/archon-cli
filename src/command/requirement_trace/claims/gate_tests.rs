@@ -138,6 +138,8 @@ globalThis.args = {{
   projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "/p/tasks",
   gateMode: "enforce", acceptanceCriteria: {{ "AC-X-001": "criterion" }},
 }};
+// Node has no native entry validator; stub it as the other node-driven script tests do.
+globalThis.__archonValidateAcceptanceEntry = () => "[]";
 const subjects = [
   {{ taskId: "TASK-X-010", fileName: "TASK-X-010.md" }},
   {{ taskId: "TASK-X-020", fileName: "TASK-X-020.md" }},

@@ -13,6 +13,7 @@ const source = FILES.map((f) => fs.readFileSync(`${dir}/${f}`, 'utf8')).join('\n
 
 function context(args) {
   const ctx = { args, console };
+  ctx.__archonValidateAcceptanceEntry = () => '[]';
   vm.createContext(ctx);
   vm.runInContext(source, ctx);
   return ctx;
