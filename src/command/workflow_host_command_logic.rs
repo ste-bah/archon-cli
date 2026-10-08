@@ -233,7 +233,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         id: "requirements-trace",
         version: 1,
         sources: &[GATE, CONTRACT, TRACE],
-        sources_digest: "640cd3112901eba0df28e41271e91beb300e98abad2e552c408de8f56b88ca39",
+        sources_digest: "c99dfe1fe3a8994e6998239d41b70edd07476245aecf111496357afe08397c03",
         build_bound: true,
     },
     CapabilityLogic {
