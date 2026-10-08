@@ -16,6 +16,7 @@ include!("stream_round_test_fixture.rs");
 include!("stream_round_recovery_tests.rs");
 include!("stream_round_activity_tests.rs");
 include!("stream_round_wake_tests.rs");
+include!("stream_round_open_error_tests.rs");
 
 #[tokio::test]
 async fn cancellation_drops_stalled_provider_stream_promptly() {

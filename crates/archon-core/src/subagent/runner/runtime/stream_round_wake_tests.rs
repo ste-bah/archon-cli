@@ -107,6 +107,12 @@ enum WakeOpen {
     Unauthorized,
     /// The provider answers this text.
     Answers(&'static str),
+    /// The provider answers HTTP 500 with this body.
+    ServerError(&'static str),
+    /// The provider asks for a wait of this many seconds.
+    RateLimited(u64),
+    /// The stream opens and its first event is an error of this type.
+    ErrorEvent(&'static str),
 }
 
 /// Opens per a script; the last entry repeats. Counts every open.
@@ -137,10 +143,31 @@ impl LlmProvider for WakeNetworkProvider {
         match step {
             WakeOpen::Silent => self.held.lock().unwrap().push(tx),
             WakeOpen::Unreachable => {
-                return Err(LlmError::Http("error sending request: network is down".into()));
+                return Err(LlmError::Http(
+                    "error sending request: network is down".into(),
+                ));
             }
             WakeOpen::Unauthorized => {
                 return Err(LlmError::Auth("401 invalid x-api-key".into()));
+            }
+            WakeOpen::ServerError(body) => {
+                return Err(LlmError::Server {
+                    status: 500,
+                    message: body.into(),
+                });
+            }
+            WakeOpen::RateLimited(secs) => {
+                return Err(LlmError::RateLimited {
+                    retry_after_secs: secs,
+                });
+            }
+            WakeOpen::ErrorEvent(error_type) => {
+                let message = format!("{error_type} from the provider");
+                tx.try_send(StreamEvent::Error {
+                    error_type: error_type.into(),
+                    message,
+                })
+                .expect("room for the error");
             }
             WakeOpen::Answers(text) => {
                 for event in crate::subagent::runner::tests::text_response(text) {
@@ -156,17 +183,25 @@ impl LlmProvider for WakeNetworkProvider {
     }
 }
 
+fn wake_provider(script: Vec<WakeOpen>, opens: &Arc<AtomicU32>) -> Arc<WakeNetworkProvider> {
+    Arc::new(WakeNetworkProvider {
+        script,
+        opens: Arc::clone(opens),
+        held: Mutex::new(Vec::new()),
+    })
+}
+
 fn wake_runner(script: Vec<WakeOpen>, opens: &Arc<AtomicU32>, idle_secs: u64) -> SubagentRunner {
+    runner_over(wake_provider(script, opens), idle_secs)
+}
+
+fn runner_over(provider: Arc<dyn LlmProvider>, idle_secs: u64) -> SubagentRunner {
     let config = crate::agent::AgentConfig {
         subagent_stream_idle_timeout_secs: idle_secs,
         ..Default::default()
     };
     SubagentRunner::new(
-        Arc::new(WakeNetworkProvider {
-            script,
-            opens: Arc::clone(opens),
-            held: Mutex::new(Vec::new()),
-        }),
+        provider,
         String::new(),
         Vec::new(),
         Arc::new(crate::dispatch::ToolRegistry::new()),
@@ -262,7 +297,10 @@ async fn a_first_open_that_never_succeeds_ends_with_the_resumable_stall_marker()
         started.elapsed() >= std::time::Duration::from_secs(1),
         "the stop comes after the whole window, not at once"
     );
-    assert!(opens.load(Ordering::SeqCst) >= 4, "it kept trying inside the window");
+    assert!(
+        opens.load(Ordering::SeqCst) >= 4,
+        "it kept trying inside the window"
+    );
 }
 
 /// A refused credential is not a network that will come back: it fails at

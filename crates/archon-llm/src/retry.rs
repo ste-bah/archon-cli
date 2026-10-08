@@ -49,7 +49,7 @@ use crate::runtime::{
 use crate::streaming::StreamEvent;
 
 pub use policy::{RetryDecision, RetryPolicy, classify};
-use policy::{reason_code_for_error, stream_error_is_retryable};
+use policy::{reason_code_for_error, stream_error_before_content, stream_error_is_retryable};
 
 /// Outcome of peeking at a freshly opened stream.
 enum StreamProbe {
@@ -362,7 +362,13 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
                             message,
                         } => {
                             attempt += 1;
-                            if attempt >= max || !stream_error_is_retryable(&error_type, &message) {
+                            // Issue 364: classed by the provider's error type,
+                            // so a rejected request fails fast up the stack.
+                            let error = stream_error_before_content(&error_type, &message);
+                            if attempt >= max
+                                || !stream_error_is_retryable(&error_type, &message)
+                                || classify(&error) == RetryDecision::FailFast
+                            {
                                 self.record_runtime_event(
                                     &request,
                                     ProviderRuntimeEventType::RequestFailed,
@@ -370,9 +376,7 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
                                     Some("stream_failed_before_content"),
                                     Some(attempt),
                                 );
-                                return Err(LlmError::Http(format!(
-                                    "stream failed before producing content ({error_type}): {message}"
-                                )));
+                                return Err(error);
                             }
                             tokio::time::sleep(self.backoff_for_attempt(attempt - 1)).await;
                             continue;

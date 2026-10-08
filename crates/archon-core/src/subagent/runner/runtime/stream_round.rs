@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::stream_idle_window::within;
-use super::stream_resend_budget::{FailedAttempt, ResendBudget, retryable_open_error};
+use super::stream_resend_budget::{FailedAttempt, ResendBudget};
 use super::*;
 
 /// How long the provider may go silent before the round is abandoned.
@@ -84,11 +84,8 @@ pub(super) async fn collect_stream_round(
             // network that is not up yet. A retryable error backs off inside
             // the no-progress window like a resend; auth and other 4xx
             // errors still end the round at once.
-            Ok(Err(error)) if !retryable_open_error(&error) => return Err(error),
-            Ok(Err(_)) => {
-                let backoff = budget
-                    .failed(FailedAttempt::Unanswered("first open could not open"))
-                    .map_err(anyhow::Error::msg)?;
+            Ok(Err(error)) => {
+                let backoff = budget.open_failed(error, "first open could not open")?;
                 tokio::time::sleep(backoff).await;
             }
             Err(expired) => {
@@ -171,11 +168,9 @@ pub(super) async fn collect_stream_round(
                         break;
                     }
                     Ok(Err(error)) => {
-                        let error = anyhow::Error::from(error);
-                        if !retryable_open_error(&error) {
-                            return Err(error);
-                        }
-                        FailedAttempt::Unanswered("resend could not open")
+                        backoff = budget
+                            .open_failed(anyhow::Error::from(error), "resend could not open")?;
+                        continue;
                     }
                     Err(expired) => {
                         budget.note_expiry(expired);

@@ -1,4 +1,5 @@
-//! Issue 364: a provider silent for a whole no-progress window pauses the run.
+//! Issue 364: a provider silent for a whole no-progress window, or one that
+//! asks for a wait past it (a long rate limit), pauses the run.
 //!
 //! A session's stream round resends its request, with backoff, for as long
 //! as its provider answers within a no-progress window (a network that needs
@@ -33,7 +34,7 @@ impl WorkflowScriptHost {
         let (store, run_id) = (&self.runner.workflow_store, &self.runner.run_id);
         let resume = format!("archon workflow resume --live --yes {run_id}");
         let message = format!(
-            "call `{call_id}`: the provider gave no answer for a whole no-progress window of resends: {error}; the run is paused, not failed: when the provider is reachable again, {resume}"
+            "call `{call_id}`: the provider could not serve the call within a no-progress window of resends: {error}; the run is paused, not failed: when the provider can serve again (after any retry time named above), {resume}"
         );
         let detail = serde_json::json!({
             "event": "transport_stall_pause",
