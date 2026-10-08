@@ -25,6 +25,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::acceptance_check_environment::CommandEnvironment;
+
 use archon_shell::write_boundary::landlock::LandlockSandbox;
 use archon_shell::write_boundary::{Mechanism, SANDBOX_EXEC, SnapshotBoundary, refusal};
 
@@ -170,13 +172,25 @@ pub(crate) fn command(
     program: &Path,
     run_root: Option<&Path>,
     writable: &[PathBuf],
+) -> Result<(std::process::Command, BoundaryGuard, CommandEnvironment), String> {
+    let policy = crate::acceptance_check_environment::policy_for_run(run_root)?;
+    let environment =
+        CommandEnvironment::capture(policy.as_ref())?.with_remedy(if run_root.is_some() {
+            crate::acceptance_check_environment::RUN_POLICY_REMEDY
+        } else {
+            crate::acceptance_check_environment::NO_RUN_POLICY_REMEDY
+        });
+    let (command, boundary) = bounded_command(program, run_root, writable, &environment)?;
+    Ok((command, boundary, environment))
+}
+
+fn bounded_command(
+    program: &Path,
+    run_root: Option<&Path>,
+    writable: &[PathBuf],
+    environment: &CommandEnvironment,
 ) -> Result<(std::process::Command, BoundaryGuard), String> {
-    let unbounded = || {
-        Ok((
-            archon_shell::spawn::command(program),
-            BoundaryGuard::default(),
-        ))
-    };
+    let unbounded = || Ok((environment.command(program), BoundaryGuard::default()));
     let Some(run_root) = run_root else {
         return unbounded();
     };
@@ -194,9 +208,8 @@ pub(crate) fn command(
     };
     let refused = |reason: &str| refusal("A host-run verifier for this run", reason);
     match mechanism().map_err(|reason| refused(&reason))? {
-        Mechanism::SandboxExec => {
-            sandbox_exec(program, profile).map(|command| (command, BoundaryGuard::default()))
-        }
+        Mechanism::SandboxExec => sandbox_exec(program, profile, environment)
+            .map(|command| (command, BoundaryGuard::default())),
         Mechanism::Landlock { .. } => {
             let temps: Vec<PathBuf> = ["TMPDIR", "TMP", "TEMP"]
                 .iter()
@@ -206,7 +219,7 @@ pub(crate) fn command(
                 .collect();
             let sandbox =
                 LandlockSandbox::build(&sealed, writable, &temps).map_err(|r| refused(&r))?;
-            let mut command = archon_shell::spawn::command(program);
+            let mut command = environment.command(program);
             #[cfg(target_os = "linux")]
             sandbox.install_std(&mut command);
             if let Some(dir) = sandbox.private_temp() {
@@ -230,7 +243,7 @@ pub(crate) fn command(
             excluded.extend(super::sealed_roots::user_host_stores());
             let snapshot = SnapshotBoundary::capture(&sealed, &excluded);
             Ok((
-                archon_shell::spawn::command(program),
+                environment.command(program),
                 BoundaryGuard::snapshot(snapshot),
             ))
         }
@@ -239,7 +252,11 @@ pub(crate) fn command(
 
 /// `program` under `sandbox-exec` with `profile`, once a probe shows this
 /// process can apply it.
-fn sandbox_exec(program: &Path, profile: String) -> Result<std::process::Command, String> {
+fn sandbox_exec(
+    program: &Path,
+    profile: String,
+    environment: &CommandEnvironment,
+) -> Result<std::process::Command, String> {
     let probe = archon_shell::spawn::command(SANDBOX_EXEC)
         .arg("-p")
         .arg(&profile)
@@ -255,7 +272,7 @@ fn sandbox_exec(program: &Path, profile: String) -> Result<std::process::Command
             String::from_utf8_lossy(&probe.stderr).trim()
         ));
     }
-    let mut command = archon_shell::spawn::command(SANDBOX_EXEC);
+    let mut command = environment.command(SANDBOX_EXEC);
     command.arg("-p").arg(profile).arg(program);
     Ok(command)
 }
@@ -277,6 +294,10 @@ pub(crate) fn verifier_writable(cwd: &Path, input: Option<&serde_json::Value>) -
     }
     writable
 }
+
+#[cfg(test)]
+#[path = "host_verifier_environment_tests.rs"]
+mod environment_tests;
 
 #[cfg(test)]
 mod tests {
@@ -324,7 +345,7 @@ mod tests {
         // no-op and the write was already refused. Returns the exit success and
         // whether the boundary reported a restored change.
         let run = |script: &str| -> (bool, bool) {
-            let (mut command, boundary) =
+            let (mut command, boundary, _) =
                 command(&shell, Some(&run_root), std::slice::from_ref(&worktree)).unwrap();
             let out = command
                 .arg("-c")

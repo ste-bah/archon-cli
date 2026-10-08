@@ -13,6 +13,10 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+#[path = "acceptance_unavailable_tests.rs"]
+mod unavailable_environment_tests;
+
 /// A fingerprint of a single target path. `None` means the path is absent.
 pub type TargetFingerprints = BTreeMap<String, Option<String>>;
 
@@ -21,6 +25,8 @@ pub type TargetFingerprints = BTreeMap<String, Option<String>>;
 pub enum AcceptanceOutcome {
     Accepted,
     Rejected(String),
+    /// Verification could not be launched or its operator environment was unavailable.
+    Unavailable(String),
 }
 
 /// Captured result for a focused stage verification command.
@@ -30,6 +36,7 @@ pub(crate) struct VerifyCommandReport {
     pub exit_code: Option<i32>,
     pub stdout: String,
     pub stderr: String,
+    pub environment_note: Option<String>,
 }
 
 impl AcceptanceOutcome {
@@ -40,7 +47,9 @@ impl AcceptanceOutcome {
     pub fn reason(&self) -> Option<&str> {
         match self {
             AcceptanceOutcome::Accepted => None,
-            AcceptanceOutcome::Rejected(reason) => Some(reason.as_str()),
+            AcceptanceOutcome::Rejected(reason) | AcceptanceOutcome::Unavailable(reason) => {
+                Some(reason.as_str())
+            }
         }
     }
 }
@@ -64,7 +73,13 @@ impl VerifyCommandReport {
             .exit_code
             .map(|code| code.to_string())
             .unwrap_or_else(|| "signal".to_string());
-        format!("verify_command exited with status {code}")
+        format!(
+            "verify_command exited with status {code}{}",
+            self.environment_note
+                .as_ref()
+                .map(|note| format!("\n{note}"))
+                .unwrap_or_default()
+        )
     }
 }
 
@@ -97,7 +112,16 @@ pub fn mutated_targets(before: &TargetFingerprints, after: &TargetFingerprints) 
 /// Run the stage verification command in `root`. Returns `Ok(())` on exit 0,
 /// otherwise an error describing the failure. `None` command always passes.
 pub fn run_verify_command(root: &Path, command: Option<&str>) -> Result<(), String> {
-    let Some(report) = run_verify_command_capture(root, command)? else {
+    run_verify_command_with_policy(root, command, None)
+}
+
+/// Execute with a policy supplied by the operator's configuration boundary.
+pub fn run_verify_command_with_policy(
+    root: &Path,
+    command: Option<&str>,
+    policy: Option<&crate::acceptance_check_environment::CheckPolicy>,
+) -> Result<(), String> {
+    let Some(report) = run_verify_command_capture(root, command, policy)? else {
         return Ok(());
     };
     if report.success() {
@@ -111,6 +135,7 @@ pub fn run_verify_command(root: &Path, command: Option<&str>) -> Result<(), Stri
 pub(crate) fn run_verify_command_capture(
     root: &Path,
     command: Option<&str>,
+    policy: Option<&crate::acceptance_check_environment::CheckPolicy>,
 ) -> Result<Option<VerifyCommandReport>, String> {
     let Some(command) = command else {
         return Ok(None);
@@ -119,17 +144,25 @@ pub(crate) fn run_verify_command_capture(
     if command.is_empty() {
         return Ok(None);
     }
-    let output = archon_shell::spawn::command(shell_program())
+    let environment = crate::acceptance_check_environment::CommandEnvironment::capture(policy)?
+        .with_remedy("Supply an operator-owned CheckPolicy (with the needed names in forwarded) to run_verify_command_with_policy or evaluate_with_policy; those APIs consume the explicit policy, not a project config file");
+    let output = environment
+        .command(shell_program())
         .arg("-c")
         .arg(command)
         .current_dir(root)
         .output()
         .map_err(|err| format!("verify_command failed to launch: {err}"))?;
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let environment_note = (!output.status.success())
+        .then(|| environment.note(&[&output.stdout, &output.stderr]))
+        .flatten();
     Ok(Some(VerifyCommandReport {
         command: command.to_string(),
         exit_code: output.status.code(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        stderr,
+        environment_note,
     }))
 }
 
@@ -192,6 +225,18 @@ pub fn evaluate(
     after: &TargetFingerprints,
     verify_command: Option<&str>,
 ) -> AcceptanceOutcome {
+    evaluate_with_policy(root, targets, _before, after, verify_command, None)
+}
+
+/// Stage acceptance with explicit operator check policy.
+pub fn evaluate_with_policy(
+    root: &Path,
+    targets: &[String],
+    _before: &TargetFingerprints,
+    after: &TargetFingerprints,
+    verify_command: Option<&str>,
+    policy: Option<&crate::acceptance_check_environment::CheckPolicy>,
+) -> AcceptanceOutcome {
     if targets.is_empty() {
         return AcceptanceOutcome::Rejected(
             "implementation stage declared no expected_target_files".to_string(),
@@ -204,9 +249,12 @@ pub fn evaluate(
             missing.join(", ")
         ));
     }
-    match run_verify_command(root, verify_command) {
-        Ok(()) => AcceptanceOutcome::Accepted,
-        Err(reason) => AcceptanceOutcome::Rejected(reason),
+    match run_verify_command_capture(root, verify_command, policy) {
+        Err(reason) => AcceptanceOutcome::Unavailable(reason),
+        Ok(Some(report)) if !report.success() => {
+            AcceptanceOutcome::Rejected(report.failure_reason())
+        }
+        Ok(_) => AcceptanceOutcome::Accepted,
     }
 }
 

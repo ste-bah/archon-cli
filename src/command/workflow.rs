@@ -113,7 +113,10 @@ impl CommandHandler for WorkflowHandler {
                     ),
                 ),
                 ctx.config_path.clone(),
-            );
+                ctx.workflow_config
+                    .clone()
+                    .ok_or_else(|| anyhow!("workflow requires resolved operator configuration"))?,
+            )?;
             ctx.emit(TuiEvent::SlashCommandComplete);
             return Ok(());
         }

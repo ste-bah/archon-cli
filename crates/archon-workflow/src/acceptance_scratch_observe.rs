@@ -340,6 +340,7 @@ fn operational(id: &str, error: String) -> CheckResult {
         stdout: vec![],
         stderr: vec![],
         operational_error: Some(error),
+        environment_note: None,
     }
 }
 fn normalized(
@@ -415,6 +416,7 @@ pub async fn execute_check_at(
                         stdout: vec![],
                         stderr: findings.join("; ").into_bytes(),
                         operational_error: None,
+                        environment_note: None,
                     });
                 }
                 crate::DeclarativeFloorEvaluation::Deferred { .. } => {

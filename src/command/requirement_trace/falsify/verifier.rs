@@ -109,6 +109,7 @@ pub(super) enum Ran {
         code: Option<i32>,
         success: bool,
         output: String,
+        note: Option<String>,
     },
     /// Killed at the deadline. Not a failure — an absence of an answer.
     TimedOut {
@@ -123,8 +124,34 @@ pub(super) enum Ran {
 /// promptly, long enough that polling costs nothing next to a compile.
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
+#[cfg(test)]
 pub(super) fn run(cwd: &Path, argv: &[String], timeout: Duration) -> Ran {
-    let spawned = archon_shell::spawn::command(&argv[0])
+    run_with_policy(cwd, argv, timeout, None)
+}
+
+#[cfg(test)]
+pub(super) fn run_with_policy(
+    cwd: &Path,
+    argv: &[String],
+    timeout: Duration,
+    policy: Option<&archon_workflow::acceptance_check_environment::CheckPolicy>,
+) -> Ran {
+    let environment =
+        match archon_workflow::acceptance_check_environment::CommandEnvironment::capture(policy) {
+            Ok(environment) => environment.with_remedy("Name the needed variables in [workflow.acceptance_execution] environment_allowlist in the operator configuration consumed by requirements trace, then retry --falsify"),
+            Err(reason) => return Ran::NotLaunchable { reason },
+        };
+    run_in_environment(cwd, argv, timeout, &environment)
+}
+
+pub(super) fn run_in_environment(
+    cwd: &Path,
+    argv: &[String],
+    timeout: Duration,
+    environment: &archon_workflow::acceptance_check_environment::CommandEnvironment,
+) -> Ran {
+    let spawned = environment
+        .command(&argv[0])
         .args(&argv[1..])
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -165,8 +192,15 @@ pub(super) fn run(cwd: &Path, argv: &[String], timeout: Duration) -> Ran {
         std::thread::sleep(POLL_INTERVAL);
     };
 
-    let mut output = out_reader.join().unwrap_or_default();
-    output.push_str(&err_reader.join().unwrap_or_default());
+    let stdout = out_reader.join().unwrap_or_default();
+    let stderr = err_reader.join().unwrap_or_default();
+
+    let note = status
+        .as_ref()
+        .filter(|status| !status.success())
+        .and_then(|_| environment.note(&[stdout.as_bytes(), stderr.as_bytes()]));
+    let mut output = stdout;
+    output.push_str(&stderr);
 
     match status {
         None => Ran::TimedOut {
@@ -176,6 +210,7 @@ pub(super) fn run(cwd: &Path, argv: &[String], timeout: Duration) -> Ran {
             code: status.code(),
             success: status.success(),
             output,
+            note,
         },
     }
 }
@@ -191,3 +226,7 @@ fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> String {
     let _ = pipe.read_to_end(&mut raw);
     String::from_utf8_lossy(&raw).into_owned()
 }
+
+#[cfg(test)]
+#[path = "verifier_environment_tests.rs"]
+mod environment_tests;

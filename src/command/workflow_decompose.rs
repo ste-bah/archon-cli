@@ -154,7 +154,9 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         config.api.base_url.as_deref(),
         super::workflow_provider_route::ProviderEndpointPolicy::ConfiguredOnly,
     );
-    let launch_digest = fixed_launch_digest(&state.identity, &arguments, &catalog, &route)?;
+    let check_policy = super::acceptance_check_policy::from_config(config)?;
+    let launch_digest =
+        fixed_launch_digest(&state.identity, &arguments, &catalog, &route, &check_policy)?;
     let calls =
         archon_workflow::v2::script::dry_run_workflow_plan(FIXED_SCRIPT_SOURCE, Some(&arguments))
             .await?;
@@ -180,12 +182,13 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         permissions: Default::default(),
         learning_hooks: Vec::new(),
     };
-    let plan = super::workflow_live::workflow_live_planner::WorkflowScriptPlan::fixed(
+    let mut plan = super::workflow_live::workflow_live_planner::WorkflowScriptPlan::fixed(
         spec,
         FIXED_SCRIPT_SOURCE,
         calls,
         arguments.clone(),
     );
+    plan.check_policy = Some(check_policy);
 
     let store = WorkflowStore::project(&project_root);
     let mut approval_spec = plan.approval_metadata_spec();
@@ -392,8 +395,9 @@ pub(crate) fn fixed_launch_digest(
     arguments: &serde_json::Value,
     catalog: &archon_workflow::CommandCapabilityCatalog,
     route: &super::workflow_provider_route::TrustedProviderRouteSnapshot,
+    check_policy: &Option<archon_workflow::acceptance_check_environment::CheckPolicy>,
 ) -> Result<String> {
-    let bytes = serde_json::to_vec(&(identity, arguments, catalog, route))?;
+    let bytes = serde_json::to_vec(&(identity, arguments, catalog, route, check_policy))?;
     Ok(archon_workflow::task_set_contract::content_digest(&bytes))
 }
 

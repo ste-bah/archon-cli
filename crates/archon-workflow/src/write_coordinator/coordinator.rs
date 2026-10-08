@@ -10,7 +10,7 @@ use std::path::Path;
 
 pub use super::WriteBoundaryProbe;
 use super::conflict_graph::{WaveCaps, build_schedule};
-use super::patch_apply::{ApplyRecord, VerifyResult, apply_wave, run_wave_verify, with_repo_lock};
+use super::patch_apply::{ApplyError, ApplyRecord, VerifyResult};
 use super::patch_manifest::{ManifestStatus, PatchManifest, persist_manifest, validate_patch};
 use super::shared_append::{
     resolve_shared_append_targets, resource_keys_for_targets_with_shared_append,
@@ -33,12 +33,14 @@ use crate::spec::StageSpec;
 use crate::store::WorkflowStore;
 use crate::work_unit_coverage;
 
+mod apply_verify;
 mod errors;
 mod resume;
 mod run_agents;
 mod target_adoption;
 mod validation_failure;
 mod wave_failure;
+use apply_verify::apply_and_verify;
 pub use errors::FanoutError;
 use resume::filter_resumable_items;
 
@@ -267,21 +269,36 @@ async fn process_wave<'a>(
                 return Ok(false);
             }
         };
-    let (apply_record, verify) =
-        match apply_and_verify(ctx, canonical, wave, &manifests, &pre_by_item) {
-            Ok(result) => result,
-            Err(err) => {
-                wave_failure::finalize_failed_wave(
-                    canonical,
-                    cfg,
-                    wave,
-                    &err.to_string(),
-                    &items,
-                    outcome,
-                );
+    let (apply_record, verify) = match apply_and_verify(
+        ctx,
+        canonical,
+        wave.wave_id,
+        &manifests,
+        &pre_by_item,
+    ) {
+        Ok(result) => result,
+        Err(err) => {
+            if let FanoutError::Apply(ApplyError::VerifyEnvironment(reason)) = &err {
+                crate::LifecycleController::new(ctx.store.clone())
+                        .apply(&ctx.run.id, crate::LifecycleAction::Pause)
+                        .map_err(|pause| {
+                            FanoutError::Workflow(format!(
+                                "verify environment unavailable ({reason}); workflow pause failed: {pause}"
+                            ))
+                        })?;
                 return Ok(false);
             }
-        };
+            wave_failure::finalize_failed_wave(
+                canonical,
+                cfg,
+                wave,
+                &err.to_string(),
+                &items,
+                outcome,
+            );
+            return Ok(false);
+        }
+    };
     for manifest in manifests.iter().filter(|m| {
         matches!(
             m.status,
@@ -428,35 +445,6 @@ fn load_manifest(json_path: &Path) -> Result<PatchManifest, FanoutError> {
     let text = std::fs::read_to_string(json_path)
         .map_err(|e| FanoutError::Workflow(format!("read manifest: {e}")))?;
     serde_json::from_str(&text).map_err(|e| FanoutError::Workflow(format!("parse manifest: {e}")))
-}
-
-fn apply_and_verify(
-    ctx: &FanoutCtx<'_>,
-    canonical: &Path,
-    wave: &super::conflict_graph::Wave,
-    manifests: &[PatchManifest],
-    pre_by_item: &BTreeMap<ItemId, BTreeMap<String, String>>,
-) -> Result<(ApplyRecord, VerifyResult), FanoutError> {
-    with_repo_lock(canonical, || {
-        let apply_record = apply_wave(
-            canonical,
-            manifests,
-            pre_by_item,
-            wave.wave_id,
-            &ctx.run_root,
-            &ctx.run.id,
-            &ctx.stage.id,
-        )?;
-        let verify = run_wave_verify(
-            canonical,
-            ctx.stage.verify_command.as_deref(),
-            wave.wave_id,
-            &ctx.run_root,
-            &ctx.stage.id,
-        )?;
-        Ok((apply_record, verify))
-    })
-    .map_err(FanoutError::Apply)
 }
 
 fn record_applied(apply_record: &ApplyRecord, outcome: &mut CoordinatedOutcome) {

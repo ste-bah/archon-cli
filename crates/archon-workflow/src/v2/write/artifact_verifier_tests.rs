@@ -4,6 +4,45 @@ use super::*;
 use crate::write_coordinator::project_inputs::write_test_policy;
 
 #[cfg(unix)]
+#[test]
+fn artifact_environment_keeps_path_without_loading_login_secrets() {
+    const CASE: &str = "artifact_environment_keeps_path_without_loading_login_secrets";
+    if std::env::var("ISSUE_349_CASE").as_deref() == Ok(CASE) {
+        let home = std::env::var("HOME").unwrap();
+        let result = run_supervised(
+            "test -z \"${OPERATOR_SECRET-}${PROFILE_SECRET-}\" && test \"$PATH\" = /usr/bin:/bin",
+            Path::new(&home),
+            Duration::from_secs(5),
+            None,
+            None,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join(".profile"),
+        "export PROFILE_SECRET=private\n",
+    )
+    .unwrap();
+    let output = archon_shell::spawn::command(std::env::current_exe().unwrap())
+        .args([CASE, "--nocapture"])
+        .env_clear()
+        .env("ISSUE_349_CASE", CASE)
+        .env("HOME", root.path())
+        .env("PATH", "/usr/bin:/bin")
+        .env("OPERATOR_SECRET", "hidden")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(unix)]
 fn child_alive(pidfile: &Path) -> bool {
     crate::v2::write::test_baseline_run::child_alive_for_tests(pidfile)
 }

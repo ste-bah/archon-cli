@@ -130,6 +130,7 @@ pub(crate) fn sh(dir: &Path, script: &str) -> CheckResult {
         stdout: out.stdout,
         stderr: out.stderr,
         operational_error: None,
+        environment_note: None,
     }
 }
 

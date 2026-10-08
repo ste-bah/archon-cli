@@ -1,13 +1,12 @@
 use super::*;
-// `Mutex` guards only the `cfg(unix)` env-mutating tests. See #136.
 use std::sync::Arc;
-#[cfg(unix)]
-use std::sync::Mutex;
 
 use crate::command::dispatcher::Dispatcher;
 use crate::command::registry::{CommandContext, RegistryBuilder};
 
-/// Process-wide lock so tests that mutate `HOME` do not race. The
+/// Process-wide lock so tests that mutate `HOME` do not race. It is the
+/// command tests' shared `USER_DATA_ENV_LOCK`, so login and logout tests
+/// serialise with each other and with the other command tests that take it. The
 /// env_guard crate does not serialise arbitrary env vars across
 /// threads, and setting `HOME` is inherently process-global.
 /// `Mutex<()>` suffices — poisoning is tolerated (tests inside
@@ -15,7 +14,7 @@ use crate::command::registry::{CommandContext, RegistryBuilder};
 /// AGS-815 / B20 env-mutation serialisation pattern.
 // Used only by `cfg(unix)` tests in this module. See #136.
 #[cfg(unix)]
-static ENV_LOCK: Mutex<()> = Mutex::new(());
+use crate::command::USER_DATA_ENV_LOCK as ENV_LOCK;
 
 /// RAII guard that overrides an env var for the lifetime of a
 /// single test body and restores the prior value on drop.

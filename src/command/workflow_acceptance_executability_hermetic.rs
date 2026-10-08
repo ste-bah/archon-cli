@@ -314,6 +314,7 @@ fn deferred(id: &str) -> CheckResult {
         stdout: Vec::new(),
         stderr: Vec::new(),
         operational_error: Some(CHECK_DEFERRED.to_string()),
+        environment_note: None,
     }
 }
 

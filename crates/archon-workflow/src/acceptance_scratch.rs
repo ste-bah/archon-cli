@@ -99,11 +99,6 @@ impl ScratchPolicy {
         if self.timeout_secs == 0 || self.output_bytes == 0 || self.scratch_bytes == 0 {
             return Err(invalid("scratch limits must be positive"));
         }
-        if std::env::split_paths(&self.toolchain_path)
-            .any(|p| p.as_os_str().is_empty() || !p.is_absolute())
-        {
-            return Err(invalid("toolchain PATH must contain absolute directories"));
-        }
         for input in self
             .project_inputs
             .iter()
@@ -115,26 +110,12 @@ impl ScratchPolicy {
                 ));
             }
         }
-        // Issue 282: an allowlisted value only carries data. Names a loader,
-        // toolchain, interpreter, shell or git reads to change what runs (and
-        // the host's own execution bindings) are refused, case-insensitively.
-        for key in &self.environment_allowlist {
-            archon_shell::data_environment::check_data_variable(key)
-                .map_err(|reason| invalid(format!("acceptance environment allowlist: {reason}")))?;
-        }
-        for (key, value) in &self.environment {
-            // Only runtime-neutral, nonsecret knobs. Expand by reviewed host policy,
-            // not by accepting arbitrary names with a denylist of known secrets.
-            if !matches!(
-                key.as_str(),
-                "LANG" | "LC_ALL" | "TZ" | "RUSTUP_HOME" | "RUSTUP_TOOLCHAIN"
-            ) || value.contains('\0')
-            {
-                return Err(invalid(format!(
-                    "environment key '{key}' is not a permitted nonsecret scratch binding"
-                )));
-            }
-        }
+        crate::acceptance_check_environment::validate_operator_bindings(
+            &self.toolchain_path,
+            &self.environment,
+            &self.environment_allowlist,
+        )
+        .map_err(invalid)?;
         Ok(())
     }
 }

@@ -134,71 +134,6 @@ fn a_host_without_path_is_an_error_naming_path() {
     assert!(error.contains("no PATH"), "{error}");
 }
 
-/// A failure is no verdict only when its output says a withheld variable
-/// the allowlist can forward is missing; a bare mention (Rust's backtrace
-/// hint), a name the allowlist refuses, or a look-alike name is a verdict.
-#[test]
-fn only_a_forwardable_variable_said_missing_makes_a_failure_no_verdict() {
-    let withheld: BTreeSet<String> = ["MY_SERVICE_TOKEN", "RUST_BACKTRACE", "MY_PAT", "PYTHONPATH"]
-        .into_iter()
-        .map(String::from)
-        .collect();
-    for said in [
-        "sh: 1: MY_SERVICE_TOKEN: parameter not set",
-        "bash: line 1: MY_SERVICE_TOKEN: unbound variable",
-        "Error: MY_SERVICE_TOKEN is not set",
-        "KeyError: 'MY_SERVICE_TOKEN'",
-        "missing environment variable MY_SERVICE_TOKEN",
-        "thread 'main' panicked: MY_SERVICE_TOKEN must be set: NotPresent",
-        // Library messages as they are printed (the review's table).
-        "MY_SERVICE_TOKEN environment variable is not set",
-        "django.core.exceptions.ImproperlyConfigured: Set the MY_SERVICE_TOKEN environment variable",
-        "openai.OpenAIError: The api_key client option must be set either by passing api_key to the client or by setting the MY_SERVICE_TOKEN environment variable",
-        "decouple.UndefinedValueError: MY_SERVICE_TOKEN not found. Declare it as envvar or define a default value.",
-        "❌ Invalid environment variables: { MY_SERVICE_TOKEN: [ 'Required' ] }",
-        "pydantic_core._pydantic_core.ValidationError: 1 validation error for Settings\nMY_SERVICE_TOKEN\n  Field required [type=missing, input_value={}, input_type=dict]",
-        "Please export MY_SERVICE_TOKEN and retry",
-        "MY_SERVICE_TOKEN is empty",
-    ] {
-        let error = withheld_error(&[said.as_bytes()], &withheld).expect(said);
-        assert!(
-            error.contains("MY_SERVICE_TOKEN")
-                && error.contains("environment_allowlist")
-                && error.contains("moves its checks to the scratch site")
-                && error.contains("unset MY_SERVICE_TOKEN")
-        );
-        assert!(
-            !error.contains("MY_PAT") && !error.contains("PYTHONPATH"),
-            "{error}"
-        );
-    }
-    for verdict in [
-        "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
-        "RUST_BACKTRACE is not set",
-        "MY_PAT is not set",
-        "PYTHONPATH is not set",
-        "MY_SERVICE_TOKENS is not set",
-        "uses MY_SERVICE_TOKEN; assertion failed",
-        "note: MY_SERVICE_TOKEN=abc was used\nassertion failed: left == right",
-        // Loose matches the review found (round 3).
-        "INFO loaded MY_SERVICE_TOKEN (len 40); 1 failed: user not found",
-        "MY_SERVICE_TOKEN=abc GET /x 404 Not Found",
-        "expected 'MY_SERVICE_TOKEN is required' in stderr",
-        "using MY_SERVICE_TOKEN from .env\n  required: true",
-        "Set the MY_PAT environment variable",
-        "PYTHONPATH not found",
-        // No name in the text: undetectable, so a verdict (see `says_missing`).
-        "thread 'main' panicked: called `Result::unwrap()` on an `Err` value: NotPresent",
-        "exit 1",
-    ] {
-        assert_eq!(
-            withheld_error(&[verdict.as_bytes()], &withheld),
-            None,
-            "{verdict}"
-        );
-    }
-}
-
 /// The non-secret locators reach a check at a site with no policy; a proxy
 /// address carrying credentials does not, and neither does any
 /// credential-shaped name.
@@ -249,19 +184,6 @@ fn locators_and_credential_free_proxies_are_bound_and_nothing_credential_shaped(
     ] {
         assert!(credential_shaped(name), "{name}");
     }
-}
-
-/// Windows: a withheld name is matched ignoring case, as `withheld` and the
-/// lookup ignore it there.
-#[cfg(windows)]
-#[test]
-fn windows_withheld_names_match_ignoring_case() {
-    let host = host(&[("Path", r"C:\Windows"), ("My_Service_Token", "t")]);
-    let environment = check_environment(&host, &CheckPolicy::default_for(&host), &[]).unwrap();
-    let withheld = withheld(&host, &environment);
-    assert!(withheld.contains("My_Service_Token"));
-    let error = withheld_error(&[b"MY_SERVICE_TOKEN is not set"], &withheld).expect("matched");
-    assert!(error.contains("My_Service_Token"), "{error}");
 }
 
 /// The site's own directories are never displaced by the policy.
@@ -337,4 +259,131 @@ fn windows_profile_variables_point_at_the_site_home() {
     }
     assert_eq!(bindings["HOMEDRIVE"], PathBuf::from("D:"));
     assert_eq!(bindings["HOMEPATH"], PathBuf::from(r"\scratch\home"));
+}
+
+#[path = "acceptance_check_environment_r3_tests.rs"]
+mod round_three;
+#[path = "acceptance_check_environment_shell_names_tests.rs"]
+mod shell_names;
+
+/// Round 5 rule: a withheld name is noted only where it appears as a whole
+/// identifier (case-sensitive, no prose parsing); values are never shown.
+#[test]
+fn r5_notes_are_case_sensitive_identifier_matches_without_parsing() {
+    let env = CommandEnvironment::from_host(
+        &host(&[
+            ("PATH", "/bin"),
+            ("FIXTURE_API_KEY", "hidden-data"),
+            ("BASH_ENV", "hidden-script"),
+        ]),
+        None,
+    )
+    .unwrap();
+    for text in [
+        "E AssertionError: expected FIXTURE_API_KEY environment variable is not set in stderr",
+        "FIXTURE_API_KEY environment variable is not set",
+        r#"{"failures":["FIXTURE_API_KEY"]}"#,
+    ] {
+        let note = env.note(&[text.as_bytes()]).expect(text);
+        assert!(note.contains("FIXTURE_API_KEY"), "{note}");
+        assert!(
+            !note.contains("hidden-data") && !note.contains("BASH_ENV"),
+            "{note}"
+        );
+    }
+    let note = env
+        .note(&[b"prefixFIXTURE_API_KEYsuffix BASH_ENV"])
+        .expect("whole identifier BASH_ENV is noted");
+    assert!(
+        note.contains("BASH_ENV") && !note.contains("hidden-script"),
+        "{note}"
+    );
+    assert!(
+        !note.contains("FIXTURE_API_KEY"),
+        "embedded name noted: {note}"
+    );
+    for text in [
+        "prefixFIXTURE_API_KEYsuffix",
+        "MY_FIXTURE_API_KEY_2",
+        "fixture_api_key is missing",
+        "Fixture_Api_Key is missing",
+    ] {
+        assert!(env.note(&[text.as_bytes()]).is_none(), "{text}");
+    }
+}
+
+#[cfg(unix)]
+fn non_unicode_note_case(case: &str, text: &str) {
+    use std::os::unix::ffi::OsStringExt;
+    if std::env::var("ISSUE_349_CASE").as_deref() != Ok(case) {
+        let home = tempfile::tempdir().unwrap();
+        let output = archon_shell::spawn::command(std::env::current_exe().unwrap())
+            .args([case, "--nocapture"])
+            .env_clear()
+            .env("ISSUE_349_CASE", case)
+            .env("HOME", home.path())
+            .env("PATH", std::env::var_os("PATH").unwrap())
+            .env("CARGO_BUILD_JOBS", "2")
+            .env("RUST_TEST_THREADS", "4")
+            .env(
+                "FIXTURE_API_KEY",
+                std::ffi::OsString::from_vec(vec![0xff, 0xfe]),
+            )
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let environment = CommandEnvironment::capture(None).unwrap();
+    let output = environment
+        .command("/bin/sh")
+        .args([
+            "-c",
+            "test -z \"${FIXTURE_API_KEY-}\" || exit 4; printf '%s' \"$1\"; exit 3",
+            "fixture",
+            text,
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    let note = environment
+        .note(&[&output.stdout, &output.stderr])
+        .expect("withheld name survives non-Unicode value");
+    assert!(note.contains("FIXTURE_API_KEY") && !note.contains('\u{fffd}'));
+    assert!(environment.note(&[b"fixture_api_key"]).is_none());
+    assert!(
+        environment
+            .note(&[b"prefixFIXTURE_API_KEYsuffix"])
+            .is_none()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn r4_non_unicode_pytest_note() {
+    non_unicode_note_case(
+        "r4_non_unicode_pytest_note",
+        "E AssertionError: expected FIXTURE_API_KEY environment variable is not set in stderr",
+    );
+}
+#[cfg(unix)]
+#[test]
+fn r4_non_unicode_json_note() {
+    non_unicode_note_case(
+        "r4_non_unicode_json_note",
+        r#"{"status":"failed","failures":["FIXTURE_API_KEY environment variable is not set"]}"#,
+    );
+}
+#[cfg(unix)]
+#[test]
+fn r5_non_unicode_punctuated_identifier_note() {
+    non_unicode_note_case(
+        "r5_non_unicode_punctuated_identifier_note",
+        "prefix-FIXTURE_API_KEY-suffix",
+    );
 }

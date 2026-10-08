@@ -20,6 +20,9 @@ pub struct CheckResult {
     pub quota_walk_count: u64,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
+    /// Diagnostic about names withheld from the check, kept out of raw output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_note: Option<String>,
     pub operational_error: Option<String>,
     /// Classification of raw output, never recomputed from redacted evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -380,6 +383,7 @@ pub async fn run_at(
         stdout: pipes.0.0,
         stderr: pipes.1.0,
         operational_error: error,
+        environment_note: None,
     };
     result.classify_raw(&String::from_utf8_lossy(command.bytes()));
     result.stdout = site.redact(&result.stdout, pipes.0.1);

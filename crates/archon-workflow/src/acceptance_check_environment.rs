@@ -32,16 +32,21 @@
 //! else: an operator variable a check needs is named in
 //! `environment_allowlist`, and never reaches a check by default.
 //!
-//! Before Issue 345 a site with no section gave a check every host variable
-//! but Archon's own keys. A check that read one of them now fails; when that
-//! variable could be forwarded and the check's output says it is missing or
-//! unset, the failure is no verdict but an operational error naming it
-//! ([`withheld_error`]).
+//! Output never changes a verifier's real verdict. On failure, a separate
+//! [`withheld_note`] lists withheld names occurring as case-sensitive substrings
+//! anywhere in stdout/stderr, so the agent can ask the operator to allowlist
+//! needed data. This is a diagnostic, never evidence of the failure's cause.
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::path::Path;
 
 use crate::acceptance_scratch::ScratchPolicy;
+
+#[cfg(test)]
+#[path = "acceptance_check_environment_note_tests.rs"]
+mod note_channel_tests;
 
 /// Host variables every site keeps, when the host has them: what a process
 /// needs to start on this platform. None outside Windows.
@@ -195,11 +200,9 @@ pub fn profile_bindings(home: &Path) -> Vec<(&'static str, std::path::PathBuf)> 
     bindings
 }
 
-/// Variables a shell sets for itself: never withheld, whatever the host has.
-const SHELL_OWN: &[&str] = &["PWD", "OLDPWD", "SHLVL", "_"];
-
 /// What a site's policy gives a check.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CheckPolicy {
     /// `PATH`; `None` only when the host itself has no PATH (default policy).
     pub toolchain_path: Option<String>,
@@ -216,6 +219,33 @@ impl CheckPolicy {
             toolchain_path: Some(policy.toolchain_path.clone()),
             bound: policy.environment.clone(),
             forwarded: policy.environment_allowlist.clone(),
+        }
+    }
+
+    /// Approved dispatch locators supersede config/host locators for this lease.
+    /// Unknown variables remain withheld; a dispatch overlay cannot forward data.
+    pub fn bind_dispatch(&mut self, overrides: &[(String, String)]) {
+        for (name, value) in overrides {
+            let approved = DEFAULT_BOUND
+                .iter()
+                .copied()
+                .chain(archon_tools::build_cache_env::toolchain_cache_env_keys())
+                .any(|key| {
+                    if cfg!(windows) {
+                        key.eq_ignore_ascii_case(name)
+                    } else {
+                        key == name
+                    }
+                });
+            if name == "PATH" || (cfg!(windows) && name.eq_ignore_ascii_case("PATH")) {
+                self.toolchain_path = Some(value.clone());
+            } else if approved && !credential_shaped(name) {
+                while let Some((previous, _)) = lookup(&self.bound, name) {
+                    let previous = previous.clone();
+                    self.bound.remove(&previous);
+                }
+                self.bound.insert(name.clone(), value.clone());
+            }
         }
     }
 
@@ -263,7 +293,14 @@ pub(crate) fn lookup<'a>(
 /// The host's environment, as a map: every variable whose name and value are
 /// Unicode (a check's environment is built from it, never handed it whole).
 pub fn host_environment() -> BTreeMap<String, String> {
-    std::env::vars_os()
+    unicode_environment(std::env::vars_os())
+}
+
+fn unicode_environment(
+    variables: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> BTreeMap<String, String> {
+    variables
+        .into_iter()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
         .collect()
 }
@@ -336,9 +373,116 @@ pub fn check_environment(
     Ok(environment)
 }
 
+/// The policy-selected check environment for an agent-authored host verifier.
+/// Uses the same builder as direct/scratch acceptance, with the host HOME.
+/// Environment construction must succeed before a command can be built.
+pub struct CommandEnvironment {
+    variables: BTreeMap<String, String>,
+    withheld: BTreeSet<String>,
+    remedy: &'static str,
+}
+
+impl CommandEnvironment {
+    pub fn capture(policy: Option<&CheckPolicy>) -> Result<Self, String> {
+        Self::capture_with_dispatch(policy, &[])
+    }
+
+    /// Capture the OS environment once and apply approved dispatch locators.
+    pub fn capture_with_dispatch(
+        policy: Option<&CheckPolicy>,
+        dispatch: &[(String, String)],
+    ) -> Result<Self, String> {
+        // One OS snapshot for bindings and withheld names. A non-Unicode
+        // value cannot be forwarded, but its Unicode name still needs a note.
+        let host: Vec<_> = std::env::vars_os().collect();
+        let names: BTreeSet<String> = host
+            .iter()
+            .filter_map(|(name, _)| name.to_str().map(str::to_owned))
+            .collect();
+        let unicode = unicode_environment(host);
+        let mut effective = policy
+            .cloned()
+            .unwrap_or_else(|| CheckPolicy::default_for(&unicode));
+        effective.bind_dispatch(dispatch);
+        let mut environment = Self::from_host(&unicode, Some(&effective))?;
+        let withheld =
+            withheld::withheld_names(names.iter().map(String::as_str), &environment.variables);
+        environment.withheld.extend(withheld);
+        Ok(environment)
+    }
+
+    /// The policy is operator-owned, never taken from verifier/task text.
+    /// `None` means the operator configured no policy.
+    pub fn from_host(
+        host: &BTreeMap<String, String>,
+        policy: Option<&CheckPolicy>,
+    ) -> Result<Self, String> {
+        let site: Vec<(&str, &Path)> = lookup(host, "HOME")
+            .map(|(_, home)| ("HOME", Path::new(home)))
+            .into_iter()
+            .collect();
+        // Host verifiers share the leased machine toolchains. A data allowlist
+        // must not select a cold cache. Start with the builder's approved host
+        // bindings, then apply explicit operator/dispatch bindings. Scratch
+        // environments still use their own site bindings and directory homes.
+        let mut effective = CheckPolicy::default_for(host);
+        if let Some(policy) = policy {
+            effective.toolchain_path = policy.toolchain_path.clone();
+            for (name, value) in &policy.bound {
+                while let Some((previous, _)) = lookup(&effective.bound, name) {
+                    let previous = previous.clone();
+                    effective.bound.remove(&previous);
+                }
+                effective.bound.insert(name.clone(), value.clone());
+            }
+            effective.forwarded = policy.forwarded.clone();
+        }
+        let variables = check_environment(host, &effective, &site)
+            .map_err(|reason| format!("check command environment could not be built: {reason}"))?;
+        Ok(Self {
+            withheld: withheld(host, &variables),
+            remedy: "Supply the needed names in the operator-owned CheckPolicy.forwarded passed to this verifier",
+            variables,
+        })
+    }
+
+    /// Describe the actual operator policy source this runner consumes.
+    pub fn with_remedy(mut self, remedy: &'static str) -> Self {
+        self.remedy = remedy;
+        self
+    }
+
+    /// Every child still passes through the process-wide spawn boundary.
+    pub fn command(&self, program: impl AsRef<OsStr>) -> std::process::Command {
+        let mut command = archon_shell::spawn::command(program);
+        command.env_clear().envs(&self.variables);
+        command
+    }
+
+    pub fn tokio_command(&self, program: impl AsRef<OsStr>) -> tokio::process::Command {
+        tokio::process::Command::from(self.command(program))
+    }
+
+    /// Call only for a failed verifier. Persist this separate diagnostic with
+    /// the result; stdout/stderr must never change the verdict (Issue 349).
+    pub fn note(&self, outputs: &[&[u8]]) -> Option<String> {
+        let note = withheld::withheld_note_with_remedy(outputs, &self.withheld, self.remedy);
+        if let Some(note) = &note {
+            tracing::warn!(target: "archon_workflow::check_environment", "{note}");
+        }
+        note
+    }
+}
+
+#[path = "acceptance_check_environment_policy.rs"]
+mod policy;
+pub use policy::{
+    NO_RUN_POLICY_REMEDY, RUN_POLICY_REMEDY, policy_for_run, validate_operator_bindings,
+};
+
 #[path = "acceptance_check_environment_withheld.rs"]
 mod withheld;
-pub use withheld::{withheld, withheld_error};
+pub use withheld::{withheld, withheld_note};
 
 #[cfg(test)]
 #[path = "acceptance_check_environment_tests.rs"]

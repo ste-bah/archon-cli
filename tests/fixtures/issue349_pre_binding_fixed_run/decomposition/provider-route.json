@@ -1,0 +1,5 @@
+{
+  "origin": "trusted_config",
+  "endpoint": "http://127.0.0.1:1234/v1/messages",
+  "endpoint_digest": "90a8c2697bba93565b9562e3984878011fd7c49f66f06a0558893ebafaf988be"
+}

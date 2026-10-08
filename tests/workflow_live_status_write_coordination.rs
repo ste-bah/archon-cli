@@ -49,6 +49,7 @@ fn workflow_live_status_write_coordination_renders() {
             command: None,
             stdout_tail: String::new(),
             stderr_tail: String::new(),
+            environment_note: None,
             duration_ms: 1,
         }),
         project_input_refusals: vec![],

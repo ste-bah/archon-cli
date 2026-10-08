@@ -1,8 +1,8 @@
 //! Running one declared focused test command in a branch worktree, bounded.
 //!
 //! The command is the task's own declared string, fed to the POSIX shell
-//! with the worktree as its working directory, the host process environment
-//! plus whatever the dispatch port adds for a host-run command (the leased
+//! with the worktree as its working directory, the operator check environment
+//! plus filtered toolchain/cache locators from the dispatch port (the leased
 //! build cache, so the run builds where the coder's will and never inside
 //! the worktree or the shared tree). Timeout and output are bounded, the
 //! whole process group is killed on timeout so a runner's children do not
@@ -30,6 +30,8 @@ pub(crate) struct CommandRun {
     pub(crate) duration_ms: u64,
     /// stdout then stderr, each bounded by [`MAX_STREAM_BYTES`].
     pub(crate) output: String,
+    /// Withheld-name diagnostic kept out of test-harness output.
+    pub(crate) note: Option<String>,
     /// Why there is no verdict: spawn failure, or the timeout that ended it.
     pub(crate) error: Option<String>,
 }
@@ -43,6 +45,20 @@ pub(crate) async fn run_in_worktree(
     command: &str,
     run_root: Option<&Path>,
 ) -> CommandRun {
+    let policy = match crate::acceptance_check_environment::policy_for_run(run_root) {
+        Ok(policy) => policy,
+        Err(error) => {
+            return CommandRun {
+                error: Some(error),
+                ..CommandRun::default()
+            };
+        }
+    };
+    let remedy = if run_root.is_some() {
+        crate::acceptance_check_environment::RUN_POLICY_REMEDY
+    } else {
+        crate::acceptance_check_environment::NO_RUN_POLICY_REMEDY
+    };
     let label = format!(
         "host-run test command `{command}` in {}",
         worktree.display()
@@ -50,7 +66,7 @@ pub(crate) async fn run_in_worktree(
     let (mut run, violation) = crate::write_coordinator::input_tripwire::watch(
         run_root,
         &label,
-        run_unwatched(dispatch, worktree, command),
+        run_unwatched(dispatch, worktree, command, policy.as_ref(), remedy),
     )
     .await;
     if let Some(violation) = violation {
@@ -64,15 +80,29 @@ async fn run_unwatched(
     dispatch: &dyn WorkflowAgentDispatch,
     worktree: &Path,
     command: &str,
+    policy: Option<&crate::acceptance_check_environment::CheckPolicy>,
+    remedy: &'static str,
 ) -> CommandRun {
     let started = Instant::now();
     let env = dispatch.host_command_env(worktree).await;
-    let mut process = archon_shell::spawn::tokio_command(archon_shell::resolve_posix_shell());
+    let environment =
+        match crate::acceptance_check_environment::CommandEnvironment::capture_with_dispatch(
+            policy, &env.vars,
+        ) {
+            Ok(environment) => environment.with_remedy(remedy),
+            Err(error) => {
+                return CommandRun {
+                    error: Some(error),
+                    duration_ms: elapsed_ms(started),
+                    ..CommandRun::default()
+                };
+            }
+        };
+    let mut process = environment.tokio_command(archon_shell::resolve_posix_shell());
     process
         .arg("-c")
         .arg(command)
         .current_dir(worktree)
-        .envs(env.vars.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -108,6 +138,11 @@ async fn run_unwatched(
     drop(group);
     let out = stdout.await.ok().flatten().unwrap_or_default();
     let err = stderr.await.ok().flatten().unwrap_or_default();
+    let note = if !timed_out && status.as_ref().is_ok_and(|status| !status.success()) {
+        environment.note(&[out.as_bytes(), err.as_bytes()])
+    } else {
+        None
+    };
     drop(env);
     let mut output = out;
     if !err.is_empty() {
@@ -135,6 +170,7 @@ async fn run_unwatched(
         timed_out,
         duration_ms: elapsed_ms(started),
         output,
+        note,
         error,
     }
 }

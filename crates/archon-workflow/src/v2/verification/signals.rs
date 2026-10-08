@@ -123,7 +123,7 @@ mod declared_contract_enforcement_tests {
 
     fn failure_detail(verification: ContractVerification) -> String {
         match verification {
-            ContractVerification::Failed(findings) => findings.join("; "),
+            ContractVerification::Failed(findings, _) => findings.join("; "),
             ContractVerification::Unavailable(detail) => detail,
             ContractVerification::Passed => panic!("expected the verifier to fail closed"),
         }

@@ -1,106 +1,83 @@
-//! A failing check that needed a host variable its site withheld (Issue 345).
-//!
-//! Before Issue 345 a site with no policy gave a check every host variable,
-//! so a check may read one it no longer gets. Its failure is then no verdict
-//! on the product, and only the operator can repair it -- but only when the
-//! remedy works: the variable must be one `environment_allowlist` can forward
-//! (Issue 282's data rule accepts it), and the check's output must say it is
-//! missing or unset. A bare mention is no evidence: every panicking Rust test
-//! prints "run with `RUST_BACKTRACE=1`", and a variable the allowlist refuses
-//! would give the same error every round, so the run could never recover.
+//! Output is never evidence for changing a verifier verdict (Issue 349).
+//! A failed child may mention host variables it was actually denied. Report
+//! their names separately so the operator can consider forwarding them. Even
+//! expectations, quoted JSON and framework prefixes use the same literal,
+//! case-sensitive rule: a name counts only as a whole identifier (no
+//! [A-Za-z0-9_] byte before or after it). Shell-maintained names are skipped.
+//! Never parse prose or disclose host values.
 
+use super::lookup;
 use std::collections::{BTreeMap, BTreeSet};
-
-use regex::Regex;
-
-use super::{SHELL_OWN, lookup};
 
 /// The host variables a check given `environment` does not get.
 pub fn withheld(
     host: &BTreeMap<String, String>,
     environment: &BTreeMap<String, String>,
 ) -> BTreeSet<String> {
-    (host.keys())
-        .filter(|name| !SHELL_OWN.contains(&name.as_str()) && lookup(environment, name).is_none())
-        .cloned()
+    withheld_names(host.keys().map(String::as_str), environment)
+}
+
+/// The one candidate filter every capture path uses: a host name the check
+/// does not get, other than a shell-maintained name.
+pub(super) fn withheld_names<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+    environment: &BTreeMap<String, String>,
+) -> BTreeSet<String> {
+    (names.into_iter())
+        .filter(|name| lookup(environment, name).is_none())
+        .filter(|name| !process_maintained_name(name))
+        .map(str::to_owned)
         .collect()
 }
 
-/// Whether `output` says the variable `name` is missing or unset:
-/// - `NAME is not set` (and unset, not defined, undefined, missing,
-///   required, must be set, the shells' `unbound variable` and `parameter
-///   not set`);
-/// - `NAME environment variable` (`X environment variable is not set`),
-///   `environment variable NAME`, `missing NAME`;
-/// - `set` / `setting` / `export` / `provide` `(the) NAME` (django-environ's
-///   "Set the X environment variable", the OpenAI SDK's "by setting the X
-///   environment variable");
-/// - `NAME` then, with only spaces, quotes, colons or brackets between, not
-///   found, is empty, not provided or required (python-decouple's "X not
-///   found. Declare it as envvar", zod/t3-env's `{ X: [ 'Required' ] }`);
-/// - `NAME` alone on a line and `Field required` (alone, or before
-///   `[type=missing`) on the next (pydantic);
-/// - Python's `KeyError: 'NAME'`.
-///
-/// The first and fourth forms never match a name that opens a quoted
-/// phrase (`expected 'X is required' in stderr` is a check's expectation,
-/// not a missing variable); a quoted name alone (`'X' is required`) still
-/// matches.
-///
-/// The name's case is ignored only on Windows, as [`withheld`] ignores it
-/// there. A message that does not name the variable -- Rust's
-/// `env::var(..)` error `NotPresent`, Go's empty `os.Getenv` -- cannot be
-/// told from a product failure, so it stays a verdict. Nothing later
-/// catches it either: the freeze's passability judge (Issue 275) is shown
-/// that baseline output, but it refutes only a check whose own setup breaks
-/// a rule the product enforces, and accepts ambiguous output. Such a check
-/// needs its variable named in `environment_allowlist`.
-fn says_missing(name: &str, output: &str) -> bool {
-    let escaped = regex::escape(name);
-    let name = if cfg!(windows) {
-        escaped
-    } else {
-        format!("(?-i:{escaped})")
-    };
-    // The name, never as the opening of a quoted phrase.
-    let named = format!(r#"(?:(?:^|[^'"`\w]){name}\b['"`]?|['"`]{name}['"`])"#);
-    let patterns = [
-        format!(
-            r#"{named}\s*:?\s*(?:is\s+)?(?:not\s+set|unset|not\s+defined|undefined|missing|required|must\s+be\s+set|unbound\s+variable|parameter\s+(?:null\s+or\s+)?not\s+set)\b"#
-        ),
-        format!(r#"(?:environment\s+variable|env\s+var|missing)\s*:?\s*['"`$]?\b{name}\b"#),
-        format!(r#"\b{name}\b['"`]?\s+env(?:ironment)?\s+var(?:iable)?"#),
-        format!(
-            r#"\b(?:set(?:ting)?|export(?:ing)?|provid(?:e|ing))\s+(?:the\s+)?['"`$]?\b{name}\b"#
-        ),
-        format!(r#"{named}['"`:\[\]{{}} \t]*(?:not\s+found|is\s+empty|not\s+provided|required)\b"#),
-        format!(
-            r#"^[ \t]*{name}[ \t]*\r?\n[ \t]*field[ \t]+required(?:[ \t]*\r?$|[ \t]+\[type=missing)"#
-        ),
-        format!(r#"KeyError:\s*['"]{name}['"]"#),
-    ];
-    patterns.iter().any(|pattern| {
-        Regex::new(&format!("(?im){pattern}")).is_ok_and(|regex| regex.is_match(output))
-    })
+/// Call only for a failed check. This note does not establish a cause and
+/// must never replace an exit status, failure, refusal, or success verdict.
+pub fn withheld_note(outputs: &[&[u8]], withheld: &BTreeSet<String>) -> Option<String> {
+    withheld_note_with_remedy(
+        outputs,
+        withheld,
+        "Ask the operator to allowlist needed names in [workflow.acceptance_execution] environment_allowlist",
+    )
 }
 
-/// The operational error of a check that failed with `outputs` (its stdout
-/// and stderr) saying a withheld variable is missing, when the allowlist can
-/// forward that variable; `None` otherwise, and the failure stays a verdict.
-pub fn withheld_error(outputs: &[&[u8]], withheld: &BTreeSet<String>) -> Option<String> {
-    let outputs: Vec<String> = (outputs.iter())
-        .map(|output| String::from_utf8_lossy(output).into_owned())
-        .collect();
-    let named: Vec<&str> = (withheld.iter())
-        .filter(|name| archon_shell::data_environment::check_data_variable(name).is_ok())
-        .filter(|name| outputs.iter().any(|output| says_missing(name, output)))
+pub(super) fn withheld_note_with_remedy(
+    outputs: &[&[u8]],
+    withheld: &BTreeSet<String>,
+    remedy: &str,
+) -> Option<String> {
+    let named: Vec<&str> = withheld
+        .iter()
+        .filter(|name| {
+            outputs
+                .iter()
+                .any(|output| contains_identifier(output, name.as_bytes()))
+        })
         .map(String::as_str)
         .collect();
-    if named.is_empty() {
-        return None;
-    }
-    let list = named.join(", ");
-    Some(format!(
-        "the check failed saying the host variable(s) {list} are missing, and this acceptance site does not give a check them (Issue 345: a check gets PATH, the locale, the toolchain locators and only the host variables its policy forwards), so the failure is no verdict. If the check needs them, name them in [workflow.acceptance_execution] environment_allowlist; a run with no such section must add the section to forward a variable, and that moves its checks to the scratch site. If the check tests the missing-variable message itself, unset {list} in the environment archon starts with instead. Otherwise the check must not read them"
+    (!named.is_empty()).then(|| format!(
+        "Note: output mentions withheld variable(s) {}. This note does not establish the cause of failure; the verifier's real result is retained. {remedy}.", named.join(", ")
     ))
+}
+
+fn process_maintained_name(name: &str) -> bool {
+    name.len() <= 1 || matches!(name, "PWD" | "OLDPWD" | "SHLVL")
+}
+
+fn contains_identifier(output: &[u8], name: &[u8]) -> bool {
+    if name.is_empty() || name.len() > output.len() {
+        return false;
+    }
+    output
+        .windows(name.len())
+        .enumerate()
+        .any(|(index, found)| {
+            if found != name {
+                return false;
+            }
+            let identifier = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+            let before = index.checked_sub(1).and_then(|i| output.get(i));
+            let after = output.get(index + name.len());
+            !before.is_some_and(|byte| identifier(*byte))
+                && !after.is_some_and(|byte| identifier(*byte))
+        })
 }

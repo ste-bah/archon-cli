@@ -299,32 +299,29 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         Path::new(&state.log_path),
         &state.identity,
     )?;
-    let expected_metadata = serde_json::json!({
-        "schema_version": "workflow-generated-v2-metadata-v1",
-        "run_kind": "fixed_decomposition_v1",
-        "fixed_identity": state.identity,
-        "scaffold_hash": state.identity.script_digest,
-        "script_args": expected_arguments,
-        "script_lifecycle": true,
-    });
-    let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
-    upgrade::require_equal(&metadata, &expected_metadata, "generated metadata")?;
-    let launch_digest = super::fixed_launch_digest(
+    // Issue 358: the persisted script digest stays the launch record; Issue
+    // 349: the launch-bound check policy (or the older pre-binding form) is
+    // admitted against the verified bundle anchor.
+    let expected_metadata = policy::canonical_metadata(
         &state.identity,
-        &arguments,
-        &persisted_catalog,
-        &persisted_route,
-    )?;
+        state.identity.script_digest.clone(),
+        &expected_arguments,
+    );
+    let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
     let anchored_digest = compiled_spec
         .permissions
         .get(FIXED_LAUNCH_DIGEST_PERMISSION)
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| anyhow!("verified fixed workflow spec has no launch digest anchor"))?;
-    if launch_digest != anchored_digest {
-        return Err(anyhow!(
-            "fixed decomposition launch snapshot differs from the verified workflow bundle anchor"
-        ));
-    }
+    policy::admit(
+        &metadata,
+        expected_metadata,
+        &state.identity,
+        &arguments,
+        &persisted_catalog,
+        &persisted_route,
+        anchored_digest,
+    )?;
     // Verify readable execution state before any provider or lifecycle change.
     upgrade::validate_result_state(&store, run_id)?;
     let transitions = upgrade::record_upgrade(
@@ -492,5 +489,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     .await
 }
 
+#[path = "workflow_decompose_resume_policy.rs"]
+pub(crate) mod policy;
 #[path = "workflow_decompose_upgrade.rs"]
 pub(super) mod upgrade;

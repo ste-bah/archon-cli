@@ -147,14 +147,15 @@ pub(crate) fn run_supervised(
     // Issue-227/234: `boundary` lives until the child has been reaped below,
     // then `finish` restores and names any change to a sealed root on a host
     // with no kernel boundary.
-    let (mut process, boundary) = crate::write_coordinator::host_sandbox::command(
+    let (mut process, boundary, environment) = crate::write_coordinator::host_sandbox::command(
         archon_shell::resolve_posix_shell(),
         run_root,
         &crate::write_coordinator::host_sandbox::verifier_writable(cwd, input),
     )
     .map_err(VerifierFailure::Environment)?;
     process
-        .arg("-lc")
+        // A login shell would reload operator profiles and displace the policy's PATH.
+        .arg("-c")
         .arg(command)
         .current_dir(cwd)
         .stdin(Stdio::null())
@@ -201,11 +202,15 @@ pub(crate) fn run_supervised(
     match status {
         Err(reason) => Err(VerifierFailure::Environment(reason)),
         Ok(status) if status.success() => Ok(()),
-        Ok(status) => Err(VerifierFailure::Product(format!(
-            "declared artifact verifier failed with {status}: {}{}",
-            out.trim(),
-            err.trim(),
-        ))),
+        Ok(status) => {
+            let note = environment.note(&[out.as_bytes(), err.as_bytes()]);
+            Err(VerifierFailure::Product(format!(
+                "declared artifact verifier failed with {status}: {}{}{}",
+                out.trim(),
+                err.trim(),
+                note.map(|note| format!("\n{note}")).unwrap_or_default(),
+            )))
+        }
     }
 }
 

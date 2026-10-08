@@ -305,7 +305,8 @@ fn catalog_digest_environment_child() {
     );
     let arguments = serde_json::json!({"projectRoot": "project"});
     let launch_digest =
-        workflow_decompose::fixed_launch_digest(&identity, &arguments, &catalog, &route).unwrap();
+        workflow_decompose::fixed_launch_digest(&identity, &arguments, &catalog, &route, &None)
+            .unwrap();
     let decomposition_identity =
         workflow_decompose_identity::fixed_decomposition_identity().unwrap();
     let tokens = super::super::workflow_host_command_catalog::host_command_identity_tokens(
@@ -340,7 +341,7 @@ fn catalog_digest_environment_child() {
         assert_eq!(catalog.digest, current.digest);
         assert_eq!(
             launch_digest,
-            workflow_decompose::fixed_launch_digest(&identity, &arguments, &current, &route)
+            workflow_decompose::fixed_launch_digest(&identity, &arguments, &current, &route, &None)
                 .unwrap()
         );
         assert_eq!(

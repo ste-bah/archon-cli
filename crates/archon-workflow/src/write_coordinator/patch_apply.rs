@@ -50,6 +50,8 @@ use persist::utf8_safe_tail;
 use persist::{persist_io, persist_record};
 pub use resume::resume_status;
 pub use verify::run_wave_verify;
+pub(crate) use verify::run_wave_verify_prepared;
+pub(crate) use verify::verify_environment_ready;
 
 #[derive(Debug)]
 pub enum ApplyError {
@@ -73,7 +75,9 @@ pub enum ApplyError {
     VerifyFailed {
         exit: i32,
         stderr_tail: String,
+        environment_note: Option<String>,
     },
+    VerifyEnvironment(String),
     PersistFailed {
         source: std::io::Error,
     },
@@ -113,9 +117,18 @@ impl std::fmt::Display for ApplyError {
                     "stale baseline for '{item}' at '{path}': this file changed after your patch was computed, so the patch was NOT applied. Re-read '{path}' as it is NOW and regenerate your change against the current contents — do not resubmit the same patch"
                 )
             }
-            Self::VerifyFailed { exit, stderr_tail } => {
-                write!(f, "wave verify failed (exit {exit}): {stderr_tail}")
+            Self::VerifyFailed {
+                exit,
+                stderr_tail,
+                environment_note,
+            } => {
+                write!(f, "wave verify failed (exit {exit}): {stderr_tail}")?;
+                if let Some(note) = environment_note {
+                    write!(f, "\n{note}")?;
+                }
+                Ok(())
             }
+            Self::VerifyEnvironment(reason) => write!(f, "wave verify environment: {reason}"),
             Self::PersistFailed { source } => write!(f, "persist failed: {source}"),
             Self::Isolation(e) => write!(f, "isolation error: {e}"),
             Self::WaveCommitFailed { stderr } => {
@@ -177,6 +190,9 @@ pub struct VerifyResult {
     pub command: Option<String>,
     pub stdout_tail: String,
     pub stderr_tail: String,
+    /// Withheld-name diagnostic kept separate from verifier output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_note: Option<String>,
     pub duration_ms: u64,
 }
 

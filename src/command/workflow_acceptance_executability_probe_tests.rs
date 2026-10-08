@@ -363,6 +363,7 @@ fn a_placeholder_original_is_never_a_verdict_to_hold_a_repair_to() {
         stdout: Vec::new(),
         stderr: Vec::new(),
         operational_error: None,
+        environment_note: None,
     };
     let results = [failed("AC-H-001"), failed("AC-H-002")];
     let originals = super::baseline::originals_now(&contract, &results);

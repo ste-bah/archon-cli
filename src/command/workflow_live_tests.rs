@@ -41,7 +41,9 @@ async fn closed_tui_prevents_workflow_planner_launch() {
         planner.clone(),
         ui_sink,
         None,
-    );
+        Default::default(),
+    )
+    .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     assert_eq!(
@@ -402,7 +404,7 @@ fn harness_planner_prompt_separates_report_artifacts_from_repo_implementation() 
 #[test]
 fn generated_run_branch_is_isolated_from_legacy_executor_dispatch() {
     let source = std::fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/command/workflow_live.rs"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/command/workflow_live_action.rs"),
     )
     .expect("read workflow_live source");
     let run_branch = source

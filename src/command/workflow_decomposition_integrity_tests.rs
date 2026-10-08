@@ -138,7 +138,7 @@ async fn fixed_resume_refuses_mutated_arguments_catalog_route_and_metadata() {
         ),
         (
             crate::command::workflow_decompose::FIXED_GENERATED_METADATA_PATH,
-            serde_json::json!({"schema_version":"workflow-generated-v2-metadata-v1","run_kind":"fixed_decomposition_v1","script_lifecycle":false}),
+            serde_json::json!({"schema_version":"workflow-generated-v2-metadata-v1","run_kind":"fixed_decomposition_v1","script_lifecycle":false,"check_environment_policy":null}),
             "generated metadata",
         ),
     ] {

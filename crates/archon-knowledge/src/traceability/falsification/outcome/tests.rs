@@ -100,6 +100,7 @@ fn refusals_name_the_specific_absent_fact() {
     let baseline = RefusedToRun::BaselineDidNotPass {
         command: "cargo test -p x".into(),
         exit_code: Some(101),
+        note: None,
     };
     assert!(baseline.describe().contains("already failing"));
 

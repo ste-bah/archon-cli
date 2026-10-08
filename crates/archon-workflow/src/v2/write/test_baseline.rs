@@ -95,6 +95,9 @@ pub(crate) struct CommandBaseline {
     pub tail: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Diagnostic about withheld names, separate from parser input and tail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_note: Option<String>,
     /// Served from the (base commit, command) cache rather than run again.
     #[serde(default)]
     pub cached: bool,

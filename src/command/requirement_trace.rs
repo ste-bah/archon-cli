@@ -37,6 +37,8 @@ mod evaluation;
 mod evidence;
 mod falsify;
 mod leann_source;
+#[cfg(test)]
+pub(crate) use leann_source::with_test_embedder;
 mod persist;
 mod render;
 mod slash;
@@ -85,6 +87,7 @@ pub(crate) struct TraceOptions {
     /// the rest of this struct can still be described as read-only. Off unless
     /// a person typed `--falsify`; see [`falsify`] for what "off" has to mean.
     pub(crate) falsify: bool,
+    pub(crate) check_policy: Option<archon_workflow::acceptance_check_environment::CheckPolicy>,
     /// Emit the report model as JSON rather than text.
     pub(crate) json: bool,
     /// Hits requested per declared path scope.
@@ -102,28 +105,8 @@ pub(crate) struct TraceOptions {
     pub(crate) embedding: archon_memory::embedding::EmbeddingConfig,
 }
 
-impl TraceOptions {
-    /// Defaults chosen so a bare `--prd/--tasks` run costs no queries at all and
-    /// still answers the coverage question.
-    pub(crate) fn new(prd: PathBuf, tasks: PathBuf) -> Self {
-        Self {
-            prd,
-            tasks,
-            graph: None,
-            evidence: None,
-            leann_db: None,
-            persist: None,
-            falsify: false,
-            json: false,
-            limit_per_scope: 3,
-            max_scopes: 8,
-            // Both entry points overwrite this from `[memory]`; what is left
-            // reaching the default is a test that built its own index with the
-            // same default, which is consistent by construction.
-            embedding: archon_memory::embedding::EmbeddingConfig::default(),
-        }
-    }
-}
+#[path = "requirement_trace/check_policy.rs"]
+mod check_policy;
 
 /// CLI entry point for `archon requirements <action>`.
 ///
@@ -155,6 +138,7 @@ pub(crate) fn handle_requirements_command(
         leann_db: leann_db.clone(),
         persist: persist.clone(),
         falsify: *falsify,
+        check_policy: check_policy::from_config(config)?,
         json: *json,
         limit_per_scope: *limit_per_scope,
         max_scopes: *max_scopes,
@@ -202,7 +186,7 @@ pub(crate) fn run_trace(cwd: &Path, options: &TraceOptions) -> Result<TraceVerdi
     // established rather than the one it started from.
     if task_population_complete {
         if options.falsify {
-            falsify::execute_plans(cwd, &mut report);
+            falsify::execute_plans_with_policy(cwd, &mut report, options.check_policy.as_ref());
         }
         if let Some(store_path) = &options.persist {
             persist(cwd, store_path, &report)?;

@@ -1,0 +1,57 @@
+{
+  "schema_version": "workflow-generated-v2-metadata-v1",
+  "run_kind": "fixed_decomposition_v1",
+  "fixed_identity": {
+    "template_version": "fixed-decomposition-v1",
+    "starting_binary_revision": "8b7a3c13f",
+    "script_digest": "5564154c6205773b215bb3b54b390c981166e41e3384cfdd53b7f13b4b31f5a4",
+    "catalog_digest": "bf90959a51c7d0d96fe2893a6d0759ade20374bf182eec26ae8a456049e90f56",
+    "project_root_identity": "example-project",
+    "prd_identity": "example-project/prds/PRD-EXAMPLE-001.md",
+    "task_root_identity": "example-project/tasks/PRD-EXAMPLE-001-R1"
+  },
+  "scaffold_hash": "5564154c6205773b215bb3b54b390c981166e41e3384cfdd53b7f13b4b31f5a4",
+  "script_args": {
+    "acceptanceCriteria": {
+      "AC-EXAMPLE-001": "Example acceptance criterion 1.",
+      "AC-EXAMPLE-002": "Example acceptance criterion 2.",
+      "AC-EXAMPLE-003": "Example acceptance criterion 3.",
+      "AC-EXAMPLE-004": "Example acceptance criterion 4.",
+      "AC-EXAMPLE-005": "Example acceptance criterion 5.",
+      "AC-EXAMPLE-006": "Example acceptance criterion 6.",
+      "AC-EXAMPLE-007": "Example acceptance criterion 7.",
+      "AC-EXAMPLE-008": "Example acceptance criterion 8.",
+      "AC-EXAMPLE-009": "Example acceptance criterion 9.",
+      "AC-EXAMPLE-010": "Example acceptance criterion 10.",
+      "AC-EXAMPLE-011": "Example acceptance criterion 11."
+    },
+    "authorMaxParallelism": 4,
+    "excludedDirs": [
+      "node_modules",
+      "target",
+      ".git",
+      "__pycache__",
+      ".venv",
+      "dist",
+      "build",
+      "coverage",
+      ".tv",
+      ".archon",
+      ".claude",
+      "site-packages"
+    ],
+    "frozenChain": {
+      "acceptance": false,
+      "bodies": [],
+      "skeleton": false,
+      "subjects": []
+    },
+    "gateMode": "observe",
+    "prdDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "prdPath": "example-project/prds/PRD-EXAMPLE-001.md",
+    "projectRoot": "example-project",
+    "repositoryRoot": "example-repository",
+    "taskRoot": "example-project/tasks/PRD-EXAMPLE-001-R1"
+  },
+  "script_lifecycle": true
+}

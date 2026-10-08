@@ -53,7 +53,14 @@ async fn resume_upgraded(component: &str) {
     run.spec.permissions.insert(
         FIXED_LAUNCH_DIGEST_PERMISSION.into(),
         serde_json::json!(
-            fixed_launch_digest(&state.identity, &arguments, &catalog, &route).unwrap()
+            fixed_launch_digest(
+                &state.identity,
+                &arguments,
+                &catalog,
+                &route,
+                &serde_json::from_value(metadata["check_environment_policy"].clone()).unwrap(),
+            )
+            .unwrap()
         ),
     );
     store.save_state(&run).unwrap();

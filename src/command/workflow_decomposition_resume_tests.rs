@@ -1,6 +1,11 @@
 use super::*;
 use archon_shell::paths::plain;
 
+#[path = "workflow_decomposition_resume_legacy_tests.rs"]
+mod legacy_tests;
+#[path = "workflow_decomposition_resume_policy_tests.rs"]
+mod policy_tests;
+
 fn pause_run(store: &WorkflowStore, run_id: &str) {
     archon_workflow::LifecycleController::new(store.clone())
         .apply(run_id, archon_workflow::LifecycleAction::Pause)

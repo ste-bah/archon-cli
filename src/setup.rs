@@ -145,7 +145,7 @@ pub fn load_env_vars() -> ArchonEnvVars {
 pub fn load_config(
     env_vars: &ArchonEnvVars,
     cli: &Cli,
-) -> (archon_core::config::ArchonConfig, std::path::PathBuf) {
+) -> Result<(archon_core::config::ArchonConfig, std::path::PathBuf)> {
     let config_path = env_vars
         .config_dir
         .as_ref()
@@ -161,11 +161,7 @@ pub fn load_config(
         &working_dir_for_config,
         cli.settings.as_deref(),
         layer_filter.as_deref(),
-    )
-    .unwrap_or_else(|e| {
-        eprintln!("warning: failed to load config, using defaults: {e}");
-        archon_core::config::ArchonConfig::default()
-    });
+    )?;
 
     // Apply env var overrides on top of config file
     env_vars::apply_env_overrides(&mut config, env_vars);
@@ -176,7 +172,59 @@ pub fn load_config(
     // downstream, so `[context.model_pricing]` is installed here.
     archon_core::cost::install_pricing_overrides(config.context.model_pricing.clone());
 
-    (config, config_path)
+    Ok((config, config_path))
+}
+
+#[cfg(test)]
+mod strict_config_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn missing_explicit_settings_file_propagates_instead_of_defaulting() {
+        let root = tempfile::tempdir().unwrap();
+        let mut cli = Cli::try_parse_from(["archon"]).unwrap();
+        cli.setting_sources = Some(Vec::new());
+        cli.settings = Some(root.path().join("missing.toml"));
+        let env = env_vars::load_env_vars_from(&std::collections::HashMap::new());
+
+        let error = load_config(&env, &cli).expect_err("missing explicit settings must propagate");
+
+        assert!(error.to_string().contains("could not be read"), "{error:#}");
+    }
+
+    #[test]
+    fn malformed_explicit_settings_file_propagates_instead_of_defaulting() {
+        let root = tempfile::tempdir().unwrap();
+        let settings = root.path().join("malformed.toml");
+        std::fs::write(&settings, "[workflow\ninvalid = true").unwrap();
+        let mut cli = Cli::try_parse_from(["archon"]).unwrap();
+        cli.setting_sources = Some(Vec::new());
+        cli.settings = Some(settings);
+        let env = env_vars::load_env_vars_from(&std::collections::HashMap::new());
+
+        let error = load_config(&env, &cli).expect_err("malformed settings must propagate");
+
+        assert!(
+            error.to_string().contains("could not be parsed"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn invalid_selected_layer_propagates_instead_of_defaulting() {
+        let root = tempfile::tempdir().unwrap();
+        let settings = root.path().join("invalid.toml");
+        std::fs::write(&settings, "[subagent]\nmax_concurrent = 'many'\n").unwrap();
+        let mut cli = Cli::try_parse_from(["archon"]).unwrap();
+        cli.setting_sources = Some(Vec::new());
+        cli.settings = Some(settings);
+        let env = env_vars::load_env_vars_from(&std::collections::HashMap::new());
+
+        let error = load_config(&env, &cli).expect_err("invalid config must propagate");
+
+        assert!(error.to_string().contains("invalid type"), "{error:#}");
+    }
 }
 
 /// Log startup information about memory and prompt cache settings.

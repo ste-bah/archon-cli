@@ -1,13 +1,13 @@
 //! Layered config reads for a live workflow run.
 //!
 //! Split out of `workflow_live.rs` when the SONA tuning wiring pushed that file
-//! past the 500-line limit. These five readers were the most self-contained
-//! group in it: they share the merge helper, none of them touches the run
-//! itself, and every one of them fails the same way — see below.
+//! past the 500-line limit. These readers concern scheduling and learning.
+//! Verifier environments consume the resolved launch binding instead; their
+//! policy must never be reconstructed by this optional-settings helper.
 
 use std::path::Path;
 
-use archon_core::config::{GeneratedWorkflowConfig, LearningConfig};
+use archon_core::config::LearningConfig;
 use archon_workflow::{WorkflowConfig, WorkflowPolicy};
 
 pub(super) fn live_policy(cwd: &Path, config_path: Option<&Path>) -> WorkflowPolicy {
@@ -64,16 +64,4 @@ pub(super) fn load_learning_config(cwd: &Path, config_path: Option<&Path>) -> Le
     config_table(&merged_config_layers(cwd, config_path), &["learning"])
         .try_into()
         .unwrap_or_else(|_| LearningConfig::default())
-}
-
-pub(super) fn load_generated_workflow_config(
-    cwd: &Path,
-    config_path: Option<&Path>,
-) -> GeneratedWorkflowConfig {
-    config_table(
-        &merged_config_layers(cwd, config_path),
-        &["workflow", "generated"],
-    )
-    .try_into()
-    .unwrap_or_else(|_| GeneratedWorkflowConfig::default())
 }

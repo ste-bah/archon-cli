@@ -22,6 +22,7 @@ fn record() -> BranchBaseline {
             passed_ids_kept: false,
             tail: Vec::new(),
             error: None,
+            environment_note: None,
             cached: false,
             diagnostic_files: Vec::new(),
             not_a_command: false,

@@ -446,10 +446,19 @@ pub fn write_file(
 /// launch snapshot records it: for tests that need a seeded run.
 #[cfg(test)]
 pub(crate) fn write_test_policy(run_root: &Path, project: &Path, inputs: &[&str]) {
+    // The recorded policy now drives host verifiers too. Keep the fixture's
+    // tools directory first, with the harness toolchain available explicitly.
+    let host_path = std::env::var_os("PATH").expect("test harness supplies PATH");
+    let toolchain = std::env::join_paths(
+        std::iter::once(project.join("tools")).chain(std::env::split_paths(&host_path)),
+    )
+    .unwrap()
+    .into_string()
+    .unwrap();
     let policy = serde_json::json!({
         "repository": project, "project": project, "task_root": project.join("tasks"),
         "scratch_parent": project.parent().unwrap().join("scratch"), "project_inputs": inputs,
-        "combined": true, "toolchain_path": std::env::join_paths([project.join("tools")]).unwrap().into_string().unwrap(), "environment": {},
+        "combined": true, "toolchain_path": toolchain, "environment": {},
         "cargo_seed": null, "timeout_secs": 10, "output_bytes": 1024, "scratch_bytes": 1u64 << 30,
     });
     serde_json::from_value::<crate::acceptance_scratch::ScratchPolicy>(policy.clone())
