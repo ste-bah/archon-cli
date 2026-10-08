@@ -9,7 +9,7 @@ pub(super) enum Candidate {
 }
 pub(super) fn candidate(context: &StageContext, pin: &Path) -> WorkflowResult<Candidate> {
     archon_workflow::stage_write::with_write(|| {
-        #[cfg(test)]
+        #[cfg(all(test, unix))]
         super::recovery_tests::entry_hook();
         // Take the run lock before waiting for publication and keep it until
         // settlement and this consistent read finish. Task-local ownership
