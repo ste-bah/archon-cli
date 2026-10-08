@@ -18,9 +18,12 @@
 //! The kind is checked before the open, so a special file is never opened,
 //! and again on the opened handle, which is opened without blocking and
 //! without following a final link: an entry swapped after the check is
-//! refused, never read. A refused entry is never a record and never counts
-//! as one. Each refusal is reported as a warning that names the entry and
-//! the reason; [`classify_store_entry`] gives the same verdict unread.
+//! refused, never read. A link loop (too many levels of links) is refused
+//! like any other entry that is no record: it is never fatal. A refused
+//! entry is never a record and never counts as one. Each refusal is
+//! reported as a warning that names the entry and the reason, once per
+//! entry in a process ([`report_skipped_store_entry`]);
+//! [`classify_store_entry`] gives the same verdict unread.
 
 use std::fs;
 use std::io::Read;
@@ -45,6 +48,8 @@ pub enum StoreRefusal {
     Oversized,
     /// The entry changed between its check and its open (it became a link).
     Changed,
+    /// A link loop, or a chain of links too long to resolve (`ELOOP`).
+    LinkLoop,
 }
 
 impl std::fmt::Display for StoreRefusal {
@@ -56,6 +61,7 @@ impl std::fmt::Display for StoreRefusal {
             Self::LinkedDirectory => "inside a directory that is a link",
             Self::Oversized => "larger than the store's file bound",
             Self::Changed => "changed between its check and its open",
+            Self::LinkLoop => "a link loop (too many levels of links)",
         })
     }
 }
@@ -81,18 +87,10 @@ pub fn store_file_refusal(error: &std::io::Error) -> Option<StoreRefusal> {
 }
 
 /// Report that `path` was skipped unread, and why. Every reader that skips
-/// a store entry for its kind says so here; none skips one silently.
+/// a store entry says so here; none skips one silently. A stuck entry is
+/// met again on every read and every fan-out, so each path is reported
+/// once in this process: the first time any reader skips it.
 pub fn report_skipped_store_entry(path: &Path, reason: &dyn std::fmt::Display) {
-    tracing::warn!(
-        path = %path.display(),
-        %reason,
-        "store entry skipped unread; it is never counted as a record"
-    );
-}
-
-/// [`report_skipped_store_entry`], once per path in this process: for a
-/// reader that meets the same stuck entry on every dispatch.
-pub fn report_skipped_store_entry_once(path: &Path, reason: &dyn std::fmt::Display) {
     static REPORTED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
         std::sync::OnceLock::new();
     let first = REPORTED
@@ -101,7 +99,25 @@ pub fn report_skipped_store_entry_once(path: &Path, reason: &dyn std::fmt::Displ
         .map(|mut seen| seen.insert(path.to_path_buf()))
         .unwrap_or(true);
     if first {
-        report_skipped_store_entry(path, reason);
+        tracing::warn!(
+            path = %path.display(),
+            %reason,
+            "store entry skipped unread; it is never counted as a record"
+        );
+    }
+}
+
+/// Whether `error` says a link loop, or a chain of links too long to
+/// resolve. Only Unix names it (`ELOOP`).
+fn is_link_loop(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        error.raw_os_error() == Some(libc::ELOOP)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = error;
+        false
     }
 }
 
@@ -148,8 +164,8 @@ fn linked_dir_between(root: &Path, dir: &Path) -> std::io::Result<bool> {
 
 /// What a reader would open for `path`, judged unread: `Ok(path)` for a
 /// regular file, `Ok(target)` for a link to one in its own directory or
-/// directly in `root`, `Err(refusal)` otherwise. An entry or link that
-/// cannot be resolved is an I/O error.
+/// directly in `root`, `Err(refusal)` otherwise (a link loop too). A link
+/// whose target is missing is an I/O error.
 fn resolve(path: &Path, root: &Path) -> std::io::Result<Result<PathBuf, StoreRefusal>> {
     let own = own_dir(path);
     if linked_dir_between(root, own)? {
@@ -159,7 +175,11 @@ fn resolve(path: &Path, root: &Path) -> std::io::Result<Result<PathBuf, StoreRef
     if !meta.file_type().is_symlink() {
         return Ok(kind_refusal(&meta).map_or_else(|| Ok(path.to_path_buf()), Err));
     }
-    let target = fs::canonicalize(path)?;
+    let target = match fs::canonicalize(path) {
+        Ok(target) => target,
+        Err(error) if is_link_loop(&error) => return Ok(Err(StoreRefusal::LinkLoop)),
+        Err(error) => return Err(error),
+    };
     let target_meta = fs::metadata(&target)?;
     // What it is comes first: a link to a FIFO is a special entry wherever
     // the FIFO lives.
@@ -180,8 +200,9 @@ fn resolve(path: &Path, root: &Path) -> std::io::Result<Result<PathBuf, StoreRef
 
 /// How a reader would treat the store entry `path` of the store directory
 /// `root`, without opening it: `Ok(None)` when [`read_store_file_in`] may
-/// read it, `Ok(Some(refusal))` when it never would, an I/O error when it
-/// cannot be resolved (a broken link). Nothing is reported.
+/// read it, `Ok(Some(refusal))` when it never would (a link loop too), an
+/// I/O error when it cannot be resolved (a broken link). Nothing is
+/// reported.
 pub fn classify_store_entry(path: &Path, root: &Path) -> std::io::Result<Option<StoreRefusal>> {
     Ok(resolve(path, root)?.err())
 }

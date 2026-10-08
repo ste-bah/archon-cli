@@ -63,7 +63,7 @@ impl WorkflowV2ResultStore {
                 let path = entry.path();
                 if !path.is_file() {
                     // Met again on every lookup while it stays: said once.
-                    report_skipped_store_entry_once(&path, &"not a regular file; left unmigrated");
+                    report_skipped_store_entry(&path, &"not a regular file; left unmigrated");
                     continue;
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();

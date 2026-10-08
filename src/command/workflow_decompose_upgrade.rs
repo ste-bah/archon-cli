@@ -12,6 +12,22 @@ fn read_named(path: &Path) -> Result<Vec<u8>> {
         .map_err(|error| anyhow!("{}: {error}", path.display()))
 }
 
+/// [`read_named`] for a call record: `None` for an entry the store's readers
+/// refuse (a FIFO or other non-regular entry, a link out of its directory,
+/// a link loop, an oversized file). The store itself moves such a slot into
+/// `results/history/` when a new execution claims it, and its readers treat
+/// it as a gap in that call's history, never as a record. So the check does
+/// too: the refusal is reported (by `store_file`, naming the entry), it is
+/// never counted, and it never blocks a resume.
+fn read_record_or_gap(path: &Path) -> Result<Option<Vec<u8>>> {
+    use archon_workflow::v2::store_file::{read_store_file, store_file_refusal};
+    match read_store_file(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if store_file_refusal(&error).is_some() => Ok(None),
+        Err(error) => Err(anyhow!("{}: {error}", path.display())),
+    }
+}
+
 pub(crate) fn unmapped(field: &str, reason: &str) -> anyhow::Error {
     anyhow!(
         "fixed decomposition resume paused: cannot map {field}: {reason}; restore an intact record or install a compatible binary with an explicit migration, then resume this run"
@@ -70,17 +86,23 @@ fn validate_call_directory(
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
         let file = entry.path();
-        if entry.file_type()?.is_dir() {
+        // A `.json` entry is a record candidate whatever its kind: a slot
+        // the store moved aside unread can be a directory. A store
+        // directory (`history/`, a call's archive) never has that name.
+        let candidate = file
+            .extension()
+            .is_some_and(|extension| extension == "json");
+        if !candidate && entry.file_type()?.is_dir() {
             if entry.file_name() != "quarantine" {
                 validate_call_directory(&file, store, false)?;
             }
-        } else if file
-            .extension()
-            .is_some_and(|extension| extension == "json")
-        {
+        } else if candidate {
+            let Some(bytes) = read_record_or_gap(&file)? else {
+                continue;
+            };
             let field = file.display().to_string();
-            let value: serde_json::Value = serde_json::from_slice(&read_named(&file)?)
-                .map_err(|e| unmapped(&field, &e.to_string()))?;
+            let value: serde_json::Value =
+                serde_json::from_slice(&bytes).map_err(|e| unmapped(&field, &e.to_string()))?;
             // Missing schema is the explicitly supported pre-versioned v2
             // shape (the result store's existing default). Unknown is not.
             if value.get("schema_version").is_some()
@@ -343,28 +365,82 @@ pub(super) fn require_equal(
 #[cfg(all(test, unix))]
 mod store_read_tests {
     use super::*;
+    use std::path::PathBuf;
 
-    /// Issue-292: a FIFO planted in the result store fails the upgrade
-    /// check at once, and the error names it.
-    #[test]
-    fn a_fifo_in_the_result_store_fails_the_check_naming_it() {
+    fn mkfifo(path: &Path) {
+        let raw = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(raw.as_ptr(), 0o600) }, 0, "{path:?}");
+    }
+
+    /// A run's `v2/` with `results/history/<stem>/`, as the store archives
+    /// a slot a new execution claims.
+    fn store_dirs() -> (tempfile::TempDir, PathBuf, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let results = dir.path().join("results");
-        std::fs::create_dir(&results).unwrap();
-        let fifo = results.join("planted.json");
-        let raw = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
-        assert_eq!(unsafe { libc::mkfifo(raw.as_ptr(), 0o600) }, 0);
+        let history = results.join("history").join("call-x-0a1b");
+        std::fs::create_dir_all(&history).unwrap();
+        (dir, results, history)
+    }
+
+    /// The check over `results`, on its own thread: a check that blocks on
+    /// a FIFO fails the test instead of hanging the suite.
+    fn check(dir: &tempfile::TempDir, results: &Path) -> std::result::Result<(), String> {
         let store = archon_workflow::WorkflowV2ResultStore::new(dir.path());
         let (done, wait) = std::sync::mpsc::channel();
-        let at = results.clone();
+        let at = results.to_path_buf();
         std::thread::spawn(move || {
             let checked = validate_call_directory(&at, &store, true).map_err(|e| e.to_string());
             let _ = done.send(checked);
         });
-        let error = wait
-            .recv_timeout(std::time::Duration::from_secs(10))
+        wait.recv_timeout(std::time::Duration::from_secs(10))
             .expect("the check blocked on a FIFO")
-            .expect_err("a FIFO is no record");
-        assert!(error.contains(&fifo.display().to_string()), "{error}");
+    }
+
+    /// Issue-292 L5: a FIFO the store moved aside into a call's history,
+    /// or one in a slot, is a gap: the check returns at once and passes.
+    #[test]
+    fn a_fifo_in_the_result_store_is_a_gap_never_a_block() {
+        let (dir, results, history) = store_dirs();
+        mkfifo(&history.join("call-x-0a1b-20261007T230531Z-1.json"));
+        mkfifo(&results.join("planted.json"));
+        check(&dir, &results).expect("a refused entry blocked the resume");
+    }
+
+    /// Every other kind the store refuses is a gap too: a link out of its
+    /// directory, a link loop, an oversized file, and a directory slot the
+    /// store moved aside (whose contents are never records).
+    #[test]
+    fn every_refused_kind_in_history_is_a_gap_never_a_block() {
+        let (dir, results, history) = store_dirs();
+        let outside = dir.path().join("outside.json");
+        std::fs::write(&outside, b"{\"schema_version\":\"future\"}").unwrap();
+        std::os::unix::fs::symlink(&outside, history.join("out.json")).unwrap();
+        std::os::unix::fs::symlink("loop.json", history.join("loop.json")).unwrap();
+        let big = std::fs::File::create(history.join("big.json")).unwrap();
+        big.set_len(archon_workflow::v2::store_file::MAX_STORE_FILE_BYTES + 1)
+            .unwrap();
+        let moved = history.join("call-x-0a1b-20261007T230531Z-2.json");
+        std::fs::create_dir(&moved).unwrap();
+        std::fs::write(moved.join("junk.json"), b"not json").unwrap();
+        check(&dir, &results).expect("a refused entry blocked the resume");
+    }
+
+    /// A gap is never counted, and never hides a record: refused entries in
+    /// the legacy flat archive and in a slot pass, and a corrupt record
+    /// beside them still fails, naming the record, not the gap.
+    #[test]
+    fn a_gap_in_the_flat_archive_passes_and_never_hides_a_corrupt_record() {
+        let (dir, results, history) = store_dirs();
+        let flat = results.join("superseded");
+        std::fs::create_dir(&flat).unwrap();
+        let fifo = flat.join("planted.json");
+        mkfifo(&fifo);
+        std::os::unix::fs::symlink("slot.json", results.join("slot.json")).unwrap();
+        check(&dir, &results).expect("a refused entry blocked the resume");
+        let corrupt = history.join("corrupt.json");
+        std::fs::write(&corrupt, b"{\"schema_version\":\"future\"}").unwrap();
+        let error = check(&dir, &results).expect_err("a corrupt record passed");
+        assert!(error.contains(&corrupt.display().to_string()), "{error}");
+        assert!(!error.contains(&fifo.display().to_string()), "{error}");
     }
 }
