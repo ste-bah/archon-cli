@@ -61,7 +61,15 @@ impl RawEvidence {
                     outcome
                         .tool_uses
                         .iter()
-                        .map(|t| json!({"name":t.tool_name,"input":t.input,"output":t.output}))
+                        .map(|t| {
+                            // Issue 276: what a call touched, never its content.
+                            let input = archon_tools::tool_trace_input::safe_input(
+                                &t.tool_name,
+                                &t.input,
+                                384,
+                            );
+                            json!({"name":t.tool_name,"input":input.input,"output":t.output})
+                        })
                         .collect::<Vec<_>>()
                 );
             }

@@ -200,7 +200,10 @@ impl LiveV2AgentClient {
         };
         let attempt = archon_tools::read_boundary::scope(
             archon_leann::language::default_exclude_patterns(),
-            run_agent_with_transient_retry(&self.llm, call, |_attempt| async { Ok(()) }),
+            run_agent_with_transient_retry(&self.llm, call, |_attempt| {
+                structured_trace::note_lost(structured_trace::RETRIED);
+                async { Ok(()) }
+            }),
         );
         let outcome = author_attempt_deadline(self.timeout_secs, attempt).await?;
         outcome.map_err(|error| WorkflowV2AgentError::from_call_error(&error))
@@ -347,6 +350,7 @@ impl LiveV2AgentClient {
                 .clone()
                 .map(WorkflowProviderEnv::new),
         };
+        let retried = structured_trace::Retried::default();
         let provider_work =
             async {
                 if continuing {
@@ -354,6 +358,7 @@ impl LiveV2AgentClient {
                     self.llm.continue_agent(agent_request).await
                 } else {
                     run_agent_with_transient_retry(&self.llm, agent_request, |attempt| {
+                        retried.mark();
                         let client = self.clone();
                         let stage_request = stage_request.clone();
                         let agent_name = agent_name.clone();
@@ -380,7 +385,9 @@ impl LiveV2AgentClient {
                     .await
                 }
             };
-        let response = match self.admit_provider(provider_work).await {
+        let response = self.admit_provider(provider_work).await;
+        retried.note(response.is_err());
+        let response = match response {
             Ok(response) => response,
             Err(err) => {
                 // Before the emit below, which is itself a `?`.

@@ -5,6 +5,8 @@ use super::*;
 
 struct TracedRawLlm {
     tool_uses: Vec<archon_workflow::WorkflowAgentToolUse>,
+    /// Calls that fail with a transient error before one succeeds.
+    transient_failures: std::sync::atomic::AtomicUsize,
 }
 
 #[async_trait::async_trait]
@@ -23,6 +25,13 @@ impl WorkflowLlmClient for TracedRawLlm {
         &self,
         _request: archon_workflow::WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
+        let left = &self.transient_failures;
+        if left.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+            left.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            return Err(archon_workflow::WorkflowError::StageFailed(
+                "connection reset by peer".to_string(),
+            ));
+        }
         Ok(WorkflowAgentOutcome {
             content: "opaque candidate bytes".to_string(),
             tool_uses: self.tool_uses.clone(),
@@ -51,9 +60,17 @@ async fn run_raw_author(
     run_raw_author_with_files(tool_uses).await.0
 }
 
-/// The stored author result and the text of every file the run wrote.
 async fn run_raw_author_with_files(
     tool_uses: Vec<archon_workflow::WorkflowAgentToolUse>,
+) -> (archon_workflow::WorkflowV2Result, String) {
+    run_raw_author_after_failures(tool_uses, 0).await
+}
+
+/// The stored author result and the text of every file the run wrote, the
+/// provider failing transiently `failures` times first.
+async fn run_raw_author_after_failures(
+    tool_uses: Vec<archon_workflow::WorkflowAgentToolUse>,
+    failures: usize,
 ) -> (archon_workflow::WorkflowV2Result, String) {
     let temp = tempfile::tempdir().expect("tempdir");
     let spec = test_spec();
@@ -62,7 +79,10 @@ async fn run_raw_author_with_files(
     let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
     let (ui_sink, _tui_rx) = default_workflow_ui_sink();
     let client = LiveV2AgentClient::new(
-        Arc::new(TracedRawLlm { tool_uses }),
+        Arc::new(TracedRawLlm {
+            tool_uses,
+            transient_failures: failures.into(),
+        }),
         ui_sink,
         Vec::new(),
         run.id.clone(),
@@ -228,4 +248,70 @@ async fn raw_outcome_trace_never_persists_a_credential_from_a_tool_input() {
                 .contains(secret.as_str())
         );
     }
+}
+
+/// A PEM private key block, built at run time so no literal key sits in the
+/// source.
+fn pem_block() -> String {
+    let kind = "PRIVATE KEY";
+    format!(
+        "-----BEGIN {kind}-----\n{}\n-----END {kind}-----",
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC".repeat(40)
+    )
+}
+
+#[tokio::test]
+async fn no_secret_from_any_tool_input_reaches_a_run_file() {
+    let key_id = "f00dfacecafe0123beef4567";
+    let account = serde_json::json!({"type": "service_account", "private_key_id": key_id,
+        "private_key": pem_block()})
+    .to_string();
+    let big = format!("{}\n{}", "x".repeat(200_000), pem_block());
+    let (result, written) = run_raw_author_with_files(vec![
+        tool_use("Write", serde_json::json!({"file_path": "keys/a.pem", "content": big}), false),
+        tool_use("Write", serde_json::json!({"file_path": "sa.json", "content": account}), false),
+        tool_use(
+            "Bash",
+            serde_json::json!({"command": "DB_PASSWORD=hunter2xyz FOO_TOKEN=abc123xyz ./deploy"}),
+            false,
+        ),
+        tool_use(
+            "WebFetch",
+            serde_json::json!({"url": "https://example.invalid/api?key=AIzaQ1W2E3R4", "prompt": "p"}),
+            false,
+        ),
+    ])
+    .await;
+
+    assert_eq!(result.commands_run.len(), 4, "{result:?}");
+    assert!(written.contains("toolTrace") && written.contains("sa.json"));
+    for secret in [
+        "MIIEvQIBADAN",
+        key_id,
+        "hunter2xyz",
+        "abc123xyz",
+        "AIzaQ1W2E3R4",
+    ] {
+        assert!(!written.contains(secret), "a run file holds {secret}");
+    }
+}
+
+#[tokio::test]
+async fn a_retried_attempt_marks_the_trace_incomplete() {
+    let summary = archon_workflow::WorkflowAgentToolUse {
+        tool_name: archon_tools::subagent_session::TOOL_TRACE_SUMMARY_NAME.to_string(),
+        input: serde_json::json!({"calls": 0, "kept": 0, "dropped": 0, "inputs_truncated": 0}),
+        output: serde_json::Value::Null,
+    };
+    let (result, _) = run_raw_author_after_failures(vec![summary], 1).await;
+
+    let trace = &result.data["toolTrace"];
+    assert_eq!(trace["recorded"], true, "{trace}");
+    assert_eq!(trace["complete"], false, "{trace}");
+    assert!(
+        trace["incompleteReasons"][0]
+            .as_str()
+            .is_some_and(|reason| reason.contains("retry")),
+        "{trace}"
+    );
 }

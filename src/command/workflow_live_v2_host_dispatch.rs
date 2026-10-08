@@ -296,17 +296,20 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                 })
                 .transpose()?;
             let records = stage_landing::prepare(&mut request, v2_store)?;
-            let response = stage_landing::scope(
-                records.clone(),
-                archon_tools::workflow_read_guard::scope_run_store(
-                    run_store,
-                    archon_tools::workflow_read_guard::scope_read_only_boundary(
-                        read_only,
-                        on_heap(|| client.run_agent_raw_request(&request, request.task.clone())),
+            let (response, captured) =
+                workflow_live_v2_client::structured_trace::capture(stage_landing::scope(
+                    records.clone(),
+                    archon_tools::workflow_read_guard::scope_run_store(
+                        run_store,
+                        archon_tools::workflow_read_guard::scope_read_only_boundary(
+                            read_only,
+                            on_heap(|| {
+                                client.run_agent_raw_request(&request, request.task.clone())
+                            }),
+                        ),
                     ),
-                ),
-            )
-            .await;
+                ))
+                .await;
             if let Some(evidence) = &mut evidence {
                 evidence.finish(&response)?;
             }
@@ -329,7 +332,9 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                     "raw provider outcome returned empty content".to_string(),
                 ));
             }
-            return Ok(raw_evidence::raw_outcome_result(outcome, stop_reason));
+            let mut result = raw_evidence::raw_outcome_result(outcome, stop_reason);
+            archon_workflow::v2::tool_trace::mark_incomplete(&mut result, &captured.lost);
+            return Ok(result);
         }
         let provider_env = workflow_live_provider_env::prepare_provider_env_for_v2_request(
             &mut request,
@@ -337,7 +342,7 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         )
         .await;
         let call_client = client.with_provider_tier(provider_tier_for_v2_request(&request));
-        let (outcome, trace) = workflow_live_v2_client::structured_trace::capture(
+        let (outcome, captured) = workflow_live_v2_client::structured_trace::capture(
             archon_tools::workflow_read_guard::scope_run_store(
                 run_store,
                 archon_tools::workflow_read_guard::scope_read_only_boundary(
@@ -360,8 +365,9 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                 // agent's report of itself.
                 archon_workflow::v2::tool_trace::record_structured_trace(
                     &mut result,
-                    trace.as_deref(),
+                    captured.trace.as_deref(),
                 );
+                archon_workflow::v2::tool_trace::mark_incomplete(&mut result, &captured.lost);
                 workflow_live_provider_env::stamp_provider_env_result(
                     &mut result,
                     provider_env.as_ref(),

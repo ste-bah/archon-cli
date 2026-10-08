@@ -138,6 +138,10 @@ async fn structured_result_carries_the_observed_trace_beside_the_agent_report() 
         trace["filesRead"][0]["path"], "src/token_store.rs",
         "{trace}"
     );
+    // The agent claims a read the trace never saw: named, not silent.
+    let check = &trace["claimCheck"];
+    assert_eq!(check["claimsMatchTrace"], false, "{trace}");
+    assert_eq!(check["filesRead"]["unobserved"][0], "agent/claimed.rs");
     assert!(
         trace["commandsRun"][0]["command"]
             .as_str()
