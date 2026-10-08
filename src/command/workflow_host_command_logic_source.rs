@@ -133,7 +133,9 @@ pub(crate) fn hashed_text(text: &str) -> String {
     let last = kept.iter().rposition(|line| !line.trim().is_empty());
     let cut = kept.iter().enumerate().find_map(|(at, line)| {
         let block = *line == "#[cfg(test)]" && kept.get(at + 1).is_some_and(|l| opener(l));
-        let close = kept[at + 1..].iter().position(|l| l.starts_with('}'));
+        // Only a line that is the brace alone closes it: code after the
+        // brace on that line is hashed.
+        let close = kept[at + 1..].iter().position(|l| l.trim_end() == "}");
         (block && close.map(|close| at + 1 + close) == last).then_some(at)
     });
     kept.truncate(cut.unwrap_or(kept.len()));

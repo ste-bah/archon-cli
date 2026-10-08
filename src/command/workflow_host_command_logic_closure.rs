@@ -42,9 +42,10 @@ enum Res {
 pub(crate) struct Closure {
     pub(crate) files: BTreeSet<PathBuf>,
     pub(crate) denied: BTreeMap<String, BTreeSet<PathBuf>>,
-    /// Each hashed file's references to other workspace files.
+    /// Each hashed file's references to other workspace files, denied and
+    /// dropped ones included.
     pub(crate) references: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
-    /// The file through which each hashed file was first reached.
+    /// The file through which each reached file was first reached.
     pub(crate) parents: BTreeMap<PathBuf, PathBuf>,
     /// Every resolved reference, item to item (`usize::MAX` for the file
     /// itself). It is in the digest, so re-pointing a `use` between two
@@ -418,6 +419,16 @@ impl Workspace {
         let (mut items, mut touched) = (BTreeSet::new(), BTreeSet::new());
         while let Some((krate, file, item, from)) = queue.pop_front() {
             let rel = self.rel(&file);
+            // Recorded before any stop, so a reference that lands on a file
+            // the walk then drops shows as neither hashed nor denied.
+            if let Some(from) = from.filter(|from| *from != rel) {
+                closure
+                    .references
+                    .entry(from.clone())
+                    .or_default()
+                    .insert(rel.clone());
+                closure.parents.entry(rel.clone()).or_insert(from);
+            }
             if let Some(entry) = Self::denied(&rel, deny) {
                 closure
                     .denied
@@ -428,14 +439,6 @@ impl Workspace {
             }
             if is_test_file(&rel) || !self.crates[&krate].files.contains_key(&file) {
                 continue;
-            }
-            if let Some(from) = from.filter(|from| *from != rel) {
-                closure
-                    .references
-                    .entry(from.clone())
-                    .or_default()
-                    .insert(rel.clone());
-                closure.parents.entry(rel.clone()).or_insert(from);
             }
             let mut reached = Vec::new();
             if touched.insert(file.clone()) {

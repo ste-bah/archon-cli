@@ -99,35 +99,47 @@ fn logic_361_sources_match_their_pinned_digest() {
     );
 }
 
+/// What makes a capability's walk unsound: a reference it could not
+/// resolve, or one that lands on a file neither hashed nor denied (a file
+/// the walk dropped). The walk records every reference before it stops.
+pub(crate) fn walk_problems(hashed: &Hashed) -> Vec<String> {
+    let closure = &hashed.closure;
+    let denied = closure.denied.values().flatten().collect::<BTreeSet<_>>();
+    let mut problems = hashed.errors.iter().cloned().collect::<Vec<_>>();
+    for (from, targets) in &closure.references {
+        if !closure.files.contains(from) {
+            problems.push(format!(
+                "{} references from outside the closure",
+                from.display()
+            ));
+        }
+        for target in targets {
+            if !closure.files.contains(target) && !denied.contains(target) {
+                problems.push(format!(
+                    "{} references {}, which is neither hashed nor denied",
+                    from.display(),
+                    target.display()
+                ));
+            }
+        }
+    }
+    problems
+}
+
 /// The walk is sound: every reference it meets resolves, and lands on a
 /// hashed or a denied file. Every denylist entry is reached and says why.
+/// `workflow_host_command_logic_walk_tests` proves this check can fail.
 #[test]
 fn logic_361_every_referenced_module_is_hashed_or_denied() {
     let mut reached = BTreeSet::new();
     for (id, hashed) in REPOSITORY.iter() {
+        let problems = walk_problems(hashed);
         assert!(
-            hashed.errors.is_empty(),
-            "{id}: references the logic walk cannot resolve (teach the walk, never \
-             ignore them):\n{}",
-            hashed.errors.iter().cloned().collect::<Vec<_>>().join("\n")
+            problems.is_empty(),
+            "{id}: the logic walk is unsound (teach the walk, never ignore it):\n{}",
+            problems.join("\n")
         );
         let closure = &hashed.closure;
-        let denied = closure.denied.values().flatten().collect::<BTreeSet<_>>();
-        for (from, targets) in &closure.references {
-            assert!(
-                closure.files.contains(from),
-                "{id}: {} not hashed",
-                from.display()
-            );
-            for target in targets {
-                assert!(
-                    closure.files.contains(target) || denied.contains(target),
-                    "{id}: {} references {}, which is neither hashed nor denied",
-                    from.display(),
-                    target.display()
-                );
-            }
-        }
         reached.extend(closure.denied.keys().cloned());
     }
     for (entry, reason) in LOGIC_DENYLIST {
@@ -195,10 +207,10 @@ fn logic_361_review_logic_changes_trip_the_guard() {
 }
 
 /// A small workspace: the binary crate and one library crate.
-struct Tree(tempfile::TempDir);
+pub(crate) struct Tree(tempfile::TempDir);
 
 impl Tree {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let tree = Self(tempfile::tempdir().unwrap());
         tree.write("src/main.rs", "mod command;\n");
         tree.write(
@@ -207,12 +219,12 @@ impl Tree {
         );
         tree
     }
-    fn write(&self, path: &str, text: &str) {
+    pub(crate) fn write(&self, path: &str, text: &str) {
         let path = self.0.path().join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
     }
-    fn hash(&self, deny: &[(&str, &str)]) -> Hashed {
+    pub(crate) fn hash(&self, deny: &[(&str, &str)]) -> Hashed {
         let mut workspace = Workspace::new(self.0.path());
         sources_digest(
             &mut workspace,
@@ -221,12 +233,12 @@ impl Tree {
             deny,
         )
     }
-    fn digest(&self) -> String {
+    pub(crate) fn digest(&self) -> String {
         let hashed = self.hash(&[]);
         assert!(hashed.errors.is_empty(), "{:?}", hashed.errors);
         hashed.digest
     }
-    fn files(&self) -> BTreeSet<String> {
+    pub(crate) fn files(&self) -> BTreeSet<String> {
         let hashed = self.hash(&[]);
         let files = hashed.closure.files.iter();
         files

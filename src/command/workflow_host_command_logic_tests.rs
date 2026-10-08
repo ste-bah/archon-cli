@@ -11,8 +11,8 @@ use crate::command::workflow_host_command_exec::{
     FixedHostCommandExecutor, WorkflowHostCommandExecutor,
 };
 use crate::command::workflow_host_command_logic::{
-    BASELINE_LOGIC_VERSION, CAPABILITY_LOGIC, LOGIC_DIGEST_STAMP, LOGIC_VERSION_STAMP, judges_only,
-    outcome_logic_holds,
+    BASELINE_LOGIC_VERSION, CAPABILITY_LOGIC, LOGIC_BUILD_STAMP, LOGIC_DIGEST_STAMP,
+    LOGIC_VERSION_STAMP, THIS_BUILD, judges_only, outcome_logic_holds,
 };
 
 #[test]
@@ -107,28 +107,28 @@ fn logic_361_policy_for_stamped_and_unstamped_outcomes() {
     ));
 }
 
-/// The cheap checks replay only under the source digest they were judged
-/// by; the others keep version-only reuse (Steven decides on those).
+/// The cheap checks replay only under the build that judged them; the
+/// others keep version-only reuse (Steven decides on those).
 #[test]
-fn logic_361_cheap_checks_replay_only_under_the_same_logic_digest() {
-    let stamped = |digest: Option<serde_json::Value>| {
-        let mut data = serde_json::json!({ LOGIC_VERSION_STAMP: 1 });
-        if let Some(digest) = digest {
-            data[LOGIC_DIGEST_STAMP] = digest;
+fn logic_361_cheap_checks_replay_only_under_the_same_build() {
+    let stamped = |build: Option<serde_json::Value>| {
+        let mut data = serde_json::json!({ LOGIC_VERSION_STAMP: 1, LOGIC_DIGEST_STAMP: "pin" });
+        if let Some(build) = build {
+            data[LOGIC_BUILD_STAMP] = build;
         }
         data
     };
-    let bound = Some("digest-b");
-    // The same source: it replays.
+    let bound = Some("build-b");
+    // The same build: it replays.
     assert!(outcome_logic_holds(
-        &stamped(Some("digest-b".into())),
+        &stamped(Some("build-b".into())),
         1,
         true,
         bound
     ));
-    // Other source, no digest (an earlier binary), or a malformed one: never.
+    // Another build, no build (an earlier binary), or a malformed one: never.
     assert!(!outcome_logic_holds(
-        &stamped(Some("digest-a".into())),
+        &stamped(Some("build-a".into())),
         1,
         true,
         bound
@@ -140,16 +140,16 @@ fn logic_361_cheap_checks_replay_only_under_the_same_logic_digest() {
         true,
         bound
     ));
-    // The same digest never rescues another version.
+    // The same build never rescues another version.
     assert!(!outcome_logic_holds(
-        &stamped(Some("digest-b".into())),
+        &stamped(Some("build-b".into())),
         2,
         true,
         bound
     ));
     // Not bound: the version alone decides.
     assert!(outcome_logic_holds(
-        &stamped(Some("digest-a".into())),
+        &stamped(Some("build-a".into())),
         1,
         true,
         None
@@ -158,19 +158,18 @@ fn logic_361_cheap_checks_replay_only_under_the_same_logic_digest() {
 }
 
 #[test]
-fn logic_361_fixed_executor_binds_only_verify_and_trace_to_the_digest() {
+fn logic_361_fixed_executor_binds_only_verify_and_trace_to_the_build() {
     let temp = tempfile::tempdir().unwrap();
     let context = crate::command::workflow_host_command_exec_tests::context(temp.path());
     let catalog = fixed_decomposition_catalog("rev-a").unwrap();
     let launched =
         FixedHostCommandExecutor::new(catalog.clone(), context.clone(), temp.path().join("run"));
-    let mut changed = FixedHostCommandExecutor::new(catalog, context, temp.path().join("run"));
-    for logic in CAPABILITY_LOGIC {
-        changed = changed.with_logic_digest(logic.id, "other-source");
-    }
+    // Another binary, with the same versions and the same pinned digests.
+    let rebuilt = FixedHostCommandExecutor::new(catalog, context, temp.path().join("run"))
+        .with_build("other-build");
     for logic in CAPABILITY_LOGIC {
         let request = HostCommandRequest::new(logic.id, None).unwrap();
-        // The host stamps the pinned digest of the capability's closure.
+        // The host stamps the pinned digest and this binary's build.
         let digest = launched.logic_digest(&request).unwrap();
         assert_eq!(
             digest.as_deref(),
@@ -178,25 +177,28 @@ fn logic_361_fixed_executor_binds_only_verify_and_trace_to_the_digest() {
             "{}",
             logic.id
         );
+        let build = launched.logic_build(&request).unwrap();
+        assert_eq!(build.as_deref(), Some(THIS_BUILD), "{}", logic.id);
         let data = serde_json::json!({
             LOGIC_VERSION_STAMP: logic.version,
             LOGIC_DIGEST_STAMP: digest,
+            LOGIC_BUILD_STAMP: build,
         });
         let holds = |executor: &FixedHostCommandExecutor| {
             executor
                 .outcome_logic_holds(&record(logic.id, data.clone()))
                 .unwrap()
         };
-        assert!(holds(&launched), "{}: same source", logic.id);
+        assert!(holds(&launched), "{}: same build", logic.id);
         let cheap = [
             "verify-frozen-acceptance",
             "verify-frozen-skeleton",
             "requirements-trace",
         ];
         assert_eq!(
-            holds(&changed),
+            holds(&rebuilt),
             !cheap.contains(&logic.id),
-            "{}: other source",
+            "{}: other build",
             logic.id
         );
     }
@@ -245,6 +247,7 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
         let stamped = serde_json::json!({
             LOGIC_VERSION_STAMP: BASELINE_LOGIC_VERSION,
             LOGIC_DIGEST_STAMP: baseline.logic_digest(&request).unwrap(),
+            LOGIC_BUILD_STAMP: baseline.logic_build(&request).unwrap(),
         });
         assert!(holds(&baseline, command, &stamped), "{command}: same logic");
     }
@@ -345,4 +348,26 @@ fn logic_361_a_bump_rekeys_that_capability_alone_and_none_names_no_key() {
     let undeclared = build(Some(("freeze-skeleton", None)));
     let error = undeclared.call_identity(&skeleton).unwrap_err().to_string();
     assert!(error.contains("has no logic version"), "{error}");
+}
+
+/// The cheap checks bind to the binary, not to a pinned digest: a record
+/// that carries this build's version and pinned digest but no build stamp
+/// (a binary that stamped none, or a stale pin shipped by a build that
+/// skipped the guard test) never replays one.
+#[test]
+fn logic_361_a_cheap_check_without_this_builds_stamp_never_replays() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = crate::command::workflow_host_command_exec_tests::context(temp.path());
+    let catalog = fixed_decomposition_catalog("rev-a").unwrap();
+    let executor = FixedHostCommandExecutor::new(catalog, context, temp.path().join("run"));
+    for logic in CAPABILITY_LOGIC {
+        let data = serde_json::json!({
+            LOGIC_VERSION_STAMP: logic.version,
+            LOGIC_DIGEST_STAMP: logic.sources_digest,
+        });
+        let holds = executor
+            .outcome_logic_holds(&record(logic.id, data))
+            .unwrap();
+        assert_eq!(holds, !logic.build_bound, "{}", logic.id);
+    }
 }

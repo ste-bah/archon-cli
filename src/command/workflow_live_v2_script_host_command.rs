@@ -5,9 +5,9 @@ use super::*;
 impl WorkflowScriptHost {
     /// `data` with what the host command `call` ran under: its limits
     /// (Issue 358), so a resume replays an outcome a limit cut short only
-    /// under the same limits, and the logic version and source digest that
-    /// judged it (Issue 361), so a resume replays a verdict only under the
-    /// same logic. Other calls, and executors that apply none, are unchanged.
+    /// under the same limits, and the logic version, source digest and build
+    /// that judged it (Issue 361), so a resume replays a verdict only under
+    /// the same logic. Other calls, and executors that apply none, are unchanged.
     pub(super) fn stamp_host_outcome(
         &self,
         call: &archon_workflow::WorkflowV2HostCall,
@@ -25,6 +25,7 @@ impl WorkflowScriptHost {
         let limits = executor.limits_fingerprint(request)?;
         let logic = executor.logic_version(request)?;
         let digest = executor.logic_digest(request)?;
+        let build = executor.logic_build(request)?;
         if let Some(map) = data.as_object_mut() {
             if let Some(stamp) = limits {
                 map.insert(
@@ -42,6 +43,12 @@ impl WorkflowScriptHost {
                 map.insert(
                     crate::command::workflow_host_command_logic::LOGIC_DIGEST_STAMP.into(),
                     serde_json::json!(digest),
+                );
+            }
+            if let Some(build) = build {
+                map.insert(
+                    crate::command::workflow_host_command_logic::LOGIC_BUILD_STAMP.into(),
+                    serde_json::json!(build),
                 );
             }
         }

@@ -81,6 +81,11 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn logic_digest(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
         Ok(None)
     }
+    /// Issue 361: the build a call of `request` is judged by, stamped into
+    /// its outcome; `None` for an executor that names none.
+    fn logic_build(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
+        Ok(None)
+    }
 
     async fn execute(
         &self,
@@ -121,8 +126,11 @@ pub(crate) struct FixedHostCommandExecutor {
     launch_catalog: Option<CommandCapabilityCatalog>,
     /// Issue 361: each capability's logic version, part of its reuse key.
     logic: BTreeMap<String, u32>,
-    /// Issue 361: each capability's logic digest, and whether reuse binds to it.
+    /// Issue 361: each capability's pinned logic digest, and whether its
+    /// reuse binds to the build.
     logic_digests: BTreeMap<String, (String, bool)>,
+    /// Issue 361: the build that judges every call here.
+    build: String,
     context: HostCommandResolutionContext,
     run_root: PathBuf,
     process: Arc<dyn HostCommandProcessAdapter>,
@@ -155,6 +163,7 @@ impl FixedHostCommandExecutor {
             launch_catalog: None,
             logic: super::workflow_host_command_logic::versions(),
             logic_digests: super::workflow_host_command_logic::digests(),
+            build: super::workflow_host_command_logic::THIS_BUILD.to_string(),
             context,
             run_root,
             process,
@@ -254,6 +263,10 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             .logic_digests
             .get(&request.command_id)
             .map(|(digest, _)| digest.clone()))
+    }
+
+    fn logic_build(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
+        Ok(Some(self.build.clone()))
     }
 
     async fn execute(

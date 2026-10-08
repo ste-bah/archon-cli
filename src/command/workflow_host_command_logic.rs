@@ -12,20 +12,24 @@
 //! - [`BASELINE_LOGIC_VERSION`] adds nothing to the key, so a capability
 //!   whose logic never changed keeps the keys the records written before
 //!   logic versions already hold.
-//! - Every outcome records the version that judged it ([`LOGIC_VERSION_STAMP`])
-//!   and the digest of the source it was judged by ([`LOGIC_DIGEST_STAMP`]).
+//! - Every outcome records the version that judged it ([`LOGIC_VERSION_STAMP`]),
+//!   the pinned digest of its source ([`LOGIC_DIGEST_STAMP`]) and the build
+//!   that judged it ([`LOGIC_BUILD_STAMP`]).
 //!   An outcome without a version stamp was written before logic versions,
 //!   by some earlier binary (any one, from before b22 too), so a runtime
 //!   transition lies between it and this read; what it was judged by is
 //!   unknown. [`outcome_logic_holds`] says when such a record may still
 //!   answer.
 //! - The checks that are cheap to run again (verify-frozen-* and
-//!   requirements-trace) also need the same source digest: until a record's
-//!   stamped digest equals this build's, they never replay across a binary
-//!   change, whatever the version says. This is the backstop for a logic
-//!   change the version guard missed. task-set-lint (its critic run is
+//!   requirements-trace) also need the same build: a record replays only
+//!   when it was stamped by this very binary ([`THIS_BUILD`], the build
+//!   fingerprint of every source file, as the critic findings store uses).
+//!   Any binary change re-runs them, whatever the version and the pinned
+//!   digest say, and a record without a build stamp never replays one. This
+//!   is the backstop for a logic change the version guard missed, and for a
+//!   build that shipped a stale pin. task-set-lint (its critic run is
 //!   costly) and the landings keep version-only reuse; whether they also
-//!   bind to the digest is Steven's decision.
+//!   bind to the build is Steven's decision.
 //!
 //! A developer cannot change a capability's logic and forget the version:
 //! `sources_digest` pins every source file its verdict is built from (the
@@ -58,6 +62,13 @@ pub(crate) const LOGIC_VERSION_STAMP: &str = "logicVersion";
 /// judged it.
 pub(crate) const LOGIC_DIGEST_STAMP: &str = "logicDigest";
 
+/// Where a host command's outcome records the build that judged it.
+pub(crate) const LOGIC_BUILD_STAMP: &str = "logicBuild";
+
+/// This binary's build fingerprint (`build.rs`): it changes with any
+/// source, manifest, toolchain or profile change.
+pub(crate) const THIS_BUILD: &str = env!("ARCHON_BUILD_FINGERPRINT");
+
 /// The reuse-key token that carries a version above the baseline.
 pub(crate) const LOGIC_VERSION_TOKEN: &str = "CAPABILITY_LOGIC_VERSION";
 
@@ -73,8 +84,9 @@ pub(crate) struct CapabilityLogic {
     pub(crate) sources: &'static [&'static [&'static str]],
     /// Stamped into every outcome ([`LOGIC_DIGEST_STAMP`]).
     pub(crate) sources_digest: &'static str,
-    /// A record replays only under the same `sources_digest` as well.
-    pub(crate) digest_bound: bool,
+    /// A record replays only when this very build ([`THIS_BUILD`]) judged
+    /// it as well.
+    pub(crate) build_bound: bool,
 }
 
 /// Files the closure of a capability reaches that no verdict depends on,
@@ -85,8 +97,11 @@ pub(crate) struct CapabilityLogic {
 pub(crate) const LOGIC_DENYLIST: &[(&str, &str)] = &[
     (
         "crates/archon-llm/",
-        "LLM provider transport and model catalogue: how a critic request travels, not \
-         what it asks or how its reply is read (both are hashed)",
+        "LLM provider transport and model catalogue. The catalogue resolves the critic's \
+         model alias, so a remap changes which model judges task-set-lint: that is a \
+         model choice, not logic. It re-runs no recorded verdict; a lint that runs anyway \
+         asks the critic again, as its findings store keys on the resolved model. The \
+         request and its reply reader are hashed",
     ),
     (
         "src/command/pipeline_workflow_llm.rs",
@@ -191,49 +206,49 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 1,
         sources: &[GATE, CONTRACT, FREEZE],
         sources_digest: "8a6a301bddba947470b044b55afa40a2842470f452e8a8abacc397e11ffaab53",
-        digest_bound: false,
+        build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, FREEZE],
         sources_digest: "8a6a301bddba947470b044b55afa40a2842470f452e8a8abacc397e11ffaab53",
-        digest_bound: false,
+        build_bound: false,
     },
     CapabilityLogic {
         id: "land-task-body",
         version: 1,
         sources: &[GATE, CONTRACT, LINT],
         sources_digest: "182816359967cfa315c211e02b6d3cdc0d4f17a19cb1dbaf75f1c77b80b66dd0",
-        digest_bound: false,
+        build_bound: false,
     },
     CapabilityLogic {
         id: "task-set-lint",
         version: 1,
         sources: &[GATE, CONTRACT, LINT],
         sources_digest: "182816359967cfa315c211e02b6d3cdc0d4f17a19cb1dbaf75f1c77b80b66dd0",
-        digest_bound: false,
+        build_bound: false,
     },
     CapabilityLogic {
         id: "requirements-trace",
         version: 1,
         sources: &[GATE, CONTRACT, TRACE],
         sources_digest: "0987c04a120dc8bd7a66c9fe308ed9414dc817a65f82e1714f8d969802dedb45",
-        digest_bound: true,
+        build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-acceptance",
         version: 1,
         sources: &[GATE, CONTRACT, VERIFY],
         sources_digest: "756970becad644c788aef03a7a92923584b30c1b054659edec309036b3504513",
-        digest_bound: true,
+        build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, VERIFY],
         sources_digest: "756970becad644c788aef03a7a92923584b30c1b054659edec309036b3504513",
-        digest_bound: true,
+        build_bound: true,
     },
 ];
 
@@ -245,13 +260,13 @@ pub(crate) fn versions() -> std::collections::BTreeMap<String, u32> {
         .collect()
 }
 
-/// Every capability's logic digest, by id, and whether its reuse is bound
-/// to it.
+/// Every capability's pinned logic digest, by id, and whether its reuse is
+/// bound to the build.
 pub(crate) fn digests() -> std::collections::BTreeMap<String, (String, bool)> {
     CAPABILITY_LOGIC
         .iter()
         .map(|logic| {
-            let digest = (logic.sources_digest.to_string(), logic.digest_bound);
+            let digest = (logic.sources_digest.to_string(), logic.build_bound);
             (logic.id.to_string(), digest)
         })
         .collect()
@@ -280,8 +295,8 @@ pub(crate) fn judges_only(capability: &CommandCapability) -> bool {
         .all(|write| write == "{GATE_ENVELOPE}")
 }
 
-/// Whether a recorded outcome may answer again under logic `current`, whose
-/// source digest is `bound` when the capability's reuse is bound to it.
+/// Whether a recorded outcome may answer again under logic `current`, run
+/// by build `bound` when the capability's reuse is bound to the build.
 ///
 /// A stamped outcome answers only under the version it records. An
 /// unstamped one predates logic versions and was written by another binary:
@@ -291,8 +306,9 @@ pub(crate) fn judges_only(capability: &CommandCapability) -> bool {
 ///   still the baseline: its artifact is on disk, the checks after it run
 ///   again on this build, and its key changes with its first version bump.
 ///
-/// A digest-bound outcome also needs the digest `bound` stamped: one judged
-/// by other source, or by a binary that stamped none, runs again.
+/// A build-bound outcome also needs the build `bound` stamped: one judged
+/// by another binary, or by one that stamped no build, runs again. The
+/// pinned digest is not compared: it moves only when a developer re-pins.
 pub(crate) fn outcome_logic_holds(
     data: &serde_json::Value,
     current: u32,
@@ -303,10 +319,10 @@ pub(crate) fn outcome_logic_holds(
         Some(stamp) => stamp.as_u64() == Some(u64::from(current)),
         None => !checks && current == BASELINE_LOGIC_VERSION,
     };
-    let source = bound.is_none_or(|digest| {
-        data.get(LOGIC_DIGEST_STAMP)
+    let build = bound.is_none_or(|build| {
+        data.get(LOGIC_BUILD_STAMP)
             .and_then(serde_json::Value::as_str)
-            == Some(digest)
+            == Some(build)
     });
-    version && source
+    version && build
 }

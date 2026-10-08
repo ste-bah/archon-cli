@@ -3,7 +3,7 @@
 //! verdict recorded before logic versions never answers for a check.
 use super::*;
 use crate::command::workflow_host_command_logic::{
-    CAPABILITY_LOGIC, LOGIC_DIGEST_STAMP, LOGIC_VERSION_STAMP,
+    LOGIC_BUILD_STAMP, LOGIC_VERSION_STAMP, THIS_BUILD,
 };
 
 /// A binary from before logic versions: the same keys, no stamp, no check.
@@ -77,11 +77,11 @@ impl Run {
     /// A later build: a freeze-skeleton limit changed (a binary that is not
     /// the launch one), and each of `bumps` runs another logic version.
     fn upgraded(&self, bumps: &[(&str, u32)]) -> Arc<CatalogHost> {
-        self.rebuilt(bumps, &[])
+        self.rebuilt(bumps, None)
     }
 
-    /// As [`Self::upgraded`], where each of `sources` hashes to other source.
-    fn rebuilt(&self, bumps: &[(&str, u32)], sources: &[&str]) -> Arc<CatalogHost> {
+    /// As [`Self::upgraded`], built as another binary `build` when given.
+    fn rebuilt(&self, bumps: &[(&str, u32)], build: Option<&str>) -> Arc<CatalogHost> {
         let mut keys = FixedHostCommandExecutor::new(
             changed(&self.launch, "freeze-skeleton", "timeout"),
             self.context.clone(),
@@ -91,8 +91,8 @@ impl Run {
         for (id, version) in bumps {
             keys = keys.with_logic_version(id, Some(*version));
         }
-        for id in sources {
-            keys = keys.with_logic_digest(id, "other-source");
+        if let Some(build) = build {
+            keys = keys.with_build(build);
         }
         Arc::new(CatalogHost {
             keys,
@@ -134,8 +134,8 @@ impl Run {
         (summary.executed, summary.reused)
     }
 
-    /// The logic digest each recorded outcome of `command` carries.
-    fn digests(&self, command: &str) -> Vec<Option<String>> {
+    /// The build each recorded outcome of `command` carries.
+    fn builds(&self, command: &str) -> Vec<Option<String>> {
         let records = self.v2.load_call_records().unwrap().into_iter();
         records
             .filter(|record| {
@@ -143,7 +143,7 @@ impl Run {
                 request.is_some_and(|request| request.command_id == command)
             })
             .map(|record| {
-                let digest = record.result.data.get(LOGIC_DIGEST_STAMP);
+                let digest = record.result.data.get(LOGIC_BUILD_STAMP);
                 digest.and_then(|v| v.as_str()).map(str::to_string)
             })
             .collect()
@@ -268,44 +268,28 @@ async fn logic_361_unversioned_check_history_is_not_replayed() {
     assert_eq!(run.run(run.upgraded(&[]), script).await, (0, 2));
 }
 
-/// The backstop: a later binary whose source of a cheap check differs runs
-/// that check again even at the same version; task-set-lint and the
-/// landings keep version-only reuse.
+/// The backstop: another binary runs the cheap checks again even at the
+/// same version and pinned digest; task-set-lint and the landings keep
+/// version-only reuse.
 #[tokio::test]
-async fn logic_361_other_source_reruns_only_the_cheap_checks() {
+async fn logic_361_another_build_reruns_only_the_cheap_checks() {
     let run = Run::new();
     assert_eq!(run.run(Arc::new(run.launched()), SCRIPT).await, (4, 0));
-    let pinned = |id: &str| {
-        let logic = CAPABILITY_LOGIC
-            .iter()
-            .find(|logic| logic.id == id)
-            .unwrap();
-        Some(logic.sources_digest.to_string())
-    };
-    assert_eq!(
-        run.digests("requirements-trace"),
-        vec![pinned("requirements-trace")]
-    );
-    let all = [
-        "freeze-skeleton",
-        "verify-frozen-acceptance",
-        "task-set-lint",
-        "requirements-trace",
-    ];
-    let rebuilt = run.rebuilt(&[], &all);
+    let this = Some(THIS_BUILD.to_string());
+    assert_eq!(run.builds("requirements-trace"), vec![this.clone()]);
+    let rebuilt = run.rebuilt(&[], Some("build-b"));
     assert_eq!(run.run(rebuilt.clone(), SCRIPT).await, (2, 2));
     assert_eq!(rebuilt.calls.load(Ordering::SeqCst), 2);
-    // Run again and stamped by the new source, they now replay on it.
-    assert!(
-        run.digests("verify-frozen-acceptance")
-            .contains(&Some("other-source".into()))
+    // Run again and stamped by the new build, they now replay on it.
+    let b = Some("build-b".to_string());
+    assert!(run.builds("verify-frozen-acceptance").contains(&b));
+    assert!(run.builds("requirements-trace").contains(&b));
+    assert_eq!(run.builds("task-set-lint"), vec![this]);
+    assert_eq!(
+        run.run(run.rebuilt(&[], Some("build-b")), SCRIPT).await,
+        (0, 4)
     );
-    assert_eq!(run.digests("task-set-lint"), vec![pinned("task-set-lint")]);
-    assert_eq!(run.run(run.rebuilt(&[], &all), SCRIPT).await, (0, 4));
-    // Only one cheap check's source changed: only it runs.
-    let one = run.rebuilt(
-        &[],
-        &["freeze-skeleton", "task-set-lint", "requirements-trace"],
-    );
-    assert_eq!(run.run(one, SCRIPT).await, (1, 3));
+    // Any further binary change runs them again.
+    let again = run.rebuilt(&[], Some("build-c"));
+    assert_eq!(run.run(again, SCRIPT).await, (2, 2));
 }

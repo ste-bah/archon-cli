@@ -174,12 +174,10 @@ impl FixedHostCommandExecutor {
         self
     }
 
-    /// A build whose capability `id` hashes to `digest` (tests).
+    /// Another binary, whose build fingerprint is `build` (tests).
     #[cfg(test)]
-    pub(crate) fn with_logic_digest(mut self, id: &str, digest: &str) -> Self {
-        if let Some(entry) = self.logic_digests.get_mut(id) {
-            entry.0 = digest.to_string();
-        }
+    pub(crate) fn with_build(mut self, build: &str) -> Self {
+        self.build = build.to_string();
         self
     }
 
@@ -202,8 +200,8 @@ impl FixedHostCommandExecutor {
         let bound = self
             .logic_digests
             .get(&request.command_id)
-            .filter(|(_, bound)| *bound)
-            .map(|(digest, _)| digest.as_str());
+            .is_some_and(|(_, bound)| *bound)
+            .then_some(self.build.as_str());
         let holds = logic::outcome_logic_holds(
             &record.result.data,
             self.logic_version_for(&request.command_id)?,
@@ -215,7 +213,7 @@ impl FixedHostCommandExecutor {
                 call_id = %record.call.id,
                 command_id = %request.command_id,
                 recorded = %record.result.data.get(logic::LOGIC_VERSION_STAMP).map_or_else(|| "none".to_string(), ToString::to_string),
-                recorded_digest = %record.result.data.get(logic::LOGIC_DIGEST_STAMP).map_or_else(|| "none".to_string(), ToString::to_string),
+                recorded_build = %record.result.data.get(logic::LOGIC_BUILD_STAMP).map_or_else(|| "none".to_string(), ToString::to_string),
                 "host command outcome was judged by other logic; it runs again"
             );
         }
