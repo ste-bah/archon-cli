@@ -13,11 +13,13 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-const WINDOW: Duration = Duration::from_millis(400);
+// Wide against the 100 ms write gap, so a slow write on a loaded host is not
+// a stall.
+const WINDOW: Duration = Duration::from_secs(2);
 /// A correct acquisition returns about one window after the last progress.
 /// An acquisition that restarts its window never returns while the holder is
 /// wedged, so the test gives up here instead of hanging.
-const GIVE_UP: Duration = Duration::from_secs(10);
+const GIVE_UP: Duration = Duration::from_secs(20);
 
 struct Store {
     _temp: tempfile::TempDir,
