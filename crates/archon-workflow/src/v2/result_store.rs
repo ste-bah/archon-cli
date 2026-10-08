@@ -51,23 +51,6 @@ impl WorkflowV2ResultStore {
         &self.root
     }
 
-    pub fn run_id(&self) -> String {
-        if self.root.file_name().and_then(|name| name.to_str()) == Some("v2") {
-            return self
-                .root
-                .parent()
-                .and_then(|path| path.file_name())
-                .and_then(|name| name.to_str())
-                .unwrap_or("unknown-run")
-                .to_string();
-        }
-        self.root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("unknown-run")
-            .to_string()
-    }
-
     pub fn result_path(&self, call_id: &str) -> PathBuf {
         let hash = blake3::hash(call_id.as_bytes()).to_hex().to_string();
         self.root
@@ -82,29 +65,12 @@ impl WorkflowV2ResultStore {
     pub fn branch_outcome_path(&self, call_id: &str, item_id: &str) -> PathBuf {
         self.root
             .join("branches")
-            .join(sanitize_call_id(call_id))
-            .join(format!("{}.json", sanitize_call_id(item_id)))
+            .join(branch_component(call_id))
+            .join(format!("{}.json", branch_component(item_id)))
     }
 
-    pub fn rejected_output_path(&self, branch_id: &str) -> PathBuf {
-        self.root
-            .join("rejected-outputs")
-            .join(format!("{}.json", sanitize_call_id(branch_id)))
-    }
-
-    pub fn append_rejected_output(
-        &self,
-        branch_id: &str,
-        record: WorkflowV2RejectedOutput,
-    ) -> WorkflowResult<PathBuf> {
-        self.with_session_write_lock(|| {
-            let path = self.rejected_output_path(branch_id);
-            let mut log = load_rejected_output_log(&path)?;
-            log.branch_id = branch_id.to_string();
-            log.rejections.push(record);
-            write_json(&path, &log)?;
-            Ok(path)
-        })
+    pub(crate) fn branch_call_dir(&self, call_id: &str) -> PathBuf {
+        self.root.join("branches").join(branch_component(call_id))
     }
 
     pub fn save_call_record(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<()> {
@@ -155,16 +121,27 @@ impl WorkflowV2ResultStore {
         outcome: &WorkflowV2BranchOutcome,
     ) -> WorkflowResult<PathBuf> {
         let path = self.branch_outcome_path(call_id, &outcome.item_id);
+        migrate_legacy_branch_archive(self, call_id)?;
+        migrate_legacy_branch_outcome(self, call_id, &outcome.item_id, &path)?;
         // Authoritative, like a call record: never log-redacted (Issue-245).
         let clean = outcome.clone();
-        archive_superseded_json(&path, self.durable, |existing: &WorkflowV2BranchOutcome| {
-            match (&existing.item_input_hash, &clean.item_input_hash) {
-                (Some(old), Some(new)) => old == new,
-                // Missing identity on either side: treat as an in-place update
-                // of the same execution, never a supersede.
-                _ => true,
-            }
-        })?;
+        archive_superseded_json_into(
+            &path,
+            &path
+                .parent()
+                .unwrap()
+                .join("superseded")
+                .join(branch_component(&outcome.item_id)),
+            self.durable,
+            |existing: &WorkflowV2BranchOutcome| {
+                match (&existing.item_input_hash, &clean.item_input_hash) {
+                    (Some(old), Some(new)) => old == new,
+                    // Missing identity on either side: treat as an in-place update
+                    // of the same execution, never a supersede.
+                    _ => true,
+                }
+            },
+        )?;
         self.write_record(&path, &clean)?;
         Ok(path)
     }
@@ -175,10 +152,15 @@ impl WorkflowV2ResultStore {
         item_id: &str,
     ) -> WorkflowResult<Option<WorkflowV2BranchOutcome>> {
         let path = self.branch_outcome_path(call_id, item_id);
-        if !path.exists() {
+        let candidate = if path.exists() {
+            path
+        } else {
+            legacy_branch_outcome_path(self, call_id, item_id)
+        };
+        if !candidate.exists() {
             return Ok(None);
         }
-        read_store_record(&path)
+        read_store_record(&candidate)
     }
 
     /// The current outcome of every branch one call fanned out, sorted by
@@ -189,10 +171,14 @@ impl WorkflowV2ResultStore {
         &self,
         call_id: &str,
     ) -> WorkflowResult<Vec<WorkflowV2BranchOutcome>> {
-        let dir = self.root.join("branches").join(sanitize_call_id(call_id));
         let mut outcomes = Vec::new();
-        if dir.is_dir() {
-            load_outcomes_from_dir(&dir, &mut outcomes)?;
+        for dir in [
+            self.branch_call_dir(call_id),
+            self.root.join("branches").join(sanitize_call_id(call_id)),
+        ] {
+            if dir.is_dir() {
+                load_outcomes_from_dir(&dir, &mut outcomes)?;
+            }
         }
         outcomes.sort_by(|left, right| left.item_id.cmp(&right.item_id));
         Ok(outcomes)
@@ -220,7 +206,8 @@ impl WorkflowV2ResultStore {
     }
 
     /// Every branch outcome a later record replaced, from each call's
-    /// `superseded/` directory. `load_branch_outcomes` is the current record
+    /// per-item directories under `superseded/`. A legacy flat archive is
+    /// read until the next save migrates it. `load_branch_outcomes` is the current record
     /// per item; a partial captured by a replaced record (Issue-18) lives
     /// only here. An unreadable archived file is skipped, never fatal: the
     /// archive is history, and one bad row must not hide the rest. Only
@@ -240,7 +227,7 @@ impl WorkflowV2ResultStore {
             if !is_candidate {
                 continue;
             }
-            for path in store_dir_entries(&call_dir.join("superseded")) {
+            for path in branch_archive_entries(&call_dir.join("superseded")) {
                 if path.extension().and_then(|value| value.to_str()) != Some("json") {
                     continue;
                 }
@@ -266,28 +253,27 @@ impl WorkflowV2ResultStore {
     }
 
     pub fn delete_branch_outcomes_for_call(&self, call_id: &str) -> WorkflowResult<usize> {
-        self.with_session_write_lock(|| {
-            let dir = self.root.join("branches").join(sanitize_call_id(call_id));
-            if !dir.exists() {
-                return Ok(0);
-            }
-            let mut deleted = 0usize;
-            for entry in fs::read_dir(&dir).map_err(|err| WorkflowError::io(&dir, err))? {
-                let entry = entry.map_err(|err| WorkflowError::io(&dir, err))?;
-                if entry
-                    .file_type()
-                    .map_err(|err| WorkflowError::io(entry.path(), err))?
-                    .is_file()
-                {
-                    deleted += 1;
-                }
-            }
-            fs::remove_dir_all(&dir).map_err(|err| WorkflowError::io(&dir, err))?;
-            if self.durable {
-                crate::durable_io::sync_dir(&self.root.join("branches"))?;
-            }
-            Ok(deleted)
-        })
+        let dir = self.branch_call_dir(call_id);
+        let legacy = self.root.join("branches").join(sanitize_call_id(call_id));
+        let mut items = if dir.exists() {
+            stored_outcomes_in(&dir)?
+                .into_iter()
+                .map(|(_, outcome)| outcome.item_id)
+                .collect::<BTreeSet<_>>()
+        } else {
+            BTreeSet::new()
+        };
+        if legacy != dir && legacy.exists() {
+            items.extend(
+                stored_outcomes_in(&legacy)?
+                    .into_iter()
+                    .map(|(_, outcome)| outcome.item_id),
+            );
+        }
+        let plan = self.plan_item_revocation(call_id, &items.into_iter().collect::<Vec<_>>())?;
+        let count = plan.iter().map(|(_, files)| files.len()).sum();
+        self.execute_item_revocation(plan)?;
+        Ok(count)
     }
 
     pub fn load_call_record(&self, call_id: &str) -> WorkflowResult<Option<WorkflowV2CallRecord>> {

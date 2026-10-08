@@ -82,10 +82,27 @@ pub fn landed_then_superseded(v2: &WorkflowV2ResultStore, task: &str) {
     let archive = v2.branch_outcome_path(CALL, &item(task).id);
     let archive = archive.parent().unwrap().join("superseded");
     assert_eq!(
-        std::fs::read_dir(archive).unwrap().count(),
+        std::fs::read_dir(archive.join(branch_component(&item(task).id)))
+            .unwrap()
+            .count(),
         1,
         "H1 archived"
     );
+}
+
+pub fn branch_component(value: &str) -> String {
+    let hash = blake3::hash(value.as_bytes()).to_hex();
+    let safe = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("{safe}-{}", &hash[..16])
 }
 
 /// `(reused, pending)` item ids for one split of `tasks`.

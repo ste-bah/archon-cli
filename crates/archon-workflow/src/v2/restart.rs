@@ -282,9 +282,16 @@ fn invalidate_generated_v2_call_cache(
         .collect::<BTreeSet<_>>();
     invalidated.extend(v2_store.invalidate_dynamic_wave_dependents(call_id)?);
     if clear_branch_outcomes {
-        let deleted = v2_store.delete_branch_outcomes_for_call(call_id)?;
-        if deleted > 0 {
-            invalidated.insert(format!("{call_id}:branches({deleted})"));
+        let calls = invalidated
+            .iter()
+            .filter(|id| !id.contains(':'))
+            .cloned()
+            .collect::<Vec<_>>();
+        for invalidated_call in calls {
+            let deleted = v2_store.delete_branch_outcomes_for_call(&invalidated_call)?;
+            if deleted > 0 {
+                invalidated.insert(format!("{invalidated_call}:branches({deleted})"));
+            }
         }
     }
     // Round 2: a live session of any run kind stops writing once the epoch

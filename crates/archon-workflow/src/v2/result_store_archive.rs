@@ -142,6 +142,7 @@ impl WorkflowV2ResultStore {
 /// built on this history. When a NEW execution claims an occupied slot, the
 /// existing file moves into a `superseded/` sibling directory first; an
 /// unreadable existing file is archived rather than clobbered.
+#[cfg(test)]
 fn archive_superseded_json<T: DeserializeOwned>(
     path: &Path,
     durable: bool,
