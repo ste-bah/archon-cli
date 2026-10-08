@@ -496,4 +496,4 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
 #[path = "workflow_decompose_resume_policy.rs"]
 pub(crate) mod policy;
 #[path = "workflow_decompose_upgrade.rs"]
-pub(super) mod upgrade;
+pub(crate) mod upgrade;

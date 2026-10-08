@@ -380,3 +380,48 @@ async fn a_running_record_without_a_marker_is_closed_at_the_next_start() {
     );
     drop(host);
 }
+
+/// Issue 368: the record the unstarted-call writer leaves for a host command
+/// passes the resume's record check, and the same record naming another
+/// call does not.
+#[tokio::test]
+async fn an_unstarted_host_command_record_passes_the_resume_check() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
+    let run = workflow_store.create_run(spec()).expect("run");
+    let v2_store = WorkflowV2ResultStore::new(workflow_store.run_dir(&run.id).join("v2"));
+    let mut call = marker("command").call;
+    call.method = WorkflowV2HostMethod::HostCommand;
+    let running = WorkflowV2CallRecord::new(
+        run.id.clone(),
+        call,
+        1,
+        "in-hash".to_string(),
+        WorkflowV2Result {
+            status: WorkflowV2Status::Running,
+            ..WorkflowV2Result::default()
+        },
+        Vec::new(),
+    );
+    v2_store.save_call_record(&running).expect("seed");
+
+    start_run(workflow_store.clone(), v2_store.clone(), &run.id).await;
+
+    let mut closed = v2_store
+        .load_call_record("command")
+        .expect("lookup")
+        .expect("record");
+    assert_eq!(closed.status, WorkflowV2Status::NeedsReview);
+    assert_eq!(closed.result.data["interrupted"], UNSTARTED_REASON);
+    crate::command::workflow_decompose::upgrade::validate_result_state(&workflow_store, &run.id)
+        .expect("an interrupted host command does not block a resume");
+    closed.result.data["call_id"] = serde_json::json!("another-call");
+    v2_store.save_call_record(&closed).expect("tampered");
+    let error = crate::command::workflow_decompose::upgrade::validate_result_state(
+        &workflow_store,
+        &run.id,
+    )
+    .expect_err("a reason for another call is no interruption of this one")
+    .to_string();
+    assert!(error.contains("result.data"), "{error}");
+}

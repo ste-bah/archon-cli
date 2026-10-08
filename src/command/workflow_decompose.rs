@@ -476,10 +476,10 @@ pub(crate) fn is_fixed_decomposition_run(cwd: &Path, run_id: &str) -> Result<boo
 
 #[path = "workflow_decompose_resume.rs"]
 mod resume;
-// Issue 360: the seed reads its records under the resume's own rules.
-#[cfg(test)]
-pub(crate) use resume::resume_fixed_decomposition_at_binary_revision;
+// Issues 360, 368: tests read records under the resume's own rules.
 pub(crate) use resume::upgrade::{decode, unmapped};
+#[cfg(test)]
+pub(crate) use resume::{resume_fixed_decomposition_at_binary_revision, upgrade};
 pub(crate) use resume::{
     resume_fixed_decomposition_with_factory, resume_fixed_decomposition_with_factory_and_sink,
 };

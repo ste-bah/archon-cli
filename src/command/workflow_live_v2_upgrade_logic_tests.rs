@@ -70,8 +70,8 @@ impl Run {
                 self.context.clone(),
                 self.store.run_dir(&self.run_id),
             )
-            // Model the prior build so this suite can verify that bumping
-            // task-set-lint from 1 to 2 invalidates its saved verdict.
+            // Both builds model the same task-set-lint version, so each bump
+            // test sets its own versions.
             .with_logic_version("task-set-lint", Some(1)),
             calls: AtomicUsize::new(0),
         }

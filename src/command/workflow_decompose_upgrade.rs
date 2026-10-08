@@ -60,7 +60,7 @@ pub(crate) fn decode<T: serde::de::DeserializeOwned>(
 
 /// No result-store healing, ignored archive gaps, or unknown future schemas
 /// may turn unreadable execution history into a fresh call on upgrade.
-pub(super) fn validate_result_state(store: &WorkflowStore, run_id: &str) -> Result<()> {
+pub(crate) fn validate_result_state(store: &WorkflowStore, run_id: &str) -> Result<()> {
     let root = store.run_dir(run_id).join("v2");
     let checkpoint = root.join("checkpoint.json");
     if checkpoint.exists() {
@@ -135,8 +135,7 @@ fn validate_call_directory(
                         | archon_workflow::WorkflowV2Status::Noop
                         | archon_workflow::WorkflowV2Status::NeedsReview
                 )
-                && !(record.status == archon_workflow::WorkflowV2Status::NeedsReview
-                    && is_interruption_record(&record.result.data))
+                && !is_interruption_record(&record)
             {
                 let _: archon_workflow::HostCommandResult =
                     decode(record.result.data.clone(), &format!("{field}.result.data"))?;
@@ -154,10 +153,17 @@ fn validate_call_directory(
 
 /// A host command cut short (a pause, or the host process ending) leaves a
 /// `NeedsReview` record whose data names the interruption reason instead of a
-/// command result. It is never reused, so it has no command result to map.
-fn is_interruption_record(data: &serde_json::Value) -> bool {
-    data.get("interrupted")
-        .is_some_and(serde_json::Value::is_string)
+/// command result, and the id of the call it closes: every interruption
+/// writer sets `call_id` to the record's own call. It is never reused, so it
+/// has no command result to map. The reasons are not checked against a list:
+/// the control reasons (`paused`, `cancelled`) have no named constant.
+fn is_interruption_record(record: &archon_workflow::WorkflowV2CallRecord) -> bool {
+    let data = &record.result.data;
+    record.status == archon_workflow::WorkflowV2Status::NeedsReview
+        && data
+            .get("interrupted")
+            .is_some_and(serde_json::Value::is_string)
+        && data.get("call_id").and_then(serde_json::Value::as_str) == Some(record.call.id.as_str())
 }
 
 /// One durable transition per runtime change, even if preparation is

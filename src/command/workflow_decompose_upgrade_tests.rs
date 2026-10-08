@@ -32,9 +32,11 @@ fn check(store: &archon_workflow::WorkflowV2ResultStore) -> Result<()> {
     validate_call_directory(&store.root().join("results"), store, true)
 }
 
+/// The reasons the interruption writers give; the record a real writer
+/// leaves is checked in `workflow_live_v2_script_host_inflight_tests.rs`.
 #[test]
 fn a_paused_host_command_record_does_not_block_resume() {
-    for reason in ["paused", "host_process_ended", "unstarted"] {
+    for reason in ["paused", "host_process_ended", "dispatch_not_started"] {
         let (_t, store) = store_with(&[record(
             "c1",
             "needs_review",
@@ -58,6 +60,17 @@ fn an_accepted_record_with_an_interruption_reason_is_still_refused() {
 #[test]
 fn a_needs_review_record_without_a_command_result_or_reason_is_still_refused() {
     let (_t, store) = store_with(&[record("c3", "needs_review", json!({"call_id": "c3"}))]);
+    let error = check(&store).unwrap_err().to_string();
+    assert!(error.contains("result.data"), "{error}");
+}
+
+#[test]
+fn a_needs_review_record_whose_reason_names_another_call_is_still_refused() {
+    let (_t, store) = store_with(&[record(
+        "c4",
+        "needs_review",
+        json!({"call_id": "other", "interrupted": "paused"}),
+    )]);
     let error = check(&store).unwrap_err().to_string();
     assert!(error.contains("result.data"), "{error}");
 }
