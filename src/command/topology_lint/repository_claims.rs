@@ -216,7 +216,10 @@ fn claims_in_sentence(sentence: &str) -> Vec<PathClaim> {
         let token = &after_open[..close];
         let before = &rest[..open];
         let after = &after_open[close + 1..];
-        if let Some(path) = repository_relative_token(token) {
+        if !is_incomplete_path_fragment(before, after)
+            && !is_runtime_path_context(before, after)
+            && let Some(path) = repository_relative_token(token)
+        {
             let claim = claim_after(after).or_else(|| claim_before(before));
             if let Some(claim) = claim {
                 claims.push(PathClaim {
@@ -229,6 +232,55 @@ fn claims_in_sentence(sentence: &str) -> Vec<PathClaim> {
         rest = after;
     }
     claims
+}
+
+/// Runtime output locations are not repository paths, even if nearby prose
+/// says the output exists. Keep this local to the path mention so unrelated
+/// repository claims elsewhere in a long sentence remain checkable.
+fn is_runtime_path_context(before: &str, after: &str) -> bool {
+    let before: String = before
+        .chars()
+        .rev()
+        .take(120)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    let after: String = after.chars().take(120).collect();
+    let context = format!("{before} {after}").to_ascii_lowercase();
+    let generation_verb = ["produced", "generated", "written", "writes", "generates"]
+        .iter()
+        .any(|verb| context.contains(verb));
+    [
+        "runtime",
+        "run time",
+        "data root",
+        "output root",
+        "output directory",
+    ]
+    .iter()
+    .any(|marker| context.contains(marker))
+        || (context.contains("runner") && generation_verb)
+        || (context.contains("when it runs") && generation_verb)
+}
+
+/// Do not treat a backticked component as a repository path when it is one
+/// segment of a larger path containing a placeholder or ellipsis, such as
+/// `<root>/…/`backtests`/…`.
+fn is_incomplete_path_fragment(before: &str, after: &str) -> bool {
+    let left = before
+        .rsplit_once(char::is_whitespace)
+        .map_or(before, |(_, tail)| tail);
+    let right = after.split_whitespace().next().unwrap_or(after);
+    let left_is_path_prefix = left.ends_with('/')
+        && (left.contains('<')
+            || left.contains('{')
+            || left.contains('$')
+            || left.contains("...")
+            || left.contains('…'));
+    let right_is_path_suffix =
+        right.starts_with('/') && (right.contains("...") || right.contains('…'));
+    left_is_path_prefix || right_is_path_suffix
 }
 
 /// A backticked token that reads as a file or directory path: no whitespace,
@@ -245,6 +297,8 @@ pub(crate) fn repository_relative_token(token: &str) -> Option<String> {
         || token.starts_with('~')
         || token.contains("://")
         || token.contains(['*', '{', '}', '$', '<', '>', '|', '=', '"', '\''])
+        || token.contains("...")
+        || token.contains('…')
         || token.starts_with("..")
         || token.contains("/..")
     {
