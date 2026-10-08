@@ -61,7 +61,12 @@ fn a_structured_result_keeps_its_lists_and_carries_the_observed_trace_beside_the
     assert_eq!(marker["topLevelLists"], AGENT_REPORTED);
     assert_eq!(marker["recorded"], true);
     assert_eq!(marker["filesRead"][0]["path"], "src/a.rs");
-    assert_eq!(marker["commandsRun"][0]["command"], "ls");
+    assert!(
+        marker["commandsRun"][0]["command"]
+            .as_str()
+            .is_some_and(|command| command.starts_with("ls (0 args")),
+        "{marker}"
+    );
     assert_eq!(result.data["other"], 1);
 }
 

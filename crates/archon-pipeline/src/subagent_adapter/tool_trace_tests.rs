@@ -109,9 +109,9 @@ fn a_write_of_service_account_json_stores_none_of_it() {
 }
 
 #[test]
-fn a_long_bash_command_is_redacted_before_it_is_cut() {
+fn a_bash_command_is_kept_as_its_program_count_and_digest_only() {
     let command = format!(
-        "cat <<'EOF' > key.pem\n{}\nEOF\n{}",
+        "cat <<'EOF' > key.pem\n{}\nEOF\nmysql -phunter2 {}",
         pem_block(),
         "x".repeat(900)
     );
@@ -119,13 +119,14 @@ fn a_long_bash_command_is_redacted_before_it_is_cut() {
         "type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": command},
     })])];
     let uses = tool_uses(&messages);
-    let kept = uses[0].input["command"].as_str().unwrap();
+    assert_eq!(uses[0].input["program"], "cat");
+    assert!(uses[0].input.get("command").is_none());
+    let stored = serde_json::to_string(&uses).unwrap();
     assert!(
-        kept.len() <= MAX_VALUE_BYTES && !kept.contains("MIIEvQ"),
-        "{kept}"
+        !stored.contains("MIIEvQ") && !stored.contains("hunter2"),
+        "{stored}"
     );
-    assert_eq!(uses[0].output["input_truncated"], true);
-    assert_eq!(summary(&uses)["inputs_truncated"], 1);
+    assert_eq!(summary(&uses)["inputs_truncated"], 0);
 }
 
 #[test]

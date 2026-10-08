@@ -9,20 +9,33 @@
 //! that name WHAT was touched, never the content, and redacts each kept
 //! value BEFORE it is cut:
 //!
-//! - paths (`file_path`, `notebook_path`, `path`): credential-shaped values
-//!   replaced, words kept, so a path stays the path that was read;
-//! - search text (`pattern`, `glob`) and, for `Bash` only, `command`: URLs
-//!   cut as below, credential shapes replaced, then the value of every
-//!   `KEY=VALUE` (or `KEY: VALUE`) whose key names a credential replaced;
+//! - paths (`file_path`, `notebook_path`, `path`): ONLY the credential-shape
+//!   check (`redact_secret_values`), no word or assignment redaction, so a
+//!   path stays the path that was read; a plain-word secret in a path is
+//!   kept;
+//! - search text (`pattern`, `glob`): URLs cut as below, credential shapes
+//!   replaced, then the value of every `KEY=VALUE` (or `KEY: VALUE`) whose
+//!   key names a credential replaced;
 //! - `url`: scheme, host and path only, never user info, query or fragment;
-//! - `offset` / `limit`: numbers only.
+//! - `offset` / `limit`: numbers only;
+//! - `command`, for `Bash` only: never its text. A shell command can carry
+//!   a credential in more forms than any rule can know (`mysql -phunter2`,
+//!   `curl -u a:b`, an escaped JSON body), so the trace keeps the program
+//!   and its leading plain sub-command words (`program`, see
+//!   [`command_program`]), the number of words after the first
+//!   (`arg_count`), and the SHA-256 of the full command (`command_sha256`)
+//!   to correlate calls.
 //!
 //! Every other key is dropped and counted.
 use archon_observability::redaction::redact_secret_values;
 use archon_observability::secret_values::{REDACTED_VALUE, is_credential_name};
 use regex::Regex;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use std::sync::LazyLock;
+
+/// The most leading words of a command kept as its program.
+const PROGRAM_WORDS: usize = 4;
 
 /// Keys whose values name what a call touched.
 const PATH_KEYS: &[&str] = &["file_path", "notebook_path", "path"];
@@ -63,7 +76,16 @@ pub fn safe_input(tool_name: &str, input: &Value, max_value_bytes: usize) -> Saf
             (key, Value::String(text)) if PATH_KEYS.contains(&key) => redact_secret_values(text),
             (key, Value::String(text)) if SEARCH_KEYS.contains(&key) => redact_tool_text(text),
             ("url", Value::String(url)) => redact_secret_values(&strip_url(url)),
-            ("command", Value::String(command)) if tool_name == "Bash" => redact_tool_text(command),
+            ("command", Value::String(command)) if tool_name == "Bash" => {
+                let program = command_program(command);
+                let kept_program = clip(&program, max_value_bytes);
+                cut |= kept_program.len() != program.len();
+                kept.insert("program".into(), json!(kept_program));
+                let words = command.split_whitespace().count();
+                kept.insert("arg_count".into(), json!(words.saturating_sub(1)));
+                kept.insert("command_sha256".into(), json!(sha256_hex(command)));
+                continue;
+            }
             (key, Value::Number(_)) if NUMBER_KEYS.contains(&key) => {
                 kept.insert(key.to_string(), value.clone());
                 continue;
@@ -84,7 +106,7 @@ pub fn safe_input(tool_name: &str, input: &Value, max_value_bytes: usize) -> Saf
     }
 }
 
-/// Free text a trace keeps (a shell command, a search pattern): URLs cut to
+/// Free text a trace keeps (a search pattern): URLs cut to
 /// scheme, host and path, credential shapes replaced (first, so a `Bearer`
 /// credential is matched whole), then credential assignments' values.
 pub fn redact_tool_text(text: &str) -> String {
@@ -101,18 +123,53 @@ pub fn redact_tool_text(text: &str) -> String {
         .into_owned()
 }
 
-/// `scheme://host/path` of `url`: no user info, query or fragment. Text
-/// without a scheme is cut at its first `?` or `#`.
+/// The program of a shell command and its leading plain sub-command words:
+/// at most [`PROGRAM_WORDS`] words, each made only of `[A-Za-z0-9_./-]` and
+/// not starting with `-`, stopping at the first other word (an option, an
+/// assignment, a quoted or `:`-bearing word). `cargo test -p x` is
+/// `cargo test`; `DB_PASSWORD=x ./run` keeps nothing.
+pub fn command_program(command: &str) -> String {
+    command
+        .split_whitespace()
+        .take_while(|word| {
+            !word.starts_with('-')
+                && word
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '/' | '-'))
+        })
+        .take(PROGRAM_WORDS)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn sha256_hex(text: &str) -> String {
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// `scheme://host/path` of `url`: no user info, query or fragment. User
+/// info is removed FIRST, so a `?` or `#` inside a password cannot end the
+/// address early and keep the rest of it: the user info ends at the last
+/// `@` before the first `/` that follows the first `@`. Text without a
+/// scheme is cut at its first `?` or `#`.
 pub fn strip_url(url: &str) -> String {
-    let url = url.split(['?', '#']).next().unwrap_or_default();
     let Some((scheme, rest)) = url.split_once("://") else {
-        return url.to_string();
+        return url.split(['?', '#']).next().unwrap_or_default().to_string();
     };
-    let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
-    let host = authority
-        .rsplit_once('@')
-        .map_or(authority, |(_, host)| host);
-    format!("{scheme}://{host}{path}")
+    let rest = match rest.find('@') {
+        Some(first_at) => {
+            let end = rest[first_at..]
+                .find('/')
+                .map_or(rest.len(), |slash| first_at + slash);
+            let last_at = rest[..end].rfind('@').unwrap_or(first_at);
+            &rest[last_at + 1..]
+        }
+        None => rest,
+    };
+    let rest = rest.split(['?', '#']).next().unwrap_or_default();
+    format!("{scheme}://{rest}")
 }
 
 static URL: LazyLock<Regex> = LazyLock::new(|| {

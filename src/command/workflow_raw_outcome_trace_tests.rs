@@ -315,3 +315,26 @@ async fn a_retried_attempt_marks_the_trace_incomplete() {
         "{trace}"
     );
 }
+
+#[tokio::test]
+async fn no_bash_credential_form_reaches_a_run_file() {
+    let commands = [
+        "mysql -uroot -phunter2 app",
+        "psql --password hunter2 -h db",
+        "sshpass -p hunter2 ssh deploy@host",
+        "curl -u admin:hunter2 https://api.invalid/x",
+        r#"curl -d "{\"password\":\"hunter2\"}" https://api.invalid/login"#,
+        "curl -H 'Authorization: Basic aHVudGVyMg==' https://api.invalid/x",
+    ];
+    let uses = commands
+        .iter()
+        .map(|command| tool_use("Bash", serde_json::json!({"command": command}), false))
+        .collect();
+    let (result, written) = run_raw_author_with_files(uses).await;
+
+    assert_eq!(result.commands_run.len(), commands.len(), "{result:?}");
+    assert!(written.contains("toolTrace") && written.contains("sshpass"));
+    for secret in ["hunter2", "aHVudGVyMg"] {
+        assert!(!written.contains(secret), "a run file holds {secret}");
+    }
+}

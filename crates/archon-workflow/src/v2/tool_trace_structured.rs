@@ -74,8 +74,10 @@ pub fn record_structured_trace(
         marker["claimCheck"] = json!({
             "filesRead": {
                 "claimed": result.files_read.len(),
-                // Non-empty claims an observed read matches: the only
-                // claimed reads a gate may take as proof of inspection.
+                // Non-empty claims an observed read matches. A visible
+                // marker only: no gate blocks on it, since an inspection by
+                // Grep or `cat`, or an incomplete trace, leaves true claims
+                // unmatched.
                 "confirmed": claimed - unobserved.len(),
                 "observedReads": observed.files_read.len(),
                 "unobservedCount": unobserved.len(),

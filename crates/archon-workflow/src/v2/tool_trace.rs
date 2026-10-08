@@ -196,16 +196,22 @@ fn status(output: &Value) -> WorkflowV2CommandStatus {
     }
 }
 
-/// A Bash call is its (already reduced) command; any other call is its
+/// A Bash call is its program summary; any other call is its
 /// name and its allow-listed input, never its whole input.
 fn command_record(
     tool: &WorkflowAgentToolUse,
     safe: &SafeInput,
     status: WorkflowV2CommandStatus,
 ) -> WorkflowV2CommandRecord {
-    let shell = safe.input.get("command").and_then(Value::as_str);
-    let command = match (tool.tool_name.as_str(), shell) {
-        ("Bash", Some(command)) => command.to_string(),
+    let program = safe.input.get("program").and_then(Value::as_str);
+    let command = match (tool.tool_name.as_str(), program) {
+        // Never the command text: its program, how many words follow, and
+        // a digest to correlate calls.
+        ("Bash", Some(program)) => format!(
+            "{program} ({} args, sha256 {})",
+            safe.input["arg_count"],
+            safe.input["command_sha256"].as_str().unwrap_or_default(),
+        ),
         _ => format!("{} {}", tool.tool_name, safe.input),
     };
     let output_summary = match status {

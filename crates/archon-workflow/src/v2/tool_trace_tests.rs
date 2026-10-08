@@ -53,7 +53,11 @@ fn reads_become_files_read_once_and_other_calls_become_commands() {
         .collect();
     assert_eq!(commands.len(), 2, "{commands:?}");
     assert!(commands[0].0.starts_with("Glob ") && commands[0].0.contains("**/*.rs"));
-    assert_eq!(commands[1], ("ls", WorkflowV2CommandStatus::Skipped));
+    assert!(
+        commands[1].0.starts_with("ls (0 args, sha256 "),
+        "{commands:?}"
+    );
+    assert_eq!(commands[1].1, WorkflowV2CommandStatus::Skipped);
     let trace = &result.data["toolTrace"];
     assert_eq!(trace["recorded"], true);
     assert_eq!(trace["source"], "host session trace");
@@ -212,7 +216,7 @@ fn a_long_input_is_redacted_then_clipped() {
     let long = format!("{} {}", "x".repeat(COMMAND_CHARS - 10), anthropic_key());
     record_tool_trace(
         &mut result,
-        &[call("Bash", json!({"command": long}), Value::Null)],
+        &[call("Grep", json!({"pattern": long}), Value::Null)],
     );
     let command = &result.commands_run[0].command;
     assert_eq!(command.chars().count(), COMMAND_CHARS);
@@ -304,7 +308,8 @@ fn a_non_bash_call_stores_only_its_allow_listed_input() {
         commands[2],
         r#"WebFetch {"url":"https://example.invalid/v1"}"#
     );
-    assert!(commands[3].ends_with("./run"), "{commands:?}");
+    // An assignment first: no program word is kept, only the count.
+    assert!(commands[3].starts_with(" (2 args, sha256 "), "{commands:?}");
 }
 
 #[test]

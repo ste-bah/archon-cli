@@ -39,22 +39,57 @@ fn a_url_keeps_scheme_host_and_path_only() {
         strip_url("postgres://app:s3cret@db:5432/main"),
         "postgres://db:5432/main"
     );
+    // User info goes first: a `#` or `?` in a password cannot cut early.
+    assert_eq!(
+        strip_url("postgres://app:Pa#ss@db/main"),
+        "postgres://db/main"
+    );
+    assert_eq!(
+        strip_url("https://u:p?x@h.invalid/a?q=1"),
+        "https://h.invalid/a"
+    );
+    assert_eq!(
+        strip_url("https://host.invalid/a#frag"),
+        "https://host.invalid/a"
+    );
 }
 
+/// Shell commands that carry a credential in forms no redaction rule can
+/// know, each holding `hunter2`.
+pub(crate) const LEAKY_COMMANDS: &[&str] = &[
+    "mysql -uroot -phunter2 app",
+    "psql --password hunter2 -h db",
+    "sshpass -p hunter2 ssh deploy@host",
+    "curl -u admin:hunter2 https://api.invalid/x",
+    r#"curl -d "{\"password\":\"hunter2\"}" https://api.invalid/login"#,
+    "curl -H 'Authorization: Basic aHVudGVyMg==' https://api.invalid/x",
+    "DB_PASSWORD=hunter2 ./deploy",
+    "echo-free hunter2:x",
+];
+
 #[test]
-fn bash_keeps_its_command_with_credential_values_replaced() {
-    let command = "export DB_PASSWORD=hunter2 FOO_TOKEN='abc def' MODE=fast; \
-                   curl -H 'Authorization: Bearer abcdefgh' https://u:p@h.invalid/x?api_key=zzz";
-    let safe = safe_input("Bash", &json!({"command": command, "timeout": 5}), 4096);
-    let kept = safe.input["command"].as_str().unwrap();
-    for secret in ["hunter2", "abc def", "abcdefgh", "u:p@", "zzz"] {
-        assert!(!kept.contains(secret), "{secret} in {kept}");
-    }
-    assert!(
-        kept.contains("MODE=fast") && kept.contains("DB_PASSWORD="),
-        "{kept}"
+fn bash_keeps_only_its_program_word_count_and_digest() {
+    let safe = safe_input(
+        "Bash",
+        &json!({"command": "cargo test -p x -- --nocapture", "timeout": 5}),
+        384,
     );
+    assert_eq!(safe.input["program"], "cargo test");
+    assert_eq!(safe.input["arg_count"], 5);
+    assert_eq!(safe.input["command_sha256"].as_str().unwrap().len(), 64);
+    assert!(safe.input.get("command").is_none());
     assert_eq!(safe.dropped_keys, 1, "timeout is not on the allow-list");
+    for command in LEAKY_COMMANDS {
+        let kept = safe_input("Bash", &json!({"command": command}), 384).input;
+        let text = kept.to_string();
+        assert!(
+            !text.contains("hunter2") && !text.contains("aHVudGVyMg"),
+            "{text}"
+        );
+    }
+    assert_eq!(command_program("DB_PASSWORD=hunter2 ./deploy"), "");
+    assert_eq!(command_program("git commit -m x"), "git commit");
+    assert_eq!(command_program("a b c d e f"), "a b c d");
 }
 
 #[test]
@@ -66,14 +101,14 @@ fn a_command_key_of_another_tool_is_dropped() {
 
 #[test]
 fn a_secret_is_redacted_before_a_value_is_cut() {
-    let command = format!("echo '{}'", pem_block());
-    let safe = safe_input("Bash", &json!({"command": command}), 64);
-    let kept = safe.input["command"].as_str().unwrap();
+    let pattern = format!("{} {}", "x".repeat(10), pem_block());
+    let safe = safe_input("Grep", &json!({"pattern": pattern}), 64);
+    let kept = safe.input["pattern"].as_str().unwrap();
     assert!(!kept.contains("MIIEvQ"), "{kept}");
-    assert!(!safe.cut, "the redacted command fits");
-    let long = format!("grep {}", "x".repeat(500));
-    let safe = safe_input("Bash", &json!({"command": long}), 64);
-    assert!(safe.cut && safe.input["command"].as_str().unwrap().len() <= 64);
+    assert!(!safe.cut, "the redacted pattern fits");
+    let long = "x".repeat(500);
+    let safe = safe_input("Grep", &json!({"pattern": long}), 64);
+    assert!(safe.cut && safe.input["pattern"].as_str().unwrap().len() <= 64);
 }
 
 #[test]

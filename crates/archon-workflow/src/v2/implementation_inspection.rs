@@ -1,7 +1,5 @@
 use thiserror::Error;
 
-use super::inspection_read_proof::ReadProof;
-
 use super::{
     WorkflowV2CommandKind, WorkflowV2EvidenceKind, WorkflowV2ImplementationStatus,
     WorkflowV2Result, WorkflowV2Status, WorkflowV2TaskCoverage, WorkflowV2TaskCoverageStatus,
@@ -57,9 +55,7 @@ impl WorkflowV2ImplementationInspector {
         let coverage = coverage_for_task(task, &result)?;
         match coverage.status {
             WorkflowV2TaskCoverageStatus::Accepted | WorkflowV2TaskCoverageStatus::Noop => {
-                let proof = validate_noop_proof(task, &result, coverage)?;
-                let mut result = result;
-                proof.stamp(&mut result);
+                validate_noop_proof(task, &result, coverage)?;
                 Ok(WorkflowV2InspectionDecision {
                     task_id: task.task_id.clone(),
                     implementation_status: WorkflowV2ImplementationStatus::Complete,
@@ -105,11 +101,6 @@ pub enum WorkflowV2InspectionError {
     MissingTaskCoverage(String),
     #[error("task '{0}' no-op proof requires files_read evidence")]
     NoopWithoutFilesRead(String),
-    #[error(
-        "task '{task_id}' no-op proof: the session trace shows no read of any claimed \
-         files_read entry, so the claims are not proof of inspection; unmatched: {unmatched}"
-    )]
-    NoopFilesReadNotObserved { task_id: String, unmatched: String },
     #[error("task '{0}' complete inspection must return noop status")]
     NoopWrongStatus(String),
     #[error("task '{0}' no-op proof requires command evidence")]
@@ -141,12 +132,11 @@ fn coverage_for_task<'a>(
         .ok_or_else(|| WorkflowV2InspectionError::MissingTaskCoverage(task.task_id.clone()))
 }
 
-/// Returns what the claimed reads prove, for the accepted result's stamp.
 fn validate_noop_proof(
     task: &WorkflowV2TaskRecord,
     result: &WorkflowV2Result,
     coverage: &WorkflowV2TaskCoverage,
-) -> Result<ReadProof, WorkflowV2InspectionError> {
+) -> Result<(), WorkflowV2InspectionError> {
     if result.status != WorkflowV2Status::Noop {
         return Err(WorkflowV2InspectionError::NoopWrongStatus(
             task.task_id.clone(),
@@ -160,14 +150,6 @@ fn validate_noop_proof(
         return Err(WorkflowV2InspectionError::NoopWithoutFilesRead(
             task.task_id.clone(),
         ));
-    }
-    // Issue 276: with a trace, only claims it confirms are proof.
-    let proof = ReadProof::of(result);
-    if let ReadProof::Checked { confirmed: 0, .. } = proof {
-        return Err(WorkflowV2InspectionError::NoopFilesReadNotObserved {
-            task_id: task.task_id.clone(),
-            unmatched: proof.unmatched_line(),
-        });
     }
     if !has_command_evidence(result) {
         return Err(WorkflowV2InspectionError::NoopWithoutCommandEvidence(
@@ -187,7 +169,7 @@ fn validate_noop_proof(
             });
         }
     }
-    Ok(proof)
+    Ok(())
 }
 
 fn has_inspection_evidence(result: &WorkflowV2Result, coverage: &WorkflowV2TaskCoverage) -> bool {
