@@ -11,6 +11,38 @@ use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, ObserveHooks, observe_
 use super::hermetic::{Unrun, data_digest};
 use super::*;
 
+/// A freeze probe's site and the repository it proves checks against: the
+/// hermetic scratch site when a policy is configured (warm from a
+/// per-repository cache), else the probe's own copy. A configured policy
+/// that cannot be captured, or a repository record that cannot be believed
+/// (Issue 366, N1), runs nothing: the repository is then only a placeholder.
+pub(super) fn freeze_site(project: &Path, tasks_root: &Path) -> (Site, PathBuf) {
+    let site = match crate::command::acceptance_scratch_policy::capture(project, tasks_root) {
+        Ok(Some(binding)) => {
+            let key = content_digest(binding.policy.repository.to_string_lossy().as_bytes());
+            Site::Scratch(Box::new(
+                binding.with_run_build_cache(&format!("acceptance-probe-{}", &key[..12])),
+            ))
+        }
+        Ok(None) => Site::Hermetic,
+        Err(error) => Site::Unavailable(format!(
+            "the [workflow.acceptance_execution] policy could not be captured ({error}); nothing is run until it is repaired"
+        )),
+    };
+    let binding = match &site {
+        Site::Scratch(binding) => Some(&**binding),
+        Site::Direct | Site::Hermetic | Site::Unavailable(_) => None,
+    };
+    match live_root::freeze_repository(project, tasks_root, binding) {
+        Ok(repository) => (site, repository),
+        Err(why) if !matches!(site, Site::Unavailable(_)) => (
+            Site::Unavailable(format!("{why}; nothing is run until it is repaired")),
+            project.to_path_buf(),
+        ),
+        Err(_) => (site, project.to_path_buf()),
+    }
+}
+
 #[cfg(test)]
 impl HostProbe {
     /// Fail the next `count` hermetic runs as the host's environment would.

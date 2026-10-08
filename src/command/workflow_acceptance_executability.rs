@@ -317,28 +317,17 @@ impl HostProbe {
     /// At freeze time, before any run: the hermetic scratch site when one is
     /// configured (building warm from a per-repository cache), otherwise the
     /// probe's own hermetic copy -- never the live repository. A configured
-    /// policy that cannot be captured runs nothing. The probe carries the
+    /// policy that cannot be captured, or a repository record that cannot be
+    /// believed, runs nothing (`sites::freeze_site`). The probe carries the
     /// task set's pre-implementation baseline (`Baseline::for_task_set`).
     pub(crate) fn for_task_set(project: &std::path::Path, tasks_root: &std::path::Path) -> Self {
-        let site = match crate::command::acceptance_scratch_policy::capture(project, tasks_root) {
-            Ok(Some(binding)) => {
-                let key = content_digest(binding.policy.repository.to_string_lossy().as_bytes());
-                Site::Scratch(Box::new(
-                    binding.with_run_build_cache(&format!("acceptance-probe-{}", &key[..12])),
-                ))
-            }
-            Ok(None) => Site::Hermetic,
-            Err(error) => Site::Unavailable(format!(
-                "the [workflow.acceptance_execution] policy could not be captured ({error}); nothing is run until it is repaired"
-            )),
-        };
-        let binding = match &site {
-            Site::Scratch(binding) => Some(&**binding),
-            Site::Direct | Site::Hermetic | Site::Unavailable(_) => None,
-        };
-        let repository = live_root::freeze_repository(project, tasks_root, binding);
+        let (site, repository) = sites::freeze_site(project, tasks_root);
+        let unavailable = matches!(site, Site::Unavailable(_));
         let mut probe = Self::new(project.to_path_buf(), repository, site);
         probe.memo = true;
+        if unavailable {
+            return probe;
+        }
         probe.baseline = Baseline::for_task_set(&probe.repository, tasks_root);
         if let Site::Scratch(binding) = &probe.site
             && let Some(cache) = &binding.policy.build_cache

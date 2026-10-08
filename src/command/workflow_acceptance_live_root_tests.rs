@@ -116,3 +116,46 @@ fn a_relative_root_never_matches_a_command() {
     assert_eq!(forms, [PathBuf::from("/work/repo")]);
     assert_eq!(named_root("bar baz r p", &forms), None);
 }
+
+/// The three `repository.lock` texts no freeze may believe (Issue 366, N1):
+/// one that is not JSON, one of another schema, and one whose recorded
+/// root is gone. Each leaves the true repository root unknown.
+pub(crate) const UNBELIEVABLE_LOCKS: [(&str, &str); 3] = [
+    ("corrupt", "{not json"),
+    (
+        "another schema",
+        r#"{"schema_version":99,"repository_root":"/","base_commit":"unborn","decomposition_run_id":"x","recorded_at":"x"}"#,
+    ),
+    (
+        "a root that is gone",
+        r#"{"schema_version":1,"repository_root":"/nonexistent/archon-366-gone","base_commit":"unborn","decomposition_run_id":"x","recorded_at":"x"}"#,
+    ),
+];
+
+/// Issue 366 N1: only a missing lock is the legacy set (the project); a lock
+/// that cannot be believed is an error naming it and its repair, for the
+/// freeze probe, the author step and the host re-author alike.
+#[test]
+fn only_a_missing_lock_falls_back_to_the_project() {
+    let project = tempfile::tempdir().unwrap();
+    let tasks = project.path().join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    assert_eq!(
+        recorded_repository(project.path(), &tasks),
+        Ok(project.path().to_path_buf())
+    );
+    let lock = archon_workflow::repository_record::repository_record_path(&tasks);
+    for (case, text) in UNBELIEVABLE_LOCKS {
+        std::fs::write(&lock, text).unwrap();
+        for why in [
+            recorded_repository(project.path(), &tasks).unwrap_err(),
+            freeze_repository(project.path(), &tasks, None).unwrap_err(),
+            task_set_roots(project.path(), &tasks).unwrap_err(),
+        ] {
+            assert!(
+                why.contains(&lock.display().to_string()) && why.contains("restore"),
+                "{case}: {why}"
+            );
+        }
+    }
+}

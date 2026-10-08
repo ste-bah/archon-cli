@@ -40,7 +40,8 @@ async fn reauthor_republishes_contract_lock_skeleton_and_pin_as_one_verified_cha
         |entry, _| command_entry(entry, "jq -e '.b == true and .d == 1' out.json"),
         |_, _| true,
     );
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd);
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+        .expect("the task set's repository record is believed");
     let result = reauthor_and_republish(&client, request(&set, &named), &scope)
         .await
         .expect("repair publishes");
@@ -76,7 +77,8 @@ async fn reauthor_refuses_an_unknown_check_and_writes_nothing() {
     let before = set.chain_bytes();
     let named = ids(&["AC-F-404"]);
     let client = ScriptedAuthorJudge::new(|entry, _| command_entry(entry, "true"), |_, _| true);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd);
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+        .expect("the task set's repository record is believed");
     let error = reauthor_and_republish(&client, request(&set, &named), &scope)
         .await
         .expect_err("unknown id")
@@ -95,7 +97,8 @@ async fn reauthor_refuses_to_leave_an_unnamed_refuted_check_published() {
     let before = set.chain_bytes();
     let named = ids(&["AC-F-001"]);
     let client = ScriptedAuthorJudge::new(|entry, _| command_entry(entry, "true"), |_, _| true);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd);
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+        .expect("the task set's repository record is believed");
     let error = reauthor_and_republish(&client, request(&set, &named), &scope)
         .await
         .expect_err("AC-F-002 would stay refuted")
@@ -113,7 +116,8 @@ async fn a_repair_the_judge_never_accepts_fails_bounded_and_writes_nothing() {
         |entry, attempt| command_entry(entry, &format!("jq -e '.a{attempt}' out.json")),
         |_, _| false,
     );
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd);
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+        .expect("the task set's repository record is believed");
     let error = reauthor_and_republish(&client, request(&set, &named), &scope)
         .await
         .expect_err("still refuted")
@@ -167,7 +171,8 @@ async fn dry_run(project: &Path, tasks: &Path, prd: &Path, check: &str) {
         |_, _| true,
     )
     .with_provider(&provider);
-    let scope = AuthorScope::for_task_set(project, tasks, prd);
+    let scope = AuthorScope::for_task_set(project, tasks, prd)
+        .expect("the task set's repository record is believed");
     // The probe runs checks in the copied project only, never in the
     // repository its repository.lock names.
     let probe = HostProbe::at(project.to_path_buf(), project.to_path_buf(), None).with_baseline(
@@ -301,7 +306,8 @@ async fn gc_refused_publication(case: u8) {
         |entry, _| command_entry(entry, "jq -e '.b == true and .d == 1' out.json"),
         |_, _| true,
     );
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd);
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+        .expect("the task set's repository record is believed");
     let result = archon_workflow::stage_write::scope(
         writer,
         reauthor_and_republish(&client, request(&set, &named), &scope),

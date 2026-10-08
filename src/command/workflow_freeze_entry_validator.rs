@@ -101,8 +101,10 @@ enum LiveRoots {
     /// Exactly these roots.
     Listed(Vec<PathBuf>),
     /// The roots the script names, and the task set's own as its freeze
-    /// probe sees them ([`live_root::task_set_roots`]): one source. A root
-    /// the script does not carry is not named.
+    /// probe sees them ([`live_root::task_set_roots`]): one source. The
+    /// repository and the project are required (Issue 366, N2): without
+    /// one, no check could be held off it, and the rule would be off
+    /// without a signal.
     TaskSet {
         repository: Option<PathBuf>,
         project: Option<PathBuf>,
@@ -119,11 +121,18 @@ fn live_roots(text: &str) -> Result<Vec<PathBuf>, String> {
             project,
             tasks,
         } => {
-            let mut roots: Vec<PathBuf> = ([repository, project.clone()].into_iter().flatten())
-                .filter(|root| !root.as_os_str().is_empty())
-                .collect();
-            if let (Some(project), Some(tasks)) = (project, tasks) {
-                roots.extend(live_root::task_set_roots(&project, &tasks));
+            let named = |root: Option<PathBuf>| {
+                root.filter(|root| !root.as_os_str().to_string_lossy().trim().is_empty())
+            };
+            let blank_tasks = tasks.is_some() && named(tasks.clone()).is_none();
+            let (Some(repository), Some(project), false) =
+                (named(repository), named(project), blank_tasks)
+            else {
+                return Err("task-set roots must name both the repository and the project, and a tasks key must name a task root: without them no check can be held off the live roots".to_string());
+            };
+            let mut roots = vec![repository, project.clone()];
+            if let Some(tasks) = tasks {
+                roots.extend(live_root::task_set_roots(&project, &tasks)?);
             }
             roots
         }
@@ -137,7 +146,8 @@ fn live_roots(text: &str) -> Result<Vec<PathBuf>, String> {
 /// (Issue 366): a JSON list of them, or `{repository, project, tasks?}`,
 /// whose task root adds the roots its freeze probe refuses; without it only
 /// the shape is validated. Only a binding fault throws (a non-string
-/// argument, roots that are neither form or not absolute, or text that is
+/// argument, roots that are neither form, incomplete or not absolute, a
+/// task set whose repository record cannot be believed, or text that is
 /// not one JSON value); every defect of the model's reply is a refusal.
 pub(crate) fn install_entry_validator<'js>(ctx: &rquickjs::Ctx<'js>) -> rquickjs::Result<()> {
     ctx.globals().set(

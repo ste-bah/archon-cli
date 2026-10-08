@@ -50,7 +50,8 @@ async fn reauthor(set: &FrozenSet, id: &str, command: &'static str) {
     let ids: BTreeSet<String> = [id.to_string()].into();
     let client =
         ScriptedAuthorJudge::new(move |entry, _| command_entry(entry, command), |_, _| true);
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd);
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+        .expect("the task set's repository record is believed");
     let request = ReauthorRequest {
         project_root: set.project.path(),
         tasks_root: &set.tasks,

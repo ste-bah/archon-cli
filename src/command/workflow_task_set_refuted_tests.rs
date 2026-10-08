@@ -35,7 +35,8 @@ async fn whole_set_freeze_returns_a_refuted_check_to_its_author_before_publishin
         |entry, _| command_entry(entry, STRONGER),
         |_, check| check["command"] != serde_json::json!(ORIGINAL),
     ));
-    let scope = AuthorScope::for_task_set(temp.path(), &tasks, &prd);
+    let scope = AuthorScope::for_task_set(temp.path(), &tasks, &prd)
+        .expect("the task set's repository record is believed");
     let prepared = prepare_acceptance_freeze_reauthoring(
         temp.path(),
         &tasks,
@@ -71,7 +72,8 @@ async fn whole_set_freeze_fails_bounded_with_nothing_written_when_the_judge_keep
         |entry, attempt| command_entry(entry, &format!("jq -e '.v{attempt} == true' out.json")),
         |_, _| false,
     ));
-    let scope = AuthorScope::for_task_set(temp.path(), &tasks, &prd);
+    let scope = AuthorScope::for_task_set(temp.path(), &tasks, &prd)
+        .expect("the task set's repository record is believed");
     let error = prepare_acceptance_freeze_reauthoring(
         temp.path(),
         &tasks,
@@ -160,7 +162,8 @@ async fn whole_set_freeze_returns_a_check_crashing_in_its_own_code_to_its_author
         |entry, _| command_entry(entry, FIXED),
         |_, _| true,
     ));
-    let scope = AuthorScope::for_task_set(temp.path(), &tasks, &prd);
+    let scope = AuthorScope::for_task_set(temp.path(), &tasks, &prd)
+        .expect("the task set's repository record is believed");
     let prepared = prepare_acceptance_freeze_reauthoring(
         temp.path(),
         &tasks,

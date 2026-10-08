@@ -38,40 +38,61 @@ pub(crate) fn check_path_rule(repository: &str, project: &str) -> String {
 }
 
 /// The repository a task set was decomposed against (its
-/// `repository.lock`), else the project.
-pub(crate) fn recorded_repository(project: &Path, tasks_root: &Path) -> PathBuf {
-    archon_workflow::repository_record::read_repository_record(tasks_root)
-        .ok()
-        .flatten()
-        .map(|record| PathBuf::from(record.repository_root))
-        .filter(|root| root.is_dir())
-        .unwrap_or_else(|| project.to_path_buf())
+/// `repository.lock`), else the project for a set that predates the record.
+/// A lock that exists but cannot be believed (unreadable, malformed, of
+/// another schema, or naming a root that is not a directory) is an error,
+/// as the record's own contract says: the true repository root is then
+/// unknown, and no check is run and no author told a root from a guess
+/// (Issue 366, N1).
+pub(crate) fn recorded_repository(project: &Path, tasks_root: &Path) -> Result<PathBuf, String> {
+    use archon_workflow::repository_record::{read_repository_record, repository_record_path};
+    let lock = repository_record_path(tasks_root);
+    // The lock and its repair lead: a binding fault's text can be cut short.
+    let unknown = |why: String| {
+        format!(
+            "restore {} as its decomposition wrote it, or remove the task set and decompose again, then re-run: the task set's repository root is unknown ({why})",
+            lock.display()
+        )
+    };
+    match read_repository_record(tasks_root) {
+        Ok(None) => Ok(project.to_path_buf()),
+        Ok(Some(record)) if Path::new(&record.repository_root).is_dir() => {
+            Ok(PathBuf::from(record.repository_root))
+        }
+        Ok(Some(record)) => Err(unknown(format!(
+            "{} records repository {}, which is not a directory",
+            lock.display(),
+            record.repository_root
+        ))),
+        Err(error) => Err(unknown(error.to_string())),
+    }
 }
 
 /// The repository a freeze proves a task set's checks against: the scratch
 /// policy's (`binding`) when one is configured, else the recorded one. The
-/// freeze probe and the author step both take it from here (L4).
+/// freeze probe and the author step both take it from here (L4). A lock
+/// that cannot be believed is an error under a policy too: the freeze pins
+/// its checks' sources from that lock when it publishes.
 pub(crate) fn freeze_repository(
     project: &Path,
     tasks_root: &Path,
     binding: Option<&NativeBinding>,
-) -> PathBuf {
-    binding.map_or_else(
-        || recorded_repository(project, tasks_root),
-        |binding| binding.policy.repository.clone(),
-    )
+) -> Result<PathBuf, String> {
+    let recorded = recorded_repository(project, tasks_root)?;
+    Ok(binding.map_or(recorded, |binding| binding.policy.repository.clone()))
 }
 
 /// The live roots of a task set as its freeze probe sees them: the project
 /// and [`freeze_repository`] under the policy configured now. A policy that
-/// cannot be captured adds nothing (the freeze then runs nothing).
-pub(crate) fn task_set_roots(project: &Path, tasks_root: &Path) -> Vec<PathBuf> {
+/// cannot be captured adds nothing (the freeze then runs nothing); a lock
+/// that cannot be believed is an error.
+pub(crate) fn task_set_roots(project: &Path, tasks_root: &Path) -> Result<Vec<PathBuf>, String> {
     let binding = crate::command::acceptance_scratch_policy::capture(project, tasks_root);
     let binding = binding.ok().flatten();
-    vec![
-        freeze_repository(project, tasks_root, binding.as_ref()),
+    Ok(vec![
+        freeze_repository(project, tasks_root, binding.as_ref())?,
         project.to_path_buf(),
-    ]
+    ])
 }
 
 /// The forms of `roots` check text could name: each absolute root as given
@@ -185,4 +206,4 @@ pub(crate) fn executed_check_text(check: &serde_json::Value) -> Option<&str> {
 
 #[cfg(test)]
 #[path = "workflow_acceptance_live_root_tests.rs"]
-mod tests;
+pub(crate) mod tests;

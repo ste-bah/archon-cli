@@ -51,13 +51,19 @@ pub(crate) struct AuthorScope {
 
 impl AuthorScope {
     /// The repository the task set was decomposed against (its
-    /// `repository.lock`), else the project root.
-    pub(crate) fn for_task_set(project_root: &Path, tasks_root: &Path, prd_path: &Path) -> Self {
-        Self {
+    /// `repository.lock`), else the project root. A lock that cannot be
+    /// believed is an error ([`live_root::recorded_repository`]): the author
+    /// is never told, nor confined to, a guessed root.
+    pub(crate) fn for_task_set(
+        project_root: &Path,
+        tasks_root: &Path,
+        prd_path: &Path,
+    ) -> std::result::Result<Self, String> {
+        Ok(Self {
             prd_path: prd_path.to_path_buf(),
             project_root: project_root.to_path_buf(),
-            repository_root: live_root::recorded_repository(project_root, tasks_root),
-        }
+            repository_root: live_root::recorded_repository(project_root, tasks_root)?,
+        })
     }
 }
 

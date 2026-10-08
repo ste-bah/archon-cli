@@ -294,3 +294,60 @@ fn both_acceptance_authors_are_told_one_check_path_rule() {
         )
     );
 }
+
+/// The binding fault `rootsJson` (JSON text) raises, or "applied".
+fn roots_fault(roots: &Roots, roots_json: &str) -> String {
+    let entry = command("true").to_string();
+    let body = format!(
+        "try {{ __archonValidateAcceptanceEntry('A', {}, {}); return '\"applied\"'; }} catch (e) {{ return JSON.stringify(String(e.message)); }}",
+        serde_json::to_string(&entry).unwrap(),
+        serde_json::to_string(roots_json).unwrap()
+    );
+    let message = run(&roots.repository, &roots.project, &body);
+    message.as_str().unwrap().to_string()
+}
+
+/// Issue 366 N2: task-set roots without the repository or the project would
+/// turn the rule off without a signal; they are a binding fault.
+#[test]
+fn task_set_roots_without_the_repository_or_the_project_are_a_binding_fault() {
+    let roots = roots();
+    let (repository, project) = (roots.repository.display(), roots.project.display());
+    for roots_json in [
+        "{}".to_string(),
+        format!(r#"{{"tasks":"{project}/tasks"}}"#),
+        format!(r#"{{"repository":"{repository}"}}"#),
+        format!(r#"{{"repository":"","project":"{project}"}}"#),
+        format!(r#"{{"repository":"{repository}","project":"  "}}"#),
+        format!(r#"{{"repository":"{repository}","project":"{project}","tasks":""}}"#),
+    ] {
+        let message = roots_fault(&roots, &roots_json);
+        assert!(
+            message.contains("must name both the repository and the project"),
+            "{roots_json}: refused, never shape-only: {message}"
+        );
+    }
+    let complete = format!(r#"{{"repository":"{repository}","project":"{project}"}}"#);
+    assert_eq!(roots_fault(&roots, &complete), "applied");
+}
+
+/// Issue 366 N1: the author step reads the task set's roots from the same
+/// source as the freeze probe; a lock it cannot believe is a binding fault
+/// naming the lock, never the project taken as the repository.
+#[test]
+fn an_unbelievable_repository_lock_is_a_binding_fault_naming_it() {
+    for (case, lock) in crate::command::workflow_task_set::live_root::tests::UNBELIEVABLE_LOCKS {
+        let roots = roots();
+        let tasks = roots.project.join("tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        let path = archon_workflow::repository_record::repository_record_path(&tasks);
+        std::fs::write(&path, lock).unwrap();
+        let roots_json =
+            json!({"repository": roots.repository, "project": roots.project, "tasks": tasks});
+        let message = roots_fault(&roots, &roots_json.to_string());
+        assert!(
+            message.contains(&path.display().to_string()) && message.contains("restore"),
+            "{case}: {message}"
+        );
+    }
+}

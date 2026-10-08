@@ -371,7 +371,8 @@ async fn a_correction_of_a_check_that_cannot_pass_is_accepted() {
 async fn the_reauthoring_freeze_shows_the_output_and_accepts_the_correction() {
     let (project, _outside, tasks, prd) = outside_set(UNPASSABLE);
     let client = Arc::new(EvidenceJudge::default());
-    let scope = reauthor::AuthorScope::for_task_set(project.path(), &tasks, &prd);
+    let scope = reauthor::AuthorScope::for_task_set(project.path(), &tasks, &prd)
+        .expect("the task set's repository record is believed");
     let prepared = prepare_acceptance_freeze_reauthoring(
         project.path(),
         &tasks,

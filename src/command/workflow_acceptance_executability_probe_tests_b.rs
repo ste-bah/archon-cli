@@ -167,7 +167,8 @@ async fn a_host_failure_is_never_fed_to_the_author() {
         |_, _| true,
     );
     let scope =
-        AuthorScope::for_task_set(trees.set.project.path(), &trees.set.tasks, &trees.set.prd);
+        AuthorScope::for_task_set(trees.set.project.path(), &trees.set.tasks, &trees.set.prd)
+            .expect("the task set's repository record is believed");
     let seeds = BTreeMap::new();
     let error = reauthor(
         &client,
@@ -224,6 +225,40 @@ async fn a_broken_scratch_policy_runs_nothing() {
     );
     assert_eq!(probe.copies_made.load(SeqCst), 0, "no copy was even made");
     trees.assert_live_untouched(copies.path());
+}
+
+/// Issue 366 N1: a `repository.lock` the host cannot believe leaves the true
+/// repository root unknown. The freeze probe then runs nothing, in any copy,
+/// and each check is unproven with the lock named (resumable, the host's),
+/// never proven against the project as a guessed repository.
+#[tokio::test]
+async fn an_unbelievable_repository_lock_runs_nothing() {
+    for (case, lock) in crate::command::workflow_task_set::live_root::tests::UNBELIEVABLE_LOCKS {
+        let trees = trees(&[(
+            "AC-8-001",
+            "touch executed-marker && test -f data/state.txt",
+            PROJECT,
+        )]);
+        let path = archon_workflow::repository_record::repository_record_path(&trees.set.tasks);
+        std::fs::write(&path, lock).unwrap();
+        let copies = tempfile::tempdir().unwrap();
+        let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+            .with_copy_parent(copies.path().to_path_buf());
+        let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
+        assert!(findings.is_empty(), "{case}: {findings:?}");
+        let unproven = probe.take_unproven();
+        let why = unproven.get("AC-8-001").map(String::as_str).unwrap_or("");
+        assert!(
+            why.contains(&path.display().to_string()) && why.contains("restore"),
+            "{case}: the lock and its repair are named: {unproven:?}"
+        );
+        assert_eq!(
+            probe.copies_made.load(SeqCst),
+            0,
+            "{case}: no copy was made"
+        );
+        trees.assert_live_untouched(copies.path());
+    }
 }
 
 /// Fix 7: a check naming a live root by its absolute path is never run.
@@ -339,7 +374,8 @@ async fn the_republish_path_holds_a_repair_to_its_originals_failing_verdict() {
             },
             trigger: "test",
         },
-        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd),
+        &AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+            .expect("the task set's repository record is believed"),
     )
     .await
     .expect("the repair that keeps the verdict publishes");
