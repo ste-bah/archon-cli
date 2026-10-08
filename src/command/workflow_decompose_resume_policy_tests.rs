@@ -54,11 +54,11 @@ impl RunCopy {
         let arguments: serde_json::Value = self.json("decomposition/arguments.json");
         admit(
             metadata,
+            // Issue 358: the persisted script digest is the launch record; a
+            // later script is an upgrade, not a metadata mismatch.
             canonical_metadata(
                 &state.identity,
-                archon_workflow::workflow_scaffold_hash(
-                    crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE,
-                ),
+                state.identity.script_digest.clone(),
                 &arguments,
             ),
             &state.identity,
@@ -75,23 +75,8 @@ fn pre_binding_run_copy_is_admitted_with_no_check_policy() {
     let run = RunCopy::new();
     let metadata: serde_json::Value = run.json("v2/generated-metadata.json");
     assert!(metadata.get(CHECK_POLICY_KEY).is_none());
-    // The other launch-bound gates resume applies hold for this run too.
-    let state: archon_workflow::FixedDecompositionStateV1 = run.json("decomposition/state.json");
-    assert_eq!(
-        state.identity.script_digest,
-        archon_workflow::workflow_scaffold_hash(
-            crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
-        )
-    );
-    let catalog: archon_workflow::CommandCapabilityCatalog =
-        run.json("decomposition/command-catalog.json");
-    assert_eq!(
-        catalog,
-        crate::command::workflow_host_command_catalog::fixed_decomposition_catalog(
-            &state.identity.starting_binary_revision
-        )
-        .unwrap()
-    );
+    // Script, catalog and template changes since launch are runtime
+    // transitions (Issue 358), recorded at resume; they are not checked here.
     assert_eq!(run.admit(&metadata).unwrap(), None);
 }
 
