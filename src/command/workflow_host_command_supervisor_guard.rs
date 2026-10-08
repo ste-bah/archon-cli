@@ -6,6 +6,7 @@
 //! is removed; stalled, the record is kept, with the survivors it can name,
 //! so that a resume refuses while any of them still runs (Issue 270/273).
 use super::super::workflow_host_command_groups::GroupRecordGuard;
+use super::super::workflow_host_command_teardown_latch::TeardownToken;
 use super::SupervisedProcessOutput;
 use super::io::CapturedPipe;
 use super::termination::{Teardown, Tree, kill_blocking};
@@ -15,6 +16,8 @@ pub(super) struct ProcessGroupGuard {
     #[cfg(unix)]
     pub(super) child: std::mem::ManuallyDrop<tokio::process::Child>,
     record: Option<GroupRecordGuard>,
+    /// Reports to the call when the teardown is settled (#297 round 8).
+    teardown: Option<TeardownToken>,
     settled: bool,
     /// Once the leader is reaped its pid may be reused, so the tree is no
     /// longer reached through it by ancestry.
@@ -28,9 +31,14 @@ impl ProcessGroupGuard {
             #[cfg(unix)]
             child: std::mem::ManuallyDrop::new(child),
             record: None,
+            teardown: None,
             settled: false,
             reaped: false,
         }
+    }
+
+    pub(super) fn track_teardown(&mut self, token: TeardownToken) {
+        self.teardown = Some(token);
     }
 
     pub(super) fn hold_record(&mut self, record: Option<GroupRecordGuard>) {
@@ -89,7 +97,16 @@ impl ProcessGroupGuard {
             })
             .unwrap_or_default();
         let progress = archon_shell::teardown_progress::Progress::new(super::REAP_DEADLINE);
-        let work = tokio::task::spawn_blocking(move || settle_record(record, teardown));
+        // The token moves with the work: it reports even if this future is
+        // dropped while the blocking work still runs.
+        let token = self.teardown.take();
+        let work = tokio::task::spawn_blocking(move || {
+            let evidence = settle_record(record, teardown);
+            if let Some(token) = token {
+                token.settled(evidence.is_none());
+            }
+            evidence
+        });
         progress.watch(work).await.map_err(|error| archon_workflow::WorkflowError::HostOperational(
             format!("settling host command survivor evidence stalled ({files}); repair the host I/O and recheck these records on resume: {error}")
         ))
@@ -140,6 +157,8 @@ impl Drop for ProcessGroupGuard {
         let record = std::sync::Arc::new(std::sync::Mutex::new(self.record.take()));
         let held = record.clone();
         let reaped = self.reaped;
+        // Dropped unreported if the thread cannot start: then unconfirmed.
+        let token = self.teardown.take();
         let spawned = std::thread::Builder::new()
             .name("archon-host-command-teardown".into())
             .spawn(move || {
@@ -155,8 +174,14 @@ impl Drop for ProcessGroupGuard {
                 #[cfg(unix)]
                 tree.leader_reaped();
                 let record = held.lock().ok().and_then(|mut record| record.take());
-                if let Some(evidence) = settle_record(record, teardown) {
+                let evidence = settle_record(record, teardown);
+                if let Some(evidence) = &evidence {
                     tracing::warn!(%evidence, "host command teardown stalled after supervision stopped");
+                }
+                // Last: what waits for the teardown (the cancelled call's
+                // sealing) runs once no process of the tree can write.
+                if let Some(token) = token {
+                    token.settled(evidence.is_none());
                 }
             });
         match spawned {

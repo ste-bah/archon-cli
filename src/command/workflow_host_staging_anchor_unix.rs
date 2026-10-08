@@ -50,6 +50,16 @@ pub(super) fn is_not_dir(error: &io::Error) -> bool {
     errno_is(error, &[libc::ENOTDIR, libc::ELOOP, libc::EMLINK])
 }
 
+/// `open` refused the entry because of what it is, not because of I/O: a
+/// socket (`ENXIO` on Linux, `EOPNOTSUPP` on macOS and the BSDs) or a
+/// device without a driver (`ENODEV`). It holds no bytes to seal (#297 r8).
+fn is_not_openable(error: &io::Error) -> bool {
+    errno_is(
+        error,
+        &[libc::ENXIO, libc::EOPNOTSUPP, libc::ENOTSUP, libc::ENODEV],
+    )
+}
+
 pub(super) fn open_dir_path(path: &Path) -> io::Result<OwnedFd> {
     let path = CString::new(path.as_os_str().as_bytes())
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
@@ -120,7 +130,7 @@ pub(super) fn restore_owner_access(fd: &OwnedFd) -> io::Result<()> {
 /// Make the directory `name` openable without following a link: a child's
 /// `chmod 000` must not stop removal, and a swapped-in link is never chmodded.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn unlock_dir_at(dir: &OwnedFd, name: &OsStr) -> io::Result<()> {
+pub(super) fn unlock_dir_at(dir: &OwnedFd, name: &OsStr) -> io::Result<()> {
     let name = component(name)?;
     let flags = libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC;
     // SAFETY: as for `open_dir_at`. An `O_PATH` handle needs no permission.
@@ -139,7 +149,7 @@ fn unlock_dir_at(dir: &OwnedFd, name: &OsStr) -> io::Result<()> {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
-fn unlock_dir_at(dir: &OwnedFd, name: &OsStr) -> io::Result<()> {
+pub(super) fn unlock_dir_at(dir: &OwnedFd, name: &OsStr) -> io::Result<()> {
     if kind_at(dir, name)? != libc::S_IFDIR {
         return Ok(());
     }
@@ -243,14 +253,26 @@ pub(super) fn list(_: &OwnedFd) -> io::Result<Vec<OsString>> {
 }
 
 /// Opens the regular file `name` without following a link or blocking on a
-/// FIFO. `None`: absent, or not a regular file.
+/// FIFO. `None`: absent, or not a regular file. The entry is described
+/// first, so a socket, FIFO or device is never opened; one swapped in after
+/// that check is refused by `open` or by the descriptor's own type.
 pub(super) fn open_file_at(dir: &OwnedFd, name: &OsStr) -> io::Result<Option<File>> {
+    match kind_at(dir, name) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+        Ok(kind) if kind != libc::S_IFREG => return Ok(None),
+        Ok(_) => {}
+    }
     let c_name = component(name)?;
     let flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
     // SAFETY: as for `open_dir_at`.
     let fd = match cvt(unsafe { libc::openat(dir.as_raw_fd(), c_name.as_ptr(), flags) }) {
         Ok(fd) => fd,
-        Err(error) if error.kind() == io::ErrorKind::NotFound || is_not_dir(&error) => {
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                || is_not_dir(&error)
+                || is_not_openable(&error) =>
+        {
             return Ok(None);
         }
         Err(error) => return Err(error),
@@ -273,10 +295,23 @@ pub(super) fn read_file_at(dir: &OwnedFd, name: &OsStr) -> io::Result<Option<Vec
 }
 
 /// Restricts the regular file `name` to its owner through its own handle.
+/// A file with more than one name is refused (`InvalidData`), never
+/// chmodded: another name may be outside staging (#297 round 8).
 pub(super) fn owner_only_at(dir: &OwnedFd, name: &OsStr) -> io::Result<()> {
     if let Some(file) = open_file_at(dir, name)? {
+        let fd = OwnedFd::from(file);
+        let links = fstat(&fd)?.st_nlink;
+        if links > 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "staged '{}' has {links} hard links; a link can name a file outside staging",
+                    name.to_string_lossy()
+                ),
+            ));
+        }
         // SAFETY: a valid descriptor; the inode is pinned by it.
-        cvt(unsafe { libc::fchmod(file.as_raw_fd(), 0o600) })?;
+        cvt(unsafe { libc::fchmod(fd.as_raw_fd(), 0o600) })?;
     }
     Ok(())
 }
@@ -382,7 +417,8 @@ fn empty(dir: &OwnedFd, depth: usize) -> io::Result<()> {
 }
 
 /// Visits every non-directory entry under `dir` (`rel` is its path from the
-/// call root). With `read`, only regular files, with their bytes. The
+/// call root). With `read`, only regular files, with their bytes; a socket,
+/// FIFO or device is removed, never opened, and a link is skipped. The
 /// visitor returns whether to remove the entry; the result is whether any
 /// entry was removed. An unreadable directory is an error.
 pub(super) fn scan(
@@ -415,6 +451,14 @@ pub(super) fn scan(
                 Err(error) if is_not_dir(&error) => {}
                 Err(error) => return Err(error),
             }
+        }
+        // A socket, FIFO or device holds no bytes to seal, opening one fails
+        // or blocks, and it can never be published: it is removed unopened
+        // through this handle, so it cannot pause every attempt (#297 r8).
+        if read && kind != libc::S_IFREG && kind != libc::S_IFDIR && kind != libc::S_IFLNK {
+            remove_entry(dir, &name, depth)?;
+            tracing::warn!(path = %path.display(), "removed a socket, FIFO or device from host command staging");
+            continue;
         }
         let bytes = if read {
             match read_file_at(dir, &name)? {

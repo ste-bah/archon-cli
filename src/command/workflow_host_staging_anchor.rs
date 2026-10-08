@@ -12,10 +12,13 @@
 //! directory.
 //!
 //! Windows limitation: std has no handle-relative API, so there each step
-//! checks the components with `symlink_metadata` before it acts. That
-//! refuses a link present at the check but cannot close a swap between the
-//! check and the act; creating a link there needs a privilege (or Developer
-//! Mode) a child does not have by default.
+//! checks the components with `symlink_metadata` before it acts and refuses
+//! any reparse point (a symbolic link, a junction or a mount point) present
+//! at the check. It cannot close a swap between the check and the act, and
+//! a child needs no privilege for that: a junction (`mklink /J`) can be
+//! created by any user. Closing it needs handle-relative NT calls
+//! (`NtCreateFile` with a `RootDirectory`, or `FILE_FLAG_OPEN_REPARSE_POINT`
+//! with `SetFileInformationByHandle`), which this module does not make yet.
 use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -69,7 +72,7 @@ impl StagingAnchor {
         let run = at::open_dir_path(run_root)?;
         let staging = std::ffi::OsStr::new(STAGING_DIR);
         let mut parent = None;
-        for _ in 0..2 {
+        for _ in 0..3 {
             match at::mkdir_at(&run, staging) {
                 Err(error) if error.kind() != io::ErrorKind::AlreadyExists => return Err(error),
                 _ => {}
@@ -80,6 +83,11 @@ impl StagingAnchor {
                     break;
                 }
                 Err(error) if at::is_not_dir(&error) => at::unlink_at(&run, staging, false)?,
+                // A child's `chmod 000`: owner access is restored through the
+                // run directory's handle, never through a link (#297 r8).
+                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                    at::unlock_dir_at(&run, staging)?
+                }
                 Err(error) => return Err(error),
             }
         }
@@ -171,6 +179,40 @@ impl StagingAnchor {
             Some(dir) => at::owner_only_at(&dir, name.as_ref()),
             None => Ok(()),
         }
+    }
+
+    /// Removes the entry at `relative` (from the call root), resolving each
+    /// component against the parent's handle without following a link. An
+    /// absent entry or parent is already removed; a parent replaced by a
+    /// link or file is an error, never followed (#297 round 8).
+    #[cfg(unix)]
+    pub(crate) fn remove_file(&self, relative: &Path) -> io::Result<()> {
+        let Some(dir) = self.call_dir()? else {
+            return Ok(());
+        };
+        let names: Vec<_> = relative.iter().collect();
+        let Some((last, parents)) = names.split_last() else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "an empty staging path names nothing to remove",
+            ));
+        };
+        let mut current = dir;
+        for name in parents {
+            current = match at::open_dir_at(&current, name) {
+                Ok(fd) => fd,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+                Err(error) if at::is_not_dir(&error) => {
+                    return Err(io::Error::other(format!(
+                        "'{}' was replaced by a link or file at '{}'",
+                        self.root.join(relative).display(),
+                        name.to_string_lossy()
+                    )));
+                }
+                Err(error) => return Err(error),
+            };
+        }
+        at::remove_entry(&current, last, 0)
     }
 
     /// Visits every non-directory entry of the call tree by its relative

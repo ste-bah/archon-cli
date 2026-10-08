@@ -61,6 +61,30 @@ impl StagingPause {
         })
     }
 
+    /// Records, without pausing, that `step` left staging at `path` (the
+    /// call's outcome is already committed). The next prepare clears it.
+    pub(crate) fn record_residue(&self, path: &Path, step: &str, evidence: &str) {
+        let path = path.display().to_string();
+        tracing::warn!(run_id = %self.run_id, %path, "host command {step}: {evidence}");
+        let detail = serde_json::json!({
+            "event": "host_command_staging_residue",
+            "call_id": self.call_id,
+            "command_id": self.command_id,
+            "path": path,
+            "step": step,
+            "evidence": evidence,
+            "residue": true,
+        });
+        if let Err(error) = emit(
+            &self.store,
+            &self.run_id,
+            WorkflowEventKind::StageStalled,
+            detail,
+        ) {
+            tracing::error!(%error, %path, "host command staging residue not recorded");
+        }
+    }
+
     /// Pauses the run because `step` failed at `path` with `evidence` (already
     /// scrubbed of credentials). `residue`: the staging may still hold child
     /// output, so the path is recorded even when the pause is refused.

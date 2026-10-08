@@ -171,3 +171,144 @@ fn a_tree_deeper_than_the_bound_is_an_error_not_a_crash() {
     assert!(tree.anchor.scan(false, &mut |_, _| false).is_err());
     outside_intact(&tree);
 }
+
+/// A socket bound at a short path (the 104-byte address limit) and moved to
+/// `path`. The listener is returned so the socket stays bound.
+fn socket(tree: &Tree, path: &Path) -> std::os::unix::net::UnixListener {
+    let short = tree.run.parent().unwrap().join("s");
+    let listener = std::os::unix::net::UnixListener::bind(&short).unwrap();
+    std::fs::rename(&short, path).unwrap();
+    listener
+}
+
+fn fifo(path: &Path) {
+    let path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+    // SAFETY: a valid NUL-terminated path.
+    assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+}
+
+fn regular_files_seen(tree: &Tree) -> Vec<PathBuf> {
+    let mut seen = Vec::new();
+    let removed = tree
+        .anchor
+        .scan(true, &mut |path, bytes| {
+            assert!(bytes.is_some(), "only regular files are visited");
+            seen.push(path.to_path_buf());
+            false
+        })
+        .unwrap();
+    assert!(!removed, "no secret-bearing file was removed");
+    seen.sort();
+    seen
+}
+
+#[test]
+fn a_socket_in_staging_is_removed_by_the_secret_scan_and_never_opened() {
+    let tree = tree();
+    let nested = tree.anchor.root().join("nested");
+    let _bound = socket(&tree, &nested.join("agent.sock"));
+    let _top = socket(&tree, &tree.anchor.root().join("top.sock"));
+    assert_eq!(
+        regular_files_seen(&tree),
+        vec![
+            PathBuf::from("gate-envelope.json"),
+            PathBuf::from("nested/deep/a")
+        ]
+    );
+    assert!(std::fs::symlink_metadata(nested.join("agent.sock")).is_err());
+    assert!(std::fs::symlink_metadata(tree.anchor.root().join("top.sock")).is_err());
+    outside_intact(&tree);
+}
+
+#[test]
+fn a_fifo_in_staging_is_removed_by_the_secret_scan_without_blocking() {
+    let tree = tree();
+    let path = tree.anchor.root().join("nested").join("deep").join("pipe");
+    fifo(&path);
+    assert_eq!(regular_files_seen(&tree).len(), 2);
+    assert!(std::fs::symlink_metadata(&path).is_err());
+    outside_intact(&tree);
+}
+
+#[test]
+fn a_socket_named_as_the_envelope_reads_as_absent_and_is_replaced() {
+    let tree = tree();
+    let envelope = tree.anchor.root().join("gate-envelope.json");
+    std::fs::remove_file(&envelope).unwrap();
+    let _bound = socket(&tree, &envelope);
+    assert_eq!(tree.anchor.read_file("gate-envelope.json").unwrap(), None);
+    tree.anchor.owner_only("gate-envelope.json").unwrap();
+    tree.anchor
+        .write_file("gate-envelope.json", b"sealed")
+        .unwrap();
+    assert!(std::fs::symlink_metadata(&envelope).unwrap().is_file());
+    assert_eq!(std::fs::read(&envelope).unwrap(), b"sealed");
+}
+
+#[test]
+fn a_hard_linked_envelope_is_refused_and_the_other_name_is_never_chmodded() {
+    let tree = tree();
+    let envelope = tree.anchor.root().join("gate-envelope.json");
+    std::fs::remove_file(&envelope).unwrap();
+    let outside = tree.outside.join("owned.json");
+    std::fs::write(&outside, b"{}").unwrap();
+    mode(&outside, 0o644);
+    std::fs::hard_link(&outside, &envelope).unwrap();
+    let error = tree.anchor.owner_only("gate-envelope.json").unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{error}");
+    assert!(error.to_string().contains("2 hard links"), "{error}");
+    let after = std::fs::metadata(&outside).unwrap().permissions().mode();
+    assert_eq!(after & 0o777, 0o644, "the outside name keeps its mode");
+    // One name only: restricted as before.
+    std::fs::remove_file(&outside).unwrap();
+    tree.anchor.owner_only("gate-envelope.json").unwrap();
+    let mode = std::fs::metadata(&envelope).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+}
+
+#[test]
+fn a_locked_shared_staging_directory_is_unlocked_through_the_run_handle() {
+    let tree = tree();
+    let staging = tree.run.join(STAGING_DIR);
+    mode(&staging, 0);
+    let next = StagingAnchor::create(&tree.run, "next").unwrap();
+    next.verify().unwrap();
+    let restored = std::fs::metadata(&staging).unwrap().permissions().mode();
+    assert_eq!(restored & 0o700, 0o700, "owner access restored");
+    assert!(tree.anchor.root().join("gate-envelope.json").exists());
+    outside_intact(&tree);
+}
+
+#[test]
+fn removing_a_published_source_never_follows_a_swapped_parent_or_link() {
+    let tree = tree();
+    let root = tree.anchor.root();
+    tree.anchor.remove_file(Path::new("nested/deep/a")).unwrap();
+    assert!(
+        !root.join("nested/deep/a").exists(),
+        "removed through the anchor"
+    );
+    tree.anchor.remove_file(Path::new("nested/deep/a")).unwrap();
+    tree.anchor.remove_file(Path::new("gone/x")).unwrap();
+    // A parent swapped for a link to a tree holding the same name.
+    std::fs::rename(root.join("nested"), tree.run.join("moved")).unwrap();
+    symlink(&tree.outside, root.join("nested")).unwrap();
+    let error = tree
+        .anchor
+        .remove_file(Path::new("nested/call/keep.txt"))
+        .unwrap_err();
+    assert!(error.to_string().contains("replaced by a link"), "{error}");
+    // The entry itself a link: the link goes, its target stays.
+    symlink(
+        tree.outside.join("call").join("keep.txt"),
+        root.join("keep.txt"),
+    )
+    .unwrap();
+    tree.anchor.remove_file(Path::new("keep.txt")).unwrap();
+    assert!(std::fs::symlink_metadata(root.join("keep.txt")).is_err());
+    // The call directory swapped for a link: refused, not followed.
+    std::fs::rename(root, tree.run.join("moved-call")).unwrap();
+    symlink(tree.outside.join("call"), root).unwrap();
+    assert!(tree.anchor.remove_file(Path::new("keep.txt")).is_err());
+    outside_intact(&tree);
+}

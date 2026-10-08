@@ -3,10 +3,12 @@
 //! be rebound to the sealed bytes. Temporary envelopes are removed on exit.
 //! Every read and rewrite goes through the call's staging anchor (#297).
 use std::path::Path;
+use std::sync::Arc;
 
 use archon_workflow::task_set_contract::content_digest;
 use archon_workflow::{GateEnvelopeV1, PreparedPublicationV1, WorkflowError, WorkflowResult};
 
+use super::workflow_host_command_teardown_latch::TeardownLatch;
 use super::workflow_host_secrets::HostSecrets;
 use super::workflow_host_staging_anchor::StagingAnchor;
 use super::workflow_host_staging_pause::StagingPause;
@@ -15,35 +17,74 @@ pub(crate) const ENVELOPE_FILE: &str = "gate-envelope.json";
 
 /// Covers early returns and cancellation of the executor's future too. A
 /// failure on cancellation is made durable by the pause sealing records.
-pub(crate) struct EnvelopeCleanup<'a> {
-    pub(crate) anchor: &'a StagingAnchor,
-    pub(crate) secrets: &'a HostSecrets,
-    pub(crate) pause: &'a StagingPause,
+/// Sealing waits for the call's process trees (`teardown`): a child still
+/// being torn down can write staging after an early seal (#297 round 8).
+pub(crate) struct EnvelopeCleanup {
+    pub(crate) anchor: Arc<StagingAnchor>,
+    pub(crate) secrets: Arc<HostSecrets>,
+    pub(crate) pause: Arc<StagingPause>,
+    pub(crate) teardown: TeardownLatch,
     pub(crate) armed: bool,
 }
 
-impl EnvelopeCleanup<'_> {
+impl EnvelopeCleanup {
+    /// Seals now. A teardown still pending (the supervisor was dropped by an
+    /// early return) gets a second seal once it is settled.
     pub(crate) fn finish(mut self) -> WorkflowResult<()> {
         self.armed = false;
-        self.secrets
-            .seal_staged_evidence(self.anchor, None, self.pause)
+        let sealed = self
+            .secrets
+            .seal_staged_evidence(&self.anchor, None, &self.pause);
+        if self.teardown.pending() {
+            self.teardown.after_teardown(self.reseal());
+        }
+        sealed
+    }
+
+    fn reseal(&self) -> Box<dyn FnOnce(bool) + Send> {
+        let (anchor, secrets, pause) = (
+            self.anchor.clone(),
+            self.secrets.clone(),
+            self.pause.clone(),
+        );
+        Box::new(move |confirmed| seal_after_teardown(&anchor, &secrets, &pause, confirmed))
     }
 }
 
-impl Drop for EnvelopeCleanup<'_> {
+impl Drop for EnvelopeCleanup {
     fn drop(&mut self) {
         if !self.armed {
             return;
         }
-        // Sealing pauses the run (or, when the run is no longer this call's,
-        // records the residue) before it returns; nothing is left to decide.
-        if let Err(error) = self
-            .secrets
-            .seal_staged_evidence(self.anchor, None, self.pause)
-        {
-            let evidence = self.secrets.text(&error.to_string());
-            tracing::warn!(error = %evidence, "sealing a cancelled call's staging failed");
-        }
+        // Cancelled: sealed once the trees are gone, on the thread that
+        // settles the last teardown, or here when none is pending.
+        self.teardown.after_teardown(self.reseal());
+    }
+}
+
+/// Seals the staging of a call whose trees were torn down. Sealing pauses
+/// the run (or, when the run is no longer this call's, records the residue)
+/// before it returns. A teardown that was not confirmed may have left a
+/// process that still writes staging: that is recorded as residue too, and
+/// the next resume clears the staging before its child runs.
+fn seal_after_teardown(
+    anchor: &StagingAnchor,
+    secrets: &HostSecrets,
+    pause: &StagingPause,
+    confirmed: bool,
+) {
+    if let Err(error) = secrets.seal_staged_evidence(anchor, None, pause) {
+        let evidence = secrets.text(&error.to_string());
+        tracing::warn!(error = %evidence, "sealing a cancelled call's staging failed");
+    }
+    if !confirmed {
+        let error = pause.pause(
+            anchor.root(),
+            "staging was sealed but the teardown of its processes was not confirmed",
+            "a process of the call may still write staging",
+            true,
+        );
+        tracing::warn!(%error, "a cancelled call's staging may still be written");
     }
 }
 
@@ -83,7 +124,15 @@ pub(crate) fn seal_staged_envelope(
     if sealed != raw {
         anchor.write_file(ENVELOPE_FILE, &sealed).map_err(&io)?;
     } else {
-        anchor.owner_only(ENVELOPE_FILE).map_err(&io)?;
+        // A hard-linked envelope is refused: another name may be outside.
+        anchor
+            .owner_only(ENVELOPE_FILE)
+            .map_err(|error| match error.kind() {
+                std::io::ErrorKind::InvalidData => WorkflowError::ArtifactInvalid(format!(
+                    "staged output gate-envelope.json refused: {error}"
+                )),
+                _ => io(error),
+            })?;
     }
     if mismatch {
         return Err(WorkflowError::ArtifactInvalid(

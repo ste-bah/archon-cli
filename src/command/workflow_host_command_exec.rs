@@ -32,6 +32,7 @@ use super::workflow_host_command_supervisor::{
     HostCommandControl, HostCommandControlHandle, HostCommandSignal, SupervisedProcessOutput,
     supervise_process_group,
 };
+use super::workflow_host_command_teardown_latch::TeardownLatch;
 use super::workflow_host_envelope_seal::{ENVELOPE_FILE, EnvelopeCleanup, owner_only};
 use super::workflow_host_secrets::{HostSecrets, utf8};
 
@@ -141,63 +142,12 @@ impl FixedHostCommandExecutor {
     ) -> WorkflowResult<ResolvedHostCommand> {
         resolve_host_command(request, &self.catalog, context, call_id)
     }
-
-    async fn execute_process_with_run_control(
-        &self,
-        request: ResolvedHostCommand,
-        control: HostCommandControl,
-        handle: HostCommandControlHandle,
-        expected_generation: u64,
-    ) -> WorkflowResult<SupervisedProcessOutput> {
-        let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
-        let run_id = self
-            .run_root
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                WorkflowError::StateCorrupt(
-                    "fixed HostCommand run root has no UTF-8 run id".to_string(),
-                )
-            })?
-            .to_string();
-        // A run paused meanwhile reports the pause, never a cancellation.
-        crate::command::workflow_host_command_operational::require_run_owned(
-            &store,
-            &run_id,
-            expected_generation,
-        )?;
-        let work = self.process.execute(request, control);
-        tokio::pin!(work);
-        let mut poll = tokio::time::interval(std::time::Duration::from_millis(100));
-        loop {
-            tokio::select! {
-                biased;
-                result = &mut work => return result,
-                _ = poll.tick() => {
-                    let Ok(run) = store.load_state(&run_id) else {
-                        continue;
-                    };
-                    let signal = match run.status {
-                        archon_workflow::RunStatus::Paused => Some(HostCommandSignal::Paused),
-                        archon_workflow::RunStatus::Cancelled => Some(HostCommandSignal::Cancelled),
-                        _ if run.generation != expected_generation =>
-                        {
-                            Some(HostCommandSignal::Cancelled)
-                        }
-                        _ => None,
-                    };
-                    if let Some(signal) = signal {
-                        handle.signal(signal)?;
-                        return work.await;
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[path = "workflow_host_command_exec_destinations.rs"]
 mod destinations;
+#[path = "workflow_host_command_exec_finish.rs"]
+pub(crate) mod finish;
 #[path = "workflow_host_command_exec_live.rs"]
 mod live;
 #[path = "workflow_host_command_exec_retry.rs"]
@@ -305,12 +255,15 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             LiveMutationSentinels::capture(&destinations.values().cloned().collect::<Vec<_>>())
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
         // What the call records never holds a secret value the child was given.
-        let secrets = HostSecrets::of(&context, &command.environment);
+        let secrets = Arc::new(HostSecrets::of(&context, &command.environment));
+        let pause = Arc::new(pause);
+        let teardown = TeardownLatch::default();
         let staged_envelope = staging.root.join(ENVELOPE_FILE);
         let cleanup = EnvelopeCleanup {
-            anchor: &staging.anchor,
-            secrets: &secrets,
-            pause: &pause,
+            anchor: staging.anchor.clone(),
+            secrets: secrets.clone(),
+            pause: pause.clone(),
+            teardown: teardown.clone(),
             armed: true,
         };
         let result = async {
@@ -323,6 +276,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                     &secrets,
                     &staging.anchor,
                     &pause,
+                    &teardown,
                 )
                 .await?;
             let truncated = sealed.truncated;
@@ -469,6 +423,8 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
                     evaluate_postcondition(&context, &command.command_id)?;
                 Ok((receipt, subjects, postcondition))
             })?;
+            // Through the anchor, after the lock: a failure is recorded.
+            finish::remove_published(&staging, &receipt, &pause, &secrets);
             Ok(HostCommandResult {
                 exit_code: observed.exit_code,
                 stdout,
@@ -486,11 +442,8 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             })
         }
         .await;
-        let cleanup_result = cleanup.finish();
-        let result = match cleanup_result {
-            Err(cleanup_error) => Err(cleanup_error),
-            Ok(()) => result,
-        };
-        result.map_err(|error| secrets.error(error))
+        let sealed = cleanup.finish();
+        finish::settle_cleanup(result, sealed, &staging.root, &pause, &secrets)
+            .map_err(|error| secrets.error(error))
     }
 }

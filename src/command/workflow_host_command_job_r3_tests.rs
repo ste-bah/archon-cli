@@ -18,6 +18,9 @@ impl Drop for AccountingStall {
     }
 }
 impl JobOps for AccountingStall {
+    fn active_processes(&self) -> io::Result<u32> {
+        Ok(self.pins.len() as u32)
+    }
     fn process_identities_observed(&self, progress: &Progress) -> io::Result<Vec<(u32, u64)>> {
         progress.check()?;
         self.reads.fetch_add(1, Ordering::SeqCst);
@@ -101,4 +104,61 @@ async fn increasing_job_accounting_collects_identities_and_heals() {
 #[tokio::test]
 async fn stall_collection_survives_record_rewrite_failure() {
     stall_collects_and_heals(2).await;
+}
+
+/// The job empties after the inactivity bound but before the identities are
+/// read (#297 round 8): accounting is re-read, never assumed.
+struct EmptiedLate {
+    /// What accounting reads after the identities came back empty.
+    after: io::Result<u32>,
+}
+impl JobOps for EmptiedLate {
+    fn process_identities_observed(&self, progress: &Progress) -> io::Result<Vec<(u32, u64)>> {
+        progress.check()?;
+        progress.advance();
+        Ok(Vec::new())
+    }
+    fn kill_and_confirm_observed(&self, progress: &Progress) -> io::Result<u32> {
+        progress.check()?;
+        Ok(1)
+    }
+    fn active_processes(&self) -> io::Result<u32> {
+        match &self.after {
+            Ok(count) => Ok(*count),
+            Err(error) => Err(io::Error::new(error.kind(), error.to_string())),
+        }
+    }
+}
+async fn emptied_late(after: io::Result<u32>) -> Teardown {
+    let job = Arc::new(EmptiedLate { after });
+    kill_job_off_thread(job, None, Duration::from_millis(200)).await
+}
+#[tokio::test]
+async fn a_job_that_emptied_after_the_bound_is_confirmed() {
+    assert!(matches!(emptied_late(Ok(0)).await, Teardown::Confirmed));
+}
+#[tokio::test]
+async fn a_job_still_counting_processes_with_no_identity_stays_unknown() {
+    let Teardown::Stalled {
+        evidence,
+        survivors,
+    } = emptied_late(Ok(2)).await
+    else {
+        panic!("accounting still holds processes")
+    };
+    assert!(survivors.is_none(), "survivors are unknown");
+    assert!(evidence.contains("survivors unknown"), "{evidence}");
+}
+#[tokio::test]
+async fn a_failed_accounting_reread_stays_unknown_and_names_the_error() {
+    let failed = Err(io::Error::other("accounting query failed"));
+    let Teardown::Stalled {
+        evidence,
+        survivors,
+    } = emptied_late(failed).await
+    else {
+        panic!("a failed read proves nothing")
+    };
+    assert!(survivors.is_none());
+    assert!(evidence.contains("accounting query failed"), "{evidence}");
 }

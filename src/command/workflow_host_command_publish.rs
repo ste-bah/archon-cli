@@ -69,7 +69,6 @@ impl LiveMutationSentinels {
 #[derive(Debug)]
 struct AuditedEntry {
     relative_path: String,
-    source_path: PathBuf,
     bytes: Vec<u8>,
 }
 
@@ -196,7 +195,6 @@ pub(crate) fn audit_prepared_publication(
         }
         entries.push(AuditedEntry {
             relative_path,
-            source_path,
             bytes,
         });
     }
@@ -210,7 +208,9 @@ pub(crate) fn audit_prepared_publication(
 
 /// Publish the audited output as one crash-atomic transaction journaled
 /// beside the bound task set's acceptance pin (`journal_pin`), so a kill
-/// mid-publish is settled to one whole version by the next recovery.
+/// mid-publish is settled to one whole version by the next recovery. The
+/// staged sources stay: the caller removes them through the staging anchor,
+/// never by a path a child could have redirected (#297 round 8).
 pub(crate) fn publish_audited(
     audited: AuditedPublication,
     destinations: &BTreeMap<String, PathBuf>,
@@ -268,7 +268,6 @@ pub(crate) fn publish_audited(
                 destination.display()
             ));
         }
-        let _ = std::fs::remove_file(&entry.source_path);
         receipts.push(PublishedArtifactReceipt {
             relative_path: entry.relative_path.clone(),
             destination_path: destination.to_string_lossy().replace('\\', "/"),

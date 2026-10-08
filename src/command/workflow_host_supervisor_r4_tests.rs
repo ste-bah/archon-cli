@@ -158,6 +158,9 @@ struct StalledJob {
     marker: std::path::PathBuf,
 }
 impl JobOps for StalledJob {
+    fn active_processes(&self) -> io::Result<u32> {
+        Ok(1)
+    }
     fn process_identities_observed(&self, progress: &Progress) -> io::Result<Vec<(u32, u64)>> {
         progress.check()?;
         if self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0

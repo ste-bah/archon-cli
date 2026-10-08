@@ -7,6 +7,8 @@ use std::{io, sync::Arc, time::Duration};
 pub(in super::super) trait JobOps: Send + Sync + 'static {
     fn process_identities_observed(&self, progress: &Progress) -> io::Result<Vec<(u32, u64)>>;
     fn kill_and_confirm_observed(&self, progress: &Progress) -> io::Result<u32>;
+    /// How many processes the job's accounting holds now.
+    fn active_processes(&self) -> io::Result<u32>;
 }
 #[cfg(windows)]
 impl JobOps for archon_shell::job_object::Job {
@@ -15,6 +17,9 @@ impl JobOps for archon_shell::job_object::Job {
     }
     fn kill_and_confirm_observed(&self, progress: &Progress) -> io::Result<u32> {
         self.kill_and_confirm_observed(progress)
+    }
+    fn active_processes(&self) -> io::Result<u32> {
+        archon_shell::job_object::Job::active_processes(self)
     }
 }
 
@@ -63,14 +68,17 @@ pub(super) async fn kill_job_off_thread(
     let confirmed = matches!(killed, Ok(0));
     let collected = phase(bound, move |progress| {
         let pins = if confirmed { Vec::new() } else { job.process_identities_observed(&progress)? };
-        if !confirmed && pins.is_empty() {
+        // The job can empty between the end of the bound and this read: no
+        // identity, and accounting that now reads zero, proves it empty.
+        let emptied = !confirmed && pins.is_empty() && job.active_processes()? == 0;
+        if !confirmed && !emptied && pins.is_empty() {
             return Err(io::Error::other("job accounting has not confirmed exit and no survivor identities could be collected"));
         }
         progress.check()?;
-        Ok(pins)
+        Ok((pins, emptied))
     }).await;
-    let pins = match collected {
-        Ok(pins) => pins,
+    let (pins, emptied) = match collected {
+        Ok(collected) => collected,
         Err(error) => {
             return Teardown::stalled(format!(
                 "job survivor collection stalled; survivors unknown: {error}"
@@ -98,6 +106,7 @@ pub(super) async fn kill_job_off_thread(
     }
     match killed {
         Ok(0) => Teardown::Confirmed,
+        _ if emptied => Teardown::Confirmed,
         result => Teardown::Stalled {
             evidence: match result {
                 Ok(active) => format!(

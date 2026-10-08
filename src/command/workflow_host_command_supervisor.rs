@@ -10,6 +10,7 @@ use archon_workflow::{WorkflowError, WorkflowResult};
 use tokio::sync::{mpsc, watch};
 
 use super::workflow_host_command_catalog::ResolvedHostCommand;
+use super::workflow_host_command_teardown_latch::{TeardownLatch, TeardownToken};
 #[path = "workflow_host_command_supervisor_io.rs"]
 mod io;
 use io::{SupervisorEvent, abort_stdin, drain_pipe, finish_pipe_tasks, spawn_stdin};
@@ -66,12 +67,28 @@ impl HostCommandControlHandle {
 #[derive(Debug)]
 pub(crate) struct HostCommandControl {
     receiver: watch::Receiver<Option<HostCommandSignal>>,
+    /// Reports when the supervised tree's teardown is settled (#297 r8).
+    teardown: TeardownLatch,
 }
 
 impl HostCommandControl {
+    #[cfg(test)]
     pub(crate) fn new() -> (Self, HostCommandControlHandle) {
+        Self::tracked(TeardownLatch::default())
+    }
+
+    /// A control whose supervised tree reports its teardown to `teardown`.
+    pub(crate) fn tracked(teardown: TeardownLatch) -> (Self, HostCommandControlHandle) {
         let (sender, receiver) = watch::channel(None);
-        (Self { receiver }, HostCommandControlHandle { sender })
+        (
+            Self { receiver, teardown },
+            HostCommandControlHandle { sender },
+        )
+    }
+
+    /// The token a supervised tree holds until its teardown is settled.
+    pub(crate) fn track_teardown(&self) -> TeardownToken {
+        self.teardown.track()
     }
 
     pub(crate) async fn wait(mut self) -> HostCommandSignal {
@@ -191,6 +208,7 @@ pub(crate) async fn supervise_process_group(
     let mut group_guard = ProcessGroupGuard::new(tree, child);
     #[cfg(not(unix))]
     let mut group_guard = ProcessGroupGuard::new(tree);
+    group_guard.track_teardown(control.track_teardown());
     let record = match super::workflow_host_command_groups::record_in(
         group_records,
         group_guard.tree.leader(),

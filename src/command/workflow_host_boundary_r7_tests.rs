@@ -11,6 +11,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[path = "workflow_host_boundary_r7_cancel_tests.rs"]
 mod cancel;
 
+#[path = "workflow_host_boundary_r8_tests.rs"]
+mod r8;
+
 pub(super) struct Fixture {
     pub(super) _temp: tempfile::TempDir,
     pub(super) store: WorkflowStore,

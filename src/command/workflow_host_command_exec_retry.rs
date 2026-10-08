@@ -8,6 +8,59 @@ use crate::command::workflow_host_command_operational::{
 };
 
 impl FixedHostCommandExecutor {
+    async fn execute_process_with_run_control(
+        &self,
+        request: ResolvedHostCommand,
+        control: HostCommandControl,
+        handle: HostCommandControlHandle,
+        expected_generation: u64,
+    ) -> WorkflowResult<SupervisedProcessOutput> {
+        let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
+        let run_id = self
+            .run_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                WorkflowError::StateCorrupt(
+                    "fixed HostCommand run root has no UTF-8 run id".to_string(),
+                )
+            })?
+            .to_string();
+        // A run paused meanwhile reports the pause, never a cancellation.
+        crate::command::workflow_host_command_operational::require_run_owned(
+            &store,
+            &run_id,
+            expected_generation,
+        )?;
+        let work = self.process.execute(request, control);
+        tokio::pin!(work);
+        let mut poll = tokio::time::interval(std::time::Duration::from_millis(100));
+        loop {
+            tokio::select! {
+                biased;
+                result = &mut work => return result,
+                _ = poll.tick() => {
+                    let Ok(run) = store.load_state(&run_id) else {
+                        continue;
+                    };
+                    let signal = match run.status {
+                        archon_workflow::RunStatus::Paused => Some(HostCommandSignal::Paused),
+                        archon_workflow::RunStatus::Cancelled => Some(HostCommandSignal::Cancelled),
+                        _ if run.generation != expected_generation =>
+                        {
+                            Some(HostCommandSignal::Cancelled)
+                        }
+                        _ => None,
+                    };
+                    if let Some(signal) = signal {
+                        handle.signal(signal)?;
+                        return work.await;
+                    }
+                }
+            }
+        }
+    }
+
     /// Runs `command` until it completes. A timeout or an incomplete,
     /// resumable exit runs it again under `next_step`; when that stops, the
     /// run is paused and the call ends with the pause's control error, so it
@@ -21,6 +74,7 @@ impl FixedHostCommandExecutor {
         secrets: &HostSecrets,
         anchor: &crate::command::workflow_host_staging_anchor::StagingAnchor,
         pause: &crate::command::workflow_host_staging_pause::StagingPause,
+        teardown: &crate::command::workflow_host_command_teardown_latch::TeardownLatch,
     ) -> WorkflowResult<crate::command::workflow_host_secrets::SealedProcessOutput> {
         let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
         let run_id = self
@@ -49,7 +103,9 @@ impl FixedHostCommandExecutor {
                     )
                 })?;
             }
-            let (control, handle) = HostCommandControl::new();
+            // Every attempt's tree reports to the call's latch, so sealing
+            // after a cancellation waits for it (#297 round 8).
+            let (control, handle) = HostCommandControl::tracked(teardown.clone());
             let started = std::time::Instant::now();
             let observed = self
                 .execute_process_with_run_control(
