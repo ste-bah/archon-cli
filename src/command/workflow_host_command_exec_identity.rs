@@ -174,6 +174,15 @@ impl FixedHostCommandExecutor {
         self
     }
 
+    /// A build whose capability `id` hashes to `digest` (tests).
+    #[cfg(test)]
+    pub(crate) fn with_logic_digest(mut self, id: &str, digest: &str) -> Self {
+        if let Some(entry) = self.logic_digests.get_mut(id) {
+            entry.0 = digest.to_string();
+        }
+        self
+    }
+
     /// Whether a recorded outcome was judged by the logic this build runs
     /// ([`logic::outcome_logic_holds`]). A command this build no longer
     /// declares runs no logic that could vouch for it.
@@ -190,16 +199,23 @@ impl FixedHostCommandExecutor {
         let Some(capability) = self.catalog.capabilities.get(&request.command_id) else {
             return Ok(false);
         };
+        let bound = self
+            .logic_digests
+            .get(&request.command_id)
+            .filter(|(_, bound)| *bound)
+            .map(|(digest, _)| digest.as_str());
         let holds = logic::outcome_logic_holds(
             &record.result.data,
             self.logic_version_for(&request.command_id)?,
             logic::judges_only(capability),
+            bound,
         );
         if !holds {
             tracing::info!(
                 call_id = %record.call.id,
                 command_id = %request.command_id,
                 recorded = %record.result.data.get(logic::LOGIC_VERSION_STAMP).map_or_else(|| "none".to_string(), ToString::to_string),
+                recorded_digest = %record.result.data.get(logic::LOGIC_DIGEST_STAMP).map_or_else(|| "none".to_string(), ToString::to_string),
                 "host command outcome was judged by other logic; it runs again"
             );
         }

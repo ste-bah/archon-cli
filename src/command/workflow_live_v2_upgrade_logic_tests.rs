@@ -2,7 +2,9 @@
 //! only its capability, an upgrade without one reuses everything, and a
 //! verdict recorded before logic versions never answers for a check.
 use super::*;
-use crate::command::workflow_host_command_logic::LOGIC_VERSION_STAMP;
+use crate::command::workflow_host_command_logic::{
+    CAPABILITY_LOGIC, LOGIC_DIGEST_STAMP, LOGIC_VERSION_STAMP,
+};
 
 /// A binary from before logic versions: the same keys, no stamp, no check.
 struct Unversioned(CatalogHost);
@@ -75,6 +77,11 @@ impl Run {
     /// A later build: a freeze-skeleton limit changed (a binary that is not
     /// the launch one), and each of `bumps` runs another logic version.
     fn upgraded(&self, bumps: &[(&str, u32)]) -> Arc<CatalogHost> {
+        self.rebuilt(bumps, &[])
+    }
+
+    /// As [`Self::upgraded`], where each of `sources` hashes to other source.
+    fn rebuilt(&self, bumps: &[(&str, u32)], sources: &[&str]) -> Arc<CatalogHost> {
         let mut keys = FixedHostCommandExecutor::new(
             changed(&self.launch, "freeze-skeleton", "timeout"),
             self.context.clone(),
@@ -83,6 +90,9 @@ impl Run {
         .with_launch_catalog(self.launch.clone());
         for (id, version) in bumps {
             keys = keys.with_logic_version(id, Some(*version));
+        }
+        for id in sources {
+            keys = keys.with_logic_digest(id, "other-source");
         }
         Arc::new(CatalogHost {
             keys,
@@ -122,6 +132,21 @@ impl Run {
         .await
         .unwrap();
         (summary.executed, summary.reused)
+    }
+
+    /// The logic digest each recorded outcome of `command` carries.
+    fn digests(&self, command: &str) -> Vec<Option<String>> {
+        let records = self.v2.load_call_records().unwrap().into_iter();
+        records
+            .filter(|record| {
+                let request = record.call.options.host_command.as_ref();
+                request.is_some_and(|request| request.command_id == command)
+            })
+            .map(|record| {
+                let digest = record.result.data.get(LOGIC_DIGEST_STAMP);
+                digest.and_then(|v| v.as_str()).map(str::to_string)
+            })
+            .collect()
     }
 
     /// The logic version each recorded outcome of `command` carries.
@@ -241,4 +266,46 @@ async fn logic_361_unversioned_check_history_is_not_replayed() {
     assert_eq!(run.run(upgraded.clone(), script).await, (2, 0));
     assert_eq!(upgraded.calls.load(Ordering::SeqCst), 2);
     assert_eq!(run.run(run.upgraded(&[]), script).await, (0, 2));
+}
+
+/// The backstop: a later binary whose source of a cheap check differs runs
+/// that check again even at the same version; task-set-lint and the
+/// landings keep version-only reuse.
+#[tokio::test]
+async fn logic_361_other_source_reruns_only_the_cheap_checks() {
+    let run = Run::new();
+    assert_eq!(run.run(Arc::new(run.launched()), SCRIPT).await, (4, 0));
+    let pinned = |id: &str| {
+        let logic = CAPABILITY_LOGIC
+            .iter()
+            .find(|logic| logic.id == id)
+            .unwrap();
+        Some(logic.sources_digest.to_string())
+    };
+    assert_eq!(
+        run.digests("requirements-trace"),
+        vec![pinned("requirements-trace")]
+    );
+    let all = [
+        "freeze-skeleton",
+        "verify-frozen-acceptance",
+        "task-set-lint",
+        "requirements-trace",
+    ];
+    let rebuilt = run.rebuilt(&[], &all);
+    assert_eq!(run.run(rebuilt.clone(), SCRIPT).await, (2, 2));
+    assert_eq!(rebuilt.calls.load(Ordering::SeqCst), 2);
+    // Run again and stamped by the new source, they now replay on it.
+    assert!(
+        run.digests("verify-frozen-acceptance")
+            .contains(&Some("other-source".into()))
+    );
+    assert_eq!(run.digests("task-set-lint"), vec![pinned("task-set-lint")]);
+    assert_eq!(run.run(run.rebuilt(&[], &all), SCRIPT).await, (0, 4));
+    // Only one cheap check's source changed: only it runs.
+    let one = run.rebuilt(
+        &[],
+        &["freeze-skeleton", "task-set-lint", "requirements-trace"],
+    );
+    assert_eq!(run.run(one, SCRIPT).await, (1, 3));
 }

@@ -126,6 +126,12 @@ impl WorkflowHostCommandExecutor for CatalogHost {
     ) -> archon_workflow::WorkflowResult<bool> {
         self.keys.outcome_logic_holds(record)
     }
+    fn logic_digest(
+        &self,
+        request: &archon_workflow::HostCommandRequest,
+    ) -> archon_workflow::WorkflowResult<Option<String>> {
+        self.keys.logic_digest(request)
+    }
     async fn execute(
         &self,
         request: archon_workflow::HostCommandRequest,
