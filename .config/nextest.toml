@@ -156,3 +156,32 @@ filter = '''
   + binary_id(=archon-cli-workspace::voice_toggle_mode_wire_test)
   + (binary_id(=archon-cli-workspace::bin/archon) and (test(/::workflow_live_v2_client::wire_tests::/) + test(/::workflow_live_v2_lifecycle_e2e_tests_[be]::/)))
 '''
+
+# ---------------------------------------------------------------------------
+# Tests whose premise is a share of the CPU.
+#
+# The workflow.js heartbeat tests judge starvation by CPU time, not wall time.
+# `the_monitor_records_a_starved_thread_and_its_recovery` spins and expects
+# the monitor to suspect starvation, which it does only when the process burned
+# at least half the wall time since the last beat (the monitor's rule, so a
+# loaded machine is never called starved). Run beside other tests on a busy
+# machine, the spinner was measured at 25-30% of a core: it then never reaches
+# half, the monitor rightly suspects nothing, and the test fails after its 10 s
+# deadline. The rest of the module times cuts against a CPU window too.
+#
+# max-threads = 1 keeps these tests from competing with each other;
+# threads-required = "num-test-threads" takes every slot, so no other test runs
+# beside one of them. External load (another job on the machine) is outside
+# what nextest can bound.
+#
+# The same GOTCHA as above: CI runs the default profile on every OS, Windows
+# included (.github/workflows/ci.yml, both `cargo nextest run --workspace
+# --no-fail-fast` steps), so this block covers it; a named profile would need
+# it repeated.
+[test-groups.cpu-premise]
+max-threads = 1
+
+[[profile.default.overrides]]
+test-group = 'cpu-premise'
+threads-required = 'num-test-threads'
+filter = 'binary_id(=archon-workflow) and test(/^v2::script::script_thread_heartbeat::tests::/)'

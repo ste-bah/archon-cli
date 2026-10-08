@@ -145,6 +145,12 @@ fn a_thread_off_the_cpu_is_not_starved() {
 /// A thread that burns CPU without a beat (as a synchronous loop inside a
 /// host future does, where no interrupt can reach) is recorded by the
 /// monitor, and the recovery too.
+///
+/// Premise: this process must get at least half of one CPU while it spins.
+/// The monitor suspects starvation only when the process burned at least
+/// half the time since the last beat; on a machine so loaded that the
+/// spinner gets less, it rightly suspects nothing and this test fails. The
+/// `cpu-premise` test group in `.config/nextest.toml` runs it alone.
 #[test]
 fn the_monitor_records_a_starved_thread_and_its_recovery() {
     if process_cpu_time().is_none() {
