@@ -20,6 +20,7 @@ required_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n\
 ## Focused Tests\n- `test -f TASK-X-010.md`\n";
 
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(not(unix), allow(dead_code))]
 enum Child {
     /// A valid envelope whose report (and an unknown field) holds the value.
     Published,
@@ -47,11 +48,8 @@ enum Child {
     ScalarFailed,
     ScalarVersion,
     // Constructed only by the Unix link and permission cases (r5, r7).
-    #[cfg_attr(not(unix), allow(dead_code))]
     UnreadableStaging,
-    #[cfg_attr(not(unix), allow(dead_code))]
     UnreadableNestedStaging,
-    #[cfg_attr(not(unix), allow(dead_code))]
     UnreadableDeepStaging,
 }
 
