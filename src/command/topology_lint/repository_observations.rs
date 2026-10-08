@@ -109,11 +109,69 @@ fn paths_in_item(item: &str) -> Vec<String> {
         found_path |= !line_paths.is_empty();
         paths.extend(line_paths);
         if head_line.len() != line.len() {
+            paths.extend(paths_after_observed_list_item(&line[head_line.len()..]));
             break;
         }
         continued = ends_head_list(line);
     }
     paths
+}
+
+/// Continue a same-line path list after an observed path. A description that
+/// does not use the `, ` or `; ` list form cannot contribute another path.
+fn paths_after_observed_list_item(after_observation: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut rest = after_observation;
+    loop {
+        let Some(observation_len) = observation_end(rest) else {
+            break;
+        };
+        rest = &rest[observation_len..];
+        let Some(listed) = rest.strip_prefix(", ").or_else(|| rest.strip_prefix("; ")) else {
+            break;
+        };
+        let spans = backticked_spans(listed);
+        let Some(span) = spans.first() else {
+            break;
+        };
+        if !listed.starts_with('`') || !is_path_shaped(span) {
+            break;
+        }
+        paths.push(span.clone());
+        let Some(close) = listed[1..].find('`') else {
+            break;
+        };
+        rest = &listed[close + 2..];
+        let head = before_observation(rest);
+        if head.len() == rest.len() {
+            break;
+        }
+        rest = &rest[head.len()..];
+    }
+    paths
+}
+
+/// Byte length of the observation prefix accepted by `parse_observation`.
+fn observation_end(after: &str) -> Option<usize> {
+    parse_observation(after)?;
+    let lowered = after.to_ascii_lowercase();
+    let mut rest = lowered.trim_start();
+    let mut offset = lowered.len() - rest.len();
+    loop {
+        let trimmed = rest
+            .trim_start_matches(['—', '-', '–', ':', ',', '`', '*', ')'])
+            .trim_start();
+        if trimmed.len() == rest.len() {
+            break;
+        }
+        offset += rest.len() - trimmed.len();
+        rest = trimmed;
+    }
+    if rest.starts_with("absent") {
+        return Some(offset + "absent".len());
+    }
+    let close = rest.find(')')?;
+    Some(offset + close + 1)
 }
 
 fn paths_in_head(head: &str) -> Vec<String> {
@@ -134,7 +192,7 @@ fn ends_head_list(line: &str) -> bool {
     let trimmed = line.trim_end();
     trimmed.ends_with(',')
         || trimmed.ends_with(';')
-        || ["and", "or"].iter().any(|word| {
+        || ["and", "or", "and/or", "+"].iter().any(|word| {
             trimmed
                 .rsplit_once(char::is_whitespace)
                 .is_some_and(|(_, last)| last.eq_ignore_ascii_case(word))

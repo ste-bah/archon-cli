@@ -480,3 +480,6 @@ fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
         found[0].1
     );
 }
+
+#[path = "repository_observations_list_tests.rs"]
+mod list_tests;
