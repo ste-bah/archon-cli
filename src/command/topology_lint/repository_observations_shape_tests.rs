@@ -23,7 +23,7 @@ fn a_landed_chat_and_wrapper_file_is_one_finding_not_one_per_deliverable() {
     );
     // The set gate's per-body findings: the same one, no claim on top.
     let path = tasks.join("TASK-X-001.md");
-    let set = super::super::repository_claims::body_findings(
+    let set = crate::command::topology_lint::repository_claims::body_findings(
         &tree,
         &project,
         "TASK-X-001",
