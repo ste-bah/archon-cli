@@ -62,6 +62,9 @@ mod workflow_live_v2_script_tests_f;
 // Issue #162 — the events.jsonl / v2-results agreement invariant.
 #[path = "workflow_live_v2_blocking_gap_tests.rs"]
 mod workflow_live_v2_blocking_gap_tests;
+// Issue 276: raw-outcome results carry the session tool trace.
+#[path = "workflow_raw_outcome_trace_tests.rs"]
+mod workflow_raw_outcome_trace_tests;
 
 #[path = "workflow_live_v2_never_started_dispatch_tests.rs"]
 mod never_started_dispatch_tests;

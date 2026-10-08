@@ -130,9 +130,18 @@ async fn repair_reuses_completed_session_across_spawn_without_second_pipeline_ru
         provider_env_resolution: None,
     };
     assert!(client.continue_agent(req.clone()).await.is_err());
-    client.run_agent(req.clone()).await.unwrap();
+    // Issue 276: a response carries the tool calls of its own dispatch only.
+    let first = client.run_agent(req.clone()).await.unwrap();
+    let names: Vec<_> = first
+        .tool_uses
+        .iter()
+        .map(|t| t.tool_name.as_str())
+        .collect();
+    assert_eq!(names, ["Read"]);
+    assert_eq!(first.tool_uses[0].output, json!({"is_error": false}));
     req.messages = vec![json!({"role":"user","content":"validation feedback"})];
-    client.continue_agent(req.clone()).await.unwrap();
+    let repair = client.continue_agent(req.clone()).await.unwrap();
+    assert!(repair.tool_uses.is_empty(), "{:?}", repair.tool_uses);
     client.run_agent(req).await.unwrap();
     assert_eq!(exec.ids.lock().unwrap().len(), 3);
 }

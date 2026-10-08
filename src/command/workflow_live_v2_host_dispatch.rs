@@ -319,7 +319,7 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                 value.as_object_mut().unwrap().remove("records_landed");
                 outcome.content = serde_json::to_string(&value)?;
             }
-            let stop_reason = outcome.stop_reason.ok_or_else(|| {
+            let stop_reason = outcome.stop_reason.take().ok_or_else(|| {
                 WorkflowError::StageFailed(
                     "raw provider outcome returned no typed stop reason".to_string(),
                 )
@@ -329,18 +329,7 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                     "raw provider outcome returned empty content".to_string(),
                 ));
             }
-            let mut result = WorkflowV2Result::accepted("trusted raw provider outcome captured");
-            result.evidence.push(WorkflowV2Evidence::new(
-                WorkflowV2EvidenceKind::Inspection,
-                "fixed decomposition author returned provider content and typed stop reason",
-            ));
-            result.data = serde_json::json!({
-                "content": outcome.content,
-                "stopReason": stop_reason,
-                "tokensIn": outcome.tokens_in,
-                "tokensOut": outcome.tokens_out,
-            });
-            return Ok(result);
+            return Ok(raw_evidence::raw_outcome_result(outcome, stop_reason));
         }
         let provider_env = workflow_live_provider_env::prepare_provider_env_for_v2_request(
             &mut request,

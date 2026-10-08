@@ -269,6 +269,8 @@ impl SubagentPipelineClient {
         tool_context.run_store = archon_tools::workflow_read_guard::current_run_store();
 
         let subagent_id = lease.id.clone();
+        // Issue 276: this dispatch's tool calls are the history it appends.
+        let history_start = lease.history.message_count();
         let mut run: super::host_cuts::SessionRun = if request.disable_auto_background {
             Box::pin(run_subagent_foreground_with_system(
                 subagent_id,
@@ -337,8 +339,16 @@ impl SubagentPipelineClient {
             ));
         }
 
-        let response = llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)
-            .map_err(|error| super::host_cuts::name_last_progress(error, cut, &clock))?;
+        let mut response =
+            llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)
+                .map_err(|error| super::host_cuts::name_last_progress(error, cut, &clock))?;
+        // Workflow sessions only: the coding pipeline reads `tool_uses` for its
+        // own verification signals, which this does not change.
+        if request.pipeline_type == PipelineType::Workflow {
+            let messages = lease.history.messages();
+            response.tool_uses =
+                super::tool_trace::tool_uses(messages.get(history_start..).unwrap_or_default());
+        }
         lease.complete()?;
         Ok(response)
     }
