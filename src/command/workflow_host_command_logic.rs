@@ -181,6 +181,7 @@ const FREEZE: &[&str] = &[
 const LINT: &[&str] = &[
     "src/command/workflow_staged_cli.rs",
     "src/command/topology_lint.rs",
+    "src/command/topology_lint/repository_claims.rs",
     "src/command/topology_task_graph.rs",
     "crates/archon-workflow/src/fidelity_audit.rs",
     "crates/archon-workflow/src/defect.rs",
@@ -219,16 +220,16 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     },
     CapabilityLogic {
         id: "land-task-body",
-        version: 3,
+        version: 2,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "e7d1b21cc624f0446003c23045e98eb608c5154d302f41c596984641c3fb5733",
+        sources_digest: "7512bb0bc39c9fdb25cf642516b9959280d106a56d0d8a6e589ec46ec037ed01",
         build_bound: false,
     },
     CapabilityLogic {
         id: "task-set-lint",
-        version: 3,
+        version: 2,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "e7d1b21cc624f0446003c23045e98eb608c5154d302f41c596984641c3fb5733",
+        sources_digest: "7512bb0bc39c9fdb25cf642516b9959280d106a56d0d8a6e589ec46ec037ed01",
         build_bound: false,
     },
     CapabilityLogic {

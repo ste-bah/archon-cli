@@ -235,6 +235,7 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     for command in [
         "verify-frozen-acceptance",
         "verify-frozen-skeleton",
+        "land-task-body",
         "task-set-lint",
         "requirements-trace",
     ] {
@@ -275,7 +276,6 @@ fn logic_361_keys_at_the_baseline_are_the_keys_records_already_hold() {
     for (command, stdin) in [
         ("verify-frozen-acceptance", None),
         ("freeze-skeleton", Some("candidate")),
-        ("task-set-lint", None),
         ("requirements-trace", None),
     ] {
         let request = HostCommandRequest::new(command, stdin.map(str::to_string)).unwrap();

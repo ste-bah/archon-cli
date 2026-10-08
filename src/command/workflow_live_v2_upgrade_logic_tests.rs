@@ -69,7 +69,10 @@ impl Run {
                 self.launch.clone(),
                 self.context.clone(),
                 self.store.run_dir(&self.run_id),
-            ),
+            )
+            // Model the prior build so this suite can verify that bumping
+            // task-set-lint from 1 to 2 invalidates its saved verdict.
+            .with_logic_version("task-set-lint", Some(1)),
             calls: AtomicUsize::new(0),
         }
     }
@@ -87,7 +90,8 @@ impl Run {
             self.context.clone(),
             self.store.run_dir(&self.run_id),
         )
-        .with_launch_catalog(self.launch.clone());
+        .with_launch_catalog(self.launch.clone())
+        .with_logic_version("task-set-lint", Some(1));
         for (id, version) in bumps {
             keys = keys.with_logic_version(id, Some(*version));
         }
@@ -198,9 +202,9 @@ async fn logic_361_a_logic_change_reruns_only_its_capability() {
         (0, 4)
     );
     // A stricter set lint re-runs the lint alone.
-    let lint = run.upgraded(&[("freeze-skeleton", 2), ("task-set-lint", 4)]);
+    let lint = run.upgraded(&[("freeze-skeleton", 2), ("task-set-lint", 3)]);
     assert_eq!(run.run(lint.clone(), SCRIPT).await, (1, 3));
-    assert!(run.stamps("task-set-lint").contains(&Some(4)));
+    assert!(run.stamps("task-set-lint").contains(&Some(3)));
 }
 
 #[tokio::test]
@@ -234,7 +238,7 @@ async fn logic_361_unversioned_checks_run_again_and_an_unversioned_landing_reuse
         let expected = if check == "verify-frozen-acceptance" || check == "requirements-trace" {
             1
         } else {
-            3
+            2
         };
         assert_eq!(run.stamps(check), vec![Some(expected)], "{check}");
     }
