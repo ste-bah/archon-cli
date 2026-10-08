@@ -31,6 +31,35 @@ fn continuation_retains_raw_history_identity_and_read_budget() {
 }
 
 #[test]
+fn completed_continuation_keeps_its_scope_but_abandonment_still_cancels() {
+    let parent = tokio_util::sync::CancellationToken::new();
+    let child = parent.child_token();
+    let guard = child.clone().drop_guard();
+    super::retain_scope_after_completion(guard);
+    assert!(
+        !child.is_cancelled(),
+        "a completed session retains its scope"
+    );
+    assert!(
+        !parent.is_cancelled(),
+        "the original parent stays untouched"
+    );
+
+    let abandoned = tokio_util::sync::CancellationToken::new();
+    drop(abandoned.clone().drop_guard());
+    assert!(
+        abandoned.is_cancelled(),
+        "dropping an in-flight future cancels"
+    );
+
+    let later_repair = child.child_token();
+    assert!(
+        !later_repair.is_cancelled(),
+        "a retained scope admits a repair"
+    );
+}
+
+#[test]
 fn fresh_generation_never_reuses_history_and_parallel_agent_is_rejected() {
     let client = client();
     let request = request(ToolAccessLevel::ReadOnly);

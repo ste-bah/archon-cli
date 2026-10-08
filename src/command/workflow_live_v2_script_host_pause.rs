@@ -92,8 +92,9 @@ impl WorkflowScriptHost {
                 "w.pause requires a non-empty string id".to_string(),
             ));
         }
-        let store = &self.runner.workflow_store;
-        let run_id = self.runner.run_id.as_str();
+        let store = self.runner.workflow_store.clone();
+        let v2_store = self.runner.v2_store.clone();
+        let run_id = self.runner.run_id.clone();
         let record_path = pause_record_path(&pause_id);
         let evidence = bounded_evidence(
             request
@@ -103,91 +104,109 @@ impl WorkflowScriptHost {
                 .unwrap_or(serde_json::Value::Null),
         );
         let resume = format!("archon workflow resume --live --yes {run_id}");
-        let outcome = store.with_run_lock(run_id, |locked| {
-            let mut run = locked.load_state(run_id)?;
-            // A stale session decides nothing: not a pause, a join or a pass.
-            // Refused as every stale write is, before anything is read or
-            // recorded: a restart since this session opened, or a resume that
-            // gave the run to a newer executor.
-            self.runner.v2_store.require_session_restart_epoch()?;
-            self.runner.v2_store.require_session_executor(&run)?;
-            // Issue 337: a sibling of a deliberate stop pauses nothing.
-            let unreadable_stop = archon_workflow::control_pause::terminal_stop_before_pause(
-                locked,
-                &run,
-                &format!("pause '{pause_id}'"),
-                false,
-            )?;
-            // Coverage and the grant share the lock with run control and
-            // generation-owned persistence: no slot may change between them.
-            let credit = self.pause_credit(&record_path, &pause_id)?;
-            // Run control first: a pause already taken passes only a run that
-            // executes and was resumed since; a cancel outranks everything.
-            let joined = match (pause_disposition(&run.status), &credit) {
-                (PauseDisposition::Cancelled, _) => return Ok(PauseOutcome::Cancelled),
-                (PauseDisposition::Refused, _) => {
-                    return Err(WorkflowError::SpecInvalid(format!(
-                        "w.pause('{pause_id}') cannot pause run {run_id} in status {:?}",
-                        run.status
-                    )));
+        let lock_store = store.clone();
+        let lock_v2_store = v2_store.clone();
+        let lock_run_id = run_id.clone();
+        let lock_pause_id = pause_id.clone();
+        let lock_resume = resume.clone();
+        let lock_evidence = evidence.clone();
+        let fixed_state_path = store
+            .run_dir(&run_id)
+            .join(crate::command::workflow_decompose_state::FIXED_STATE_PATH);
+        let outcome = tokio::task::spawn_blocking(move || {
+            lock_store.with_run_lock(&lock_run_id, |locked| {
+                let mut run = locked.load_state(&lock_run_id)?;
+                // A stale session decides nothing: not a pause, a join or a pass.
+                // Refused as every stale write is, before anything is read or
+                // recorded: a restart since this session opened, or a resume that
+                // gave the run to a newer executor.
+                lock_v2_store.require_session_restart_epoch()?;
+                lock_v2_store.require_session_executor(&run)?;
+                // Issue 337: a sibling of a deliberate stop pauses nothing.
+                let unreadable_stop = archon_workflow::control_pause::terminal_stop_before_pause(
+                    locked,
+                    &run,
+                    &format!("pause '{lock_pause_id}'"),
+                    false,
+                )?;
+                // Coverage and the grant share the lock with run control and
+                // generation-owned persistence: no slot may change between them.
+                let credit = Self::pause_credit(&lock_store, &lock_v2_store, &lock_run_id, &record_path, &lock_pause_id)?;
+                // Run control first: a pause already taken passes only a run that
+                // executes and was resumed since; a cancel outranks everything.
+                let joined = match (pause_disposition(&run.status), &credit) {
+                    (PauseDisposition::Cancelled, _) => return Ok(PauseOutcome::Cancelled),
+                    (PauseDisposition::Refused, _) => {
+                        return Err(WorkflowError::SpecInvalid(format!(
+                            "w.pause('{lock_pause_id}') cannot pause run {lock_run_id} in status {:?}",
+                            run.status
+                        )));
+                    }
+                    (PauseDisposition::Pause, Some(taken)) if run.generation > taken.generation => {
+                        return Ok(PauseOutcome::Passed);
+                    }
+                    (PauseDisposition::Join, Some(_)) => return Ok(PauseOutcome::StillPaused),
+                    (PauseDisposition::Pause, _) => false,
+                    (PauseDisposition::Join, None) => true,
+                };
+                // What the pause covers, read before anything transitions: the
+                // attempts it lets a resume replay and the credit binds to.
+                let covered = lock_v2_store
+                    .load_call_records()
+                    .map(|records| covered_attempts(&records))
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(%error, pause_id = %lock_pause_id, "script pause covers no recorded attempt");
+                        Vec::new()
+                    });
+                if !joined {
+                    archon_workflow::control_pause::apply_pause(&mut run);
+                    locked.save_state(&run)?;
                 }
-                (PauseDisposition::Pause, Some(taken)) if run.generation > taken.generation => {
-                    return Ok(PauseOutcome::Passed);
-                }
-                (PauseDisposition::Join, Some(_)) => return Ok(PauseOutcome::StillPaused),
-                (PauseDisposition::Pause, _) => false,
-                (PauseDisposition::Join, None) => true,
-            };
-            // What the pause covers, read before anything transitions: the
-            // attempts it lets a resume replay and the credit binds to.
-            let covered = self
-                .runner
-                .v2_store
-                .load_call_records()
-                .map(|records| covered_attempts(&records))
-                .unwrap_or_else(|error| {
-                    tracing::warn!(%error, pause_id, "script pause covers no recorded attempt");
-                    Vec::new()
-                });
-            if !joined {
-                archon_workflow::control_pause::apply_pause(&mut run);
-                locked.save_state(&run)?;
-            }
-            // The run is paused from here whatever happens to the evidence.
-            let detail = serde_json::json!({
-                "action": "pause",
-                "event": "script_pause",
-                "pause_id": pause_id,
-                "joined": joined,
-                "generation": run.generation,
-                "evidence": evidence,
-                "resume": resume,
-                "terminal_stop_unreadable": unreadable_stop,
+                // The run is paused from here whatever happens to the evidence.
+                let detail = serde_json::json!({
+                    "action": "pause",
+                    "event": "script_pause",
+                    "pause_id": lock_pause_id.clone(),
+                    "joined": joined,
+                    "generation": run.generation,
+                    "evidence": lock_evidence.clone(),
+                    "resume": lock_resume.clone(),
+                    "terminal_stop_unreadable": unreadable_stop,
             });
             let kind = if joined {
                 WorkflowEventKind::StageStalled
             } else {
                 WorkflowEventKind::Paused
             };
-            let event = emit_event(locked, run_id, kind, detail)
-                .inspect_err(|error| tracing::warn!(%error, "script pause event not recorded"))
-                .ok();
+            let event = emit_event(locked, &lock_run_id, kind, detail).map_err(|error| {
+                WorkflowError::SpecInvalid(format!(
+                    "pause '{lock_pause_id}' was saved, but its evidence event was not recorded: {error}"
+                ))
+            })?;
             let record = ScriptPauseRecord {
-                pause_id: pause_id.clone(),
+                pause_id: lock_pause_id.clone(),
                 joined,
-                event_seq: event,
+                event_seq: Some(event),
                 generation: run.generation,
                 covered,
                 host_taken: false,
                 judged_at_pause: Default::default(),
             };
-            if let Err(error) = locked.write_run_json(run_id, &record_path, &record) {
-                // Not recorded means a resume asks again and pauses once more:
-                // a second stop, never a lost one.
-                tracing::warn!(%error, pause_id, "script pause record not written");
-            }
-            Ok(PauseOutcome::Taken { joined, event })
-        })?;
+            locked.write_run_json(&lock_run_id, &record_path, &record).map_err(|error| {
+                WorkflowError::SpecInvalid(format!(
+                    "pause '{lock_pause_id}' was saved and its event recorded, but its replay record was not written: {error}"
+                ))
+            })?;
+            Ok(PauseOutcome::Taken {
+                joined,
+                event: Some(event),
+            })
+            })
+        })
+        .await
+        .map_err(|error| {
+            WorkflowError::SpecInvalid(format!("pause transaction worker failed: {error}"))
+        })??;
         let (joined, event) = match outcome {
             PauseOutcome::Cancelled => {
                 return Err(WorkflowError::ControlCancelled(format!(
@@ -218,24 +237,40 @@ impl WorkflowScriptHost {
             }
         );
         tracing::warn!(run_id, "{message}");
-        if self.fixed_decomposition_state_present() {
-            let event = event.map_or_else(|| "none".to_string(), |seq| seq.to_string());
-            append_fixed_log(
-                store,
-                run_id,
-                &format!(
-                    "event_id={event} transition=script_pause pause_id={} joined={joined} subject={} reason={} next_action=resume run_id={run_id}",
-                    crate::command::workflow_decompose_events::log_field(&pause_id),
-                    crate::command::workflow_decompose_events::log_field(
-                        evidence["subject"].as_str().unwrap_or("none")
+        let fixed_store = store.clone();
+        let fixed_run_id = run_id.clone();
+        let fixed_pause_id = pause_id.clone();
+        let fixed_evidence = evidence.clone();
+        tokio::task::spawn_blocking(move || {
+            if fixed_state_path.exists() {
+                let event = event.map_or_else(|| "none".to_string(), |seq| seq.to_string());
+                append_fixed_log(
+                    &fixed_store,
+                    &fixed_run_id,
+                    &format!(
+                        "event_id={event} transition=script_pause pause_id={} joined={joined} subject={} reason={} next_action=resume run_id={run_id}",
+                        crate::command::workflow_decompose_events::log_field(&fixed_pause_id),
+                        crate::command::workflow_decompose_events::log_field(
+                            fixed_evidence["subject"].as_str().unwrap_or("none")
+                        ),
+                        crate::command::workflow_decompose_events::log_field(
+                            fixed_evidence["reason"].as_str().unwrap_or("none")
+                        ),
                     ),
-                    crate::command::workflow_decompose_events::log_field(
-                        evidence["reason"].as_str().unwrap_or("none")
-                    ),
-                ),
-            );
-        }
+                );
+            }
+        })
+        .await
+        .map_err(|error| WorkflowError::SpecInvalid(format!("pause log worker failed: {error}")))?;
         Err(WorkflowError::ControlPaused(message))
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn request_script_pause_for_test(
+        &self,
+        payload: &str,
+    ) -> archon_workflow::WorkflowResult<String> {
+        self.request_script_pause(payload).await
     }
 }
 
@@ -244,15 +279,13 @@ impl WorkflowScriptHost {
     /// attempt it covers still stands; `None` when there is none or a restart
     /// (or a later attempt) has voided it.
     fn pause_credit(
-        &self,
+        store: &WorkflowStore,
+        v2_store: &WorkflowV2ResultStore,
+        run_id: &str,
         record_path: &str,
         pause_id: &str,
     ) -> archon_workflow::WorkflowResult<Option<ScriptPauseRecord>> {
-        let path = self
-            .runner
-            .workflow_store
-            .run_dir(&self.runner.run_id)
-            .join(record_path);
+        let path = store.run_dir(run_id).join(record_path);
         let raw = match std::fs::read(&path) {
             Ok(raw) => raw,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -262,13 +295,13 @@ impl WorkflowScriptHost {
         if record.pause_id != pause_id {
             return Ok(None);
         }
-        let slots = self.runner.v2_store.load_call_records()?;
+        let slots = v2_store.load_call_records()?;
         Ok(credit_holds(&record, &slots).then_some(record))
     }
 }
 
 /// The record path of `pause_id`: readable, and collision-free by digest.
-fn pause_record_path(pause_id: &str) -> String {
+pub(super) fn pause_record_path(pause_id: &str) -> String {
     let readable: String = pause_id
         .chars()
         .take(64)

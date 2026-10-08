@@ -256,7 +256,7 @@ impl SubagentPipelineClient {
             .unwrap_or_default();
         // An outer attempt deadline can drop this future while its executor is
         // spawned. Propagate cancellation instead of leaving that agent running.
-        let _cancel_on_drop = cancel.clone().drop_guard();
+        let cancel_on_drop = cancel.clone().drop_guard();
         let mut tool_context = self.context.clone();
         tool_context.cancel_parent = Some(cancel.clone());
         tool_context.workflow_read_guard = lease.read_guard.clone();
@@ -340,8 +340,16 @@ impl SubagentPipelineClient {
         let response = llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)
             .map_err(|error| super::host_cuts::name_last_progress(error, cut, &clock))?;
         lease.complete()?;
+        // The lease retains this cancellation scope for a future repair. Keep
+        // drop cancellation armed while this future is abandoned, but disarm
+        // it after a completed session has been committed to the cache.
+        retain_scope_after_completion(cancel_on_drop);
         Ok(response)
     }
+}
+
+fn retain_scope_after_completion(guard: tokio_util::sync::DropGuard) {
+    guard.disarm();
 }
 
 #[cfg(test)]
