@@ -207,14 +207,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // is an error) changes acceptance freeze verdicts.
         version: 2,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "a9283f92fe4ce685dfdc29223c7cb43213ddbe0b1e84a2320a5c83ddafe81d52",
+        sources_digest: "690a1cb26ea6de7a896bc2e6927557c80c91f8c0a4ec1b0c1f8340669bd26587",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "a9283f92fe4ce685dfdc29223c7cb43213ddbe0b1e84a2320a5c83ddafe81d52",
+        sources_digest: "690a1cb26ea6de7a896bc2e6927557c80c91f8c0a4ec1b0c1f8340669bd26587",
         build_bound: false,
     },
     CapabilityLogic {
