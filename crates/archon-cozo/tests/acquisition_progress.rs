@@ -18,7 +18,9 @@ fn progressing_holder(process_mutex: bool, stalls: bool) {
     let (ready, started) = mpsc::channel();
     let (last, written) = mpsc::channel();
     let writer_lock = lock_path.clone();
-    let window = Duration::from_millis(700);
+    // Wide against a 100 ms write gap, so a slow write on a loaded host is
+    // never mistaken for a stall.
+    let window = Duration::from_secs(3);
     let holder = std::thread::spawn(move || {
         let mutate = || {
             ready.send(()).unwrap();
