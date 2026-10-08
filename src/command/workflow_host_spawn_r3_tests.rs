@@ -16,7 +16,9 @@ fn entire_fix_uses_shared_spawn_boundary() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let changed = archon_shell::spawn::command("git")
         .current_dir(root)
-        .args(["diff", "--name-only", "332c35a52"])
+        // The fix's own commits: its merge brings other work whose files are
+        // covered by their own spawn lints, not by this one.
+        .args(["diff", "--name-only", "332c35a52", "b9c8e63f4"])
         .output()
         .unwrap();
     assert!(changed.status.success());
