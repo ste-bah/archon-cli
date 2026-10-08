@@ -263,6 +263,8 @@ fn windows_profile_variables_point_at_the_site_home() {
 
 #[path = "acceptance_check_environment_r3_tests.rs"]
 mod round_three;
+#[path = "acceptance_check_environment_shell_names_tests.rs"]
+mod shell_names;
 
 /// Round 5 rule: a withheld name is noted only where it appears as a whole
 /// identifier (case-sensitive, no prose parsing); values are never shown.

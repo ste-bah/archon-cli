@@ -405,11 +405,9 @@ impl CommandEnvironment {
             .unwrap_or_else(|| CheckPolicy::default_for(&unicode));
         effective.bind_dispatch(dispatch);
         let mut environment = Self::from_host(&unicode, Some(&effective))?;
-        environment.withheld.extend(
-            names
-                .into_iter()
-                .filter(|name| lookup(&environment.variables, name).is_none()),
-        );
+        let withheld =
+            withheld::withheld_names(names.iter().map(String::as_str), &environment.variables);
+        environment.withheld.extend(withheld);
         Ok(environment)
     }
 

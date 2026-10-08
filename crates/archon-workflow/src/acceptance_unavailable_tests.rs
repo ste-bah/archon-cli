@@ -42,6 +42,9 @@ fn invalid_environment_binding_is_unavailable_not_rejected() {
     ));
 }
 
+// Unix only: on Windows `shell_program()` can name an absolute `sh.exe`
+// beside `git`, so a missing toolchain PATH does not stop the launch.
+#[cfg(unix)]
 #[test]
 fn verifier_launch_failure_is_unavailable_not_rejected() {
     let root = tempfile::tempdir().unwrap();

@@ -14,10 +14,19 @@ pub fn withheld(
     host: &BTreeMap<String, String>,
     environment: &BTreeMap<String, String>,
 ) -> BTreeSet<String> {
-    (host.keys())
+    withheld_names(host.keys().map(String::as_str), environment)
+}
+
+/// The one candidate filter every capture path uses: a host name the check
+/// does not get, other than a shell-maintained name.
+pub(super) fn withheld_names<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+    environment: &BTreeMap<String, String>,
+) -> BTreeSet<String> {
+    (names.into_iter())
         .filter(|name| lookup(environment, name).is_none())
         .filter(|name| !process_maintained_name(name))
-        .cloned()
+        .map(str::to_owned)
         .collect()
 }
 

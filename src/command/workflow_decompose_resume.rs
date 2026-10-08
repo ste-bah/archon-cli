@@ -246,47 +246,24 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &state.identity,
     )?;
     let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
-    let check_policy_value = metadata.get("check_environment_policy").ok_or_else(|| {
-        anyhow!("fixed decomposition launch metadata has no check policy binding")
-    })?;
-    let check_policy: Option<archon_workflow::acceptance_check_environment::CheckPolicy> =
-        serde_json::from_value(check_policy_value.clone()).map_err(|error| {
-            anyhow!("fixed decomposition check policy binding is invalid: {error}")
-        })?;
-    if let Some(policy) = &check_policy {
-        super::super::acceptance_check_policy::validate_persisted(policy)?;
-    }
-    let expected_metadata = serde_json::json!({
-        "schema_version": "workflow-generated-v2-metadata-v1",
-        "run_kind": "fixed_decomposition_v1",
-        "fixed_identity": state.identity,
-        "scaffold_hash": workflow_scaffold_hash(FIXED_SCRIPT_SOURCE),
-        "script_args": expected_arguments,
-        "script_lifecycle": true,
-        "check_environment_policy": check_policy,
-    });
-    if metadata != expected_metadata {
-        return Err(anyhow!(
-            "fixed decomposition generated metadata differs from its canonical launch snapshot"
-        ));
-    }
-    let launch_digest = super::fixed_launch_digest(
-        &state.identity,
-        &arguments,
-        &persisted_catalog,
-        &persisted_route,
-        &check_policy,
-    )?;
     let anchored_digest = compiled_spec
         .permissions
         .get(FIXED_LAUNCH_DIGEST_PERMISSION)
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| anyhow!("verified fixed workflow spec has no launch digest anchor"))?;
-    if launch_digest != anchored_digest {
-        return Err(anyhow!(
-            "fixed decomposition launch snapshot differs from the verified workflow bundle anchor"
-        ));
-    }
+    policy::admit(
+        &metadata,
+        policy::canonical_metadata(
+            &state.identity,
+            workflow_scaffold_hash(FIXED_SCRIPT_SOURCE),
+            &expected_arguments,
+        ),
+        &state.identity,
+        &arguments,
+        &persisted_catalog,
+        &persisted_route,
+        anchored_digest,
+    )?;
     // Every launch artifact has verified intact by here; the running build's
     // revision is the one tolerated deviation, and it is recorded rather than
     // refused. The persisted identity is left as the launch record.
@@ -433,3 +410,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     )
     .await
 }
+
+#[path = "workflow_decompose_resume_policy.rs"]
+pub(crate) mod policy;
