@@ -46,8 +46,12 @@ enum Child {
     ScalarOperational,
     ScalarFailed,
     ScalarVersion,
+    // Constructed only by the Unix link and permission cases (r5, r7).
+    #[cfg_attr(not(unix), allow(dead_code))]
     UnreadableStaging,
+    #[cfg_attr(not(unix), allow(dead_code))]
     UnreadableNestedStaging,
+    #[cfg_attr(not(unix), allow(dead_code))]
     UnreadableDeepStaging,
 }
 

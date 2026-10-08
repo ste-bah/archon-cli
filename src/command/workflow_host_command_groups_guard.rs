@@ -269,7 +269,7 @@ impl GroupEvidence {
             .map_err(|_| "survivor marker lock unavailable")?;
         state.write(bytes).map_err(|error| error.to_string())
     }
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn contend(&self, duration: std::time::Duration) -> std::thread::JoinHandle<()> {
         let evidence = self.clone();
         let (ready, acquired) = std::sync::mpsc::sync_channel(0);
@@ -298,7 +298,7 @@ impl GroupEvidence {
     pub(crate) fn failure(&self) -> Option<String> {
         self.0.try_lock().ok().and_then(|state| state.fault.clone())
     }
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn begin(&self) -> std::io::Result<()> {
         self.begin_observed(&archon_shell::teardown_progress::Progress::new(
             std::time::Duration::from_secs(2),
