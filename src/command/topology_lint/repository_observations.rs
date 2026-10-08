@@ -248,8 +248,25 @@ pub(crate) fn findings_against(
     raw: &str,
     task: &WorkflowV2TaskUniverseTask,
 ) -> Vec<(String, String)> {
+    if super::fences::outer_fence_with_surrounding_text(raw) == Some(false) {
+        return vec![(
+            task_id.to_string(),
+            format!(
+                "{task_id}: the task file is wrapped in an outer code fence; return only the task file starting with its ```yaml frontmatter"
+            ),
+        )];
+    }
     let mut findings = Vec::new();
-    for path in deliverable_paths(task) {
+    let paths = deliverable_paths(task);
+    if !paths.is_empty() && !prose_lines(raw).any(|line| !line.trim().is_empty()) {
+        return vec![(
+            task_id.to_string(),
+            format!(
+                "{task_id}: the task body has no prose outside code fences, so its deliverable observations cannot be checked; return the task file starting with its ```yaml frontmatter and keep observations outside code fences"
+            ),
+        )];
+    }
+    for path in paths {
         let Some(relative) = tree.relative_to_root(&path).filter(|r| !r.is_empty()) else {
             continue;
         };

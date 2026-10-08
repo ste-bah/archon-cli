@@ -95,6 +95,43 @@ pub(crate) fn unwrap_outer_fence(text: &str) -> Option<&str> {
     (fence_lines % 2 == 0).then_some(interior)
 }
 
+/// Locate an otherwise valid whole-document fence and report any nonblank
+/// text outside it. Pure wrappers retain the historical unwrap behaviour.
+pub(crate) fn outer_fence_with_surrounding_text(text: &str) -> Option<bool> {
+    let lines: Vec<_> = line_spans(text).collect();
+    for first in 0..lines.len() {
+        if !is_outer_opener(lines[first].2) {
+            continue;
+        }
+        let opener_end = lines[first].1;
+        for last in first + 1..lines.len() {
+            if lines[last].2.trim() != "```" {
+                continue;
+            }
+            let interior = &text[after_line_end(text, opener_end)..lines[last].0];
+            let mut inner = interior.lines().filter(|line| !line.trim().is_empty());
+            if !inner
+                .next()
+                .is_some_and(|line| matches!(line.trim(), "```yaml" | "```yml"))
+            {
+                continue;
+            }
+            let fence_lines = interior.lines().filter(|line| is_fence_line(line)).count();
+            if fence_lines % 2 != 0 {
+                continue;
+            }
+            let before = lines[..first]
+                .iter()
+                .any(|(_, _, line)| !line.trim().is_empty());
+            let after = lines[last + 1..]
+                .iter()
+                .any(|(_, _, line)| !line.trim().is_empty());
+            return Some(before || after);
+        }
+    }
+    None
+}
+
 /// A fence opener that can only be wrapping the document: bare, or carrying
 /// one info word that is not the frontmatter's own `yaml`/`yml`.
 fn is_outer_opener(line: &str) -> bool {

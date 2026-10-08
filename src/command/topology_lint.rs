@@ -54,6 +54,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 
 pub(crate) use candidate::evaluate_task_file_candidate;
+pub(crate) use fences::outer_fence_with_surrounding_text;
 pub(crate) use fences::unwrap_outer_fence;
 pub(crate) use fidelity::{
     audit_task_file_candidate, evaluate_lint_with_fidelity, evaluate_lint_with_fidelity_resumable,

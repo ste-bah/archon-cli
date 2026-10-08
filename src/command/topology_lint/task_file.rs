@@ -100,6 +100,19 @@ pub(super) fn inspect_raw(
     let mut blockers = Vec::new();
     let mut deterministic: BTreeMap<_, VecDeque<_>> = BTreeMap::new();
     let mut inherited_blockers = BTreeSet::new();
+    if super::fences::outer_fence_with_surrounding_text(raw) == Some(false) {
+        let text = format!(
+            "{}: the task file is wrapped in an outer code fence; return only the task file starting with its ```yaml frontmatter",
+            path.display()
+        );
+        block(
+            &mut blockers,
+            &mut deterministic,
+            text,
+            DeterministicDefect::new("task_file_outer_fence", "task_file", "shape"),
+        );
+        return finish(report, blockers, inherited_blockers, deterministic);
+    }
     let task = match parse_task_file(&path, raw) {
         Ok(task) => task,
         Err(error) => {

@@ -6,6 +6,9 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use archon_workflow::WorkflowLlmClientFactory;
 
+#[path = "workflow_staged_candidate.rs"]
+mod candidate;
+
 /// The decomposition's set gate: the point at which a task set with bodies is
 /// accepted, so the obligation fidelity audit runs here unconditionally.
 ///
@@ -179,11 +182,44 @@ pub(super) async fn handle_staged_task_file_lint(
             archon_workflow::HostCommandRequest::MAX_STDIN_BYTES
         ));
     }
-    // Issue-61: an author who wrapped the whole reply in one outer code fence
-    // is unwrapped here, before any lint reads the body and before the bytes
-    // are staged, so the lints, the critic, the landed file and every reader
-    // of it downstream see one and the same document.
-    let (candidate, unwrapped) = unwrap_outer_fence(candidate);
+    let (candidate, unwrapped) = match candidate::normalize_task_candidate(candidate) {
+        Ok(candidate) => candidate,
+        Err(reason) => {
+            let path = if task_file.is_absolute() {
+                task_file.to_path_buf()
+            } else {
+                cwd.join(task_file)
+            };
+            let subject = format!("task file {}", path.display());
+            let finding = crate::command::workflow_gate::GateFinding::new(
+                crate::command::workflow_gate::GateId::WorkflowLintTaskFile,
+                format!(
+                    "{reason}; return only the task file starting with its ```yaml frontmatter"
+                ),
+                subject,
+                Some(path),
+                archon_workflow::RemediationScope::Body,
+            )
+            .with_defect(archon_workflow::defect::DeterministicDefect::new(
+                "task_file_shape",
+                "task_file",
+                "candidate",
+            ));
+            let manifest = crate::command::workflow_gate_envelope::stage_gate_evaluation(
+                staging_root,
+                gate_envelope,
+                call_id,
+                "land-task-body",
+                crate::command::workflow_gate::GateEvaluation::new(
+                    "candidate task file shape refused",
+                    vec![finding],
+                ),
+                Vec::new(),
+            )?;
+            println!("{}", serde_json::to_string(&manifest)?);
+            return Ok(());
+        }
+    };
     let path = if task_file.is_absolute() {
         task_file.to_path_buf()
     } else {
@@ -228,19 +264,6 @@ pub(super) async fn handle_staged_task_file_lint(
     )?;
     println!("{}", serde_json::to_string(&manifest)?);
     Ok(())
-}
-
-/// Issue-61: the candidate with a whole-document code fence removed, and
-/// whether one was. Bytes that are not UTF-8 pass through untouched; the
-/// mechanical checks report those.
-fn unwrap_outer_fence(candidate: Vec<u8>) -> (Vec<u8>, bool) {
-    match std::str::from_utf8(&candidate)
-        .ok()
-        .and_then(crate::command::topology_lint::unwrap_outer_fence)
-    {
-        Some(inner) => (inner.as_bytes().to_vec(), true),
-        None => (candidate, false),
-    }
 }
 
 /// Issue-44: the fidelity section of the body gate. Runs only once the body
@@ -307,7 +330,7 @@ mod tests {
     #[test]
     fn the_body_gate_unwraps_an_outer_fence_before_lint_and_staging() {
         let wrapped = b"```markdown\n```yaml\ntask_id: TASK-WS-001\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n```\n".to_vec();
-        let (bytes, unwrapped) = unwrap_outer_fence(wrapped);
+        let (bytes, unwrapped) = candidate::unwrap_outer_fence(wrapped);
         assert!(unwrapped);
         assert_eq!(
             bytes,
@@ -315,9 +338,12 @@ mod tests {
                 .to_vec()
         );
         let plain = b"# TASK-WS-001\n\n```yaml\ntask_id: TASK-WS-001\n```\n".to_vec();
-        assert_eq!(unwrap_outer_fence(plain.clone()), (plain, false));
+        assert_eq!(candidate::unwrap_outer_fence(plain.clone()), (plain, false));
         let not_utf8 = vec![0x60, 0x60, 0x60, 0x0a, 0xff, 0xfe];
-        assert_eq!(unwrap_outer_fence(not_utf8.clone()), (not_utf8, false));
+        assert_eq!(
+            candidate::unwrap_outer_fence(not_utf8.clone()),
+            (not_utf8, false)
+        );
     }
 
     /// Issue-44: the body gate must refuse, not pass, when the critic cannot
@@ -455,3 +481,7 @@ mod tests {
         assert!(error.contains("critic client"), "{error}");
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_staged_candidate_tests.rs"]
+mod candidate_tests;

@@ -227,12 +227,16 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
             .unwrap()
     };
     let baseline = executor(None);
-    for command in ["freeze-acceptance", "freeze-skeleton", "land-task-body"] {
+    for command in ["freeze-acceptance", "freeze-skeleton"] {
         assert!(
             holds(&baseline, command, &unstamped),
             "{command}: landed artifact"
         );
     }
+    assert!(
+        !holds(&baseline, "land-task-body", &unstamped),
+        "the newly versioned body landing must not reuse an unstamped verdict"
+    );
     for command in [
         "verify-frozen-acceptance",
         "verify-frozen-skeleton",
@@ -245,7 +249,7 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
         );
         let request = HostCommandRequest::new(command, None).unwrap();
         let stamped = serde_json::json!({
-            LOGIC_VERSION_STAMP: BASELINE_LOGIC_VERSION,
+            LOGIC_VERSION_STAMP: baseline.logic_version(&request).unwrap(),
             LOGIC_DIGEST_STAMP: baseline.logic_digest(&request).unwrap(),
             LOGIC_BUILD_STAMP: baseline.logic_build(&request).unwrap(),
         });
@@ -279,7 +283,6 @@ fn logic_361_keys_at_the_baseline_are_the_keys_records_already_hold() {
     for (command, stdin) in [
         ("verify-frozen-acceptance", None),
         ("freeze-skeleton", Some("candidate")),
-        ("task-set-lint", None),
         ("requirements-trace", None),
     ] {
         let request = HostCommandRequest::new(command, stdin.map(str::to_string)).unwrap();

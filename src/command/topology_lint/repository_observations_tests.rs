@@ -303,9 +303,9 @@ fn the_body_lint_and_set_gate_report_each_path_once() {
 /// Issue-61: the reply run wf-7acf8d4a's author returned for TASK-TRADING-002,
 /// wrapped whole in an outer ```` ```markdown ```` fence. Read raw, the shared
 /// toggle inverts at line 1 and every observation under `## Files Expected to
-/// Change` is invisible: seven "no verifiable observation" findings. Unwrapped
-/// at the gate's entry, the six observations are found and checked, and the
-/// one finding left names the only path the body really did not observe.
+/// Change` is invisible. The linter reports the single wrapping cause instead
+/// of seven per-deliverable findings. Unwrapped at the gate's entry, the six
+/// observations are found and checked, leaving only the genuinely unobserved path.
 #[test]
 fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
     const LANDED: &str = super::super::fences::fences_tests::TASK_TRADING_002_FENCED;
@@ -328,7 +328,7 @@ fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
     let task_id = "TASK-TRADING-002";
 
     // Raw: the frontmatter still parses (the parser looks for ```yaml, not
-    // for line 1), so the lint runs, and sees no observation for any path.
+    // for line 1), but all paths share one actionable wrapper finding.
     let task = archon_workflow::task_universe::parsing::parse_task_file(&path, LANDED).unwrap();
     for (relative, _) in observed {
         assert_eq!(
@@ -338,12 +338,8 @@ fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
         );
     }
     let raw_findings = findings_against(&tree, &project, task_id, LANDED, &task);
-    assert_eq!(raw_findings.len(), 7, "{raw_findings:?}");
-    assert!(
-        raw_findings
-            .iter()
-            .all(|(_, text)| text.contains("has no verifiable observation"))
-    );
+    assert_eq!(raw_findings.len(), 1, "{raw_findings:?}");
+    assert!(raw_findings[0].1.contains("wrapped in an outer code fence"));
 
     // Unwrapped: every observation is found and matches the checkout.
     let unwrapped = super::super::fences::unwrap_outer_fence(LANDED).expect("outer fence removed");
