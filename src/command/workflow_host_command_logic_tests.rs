@@ -227,12 +227,15 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
             .unwrap()
     };
     let baseline = executor(None);
-    for command in ["freeze-acceptance", "freeze-skeleton", "land-task-body"] {
+    for command in ["freeze-skeleton", "land-task-body"] {
         assert!(
             holds(&baseline, command, &unstamped),
             "{command}: landed artifact"
         );
     }
+    // freeze-acceptance is at version 2 (#366): an unstamped record was
+    // judged by older logic and runs again.
+    assert!(!holds(&baseline, "freeze-acceptance", &unstamped));
     for command in [
         "verify-frozen-acceptance",
         "verify-frozen-skeleton",
@@ -254,7 +257,7 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     let bumped = executor(Some("freeze-skeleton"));
     assert!(!holds(&bumped, "freeze-skeleton", &unstamped));
     assert!(
-        holds(&bumped, "freeze-acceptance", &unstamped),
+        holds(&bumped, "land-task-body", &unstamped),
         "others keep"
     );
     // The stamp the host writes is the version the key names.
