@@ -15,8 +15,14 @@
 //!   stream that opens, any event) starts a new window. The stop is the
 //!   [`archon_llm::transport_idle::TRANSPORT_STALL_MARKER`] text, which the
 //!   workflow host turns into a resumable pause, never a failure.
+//!
+//! A wait that ended because the machine slept starts a new window too: the
+//! awake silence before the sleep does not count, so the round has a whole
+//! window after the wake for the network to come back.
 
 use std::time::Duration;
+
+use super::stream_idle_window::IdleExpired;
 
 pub(super) const STREAM_RETRIES: usize = 3;
 
@@ -65,6 +71,14 @@ impl ResendBudget {
     /// The provider answered: a new no-progress window starts.
     pub(super) fn answered(&mut self) {
         self.last_answer = tokio::time::Instant::now();
+    }
+
+    /// An idle window ended. When the machine slept through it, the
+    /// no-progress window starts again at the wake.
+    pub(super) fn note_expiry(&mut self, expired: IdleExpired) {
+        if expired.slept {
+            self.last_answer = tokio::time::Instant::now();
+        }
     }
 
     /// Records one failed attempt. `Ok` is the backoff before the resend;
@@ -148,6 +162,22 @@ mod tests {
         for _ in 0..10 {
             assert!(budget.failed(FailedAttempt::Unanswered("open")).is_ok());
         }
+    }
+
+    /// Fails before the fix: awake silence from before a sleep counted, so
+    /// a few quick failures after the wake stopped the round.
+    #[tokio::test]
+    async fn a_sleep_starts_a_new_window_at_the_wake() {
+        let mut budget = ResendBudget::new(Duration::from_millis(30));
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        budget.note_expiry(IdleExpired { slept: true });
+        for _ in 0..10 {
+            assert!(budget.failed(FailedAttempt::Unanswered("open")).is_ok());
+        }
+        let mut awake = ResendBudget::new(Duration::from_millis(30));
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        awake.note_expiry(IdleExpired { slept: false });
+        assert!((0..10).any(|_| awake.failed(FailedAttempt::Unanswered("open")).is_err()));
     }
 
     #[test]

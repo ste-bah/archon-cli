@@ -103,6 +103,8 @@ enum WakeOpen {
     Silent,
     /// The network is not up yet.
     Unreachable,
+    /// The provider refuses the credentials.
+    Unauthorized,
     /// The provider answers this text.
     Answers(&'static str),
 }
@@ -136,6 +138,9 @@ impl LlmProvider for WakeNetworkProvider {
             WakeOpen::Silent => self.held.lock().unwrap().push(tx),
             WakeOpen::Unreachable => {
                 return Err(LlmError::Http("error sending request: network is down".into()));
+            }
+            WakeOpen::Unauthorized => {
+                return Err(LlmError::Auth("401 invalid x-api-key".into()));
             }
             WakeOpen::Answers(text) => {
                 for event in crate::subagent::runner::tests::text_response(text) {
@@ -217,4 +222,87 @@ async fn a_network_down_for_a_whole_window_ends_with_the_resumable_stall_marker(
         opens.load(Ordering::SeqCst) >= 4,
         "it kept resending inside the window"
     );
+}
+
+/// Fails before the fix: a retryable error on the FIRST open of a round (the
+/// network not up yet after a wake) ended the round at once.
+#[tokio::test]
+async fn a_first_open_that_fails_while_the_network_comes_back_completes_the_round() {
+    let opens = Arc::new(AtomicU32::new(0));
+    let script = vec![
+        WakeOpen::Unreachable,
+        WakeOpen::Unreachable,
+        WakeOpen::Answers("network back"),
+    ];
+    let runner = wake_runner(script, &opens, 3_600);
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), runner.run("work"))
+        .await
+        .expect("the round must end");
+    assert_eq!(outcome.expect("the round completes"), "network back");
+    assert_eq!(opens.load(Ordering::SeqCst), 3);
+}
+
+/// Fails before the fix: the round failed with the open error, where a
+/// network down for a whole window is a resumable pause.
+#[tokio::test]
+async fn a_first_open_that_never_succeeds_ends_with_the_resumable_stall_marker() {
+    let opens = Arc::new(AtomicU32::new(0));
+    let runner = wake_runner(vec![WakeOpen::Unreachable], &opens, 1);
+    let started = std::time::Instant::now();
+    let error = tokio::time::timeout(std::time::Duration::from_secs(20), runner.run("work"))
+        .await
+        .expect("the round must end")
+        .expect_err("no answer for a whole window stops the round")
+        .to_string();
+    assert!(
+        error.starts_with(archon_llm::transport_idle::TRANSPORT_STALL_MARKER),
+        "{error}"
+    );
+    assert!(
+        started.elapsed() >= std::time::Duration::from_secs(1),
+        "the stop comes after the whole window, not at once"
+    );
+    assert!(opens.load(Ordering::SeqCst) >= 4, "it kept trying inside the window");
+}
+
+/// A refused credential is not a network that will come back: it fails at
+/// once, with no back-off.
+#[tokio::test]
+async fn a_first_open_refused_for_auth_fails_fast() {
+    let opens = Arc::new(AtomicU32::new(0));
+    let runner = wake_runner(vec![WakeOpen::Unauthorized], &opens, 3_600);
+    let error = tokio::time::timeout(std::time::Duration::from_secs(5), runner.run("work"))
+        .await
+        .expect("an auth failure must not wait out a window")
+        .expect_err("an auth failure fails the round")
+        .to_string();
+    assert!(
+        !error.contains(archon_llm::transport_idle::TRANSPORT_STALL_MARKER),
+        "{error}"
+    );
+    assert!(error.contains("authentication error"), "{error}");
+    assert_eq!(opens.load(Ordering::SeqCst), 1);
+}
+
+/// Fails before the fix: the awake silence from before the sleep counted, so
+/// the round stopped a few quick failures after the wake while the network
+/// was still coming back.
+#[tokio::test]
+async fn a_stream_quiet_before_a_sleep_has_a_whole_window_after_the_wake() {
+    let opens = Arc::new(AtomicU32::new(0));
+    let mut script = vec![WakeOpen::Silent];
+    script.extend(std::iter::repeat_n(WakeOpen::Unreachable, 8));
+    script.push(WakeOpen::Answers("after the wake"));
+    let runner = wake_runner(script, &opens, 2);
+    let run = tokio::spawn(async move { runner.run("work across a sleep").await });
+    assert!(wait_for_opens(&opens, 1, std::time::Duration::from_secs(2)).await);
+    // Most of the window passes awake and silent, then the machine sleeps.
+    tokio::time::sleep(std::time::Duration::from_millis(1_600)).await;
+    jump_clocks_as_a_sleep(std::time::Duration::from_secs(7 * 3_600));
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), run).await;
+    jump_clocks_as_a_sleep(std::time::Duration::ZERO);
+
+    let outcome = outcome.expect("the round must end").expect("no panic");
+    assert_eq!(outcome.expect("the round completes"), "after the wake");
+    assert_eq!(opens.load(Ordering::SeqCst), 10);
 }

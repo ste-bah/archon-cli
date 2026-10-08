@@ -21,7 +21,7 @@ async fn work_that_finishes_inside_the_window_is_returned() {
 async fn the_monotonic_clock_still_ends_a_silent_window() {
     let started = std::time::Instant::now();
     let out = within(Duration::from_millis(60), std::future::pending::<()>()).await;
-    assert_eq!(out, Err(IdleExpired));
+    assert_eq!(out, Err(IdleExpired { slept: false }));
     assert!(started.elapsed() >= Duration::from_millis(60));
 }
 
@@ -36,7 +36,7 @@ async fn a_sleep_ends_the_window_soon_after_the_wake() {
     let started = std::time::Instant::now();
     let (out, ()) = tokio::join!(within(Duration::from_secs(3600), rx.recv()), jump);
     reset_clocks();
-    assert_eq!(out, Err(IdleExpired));
+    assert_eq!(out, Err(IdleExpired { slept: true }));
     assert!(
         started.elapsed() < Duration::from_secs(2),
         "the window must end within a re-check of the wake, took {:?}",
@@ -90,7 +90,7 @@ async fn without_a_boot_clock_a_wall_jump_ends_the_window_only_after_the_floor()
     let took = started.elapsed();
     reset_clocks();
     assert_eq!(short, Ok(2));
-    assert_eq!(silent, Err(IdleExpired));
+    assert_eq!(silent, Err(IdleExpired { slept: true }));
     assert!(
         took >= STEP_FLOOR && took < Duration::from_secs(2),
         "{took:?}"
@@ -113,4 +113,35 @@ async fn a_wall_clock_set_backwards_does_not_end_the_window() {
     );
     reset_clocks();
     assert_eq!(out, Ok(1));
+}
+
+/// Fails before the fix: Apple's `CLOCK_MONOTONIC` is the wall clock minus the
+/// boot time, seconds away from the continuous (sleep-counting) clock, so it
+/// could not tell a step of the wall clock from a sleep.
+#[cfg(target_vendor = "apple")]
+#[test]
+fn the_apple_boot_clock_is_the_continuous_clock() {
+    #[repr(C)]
+    struct Timebase {
+        numer: u32,
+        denom: u32,
+    }
+    unsafe extern "C" {
+        fn mach_continuous_time() -> u64;
+        fn mach_timebase_info(info: *mut Timebase) -> i32;
+    }
+    let mut timebase = Timebase { numer: 0, denom: 0 };
+    // SAFETY: `timebase` is a valid, writable struct of the C layout.
+    assert_eq!(unsafe { mach_timebase_info(&mut timebase) }, 0);
+    let boot = read_boot_clock().expect("a boot clock on Apple platforms");
+    // SAFETY: no arguments; it cannot fail.
+    let ticks = unsafe { mach_continuous_time() } as u128;
+    let continuous = Duration::from_nanos(
+        (ticks * u128::from(timebase.numer) / u128::from(timebase.denom)) as u64,
+    );
+    let apart = boot.abs_diff(continuous);
+    assert!(
+        apart < Duration::from_millis(250),
+        "boot {boot:?} vs continuous {continuous:?}"
+    );
 }

@@ -158,6 +158,9 @@ impl WorkflowScriptHost {
         let detail = serde_json::json!({
             "event": "script_error_pause",
             "cause": if recurring { "recurring_script_error" } else { cause },
+            // A recurrence keeps what stopped the script (Issue 364: a starved
+            // script thread is not a script error).
+            "stop_cause": cause,
             "call_id": "workflow.js",
             "script_error": script_error,
             "calls_answered": point.calls,

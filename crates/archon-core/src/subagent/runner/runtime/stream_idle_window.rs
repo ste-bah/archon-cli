@@ -15,13 +15,20 @@
 //! A wall clock stepped FORWARD (NTP at a wake, an operator) is not a sleep,
 //! and it must not cut a healthy stream. So the wall clock ends the window only
 //! when a clock that cannot be set agrees: the boot clock, which counts time
-//! asleep (`CLOCK_MONOTONIC` on Apple platforms, `CLOCK_BOOTTIME` on Linux). A
-//! step moves the wall clock alone; a sleep moves both. Where no boot clock can
-//! be read, the wall clock ends the window only after [`STEP_FLOOR`] (or the
-//! whole limit, when it is shorter) of monotonic silence too.
+//! asleep. That is `CLOCK_MONOTONIC_RAW` on Apple platforms (the
+//! `mach_continuous_time` clock; Apple's `CLOCK_MONOTONIC` is the wall clock
+//! minus the boot time, so it is not independent of the wall clock),
+//! `CLOCK_BOOTTIME` on Linux, and `GetTickCount64` on Windows (the
+//! interrupt-time count that includes sleep; `QueryUnbiasedInterruptTime`
+//! excludes it). A step moves the wall clock alone; a sleep moves both. Where
+//! no boot clock can be read, the wall clock ends the window only after
+//! [`STEP_FLOOR`] (or the whole limit, when it is shorter) of monotonic
+//! silence too.
 //!
 //! It is a no-progress window like before: every event the caller receives
-//! starts a new one.
+//! starts a new one. A window that ends because of a sleep says so
+//! ([`IdleExpired::slept`]), so the caller can measure its own no-progress
+//! budget from the wake and not from before the sleep.
 
 use std::future::Future;
 use std::time::{Duration, SystemTime};
@@ -40,7 +47,10 @@ const STEP_FLOOR: Duration = Duration::from_millis(150);
 
 /// The window ended before the awaited work did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct IdleExpired;
+pub(super) struct IdleExpired {
+    /// The wall and boot clocks ended it: the machine slept through it.
+    pub(super) slept: bool,
+}
 
 #[cfg(test)]
 thread_local! {
@@ -65,7 +75,7 @@ fn wall_now() -> SystemTime {
 #[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
 fn read_boot_clock() -> Option<Duration> {
     #[cfg(target_vendor = "apple")]
-    let clock = libc::CLOCK_MONOTONIC;
+    let clock = libc::CLOCK_MONOTONIC_RAW;
     #[cfg(not(target_vendor = "apple"))]
     let clock = libc::CLOCK_BOOTTIME;
     let mut now = libc::timespec {
@@ -77,7 +87,23 @@ fn read_boot_clock() -> Option<Duration> {
     (status == 0).then(|| Duration::new(now.tv_sec as u64, now.tv_nsec as u32))
 }
 
-#[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
+/// The boot clock on Windows: milliseconds since boot, sleep included.
+#[cfg(windows)]
+fn read_boot_clock() -> Option<Duration> {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetTickCount64() -> u64;
+    }
+    // SAFETY: `GetTickCount64` takes no arguments and cannot fail.
+    Some(Duration::from_millis(unsafe { GetTickCount64() }))
+}
+
+#[cfg(not(any(
+    target_vendor = "apple",
+    target_os = "linux",
+    target_os = "android",
+    windows
+)))]
 fn read_boot_clock() -> Option<Duration> {
     None
 }
@@ -104,8 +130,11 @@ pub(super) async fn within<F: Future>(limit: Duration, work: F) -> Result<F::Out
     let mut work = std::pin::pin!(work);
     loop {
         let left = limit.saturating_sub(started.elapsed());
-        if left.is_zero() || slept_through(limit, started, wall_started, boot_started) {
-            return Err(IdleExpired);
+        if left.is_zero() {
+            return Err(IdleExpired { slept: false });
+        }
+        if slept_through(limit, started, wall_started, boot_started) {
+            return Err(IdleExpired { slept: true });
         }
         if let Ok(output) = tokio::time::timeout(left.min(WALL_RECHECK), &mut work).await {
             return Ok(output);

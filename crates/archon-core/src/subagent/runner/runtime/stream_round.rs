@@ -53,8 +53,11 @@ pub(super) async fn collect_stream_round(
     // `request` is the body that actually opened the stream. Mid-stream
     // recovery classifies and measures against it rather than against the
     // template, which carries no messages of its own (#171 part 2).
+    // Taken once: a first open that backs off and tries again keeps the
+    // projection the round asked for.
+    let emergency_projection = std::mem::take(emergency_projection_pending);
     let (mut rx, request) = loop {
-        let attempt_request = if std::mem::take(emergency_projection_pending) {
+        let attempt_request = if emergency_projection {
             emergency_projected_request(runner, messages.as_slice(), &template)
         } else {
             projected_request(runner, messages.as_slice(), &template)
@@ -76,8 +79,20 @@ pub(super) async fn collect_stream_round(
         )
         .await
         {
-            Ok(result) => break result?,
-            Err(_) => {
+            Ok(Ok(opened)) => break opened,
+            // Issue 364: the first open of a round after a wake meets a
+            // network that is not up yet. A retryable error backs off inside
+            // the no-progress window like a resend; auth and other 4xx
+            // errors still end the round at once.
+            Ok(Err(error)) if !retryable_open_error(&error) => return Err(error),
+            Ok(Err(_)) => {
+                let backoff = budget
+                    .failed(FailedAttempt::Unanswered("first open could not open"))
+                    .map_err(anyhow::Error::msg)?;
+                tokio::time::sleep(backoff).await;
+            }
+            Err(expired) => {
+                budget.note_expiry(expired);
                 let backoff = budget
                     .failed(FailedAttempt::Unanswered(
                         "stream idle timeout while opening",
@@ -113,6 +128,9 @@ pub(super) async fn collect_stream_round(
             || matches!(&received, Ok(None))
                 && ((!terminal_marker && finish_reason.is_none()) || empty_terminal);
         if interrupted {
+            if let Err(expired) = &received {
+                budget.note_expiry(*expired);
+            }
             let attempt = match &received {
                 Err(_) => FailedAttempt::Unanswered("stream idle timeout"),
                 Ok(Some(StreamEvent::Error { error_type, .. })) if error_type != "protocol" => {
@@ -159,7 +177,10 @@ pub(super) async fn collect_stream_round(
                         }
                         FailedAttempt::Unanswered("resend could not open")
                     }
-                    Err(_) => FailedAttempt::Unanswered("stream idle timeout while reconnecting"),
+                    Err(expired) => {
+                        budget.note_expiry(expired);
+                        FailedAttempt::Unanswered("stream idle timeout while reconnecting")
+                    }
                 };
                 backoff = budget.failed(attempt).map_err(anyhow::Error::msg)?;
             }

@@ -310,8 +310,8 @@ pub struct MonitorHandle(Option<std::sync::mpsc::Sender<()>>);
 
 impl Drop for MonitorHandle {
     fn drop(&mut self) {
-        // Dropping the sender disconnects the channel; the thread ends at
-        // its next poll.
+        // Dropping the sender disconnects the channel; the thread's wait
+        // returns `Disconnected` at once and it ends.
         self.0.take();
     }
 }

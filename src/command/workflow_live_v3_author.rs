@@ -325,7 +325,9 @@ impl WorkflowV2ScriptRunner {
         // authoring loop pauses on it instead of reading a failed call.
         bootstrap.stops_on_host_fault = true;
         // Issue 335: a crashed bootstrap returns no script, which the
-        // authoring loop counts and re-authors; it never pauses the run.
+        // authoring loop counts and re-authors; a script error never pauses
+        // the run. Issue 364: a starved bootstrap thread does pause it; the
+        // authoring loop passes that pause through as run control.
         bootstrap.pauses_on_script_error = false;
         // Frontier reuse is content-keyed now, so the authoring call needs no
         // opt-out of its own: the brief (task paths + per-file fingerprints +

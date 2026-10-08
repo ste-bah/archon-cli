@@ -6,8 +6,10 @@
 //! interrupt handler, which here checks the CPU watchdog first and the
 //! heartbeat after it, cuts JavaScript that ran a whole no-progress window of
 //! CPU with no beat, even while the watchdog is paused for an in-flight call.
-//! A monitor thread writes the durable record [`STARVATION_RECORD`] (what was
-//! in flight) as soon as the heartbeat is stale while the process burns CPU.
+//! A monitor thread writes a durable record (what was in flight) under
+//! [`STARVATION_RECORDS`] as soon as the heartbeat is stale while the process
+//! burns CPU. Every record (suspected, cut, recovered) is a file of its own,
+//! named by time, so a later record never replaces the evidence of a cut.
 //!
 //! A cut ends the run as a resumable PAUSE through the script-error pause,
 //! for every script (the authoring bootstrap too), never as a failure: the
@@ -25,8 +27,13 @@ use super::workflow_live_v2_script_host_pending::in_flight_summary;
 use super::workflow_live_v2_script_watchdog::{WORKFLOW_JS_WATCHDOG, WorkflowJsWatchdog};
 use super::*;
 
-/// The durable starvation record, relative to the run directory.
-pub(super) const STARVATION_RECORD: &str = "v2/script-thread-starved.json";
+/// The directory of the durable starvation records, relative to the run
+/// directory: one `<unix ms>-<sequence>-<state>.json` file per record, so the
+/// names sort in the order they were written.
+pub(super) const STARVATION_RECORDS: &str = "v2/script-thread-starved";
+
+/// Orders records written in the same millisecond.
+static RECORD_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// The no-progress window: twice the CPU watchdog's budget, so a script the
 /// watchdog allows (a long computation between host calls) is never cut.
@@ -110,7 +117,7 @@ impl ScriptStarvationGuard {
         // Stable text (no timings), so a recurrence at the same point is
         // counted as one by the script-error pause.
         let error = format!(
-            "workflow.js script thread starved: its JavaScript ran for a whole {STARVATION_WINDOW:?} no-progress window (no heartbeat, no host-call completion) and was interrupted ({} check); in flight: [{}]; evidence: {STARVATION_RECORD}",
+            "workflow.js script thread starved: its JavaScript ran for a whole {STARVATION_WINDOW:?} no-progress window (no heartbeat, no host-call completion) and was interrupted ({} check); in flight: [{}]; evidence: {STARVATION_RECORDS}/",
             starvation.detected_by,
             in_flight.join(", "),
         );
@@ -129,7 +136,7 @@ impl ScriptStarvationGuard {
     }
 }
 
-fn write_record(store: &WorkflowStore, run_id: &str, starvation: &Starvation) {
+pub(super) fn write_record(store: &WorkflowStore, run_id: &str, starvation: &Starvation) {
     tracing::warn!(
         run_id,
         detected_by = %starvation.detected_by,
@@ -138,7 +145,17 @@ fn write_record(store: &WorkflowStore, run_id: &str, starvation: &Starvation) {
         in_flight = starvation.in_flight.len(),
         "workflow.js script thread starved"
     );
-    if let Err(error) = store.write_run_json(run_id, STARVATION_RECORD, starvation) {
+    let unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis());
+    let sequence = RECORD_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let state: String = starvation
+        .state
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect();
+    let path = format!("{STARVATION_RECORDS}/{unix_ms:013}-{sequence:06}-{state}.json");
+    if let Err(error) = store.write_run_json(run_id, &path, starvation) {
         tracing::warn!(%error, run_id, "script thread starvation record not written");
     }
 }

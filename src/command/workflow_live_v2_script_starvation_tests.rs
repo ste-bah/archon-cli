@@ -3,7 +3,7 @@
 //! call is never cut.
 use super::workflow_live_v2_script_pause_tests::{events, new_run, set_status};
 use super::workflow_live_v2_script_starvation::{
-    STARVATION_RECORD, STARVATION_WINDOW, WATCHDOG_PAUSED_RUNS,
+    STARVATION_RECORDS, STARVATION_WINDOW, WATCHDOG_PAUSED_RUNS, write_record,
 };
 use super::*;
 
@@ -80,9 +80,49 @@ fn slow_llm(delay: Duration) -> Arc<dyn WorkflowLlmClient> {
     Arc::new(SlowAcceptedLlm { delay })
 }
 
+/// Every starvation record of the run, in the order they were written.
+fn starvation_records(store: &WorkflowStore, run_id: &str) -> Vec<serde_json::Value> {
+    let Ok(entries) = std::fs::read_dir(store.run_dir(run_id).join(STARVATION_RECORDS)) else {
+        return Vec::new();
+    };
+    let mut paths = entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+        .iter()
+        .filter_map(|path| serde_json::from_slice(&std::fs::read(path).ok()?).ok())
+        .collect()
+}
+
+/// The latest starvation record of the run.
 fn starvation_record(store: &WorkflowStore, run_id: &str) -> Option<serde_json::Value> {
-    let bytes = std::fs::read(store.run_dir(run_id).join(STARVATION_RECORD)).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    starvation_records(store, run_id).pop()
+}
+
+/// Fails before the fix: every record went to one file, so a later
+/// "suspected" or "recovered" record replaced the evidence of a cut.
+#[test]
+fn every_starvation_record_is_kept() {
+    let (_tmp, store, run_id) = new_run();
+    let record = |state: &str| archon_workflow::v2::script::script_thread_heartbeat::Starvation {
+        detected_by: "monitor".into(),
+        state: state.into(),
+        no_progress_ms: 1,
+        window_ms: 1,
+        script_thread_cpu_ms: None,
+        process_cpu_ms: None,
+        in_flight: vec![serde_json::json!({"id": state})],
+    };
+    for state in ["cut", "suspected", "recovered"] {
+        write_record(&store, &run_id, &record(state));
+    }
+    let states = starvation_records(&store, &run_id)
+        .iter()
+        .map(|record| record["state"].as_str().unwrap_or_default().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(states, ["cut", "suspected", "recovered"]);
 }
 
 /// The run paused (never failed) on a starved thread, with the record.
@@ -114,6 +154,8 @@ fn assert_starvation_pause(
         .find(|event| event.detail["event"] == "script_error_pause")
         .expect("a pause event");
     assert_eq!(pause.detail["cause"], "script_thread_starved");
+    // Kept on a recurrence too, whose `cause` is `recurring_script_error`.
+    assert_eq!(pause.detail["stop_cause"], "script_thread_starved");
 }
 
 /// Fails before the fix: the run never ends (the watchdog is paused for the
