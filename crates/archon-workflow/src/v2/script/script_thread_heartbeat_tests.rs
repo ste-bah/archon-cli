@@ -163,16 +163,36 @@ fn the_monitor_records_a_starved_thread_and_its_recovery() {
     while records.lock().unwrap().is_empty() && started.elapsed() < Duration::from_secs(10) {
         spins = std::hint::black_box(spins.wrapping_add(1));
     }
-    let suspected = records.lock().unwrap().first().cloned().expect("recorded");
+    let suspected = records
+        .lock()
+        .unwrap()
+        .first()
+        .cloned()
+        .expect("the monitor recorded no suspected starvation within 10 s of spinning");
     assert_eq!(suspected.detected_by, "monitor");
     assert_eq!(suspected.state, "suspected");
     assert_eq!(suspected.in_flight[0]["id"], "spinning-call");
     assert!(suspected.no_progress_ms >= suspected.window_ms);
 
     heartbeat.beat();
-    std::thread::sleep(WINDOW / 2);
-    let last = records.lock().unwrap().last().cloned().expect("recorded");
-    assert_eq!(last.state, "recovered");
+    // The monitor thread records the recovery on its next poll; a loaded
+    // machine can delay that poll, so wait for it rather than for a fixed time.
+    let recovered_by = Instant::now() + Duration::from_secs(10);
+    let last = loop {
+        let last = records.lock().unwrap().last().cloned();
+        let recovered = last
+            .as_ref()
+            .is_some_and(|record| record.state == "recovered");
+        if recovered || Instant::now() >= recovered_by {
+            break last;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let last = last.expect("records vanished after the suspected one");
+    assert_eq!(
+        last.state, "recovered",
+        "the monitor recorded no recovery within 10 s of the beat; last record: {last:?}"
+    );
     assert!(!heartbeat.should_cut());
     assert!(heartbeat.cut().is_none(), "a suspicion alone never cuts");
 }
