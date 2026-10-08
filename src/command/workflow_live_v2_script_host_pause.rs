@@ -40,6 +40,28 @@ use super::workflow_live_v2_script_host_pause_credit::{
     ScriptPauseRecord, covered_attempts, credit_holds,
 };
 
+/// Keep sibling pause requests in the order they enter the async host. The
+/// filesystem transaction itself runs on Tokio's blocking pool, whose workers
+/// may otherwise acquire the run lock in a different order.
+fn pause_request_order_lock(run_dir: &std::path::Path) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock, Weak};
+
+    static LOCKS: OnceLock<Mutex<HashMap<std::path::PathBuf, Weak<tokio::sync::Mutex<()>>>>> =
+        OnceLock::new();
+    let mut locks = LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .expect("script pause ordering registry poisoned");
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(run_dir).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    locks.insert(run_dir.to_path_buf(), Arc::downgrade(&lock));
+    lock
+}
+
 enum PauseOutcome {
     Taken {
         joined: bool,
@@ -113,6 +135,9 @@ impl WorkflowScriptHost {
         let fixed_state_path = store
             .run_dir(&run_id)
             .join(crate::command::workflow_decompose_state::FIXED_STATE_PATH);
+        let _pause_order = pause_request_order_lock(&store.run_dir(&run_id))
+            .lock_owned()
+            .await;
         let outcome = tokio::task::spawn_blocking(move || {
             lock_store.with_run_lock(&lock_run_id, |locked| {
                 let mut run = locked.load_state(&lock_run_id)?;
