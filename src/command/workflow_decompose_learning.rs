@@ -32,6 +32,10 @@ pub(crate) fn redact_lesson(text: &str) -> String {
     bounded(&archon_observability::redaction::redact_text(text))
 }
 
+pub(super) fn safe_fold_context(task: &str) -> String {
+    redact_lesson(task)
+}
+
 pub(crate) fn lesson_records(
     run_id: &str,
     _content: &str,
@@ -145,6 +149,9 @@ fn bounded(text: &str) -> String {
 
 fn collect_lessons(value: &Value, out: &mut Vec<(String, String, bool)>) {
     match value {
+        Value::String(text) if text.to_ascii_lowercase().contains("cannot pass as written") => {
+            out.push(("cannot_pass".into(), text.clone(), true));
+        }
         Value::Object(map) => {
             let verdict = map
                 .get("verdict")
@@ -212,18 +219,41 @@ pub(crate) fn fold(
     run_id: &str,
     config: &LearningConfig,
 ) -> anyhow::Result<()> {
+    with_fold_lock(store, run_id, |locked| {
+        fold_locked(cwd, locked, run_id, config).map_err(|error| {
+            archon_workflow::WorkflowError::SpecInvalid(format!(
+                "decomposition learning fold: {error:#}"
+            ))
+        })
+    })?;
+    Ok(())
+}
+
+pub(super) fn with_fold_lock<T>(
+    store: &WorkflowStore,
+    run_id: &str,
+    operation: impl FnOnce(&WorkflowStore) -> archon_workflow::WorkflowResult<T>,
+) -> archon_workflow::WorkflowResult<T> {
+    store.with_run_lock(run_id, operation)
+}
+
+fn fold_locked(
+    cwd: &Path,
+    store: &WorkflowStore,
+    run_id: &str,
+    config: &LearningConfig,
+) -> anyhow::Result<()> {
     let run = store.load_state(run_id)?;
     let v2 = archon_workflow::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
     let calls = v2.load_call_records()?;
-    let classifier_content = calls
-        .iter()
-        .fold(run.spec.task.clone(), |mut content, call| {
-            content.push(' ');
-            content.push_str(&call.call.id);
-            content.push(' ');
-            content.push_str(&call.result.data.to_string());
-            content
-        });
+    let safe_task = safe_fold_context(&run.spec.task);
+    let classifier_content = calls.iter().fold(safe_task.clone(), |mut content, call| {
+        content.push(' ');
+        content.push_str(&call.call.id);
+        content.push(' ');
+        content.push_str(&call.result.data.to_string());
+        content
+    });
     let hooks = hooks(&classifier_content, config);
     if hooks.is_empty() {
         return Ok(());
@@ -231,19 +261,10 @@ pub(crate) fn fold(
     let journal = store
         .run_dir(run_id)
         .join("learning/decomposition-records.jsonl");
+    let pending_journal = store
+        .run_dir(run_id)
+        .join("learning/decomposition-pending.jsonl");
     std::fs::create_dir_all(journal.parent().expect("journal parent"))?;
-    let mut known = std::collections::BTreeSet::new();
-    if let Ok(text) = std::fs::read_to_string(&journal) {
-        for line in text.lines() {
-            if let Ok(record) = serde_json::from_str::<WorkflowLearningRecord>(line) {
-                known.insert(record.stage_id);
-            }
-        }
-    }
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&journal)?;
     let candidates: Vec<_> = calls
         .into_iter()
         .filter(|call| {
@@ -256,7 +277,7 @@ pub(crate) fn fold(
         .flat_map(|call| {
             lesson_records(
                 run_id,
-                &run.spec.task,
+                &safe_task,
                 &call.call.id,
                 call.attempt,
                 &call.result.data,
@@ -264,23 +285,83 @@ pub(crate) fn fold(
             )
         })
         .collect();
-    let records = filter_new_records(candidates, &mut known);
-    for record in &records {
-        use std::io::Write;
-        writeln!(file, "{}", serde_json::to_string(record)?)?;
-    }
+    let records = stage_journal(&journal, &pending_journal, candidates)?;
     crate::command::topology_trace::project_workflow_run(cwd, store, run_id);
     crate::command::topology_fold::fold_project_pending_blocking(
-        cwd,
-        run_id,
-        &run.spec.task,
-        "default",
+        cwd, run_id, &safe_task, "default",
     );
     let outcome =
         crate::command::topology_fold::workflow_learning::bridge_workflow_learning_with_records(
             cwd, store, run_id, &records,
         );
+    finish_journal_dispatch(
+        &pending_journal,
+        !outcome.integration_unavailable && outcome.dispatched >= records.len(),
+    )?;
     tracing::debug!(%run_id, dispatched = outcome.dispatched, records = records.len(), "fixed decomposition learning fold finished");
+    Ok(())
+}
+
+pub(super) fn read_journal(path: &Path) -> anyhow::Result<Vec<WorkflowLearningRecord>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    text.lines()
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+pub(super) fn stage_journal(
+    history_path: &Path,
+    pending_path: &Path,
+    candidates: Vec<WorkflowLearningRecord>,
+) -> anyhow::Result<Vec<WorkflowLearningRecord>> {
+    let mut history = read_journal(history_path)?;
+    let mut known = history
+        .iter()
+        .map(|record| record.stage_id.clone())
+        .collect();
+    let new_records = filter_new_records(candidates, &mut known);
+    let pending = merge_records(read_journal(pending_path)?, new_records.clone());
+    // The retry source is durable before the seen journal advances. A crash
+    // between the writes can therefore replay a pending record, never lose it.
+    write_journal(pending_path, &pending)?;
+    history.extend(new_records);
+    write_journal(history_path, &history)?;
+    Ok(pending)
+}
+
+fn merge_records(
+    mut records: Vec<WorkflowLearningRecord>,
+    candidates: Vec<WorkflowLearningRecord>,
+) -> Vec<WorkflowLearningRecord> {
+    let mut known = records
+        .iter()
+        .map(|record| record.stage_id.clone())
+        .collect();
+    records.extend(filter_new_records(candidates, &mut known));
+    records
+}
+
+pub(super) fn write_journal(path: &Path, records: &[WorkflowLearningRecord]) -> anyhow::Result<()> {
+    use std::io::Write;
+    let temporary = path.with_extension("jsonl.tmp");
+    let mut file = std::fs::File::create(&temporary)?;
+    for record in records {
+        writeln!(file, "{}", serde_json::to_string(record)?)?;
+    }
+    file.sync_all()?;
+    std::fs::rename(temporary, path)?;
+    Ok(())
+}
+
+pub(super) fn finish_journal_dispatch(path: &Path, dispatched: bool) -> anyhow::Result<()> {
+    if dispatched {
+        write_journal(path, &[])?;
+    }
     Ok(())
 }
 
