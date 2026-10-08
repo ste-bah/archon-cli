@@ -67,6 +67,9 @@ fn warn_incoherent_permissions(config: &ArchonConfig, path: &std::path::Path) {
     for warning in permission_coherence_warnings(config) {
         tracing::warn!(config = %path.display(), "{warning}");
     }
+    for warning in write_call_time_budget_warnings(config) {
+        tracing::warn!(config = %path.display(), "{warning}");
+    }
 }
 
 /// Write a named preset's tuple into the HOME config file.
