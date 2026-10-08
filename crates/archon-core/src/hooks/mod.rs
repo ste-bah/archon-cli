@@ -5,6 +5,7 @@
 //! - `condition`— condition expression evaluator (`"Bash(git *)"` syntax)
 //! - `executor` — shell command runner with exit-code semantics
 //! - `registry` — `HookRegistry`: loads from .archon/settings.json, fires hooks per event
+mod async_diagnostics;
 pub mod callback;
 pub mod condition;
 pub mod context;
@@ -18,6 +19,7 @@ pub mod toml_loader;
 mod types;
 pub mod watch;
 
+pub use async_diagnostics::{AsyncHookDiagnostic, AsyncHookDiagnosticBatch};
 pub use callback::{HookCallback, HookCallbackEntry};
 pub use context::{HookContext, HookContextBuilder};
 pub use executor::{is_in_hook_agent, set_in_hook_agent};

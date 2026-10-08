@@ -142,7 +142,7 @@ pub(crate) async fn execute_hook(
     session_id: &str,
     event_name: &str,
 ) -> HookResult {
-    execute_hook_with_metadata(config, input, cwd, session_id, event_name)
+    execute_hook_with_metadata(config, input, cwd, session_id, event_name, None)
         .await
         .result
 }
@@ -153,6 +153,10 @@ pub(super) async fn execute_hook_with_metadata(
     cwd: &Path,
     session_id: &str,
     event_name: &str,
+    async_diagnostics: Option<(
+        std::sync::Arc<super::async_diagnostics::AsyncHookDiagnosticStore>,
+        Option<String>,
+    )>,
 ) -> HookExecutionResult {
     // Function hooks: in-process execution, no shell spawn needed
     if matches!(config.hook_type, super::types::HookCommandType::Function) {
@@ -185,14 +189,23 @@ pub(super) async fn execute_hook_with_metadata(
     if config.r#async == Some(true)
         && config.failure_policy(event_name) == super::types::HookFailurePolicy::Allow
     {
-        spawn_background(
-            config.command.clone(),
-            input.clone(),
-            cwd.to_path_buf(),
-            session_id.to_owned(),
-            event_name.to_owned(),
-            config.timeout.unwrap_or(60),
-        );
+        if let Some((store, source)) = async_diagnostics {
+            spawn_background(
+                config.command.clone(),
+                input.clone(),
+                cwd.to_path_buf(),
+                session_id.to_owned(),
+                event_name.to_owned(),
+                config.clone(),
+                source,
+                move |diagnostic| store.push(diagnostic),
+            );
+        } else {
+            tracing::error!(
+                event = %event_name,
+                "async hook dispatch requires a registry diagnostic store"
+            );
+        }
         return HookResult::allow().into();
     }
 

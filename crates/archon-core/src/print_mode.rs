@@ -51,7 +51,7 @@ use std::sync::Arc;
 
 use crate::agent::{Agent, AgentEvent, TimestampedEvent};
 use crate::config::ArchonConfig;
-use crate::output_format::{format_agent_event, format_json_result};
+use crate::output_format::{format_agent_event, format_json_result_with_diagnostics};
 
 /// Run print mode: process a single query, emit output, and return an exit code.
 ///
@@ -152,6 +152,9 @@ pub async fn run_print_mode(
             }
 
             // Write formatted output
+            if matches!(&event, AgentEvent::AsyncHookDiagnostic(_)) {
+                continue;
+            }
             if let Some(output) = format_agent_event(&event, &fmt_clone) {
                 let _ = stdout.write_all(output.as_bytes());
                 let _ = stdout.flush();
@@ -165,6 +168,11 @@ pub async fn run_print_mode(
     // Close the event channel so the consumer task finishes
     agent.close_event_channel();
     let _ = event_handle.await;
+    let async_diagnostics = agent.close_async_hook_diagnostics();
+    if output_format == OutputFormat::Text {
+        let mut stderr = std::io::stderr();
+        write_async_diagnostics(&mut stderr, &async_diagnostics);
+    }
 
     // A denied tool is not a failed turn: `process_result` is Ok, the agent
     // reports the denial in prose, and print mode used to exit 0 having done
@@ -223,7 +231,8 @@ pub async fn run_print_mode(
             let inp = usage.input_tokens as f64;
             let out = usage.output_tokens as f64;
             let cost = (inp * 3.0 + out * 15.0) / 1_000_000.0;
-            let json = format_json_result(&text, &usage, cost);
+            let json =
+                format_json_result_with_diagnostics(&text, &usage, cost, Some(&async_diagnostics));
             let _ = std::io::stdout().write_all(json.as_bytes());
             let _ = std::io::stdout().write_all(b"\n");
         }
@@ -241,7 +250,8 @@ pub async fn run_print_mode(
         let inp = usage.input_tokens as f64;
         let out = usage.output_tokens as f64;
         let cost = (inp * 3.0 + out * 15.0) / 1_000_000.0;
-        let json = format_json_result(&text, &usage, cost);
+        let json =
+            format_json_result_with_diagnostics(&text, &usage, cost, Some(&async_diagnostics));
         let _ = std::io::stdout().write_all(json.as_bytes());
         let _ = std::io::stdout().write_all(b"\n");
     }
@@ -281,4 +291,50 @@ pub async fn run_print_mode(
     }
 
     EXIT_SUCCESS
+}
+
+fn write_async_diagnostics(
+    stderr: &mut impl std::io::Write,
+    batch: &crate::hooks::AsyncHookDiagnosticBatch,
+) {
+    for diagnostic in &batch.diagnostics {
+        let _ = writeln!(
+            stderr,
+            "[async hook:{}:{} source={}] {}",
+            diagnostic.event,
+            diagnostic.outcome,
+            diagnostic.source.as_deref().unwrap_or("unknown"),
+            diagnostic.message
+        );
+    }
+    if batch.dropped > 0 {
+        let _ = writeln!(
+            stderr,
+            "[async hook diagnostics] {} older diagnostic(s) dropped",
+            batch.dropped
+        );
+    }
+}
+
+#[cfg(test)]
+mod async_hook_diagnostic_tests {
+    use super::write_async_diagnostics;
+    use crate::hooks::{AsyncHookDiagnostic, AsyncHookDiagnosticBatch};
+
+    #[test]
+    fn text_mode_diagnostic_writer_emits_a_stderr_line() {
+        let batch = AsyncHookDiagnosticBatch {
+            diagnostics: vec![AsyncHookDiagnostic {
+                event: "ConfigChange".into(),
+                source: Some("user".into()),
+                outcome: "failure".into(),
+                message: "exit 1".into(),
+            }],
+            dropped: 0,
+        };
+        let mut sink = Vec::new();
+        write_async_diagnostics(&mut sink, &batch);
+        let output = String::from_utf8(sink).unwrap();
+        assert!(output.contains("[async hook:ConfigChange:failure source=user] exit 1"));
+    }
 }

@@ -60,6 +60,7 @@ pub(super) async fn handle_tui_event(
             flush_pending_input_after_turn(app, input_tx);
         }
         TuiEvent::Error(msg) => app.on_error(&msg),
+        TuiEvent::DiagnosticLine(msg) => app.on_diagnostic_line(&msg),
         TuiEvent::GenerationStarted => app.on_generation_started(),
         TuiEvent::SlashCommandComplete => app.on_slash_command_complete(),
         TuiEvent::ThinkingToggle(enabled) => {

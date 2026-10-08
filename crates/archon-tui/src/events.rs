@@ -131,6 +131,8 @@ pub enum TuiEvent {
         cache_read_tokens: u64,
     },
     Error(String),
+    /// Diagnostic-only line that does not mutate generation or turn state.
+    DiagnosticLine(String),
     /// Emitted by main.rs right before agent.process_message().
     GenerationStarted,
     /// Emitted by main.rs after a slash command completes.

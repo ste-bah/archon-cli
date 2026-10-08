@@ -155,6 +155,13 @@ async fn fire_stop_hooks(agent: &Arc<tokio::sync::Mutex<Agent>>) {
         }
         .await;
     }
+    let diagnostics = agent.lock().await.close_async_hook_diagnostics();
+    if diagnostics.dropped > 0 {
+        tracing::warn!(
+            dropped = diagnostics.dropped,
+            "async hook diagnostics were dropped before session shutdown"
+        );
+    }
 }
 
 #[cfg(test)]

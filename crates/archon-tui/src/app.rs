@@ -385,6 +385,10 @@ impl App {
         crate::agent_activity::turn_failed(&mut self.agent_activity);
     }
 
+    pub fn on_diagnostic_line(&mut self, message: &str) {
+        self.output.append_line(&format!("[diagnostic] {message}"));
+    }
+
     pub fn submit_input(&mut self) -> String {
         let text = self.input.submit();
         if !text.is_empty() {
@@ -478,6 +482,9 @@ pub fn should_process_key_event(key: &KeyEvent) -> bool {
     key.kind != KeyEventKind::Release
 }
 
+#[cfg(test)]
+#[path = "app_async_hook_tests.rs"]
+mod app_async_hook_tests;
 #[cfg(test)]
 #[path = "app_tests.rs"]
 mod tests;

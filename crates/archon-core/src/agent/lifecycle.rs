@@ -206,15 +206,13 @@ impl Agent {
     /// Close the event channel so receivers know the agent is done.
     /// Used by print mode to unblock the event consumer task.
     pub fn close_event_channel(&mut self) {
+        if let Some(registry) = &self.hook_registry {
+            registry.set_async_hook_diagnostic_observer(None);
+        }
         // Replace the sender with a closed one by dropping it.
         let (tx, _) = tokio::sync::mpsc::channel(super::AGENT_EVENT_CHANNEL_CAPACITY);
         self.event_tx = tx;
         // The old sender is dropped, closing the channel
-    }
-
-    /// Set the hook registry for pre/post tool execution hooks.
-    pub fn set_hook_registry(&mut self, registry: Arc<crate::hooks::HookRegistry>) {
-        self.hook_registry = Some(registry);
     }
 
     /// Add dynamic watch paths from hooks (REQ-HOOK-017).

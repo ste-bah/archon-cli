@@ -9,6 +9,7 @@ pub(super) fn heap_bytes(event: &TuiEvent) -> usize {
         | TuiEvent::ThinkingDelta(text)
         | TuiEvent::TransientThinkingDelta(text)
         | TuiEvent::Error(text)
+        | TuiEvent::DiagnosticLine(text)
         | TuiEvent::ModelChanged(text)
         | TuiEvent::BtwResponse(text)
         | TuiEvent::SessionRenamed(text)

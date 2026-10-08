@@ -32,6 +32,7 @@ use crate::auto_extraction::AutoExtractor;
 use crate::dispatch::ToolRegistry;
 use crate::subagent::SubagentManager;
 
+mod async_hook_diagnostics;
 mod attribution_followup;
 pub mod autocompact;
 mod cognitive_gate;
