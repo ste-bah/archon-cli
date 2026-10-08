@@ -3,16 +3,17 @@
 // at most the cap in flight, results keyed by frozen file name in skeleton
 // order, frozen bodies skipped, and a failing body surfaces only after its
 // started siblings settle, with nothing started after it failed.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const scriptSource = () => ['workflow_decompose_v1.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js','workflow_decompose_v1_progress.js'].map(f=>fs.readFileSync(__dirname+'/'+f,'utf8')).join('\n');
+const scriptSource = () => ['workflow_decompose_v1.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js','workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js'].map(f=>fs.readFileSync(__dirname+'/'+f,'utf8')).join('\n');
 const SUBJECTS = Array.from({length:7},(_,i)=>({taskId:`TASK-X-${i+1}`,fileName:`TASK-X-${i+1}.md`}));
 
 function harness(cap, options = {}) {
  const context = {args:{projectRoot:'/p',repositoryRoot:'/r',prdPath:'/p/prd',prdDigest:'x',taskRoot:'/p/tasks',gateMode:'observe',acceptanceCriteria:{'AC-X-1':'c'},authorMaxParallelism:cap,frozenChain:options.frozenChain}, console};
  context.__archonValidateAcceptanceEntry = () => '[]';
- vm.createContext(context);
+ vm.createContext(withAuthorContext(context));
  vm.runInContext(scriptSource(),context);
  let active=0,peak=0,failedAt=null,firstEndedAfterFourthStarted=null; const bodyCalls=[],landed=[];
  const w={

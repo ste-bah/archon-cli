@@ -125,6 +125,7 @@ pub(super) fn script_source() -> String {
             "workflow_decompose_v1_acceptance.js",
             "workflow_decompose_v1_set_gate.js",
             "workflow_decompose_v1_progress.js",
+            "workflow_decompose_v1_context.js",
         ]
         .iter()
         .map(|name| std::fs::read_to_string(std::path::Path::new(&root).join(name)).unwrap())
@@ -141,6 +142,7 @@ fn assert_author_shape_refusal(entry: Value) {
     let context = rquickjs::Context::full(&runtime).unwrap();
     context.with(|ctx| {
         install_entry_validator(&ctx).unwrap();
+        archon_workflow::v2::script::author_context::install_preview(&ctx).unwrap();
         ctx.eval::<(), _>(format!("const args = {{repositoryRoot:'/archon-test-roots/repo',projectRoot:'/archon-test-roots/project',}};\n{source}")).unwrap();
         let candidate = serde_json::to_vec(&json!({"entries": [entry.clone()]})).unwrap();
         // Each refusal names the entry (Issue 357 round 4), not `entries/0`.
@@ -199,6 +201,7 @@ fn native_refuted_entry_shape_repairs_decrease_five_to_zero_without_pause() {
     let context = rquickjs::Context::full(&runtime).unwrap();
     context.with(|ctx| {
         install_entry_validator(&ctx).unwrap();
+        archon_workflow::v2::script::author_context::install_preview(&ctx).unwrap();
         let script = format!(
             r#"const args = {{repositoryRoot:'/archon-test-roots/repo',projectRoot:'/archon-test-roots/project',acceptanceCriteria:{{A:'a'}},authorMaxParallelism:1,gateMode:'enforce'}};
             {source}

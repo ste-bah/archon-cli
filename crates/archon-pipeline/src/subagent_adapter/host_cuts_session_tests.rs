@@ -23,7 +23,7 @@ use crate::subagent_adapter::tests::{NoopClient, request};
 const BOUND: u64 = 1_800;
 const WALL: u64 = 14_400;
 /// Active rounds a queued session runs once it has its slot: under half its
-/// wall clock in all.
+/// no-progress window in all.
 const RUN_ROUNDS: u64 = 4;
 
 /// Behaves by the prompt, so every test here can install the same executor
@@ -51,11 +51,12 @@ impl SubagentExecutor for ScriptedRunner {
         cancel: CancellationToken,
     ) -> Result<String, ExecutorError> {
         if request.prompt.contains("QUEUED") {
-            // Issue 288: every slot is in use for longer than the wall clock;
+            // Issue 288: every slot is in use for longer than the window;
             // the executor reports the wait where the real one does, then
-            // runs well inside the wall clock once it has the slot.
+            // runs well inside the window once it has the slot.
             let paused = dispatch_clock::slot_wait(&agent_id);
             tokio::time::sleep(Duration::from_secs(WALL * 2)).await;
+            dispatch_clock::admitted(&agent_id);
             drop(paused);
             for _ in 0..RUN_ROUNDS {
                 subagent_activity::note();
@@ -63,6 +64,8 @@ impl SubagentExecutor for ScriptedRunner {
             }
             return Ok("ran after the queue".into());
         }
+        // A free slot, taken at once and reported as the executor does.
+        dispatch_clock::admitted(&agent_id);
         if request.prompt.contains("NO-CLOCK-EXPECTED") {
             assert!(subagent_activity::current().is_none(), "bound is off");
             tokio::time::sleep(Duration::from_secs(BOUND * 5)).await;
@@ -142,7 +145,7 @@ async fn a_stalled_session_is_cut_for_inactivity_through_the_real_spawn_path() {
     let elapsed = tokio::time::Instant::now() - started;
     assert!(
         elapsed >= Duration::from_secs(BOUND) && elapsed < Duration::from_secs(BOUND + 60),
-        "cut at the bound, hours before the 14400s wall clock: {elapsed:?}"
+        "cut at the bound, hours before the 14400s no-progress window: {elapsed:?}"
     );
 }
 
@@ -164,11 +167,11 @@ async fn a_disabled_bound_installs_no_clock_through_the_real_spawn_path() {
     assert_eq!(response.content, "finished unbounded");
 }
 
-/// Issue 288: a call queued behind full slots for twice its wall clock is not
-/// cut; its wall clock starts when it takes the slot, and it still runs to
-/// completion inside it.
+/// Issue 288: a call queued behind full slots for twice its window is not
+/// cut; its no-progress window starts when it takes the slot, and it still
+/// runs to completion inside it.
 #[tokio::test(start_paused = true)]
-async fn a_queued_session_starts_its_wall_clock_at_the_slot_through_the_real_spawn_path() {
+async fn a_queued_session_starts_its_window_at_the_slot_through_the_real_spawn_path() {
     let started = tokio::time::Instant::now();
     let response = client(Some(BOUND))
         .run_agent(workflow_request("QUEUED"))
@@ -181,16 +184,16 @@ async fn a_queued_session_starts_its_wall_clock_at_the_slot_through_the_real_spa
     );
 }
 
-/// The wall clock still bounds the run itself once the slot is taken.
+/// The no-progress window still bounds the run itself once the slot is taken.
 #[tokio::test(start_paused = true)]
-async fn the_wall_clock_still_cuts_a_session_that_runs_past_it() {
+async fn the_no_progress_window_still_cuts_a_session_that_stalls_past_it() {
     let mut request = workflow_request("STALL");
     request.timeout_secs = Some(BOUND / 2);
     let started = tokio::time::Instant::now();
     let error = client(Some(BOUND))
         .run_agent(request)
         .await
-        .expect_err("cut at its wall clock");
+        .expect_err("cut at its no-progress window");
     assert!(error.to_string().contains("timed out after"), "{error}");
     assert_eq!(
         tokio::time::Instant::now() - started,

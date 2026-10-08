@@ -31,6 +31,8 @@ pub(crate) const FIXED_SCRIPT_SOURCE: &str = concat!(
     include_str!("workflow_decompose_v1_progress.js"),
     "\n",
     include_str!("workflow_decompose_v1_seed.js"),
+    "\n",
+    include_str!("workflow_decompose_v1_context.js"),
 );
 pub(crate) const FIXED_DECOMPOSITION_STATE_PATH: &str = "decomposition/state.json";
 pub(crate) const FIXED_CATALOG_PATH: &str = "decomposition/command-catalog.json";
@@ -280,17 +282,21 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
                 // The authors work in the project directory and read the
                 // repository (Issue-56): without this every Read of it was
                 // refused and the bodies were written around the refusal.
-                read_roots: read_roots.clone(),
+                read_roots: super::workflow_read_scope::with_author_context(
+                    read_roots.clone(),
+                    &store.run_dir(&run_id),
+                )?,
             })
             .await
             .context("building the fixed decomposition provider client")?;
         // Proof, not trust: the same guard the authors' tools consult, asked
-        // now for the repository root. A refusal ends the launch here with
-        // the guard's text, before the first author spends an hour on it.
-        super::workflow_read_scope::require_agent_read(
+        // now for the repository root and the author-context directory. A
+        // refusal ends the launch here with the guard's text.
+        super::workflow_read_scope::require_author_reads(
             client.as_ref(),
-            &repository.root,
             "the decomposition authors",
+            Some(&repository.root),
+            &store.run_dir(&run_id),
         )?;
         let program = std::env::current_exe()
             .context("resolving the fixed decomposition binary")?

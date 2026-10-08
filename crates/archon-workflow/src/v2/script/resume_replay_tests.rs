@@ -79,7 +79,9 @@ async fn reduce_payload(map_view: String) -> serde_json::Value {
                             let answer = if payload["id"] == "adversarial-review-map" {
                                 map_view
                             } else {
-                                serde_json::json!({ "status": "accepted", "summary": "stub", "review_findings": { "findings": [] } }).to_string()
+                                let mut view = serde_json::json!({ "status": "accepted", "summary": "stub", "review_findings": { "findings": [] } });
+                                super::super::v3_prelude::cross_task_tests::host_sets_final(&payload, &mut view);
+                                view.to_string()
                             };
                             recorded.lock().unwrap().push((method, payload));
                             Ok::<_, rquickjs::Error>(answer)

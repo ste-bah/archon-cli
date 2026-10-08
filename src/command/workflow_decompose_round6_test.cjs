@@ -1,19 +1,20 @@
 // Issue 261 round 6: only a higher tier or a smaller distinct defect count progresses.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const scriptRoot = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${scriptRoot}/${name}`, 'utf8')).join('\n');
 const defect = (task, value = 'bad') => ({
   text: `candidate artifact was refused: task '${task}' file_name '${value}' is invalid`,
   subject: value, source_path: `/submitted/${value}`, remediation_scope: 'candidate_artifact',
   deterministic_defect: { provenance: 'host_validator', code: 'invalid_filename', subject: task, location: '' },
 });
-async function author(findings, resumed = [], mode = 'enforce') {
+async function author(findings, resumed = [], mode = 'enforce', initialFeedback = []) {
   const ctx = { args: { gateMode: mode } };
-  vm.createContext(ctx);
+  vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   let calls = 0;
   const pauses = [];
@@ -31,7 +32,7 @@ async function author(findings, resumed = [], mode = 'enforce') {
   };
   let error;
   try { await ctx.authorCandidate(w, { phase: 'skeleton', prompt: () => 'author',
-    retryScopes: new Set(['candidate_artifact']) }); } catch (e) { error = e.message; }
+    retryScopes: new Set(['candidate_artifact']), initialFeedback }); } catch (e) { error = e.message; }
   return { calls, pauses, error };
 }
 const flags = out => Array.from(out.pauses.at(-1).evidence.progress_history, e => e.progress);
@@ -76,12 +77,26 @@ async function resume() {
   assert.deepEqual(flags(out), [true, false, false, false, false, false, false]);
   assert.equal(out.pauses.length, 2);
 }
-// Round 7: observe falls back to the best committed artifact on a stall.
+// Round 7: a committed artifact with outstanding findings still pauses.
 async function observeStall() {
   const out = await author(() => [defect('TASK-X-001')], [], 'observe');
-  assert.equal(out.error, undefined);
+  assert.equal(out.error, 'paused');
   assert.equal(out.calls, 4);
-  assert.equal(out.pauses.length, 0);
+  assert.equal(out.pauses.length, 1);
+  assert.equal(out.pauses[0].evidence.last_findings.length, 1);
+}
+async function observeSeededStall() {
+  const out = await author(() => [defect('TASK-X-001')], [], 'observe', ['seeded repair remains']);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.calls, 4);
+  assert.equal(out.pauses.length, 1);
+  assert(out.pauses[0].evidence.last_findings.length > 0);
+}
+async function observeChangingFindingStall() {
+  const out = await author(n => [defect(n % 2 ? 'TASK-X-001' : 'TASK-X-002')], [], 'observe');
+  assert.equal(out.error, 'paused');
+  assert.equal(out.calls, 4);
+  assert.equal(out.pauses.length, 1);
 }
 async function duplicates() {
   const out = await author(n => n === 1 ? [defect('TASK-X-001'), defect('TASK-X-001', 'bad2')]
@@ -103,7 +118,8 @@ async function duplicates() {
   let failed = 0;
   for (const [name, test, guard] of [['rename spin', rename], ['70 to 0', seventy, true], ['shape to 70 defects is a higher tier', shapeThenSeventy, true],
     ['judged rewording', rewording], ['oscillation', oscillation], ['resume best preserved', resume],
-    ['distinct identity count', duplicates], ['observe stall falls back to the best commit', observeStall]]) {
+    ['distinct identity count', duplicates], ['observe committed finding pauses', observeStall],
+    ['observe seeded finding pauses', observeSeededStall], ['observe changing findings pause', observeChangingFindingStall]]) {
     try { await test(); console.log(`PASS ${name}${guard ? ' (guard; validator completeness tested in Rust)' : ''}`); }
     catch (e) { failed++; console.error(`FAIL ${name}: ${e.message}`); }
   }

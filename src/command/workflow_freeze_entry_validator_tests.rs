@@ -59,6 +59,7 @@ fn run(body: &str) -> Value {
     let context = rquickjs::Context::full(&runtime).unwrap();
     context.with(|ctx| {
         install_entry_validator(&ctx).unwrap();
+        archon_workflow::v2::script::author_context::install_preview(&ctx).unwrap();
         let script = [
             "const args = {repositoryRoot:'/archon-test-roots/repo',projectRoot:'/archon-test-roots/project',authorMaxParallelism:1, gateMode:'enforce'};",
             &source,
@@ -381,6 +382,7 @@ fn preserves(entry: Value) {
     let context = rquickjs::Context::full(&runtime).unwrap();
     context.with(|ctx| {
         install_entry_validator(&ctx).unwrap();
+        archon_workflow::v2::script::author_context::install_preview(&ctx).unwrap();
         let native: rquickjs::Function = ctx
             .globals()
             .get("__archonValidateAcceptanceEntry")
@@ -432,6 +434,7 @@ fn native_author_shape_repairs_decrease_five_to_zero_without_pause() {
     let context = rquickjs::Context::full(&runtime).unwrap();
     context.with(|ctx| {
         install_entry_validator(&ctx).unwrap();
+        archon_workflow::v2::script::author_context::install_preview(&ctx).unwrap();
         let script = format!(
             r#"const args = {{repositoryRoot:'/archon-test-roots/repo',projectRoot:'/archon-test-roots/project',acceptanceCriteria:{{A:'a'}},authorMaxParallelism:1,gateMode:'enforce'}};
             {source}

@@ -268,9 +268,11 @@ impl WorkflowV2ScriptRunner {
             issued: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             fault: host_fault.clone(),
         };
+        let run_dir = host.runner.workflow_store.run_dir(&host.runner.run_id);
         let js_result = context
             .async_with(async move |ctx| {
                 crate::command::workflow::install_entry_validator(&ctx)?;
+                archon_workflow::v2::script::author_context::install_for_run(&ctx, &run_dir)?;
                 ctx.globals().set(
                     "__archonHost",
                     Func::from(Async(move |method: String, payload: String| {

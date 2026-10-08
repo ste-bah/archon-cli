@@ -2,19 +2,20 @@
 // entries that fail or were refuted, then runs the gate. Run with node.
 // ARCHON_SEED_SAMPLE may name a derived seed (`{subjects}` JSON) and
 // ARCHON_SEED_CRITERIA its criteria, to report what that seed re-authors.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js',
-  'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_seed.js']
+  'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js', 'workflow_decompose_v1_seed.js']
   .map((name) => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 
 function context(criteria, phaseSeed) {
   // Issue 357's native entry validator; its rules are tested by shape_tests.
   const ctx = { args: { acceptanceCriteria: criteria, gateMode: 'enforce', authorMaxParallelism: 2, phaseSeed },
     __archonValidateAcceptanceEntry: () => '[]' };
-  vm.createContext(ctx);
+  vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   if (phaseSeed) ctx.applySeedOrdinals();
   return ctx;

@@ -44,6 +44,7 @@ pub(crate) use crate::v2::result_store::{
 pub(crate) use crate::v2::scheduler::stable_value_hash;
 
 pub mod audit_contest_plan;
+pub mod author_context;
 pub mod coverage_inventory;
 mod dry_run_a;
 mod dry_run_b;

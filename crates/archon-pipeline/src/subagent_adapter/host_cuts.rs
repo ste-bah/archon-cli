@@ -1,14 +1,17 @@
-//! The two host bounds on one agent session, raced against its run: the wall
-//! clock, and inactivity (`archon_tools::subagent_activity`).
+//! The two host bounds on one agent session, raced against its run: the
+//! no-progress window, and inactivity (`archon_tools::subagent_activity`).
 //!
-//! The wall clock counts execution only: a session waiting for a subagent
-//! slot has not started, so the wait does not run it down (Issue 288).
+//! The no-progress window counts execution only: it starts when the session
+//! takes its subagent slot, so a wait for one does not run it down, and it
+//! renews only on the novel activity the runner reports, never on output that
+//! repeats itself (Issue 288). It is never a total.
 //!
 //! Each bound cancels the session the same way and then waits for it to wind
-//! down; what differs is how the ending is reported. A wall-clock cut keeps the
-//! "subagent timed out after Ns" text every host classifier already knows. An
-//! inactivity cut carries its own marker, so a record says which bound fired —
-//! a session that was slow and one that had stopped look nothing alike.
+//! down; what differs is how the ending is reported. A no-progress cut keeps
+//! the "subagent timed out after Ns" text every host classifier already knows
+//! and names the last novel activity. An inactivity cut carries its own
+//! marker, so a record says which bound fired: a session that was looping and
+//! one that had stopped look nothing alike.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -17,7 +20,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use archon_tools::subagent_activity::{ActivityClock, inactivity_error_text, silence_exceeding};
-use archon_tools::subagent_dispatch_clock::{self, DispatchClock};
+use archon_tools::subagent_dispatch_clock::{self, DispatchClock, DispatchCut};
 use archon_tools::subagent_executor::SubagentOutcome;
 use tokio_util::sync::CancellationToken;
 
@@ -26,8 +29,17 @@ pub(super) type SessionRun = Pin<Box<dyn Future<Output = SubagentOutcome> + Send
 /// Which host bound ended a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum HostCut {
-    WallClock,
-    Inactivity { silent: Duration, limit: Duration },
+    /// No novel activity for the whole no-progress window.
+    NoProgress,
+    Inactivity {
+        silent: Duration,
+        limit: Duration,
+    },
+    /// The executor reported neither a slot nor a wait for one for a whole
+    /// no-progress window (Issue 288): named, never timed from dispatch.
+    NeverAdmitted {
+        limit: Duration,
+    },
 }
 
 /// The inactivity bound for one session: the clock its runner reports to and
@@ -57,12 +69,16 @@ impl InactivityBound {
     }
 }
 
-/// The wall clock counts the session's execution only: it does not run while
-/// the executor waits for a subagent slot (Issue 288), so a queued session is
-/// never cut before it has run.
-async fn wall_clock(clock: &DispatchClock, timeout_secs: Option<u64>) {
+/// The no-progress window counts the session's execution only: it starts
+/// when the executor reports the session took its slot and does not run while
+/// it waits for one (Issue 288), so a queued session is never cut before it
+/// has run. A session never admitted is cut with its own diagnosis.
+async fn no_progress_window(clock: &DispatchClock, timeout_secs: Option<u64>) -> HostCut {
     match timeout_secs {
-        Some(secs) => clock.exceeding(Duration::from_secs(secs.max(1))).await,
+        Some(secs) => match clock.cut(Duration::from_secs(secs.max(1))).await {
+            DispatchCut::Execution(_) => HostCut::NoProgress,
+            DispatchCut::NeverAdmitted(limit) => HostCut::NeverAdmitted { limit },
+        },
         None => std::future::pending().await,
     }
 }
@@ -106,26 +122,49 @@ pub(super) async fn drive(
 ) -> (SubagentOutcome, Option<HostCut>) {
     let cut = tokio::select! {
         outcome = &mut run => return (outcome, None),
-        _ = wall_clock(clock, timeout_secs) => HostCut::WallClock,
+        cut = no_progress_window(clock, timeout_secs) => cut,
         (silent, limit) = inactivity(bound) => HostCut::Inactivity { silent, limit },
     };
     cancel.cancel();
     (run.await, Some(cut))
 }
 
-/// The error an inactivity cut ends the call with, or `None` when the session
-/// was not cut for inactivity or finished before the cancellation reached it.
+/// The error an inactivity cut, or a never-admitted cut, ends the call with;
+/// `None` for a no-progress cut, no cut, or a session that finished before the
+/// cancellation reached it.
 pub(super) fn inactivity_failure(
     outcome: &SubagentOutcome,
     cut: Option<HostCut>,
 ) -> Option<anyhow::Error> {
-    let Some(HostCut::Inactivity { silent, limit }) = cut else {
+    if let SubagentOutcome::Completed(_) = outcome {
         return None;
-    };
-    match outcome {
-        SubagentOutcome::Completed(_) => None,
-        _ => Some(anyhow!("{}", inactivity_error_text(silent, limit))),
     }
+    match cut? {
+        HostCut::Inactivity { silent, limit } => {
+            Some(anyhow!("{}", inactivity_error_text(silent, limit)))
+        }
+        HostCut::NeverAdmitted { limit } => {
+            Some(anyhow!("subagent {}", DispatchCut::NeverAdmitted(limit)))
+        }
+        HostCut::NoProgress => None,
+    }
+}
+
+/// A no-progress cut's error names the novel activity that last renewed the
+/// session's window; every other error is returned as it is. The text keeps
+/// the cut's own words first, so every classifier still reads it.
+pub(super) fn name_last_progress(
+    error: anyhow::Error,
+    cut: Option<HostCut>,
+    clock: &DispatchClock,
+) -> anyhow::Error {
+    if cut != Some(HostCut::NoProgress) {
+        return error;
+    }
+    anyhow!(
+        "{error} without progress (no-progress window; {})",
+        subagent_dispatch_clock::last_progress_text(clock.last_progress().as_deref())
+    )
 }
 
 #[cfg(test)]

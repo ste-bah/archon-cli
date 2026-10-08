@@ -1,20 +1,23 @@
-// Issue 288: an author prompt grows by a bounded amount per new acceptance
-// entry and per new attempt, never by the size of everything done before.
-// Prints the measured prompt bytes for a fixture of 120 entries and 30
+// Issue 288: an author prompt is bounded whatever the number of completed
+// acceptance entries and earlier attempts: what it repeats from earlier work
+// shares one byte budget, and the exact bytes are host-written files it names.
+// Prints the measured prompt bytes for a fixture of 120 entries and 60
 // attempts. Also pins that an inactivity cut in a round that kept new work
 // does not consume the no-progress window, and that cuts without progress
 // pause the loop (they never fail it).
+const { authorContext, withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const dir = process.env.ARCHON_DECOMPOSE_SCRIPT_DIR || __dirname;
-const FILES = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js'];
+const FILES = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js'];
 const source = FILES.map((f) => fs.readFileSync(`${dir}/${f}`, 'utf8')).join('\n');
 
-function context(args) {
+function context(args, binding) {
   const ctx = { args, console };
+  if (binding) ctx.__archonAuthorContext = binding;
   ctx.__archonValidateAcceptanceEntry = () => '[]';
-  vm.createContext(ctx);
+  vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   return ctx;
 }
@@ -55,9 +58,9 @@ function entry(id, n) {
 }
 
 // The prompt of the acceptance author for the entry after `done` completed ones.
-async function acceptancePrompt(done, total) {
+async function acceptancePrompt(done, total, binding) {
   const all = criteria(total);
-  const ctx = context({ acceptanceCriteria: all, authorMaxParallelism: 1 });
+  const ctx = context({ acceptanceCriteria: all, authorMaxParallelism: 1 }, binding);
   const ids = Object.keys(all).sort();
   const state = { entries: new Map(ids.slice(0, done).map((id, n) => [id, entry(id, n)])), retryIds: new Set() };
   const prompts = [];
@@ -68,43 +71,131 @@ async function acceptancePrompt(done, total) {
   return prompts[0];
 }
 
-async function priorGrowsBoundedPerEntry() {
+// Before: every completed entry's whole check, about 4 KB each (359,698 /
+// 439,291 bytes after 100 / 120 entries). Now one record line per entry in a
+// fixed share: the prompt after 120 entries is within that share of the one
+// after the first entry, and entries past the share add nothing.
+async function priorIsBoundedInAggregate() {
   const total = 121;
-  const at100 = await acceptancePrompt(100, total);
-  const at120 = await acceptancePrompt(120, total);
-  const added = Array.from({ length: 20 }, (_, i) => entry(`AC-${pad(101 + i)}`, 100 + i));
-  const entryBytes = added.reduce((sum, e) => sum + JSON.stringify(e).length, 0) / 20;
-  // What each added entry may cost: its own id, covers and check (cut at the
-  // cap), plus the line's framing. Nothing else an entry carries.
-  const ownBytes = added.reduce((sum, e) => sum + JSON.stringify({ id: e.id, covers: e.covers, gap_permitted: e.gap_permitted, check: e.check }).length, 0) / 20;
-  const perEntry = (Buffer.byteLength(at120) - Buffer.byteLength(at100)) / 20;
-  console.log(`acceptance author prompt: ${Buffer.byteLength(at100)} bytes after 100 entries, ${Buffer.byteLength(at120)} bytes after 120 entries, ${perEntry} bytes per completed entry (entry JSON ${entryBytes} bytes, its own check ${ownBytes} bytes)`);
-  assert(perEntry <= ownBytes + 16, `prompt grows ${perEntry} bytes per completed entry; the entry's own check is ${ownBytes}`);
-  // Every real-sized check (up to 15.5 KB) is shown whole, shared interface
-  // and cwd included: nothing is cut.
-  for (let n = 0; n < 120; n += 1) {
-    const check = entry('x', n).check;
-    assert(at120.includes(JSON.stringify(check.command)), `the command of AC-${pad(n + 1)} is shown whole`);
+  const files = new Map();
+  const sizes = {};
+  const prompts = {};
+  for (const done of [1, 70, 100, 120]) {
+    prompts[done] = await acceptancePrompt(done, total, authorContext(files));
+    sizes[done] = Buffer.byteLength(prompts[done]);
   }
-  assert(!at120.includes('[CUT:'), 'no real-sized check is cut');
-  assert(!at120.includes('host_call_id'), 'the host-owned judgment is not shown');
+  console.log(`acceptance author prompt bytes by completed entries: ${JSON.stringify(sizes)}`);
+  assert(sizes[120] - sizes[1] <= 14336 + 1024, `prompt grew ${sizes[120] - sizes[1]} bytes from 1 to 120 entries`);
+  assert(sizes[120] - sizes[100] <= 64, `prompt grew ${sizes[120] - sizes[100]} bytes from 100 to 120 entries`);
+  assert(sizes[120] <= 48 * 1024, `prompt after 120 entries is ${sizes[120]} bytes`);
+  assert(!prompts[120].includes('host_call_id') && !prompts[120].includes('field_3 missing'), 'no judgment and no whole check is inlined');
+  // Every listed record names the sha256 of the entry's exact JSON, and the
+  // file it names holds exactly those bytes.
+  const at120 = prompts[120];
+  const listed = [...at120.matchAll(/\n- (AC-\d+) sha256:([0-9a-f]{64}) covers=/g)];
+  assert(listed.length > 10 && listed.length < 120, `${listed.length} records shown`);
+  for (const [, id, sha] of listed) {
+    const n = Number(id.slice(3)) - 1;
+    assert.equal(files.get(`/run/author-context/${sha}.json`), JSON.stringify(entry(id, n)), `${id} resolves to its exact bytes`);
+  }
+  // The omitted ones are counted, and the index lists every one exactly.
+  const omitted = at120.match(/; (\d+) more are not, and every one is listed in (\S+)\./);
+  assert(omitted, at120.slice(-3000));
+  assert.equal(Number(omitted[1]) + listed.length, 120);
+  const index = files.get(omitted[2]).trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(index.length, 120);
+  for (const [n, record] of index.entries()) assert.equal(files.get(record.path), JSON.stringify(entry(`AC-${pad(n + 1)}`, n)));
+  // The nearest entries are the ones shown: AC-120 (just before AC-121) is.
+  assert(listed.some(([, id]) => id === 'AC-120') && !listed.some(([, id]) => id === 'AC-001'), 'nearest records shown');
 }
 
-// A 15 KB real-shaped check is never cut. A runaway check (over 64 KB) is cut
-// with the mark, and its short fields -- cwd, kind, artifact format -- survive.
-async function onlyARunawayCheckIsCut() {
-  const ctx = context({});
-  const big = { id: 'AC-BIG', covers: ['REQ-001'], gap_permitted: false, check: { kind: 'command', command: command(1, 15545), cwd: 'project_root' } };
-  const line = ctx.priorText([big]);
-  assert(line.includes(JSON.stringify(big.check.command)) && !line.includes('[CUT:'), 'a 15 KB check is shown whole');
-  const runaway = { id: 'AC-RUN', check: { kind: 'command', command: command(2, 70000), cwd: 'project_root' } };
-  const cut = ctx.priorText([runaway]);
-  assert.match(cut, /\[CUT: \d+ more characters of this entry are not shown\]/);
-  assert(cut.includes('"cwd":"project_root"') && cut.includes('"kind":"command"'), 'the short fields survive the cut');
-  const floor = { id: 'AC-FLOOR', check: { kind: 'floor', contract: { typed_verifier_command: command(3, 70000), kind: 'report', artifact_path: 'out/report.json', artifact_format: 'json', required_true_fields: ['complete'] } } };
-  const floorCut = ctx.priorText([floor]);
-  assert.match(floorCut, /\[CUT:/);
-  for (const field of ['"artifact_path":"out/report.json"', '"artifact_format":"json"', '"required_true_fields":["complete"]']) assert(floorCut.includes(field), `${field} survives the cut`);
+// A record line is cut at a character boundary by bytes, not characters: a
+// multibyte check does not buy a longer line, and the cut is marked.
+async function multibyteRecordsAreCutByBytes() {
+  const files = new Map();
+  const ctx = context({}, authorContext(files));
+  const wide = { id: 'AC-W', covers: ['REQ-1'], check: { kind: 'command', cwd: 'project_root', command: `echo ${'東京🚀'.repeat(400)}` } };
+  const text = ctx.priorText([wide], 'AC-X', ['AC-W', 'AC-X']);
+  const line = text.split('\n- ')[1];
+  assert(Buffer.byteLength(line) <= 320, `record is ${Buffer.byteLength(line)} bytes`);
+  assert(line.endsWith(' [cut]'), line);
+  assert(!line.includes('�') && Buffer.from(line, 'utf8').toString('utf8') === line, 'no character is split');
+  const sha = line.match(/sha256:([0-9a-f]{64})/)[1];
+  assert.equal(files.get(`/run/author-context/${sha}.json`), JSON.stringify(wide), 'the exact bytes are kept whole');
+  // A catalogue over its share is cut by bytes too and names the exact catalogue.
+  const catalogue = Object.fromEntries(Array.from({ length: 80 }, (_, i) => [`AC-${pad(i + 1)}`, '基準'.repeat(100)]));
+  const listed = ctx.catalogueText(catalogue, 'AC-040', Object.keys(catalogue));
+  assert(Buffer.byteLength(listed) <= 10240 + 400, `catalogue is ${Buffer.byteLength(listed)} bytes`);
+  const file = listed.match(/the exact catalogue is (\S+) \(sha256/)[1];
+  assert.equal(files.get(file), JSON.stringify(catalogue));
+  assert(listed.includes('\n- AC-040: '), 'the entry\'s own neighbourhood is listed');
+}
+
+// A host that cannot write the context never yields a prompt that names
+// bytes that are not there: the entry's call is an outage, no agent is
+// called, and outages pause the loop. A missing binding is a host fault.
+async function unwritableContextIsAnOutageAndAMissingBindingThrows() {
+  const all = { 'AC-001': 'one', 'AC-002': 'two' };
+  const failing = () => { throw new Error('disk full'); };
+  const ctx = context({ acceptanceCriteria: all, authorMaxParallelism: 1, gateMode: 'enforce' }, failing);
+  const agents = [];
+  const w = { agent: async (id) => { agents.push(id); return { status: 'failed', summary: 'unreached' }; } };
+  const kept = { id: 'AC-001', check: { kind: 'command', command: 'true' } };
+  const state = { entries: new Map([['AC-001', kept]]), retryIds: new Set(['AC-002']) };
+  const out = await ctx.authorAcceptanceEntries(w, 'author', 2, state);
+  assert.equal(agents.length, 0, 'no provider call');
+  assert.equal(out.status, 'failed');
+  assert.notEqual(out.malformed, true, 'an outage, not a refusal');
+  assert.match(out.summary, /AC-002: author context could not be written: disk full/);
+  assert.equal(state.roundOutage, true);
+  assert.equal(state.roundCalls, 0);
+  const bare = context({ acceptanceCriteria: all, authorMaxParallelism: 1 });
+  delete bare.__archonAuthorContext;
+  await assert.rejects(bare.authorAcceptanceEntries(w, 'author', 2, { entries: new Map([['AC-001', kept]]), retryIds: new Set(['AC-002']) }), /author-context binding is missing/);
+}
+
+// The current findings are never cut, whatever their size; a prompt whose
+// mandatory text alone passes the dispatch limit pauses instead of sending.
+async function currentFindingsStayWholeAndOversizedPromptsPause() {
+  const ctx = context({ acceptanceCriteria: { 'AC-001': 'one' }, authorMaxParallelism: 1, gateMode: 'enforce' });
+  const big = Array.from({ length: 40 }, (_, i) => `check 'AC-001' finding ${i}: ${words(i, 2000)}`);
+  const prompt = ctx.authorPrompt('author', 2, big, [{ attempt: 1, findings: big }]);
+  for (const finding of big) assert(prompt.includes(finding), 'a current finding is shown whole');
+  const huge = Array.from({ length: 200 }, (_, i) => `check 'AC-001' finding ${i}: ${words(i, 2000)}`);
+  const pauses = [];
+  let agents = 0;
+  const w = {
+    agent: async () => { agents += 1; return { status: 'failed', summary: 'unreached' }; },
+    pause: async (id, evidence) => { pauses.push({ id, evidence }); if (pauses.length === 2) throw new Error('paused'); return { resumed: true }; },
+  };
+  await assert.rejects(ctx.authorAcceptanceEntries(w, ctx.authorPrompt('author', 2, huge, []), 1, { entries: new Map(), retryIds: null }), /paused/);
+  assert.equal(agents, 0, 'never sent');
+  assert.deepEqual(pauses.map((p) => p.id), ['pause-acceptance-prompt-AC-001-1', 'pause-acceptance-prompt-AC-001-2'], 'a resumed loop that still measures it pauses again');
+  assert.equal(pauses[0].evidence.reason, 'author_prompt_oversized');
+  assert.match(pauses[0].evidence.remedy, /raise AUTHOR_PROMPT_LIMIT/);
+  assert.match(pauses[0].evidence.remedy, /resuming alone pauses again/);
+  assert(pauses[0].evidence.prompt_bytes > pauses[0].evidence.limit_bytes);
+}
+
+// The findings a phase was opened with (attempt 0) were unbounded: a set
+// gate that sent a body back with hundreds of findings repeated all of them
+// in every prompt. Now they share the history budget, the rest are counted,
+// and the exact history is a file.
+function seededHistoryIsBounded() {
+  const files = new Map();
+  const ctx = context({}, authorContext(files));
+  const seeded = Array.from({ length: 300 }, (_, i) => `seeded finding ${i}: ${words(i, 500)}`);
+  const prompt = ctx.authorPrompt('author', 2, ['current'], [{ attempt: 0, findings: seeded }]);
+  const history = prompt.split('Earlier attempts in this phase')[1];
+  assert(Buffer.byteLength(history) <= 8192 + 600, `history is ${Buffer.byteLength(history)} bytes`);
+  assert(prompt.includes(`the set gate, before this body was sent back: ${seeded[0]}`), 'the first seeded finding is shown');
+  const counted = prompt.match(/\n(\d+) older distinct findings \((\d+) occurrences, attempts 0-0\) are not repeated here\./);
+  assert(counted, prompt.slice(-500));
+  const file = prompt.match(/in full with its count and attempts, is in (\S+) /)[1];
+  const all = JSON.parse(files.get(file));
+  assert.equal(all.length, 300);
+  assert.deepEqual(all.map((found) => found.text), seeded, 'every seeded finding, exactly');
+  assert.equal(Number(counted[1]) + (history.match(/\n- /g) || []).length, 300);
 }
 
 // Each attempt: three host findings that rotate (the oscillation the history
@@ -137,12 +228,13 @@ function historyGrowsBoundedPerAttempt() {
   assert.match(at30, /\(a repeat: seen in \d+ earlier attempts, attempts \d+-\d+\)/);
 }
 
-// Findings that differ by a sign, a digit or punctuation stay apart.
+// Findings that differ by a sign, a digit, punctuation or case stay apart
+// (a path or a flag can differ by case alone).
 function nearFindingsStayApart() {
   const ctx = context({});
-  const texts = ["check 'A' value < 1", "check 'A' value > 1", "check 'A' offset -1", "check 'A' offset 1", 'field a_b', 'field a-b'];
+  const texts = ["check 'A' value < 1", "check 'A' value > 1", "check 'A' offset -1", "check 'A' offset 1", 'field a_b', 'field a-b', 'reads out/Data.json', 'reads out/data.json', 'flag -V', 'flag -v'];
   const history = texts.map((text, i) => ({ attempt: i + 1, findings: [text] }));
-  const prompt = ctx.authorPrompt('author', 8, ['unrelated'], history);
+  const prompt = ctx.authorPrompt('author', 12, ['unrelated'], history);
   for (const text of texts) assert(prompt.includes(`: ${text}`), `${text} is shown: ${prompt}`);
 }
 
@@ -181,7 +273,7 @@ async function inactivityCutWithProgressKeepsTheWindow() {
 }
 
 (async () => {
-  for (const test of [priorGrowsBoundedPerEntry, onlyARunawayCheckIsCut, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, inactivityCutWithProgressKeepsTheWindow]) {
+  for (const test of [priorIsBoundedInAggregate, multibyteRecordsAreCutByBytes, unwritableContextIsAnOutageAndAMissingBindingThrows, currentFindingsStayWholeAndOversizedPromptsPause, historyGrowsBoundedPerAttempt, nearFindingsStayApart, seededFindingStays, seededHistoryIsBounded, inactivityCutWithProgressKeepsTheWindow]) {
     try { await test(); } catch (error) { console.error(`${test.name}: ${error.message}`); process.exitCode = 1; }
   }
 })();

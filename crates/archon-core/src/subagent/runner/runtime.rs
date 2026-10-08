@@ -6,6 +6,9 @@ mod context_fit;
 mod context_fit_tests;
 mod message_history;
 mod progress_stop;
+mod progress_window;
+#[cfg(test)]
+mod progress_window_tests;
 mod request_round;
 mod request_round_pressure;
 mod stream_round;
@@ -13,6 +16,7 @@ mod tool_round;
 
 use cargo_credit::CargoCredit;
 use message_history::MessageHistory;
+use progress_window::ProgressWindow;
 use request_round::{PressureState, prepare_request_round};
 use stream_round::collect_stream_round;
 use tool_round::replay_tool_round;
@@ -33,19 +37,14 @@ impl SubagentRunner {
         self.record_transcript(&user_msg);
         messages.push(user_msg);
 
-        let started = Instant::now();
+        // Issue 288: the session's limit is a no-progress window, never a
+        // total. It renews only on novel activity (see `progress_window`).
         let timeout_secs = match archon_tools::host_timeout::current() {
             Some(archon_tools::host_timeout::HostTimeout::Unlimited) => None,
             Some(archon_tools::host_timeout::HostTimeout::Finite(seconds)) => Some(seconds),
             None => Some(self.timeout_secs),
         };
-        let mut deadline = timeout_secs
-            .map(|seconds| {
-                started
-                    .checked_add(Duration::from_secs(seconds))
-                    .ok_or_else(|| anyhow::anyhow!("host timeout exceeds supported clock range"))
-            })
-            .transpose()?;
+        let mut window = ProgressWindow::open(timeout_secs)?;
         let mut cargo_credit = CargoCredit::new(timeout_secs);
         let mut progress_stop = progress_stop::ProgressStop::default();
         let progress_agent = self.tool_context.subagent_id.clone().unwrap_or_default();
@@ -62,22 +61,11 @@ impl SubagentRunner {
         for turn in 0..self.max_turns {
             // Issue-213 C5: the turn an interrupted call's record names.
             archon_tools::session_progress::note_turn(&progress_agent, turn.saturating_add(1));
-            // Check timeout. The error message reports BOTH wall-clock
-            // elapsed and turn counter so an LLM (or human) reading
-            // the failure can tell which cap actually fired — the
-            // pre-v0.1.42 message ("Subagent timed out after N turns")
-            // misled both LLMs and reviewers into thinking N was a
-            // turn cap when it was always a wall-clock cap. Default
-            // wall-clock is now 24h (DEFAULT_TIMEOUT_SECS = 86400).
-            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-                let elapsed = started.elapsed().as_secs();
-                anyhow::bail!(
-                    "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) at turn {}/{} — \
-                     override per-spawn with timeout_secs:<seconds>, or per-agent in frontmatter",
-                    self.timeout_secs,
-                    turn,
-                    self.max_turns,
-                );
+            // The no-progress window ran out between turns. Its text names
+            // the window and the last novel activity, so a reader can tell a
+            // looping session from a slow one.
+            if window.expired() {
+                return Err(window.stall_error("between turns", turn.saturating_add(1)));
             }
 
             // Check for graceful shutdown request
@@ -95,8 +83,11 @@ impl SubagentRunner {
                 self.record_transcript(&message);
                 messages.push(message);
             }
-            let request_deadline =
-                adjusted_deadline(deadline, &cargo_credit, &self.tool_context.session_id);
+            let request_deadline = adjusted_deadline(
+                window.deadline(),
+                &cargo_credit,
+                &self.tool_context.session_id,
+            );
             let prepared_request = optional_timeout(
                 request_deadline,
                 prepare_request_round(
@@ -111,19 +102,17 @@ impl SubagentRunner {
             )
             .await
             .map_err(|_| {
-                let elapsed = started.elapsed().as_secs();
-                anyhow::anyhow!(
-                    "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) while preparing LLM request at turn {}/{}",
-                    self.timeout_secs,
-                    turn,
-                    self.max_turns,
-                )
+                window.stall_error("while preparing an LLM request", turn.saturating_add(1))
             })?;
             // A completed preparation may carry a compaction summary, which is
             // model output; without one it took no measurable time.
             archon_tools::subagent_activity::note();
-            let inference_deadline =
-                adjusted_deadline(deadline, &cargo_credit, &self.tool_context.session_id);
+            let inference_deadline = adjusted_deadline(
+                window.deadline(),
+                &cargo_credit,
+                &self.tool_context.session_id,
+            );
+            let window_ref = &window;
             let inference = async {
                 optional_timeout(
                     inference_deadline,
@@ -147,13 +136,7 @@ impl SubagentRunner {
                 )
                 .await
                 .map_err(|_| {
-                    let elapsed = started.elapsed().as_secs();
-                    anyhow::anyhow!(
-                        "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) during LLM inference at turn {}/{}",
-                        self.timeout_secs,
-                        turn,
-                        self.max_turns,
-                    )
+                    window_ref.stall_error("during LLM inference", turn.saturating_add(1))
                 })?
             };
             let stream =
@@ -162,6 +145,12 @@ impl SubagentRunner {
             if stream.retry_after_compact {
                 continue;
             }
+            // Only novel text or a novel tool call renews the window.
+            window.observe_turn(
+                turn.saturating_add(1),
+                &stream.text_content,
+                &stream.pending_tools,
+            );
             reasoning_encrypted = stream.reasoning_encrypted;
             recovery_ladder = crate::agent::autocompact::RecoveryLadder::default();
             emergency_projection_pending = false;
@@ -235,13 +224,12 @@ impl SubagentRunner {
                 ),
                 round_cancel,
                 &self.tool_context.session_id,
-                deadline,
+                window.deadline(),
                 &cargo_credit,
             )
             .await;
             drop(activity);
-            let exempt = cargo_credit.bank(&self.tool_context.session_id);
-            deadline = deadline.map(|deadline| deadline + exempt);
+            window.extend(cargo_credit.bank(&self.tool_context.session_id));
             // Issue-136: a cancelled session (a run paused or cancelled, its
             // call dropped) ends its tool round at once rather than at the
             // round's natural end; the tools' own trees are reaped on drop.
@@ -249,13 +237,7 @@ impl SubagentRunner {
                 anyhow::bail!("Subagent cancelled during tool round at turn {turn}");
             }
             if round_end == RoundEnd::TimedOut {
-                let elapsed = started.elapsed().as_secs();
-                anyhow::bail!(
-                    "Subagent wall-clock timeout: {elapsed}s elapsed (cap: {}s) during tool round at turn {}/{}",
-                    self.timeout_secs,
-                    turn,
-                    self.max_turns,
-                );
+                return Err(window.stall_error("during a tool round", turn.saturating_add(1)));
             }
             // The workflow read guard has refused this round terminally
             // (Issue-54): the agent thrashed past the read wall without
@@ -292,11 +274,11 @@ impl SubagentRunner {
 }
 
 fn adjusted_deadline(
-    deadline: Option<Instant>,
+    deadline: Option<tokio::time::Instant>,
     credit: &CargoCredit,
     session: &str,
 ) -> Option<tokio::time::Instant> {
-    deadline.map(|deadline| tokio::time::Instant::from_std(deadline + credit.live(session)))
+    deadline.map(|deadline| deadline + credit.live(session))
 }
 
 async fn optional_timeout<T>(
@@ -330,7 +312,7 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RoundEnd {
     Finished,
-    /// The session's wall clock ran out.
+    /// The session's no-progress window ran out.
     TimedOut,
     /// The session was cancelled from above while the round ran.
     Cancelled,
@@ -343,7 +325,7 @@ async fn await_tool_round<F>(
     future: F,
     round_cancel: tokio_util::sync::CancellationToken,
     session_id: &str,
-    deadline: Option<Instant>,
+    deadline: Option<tokio::time::Instant>,
     credit: &CargoCredit,
 ) -> RoundEnd
 where
@@ -351,8 +333,7 @@ where
 {
     tokio::pin!(future);
     loop {
-        let adjusted = deadline
-            .map(|deadline| tokio::time::Instant::from_std(deadline + credit.live(session_id)));
+        let adjusted = deadline.map(|deadline| deadline + credit.live(session_id));
         let expiry = async {
             match adjusted {
                 Some(at) => tokio::time::sleep_until(at).await,
@@ -363,7 +344,7 @@ where
             biased;
             _ = expiry => {
                 let Some(deadline) = deadline else { continue };
-                if Instant::now() < deadline + credit.live(session_id) {
+                if tokio::time::Instant::now() < deadline + credit.live(session_id) {
                     continue;
                 }
                 round_cancel.cancel();

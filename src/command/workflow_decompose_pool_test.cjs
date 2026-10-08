@@ -4,11 +4,12 @@
 // drained. Proves: makespan follows the pool / prefix-window schedule, the
 // in-flight count never exceeds the cap, an acceptance prompt depends on its
 // index alone, and a failure stops new starts but lets started calls settle.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const dir = process.env.ARCHON_DECOMPOSE_SCRIPT_DIR || __dirname;
-const scriptSource = () => ['workflow_decompose_v1.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js','workflow_decompose_v1_progress.js'].map(f=>fs.readFileSync(dir+'/'+f,'utf8')).join('\n');
+const scriptSource = () => ['workflow_decompose_v1.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js','workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js'].map(f=>fs.readFileSync(dir+'/'+f,'utf8')).join('\n');
 
 function clock() {
  let now=0,seq=0; const timers=[];
@@ -31,7 +32,7 @@ function clock() {
 
 function context(args={}, validator=() => '[]') {
  const ctx={args,console}; ctx.__archonValidateAcceptanceEntry = (_, serialized) => validator(serialized);
-  vm.createContext(ctx); vm.runInContext(scriptSource(),ctx); return ctx;
+  vm.createContext(withAuthorContext(ctx)); vm.runInContext(scriptSource(),ctx); return ctx;
 }
 
 // Pool 110 < prefix window 120 < barrier batches 130 for these durations, cap 2.
@@ -79,8 +80,8 @@ function acceptanceRun(seed, cap, criteria, state, options={}) {
  return {run,prompts,ends,starts,peak:()=>peak,active:()=>active,now:c.now};
 }
 
-// Issue 288: one JSON line per completed entry, its id first.
-const priorIds=task=>task.split('Previously completed entries')[1].split('\n').slice(1).filter(line=>line.startsWith('- ')).map(line=>line.match(/^- \{"id":"([^"]*)"/)[1]);
+// Issue 288: one record line per completed entry, its id and digest first.
+const priorIds=task=>task.split('Previously completed entries')[1].split('\n').slice(1).filter(line=>line.startsWith('- ')).map(line=>line.match(/^- (\S+) sha256:[0-9a-f]{64} /)[1]);
 
 // Entry i sees exactly entries 0..i-cap of this round, however the calls
 // happen to finish: two seeds, different completion orders, same prompts.
@@ -96,7 +97,8 @@ async function promptsDependOnIndexAlone() {
   runs.push(r);
  }
  assert.notDeepEqual(runs[0].ends.map(e=>e.id),runs[1].ends.map(e=>e.id),'the seeds must finish in different orders');
- const strip=prompts=>Object.fromEntries(Object.entries(prompts).map(([k,v])=>[k,v.replace(/"seed":\d+/g,'')]));
+ // The seed is part of each entry, so of its digest and its file name.
+ const strip=prompts=>Object.fromEntries(Object.entries(prompts).map(([k,v])=>[k,v.replace(/"seed":\d+/g,'').replace(/[0-9a-f]{64}/g,'<sha256>')]));
  assert.deepEqual(strip(runs[0].prompts),strip(runs[1].prompts),'prompts identical across completion orders');
  // A retry round sees earlier-round entries first, then its own window.
  const state={entries:new Map(ids.map(id=>[id,{id,old:true}])),retryIds:new Set(['AC-2','AC-5','AC-7','AC-9'])};

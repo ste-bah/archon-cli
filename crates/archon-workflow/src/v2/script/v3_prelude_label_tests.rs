@@ -35,11 +35,13 @@ async fn call_ids(source: &str) -> Vec<(String, serde_json::Value)> {
                                 "accepted"
                             };
                             calls.push((payload["id"].as_str().unwrap_or("").to_string(), payload));
-                            let view = serde_json::json!({
+                            let mut view = serde_json::json!({
                                 "status": status, "summary": "stub", "items": [], "outcomes": [], "patch_landed": true,
                                 "result": { "status": status, "summary": "stub", "files_changed": [{"path": "x"}],
                                     "commands_run": [{"command": "c", "status": "succeeded"}] },
                             });
+                            let id = serde_json::json!({ "id": calls.last().map(|(id, _)| id.clone()) });
+                            super::cross_task_tests::host_sets_final(&id, &mut view);
                             Ok::<_, rquickjs::Error>(view.to_string())
                         }
                     })),

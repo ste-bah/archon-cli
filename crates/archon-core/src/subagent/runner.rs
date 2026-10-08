@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use archon_llm::identity::IdentityProvider;
 use archon_llm::provider::{LlmProvider, LlmRequest};

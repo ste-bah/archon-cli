@@ -308,13 +308,6 @@ function recordOperational(progress, call, summary, advanced = false, round = NO
   return creditedRound(progress, { call, kind: "operational", findings: null, progress: false, summary: boundText(summary) }, round, advanced);
 }
 
-// Observe may end a stalled loop on its latest commit only when every attempt
-// of the window was answered: an outage never judged what it would have
-// produced, so a window that holds one pauses in either mode.
-function windowHasOutage(progress) {
-  return progress.stalledOperational > 0;
-}
-
 // Why the loop must stop now, or null while it may make another attempt.
 function stallReason(progress) {
   if (progress.stalled >= STALL_ATTEMPTS) {
@@ -375,75 +368,4 @@ async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra
   // The fresh window is also the episode's floor; its per-entry bests stay.
   progress.repair.stalled = 0;
   progress.repair.stalledOperational = 0;
-}
-
-// Issue 288: what an author prompt shows of earlier attempts. Every attempt's
-// findings used to be repeated in full, so a loop that repeats the same
-// findings grew its prompt by all of them on every attempt (about 2 KB per
-// attempt for five findings; live authors ran an hour per call at attempt 31).
-// Now each distinct finding is shown once with how often and when it
-// occurred, the newest findings stay in full in the repair list, the findings
-// the phase was opened with (attempt 0) are always shown, and only the
-// HISTORY_SHOWN most recent other findings are written out: older ones are
-// counted. This bounds the prompt, not the loop: the no-progress window alone
-// limits attempts.
-const HISTORY_SHOWN = 16;
-const HISTORY_TEXT = 600;
-
-// Whitespace and case only: findings that differ by a sign, a digit or
-// punctuation are different findings.
-function historyKey(text) {
-  return String(text).replace(/\s+/g, " ").trim().toLowerCase();
-}
-
-// A finding of the current attempt that earlier attempts also triggered is
-// reported as a repeat (`repeats`: how often, and when), not hidden.
-function earlierFindings(history, feedback) {
-  const current = new Set((feedback || []).map(historyKey));
-  const seeded = [];
-  const distinct = new Map();
-  const repeats = new Map();
-  const entries = Array.isArray(history) ? history.slice() : [];
-  // The attempt the current findings came from is not an earlier attempt.
-  const newest = entries[entries.length - 1];
-  if (newest && newest.attempt !== 0 && JSON.stringify((newest.findings || []).map(historyKey)) === JSON.stringify([...(feedback || [])].map(historyKey))) entries.pop();
-  for (const entry of entries) {
-    for (const text of entry.findings || []) {
-      const key = historyKey(text);
-      if (entry.attempt === 0) {
-        if (!seeded.some((seed) => seed.key === key)) seeded.push({ key, text });
-        continue;
-      }
-      if (current.has(key)) {
-        const seen = repeats.get(key);
-        if (seen) { seen.count += 1; seen.last = entry.attempt; } else repeats.set(key, { count: 1, first: entry.attempt, last: entry.attempt });
-        continue;
-      }
-      const known = distinct.get(key);
-      if (known) {
-        known.count += 1;
-        known.last = entry.attempt;
-      } else {
-        distinct.set(key, { text, count: 1, first: entry.attempt, last: entry.attempt });
-      }
-    }
-  }
-  const seedKeys = new Set(seeded.map((seed) => seed.key));
-  const others = [...distinct.entries()].filter(([key]) => !seedKeys.has(key)).map(([, found]) => found)
-    .sort((a, b) => b.last - a.last || b.count - a.count || a.first - b.first);
-  const shown = others.slice(0, HISTORY_SHOWN);
-  const hidden = others.slice(HISTORY_SHOWN);
-  const when = (found) => (found.count === 1 ? `attempt ${found.last}` : `attempts ${found.first}-${found.last}, ${found.count} times`);
-  const clip = (text) => (text.length > HISTORY_TEXT ? `${text.slice(0, HISTORY_TEXT)}...` : text);
-  return {
-    lines: [
-      ...seeded.map((seed) => `the set gate, before this body was sent back: ${seed.text}`),
-      ...shown.map((found) => `${when(found)}: ${clip(String(found.text))}`),
-    ],
-    repeats,
-    omitted: hidden.length,
-    omittedOccurrences: hidden.reduce((sum, found) => sum + found.count, 0),
-    omittedRange: hidden.length === 0 ? ""
-      : `${Math.min(...hidden.map((f) => f.first))}-${Math.max(...hidden.map((f) => f.last))}`,
-  };
 }

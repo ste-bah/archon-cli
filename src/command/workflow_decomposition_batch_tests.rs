@@ -269,10 +269,11 @@ async fn fixed_acceptance_window_holds_only_calls_behind_a_slow_entry() {
             .iter()
             .find(|(k, i, _)| *k == "start" && i == id)
             .unwrap();
-        // Issue 288: one JSON line per completed entry, its id first.
+        // Issue 288: one record line per completed entry, its id first.
         (prior.lines().skip(1))
-            .filter_map(|line| line.strip_prefix("- {\"id\":\""))
-            .map(|line| line.split('"').next().unwrap().to_string())
+            .filter_map(|line| line.strip_prefix("- "))
+            .filter_map(|line| line.split_once(" sha256:"))
+            .map(|(id, _)| id.to_string())
             .collect()
     };
     assert!(prior("AC-X-003").is_empty());

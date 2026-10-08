@@ -24,7 +24,14 @@ impl WorkflowLlmClient for SlowRetryClient {
         &self,
         _: WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
-        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+        // Each attempt takes its slot at once, as the executor reports it.
+        use archon_tools::subagent_dispatch_clock::{admitted, current_call, scope_session};
+        let clocks = current_call().into_iter().collect();
+        scope_session("slow-author", clocks, async {
+            assert!(admitted("slow-author"));
+            tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+        })
+        .await;
         Err(archon_workflow::WorkflowError::StageFailed(
             "connection reset by peer".into(),
         ))
@@ -49,7 +56,9 @@ async fn raw_author_deadline_covers_all_transient_retries() {
         .await
         .unwrap_err();
     assert!(
-        error.to_string().contains("author attempt deadline"),
+        error
+            .to_string()
+            .contains("author attempt no-progress deadline exceeded after 1s"),
         "{error}"
     );
     assert!(start.elapsed() < std::time::Duration::from_millis(1800));
@@ -80,11 +89,14 @@ impl WorkflowLlmClient for QueuedClient {
         &self,
         _: WorkflowAgentCall,
     ) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
-        use archon_tools::subagent_dispatch_clock::{current_call, scope_session, slot_wait};
+        use archon_tools::subagent_dispatch_clock::{
+            admitted, current_call, scope_session, slot_wait,
+        };
         let clocks = current_call().into_iter().collect();
         scope_session("queued-author", clocks, async {
             let paused = slot_wait("queued-author");
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            assert!(admitted("queued-author"));
             drop(paused);
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         })

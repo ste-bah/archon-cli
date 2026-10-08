@@ -286,7 +286,8 @@ impl SubagentPipelineClient {
                 tool_context,
             ))
         };
-        // An exact host policy carries an explicit timeout decision. None is
+        // An exact host policy carries an explicit timeout decision: the
+        // runner's no-progress window (Issue 288), never a total. None is
         // unlimited here, not omission that restores the runner's default.
         if request.pipeline_type == PipelineType::Workflow
             && request
@@ -308,13 +309,13 @@ impl SubagentPipelineClient {
             },
             run,
         ));
-        // The inactivity bound runs beside the wall clock, fed by the runner:
+        // The inactivity bound runs beside the no-progress window, fed by the runner:
         // a session that stopped is cut long before one that is merely slow.
         let inactivity = super::host_cuts::InactivityBound::new(self.inactivity_timeout);
         if let Some(bound) = &inactivity {
             run = bound.install(&lease.id, run);
         }
-        // The wall clock, and the outer deadline of the call this session
+        // The no-progress window, and the outer deadline of the call this session
         // serves, stop while the executor waits for a slot (Issue 288).
         let (clock, run) = super::host_cuts::install_dispatch_clock(&lease.id, run);
         let (outcome, cut) = super::host_cuts::drive(
@@ -328,7 +329,7 @@ impl SubagentPipelineClient {
         if let Some(error) = super::host_cuts::inactivity_failure(&outcome, cut) {
             return Err(error);
         }
-        let timed_out = cut == Some(super::host_cuts::HostCut::WallClock);
+        let timed_out = cut == Some(super::host_cuts::HostCut::NoProgress);
         // Only the executor records a refusal, so no output can forge one.
         if let Some(why) = lease.history.take_refusal() {
             return Err(anyhow::Error::new(
@@ -336,7 +337,8 @@ impl SubagentPipelineClient {
             ));
         }
 
-        let response = llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)?;
+        let response = llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)
+            .map_err(|error| super::host_cuts::name_last_progress(error, cut, &clock))?;
         lease.complete()?;
         Ok(response)
     }

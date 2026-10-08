@@ -256,6 +256,9 @@ async fn reauthor_dry_run_against_a_copied_task_directory() {
 #[path = "workflow_acceptance_republish_tests_b.rs"]
 mod safety;
 
+#[path = "workflow_acceptance_reauthor_stall_tests.rs"]
+mod stall;
+
 async fn gc_refused_publication(case: u8) {
     use archon_workflow::{
         LifecycleAction, LifecycleController, RunStatus, WorkflowSpec, WorkflowStore,

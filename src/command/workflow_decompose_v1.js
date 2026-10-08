@@ -266,7 +266,6 @@ async function authorCandidate(w, policy) {
   // Seeded feedback is attempt 0 of the history: every later prompt in this
   // phase keeps showing the finding the phase was opened to repair.
   const history = feedback.length > 0 ? [{ attempt: 0, findings: feedback.slice() }] : [];
-  let lastCommitted = null;
   let call = AUTHOR_CALLS.get(policy.phase) || 0;
   let attempt = 0;
   let lastFindings = feedback.slice();
@@ -279,11 +278,8 @@ async function authorCandidate(w, policy) {
   for (;;) {
     const stall = stallReason(progress);
     if (stall) {
-      // Observe never blocks on the artifact's quality: a loop that stopped
-      // improving returns the artifact the tree holds now. An outage says
-      // nothing about the artifact, so a window that holds one pauses in
-      // either mode (resumable), whatever the rest of the window was.
-      if (args.gateMode === "observe" && lastCommitted && !windowHasOutage(progress)) return lastCommitted;
+      // A stalled artifact is never accepted, even in observe mode. Keep the
+      // run resumable so repair findings remain attached to the author loop.
       await pauseAuthorLoop(w, policy.phase, progress, stall, lastFindings);
     }
     const carry = carried;
@@ -294,7 +290,7 @@ async function authorCandidate(w, policy) {
     const authored = carry !== null ? { status: "accepted", stopReason: "end_turn", content: carry } : policy.author
       ? await policy.author(w, prompt, call, authorState)
       : await w.agent(`${policy.phase}-author-${call}`, {
-          task: prompt, tier: "planner", resultMode: "rawOutcome",
+          task: await requireDispatchable(w, `${policy.phase}-prompt`, prompt), tier: "planner", resultMode: "rawOutcome",
           ...(policy.phase === "skeleton" ? { recordLanding: "skeleton" } : {})
         });
     const measuredReplies = policy.author && authorState.roundCalls !== undefined;
@@ -348,11 +344,8 @@ async function authorCandidate(w, policy) {
       authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content));
     }
     // A committed artifact is not the finished one: repairable findings are
-    // still fed back below in either mode. Every publication replaces the
-    // live tree, so observe's fallback is the LATEST committed outcome: only
-    // its receipt and subjects describe what the tree now holds (an earlier
-    // outcome with fewer findings would name a skeleton that is gone).
-    if (outcome.publicationReceipt && outcome.postcondition?.satisfied === true) lastCommitted = outcome;
+    // still fed back below in either mode, and a loop that stalls on them
+    // pauses (resumable) in either mode.
     if (routed.fatal.length > 0) {
       await stopFixed(`${policy.phase} stopped: ${routed.fatal.join(" | ")}`);
     }
@@ -471,27 +464,4 @@ function requireSubject(subject) {
   if (!subject || typeof subject.taskId !== "string" || typeof subject.fileName !== "string") {
     throw new Error("frozen skeleton returned a malformed host-read subject");
   }
-}
-
-function authorPrompt(base, attempt, feedback, history) {
-  if (feedback.length === 0) return `${base}\nLogical attempt: ${attempt}.`;
-  const earlier = earlierFindings(history, feedback);
-  const repeat = (text) => {
-    const seen = earlier.repeats.get(historyKey(text));
-    return seen ? ` (a repeat: seen in ${seen.count} earlier attempt${seen.count === 1 ? "" : "s"}, ${seen.first === seen.last ? `attempt ${seen.last}` : `attempts ${seen.first}-${seen.last}`})` : "";
-  };
-  let prompt = `${base}\nLogical attempt: ${attempt}. Repair these exact authoritative findings:\n- ${feedback.map((text) => `${text}${repeat(text)}`).join("\n- ")}`;
-  // Two gates can be individually satisfiable and jointly hard. Without the
-  // history an author repairs the finding in front of it, trips the other, and
-  // alternates until its budget is spent -- a live acceptance phase did exactly
-  // that for all six attempts. Showing what earlier attempts already triggered
-  // is what lets it satisfy both at once instead of trading one for the other.
-  // Issue 288: each earlier finding once, bounded (earlierFindings).
-  if (earlier.lines.length > 0) {
-    prompt += `\nEarlier attempts in this phase already triggered the following. Satisfy every one of them at once; repairing the finding above by reverting an earlier repair will not converge:\n- ${earlier.lines.join("\n- ")}`;
-  }
-  if (earlier.omitted > 0) {
-    prompt += `\n${earlier.omitted} older distinct findings (${earlier.omittedOccurrences} occurrences, attempts ${earlier.omittedRange}) are not repeated here.`;
-  }
-  return prompt;
 }

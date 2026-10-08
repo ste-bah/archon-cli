@@ -25,6 +25,9 @@ pub(crate) fn run(gate_mode: &str, scenario: &str, entry: &str) -> serde_json::V
         r##"{FIXED_SCRIPT_SOURCE}
 // Scheduling fixture: the real native validator is tested by shape_tests.
 globalThis.__archonValidateAcceptanceEntry = () => "[]";
+// Issue 288: the host's author-context binding, its files kept nowhere.
+const stubDigest = (text) => [...String(text)].reduce((h, c) => Math.imul(h ^ c.codePointAt(0), 16777619) >>> 0, 2166136261).toString(16).padStart(8, "0").repeat(8);
+globalThis.__archonAuthorContext = (ext, text) => JSON.stringify({{ path: "/run/author-context/" + stubDigest(text) + "." + ext, sha256: stubDigest(text) }});
 const scenario = {scenario};
 globalThis.args = Object.assign({{
   projectRoot: "/p", repositoryRoot: "/r", prdPath: "/p/prd.md", prdDigest: "d", taskRoot: "/p/tasks",
@@ -244,12 +247,16 @@ fn incomplete_provider_outcomes_pause_without_a_baseline() {
     );
 }
 
+/// Issue 288: a stall pauses observe too (resumable); a committed artifact
+/// with open findings is never returned.
 #[test]
-fn observe_mode_returns_the_best_committed_artifact_on_a_stall_instead_of_pausing() {
+fn observe_mode_pauses_on_a_stall_instead_of_returning_the_committed_artifact() {
     let out = run("observe", r#"{ findings: () => ["defect alpha"] }"#, BODY);
-    assert_eq!(out["accepted"], true, "{out}");
+    assert_paused(&out);
+    assert!(out.get("accepted").is_none(), "{out}");
     assert_eq!(out["calls"], 4, "{out}");
-    assert!(pause_ids(&out).is_empty(), "{out}");
+    assert_eq!(pause_ids(&out), ["pause-body-TASK-X-010-1"], "{out}");
+    assert_eq!(evidence(&out, 0)["reason"], "no_progress", "{out}");
 }
 
 // --- resume -----------------------------------------------------------------

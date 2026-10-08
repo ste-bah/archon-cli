@@ -197,7 +197,8 @@ pub(super) fn fixed_runner(
     // (0 max_tokens, 0 empty replies, 71 completed responses); attempt 3 did
     // finish, so the work fits the model, just not the timeout. Authoring a full
     // acceptance contract from a 36KB PRD is legitimately longer work than an
-    // ordinary host call.
+    // ordinary host call. Issue 288: the value is a no-progress window that
+    // novel author activity renews, never a total limit on the session.
     let client = LiveV2AgentClient::new(
         llm,
         ui_sink,

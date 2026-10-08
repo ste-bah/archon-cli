@@ -30,27 +30,27 @@ impl LlmProvider for SilentStreamProvider {
 }
 
 #[tokio::test]
-async fn d41_total_wall_clock_times_out_silent_llm_stream() {
+async fn d41_no_progress_window_times_out_silent_llm_stream() {
     let provider = Arc::new(SilentStreamProvider {
         senders: Mutex::new(Vec::new()),
     });
     let mut runner = make_runner(provider, 2);
     runner.timeout_secs = 1;
 
-    // A stream that never yields ends this run exactly two ways: the wall-clock
-    // cap cuts it off, or nothing does and `run` never returns. The outer
+    // A stream that never yields ends this run exactly two ways: the
+    // no-progress window cuts it off, or nothing does and `run` never returns. The outer
     // timeout distinguishes those two and nothing finer — it sits far above the
     // 1s cap on purpose, so it is a liveness guard rather than a measurement.
     // The claim under test is in the message: which cap fired, and where.
     let error = tokio::time::timeout(Duration::from_secs(60), runner.run("wait forever"))
         .await
-        .expect("the 1s wall-clock cap never fired; the silent stream was left running")
+        .expect("the 1s no-progress window never fired; the silent stream was left running")
         .unwrap_err();
 
     let message = error.to_string();
     assert!(message.contains("during LLM inference"), "{message}");
     assert!(
-        message.contains("(cap: 1s)"),
+        message.contains("no-progress window of 1s"),
         "the run must end on the configured 1s cap: {message}"
     );
 }

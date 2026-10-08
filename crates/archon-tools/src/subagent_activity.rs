@@ -1,14 +1,15 @@
 //! Host-owned inactivity bound for one subagent session, separate from its
-//! wall clock.
+//! no-progress window.
 //!
-//! The wall clock bounds how long a session may run. It cannot tell a session
-//! that is working slowly from one that has stopped, so a session whose one
-//! provider request stalled holds its slot until the wall clock runs out. The
+//! The no-progress window bounds how long a session may go without novel
+//! work. It cannot tell a session that is working slowly from one that has
+//! stopped, so a session whose one provider request stalled holds its slot
+//! until the window runs out. The
 //! stream idle guard does not close that gap on its own: it bounds ONE read
 //! gap, then resends the identical request, and each resend is answered with a
 //! fresh `message_start` that resets it. A stall that repeats on the resend
 //! therefore costs the idle guard times its retry count — observed live as four
-//! consecutive one-hour silences, exactly the session's four-hour wall clock.
+//! consecutive one-hour silences, exactly the session's four-hour limit.
 //!
 //! This clock measures activity where it happens. The runner touches it on
 //! every model output event and when a request preparation (which may carry a
@@ -17,13 +18,18 @@
 //! has been silent for the bound, and reports that cut under
 //! [`INACTIVITY_TIMEOUT_MARKER`], a kind of its own.
 //!
+//! Activity is not progress. This clock only tells a silent session from a
+//! working one; the no-progress window (`subagent_dispatch_clock`) renews only
+//! on novel work the runner reports, so output that repeats itself keeps a
+//! session out of this bound but never out of that one.
+//!
 //! What is NOT activity: the opening `message_start` of a response, keep-alive
 //! pings, and provider error events. A stalled provider sends exactly those and
 //! nothing else, so counting them would let a stall look alive forever.
 //!
 //! A tool round in flight IS activity. A branch waiting on a slow tool is
 //! working, and every tool already carries its own bound (the MCP call budget,
-//! the Bash timeout); a tool with none is still bounded by the wall clock. The
+//! the Bash timeout); a tool with none is still bounded by the no-progress window. The
 //! clock resumes when the round ends, measured from the moment its results
 //! returned.
 
@@ -43,7 +49,7 @@ pub const INACTIVITY_TIMEOUT_MARKER: &str = "subagent inactivity timeout:";
 /// The clock does not run until the session's runner reports its first
 /// activity. Before that the session may be queued for a subagent slot, and a
 /// branch waiting for capacity has not gone silent — it has not started. The
-/// wall clock still bounds a session that never starts.
+/// no-progress window still bounds a session that never starts.
 #[derive(Debug)]
 pub struct ActivityClock {
     last: Mutex<Option<Instant>>,
@@ -119,7 +125,7 @@ pub async fn silence_exceeding(clock: &ActivityClock, limit: Duration) -> Durati
 pub fn inactivity_error_text(silent: Duration, limit: Duration) -> String {
     format!(
         "{INACTIVITY_TIMEOUT_MARKER} no model output, tool call or tool result for {}s \
-         (inactivity limit {}s); the host ended the session inside its wall clock",
+         (inactivity limit {}s); the host ended the session inside its no-progress window",
         silent.as_secs(),
         limit.as_secs()
     )

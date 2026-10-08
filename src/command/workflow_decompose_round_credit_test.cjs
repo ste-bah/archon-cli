@@ -1,13 +1,15 @@
 // Issue 357 round 7: an entry that beats its own best is progress in every
 // kind of failed round (a sibling refused, unparseable or never answered);
 // each entry's note stays in its own slot and the shared repair list stays
-// the gate's findings; observe pauses on a window that holds an outage.
+// the gate's findings; observe pauses on a window that holds an outage, and
+// (Issue 288) on every other stalled window too.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const fields = ['check/command', 'check/cwd', 'check/kind'];
 const shape = (id, field) => ({text:`acceptance entry '${id}' was refused: ${field} invalid`,
@@ -35,7 +37,7 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
       const value = decided.get(`${id}@${JSON.parse(serialized).version}`);
       return JSON.stringify(typeof value === 'number' ? fields.slice(0, value).map(field => shape(id, field)) : []);
     }};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
   let calls = 0, gate = 0, error, result;
   const versions = new Map(), pauses = [], prompts = [];
   try {
@@ -188,11 +190,14 @@ async function hiddenOutagePauses(kind) {
   assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
   assert.equal(out.history[2].outage, true, JSON.stringify(out.history[2]));
 }
-// F3 control: the same window without the transport failure returns.
-async function noOutageReturns() {
+// F3 control: the same window without the transport failure also pauses
+// (Issue 288: a stall never returns an artifact), but as a measured stall.
+async function noOutagePausesToo() {
   const out = await run({A:['ok', 1], B:['ok', 1]}, [refute(['A', 'B'])], {mode:'observe'});
-  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
-  assert.equal(out.result.publicationReceipt.call_id, 'freeze');
+  assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
+  assert.equal(out.pauses.length, 1);
+  assert.equal(out.pauses[0].reason, 'no_progress');
+  assert.notEqual(out.history[2].outage, true, JSON.stringify(out.history[2]));
 }
 
 // Observe: a window that ends on outages after a judged repeat pauses
@@ -207,12 +212,15 @@ async function observeOneOutagePauses() {
   const out = await run({A:['ok']}, [refute(['A']), refute(['A']), outage, refute(['A']), clean], {mode:'observe'});
   assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
 }
-// Control: judged repeats alone still return observe's latest commit.
-async function observeJudgedReturns() {
+// Control: judged repeats alone pause observe too (Issue 288), with the
+// open refutation as evidence; the committed artifact is not returned.
+async function observeJudgedRepeatsPause() {
   const out = await run({A:['ok']}, [refute(['A'])], {mode:'observe'});
-  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
-  assert.equal(out.result.publicationReceipt.call_id, 'freeze');
+  assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
   assert.equal(out.gate, 4, 'first refutation, then 3 judged repeats');
+  assert.deepEqual(out.history.map(step => step.kind), ['judged', 'judged', 'judged', 'judged']);
+  assert.ok(Array.from(out.pauses[0].last_findings).some(text => text.includes("check 'A' was refuted")),
+    JSON.stringify(out.pauses[0].last_findings));
 }
 
 // N1: an owed entry completed in a clean round is progress even when the
@@ -257,10 +265,10 @@ const tests = [
   ['an endless refutation with repairs between pauses', endlessRefutationPauses],
   ['F3: an outage behind a refusal pauses observe', () => hiddenOutagePauses(1)],
   ['F3: an outage behind an unparseable reply pauses observe', () => hiddenOutagePauses('bad')],
-  ['F3 control: the window without an outage returns', noOutageReturns],
+  ['F3 control: the window without an outage pauses as a judged stall', noOutagePausesToo],
   ['observe pauses on outages after a judged repeat', observeOutagePauses],
   ['observe pauses on one outage inside a judged window', observeOneOutagePauses],
-  ['observe returns the latest commit on judged repeats (control)', observeJudgedReturns],
+  ['observe pauses on judged repeats (control)', observeJudgedRepeatsPause],
   ['N1 probe: a new entry in a clean round before two outages is progress', newEntryBeforeOutages],
   ['N1 edge: a round with no new entry before an outage is not progress', noNewEntryOutageIsNotProgress],
   ['N1 edge: a new entry before outages is credited once', newEntryCreditedOnce],

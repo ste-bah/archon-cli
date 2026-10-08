@@ -111,7 +111,7 @@ fn an_acceptance_entry_the_judge_rejects_after_every_rewrite_pauses() {
     assert_eq!(evidence["reason"], "no_progress", "{evidence}");
 }
 
-/// The round-8 measure and observe-fallback suite runs under cargo.
+/// The round-8 measure and observe stall-pause suite runs under cargo.
 #[test]
 fn round8_regression_suite_passes() {
     let output = std::process::Command::new("node")
@@ -184,7 +184,8 @@ fn node_suite_passes(file: &str) {
 }
 
 /// Issue 357 rounds 7-8: a pass is progress in every kind of round, each
-/// entry's note stays its own, and an outage in a window pauses observe.
+/// entry's note stays its own, and a stalled window pauses observe, with or
+/// without an outage (Issue 288).
 #[test]
 fn round_credit_regression_suite_passes() {
     node_suite_passes("workflow_decompose_round_credit_test.cjs");

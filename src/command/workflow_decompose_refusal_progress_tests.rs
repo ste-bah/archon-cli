@@ -7,8 +7,9 @@ use super::run_js;
 /// A refusal the host could not even parse is packaging. Issue 261: it is
 /// ranked below every parsed candidate and one packaging refusal is the same
 /// defect as the next, whatever the parser said, so repeated packaging makes
-/// no progress and closes the stall window (observe then keeps the best
-/// committed artifact). It used to be refunded against a fixed budget.
+/// no progress and closes the stall window, which pauses observe too (Issue
+/// 288: it used to keep the best committed artifact). It used to be refunded
+/// against a fixed budget.
 #[test]
 fn repeated_packaging_refusals_make_no_progress_and_close_the_window() {
     let driver = r#"
@@ -25,6 +26,7 @@ const w = {
     }] },
   }),
 };
+w.pause = async (_, evidence) => { throw new Error("paused " + evidence.reason); };
 const policy = {
   phase: "acceptance", capability: "freeze-acceptance",
   retryScopes: new Set(["candidate_artifact"]), prompt: () => "author",
@@ -34,9 +36,9 @@ authorCandidate(w, policy).then(() => {
 }, (e) => console.log(JSON.stringify({ calls: call, error: String(e && e.message) })));
 "#;
     let out = run_js(driver);
-    assert!(
-        out.contains("\"calls\":4") && !out.contains("error"),
-        "a baseline and three packaging repeats, then the best committed artifact: {out}"
+    assert_eq!(
+        out, r#"{"calls":4,"error":"paused no_progress"}"#,
+        "a baseline and three packaging repeats, then a pause: {out}"
     );
 }
 

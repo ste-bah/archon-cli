@@ -423,19 +423,22 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
     )
 }
 
-/// An unproven check ends the unstaged freeze incomplete and resumable
-/// (Issue 288), with the host's own report as its reason; any other error is
-/// returned unchanged.
+/// A check the host could not prove, or a re-author that stopped making
+/// progress, ends the unstaged freeze incomplete and resumable, never failed
+/// (Issue 288). The reason is the whole report, every context included (the
+/// probe's diagnostics, the pending checks' last findings); any other error
+/// is returned unchanged.
 pub(crate) fn unproven_incomplete(error: anyhow::Error) -> anyhow::Error {
-    let unproven = error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<super::executability::HostUnproven>());
-    match unproven {
-        Some(unproven) => {
-            crate::command::workflow_freeze_budget::FreezeIncomplete::unsaved(unproven.to_string())
+    let stalled = error.chain().any(|cause| {
+        cause.is::<super::executability::HostUnproven>()
+            || cause.is::<super::reauthor::ReauthorStalled>()
+    });
+    match stalled {
+        true => {
+            crate::command::workflow_freeze_budget::FreezeIncomplete::unsaved(format!("{error:#}"))
                 .into()
         }
-        None => error,
+        false => error,
     }
 }
 

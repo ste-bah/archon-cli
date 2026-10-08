@@ -68,3 +68,6 @@ async fn a_seeded_gate_identical_to_an_old_superseded_one_is_judged_now() {
         );
     }
 }
+
+#[path = "workflow_decompose_seed_context_e2e_tests.rs"]
+mod context;

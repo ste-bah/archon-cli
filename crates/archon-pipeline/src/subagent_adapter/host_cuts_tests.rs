@@ -10,13 +10,18 @@ fn secs(value: u64) -> Duration {
 }
 
 /// A session that honours cancellation the way the executor does: whatever it
-/// was doing, a cancel ends it as `Cancelled`.
+/// was doing, a cancel ends it as `Cancelled`. It takes its slot at once, and
+/// says so, as the executor does (Issue 288).
 fn session(
     cancel: &CancellationToken,
     work: impl Future<Output = ()> + Send + 'static,
 ) -> SessionRun {
     let cancel = cancel.clone();
     Box::pin(async move {
+        assert!(
+            subagent_dispatch_clock::admitted("session"),
+            "clocks installed"
+        );
         tokio::select! {
             _ = cancel.cancelled() => SubagentOutcome::Cancelled,
             () = work => SubagentOutcome::Completed("done".into()),
@@ -42,7 +47,7 @@ async fn drive_bounded(
 }
 
 /// Case A: the session's last request stalled and nothing came back. It is cut
-/// at the inactivity bound, hours before its wall clock.
+/// at the inactivity bound, hours before its no-progress window.
 #[tokio::test(start_paused = true)]
 async fn a_silent_session_is_cut_for_inactivity_at_the_bound() {
     let (outcome, cut, elapsed) = drive_bounded(
@@ -96,7 +101,7 @@ async fn slow_but_continuous_tool_calls_are_never_cut() {
 }
 
 /// The stated rule for a long in-flight tool call: it is activity for as long
-/// as it runs, however long — tools carry their own bounds, and the wall clock
+/// as it runs, however long — tools carry their own bounds, and the no-progress window
 /// still bounds a tool that has none. The silence that follows its result is
 /// measured from the result.
 #[tokio::test(start_paused = true)]
@@ -118,26 +123,75 @@ async fn a_long_in_flight_tool_call_is_activity_and_silence_counts_from_its_resu
 }
 
 /// The two bounds end a session with records that cannot be confused.
+/// Issue 288: the window renews only on NOVEL progress, so a session doing new
+/// work for longer than it is not cut, while a session that stays active but
+/// repeats itself is cut one window after its last novel activity, and the
+/// cut names it. A tool round that never returns holds the inactivity clock
+/// open and renews nothing, so only the no-progress window can end it.
 #[tokio::test(start_paused = true)]
-async fn wall_clock_and_inactivity_cuts_are_told_apart() {
-    // Active throughout, so only the wall clock can end it.
-    let (wall_outcome, wall_cut, wall_elapsed) = drive_bounded(
+async fn no_progress_and_inactivity_cuts_are_told_apart() {
+    // Novel progress throughout, for longer than the window: never cut.
+    let (novel_outcome, novel_cut, novel_elapsed) = drive_bounded(
         async {
-            loop {
+            for step in 0..200 {
                 tokio::time::sleep(secs(60)).await;
                 subagent_activity::note();
+                subagent_dispatch_clock::progress(&format!("new tool call {step}"));
             }
         },
         Some(N),
         Some(7_200),
     )
     .await;
+    assert_eq!(novel_cut, None);
+    assert!(matches!(novel_outcome, SubagentOutcome::Completed(_)));
+    assert_eq!(novel_elapsed, secs(12_000));
+
+    // Active (output every minute) but nothing novel after the first step:
+    // activity keeps the inactivity bound away, never the window.
+    let cancel = CancellationToken::new();
+    let bound = InactivityBound::new(Some(N)).unwrap();
+    let run = bound.install(
+        "session",
+        session(&cancel, async {
+            subagent_dispatch_clock::progress("turn 1: new tool call Read a.rs");
+            loop {
+                tokio::time::sleep(secs(60)).await;
+                subagent_activity::note();
+            }
+        }),
+    );
+    let started = Instant::now();
+    let (clock, run) = install_dispatch_clock("session", run);
+    let (loop_outcome, loop_cut) = drive(run, &cancel, &clock, Some(7_200), Some(&bound)).await;
+    assert_eq!(Instant::now() - started, secs(7_200));
+    assert_eq!(loop_cut, Some(HostCut::NoProgress));
+    let loop_error =
+        crate::subagent_adapter::llm_response_for_subagent_outcome(loop_outcome, true, Some(7_200))
+            .expect_err("a no-progress cut is an error");
+    let loop_text = name_last_progress(loop_error, loop_cut, &clock).to_string();
+    assert!(
+        loop_text.contains("last novel activity: turn 1: new tool call Read a.rs"),
+        "{loop_text}"
+    );
+
+    // A tool round that never returns: only the no-progress window can end it.
+    let (wall_outcome, wall_cut, wall_elapsed) = drive_bounded(
+        async {
+            subagent_activity::note();
+            let _round = subagent_activity::tool_round();
+            std::future::pending::<()>().await;
+        },
+        Some(N),
+        Some(7_200),
+    )
+    .await;
     assert_eq!(wall_elapsed, secs(7_200));
-    assert_eq!(wall_cut, Some(HostCut::WallClock));
+    assert_eq!(wall_cut, Some(HostCut::NoProgress));
     assert!(inactivity_failure(&wall_outcome, wall_cut).is_none());
     let wall_text =
         crate::subagent_adapter::llm_response_for_subagent_outcome(wall_outcome, true, Some(7_200))
-            .expect_err("a wall-clock cut is an error")
+            .expect_err("a no-progress cut is an error")
             .to_string();
 
     let (idle_outcome, idle_cut, _) = drive_bounded(
@@ -163,7 +217,7 @@ async fn wall_clock_and_inactivity_cuts_are_told_apart() {
 }
 
 /// A session still queued for a subagent slot has not started, so only the
-/// wall clock can end it.
+/// no-progress window can end it.
 #[tokio::test(start_paused = true)]
 async fn a_session_queued_before_it_starts_is_never_cut_for_inactivity() {
     let (outcome, cut, elapsed) = drive_bounded(
@@ -222,5 +276,96 @@ fn a_completed_session_is_never_reported_inactive() {
     });
     assert!(inactivity_failure(&SubagentOutcome::Completed("x".into()), cut).is_none());
     assert!(inactivity_failure(&SubagentOutcome::Cancelled, cut).is_some());
-    assert!(inactivity_failure(&SubagentOutcome::Cancelled, Some(HostCut::WallClock)).is_none());
+    assert!(inactivity_failure(&SubagentOutcome::Cancelled, Some(HostCut::NoProgress)).is_none());
+}
+
+/// Issue 288: a session whose executor reports neither a slot nor a wait for
+/// one is not timed from dispatch in silence, nor left unbounded: it is cut at
+/// its no-progress window with a diagnosis naming the missing admission report.
+#[tokio::test(start_paused = true)]
+async fn a_session_never_admitted_is_cut_with_its_own_diagnosis() {
+    let cancel = CancellationToken::new();
+    let inner = cancel.clone();
+    let run: SessionRun = Box::pin(async move {
+        inner.cancelled().await;
+        SubagentOutcome::Cancelled
+    });
+    let started = Instant::now();
+    let (clock, run) = install_dispatch_clock("session", run);
+    let (outcome, cut) = drive(run, &cancel, &clock, Some(600), None).await;
+    assert_eq!(Instant::now() - started, secs(600));
+    assert_eq!(cut, Some(HostCut::NeverAdmitted { limit: secs(600) }));
+    assert_eq!(
+        clock.elapsed(),
+        Duration::ZERO,
+        "its run time never started"
+    );
+    let error = inactivity_failure(&outcome, cut).expect("named as an error");
+    assert!(
+        error.to_string().contains("missing admission report"),
+        "{error}"
+    );
+}
+
+/// The session clock and the outer call clock start at the same instant:
+/// when the session takes its slot, not when it was dispatched. Time spent
+/// before the slot is taken inside a reported wait counts on neither.
+#[tokio::test(start_paused = true)]
+async fn session_and_outer_clocks_start_together_at_admission() {
+    let outer = DispatchClock::new();
+    let cancel = CancellationToken::new();
+    let inner = cancel.clone();
+    let run: SessionRun = Box::pin(async move {
+        let wait = subagent_dispatch_clock::slot_wait("session").expect("clocks installed");
+        tokio::time::sleep(secs(5_000)).await;
+        assert!(subagent_dispatch_clock::admitted("session"));
+        drop(wait);
+        tokio::select! {
+            _ = inner.cancelled() => SubagentOutcome::Cancelled,
+            () = tokio::time::sleep(secs(30)) => SubagentOutcome::Completed("done".into()),
+        }
+    });
+    let started = Instant::now();
+    let (clock, run) = subagent_dispatch_clock::scope_call(Arc::clone(&outer), async {
+        install_dispatch_clock("session", run)
+    })
+    .await;
+    let (outcome, cut) = subagent_dispatch_clock::scope_call(
+        Arc::clone(&outer),
+        drive(run, &cancel, &clock, Some(60), None),
+    )
+    .await;
+    assert_eq!(cut, None, "5000s queued is not 60s of run time");
+    assert!(matches!(outcome, SubagentOutcome::Completed(_)));
+    assert_eq!(Instant::now() - started, secs(5_030));
+    assert_eq!(clock.elapsed(), secs(30));
+    assert_eq!(
+        outer.elapsed(),
+        secs(30),
+        "the outer clock started at the same instant"
+    );
+}
+
+/// A session cancelled while it waits for its slot settles without ever
+/// starting its clock.
+#[tokio::test(start_paused = true)]
+async fn a_session_cancelled_before_its_slot_never_starts_its_clock() {
+    let cancel = CancellationToken::new();
+    let inner = cancel.clone();
+    let run: SessionRun = Box::pin(async move {
+        let _wait = subagent_dispatch_clock::slot_wait("session").expect("clocks installed");
+        inner.cancelled().await;
+        SubagentOutcome::Cancelled
+    });
+    let (clock, run) = install_dispatch_clock("session", run);
+    let stop = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(secs(9_000)).await;
+        stop.cancel();
+    });
+    let (outcome, cut) = drive(run, &cancel, &clock, Some(60), None).await;
+    assert!(matches!(outcome, SubagentOutcome::Cancelled));
+    assert_eq!(cut, None, "neither bound fired while it queued");
+    assert!(!clock.is_admitted());
+    assert_eq!(clock.elapsed(), Duration::ZERO);
 }

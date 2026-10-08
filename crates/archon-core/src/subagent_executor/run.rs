@@ -71,9 +71,9 @@ impl AgentSubagentExecutor {
     }
 
     /// Take a subagent slot for `subagent_id`, waiting while every slot is in
-    /// use (Issue 288). The wait is reported where it happens: it stops the
-    /// dispatch clocks the host installed for this session, so a queued call
-    /// starts its run time when it starts to run, and it is logged and
+    /// use (Issue 288). Taking the slot is reported (`admitted`): the dispatch
+    /// clocks the host installed for this session start then, at once or
+    /// after a wait. The wait is reported where it happens: it is logged and
     /// emitted as activity when it begins and when the slot is acquired. A
     /// call with no clock installed (an interactive call) is told so, never
     /// that clocks are stopped (Issue 322). The wait has no clock of its own:
@@ -86,6 +86,8 @@ impl AgentSubagentExecutor {
         row: &mut super::activity::ActivityRow,
     ) -> Result<tokio::sync::OwnedSemaphorePermit, ExecutorError> {
         if let Ok(permit) = self.subagent_capacity.clone().try_acquire_owned() {
+            // The dispatch clocks start when the slot is held, not before.
+            archon_tools::subagent_dispatch_clock::admitted(subagent_id);
             return Ok(permit);
         }
         let paused = archon_tools::subagent_dispatch_clock::slot_wait(subagent_id);
@@ -104,6 +106,7 @@ impl AgentSubagentExecutor {
         row.queued(agent_type, model, message);
         let waited = tokio::time::Instant::now();
         let permit = self.acquire_subagent_capacity(cancel).await?;
+        archon_tools::subagent_dispatch_clock::admitted(subagent_id);
         drop(paused);
         let waited = waited.elapsed().as_secs();
         let message = if clocks_paused {
@@ -405,6 +408,34 @@ mod tests {
         let run = std::time::Duration::from_secs(30);
         tokio::time::sleep_until(acquired + run).await;
         assert_eq!(clock.elapsed(), run, "the clock started at acquisition");
+    }
+
+    /// Issue 288: a free slot is taken at once, and that is when the call's
+    /// clocks start: the time it spent before reaching the executor is not
+    /// run time.
+    #[tokio::test(start_paused = true)]
+    async fn an_immediately_admitted_calls_clock_starts_at_the_slot() {
+        use archon_tools::subagent_dispatch_clock::{DispatchClock, scope_session};
+        let executor = test_executor(1);
+        let clock = DispatchClock::new();
+        tokio::time::sleep(std::time::Duration::from_secs(900)).await;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let mut row = executor.activity_row("free");
+        let _permit = scope_session("free", vec![Arc::clone(&clock)], async {
+            executor
+                .acquire_subagent_slot("free", &queued_request(), &cancel, &mut row)
+                .await
+        })
+        .await
+        .expect("a free slot");
+        assert!(clock.is_admitted(), "taking the slot is reported");
+        assert_eq!(
+            clock.elapsed(),
+            std::time::Duration::ZERO,
+            "900s before the slot is not run time"
+        );
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        assert_eq!(clock.elapsed(), std::time::Duration::from_secs(30));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
