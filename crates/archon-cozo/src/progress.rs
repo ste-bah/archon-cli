@@ -10,6 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 /// Successful guarded writes to stores that have no lock path.
 static UNPATHED_PROGRESS: AtomicU64 = AtomicU64::new(0);
+static PATHED_PROGRESS: AtomicU64 = AtomicU64::new(0);
 
 fn progress_path(lock: &Path) -> PathBuf {
     let mut name = lock.as_os_str().to_owned();
@@ -23,7 +24,8 @@ pub(crate) fn record(config: &crate::CozoGuardConfig) {
         UNPATHED_PROGRESS.fetch_add(1, Ordering::Relaxed);
         return;
     };
-    let stamp = format!("{} {:?}", std::process::id(), SystemTime::now());
+    let sequence = PATHED_PROGRESS.fetch_add(1, Ordering::Relaxed) + 1;
+    let stamp = format!("{} {sequence}", std::process::id());
     if let Err(error) = std::fs::write(progress_path(lock), stamp) {
         tracing::warn!(path = %lock.display(), %error, "failed to record Cozo writer progress");
     }
@@ -31,10 +33,17 @@ pub(crate) fn record(config: &crate::CozoGuardConfig) {
 
 pub(crate) struct Window {
     paths: Vec<PathBuf>,
-    snapshot: Vec<Option<(SystemTime, u64)>>,
+    snapshot: Vec<Option<FileSnapshot>>,
     generation: Option<u64>,
     last_progress: Instant,
     wait: Duration,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FileSnapshot {
+    modified: SystemTime,
+    len: u64,
+    content: Option<Vec<u8>>,
 }
 
 impl Window {
@@ -96,13 +105,50 @@ impl Window {
     }
 }
 
-fn snapshot(paths: &[PathBuf]) -> Vec<Option<(SystemTime, u64)>> {
+fn snapshot(paths: &[PathBuf]) -> Vec<Option<FileSnapshot>> {
     paths
         .iter()
-        .map(|path| {
-            std::fs::metadata(path)
-                .ok()
-                .and_then(|m| Some((m.modified().ok()?, m.len())))
+        .enumerate()
+        .map(|(index, path)| {
+            std::fs::metadata(path).ok().and_then(|m| {
+                Some(FileSnapshot {
+                    modified: m.modified().ok()?,
+                    len: m.len(),
+                    content: (index == 0).then(|| std::fs::read(path).ok()).flatten(),
+                })
+            })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FileSnapshot, Window, progress_path};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn same_metadata_progress_marker_content_renews_the_window() {
+        let temp = tempfile::tempdir().unwrap();
+        let lock = temp.path().join("store.archon-cozo-write.lock");
+        let marker = progress_path(&lock);
+        std::fs::write(&marker, b"next").unwrap();
+        let metadata = std::fs::metadata(&marker).unwrap();
+        let mut window = Window {
+            paths: vec![marker],
+            snapshot: vec![Some(FileSnapshot {
+                modified: metadata.modified().unwrap(),
+                len: metadata.len(),
+                content: None,
+            })],
+            generation: None,
+            last_progress: Instant::now() - Duration::from_millis(800),
+            wait: Duration::from_secs(1),
+        };
+
+        let remaining = window.remaining().unwrap();
+        assert!(
+            remaining > Duration::from_millis(900),
+            "same-length marker content change did not renew the window: {remaining:?}"
+        );
+    }
 }

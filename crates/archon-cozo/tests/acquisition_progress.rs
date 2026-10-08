@@ -32,7 +32,9 @@ fn progressing_holder(process_mutex: bool, stalls: bool) {
                     ScriptMutability::Mutable,
                 )
                 .unwrap();
-                std::thread::sleep(Duration::from_millis(100));
+                if value + 1 < writes {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
             }
             last.send(Instant::now()).unwrap();
             if stalls {
@@ -58,12 +60,13 @@ fn progressing_holder(process_mutex: bool, stalls: bool) {
     let result = with_write_lock_blocking_timeout(&lock_path, "waiting reader", window, || Ok(42));
     let returned = Instant::now();
     holder.join().unwrap();
-    let last_write = written.recv().unwrap() - Duration::from_millis(100);
+    let last_write = written.recv().unwrap();
     if stalls {
         assert!(result.unwrap_err().is::<StoreBusy>(), "a stall is a pause");
+        let since_last_write = returned.duration_since(last_write);
         assert!(
-            returned.duration_since(last_write) >= window,
-            "acquisition expired on total lifetime, before a full no-progress window"
+            since_last_write >= window,
+            "acquisition paused after {since_last_write:?} since last write, before a full no-progress window {window:?}"
         );
     } else {
         assert_eq!(
