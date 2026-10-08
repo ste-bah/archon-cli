@@ -20,22 +20,25 @@
 //! - `offset` / `limit`: numbers only;
 //! - `command`, for `Bash` only: never its text. A shell command can carry
 //!   a credential in more forms than any rule can know (`mysql -phunter2`,
-//!   `curl -u a:b`, an escaped JSON body), so the trace keeps the program
-//!   and its leading plain sub-command words (`program`, see
-//!   [`command_program`]), the number of words after the first
-//!   (`arg_count`), and the SHA-256 of the full command (`command_sha256`)
-//!   to correlate calls.
+//!   `curl -u a:b`, an escaped JSON body, `redis-cli AUTH x`), so the trace
+//!   keeps only the program's name and one allow-listed sub-command
+//!   (`program`, see [`command_program`]) and the number of words after the
+//!   first (`arg_count`). No digest of the command is kept: an unkeyed hash
+//!   of a short command can be guessed offline.
 //!
 //! Every other key is dropped and counted.
 use archon_observability::redaction::redact_secret_values;
 use archon_observability::secret_values::{REDACTED_VALUE, is_credential_name};
 use regex::Regex;
 use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
 use std::sync::LazyLock;
 
-/// The most leading words of a command kept as its program.
-const PROGRAM_WORDS: usize = 4;
+/// The only second words a command's program may keep: common sub-commands
+/// that name an action, never a value.
+const SUB_COMMANDS: &[&str] = &[
+    "test", "build", "check", "run", "status", "diff", "log", "fmt", "clippy", "install", "add",
+    "commit", "push", "pull", "fetch", "show", "list", "ls",
+];
 
 /// Keys whose values name what a call touched.
 const PATH_KEYS: &[&str] = &["file_path", "notebook_path", "path"];
@@ -83,7 +86,6 @@ pub fn safe_input(tool_name: &str, input: &Value, max_value_bytes: usize) -> Saf
                 kept.insert("program".into(), json!(kept_program));
                 let words = command.split_whitespace().count();
                 kept.insert("arg_count".into(), json!(words.saturating_sub(1)));
-                kept.insert("command_sha256".into(), json!(sha256_hex(command)));
                 continue;
             }
             (key, Value::Number(_)) if NUMBER_KEYS.contains(&key) => {
@@ -123,49 +125,46 @@ pub fn redact_tool_text(text: &str) -> String {
         .into_owned()
 }
 
-/// The program of a shell command and its leading plain sub-command words:
-/// at most [`PROGRAM_WORDS`] words, each made only of `[A-Za-z0-9_./-]` and
-/// not starting with `-`, stopping at the first other word (an option, an
-/// assignment, a quoted or `:`-bearing word). `cargo test -p x` is
-/// `cargo test`; `DB_PASSWORD=x ./run` keeps nothing.
+/// The program of a shell command: the base name of its first word, and a
+/// second word only when it is one of [`SUB_COMMANDS`]. A first word that
+/// is an option, an assignment or anything but `[A-Za-z0-9_./-]` keeps
+/// nothing. `cargo test -p x` is `cargo test`; `/usr/bin/redis-cli AUTH x`
+/// is `redis-cli`; `DB_PASSWORD=x ./run` is empty.
 pub fn command_program(command: &str) -> String {
-    command
-        .split_whitespace()
-        .take_while(|word| {
-            !word.starts_with('-')
-                && word
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '/' | '-'))
-        })
-        .take(PROGRAM_WORDS)
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut words = command.split_whitespace();
+    let Some(first) = words.next().filter(|word| {
+        !word.starts_with('-')
+            && word
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '/' | '-'))
+    }) else {
+        return String::new();
+    };
+    let program = first.rsplit('/').next().unwrap_or_default();
+    match words.next().filter(|word| SUB_COMMANDS.contains(word)) {
+        Some(sub) => format!("{program} {sub}"),
+        None => program.to_string(),
+    }
 }
 
-fn sha256_hex(text: &str) -> String {
-    Sha256::digest(text.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
-/// `scheme://host/path` of `url`: no user info, query or fragment. User
-/// info is removed FIRST, so a `?` or `#` inside a password cannot end the
-/// address early and keep the rest of it: the user info ends at the last
-/// `@` before the first `/` that follows the first `@`. Text without a
-/// scheme is cut at its first `?` or `#`.
+/// `scheme://host/path` of `url`: no user info, query or fragment.
+///
+/// The authority ends at the first `/` after `scheme://`, and only an `@`
+/// inside it ends user info (at its last `@`): an `@` in the path or query
+/// is never user info (`https://h/x?u=a@b/c` is `https://h/x`). User info
+/// is removed BEFORE the cut at `?` or `#`, so a `?` or `#` inside a
+/// password cannot keep part of it (`postgres://app:Pa#ss@db/main` is
+/// `postgres://db/main`); an address whose `?` or `#` comes before an `@`
+/// in that first segment is read the same way, losing its host rather
+/// than risk keeping a password. Text without a scheme is cut at its first
+/// `?` or `#`.
 pub fn strip_url(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return url.split(['?', '#']).next().unwrap_or_default().to_string();
     };
-    let rest = match rest.find('@') {
-        Some(first_at) => {
-            let end = rest[first_at..]
-                .find('/')
-                .map_or(rest.len(), |slash| first_at + slash);
-            let last_at = rest[..end].rfind('@').unwrap_or(first_at);
-            &rest[last_at + 1..]
-        }
+    let authority = &rest[..rest.find('/').unwrap_or(rest.len())];
+    let rest = match authority.rfind('@') {
+        Some(at) => &rest[at + 1..],
         None => rest,
     };
     let rest = rest.split(['?', '#']).next().unwrap_or_default();

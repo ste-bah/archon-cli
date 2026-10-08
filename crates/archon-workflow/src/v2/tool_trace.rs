@@ -205,13 +205,8 @@ fn command_record(
 ) -> WorkflowV2CommandRecord {
     let program = safe.input.get("program").and_then(Value::as_str);
     let command = match (tool.tool_name.as_str(), program) {
-        // Never the command text: its program, how many words follow, and
-        // a digest to correlate calls.
-        ("Bash", Some(program)) => format!(
-            "{program} ({} args, sha256 {})",
-            safe.input["arg_count"],
-            safe.input["command_sha256"].as_str().unwrap_or_default(),
-        ),
+        // Never the command text: its program and how many words follow.
+        ("Bash", Some(program)) => format!("{program} ({} args)", safe.input["arg_count"]),
         _ => format!("{} {}", tool.tool_name, safe.input),
     };
     let output_summary = match status {

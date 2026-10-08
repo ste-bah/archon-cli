@@ -53,10 +53,7 @@ fn reads_become_files_read_once_and_other_calls_become_commands() {
         .collect();
     assert_eq!(commands.len(), 2, "{commands:?}");
     assert!(commands[0].0.starts_with("Glob ") && commands[0].0.contains("**/*.rs"));
-    assert!(
-        commands[1].0.starts_with("ls (0 args, sha256 "),
-        "{commands:?}"
-    );
+    assert!(commands[1].0.starts_with("ls (0 args)"), "{commands:?}");
     assert_eq!(commands[1].1, WorkflowV2CommandStatus::Skipped);
     let trace = &result.data["toolTrace"];
     assert_eq!(trace["recorded"], true);
@@ -309,7 +306,7 @@ fn a_non_bash_call_stores_only_its_allow_listed_input() {
         r#"WebFetch {"url":"https://example.invalid/v1"}"#
     );
     // An assignment first: no program word is kept, only the count.
-    assert!(commands[3].starts_with(" (2 args, sha256 "), "{commands:?}");
+    assert!(commands[3] == " (2 args)", "{commands:?}");
 }
 
 #[test]

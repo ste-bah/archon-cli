@@ -52,6 +52,8 @@ fn a_url_keeps_scheme_host_and_path_only() {
         strip_url("https://host.invalid/a#frag"),
         "https://host.invalid/a"
     );
+    // An `@` after the authority is not user info.
+    assert_eq!(strip_url("https://h/x?u=a@b/c"), "https://h/x");
 }
 
 /// Shell commands that carry a credential in forms no redaction rule can
@@ -65,10 +67,14 @@ pub(crate) const LEAKY_COMMANDS: &[&str] = &[
     "curl -H 'Authorization: Basic aHVudGVyMg==' https://api.invalid/x",
     "DB_PASSWORD=hunter2 ./deploy",
     "echo-free hunter2:x",
+    "redis-cli AUTH hunter2",
+    "vault login hunter2Token",
+    "echo hunter2 | docker login --password-stdin",
+    "htpasswd f user hunter2",
 ];
 
 #[test]
-fn bash_keeps_only_its_program_word_count_and_digest() {
+fn bash_keeps_only_its_program_and_word_count() {
     let safe = safe_input(
         "Bash",
         &json!({"command": "cargo test -p x -- --nocapture", "timeout": 5}),
@@ -76,7 +82,10 @@ fn bash_keeps_only_its_program_word_count_and_digest() {
     );
     assert_eq!(safe.input["program"], "cargo test");
     assert_eq!(safe.input["arg_count"], 5);
-    assert_eq!(safe.input["command_sha256"].as_str().unwrap().len(), 64);
+    assert!(
+        safe.input.get("command_sha256").is_none(),
+        "no digest is kept"
+    );
     assert!(safe.input.get("command").is_none());
     assert_eq!(safe.dropped_keys, 1, "timeout is not on the allow-list");
     for command in LEAKY_COMMANDS {
@@ -89,7 +98,10 @@ fn bash_keeps_only_its_program_word_count_and_digest() {
     }
     assert_eq!(command_program("DB_PASSWORD=hunter2 ./deploy"), "");
     assert_eq!(command_program("git commit -m x"), "git commit");
-    assert_eq!(command_program("a b c d e f"), "a b c d");
+    assert_eq!(command_program("/usr/bin/redis-cli AUTH x"), "redis-cli");
+    assert_eq!(command_program("vault login s.Abc123Token"), "vault");
+    assert_eq!(command_program("htpasswd f user x"), "htpasswd");
+    assert_eq!(command_program("./run build"), "run build");
 }
 
 #[test]

@@ -140,7 +140,7 @@ async fn raw_outcome_result_records_files_read_and_commands_run_from_the_tool_tr
         ),
         tool_use(
             "Bash",
-            serde_json::json!({"command": "cargo metadata"}),
+            serde_json::json!({"command": "cargo build --offline"}),
             true,
         ),
     ])
@@ -162,7 +162,7 @@ async fn raw_outcome_result_records_files_read_and_commands_run_from_the_tool_tr
     let bash = result
         .commands_run
         .iter()
-        .find(|c| c.command.contains("cargo metadata"))
+        .find(|c| c.command == "cargo build (2 args)")
         .expect("the Bash call is recorded");
     assert_eq!(
         bash.status,
@@ -325,6 +325,10 @@ async fn no_bash_credential_form_reaches_a_run_file() {
         "curl -u admin:hunter2 https://api.invalid/x",
         r#"curl -d "{\"password\":\"hunter2\"}" https://api.invalid/login"#,
         "curl -H 'Authorization: Basic aHVudGVyMg==' https://api.invalid/x",
+        "redis-cli AUTH hunter2",
+        "vault login hunter2Token",
+        "echo hunter2 | docker login --password-stdin",
+        "htpasswd f user hunter2",
     ];
     let uses = commands
         .iter()
