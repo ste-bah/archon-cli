@@ -27,7 +27,24 @@ const SKIPPED_NO_RESUME: &str = "auto_resume: skipped (--no-resume)";
 const SKIPPED_EXPLICIT_RESUME: &str = "auto_resume: skipped (--resume specified)";
 const NO_PRIOR_SESSION: &str = "auto_resume: no prior session for this directory";
 
-const SPAWN_TIMEOUT: Duration = Duration::from_secs(30);
+// The budget covers the child's whole start. On macOS the first exec of a
+// freshly linked debug binary (~500 MB) waits in `_dyld_start` while the
+// system scans it, which can take 10-20 s on its own. `run()` returns as soon
+// as the policy line is logged, so a long budget costs nothing when it passes.
+const SPAWN_TIMEOUT: Duration = Duration::from_secs(120);
+const POLICY_PREFIX: &str = "auto_resume: ";
+
+fn read_logs(log_dir: &std::path::Path) -> String {
+    let mut out = String::new();
+    if let Ok(entries) = std::fs::read_dir(log_dir) {
+        for entry in entries.flatten() {
+            if let Ok(contents) = std::fs::read_to_string(entry.path()) {
+                out.push_str(&contents);
+            }
+        }
+    }
+    out
+}
 
 fn minimal_config(auto_resume: bool) -> String {
     format!(
@@ -123,6 +140,9 @@ fn run(auto_resume: bool, extra_args: &[&str]) -> String {
         .env("XDG_DATA_HOME", tmp.path().join("data"))
         .env("XDG_CACHE_HOME", tmp.path().join("cache"))
         .env("XDG_CONFIG_HOME", tmp.path())
+        // Keep the child out of the real ~/.archon (session activity files and
+        // the world-model ledgers a live run on this machine also writes).
+        .env("HOME", tmp.path())
         .env("RUST_LOG", "info")
         .arg("-p")
         .arg("hello")
@@ -180,6 +200,9 @@ fn run(auto_resume: bool, extra_args: &[&str]) -> String {
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
+        if collected.contains(POLICY_PREFIX) || read_logs(&log_dir).contains(POLICY_PREFIX) {
+            break;
+        }
     }
     let _ = child.kill();
     let _ = child.wait();
@@ -188,14 +211,7 @@ fn run(auto_resume: bool, extra_args: &[&str]) -> String {
         collected.push_str(&line);
     }
 
-    if let Ok(entries) = std::fs::read_dir(&log_dir) {
-        for entry in entries.flatten() {
-            if let Ok(contents) = std::fs::read_to_string(entry.path()) {
-                collected.push_str(&contents);
-            }
-        }
-    }
-
+    collected.push_str(&read_logs(&log_dir));
     collected
 }
 
