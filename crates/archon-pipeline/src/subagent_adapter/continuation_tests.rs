@@ -1,8 +1,63 @@
 use super::*;
 use crate::subagent_adapter::tests::{NoopClient, request};
+use archon_tools::subagent_executor::{
+    ExecutorError, OutcomeSideEffects, SubagentClassification, SubagentExecutor,
+    install_subagent_executor,
+};
+use archon_tools::subagent_request::SubagentRequest;
+use archon_tools::tool::ToolContext;
+use std::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 fn client() -> SubagentPipelineClient {
     SubagentPipelineClient::new(Arc::new(NoopClient), ToolContext::default())
+}
+
+struct CaptureCancellation(Arc<Mutex<Option<CancellationToken>>>);
+
+#[async_trait::async_trait]
+impl SubagentExecutor for CaptureCancellation {
+    async fn run_to_completion(
+        &self,
+        _subagent_id: String,
+        _request: SubagentRequest,
+        _ctx: ToolContext,
+        cancel: CancellationToken,
+    ) -> Result<String, ExecutorError> {
+        *self.0.lock().unwrap() = Some(cancel);
+        Ok("completed".into())
+    }
+
+    async fn run_to_completion_with_system(
+        &self,
+        _subagent_id: String,
+        _request: SubagentRequest,
+        _system: Vec<serde_json::Value>,
+        _ctx: ToolContext,
+        cancel: CancellationToken,
+    ) -> Result<String, ExecutorError> {
+        *self.0.lock().unwrap() = Some(cancel);
+        Ok("completed".into())
+    }
+
+    async fn on_inner_complete(&self, _subagent_id: String, _result: Result<String, String>) {}
+
+    async fn on_visible_complete(
+        &self,
+        _subagent_id: String,
+        _result: Result<String, String>,
+        _nested: bool,
+    ) -> OutcomeSideEffects {
+        OutcomeSideEffects::default()
+    }
+
+    fn auto_background_ms(&self) -> u64 {
+        0
+    }
+
+    fn classify(&self, _request: &SubagentRequest) -> SubagentClassification {
+        SubagentClassification::Foreground
+    }
 }
 
 #[test]
@@ -28,6 +83,35 @@ fn continuation_retains_raw_history_identity_and_read_budget() {
     assert_eq!(next.id, id);
     assert_eq!(next.history.messages(), messages);
     assert!(Arc::ptr_eq(next.read_guard.as_ref().unwrap(), &guard));
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn completed_session_disarms_its_scope_but_abandonment_still_cancels() {
+    let _executor = archon_tools::subagent_executor::executor_test_lock::lock();
+    let captured = Arc::new(Mutex::new(None));
+    install_subagent_executor(Arc::new(CaptureCancellation(captured.clone())));
+    let client = client();
+    client
+        .execute_session(request(ToolAccessLevel::ReadOnly), false)
+        .await
+        .expect("session completes");
+    let child = captured
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("executor received the session cancellation scope");
+    assert!(
+        !child.is_cancelled(),
+        "completion retains the scope for repair"
+    );
+
+    let abandoned = tokio_util::sync::CancellationToken::new();
+    drop(abandoned.clone().drop_guard());
+    assert!(
+        abandoned.is_cancelled(),
+        "dropping an in-flight future cancels"
+    );
 }
 
 #[test]

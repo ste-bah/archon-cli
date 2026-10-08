@@ -2,6 +2,10 @@
 //! foreground spawn -> executor, with the clock crossing the spawn the way the
 //! runner reads it. The executor stands in for the runner and reports activity
 //! exactly where the runner does.
+//!
+//! The executor slot is process-global, so each test holds the shared
+//! executor test lock across `.await` for its whole body.
+#![allow(clippy::await_holding_lock)]
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -131,6 +135,7 @@ fn client(bound: Option<u64>) -> SubagentPipelineClient {
 
 #[tokio::test(start_paused = true)]
 async fn a_stalled_session_is_cut_for_inactivity_through_the_real_spawn_path() {
+    let _executor = archon_tools::subagent_executor::executor_test_lock::lock();
     let started = tokio::time::Instant::now();
     let error = client(Some(BOUND))
         .run_agent(workflow_request("STALL"))
@@ -151,6 +156,7 @@ async fn a_stalled_session_is_cut_for_inactivity_through_the_real_spawn_path() {
 
 #[tokio::test(start_paused = true)]
 async fn a_slow_but_active_session_runs_to_completion_through_the_real_spawn_path() {
+    let _executor = archon_tools::subagent_executor::executor_test_lock::lock();
     let response = client(Some(BOUND))
         .run_agent(workflow_request("SLOW-TOOLS"))
         .await
@@ -160,6 +166,7 @@ async fn a_slow_but_active_session_runs_to_completion_through_the_real_spawn_pat
 
 #[tokio::test(start_paused = true)]
 async fn a_disabled_bound_installs_no_clock_through_the_real_spawn_path() {
+    let _executor = archon_tools::subagent_executor::executor_test_lock::lock();
     let response = client(Some(0))
         .run_agent(workflow_request("NO-CLOCK-EXPECTED"))
         .await
@@ -172,6 +179,7 @@ async fn a_disabled_bound_installs_no_clock_through_the_real_spawn_path() {
 /// runs to completion inside it.
 #[tokio::test(start_paused = true)]
 async fn a_queued_session_starts_its_window_at_the_slot_through_the_real_spawn_path() {
+    let _executor = archon_tools::subagent_executor::executor_test_lock::lock();
     let started = tokio::time::Instant::now();
     let response = client(Some(BOUND))
         .run_agent(workflow_request("QUEUED"))
@@ -187,6 +195,7 @@ async fn a_queued_session_starts_its_window_at_the_slot_through_the_real_spawn_p
 /// The no-progress window still bounds the run itself once the slot is taken.
 #[tokio::test(start_paused = true)]
 async fn the_no_progress_window_still_cuts_a_session_that_stalls_past_it() {
+    let _executor = archon_tools::subagent_executor::executor_test_lock::lock();
     let mut request = workflow_request("STALL");
     request.timeout_secs = Some(BOUND / 2);
     let started = tokio::time::Instant::now();

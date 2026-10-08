@@ -282,3 +282,24 @@ pub fn get_subagent_executor() -> Option<Arc<dyn SubagentExecutor>> {
         Err(poisoned) => poisoned.into_inner().clone(),
     }
 }
+
+/// Test support: one lock for every test that installs an executor.
+///
+/// The executor slot is process-global, so a test that installs its own
+/// double must own the slot for its whole body; otherwise a test running in
+/// parallel in the same test binary replaces the double mid-test. Public
+/// (not `cfg(test)`) so tests in dependent crates share the same lock.
+#[doc(hidden)]
+pub mod executor_test_lock {
+    use std::sync::{Mutex, MutexGuard};
+
+    static EXECUTOR_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Recovers from poisoning: a failing test leaves the lock poisoned, and
+    /// the rest of the suite failing for that reason hides the real failure.
+    pub fn lock() -> MutexGuard<'static, ()> {
+        EXECUTOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}

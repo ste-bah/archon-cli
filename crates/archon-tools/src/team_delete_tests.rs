@@ -104,6 +104,7 @@ fn ctx() -> ToolContext {
 #[tokio::test]
 async fn deleting_asks_every_member_to_stop_then_removes_the_team() {
     let _guard = crate::team_roster::test_lock::lock();
+    let _executor = crate::subagent_executor::executor_test_lock::lock();
     let dir = tempfile::tempdir().expect("temp dir");
     let recorder = install(true);
     let id = team(
@@ -129,6 +130,7 @@ async fn deleting_asks_every_member_to_stop_then_removes_the_team() {
 #[tokio::test]
 async fn a_member_that_does_not_stop_keeps_the_team_alive() {
     let _guard = crate::team_roster::test_lock::lock();
+    let _executor = crate::subagent_executor::executor_test_lock::lock();
     let dir = tempfile::tempdir().expect("temp dir");
     install(false);
     let id = team(dir.path(), &["coder"], &[("agent-1", "coder")]);
@@ -154,6 +156,7 @@ async fn a_member_that_does_not_stop_keeps_the_team_alive() {
 #[tokio::test]
 async fn deleting_an_empty_team_needs_no_handshake() {
     let _guard = crate::team_roster::test_lock::lock();
+    let _executor = crate::subagent_executor::executor_test_lock::lock();
     let dir = tempfile::tempdir().expect("temp dir");
     let recorder = install(true);
     let id = team(dir.path(), &["coder"], &[]);

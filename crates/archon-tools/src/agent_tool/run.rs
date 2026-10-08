@@ -238,6 +238,23 @@ async fn run_subagent_owned(
     allow_auto_background: bool,
     auto_background_completion: Option<oneshot::Sender<SubagentOutcome>>,
 ) -> SubagentOutcome {
+    // Refuse an unusable repair before publishing a fresh Running entry. The
+    // core executor repeats this check while preparing the runner, but that is
+    // too late: a refusal there would already have replaced the prior terminal
+    // registry result (and registered a new manager generation).
+    if let Some(session) = crate::subagent_session::current_for(&subagent_id)
+        && session.continuing
+        && !has_completed_assistant_history(&session.history.messages())
+    {
+        session
+            .history
+            .refuse(
+                "cannot continue agent: validation repair has no completed assistant history; start a new agent",
+            );
+        return SubagentOutcome::Failed(
+            "validation repair has no completed assistant history".to_string(),
+        );
+    }
     let exec = match get_subagent_executor() {
         Some(e) => e,
         None => {
@@ -393,6 +410,18 @@ async fn run_subagent_owned(
 
     outcome
 }
+
+fn has_completed_assistant_history(messages: &[serde_json::Value]) -> bool {
+    messages
+        .last()
+        .and_then(|message| message.get("role"))
+        .and_then(serde_json::Value::as_str)
+        == Some("assistant")
+}
+
+#[cfg(test)]
+#[path = "run/continuation_preflight_tests.rs"]
+mod continuation_preflight_tests;
 
 /// Describe why a subagent's task ended without a result.
 ///
