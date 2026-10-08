@@ -232,7 +232,47 @@ fn apply_control(
             )));
         }
     };
-    archon_workflow::LifecycleController::new(store.clone()).apply(&request.run_id, action)
+    let controller = archon_workflow::LifecycleController::new(store.clone());
+    if matches!(&action, archon_workflow::LifecycleAction::RestartStage(_) | archon_workflow::LifecycleAction::RestartItem { .. }) {
+        let run_dir = store.run_dir(&request.run_id);
+        store.load_state(&request.run_id)?;
+        let lease_path = run_dir.join("decomposition/executor.lock");
+        if let Some(parent) = lease_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| archon_workflow::WorkflowError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        let lease = std::fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
+            .open(&lease_path).map_err(|source| archon_workflow::WorkflowError::Io {
+                path: lease_path.clone(),
+                source,
+            })?;
+        match lease.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => {
+                return Err(archon_workflow::WorkflowError::ControlCancelled(format!(
+                    "workflow restart of {} refused: executor lease is held",
+                    request.run_id
+                )));
+            }
+            Err(std::fs::TryLockError::Error(source)) => {
+                return Err(archon_workflow::WorkflowError::Io {
+                    path: lease_path.clone(),
+                    source,
+                });
+            }
+        }
+        let result = controller.apply_restart(&request.run_id, action).map(|(run, _)| run);
+        lease
+            .unlock()
+            .map_err(|source| archon_workflow::WorkflowError::Io {
+                path: lease_path.clone(),
+                source,
+            })?;
+        return result;
+    }
+    controller.apply(&request.run_id, action)
 }
 
 fn first_repairable_stage(
@@ -262,6 +302,10 @@ fn first_repairable_stage(
             ))
         })
 }
+
+#[cfg(test)]
+#[path = "part_2_restart_tests.rs"]
+mod restart_tests;
 
 fn apply_approval_control(
     store: &archon_workflow::WorkflowStore,

@@ -50,7 +50,11 @@ impl WorkflowV2ResultStore {
         items: &[String],
     ) -> WorkflowResult<Vec<(String, Vec<PathBuf>)>> {
         validate_branch_tree(&self.root.join("branches"))?;
-        let dir = self.root.join("branches").join(sanitize_call_id(call_id));
+        let mut dir = self.branch_call_dir(call_id);
+        let legacy = self.root.join("branches").join(sanitize_call_id(call_id));
+        if !dir.exists() && legacy.exists() {
+            dir = legacy.clone();
+        }
         match fs::symlink_metadata(&dir) {
             Ok(meta) if meta.is_dir() => {}
             Ok(_) => {
@@ -62,11 +66,13 @@ impl WorkflowV2ResultStore {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(err) => return Err(WorkflowError::io(&dir, err)),
         }
-        let stored = stored_outcomes_in(&dir)?;
+        let mut stored = stored_outcomes_in(&dir)?;
+        if legacy != dir { stored.extend(stored_outcomes_in(&legacy)?); }
         let mut seen = std::collections::BTreeSet::new();
         let mut plan = Vec::new();
         for item in items {
             let mut files = branch_files_in(&dir, item, &stored)?;
+            files.extend(branch_files_in(&legacy, item, &stored)?);
             files.retain(|path| seen.insert(file_identity(path)));
             plan.push((item.clone(), files));
         }
@@ -90,8 +96,17 @@ impl WorkflowV2ResultStore {
 
     pub fn revoke_branch_outcome(&self, call_id: &str, item_id: &str) -> WorkflowResult<bool> {
         validate_branch_tree(&self.root.join("branches"))?;
-        let dir = self.root.join("branches").join(sanitize_call_id(call_id));
-        let mut files = branch_files_in(&dir, item_id, &stored_outcomes_in(&dir)?)?;
+        let mut dir = self.branch_call_dir(call_id);
+        let legacy = self.root.join("branches").join(sanitize_call_id(call_id));
+        if !dir.exists() && legacy.exists() {
+            dir = legacy.clone();
+        }
+        let mut stored = stored_outcomes_in(&dir)?;
+        if legacy != dir {
+            stored.extend(stored_outcomes_in(&legacy)?);
+        }
+        let mut files = branch_files_in(&dir, item_id, &stored)?;
+        files.extend(branch_files_in(&legacy, item_id, &stored)?);
         let mut seen = std::collections::BTreeSet::new();
         files.retain(|path| seen.insert(file_identity(path)));
         self.move_revoked(&files)?;
@@ -180,14 +195,19 @@ impl WorkflowV2ResultStore {
     /// Move each file into the `revoked/` directory of its call directory.
     fn move_revoked(&self, files: &[PathBuf]) -> WorkflowResult<()> {
         self.with_session_write_lock(|| {
-            for file in files {
+            let mut ordered = files.to_vec();
+            ordered.sort_by_key(|path| {
+                !fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+            });
+            for file in &ordered {
                 let parent = file.parent().unwrap_or_else(|| Path::new("."));
-                let call_dir =
-                    if parent.file_name().and_then(|name| name.to_str()) == Some("superseded") {
-                        parent.parent().unwrap_or(parent)
-                    } else {
-                        parent
-                    };
+                let call_dir = if parent.file_name().and_then(|name| name.to_str()) == Some("superseded") {
+                    parent.parent().unwrap_or(parent)
+                } else if parent.parent().and_then(Path::file_name).and_then(|name| name.to_str()) == Some("superseded") {
+                    parent.parent().and_then(Path::parent).unwrap_or(parent)
+                } else {
+                    parent
+                };
                 archive_file_into(file, &call_dir.join("revoked"), self.durable)?;
             }
             Ok(())
@@ -217,7 +237,7 @@ fn stored_outcomes_in(dir: &Path) -> WorkflowResult<Vec<(PathBuf, WorkflowV2Bran
             stored.push((path, outcome));
         }
     }
-    for path in outcome_files_in(&dir.join("superseded"), true)? {
+    for path in branch_archive_entries(&dir.join("superseded")) {
         // An entry swapped for a special file since it was listed is refused
         // (and reported) here, never read: no reader counts it either.
         let raw = match read_store_file_in(&path, dir) {
@@ -270,6 +290,10 @@ fn store_entries_in(
     let mut listed = Vec::new();
     for entry in entries {
         let path = entry.map_err(|err| WorkflowError::io(dir, err))?.path();
+        if archived && path.is_dir() {
+            listed.extend(store_entries_in(&path, true)?);
+            continue;
+        }
         if archived || path.extension().and_then(|value| value.to_str()) == Some("json") {
             let verdict = super::store_file::classify_store_entry(&path, root);
             listed.push((path, verdict));
@@ -299,6 +323,23 @@ fn validate_branch_tree(root: &Path) -> WorkflowResult<()> {
             Err(err) => Err(WorkflowError::io(path, err)),
         }
     }
+    fn validate_archive_items(path: &Path) -> WorkflowResult<()> {
+        if !path.is_dir() {
+            return Ok(());
+        }
+        for entry in fs::read_dir(path).map_err(|err| WorkflowError::io(path, err))? {
+            let entry = entry.map_err(|err| WorkflowError::io(path, err))?;
+            let child = entry.path();
+            let meta = fs::symlink_metadata(&child).map_err(|err| WorkflowError::io(&child, err))?;
+            if meta.file_type().is_symlink() {
+                if fs::metadata(&child).is_ok_and(|target| target.is_dir()) {
+                    return Err(WorkflowError::io(&child, std::io::Error::other("branch archive directory is a link")));
+                }
+            }
+            if meta.is_dir() { validate_archive_items(&child)?; }
+        }
+        Ok(())
+    }
     if !real_dir_or_absent(root)? {
         return Ok(());
     }
@@ -311,7 +352,9 @@ fn validate_branch_tree(root: &Path) -> WorkflowResult<()> {
         if kind.is_symlink() {
             real_dir_or_absent(&call)?;
         } else if kind.is_dir() {
-            real_dir_or_absent(&call.join("superseded"))?;
+            let superseded = call.join("superseded");
+            real_dir_or_absent(&superseded)?;
+            validate_archive_items(&superseded)?;
             real_dir_or_absent(&call.join("revoked"))?;
         }
     }
@@ -355,16 +398,22 @@ fn branch_files_in(
     item_id: &str,
     stored: &[(PathBuf, WorkflowV2BranchOutcome)],
 ) -> WorkflowResult<Vec<PathBuf>> {
-    let current = dir.join(format!("{}.json", sanitize_call_id(item_id)));
-    let mut files = match fs::symlink_metadata(&current) {
-        Ok(_) => vec![current.clone()],
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(err) => return Err(WorkflowError::io(&current, err)),
-    };
+    let current_paths = [
+        dir.join(format!("{}.json", branch_component(item_id))),
+        dir.join(format!("{}.json", sanitize_call_id(item_id))),
+    ];
+    let mut files = Vec::new();
+    for current in &current_paths {
+        match fs::symlink_metadata(&current) {
+            Ok(_) => files.push(current.clone()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(WorkflowError::io(&current, err)),
+        }
+    }
     files.extend(
         stored
             .iter()
-            .filter(|(path, outcome)| *path != current && outcome.item_id == item_id)
+            .filter(|(path, outcome)| !current_paths.contains(path) && outcome.item_id == item_id)
             .map(|(path, _)| path.clone()),
     );
     Ok(files)
@@ -376,6 +425,13 @@ fn branch_files_in(
 /// synced after the rename.
 fn archive_file_into(path: &Path, dir: &Path, durable: bool) -> WorkflowResult<PathBuf> {
     fs::create_dir_all(dir).map_err(|err| WorkflowError::io(dir, err))?;
+    if durable
+        && let Some(parent) = dir.parent()
+    {
+        // Persist a newly created `superseded/<item>/` (or `revoked/`)
+        // entry in the directory that contains it before the state commit.
+        crate::durable_io::sync_dir(parent)?;
+    }
     let stem = path
         .file_stem()
         .and_then(|value| value.to_str())
@@ -394,6 +450,9 @@ fn archive_file_into(path: &Path, dir: &Path, durable: bool) -> WorkflowResult<P
         crate::durable_io::sync_dir(dir)?;
         if let Some(source) = path.parent() {
             crate::durable_io::sync_dir(source)?;
+            if let Some(parent) = source.parent() {
+                crate::durable_io::sync_dir(parent)?;
+            }
         }
     }
     Ok(target)

@@ -177,10 +177,10 @@ fn superseding_execution_archives_prior_branch_outcome() {
     store
         .save_branch_outcome("implementation-wave-1", &outcome)
         .expect("re-save");
-    let superseded_dir = temp
-        .path()
-        .join("branches")
-        .join("implementation-wave-1")
+    let superseded_dir = store
+        .branch_outcome_path("implementation-wave-1", &outcome.item_id)
+        .parent()
+        .unwrap()
         .join("superseded");
     assert!(!superseded_dir.exists());
 

@@ -115,9 +115,6 @@ pub fn invalidate_generated_v2_restart_cache(
 pub fn reset_invalidated_stages(run: &mut WorkflowRun, invalidated: &[String]) -> bool {
     let mut changed = false;
     for call_id in invalidated {
-        if call_id.contains(':') {
-            continue;
-        }
         if run.stages.contains_key(call_id) {
             run.stages
                 .insert(call_id.clone(), StageState::pending(call_id.clone()));
@@ -276,23 +273,23 @@ fn invalidate_generated_v2_call_cache(
     let executions = generated_v2_restart_executions(store, run)?;
     let v2_store =
         WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2")).with_durable_writes();
-    let mut invalidated = v2_store
-        .invalidate_call_and_dependents(&executions, call_id)?
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-    invalidated.extend(v2_store.invalidate_dynamic_wave_dependents(call_id)?);
-    if clear_branch_outcomes {
-        let deleted = v2_store.delete_branch_outcomes_for_call(call_id)?;
-        if deleted > 0 {
-            invalidated.insert(format!("{call_id}:branches({deleted})"));
-        }
-    }
+    v2_store.validate_branch_store()?;
+    let invalidated = if clear_branch_outcomes {
+        v2_store.invalidate_calls_and_clear_branches(&executions, call_id)?
+    } else {
+        let mut invalidated = v2_store
+            .invalidate_call_and_dependents(&executions, call_id)?
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        invalidated.extend(v2_store.invalidate_dynamic_wave_dependents(call_id)?);
+        invalidated.into_iter().collect()
+    };
     // Round 2: a live session of any run kind stops writing once the epoch
     // moves (`require_session_restart_epoch`).
     if move_epoch {
         v2_store.bump_restart_epoch()?;
     }
-    Ok(invalidated.into_iter().collect())
+    Ok(invalidated)
 }
 
 fn generated_v2_restart_executions(

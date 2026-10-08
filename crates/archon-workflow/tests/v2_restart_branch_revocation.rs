@@ -113,12 +113,18 @@ fn an_unreadable_archived_outcome_fails_the_restart_and_revokes_nothing() {
     let v2 = v2_store(&store, &run);
     landed_then_superseded(&v2, "T-A");
     let current = v2.branch_outcome_path(CALL, &item("T-A").id);
-    let archived = std::fs::read_dir(current.parent().unwrap().join("superseded"))
-        .unwrap()
-        .flatten()
-        .next()
-        .unwrap()
-        .path();
+    let archived = std::fs::read_dir(
+        current
+            .parent()
+            .unwrap()
+            .join("superseded")
+            .join(branch_component(&item("T-A").id)),
+    )
+    .unwrap()
+    .flatten()
+    .next()
+    .unwrap()
+    .path();
     let mode = |bits| std::fs::Permissions::from_mode(bits);
     std::fs::set_permissions(&archived, mode(0o000)).unwrap();
 
@@ -198,7 +204,7 @@ fn restart_revokes_a_superseded_non_json_landing_record() {
         .parent()
         .unwrap()
         .join("superseded");
-    let old = std::fs::read_dir(&archive)
+    let old = std::fs::read_dir(archive.join(branch_component(&item("T-A").id)))
         .unwrap()
         .next()
         .unwrap()

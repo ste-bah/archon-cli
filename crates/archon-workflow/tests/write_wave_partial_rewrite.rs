@@ -77,7 +77,11 @@ async fn a_placeholder_rewrite_does_not_hide_the_partial_from_the_next_wave() {
         current.data.get("partial_work").is_none(),
         "placeholder is bare"
     );
-    let superseded = f.v2.root().join("branches/first/superseded");
+    let superseded =
+        f.v2.branch_outcome_path("first", "first-0")
+            .parent()
+            .unwrap()
+            .join("superseded");
     assert_eq!(std::fs::read_dir(&superseded).unwrap().count(), 1);
 
     // Re-dispatch for the same task: the partial is applied and the agent told.

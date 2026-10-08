@@ -383,23 +383,11 @@ fn superseded_records_for(
     call_id: &str,
     item_id: &str,
 ) -> Vec<WorkflowV2BranchOutcome> {
-    let current = v2_store.branch_outcome_path(call_id, item_id);
-    let Some(call_dir) = current.parent() else {
-        return Vec::new();
-    };
-    use crate::v2::store_file::{read_store_file_or_report, store_dir_entries};
-    let mut records: Vec<(std::time::SystemTime, WorkflowV2BranchOutcome)> =
-        store_dir_entries(&call_dir.join("superseded"))
-            .into_iter()
-            .filter_map(|path| {
-                let written = std::fs::symlink_metadata(&path)
-                    .and_then(|meta| meta.modified())
-                    .ok()?;
-                let bytes = read_store_file_or_report(&path, call_dir)?;
-                let outcome = serde_json::from_slice::<WorkflowV2BranchOutcome>(&bytes).ok()?;
-                (outcome.item_id == item_id).then_some((written, outcome))
-            })
-            .collect();
+    let mut records = v2_store
+        .superseded_branch_outcomes_for_call(call_id)
+        .into_iter()
+        .filter(|(_, outcome)| outcome.item_id == item_id)
+        .collect::<Vec<_>>();
     records.sort_by_key(|(written, _)| std::cmp::Reverse(*written));
     records.into_iter().map(|(_, outcome)| outcome).collect()
 }

@@ -14,7 +14,10 @@ impl WorkflowStore {
             let target = self.state_path(&run.id);
             let tmp = target.with_extension("json.tmp");
             let json = serde_json::to_vec_pretty(run)?;
-            write_atomic(&tmp, &target, &json)
+            write_atomic(&tmp, &target, &json)?;
+            crate::durable_io::sync_dir(
+                target.parent().unwrap_or_else(|| std::path::Path::new(".")),
+            )
         })
     }
 
@@ -34,7 +37,8 @@ impl WorkflowStore {
         let target = self.state_path(&prior.id);
         let tmp = target.with_extension("json.tmp");
         let json = serde_json::to_vec_pretty(prior)?;
-        write_atomic(&tmp, &target, &json)
+        write_atomic(&tmp, &target, &json)?;
+        crate::durable_io::sync_dir(target.parent().unwrap_or_else(|| std::path::Path::new(".")))
         })
     }
 
@@ -78,7 +82,14 @@ impl WorkflowStore {
             let target = self.state_path(&writable.id);
             let tmp = target.with_extension("json.tmp");
             let json = serde_json::to_vec_pretty(&writable)?;
-            write_atomic(&tmp, &target, &json)
+            write_atomic(&tmp, &target, &json)?;
+            crate::durable_io::sync_dir(
+                target.parent().unwrap_or_else(|| std::path::Path::new(".")),
+            )
         })
     }
 }
+
+#[cfg(test)]
+#[path = "store_state_tests.rs"]
+mod tests;
