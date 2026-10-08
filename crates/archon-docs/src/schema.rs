@@ -30,9 +30,14 @@ const SCHEMA_CONTEXT: &str = "docs schema creation";
 pub fn ensure_doc_schema(db: &DbInstance) -> Result<()> {
     let config = archon_cozo::bound_guard_config(db, SCHEMA_CONTEXT)?;
     match config.write_lock_path.as_deref() {
-        Some(path) => {
-            archon_cozo::with_write_lock_blocking(path, SCHEMA_CONTEXT, || create_doc_relations(db))
-        }
+        Some(path) => archon_cozo::with_write_lock_resuming(
+            path,
+            SCHEMA_CONTEXT,
+            config
+                .write_lock_wait
+                .unwrap_or(archon_cozo::DEFAULT_WRITE_LOCK_WAIT),
+            || create_doc_relations(db),
+        ),
         // An in-memory store is reachable only from this process's handle, so
         // there is no cross-handle race to serialise.
         None => create_doc_relations(db),
@@ -81,6 +86,7 @@ fn run_create(db: &DbInstance, script: &str) -> Result<()> {
         "schema creation",
     ) {
         Ok(_) => Ok(()),
+        Err(e) if e.is::<archon_cozo::StoreBusy>() => Err(e),
         Err(e) => {
             let msg = e.to_string();
             if crate::errors::COZO_RELATION_ALREADY_EXISTS
@@ -89,7 +95,7 @@ fn run_create(db: &DbInstance, script: &str) -> Result<()> {
             {
                 Ok(())
             } else {
-                Err(anyhow::anyhow!("schema creation failed: {msg}"))
+                Err(e.context("schema creation failed"))
             }
         }
     }
@@ -396,88 +402,16 @@ fn ensure_vec_text_embedding_cache(db: &DbInstance, dim: usize) -> Result<()> {
     run_create(db, &create_rel)
 }
 
-fn ensure_vec_page_images(db: &DbInstance, dim: usize) -> Result<()> {
-    // Migration: a DB created by a pre-CLIP build sized `vec_page_images` to the TEXT embedding
-    // dimension. The `:create` below is a no-op when the relation already exists, so a stale
-    // 768-dim relation would silently reject 512-dim CLIP image vectors forever (insert fails →
-    // only a warning). If the existing relation's dim differs, drop it (and its HNSW index) so
-    // it is recreated at the correct image dim. It only ever holds image vectors — none exist on
-    // such old DBs — so the drop is safe; embeddings regenerate on (re-)ingest.
-    if let Some(existing) = existing_vec_page_images_dim(db)
-        && existing != dim
-    {
-        // Drop the HNSW index before the relation (a relation with a live index can't be removed).
-        let _ = crate::cozo_retry::run_script_guarded(
-            db,
-            "::hnsw drop vec_page_images:page_image_embedding_idx",
-            Default::default(),
-            ScriptMutability::Mutable,
-            "vec_page_images index drop",
-        );
-        let _ = crate::cozo_retry::run_script_guarded(
-            db,
-            "::remove vec_page_images",
-            Default::default(),
-            ScriptMutability::Mutable,
-            "vec_page_images dim migration",
-        );
-    }
-
-    let create_rel = format!(
-        ":create vec_page_images {{
-            page_id: String
-            =>
-            embedding: <F32; {dim}>,
-            provider: String
-        }}"
-    );
-    run_create(db, &create_rel)?;
-
-    let create_idx = format!(
-        "::hnsw create vec_page_images:page_image_embedding_idx {{
-            dim: {dim},
-            m: 50,
-            dtype: F32,
-            fields: [embedding],
-            distance: Cosine,
-            ef_construction: 200
-        }}"
-    );
-    run_create(db, &create_idx)?;
-
-    Ok(())
-}
-
-/// Best-effort read of the embedding dimension of an existing `vec_page_images` relation via
-/// `::columns`. Returns `None` if the relation doesn't exist or the type can't be parsed.
-fn existing_vec_page_images_dim(db: &DbInstance) -> Option<usize> {
-    let result = db
-        .run_script(
-            "::columns vec_page_images",
-            Default::default(),
-            ScriptMutability::Immutable,
-        )
-        .ok()?;
-    for row in &result.rows {
-        for cell in row {
-            let Some(text) = cell.get_str() else { continue };
-            // The embedding column's type renders as "<F32; N>" — take the digits after ';'.
-            if text.contains("F32")
-                && let Some(semi) = text.find(';')
-            {
-                let digits: String = text[semi + 1..]
-                    .chars()
-                    .filter(|c| c.is_ascii_digit())
-                    .collect();
-                if let Ok(parsed) = digits.parse::<usize>() {
-                    return Some(parsed);
-                }
-            }
-        }
-    }
-    None
-}
+#[path = "schema_vec_images.rs"]
+mod vec_images;
+use vec_images::ensure_vec_page_images;
+#[cfg(test)]
+use vec_images::existing_vec_page_images_dim;
 
 #[cfg(test)]
 #[path = "schema_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "schema_migration_tests.rs"]
+mod migration_tests;

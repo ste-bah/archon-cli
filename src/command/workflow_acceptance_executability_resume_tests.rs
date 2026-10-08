@@ -31,6 +31,7 @@ fn saving(budget: FreezeBudget) -> FreezeResume {
 /// A freeze probe in a new process: verdicts come only from disk.
 fn freeze(trees: &Trees, copies: &Path, resume: &FreezeResume) -> HostProbe {
     HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+        .with_host_environment(crate::test_environment::probe_host())
         .with_copy_parent(copies.to_path_buf())
         .with_resume(resume)
         .without_process_memo()
@@ -390,4 +391,56 @@ async fn saved_verdicts_hold_no_credential_their_check_printed() {
     let again = retry.script_defects(&trees.contract(), &trees.ids()).await;
     assert_eq!(again, findings, "the saved verdict is the one reached");
     assert_eq!(retry.copies_made.load(SeqCst), 0, "read back, not re-run");
+}
+
+async fn reuse_after_environment_change(name: &str) {
+    let runs = tempfile::tempdir().unwrap();
+    let check = counted(runs.path(), "AC-ENV-001", "test -f feature.txt");
+    let trees = trees(&[("AC-ENV-001", &check, REPO)]);
+    let copies = tempfile::tempdir().unwrap();
+    let resume = saving(FreezeBudget::unlimited());
+    let first = freeze(&trees, copies.path(), &resume);
+    assert!(
+        first
+            .script_defects(&trees.contract(), &trees.ids())
+            .await
+            .is_empty()
+    );
+    assert_eq!(runs_of(runs.path(), "AC-ENV-001"), 2);
+    // Only this test runs in this child process; the parent environment never changes.
+    unsafe { std::env::set_var(name, "changed-test-value") };
+    let retry = freeze(&trees, copies.path(), &resume);
+    assert!(
+        retry
+            .script_defects(&trees.contract(), &trees.ids())
+            .await
+            .is_empty()
+    );
+    assert_eq!(
+        runs_of(runs.path(), "AC-ENV-001"),
+        2,
+        "injected identity must be stable"
+    );
+}
+
+#[tokio::test]
+async fn injected_probe_ignores_process_locale_changes() {
+    if crate::test_environment::isolated() {
+        return;
+    }
+    reuse_after_environment_change("LANG").await;
+}
+#[tokio::test]
+async fn injected_probe_ignores_process_timezone_changes() {
+    if crate::test_environment::isolated() {
+        return;
+    }
+    reuse_after_environment_change("TZ").await;
+}
+#[tokio::test]
+async fn injected_probe_ignores_process_cargo_home_changes() {
+    if crate::test_environment::isolated() {
+        return;
+    }
+    reuse_after_environment_change("CARGO_HOME").await;
 }

@@ -30,11 +30,10 @@ pub fn ingest_text_source(
 
     let content_hash = sha256_str(content);
     let document_id = format!("doc-{}", uuid::Uuid::new_v4());
-    let artifact_id = format!("text-source-{document_id}");
-    let page_id = format!("page-{document_id}-1");
     let started_at = chrono::Utc::now().to_rfc3339();
     let job_id = format!("job-{}", uuid::Uuid::new_v4());
 
+    let mut claim_slot = store::ClaimSlot::for_content(db, &content_hash).map_err(storage)?;
     let reservation = store::reserve_doc_source_by_hash(
         db,
         &SourceDocument {
@@ -45,16 +44,26 @@ pub fn ingest_text_source(
             discovered_at: started_at.clone(),
             status: DocumentStatus::Discovered,
         },
+        &mut claim_slot,
     )
     .map_err(storage)?;
-    if let store::HashReservation::Duplicate(existing) = reservation {
-        let chunks = store::list_chunks_for_doc(db, &existing.document_id).map_err(storage)?;
-        return Ok(IngestTextSourceResult {
-            document_id: existing.document_id,
-            was_new: false,
-            chunks_registered: chunks.len(),
-        });
-    }
+    let (document_id, claim) = match reservation {
+        store::HashReservation::Registered(claim) => (document_id, claim),
+        store::HashReservation::Resume(existing, claim) => {
+            crate::reprocess::clear_generated_evidence(db, &existing.document_id)?;
+            (existing.document_id, claim)
+        }
+        store::HashReservation::Duplicate(existing) => {
+            let chunks = store::list_chunks_for_doc(db, &existing.document_id).map_err(storage)?;
+            return Ok(IngestTextSourceResult {
+                document_id: existing.document_id,
+                was_new: false,
+                chunks_registered: chunks.len(),
+            });
+        }
+    };
+    let artifact_id = format!("text-source-{document_id}");
+    let page_id = format!("page-{document_id}-1");
 
     store::insert_processing_job(
         db,
@@ -79,7 +88,8 @@ pub fn ingest_text_source(
         &content_hash,
         content,
     )?;
-    store::update_doc_status(db, &document_id, &DocumentStatus::Ingested).map_err(storage)?;
+    store::finish_claimed_ingest(db, &document_id, &DocumentStatus::Ingested, claim)
+        .map_err(storage)?;
     store::insert_processing_job(
         db,
         &ProcessingJob {
@@ -164,10 +174,8 @@ fn store_artifacts(
     Ok(())
 }
 
-fn storage(error: impl std::fmt::Display) -> DocsError {
-    DocsError::Storage {
-        message: error.to_string(),
-    }
+fn storage(error: anyhow::Error) -> DocsError {
+    DocsError::storage(error)
 }
 
 #[cfg(test)]

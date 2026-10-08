@@ -119,11 +119,16 @@ fn legacy_cozo_hnsw_search(
             bind_distance: distance
         }";
 
-    let result = db
-        .run_script(script, params, ScriptMutability::Immutable)
-        .map_err(|e| DocsError::Retrieval {
-            message: format!("HNSW search failed: {e}"),
-        })?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        script,
+        params,
+        ScriptMutability::Immutable,
+        "legacy cozo hnsw search",
+    )
+    .map_err(|e| DocsError::Retrieval {
+        message: format!("HNSW search failed: {e}"),
+    })?;
 
     let mut search_results = resolve_vector_hits(
         db,

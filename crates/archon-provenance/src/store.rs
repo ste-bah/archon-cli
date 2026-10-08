@@ -88,7 +88,7 @@ pub fn insert_record(db: &DbInstance, record: &ProvenanceRecord) -> Result<()> {
         ScriptMutability::Mutable,
         "provenance store: insert prov_records row",
     )
-    .map_err(|e| ProvenanceError::Store(format!("insert provenance record failed: {e}")))?;
+    .map_err(|e| ProvenanceError::storage(e.as_ref(), "insert provenance record failed"))?;
     Ok(())
 }
 
@@ -114,7 +114,7 @@ pub fn insert_edge(db: &DbInstance, edge: &ProvenanceEdge) -> Result<()> {
         ScriptMutability::Mutable,
         "provenance store: insert prov_edges row",
     )
-    .map_err(|e| ProvenanceError::Store(format!("insert provenance edge failed: {e}")))?;
+    .map_err(|e| ProvenanceError::storage(e.as_ref(), "insert provenance edge failed"))?;
     Ok(())
 }
 
@@ -123,9 +123,14 @@ pub fn get_record(db: &DbInstance, record_id: &str) -> Result<Option<ProvenanceR
     let mut params = BTreeMap::new();
     params.insert("rid".into(), DataValue::from(record_id));
     let script = record_query("record_id = $rid");
-    let result = db
-        .run_script(&script, params, ScriptMutability::Immutable)
-        .map_err(|e| ProvenanceError::Store(format!("get provenance record failed: {e}")))?;
+    let result = archon_cozo::run_bound_script_guarded(
+        db,
+        &script,
+        params,
+        ScriptMutability::Immutable,
+        "provenance store: get record",
+    )
+    .map_err(|e| ProvenanceError::storage(e.as_ref(), "get provenance record failed"))?;
     result
         .rows
         .first()
@@ -141,9 +146,14 @@ pub fn get_record_by_artifact(
     let mut params = BTreeMap::new();
     params.insert("aid".into(), DataValue::from(artifact_id));
     let script = record_query("artifact_id = $aid");
-    let result = db
-        .run_script(&script, params, ScriptMutability::Immutable)
-        .map_err(|e| ProvenanceError::Store(format!("get artifact record failed: {e}")))?;
+    let result = archon_cozo::run_bound_script_guarded(
+        db,
+        &script,
+        params,
+        ScriptMutability::Immutable,
+        "provenance store: get artifact record",
+    )
+    .map_err(|e| ProvenanceError::storage(e.as_ref(), "get artifact record failed"))?;
     result
         .rows
         .first()
@@ -194,10 +204,19 @@ fn query_edges(
         "?[edge_id, from_artifact_id, to_artifact_id, edge_type, created_at] := \
          *{relation}{{edge_id, from_artifact_id, to_artifact_id, edge_type, created_at}}, {filter}"
     );
-    match db.run_script(&script, params, ScriptMutability::Immutable) {
+    match archon_cozo::run_bound_script_guarded(
+        db,
+        &script,
+        params,
+        ScriptMutability::Immutable,
+        label,
+    ) {
         Ok(result) => Ok(result.rows.iter().map(|row| row_to_edge(row)).collect()),
+        Err(e) if archon_cozo::StoreBusy::find(e.as_ref()).is_some() => {
+            Err(ProvenanceError::storage(e.as_ref(), label))
+        }
         Err(e) if relation_missing(&e.to_string()) => Ok(Vec::new()),
-        Err(e) => Err(ProvenanceError::Store(format!("{label}: {e}"))),
+        Err(e) => Err(ProvenanceError::storage(e.as_ref(), label)),
     }
 }
 
@@ -240,6 +259,9 @@ fn run_create(db: &DbInstance, script: &str) -> Result<()> {
     ) {
         Ok(_) => Ok(()),
         Err(e) => {
+            if let Some(busy) = archon_cozo::StoreBusy::find(e.as_ref()) {
+                return Err(busy.clone().into());
+            }
             let msg = e.to_string();
             if msg.contains("already exists") || msg.contains("conflicts with an existing") {
                 Ok(())
@@ -267,3 +289,7 @@ pub fn relation_missing(message: &str) -> bool {
         || message.contains("not found")
         || message.contains("does not exist")
 }
+
+#[cfg(test)]
+#[path = "store_busy_tests.rs"]
+mod busy_tests;

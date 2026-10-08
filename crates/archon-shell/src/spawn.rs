@@ -41,6 +41,7 @@ use std::process::Command;
 /// A `std` command for `program` whose child inherits only its stdio.
 pub fn command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
+    crate::jobserver::inherit(&mut command);
     stdio_only(&mut command);
     command
 }
@@ -50,6 +51,27 @@ pub fn tokio_command(program: impl AsRef<OsStr>) -> tokio::process::Command {
     tokio::process::Command::from(command(program))
 }
 
+/// Replace `command`'s environment with `vars`, then apply the jobserver
+/// policy to the result.
+///
+/// A host environment overlay copies this process's raw `MAKEFLAGS`, whose
+/// `--jobserver-auth=R,W` names descriptors the child no longer has (Apple
+/// children inherit only stdio). Every spawn path that overlays an
+/// environment calls this instead of `env_clear` + `envs`, so no overlay can
+/// bring stale jobserver descriptors back; the workspace lint enforces it. A
+/// `tokio` command passes `command.as_std_mut()`.
+pub fn replace_environment<I, K, V>(command: &mut Command, vars: I) -> &mut Command
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    command.env_clear();
+    command.envs(vars);
+    crate::jobserver::sanitize_environment(command);
+    command
+}
+
 /// Applies the rule to a command that a library built (for example the
 /// commands `open::commands` returns), so its child inherits only its stdio.
 ///
@@ -57,6 +79,7 @@ pub fn tokio_command(program: impl AsRef<OsStr>) -> tokio::process::Command {
 /// that reads it is async-signal safe. If it cannot be read, the spawn fails
 /// with that error rather than run a child that may inherit anything.
 pub fn stdio_only(command: &mut Command) -> &mut Command {
+    crate::jobserver::sanitize_environment(command);
     // Apple only: see the module documentation for why not Linux.
     #[cfg(target_vendor = "apple")]
     {
@@ -78,9 +101,17 @@ pub fn stdio_only(command: &mut Command) -> &mut Command {
 /// Runs the first of `commands` (a library's launchers, such as
 /// `open::commands`) that starts, with no stdio and inheriting nothing else,
 /// and reports its exit: the contract of `open::that`, under this rule.
+///
+/// The launchers are taken to inherit this process's environment, as
+/// `open`'s do. Jobserver variables a launcher sets or removes explicitly are
+/// kept as it set them (sanitized); std cannot report an `env_clear`, so a
+/// launcher that cleared its environment must not be passed here.
 pub fn run_first_launcher(commands: Vec<Command>) -> std::io::Result<()> {
     let mut last_error = None;
     for mut launcher in commands {
+        // A library's launcher inherits this process's environment, so it
+        // gets the same jobserver policy as a command built here.
+        crate::jobserver::inherit_unset(&mut launcher);
         let status = stdio_only(&mut launcher)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -102,6 +133,10 @@ pub fn run_first_launcher(commands: Vec<Command>) -> std::io::Result<()> {
 #[cfg(all(test, unix))]
 #[path = "spawn_tests.rs"]
 mod tests;
+
+#[cfg(all(test, unix))]
+#[path = "spawn_env_tests.rs"]
+mod env_tests;
 
 #[cfg(test)]
 #[path = "spawn_lint_tests.rs"]

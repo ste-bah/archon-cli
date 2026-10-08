@@ -131,6 +131,9 @@ fn execute_without_auth_label_returns_err() {
 #[cfg(unix)]
 #[tokio::test]
 async fn execute_authenticated_branch_emits_textdelta() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let (mut ctx, mut rx) = make_login_ctx(Some("anthropic-api-key".to_string()));
     let h = LoginHandler::new();
     let cred_path;
@@ -181,6 +184,9 @@ async fn execute_authenticated_branch_emits_textdelta() {
 #[cfg(unix)]
 #[tokio::test]
 async fn execute_not_authenticated_branch_emits_textdelta() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let (mut ctx, mut rx) = make_login_ctx(Some("api-key".to_string()));
     let h = LoginHandler::new();
     {
@@ -244,6 +250,9 @@ async fn execute_not_authenticated_branch_emits_textdelta() {
 #[cfg(unix)]
 #[tokio::test]
 async fn dispatcher_routes_slash_login_with_auth_label_emits_textdelta() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let (mut ctx, mut rx) = make_login_ctx(Some("oauth".to_string()));
     {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());

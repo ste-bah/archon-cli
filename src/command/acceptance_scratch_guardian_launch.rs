@@ -31,11 +31,11 @@ pub(crate) async fn launch_selected(
         "--ignored",
         "--nocapture",
     ]);
+    archon_shell::spawn::replace_environment(
+        command.as_std_mut(),
+        child_environment(&request.policy, |key: &str| std::env::var_os(key)),
+    );
     command
-        .env_clear()
-        .envs(child_environment(&request.policy, |key: &str| {
-            std::env::var_os(key)
-        }))
         // Its stderr renews the window below: it reports activity there.
         .env(archon_shell::progress::SUPERVISED_ENV, "1")
         .stdin(std::process::Stdio::piped())

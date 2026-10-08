@@ -188,6 +188,9 @@ fn interactive_pipeline_schema_initialization_uses_registered_retry_policy() {
         max_backoff: Duration::ZERO,
         write_lock_path: Some(lock_path.clone()),
         write_lock_wait: None,
+        // The production interactive window: a held lock with no progress
+        // pauses the operation promptly instead of retrying for ever.
+        busy_wait: archon_cozo::INTERACTIVE_BUSY_WAIT,
     };
     let db = archon_cozo::open_sqlite_guarded_instance(
         &db_path.to_string_lossy(),
@@ -240,11 +243,9 @@ fn interactive_pipeline_schema_initialization_uses_registered_retry_policy() {
     assert!(logs.contains("write lock unavailable"), "{logs}");
     assert!(logs.contains("registered-policy.lock"), "{logs}");
     assert!(
-        !logs.lines().any(|line| {
-            line.contains("initialize interactive pipeline learning schemas")
-                && line.contains("retrying guarded operation")
-        }),
-        "the registered one-attempt policy must not retry: {logs}"
+        logs.lines()
+            .any(|line| line.contains("WARN") && line.contains("pausing the operation")),
+        "the registered policy must pause after its no-progress window: {logs}"
     );
     assert!(
         !schemas.pipeline,

@@ -191,11 +191,10 @@ pub async fn run_at(
         crate::task_set_contract::TrustedCwd::RepoRoot => site.repository,
     };
     let mut process = archon_shell::spawn::tokio_command(archon_shell::resolve_posix_shell());
+    archon_shell::spawn::replace_environment(process.as_std_mut(), site.environment.clone());
     process
         .arg("-s")
         .current_dir(cwd)
-        .env_clear()
-        .envs(site.environment.clone())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

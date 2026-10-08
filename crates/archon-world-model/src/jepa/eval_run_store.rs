@@ -379,8 +379,11 @@ impl JepaEvalRunStore {
                     }
                     0 => {
                         // ---- First child ----
-                        libc::setsid();
-                        match libc::fork() {
+                        let second = match worker_detach_step(libc::setsid, libc::fork) {
+                            Ok(pid) => pid,
+                            Err(_) => libc::_exit(1),
+                        };
+                        match second {
                             0 => {
                                 // ---- Grandchild: redirect stdio and exec ----
 
@@ -421,10 +424,9 @@ impl JepaEvalRunStore {
                             }
                         }
                     }
-                    _ => {
-                        // ---- Parent: reap first child to avoid zombie ----
-                        let mut status: libc::c_int = 0;
-                        libc::waitpid(-1, &mut status, 0);
+                    pid => {
+                        // Reap only our child; other runtimes own their children.
+                        worker_wait(pid)?;
                     }
                 }
             }
@@ -437,3 +439,6 @@ impl JepaEvalRunStore {
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+include!("eval_worker_detach.rs");

@@ -40,6 +40,8 @@ archon-accel = { path = "../archon-accel" }
 tempfile.workspace = true
 
 [dev-dependencies]
+archon-cozo = { path = "../archon-cozo", features = ["test-support"] }
+sqlite.workspace = true
 serial_test.workspace = true
 wiremock.workspace = true
 zip.workspace = true

@@ -14,6 +14,12 @@
 
 use std::path::{Path, PathBuf};
 
+#[path = "spawn_lint_lex.rs"]
+mod lex;
+
+#[path = "spawn_env_lint_tests.rs"]
+mod env_overlay;
+
 /// The one file allowed to call `Command::new`.
 const HELPER: &str = "crates/archon-shell/src/spawn.rs";
 
@@ -36,6 +42,36 @@ const FORBIDDEN: &[&str] = &[
 
 /// A rename of a command type that would hide `Command::new(` from the lint,
 /// in a plain `use` or one item of a braced group (which may span lines).
+fn forbidden_call(code: &str) -> bool {
+    FORBIDDEN.iter().any(|f| whole_call(code, f))
+}
+
+fn whole_call(code: &str, spelling: &str) -> bool {
+    code.match_indices(spelling).any(|(at, _)| {
+        code[..at]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+    })
+}
+
+fn alias_call(code: &str, source: &str) -> bool {
+    source.match_indices("Command as ").any(|(at, _)| {
+        if source[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+        {
+            return false;
+        }
+        let alias: String = source[at + 11..]
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        !alias.is_empty() && whole_call(code, &format!("{alias}::new("))
+    })
+}
+
 fn hiding_rename(code: &str) -> bool {
     let mut rest = code;
     while let Some(at) = rest.find("Command as ") {
@@ -122,41 +158,19 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// `{` minus `}` on a line, ignoring string and char literals and comments.
 fn brace_delta(line: &str) -> i64 {
-    let mut delta = 0;
-    let mut chars = line.chars().peekable();
-    let mut in_string = false;
-    while let Some(c) = chars.next() {
-        match c {
-            '\\' if in_string => {
-                chars.next();
-            }
-            '"' => in_string = !in_string,
-            '/' if !in_string && chars.peek() == Some(&'/') => break,
-            '\'' if !in_string => {
-                // A char literal such as '{' or '\''; a lifetime has no
-                // closing quote within three characters.
-                let rest: String = chars.clone().take(3).collect();
-                if let Some(end) = rest.find('\'') {
-                    for _ in 0..=end {
-                        chars.next();
-                    }
-                }
-            }
-            '{' if !in_string => delta += 1,
-            '}' if !in_string => delta -= 1,
-            _ => {}
-        }
-    }
-    delta
+    line.bytes().filter(|c| *c == b'{').count() as i64
+        - line.bytes().filter(|c| *c == b'}').count() as i64
 }
 
 /// The lines of `source` outside `#[cfg(test)]` items, numbered from 1.
 fn production_lines(source: &str) -> Vec<(usize, &str)> {
     let mut kept = Vec::new();
-    let mut lines = source.lines().enumerate();
+    let masked = lex::code(source);
+    let original: Vec<_> = source.lines().collect();
+    let mut lines = masked.lines().enumerate();
     while let Some((index, line)) = lines.next() {
         if line.trim() != "#[cfg(test)]" {
-            kept.push((index + 1, line));
+            kept.push((index + 1, original[index]));
             continue;
         }
         // Skip the gated item: further attributes, then either a one-line
@@ -178,8 +192,7 @@ fn production_lines(source: &str) -> Vec<(usize, &str)> {
     kept
 }
 
-fn violations() -> Vec<String> {
-    let root = workspace_root();
+fn workspace_rust_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     rust_files(&root.join("src"), &mut files);
     if let Ok(crates) = std::fs::read_dir(root.join("crates")) {
@@ -187,6 +200,13 @@ fn violations() -> Vec<String> {
             rust_files(&krate.path().join("src"), &mut files);
         }
     }
+    rust_files(&root.join("vendor/portable-pty/src"), &mut files);
+    files
+}
+
+fn violations() -> Vec<String> {
+    let root = workspace_root();
+    let files = workspace_rust_files(&root);
     // A wrong root would scan nothing and pass.
     assert!(root.join(HELPER).is_file(), "workspace root not found");
     assert!(files.len() > 100, "only {} files scanned", files.len());
@@ -203,17 +223,24 @@ fn violations() -> Vec<String> {
         let Ok(source) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let all_lines: Vec<&str> = source.lines().collect();
-        for (number, line) in production_lines(&source) {
-            let code = line.split("//").next().unwrap_or("");
-            // A raw fork that execs must sweep before it does.
-            let raw_fork = code.contains("libc::fork(") && !function_sweeps(&all_lines, number - 1);
-            if FORBIDDEN.iter().any(|spelling| code.contains(spelling))
-                || hiding_rename(code)
-                || raw_fork
-            {
-                found.push(format!("{relative}:{number}: {}", line.trim()));
-            }
+        found.extend(source_violations(&relative, &source));
+    }
+    found
+}
+
+fn source_violations(relative: &str, source: &str) -> Vec<String> {
+    if relative == HELPER || is_test_path(relative) {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    let masked = lex::code(source);
+    let all_lines: Vec<&str> = masked.lines().collect();
+    for (number, line) in production_lines(source) {
+        let code = all_lines[number - 1];
+        // A raw fork that execs must sweep before it does.
+        let raw_fork = code.contains("libc::fork(") && !function_sweeps(&all_lines, number - 1);
+        if forbidden_call(code) || alias_call(code, &masked) || hiding_rename(code) || raw_fork {
+            found.push(format!("{relative}:{number}: {}", line.trim()));
         }
     }
     found
@@ -277,3 +304,51 @@ fn a_raw_fork_must_sweep_in_the_same_function() {
         "a sweep in another function counts"
     );
 }
+
+#[test]
+fn unrelated_command_type_is_not_a_process_spawn() {
+    assert!(
+        [
+            "FooCommand::new(1)",
+            "JobCommand::new(1)",
+            "BuildCommand::new(1)"
+        ]
+        .iter()
+        .all(|code| !forbidden_call(code)),
+        "an unrelated type is mistaken for std::process::Command"
+    );
+}
+
+#[test]
+fn raw_quote_in_test_does_not_hide_production_spawn() {
+    let source = "#[cfg(test)]\nmod tests {\nlet s = r#\"\"{\"#;\n}\nCommand::new(\"git\");";
+    assert!(production_lines(source).iter().any(|(n, _)| *n == 5));
+}
+
+#[test]
+fn raw_brace_in_test_does_not_expose_test_spawn() {
+    let source =
+        "#[cfg(test)]\nmod tests {\nlet s = r#\"\"}\"#;\nCommand::new(\"git\");\n}\nfn after() {}";
+    assert_eq!(
+        production_lines(source)
+            .iter()
+            .map(|(n, _)| *n)
+            .collect::<Vec<_>>(),
+        vec![6]
+    );
+}
+
+#[test]
+fn multiline_raw_string_cannot_change_test_item_depth() {
+    let source = "#[cfg(test)]\nmod tests {\nlet s = r##\"\n}\n\"##;\nCommand::new(\"git\");\n}\nfn after() {}";
+    assert_eq!(
+        production_lines(source)
+            .iter()
+            .map(|(n, _)| *n)
+            .collect::<Vec<_>>(),
+        vec![8]
+    );
+}
+
+#[path = "spawn_lint_vendor_tests.rs"]
+mod vendor_tests;

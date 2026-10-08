@@ -281,6 +281,10 @@ fn catalog_digest_excludes_runtime_environment_values() {
 #[test]
 #[ignore = "isolated process environment"]
 fn catalog_digest_environment_child() {
+    if crate::test_environment::isolated_named(&format!("{PREFIX}catalog_digest_environment_child"))
+    {
+        return;
+    }
     use super::super::{workflow_decompose, workflow_decompose_identity, workflow_provider_route};
     let temp = tempfile::tempdir().unwrap();
     let context = configured_context(temp.path());
@@ -367,3 +371,6 @@ fn catalog_digest_environment_child() {
         assert!(!serde_json::to_string(&current).unwrap().contains(value));
     }
 }
+
+#[path = "workflow_host_environment_isolation_tests.rs"]
+mod isolation_tests;

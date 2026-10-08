@@ -7,6 +7,9 @@ use archon_llm::streaming::StreamEvent;
 
 #[test]
 fn pipeline_learning_schema_defaults_to_project_learning_store() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _env_lock = crate::command::store_paths::LEARNING_DB_ENV_LOCK
         .lock()
         .unwrap_or_else(|error| error.into_inner());

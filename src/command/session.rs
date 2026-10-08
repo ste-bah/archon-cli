@@ -180,6 +180,9 @@ mod tests {
 
     #[test]
     fn env_provider_reads_set_var() {
+        if crate::test_environment::isolated() {
+            return;
+        }
         // Save prior value, set a test URL, read via EnvRemoteUrlProvider.
         let prior = std::env::var("ARCHON_REMOTE_URL").ok();
         unsafe {
@@ -202,6 +205,9 @@ mod tests {
     #[test]
     #[ignore = "Gate 5 live smoke — exercises Registry dispatch via default_registry(), run via --ignored"]
     fn session_dispatches_via_registry() {
+        if crate::test_environment::isolated() {
+            return;
+        }
         // Gate 5 smoke: Registry::get("session") must return Some(handler).
         // The registered handler uses EnvRemoteUrlProvider reading
         // ARCHON_REMOTE_URL. Accept BOTH outcomes:

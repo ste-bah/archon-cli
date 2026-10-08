@@ -25,7 +25,7 @@ pub fn insert_image_description(db: &DbInstance, desc: &ImageDescription) -> Res
         ScriptMutability::Mutable,
         "insert doc_image_descriptions",
     )
-    .map_err(|e| anyhow::anyhow!("insert doc_image_descriptions failed: {e}"))?;
+    .map_err(|e| e.context("insert doc_image_descriptions failed"))?;
     Ok(())
 }
 
@@ -35,15 +35,16 @@ pub fn list_image_descriptions_for_doc(
 ) -> Result<Vec<ImageDescription>> {
     let mut params = BTreeMap::new();
     params.insert("did".into(), DataValue::from(document_id));
-    let result = db
-        .run_script(
-            "?[artifact_id, document_id, page_number, provider, model, description, created_at, cost_usd] \
-             := *doc_image_descriptions{artifact_id, document_id, page_number, provider, model, description, created_at, cost_usd}, \
-             document_id = $did",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list doc_image_descriptions failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[artifact_id, document_id, page_number, provider, model, description, created_at, cost_usd] \
+         := *doc_image_descriptions{artifact_id, document_id, page_number, provider, model, description, created_at, cost_usd}, \
+         document_id = $did",
+        params,
+        ScriptMutability::Immutable,
+        "list image descriptions for doc",
+    )
+    .map_err(|e| e.context("list doc_image_descriptions failed"))?;
     Ok(result
         .rows
         .iter()
@@ -105,22 +106,23 @@ pub fn upsert_pdf_metrics(db: &DbInstance, metrics: &PdfIngestMetrics) -> Result
         ScriptMutability::Mutable,
         "upsert doc_pdf_metrics",
     )
-    .map_err(|e| anyhow::anyhow!("upsert doc_pdf_metrics failed: {e}"))?;
+    .map_err(|e| e.context("upsert doc_pdf_metrics failed"))?;
     Ok(())
 }
 
 pub fn get_pdf_metrics(db: &DbInstance, document_id: &str) -> Result<Option<PdfIngestMetrics>> {
     let mut params = BTreeMap::new();
     params.insert("did".into(), DataValue::from(document_id));
-    let result = db
-        .run_script(
-            "?[document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered] \
-             := *doc_pdf_metrics{document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered}, \
-             document_id = $did",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get doc_pdf_metrics failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered] \
+         := *doc_pdf_metrics{document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered}, \
+         document_id = $did",
+        params,
+        ScriptMutability::Immutable,
+        "get pdf metrics",
+    )
+    .map_err(|e| e.context("get doc_pdf_metrics failed"))?;
     if result.rows.is_empty() {
         return Ok(None);
     }
@@ -128,14 +130,15 @@ pub fn get_pdf_metrics(db: &DbInstance, document_id: &str) -> Result<Option<PdfI
 }
 
 pub fn list_pdf_metrics(db: &DbInstance) -> Result<Vec<PdfIngestMetrics>> {
-    let result = db
-        .run_script(
-            "?[document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered] \
-             := *doc_pdf_metrics{document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered}",
-            Default::default(),
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list doc_pdf_metrics failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered] \
+         := *doc_pdf_metrics{document_id, embedded_images_extracted, embedded_images_skipped_filter, image_ocr_runs, image_ocr_failures, image_vlm_descriptions, image_vlm_failures, pages_rendered}",
+        Default::default(),
+        ScriptMutability::Immutable,
+        "list pdf metrics",
+    )
+    .map_err(|e| e.context("list doc_pdf_metrics failed"))?;
     Ok(result
         .rows
         .iter()

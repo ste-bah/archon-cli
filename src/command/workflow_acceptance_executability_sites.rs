@@ -370,11 +370,10 @@ fn runtime_identity(probe: &HostProbe) -> &serde_json::Value {
                         content_digest(&std::fs::read(path).ok()?),
                     ))
                 });
-                let version = archon_shell::spawn::command(name)
+                let mut version = archon_shell::spawn::command(name);
+                let version = archon_shell::spawn::replace_environment(&mut version, &environment)
                     .arg(arg)
                     .current_dir(&probe.repository)
-                    .env_clear()
-                    .envs(&environment)
                     .output()
                     .ok()
                     .filter(|out| out.status.success())

@@ -14,10 +14,19 @@ use std::io;
 /// The first descriptor above stdin, stdout and stderr.
 const FIRST_INHERITED: libc::c_int = 3;
 
-/// One past the highest descriptor this process can hold, for
+/// An upper bound covering existing descriptors and subsequent allocations, for
 /// [`inherit_only_stdio`]. Read before the fork: nothing that reads it is
 /// async-signal safe.
 pub fn descriptor_ceiling() -> io::Result<libc::c_int> {
+    descriptor_ceiling_with(existing_descriptor_ceiling)
+}
+
+fn descriptor_ceiling_with(
+    existing: impl FnOnce() -> io::Result<libc::c_int>,
+) -> io::Result<libc::c_int> {
+    if let Some(ceiling) = crate::process_nofile::ceiling() {
+        return Ok(ceiling);
+    }
     let mut limit = libc::rlimit {
         rlim_cur: 0,
         rlim_max: 0,
@@ -27,16 +36,42 @@ pub fn descriptor_ceiling() -> io::Result<libc::c_int> {
         return Err(io::Error::last_os_error());
     }
     let soft = libc::c_int::try_from(limit.rlim_cur).unwrap_or(libc::c_int::MAX);
+    // Neither a lowered soft nor hard limit bounds inherited high fds.
+    // Cover the entire representable range if enumeration is unavailable;
+    // the Linux child still tries close_range before using this fallback.
+    let existing = existing().unwrap_or(libc::c_int::MAX);
     #[cfg(target_vendor = "apple")]
     {
         // SAFETY: getdtablesize takes no arguments and cannot fail.
         let table = unsafe { libc::getdtablesize() };
-        Ok(bounded_ceiling(soft, max_files_per_proc().ok(), table))
+        Ok(existing.max(bounded_ceiling(soft, max_files_per_proc().ok(), table)))
     }
     #[cfg(not(target_vendor = "apple"))]
     {
-        Ok(soft)
+        Ok(existing.max(soft))
     }
+}
+
+// Read only in the parent. Lowering NOFILE leaves inherited descriptors above
+// the limit alive. Enumeration bounds those; the soft limit bounds any allocation
+// racing with the enumeration or made later, including std's exec-error pipe.
+// As with startup initialization, concurrently raising NOFILE is unsupported.
+fn existing_descriptor_ceiling() -> io::Result<libc::c_int> {
+    #[cfg(target_os = "linux")]
+    let directory = "/proc/self/fd";
+    #[cfg(not(target_os = "linux"))]
+    let directory = "/dev/fd";
+    let mut ceiling = FIRST_INHERITED;
+    for entry in std::fs::read_dir(directory)? {
+        let name = entry?.file_name();
+        if let Some(fd) = name
+            .to_str()
+            .and_then(|name| name.parse::<libc::c_int>().ok())
+        {
+            ceiling = ceiling.max(fd.saturating_add(1));
+        }
+    }
+    Ok(ceiling)
 }
 
 /// The kernel also caps a process at `kern.maxfilesperproc` (`per_process`),
@@ -97,10 +132,15 @@ pub fn inherit_only_stdio(ceiling: libc::c_int) -> io::Result<()> {
             )
         };
         if flagged == 0 {
-            return Ok(());
+            return crate::process_nofile::restore();
         }
         // An older kernel: the loop below does the same, one by one.
     }
+    inherit_only_stdio_fallback(ceiling)
+}
+
+// Kept separate so tests can exercise kernels without CLOSE_RANGE_CLOEXEC.
+fn inherit_only_stdio_fallback(ceiling: libc::c_int) -> io::Result<()> {
     for fd in FIRST_INHERITED..ceiling {
         // SAFETY: F_GETFD/F_SETFD only read and set this descriptor's flags.
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
@@ -112,9 +152,17 @@ pub fn inherit_only_stdio(ceiling: libc::c_int) -> io::Result<()> {
             return Err(io::Error::last_os_error());
         }
     }
-    Ok(())
+    crate::process_nofile::restore()
 }
 
 #[cfg(test)]
 #[path = "process_tree_descriptors_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "process_tree_descriptor_bound_tests.rs"]
+mod bound_tests;
+
+#[cfg(test)]
+#[path = "process_tree_procfs_tests.rs"]
+mod procfs_tests;

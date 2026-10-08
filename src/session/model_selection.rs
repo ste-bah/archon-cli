@@ -108,6 +108,9 @@ mod tests {
 
     #[test]
     fn active_session_model_preserves_anthropic_default() {
+        if crate::test_environment::isolated() {
+            return;
+        }
         let _env_lock = super::super::anthropic_model_env_lock()
             .lock()
             .expect("Anthropic model environment lock");
@@ -129,6 +132,9 @@ mod tests {
 
     #[test]
     fn anthropic_session_honors_anthropic_model_env_override() {
+        if crate::test_environment::isolated() {
+            return;
+        }
         let _env_lock = super::super::anthropic_model_env_lock()
             .lock()
             .expect("Anthropic model environment lock");

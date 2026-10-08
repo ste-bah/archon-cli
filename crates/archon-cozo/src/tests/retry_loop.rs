@@ -25,28 +25,32 @@ fn sync_zero_max_attempts_normalizes_to_one_call() {
         &config,
         || {
             calls.set(calls.get() + 1);
-            Err::<(), _>(anyhow!("database is locked"))
+            Err::<(), _>(anyhow!("invalid query"))
         },
     )
     .unwrap_err();
 
-    assert!(error.to_string().contains("database is locked"));
+    assert!(error.to_string().contains("invalid query"));
     assert_eq!(calls.get(), 1);
 }
 
 #[test]
-fn sync_retry_terminates_after_the_configured_number_of_calls() {
+fn sync_non_contention_error_ends_recovery() {
     let calls = Cell::new(0);
     let config = retry_config(3);
 
     let error = run_guarded("retry limit", ScriptMutability::Immutable, &config, || {
         calls.set(calls.get() + 1);
-        Err::<(), _>(anyhow!("database is locked"))
+        Err::<(), _>(anyhow!(if calls.get() <= 3 {
+            "database is locked"
+        } else {
+            "invalid query"
+        }))
     })
     .unwrap_err();
 
-    assert!(error.to_string().contains("database is locked"));
-    assert_eq!(calls.get(), 3);
+    assert!(error.to_string().contains("invalid query"));
+    assert_eq!(calls.get(), 4);
 }
 
 #[tokio::test]
@@ -61,18 +65,18 @@ async fn async_zero_max_attempts_normalizes_to_one_call() {
         &config,
         move || {
             calls_for_run.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Err::<(), _>(anyhow!("database is locked"))
+            Err::<(), _>(anyhow!("invalid query"))
         },
     )
     .await
     .unwrap_err();
 
-    assert!(error.to_string().contains("database is locked"));
+    assert!(error.to_string().contains("invalid query"));
     assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
-async fn async_retry_terminates_after_the_configured_number_of_calls() {
+async fn async_non_contention_error_ends_recovery() {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let calls_for_run = Arc::clone(&calls);
     let config = retry_config(3);
@@ -82,15 +86,19 @@ async fn async_retry_terminates_after_the_configured_number_of_calls() {
         ScriptMutability::Immutable,
         &config,
         move || {
-            calls_for_run.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Err::<(), _>(anyhow!("database is locked"))
+            let call = calls_for_run.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err::<(), _>(anyhow!(if call < 3 {
+                "database is locked"
+            } else {
+                "invalid query"
+            }))
         },
     )
     .await
     .unwrap_err();
 
-    assert!(error.to_string().contains("database is locked"));
-    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    assert!(error.to_string().contains("invalid query"));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 4);
 }
 
 fn retry_config(max_attempts: usize) -> CozoGuardConfig {
@@ -100,6 +108,7 @@ fn retry_config(max_attempts: usize) -> CozoGuardConfig {
         max_backoff: Duration::ZERO,
         write_lock_path: None,
         write_lock_wait: None,
+        busy_wait: DEFAULT_WRITE_LOCK_WAIT,
     }
 }
 
@@ -112,6 +121,7 @@ fn sync_guarded_retry_retries_then_succeeds() {
         max_backoff: Duration::ZERO,
         write_lock_path: None,
         write_lock_wait: None,
+        busy_wait: DEFAULT_WRITE_LOCK_WAIT,
     };
 
     let value = run_guarded("sync retry", ScriptMutability::Immutable, &config, || {
@@ -137,6 +147,7 @@ async fn async_guarded_retry_yields_and_succeeds() {
         max_backoff: Duration::from_secs(1),
         write_lock_path: None,
         write_lock_wait: None,
+        busy_wait: DEFAULT_WRITE_LOCK_WAIT,
     };
     let yielded = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let yielded_for_task = Arc::clone(&yielded);
@@ -203,6 +214,7 @@ async fn async_guarded_operation_runs_off_runtime_worker() {
         max_backoff: Duration::ZERO,
         write_lock_path: None,
         write_lock_wait: None,
+        busy_wait: DEFAULT_WRITE_LOCK_WAIT,
     };
     let guarded = run_guarded_async(
         "blocking guarded operation",
@@ -237,6 +249,7 @@ async fn async_guarded_terminal_error_does_not_retry() {
         max_backoff: Duration::from_secs(1),
         write_lock_path: None,
         write_lock_wait: None,
+        busy_wait: DEFAULT_WRITE_LOCK_WAIT,
     };
 
     let error = run_guarded_async(

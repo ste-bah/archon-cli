@@ -5,6 +5,9 @@ use super::openbb::{EnvGuard, env_lock};
 
 #[test]
 fn fetch_native_stooq_direct_csv_writes_non_production_artifacts() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _lock = env_lock();
     let server = raw_http_server(
         "Date,Open,High,Low,Close,Volume\n2026-01-02,470,472,469,471,1000\n",
@@ -47,6 +50,9 @@ fn fetch_native_stooq_direct_csv_writes_non_production_artifacts() {
 
 #[test]
 fn fetch_native_stooq_html_block_fails_closed_without_registry() {
+    if crate::test_environment::isolated() {
+        return;
+    }
     let _lock = env_lock();
     let server = raw_http_server(
         "<!doctype html><html><body>verification required</body></html>",

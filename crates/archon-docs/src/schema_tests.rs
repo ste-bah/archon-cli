@@ -88,7 +88,7 @@ fn test_vec_page_images_migrates_on_dim_change() {
     let db = test_db();
     // Simulate a pre-CLIP DB: vec_page_images sized to the TEXT dim (768).
     ensure_vec_page_images(&db, 768).unwrap();
-    assert_eq!(existing_vec_page_images_dim(&db), Some(768));
+    assert_eq!(existing_vec_page_images_dim(&db).unwrap(), Some(768));
 
     let mut params = std::collections::BTreeMap::new();
     let v512 = ndarray::Array1::from_vec(vec![0.0_f32; 512]);
@@ -110,7 +110,7 @@ fn test_vec_page_images_migrates_on_dim_change() {
 
     // Re-ensure at the CLIP image dim → migrate (drop + recreate at 512).
     ensure_vec_page_images(&db, 512).unwrap();
-    assert_eq!(existing_vec_page_images_dim(&db), Some(512));
+    assert_eq!(existing_vec_page_images_dim(&db).unwrap(), Some(512));
 
     // The same 512-dim insert must now succeed (fix verified).
     let after = db.run_script(put, params, cozo::ScriptMutability::Mutable);

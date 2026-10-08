@@ -16,4 +16,5 @@ hex.workspace = true
 cozo.workspace = true
 
 [dev-dependencies]
+archon-cozo = { path = "../archon-cozo", features = ["test-support"] }
 tempfile.workspace = true

@@ -1,15 +1,27 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 
+#[cfg(any(test, feature = "test-support"))]
+mod busy_observer;
+#[cfg(any(test, feature = "test-support"))]
+pub use busy_observer::{with_busy_observer, with_guarded_failure};
+mod acquire;
+mod busy;
+pub use busy::StoreBusy;
+mod contention;
 mod guard_registry;
 mod in_memory_identity;
 mod locking;
+mod owner_lock;
+pub use owner_lock::{OwnerLock, OwnerLockFile};
+mod progress;
+mod resuming;
+pub use resuming::{run_bound_script_resuming, with_write_lock_resuming};
 mod panic_guard;
 mod retry;
 
@@ -19,30 +31,30 @@ use locking::{
 };
 use panic_guard::catch_guarded_operation;
 pub use retry::{is_retryable_cozo_error, is_store_contention, render_cozo_error};
-use retry::{normalized_attempts, retry_backoff};
+mod guarded_run;
+pub use guarded_run::{run_guarded, run_guarded_async};
 
 #[cfg(test)]
-use retry::cumulative_backoff_budget;
+use retry::initial_backoff_ramp;
 
-/// How long [`with_write_lock_blocking`] waits before declaring the holder stuck.
-///
-/// Sized for the worst realistic queue rather than the common case. Every
-/// guarded mutable Cozo operation in the workspace funnels through this lock,
-/// several of them now holding it across a whole `multi_transaction` rather
-/// than a single `:put`, and the fail-fast path already spends up to 19s of
-/// cumulative backoff before it gives up (`cumulative_backoff_budget`). A
-/// ceiling at or below that would report a timeout while the system is merely
-/// busy. This exists to turn a wedged or leaked lock into a diagnosable error,
-/// not to police contention.
+/// Default no-progress window for a lock or busy wait. Writer progress renews
+/// it; once a full window passes without progress the wait ends as retryable
+/// [`StoreBusy`]. It never caps an operation once the lock has been acquired.
 pub const DEFAULT_WRITE_LOCK_WAIT: Duration = Duration::from_secs(60);
 
-const DEFAULT_MAX_ATTEMPTS: usize = 20;
-const INTERACTIVE_MAX_ATTEMPTS: usize = 10;
+/// The no-progress window for interactive callers, which report a busy store
+/// promptly rather than block a session on a holder that makes no progress.
+pub const INTERACTIVE_BUSY_WAIT: Duration = Duration::from_secs(5);
+
+const DEFAULT_BACKOFF_STEPS: usize = 20;
+const INTERACTIVE_BACKOFF_STEPS: usize = 10;
 const DEFAULT_INITIAL_BACKOFF_MS: u64 = 100;
 const DEFAULT_MAX_BACKOFF_MS: u64 = 2_000;
 
 #[derive(Clone, Debug)]
 pub struct CozoGuardConfig {
+    /// Backoff ramp length. This never limits attempts: retries end only
+    /// after [`CozoGuardConfig::busy_wait`] passes with no writer progress.
     pub max_attempts: usize,
     pub initial_backoff: Duration,
     pub max_backoff: Duration,
@@ -53,26 +65,31 @@ pub struct CozoGuardConfig {
     /// retry backoff in between -- 100ms rising to 2s. Against a peer that
     /// takes the lock back to back, as a repository index does for every file
     /// it persists, sampling on that cadence starves: the loser almost never
-    /// lands in a gap, burns its whole 19s budget and fails while the winner
-    /// runs to completion. That is issue #140, and it is not a retry-count
-    /// problem -- more attempts on the same cadence starve just as reliably.
+    /// lands in a gap. Increasing attempts on that same cadence does not
+    /// improve fairness; raw contention now retries without a total limit.
     ///
-    /// Setting this polls at 1-25ms under a bounded deadline instead, which
+    /// Setting this polls at 1-25ms under a no-progress window instead, which
     /// catches the microsecond gap between the peer's transactions, so both
     /// processes interleave and make progress. It is opt-in because an
     /// interactive caller would rather report a busy store promptly than block
     /// a keystroke; batch writers are the ones that would rather wait.
     pub write_lock_wait: Option<Duration>,
+    /// No-progress window for contention retries: raw SQLite busy and a
+    /// fail-fast write lock that another handle holds. Writer progress (the
+    /// lock's `.progress` marker, the database, `-wal` or `-journal`) renews
+    /// it. A full window without progress ends the retries as [`StoreBusy`].
+    pub busy_wait: Duration,
 }
 
 impl Default for CozoGuardConfig {
     fn default() -> Self {
         Self {
-            max_attempts: DEFAULT_MAX_ATTEMPTS,
+            max_attempts: DEFAULT_BACKOFF_STEPS,
             initial_backoff: Duration::from_millis(DEFAULT_INITIAL_BACKOFF_MS),
             max_backoff: Duration::from_millis(DEFAULT_MAX_BACKOFF_MS),
             write_lock_path: None,
             write_lock_wait: None,
+            busy_wait: DEFAULT_WRITE_LOCK_WAIT,
         }
     }
 }
@@ -84,7 +101,8 @@ impl CozoGuardConfig {
 
     pub fn for_interactive_db_path(path: impl AsRef<Path>) -> Self {
         Self {
-            max_attempts: INTERACTIVE_MAX_ATTEMPTS,
+            max_attempts: INTERACTIVE_BACKOFF_STEPS,
+            busy_wait: INTERACTIVE_BUSY_WAIT,
             ..Self::for_db_path(path)
         }
     }
@@ -101,7 +119,7 @@ impl CozoGuardConfig {
         self
     }
 
-    /// Wait up to `wait` for the cross-process write lock rather than failing
+    /// Wait for a `wait` no-progress window for the cross-process lock rather than failing
     /// fast. See [`CozoGuardConfig::write_lock_wait`].
     pub fn with_write_lock_wait(mut self, wait: Duration) -> Self {
         self.write_lock_wait = Some(wait);
@@ -187,8 +205,9 @@ pub fn run_bound_script_guarded(
     mutability: ScriptMutability,
     context: &str,
 ) -> Result<NamedRows> {
-    let config = bound_guard_config(db, context)?;
-    run_script_guarded(db, script, params, mutability, context, &config)
+    // Bound store callers retain their operation while a queued acquisition
+    // pauses. Direct run_script_guarded remains the API for exposing a pause.
+    run_bound_script_resuming(db, script, params, mutability, context)
 }
 
 pub fn run_bound_guarded<T>(
@@ -217,8 +236,12 @@ pub fn open_sqlite_guarded(
     config: &CozoGuardConfig,
 ) -> Result<DbInstance> {
     run_guarded(context, ScriptMutability::Mutable, config, || {
-        DbInstance::new("sqlite", path, "")
-            .map_err(|error| anyhow!("open sqlite-backed Cozo store failed: {error}"))
+        DbInstance::new("sqlite", path, "").map_err(|error| {
+            anyhow!(
+                "open sqlite-backed Cozo store failed: {}",
+                render_cozo_error(&error)
+            )
+        })
     })
 }
 
@@ -238,8 +261,12 @@ pub async fn open_sqlite_guarded_async(
 ) -> Result<DbInstance> {
     let path = path.to_string();
     run_guarded_async(context, ScriptMutability::Mutable, config, move || {
-        DbInstance::new("sqlite", &path, "")
-            .map_err(|error| anyhow!("open sqlite-backed Cozo store failed: {error}"))
+        DbInstance::new("sqlite", &path, "").map_err(|error| {
+            anyhow!(
+                "open sqlite-backed Cozo store failed: {}",
+                render_cozo_error(&error)
+            )
+        })
     })
     .await
 }
@@ -254,7 +281,13 @@ pub fn run_script_guarded(
 ) -> Result<NamedRows> {
     run_guarded(context, mutability, config, || {
         db.run_script(script, params.clone(), mutability)
-            .map_err(|error| anyhow!("{error}"))
+            .map_err(|error| anyhow!(render_cozo_error(&error)))
+            .and_then(|rows| {
+                if matches!(mutability, ScriptMutability::Mutable) {
+                    progress::record(config);
+                }
+                Ok(rows)
+            })
     })
 }
 
@@ -267,82 +300,18 @@ pub async fn run_script_guarded_async(
     config: &CozoGuardConfig,
 ) -> Result<NamedRows> {
     let script = script.into();
+    let progress_config = config.clone();
     run_guarded_async(context, mutability, config, move || {
         db.run_script(&script, params.clone(), mutability)
-            .map_err(|error| anyhow!("{error}"))
+            .map_err(|error| anyhow!(render_cozo_error(&error)))
+            .and_then(|rows| {
+                if matches!(mutability, ScriptMutability::Mutable) {
+                    progress::record(&progress_config);
+                }
+                Ok(rows)
+            })
     })
     .await
-}
-
-pub fn run_guarded<T>(
-    context: &str,
-    mutability: ScriptMutability,
-    config: &CozoGuardConfig,
-    mut run: impl FnMut() -> Result<T>,
-) -> Result<T> {
-    let attempts = normalized_attempts(config);
-
-    for attempt in 0..attempts {
-        match run_guarded_once(context, mutability, config, &mut run) {
-            Ok(value) => return Ok(value),
-            Err(error) => {
-                let last_error = format!("{error:#}");
-                if let Some(backoff) =
-                    retry_backoff(context, config, attempt, attempts, &last_error)
-                {
-                    thread::sleep(backoff);
-                    continue;
-                }
-                return Err(anyhow!("{context}: {last_error}"));
-            }
-        }
-    }
-
-    unreachable!("a guarded retry loop always returns from an attempt")
-}
-
-pub async fn run_guarded_async<T, Run>(
-    context: &str,
-    mutability: ScriptMutability,
-    config: &CozoGuardConfig,
-    run: Run,
-) -> Result<T>
-where
-    T: Send + 'static,
-    Run: FnMut() -> Result<T> + Send + 'static,
-{
-    let attempts = normalized_attempts(config);
-    let context = context.to_string();
-    let config = config.clone();
-    let mut run = run;
-
-    for attempt in 0..attempts {
-        let attempt_context = context.clone();
-        let attempt_config = config.clone();
-        let attempt_result = tokio::task::spawn_blocking(move || {
-            let result = run_guarded_once(&attempt_context, mutability, &attempt_config, &mut run);
-            (run, result)
-        })
-        .await
-        .map_err(|error| anyhow!("{context}: guarded operation task failed: {error}"))?;
-        run = attempt_result.0;
-
-        match attempt_result.1 {
-            Ok(value) => return Ok(value),
-            Err(error) => {
-                let last_error = format!("{error:#}");
-                if let Some(backoff) =
-                    retry_backoff(&context, &config, attempt, attempts, &last_error)
-                {
-                    tokio::time::sleep(backoff).await;
-                    continue;
-                }
-                return Err(anyhow!("{context}: {last_error}"));
-            }
-        }
-    }
-
-    unreachable!("a guarded retry loop always returns from an attempt")
 }
 
 /// Make every guarded Cozo operation **on the calling thread** panic until
@@ -401,6 +370,11 @@ fn run_guarded_once<T>(
         );
     }
 
+    #[cfg(any(test, feature = "test-support"))]
+    if let Some(error) = busy_observer::failure(context) {
+        return Err(error);
+    }
+
     if matches!(mutability, ScriptMutability::Mutable) {
         let key = write_lock_key(config.write_lock_path.as_deref())?;
         if write_lock_is_held(&key) {
@@ -413,7 +387,7 @@ fn run_guarded_once<T>(
         if let (Some(path), Some(wait)) =
             (config.write_lock_path.as_deref(), config.write_lock_wait)
         {
-            return locking::with_write_lock_blocking(path, context, wait, || {
+            return acquire::with_write_lock_blocking(path, context, wait, || {
                 catch_guarded_operation(context, run)
             });
         }
@@ -461,9 +435,9 @@ pub fn with_write_lock_blocking<T>(
     with_write_lock_blocking_timeout(path, context, DEFAULT_WRITE_LOCK_WAIT, run)
 }
 
-/// [`with_write_lock_blocking`] with an explicit ceiling on the acquire.
+/// [`with_write_lock_blocking`] with an explicit no-progress window.
 ///
-/// `wait` bounds only the acquisition. Once the lock is held, `run` is allowed
+/// Writer progress resets `wait`. Once the lock is held, `run` is allowed
 /// to take as long as it needs.
 pub fn with_write_lock_blocking_timeout<T>(
     path: &Path,
@@ -471,7 +445,7 @@ pub fn with_write_lock_blocking_timeout<T>(
     wait: Duration,
     run: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    locking::with_write_lock_blocking(path, context, wait, run)
+    acquire::with_write_lock_blocking(path, context, wait, run)
 }
 
 pub fn in_guarded_operation() -> bool {

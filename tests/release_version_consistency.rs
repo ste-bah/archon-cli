@@ -99,12 +99,18 @@ fn v1_9_3_release_surfaces_are_synchronized() {
         Some(RELEASE_VERSION)
     );
 
-    let local_versions = local_lock_versions(&read("Cargo.lock"));
+    let release_packages = workspace_package_names();
+    // Vendored path dependencies also have no lockfile source. Their upstream
+    // versions are independent of the release managed by the declared members.
+    let local_versions: Vec<_> = local_lock_versions(&read("Cargo.lock"))
+        .into_iter()
+        .filter(|(name, _)| release_packages.contains(name))
+        .collect();
     let local_names: BTreeSet<_> = local_versions
         .iter()
         .map(|(name, _)| name.to_string())
         .collect();
-    assert_eq!(local_names, workspace_package_names());
+    assert_eq!(local_names, release_packages);
     assert!(
         local_versions
             .iter()

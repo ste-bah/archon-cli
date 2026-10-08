@@ -170,7 +170,7 @@ pub fn remove_document_queue_rows(db: &DbInstance, document_id: &str) -> Result<
         ScriptMutability::Mutable,
         "remove document queue rows",
     )
-    .map_err(|e| anyhow::anyhow!("remove document queue rows failed: {e}"))?;
+    .map_err(|e| e.context("remove document queue rows failed"))?;
     Ok(())
 }
 
@@ -183,7 +183,7 @@ pub fn prune_orphaned_queue_rows(db: &DbInstance) -> Result<usize> {
         ScriptMutability::Mutable,
         "prune orphaned doc index queue rows",
     )
-    .map_err(|e| anyhow::anyhow!("prune orphaned doc index queue rows failed: {e}"))?;
+    .map_err(|e| e.context("prune orphaned doc index queue rows failed"))?;
     Ok(result.rows.len())
 }
 
@@ -271,7 +271,7 @@ fn list_pending_doc_chunks(
         ScriptMutability::Immutable,
         "list pending doc chunks",
     )
-    .map_err(|e| anyhow::anyhow!("list pending doc chunks failed: {e}"))?;
+    .map_err(|e| e.context("list pending doc chunks failed"))?;
     Ok(result.rows.iter().map(|row| chunk_from_row(row)).collect())
 }
 
@@ -344,7 +344,7 @@ fn query_queue_rows(
         ScriptMutability::Immutable,
         "query doc index queue",
     )
-    .map_err(|e| anyhow::anyhow!("query doc index queue failed: {e}"))?;
+    .map_err(|e| e.context("query doc index queue failed"))?;
     Ok(result
         .rows
         .iter()
@@ -367,7 +367,7 @@ fn count_status(db: &DbInstance, status: &str, document_id: Option<&str>) -> Res
         ScriptMutability::Immutable,
         "count doc index queue",
     )
-    .map_err(|e| anyhow::anyhow!("count doc index queue failed: {e}"))?;
+    .map_err(|e| e.context("count doc index queue failed"))?;
     Ok(result.rows[0][0].get_int().unwrap_or(0) as usize)
 }
 
@@ -394,7 +394,7 @@ fn put_rows(db: &DbInstance, rows: &[QueueRow]) -> Result<()> {
         ScriptMutability::Mutable,
         "write doc index queue",
     )
-    .map_err(|e| anyhow::anyhow!("write doc index queue failed: {e}"))?;
+    .map_err(|e| e.context("write doc index queue failed"))?;
     Ok(())
 }
 

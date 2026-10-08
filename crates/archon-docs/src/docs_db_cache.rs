@@ -10,15 +10,27 @@ pub(crate) fn acquire(path: &Path) -> Result<Arc<GuardedDbInstance>> {
     acquire_with(path, open)
 }
 
+/// The guard settings of every persisted document store.
+///
+/// Batch ingestion queues for the cross-process write lock and waits while
+/// its holder or another writer makes progress. One full no-progress window
+/// ([`archon_cozo::DEFAULT_WRITE_LOCK_WAIT`]) ends a lock or busy wait as a
+/// typed `StoreBusy` pause that names the lock path; it never fails the job
+/// and never waits forever.
+pub(crate) fn guard_config(path: &Path) -> archon_cozo::CozoGuardConfig {
+    archon_cozo::CozoGuardConfig::for_db_path(path)
+        .with_write_lock_wait(archon_cozo::DEFAULT_WRITE_LOCK_WAIT)
+}
+
 fn open(path: &Path) -> Result<Arc<GuardedDbInstance>> {
     let display = path.display();
-    let config = archon_cozo::CozoGuardConfig::for_db_path(path);
+    let config = guard_config(path);
     let guarded = archon_cozo::open_sqlite_guarded_instance(
         &path.to_string_lossy(),
         "open document store",
         config,
     )
-    .map_err(|error| anyhow::anyhow!("open document store at {display}: {error}"))?;
+    .map_err(|error| error.context(format!("open document store at {display}")))?;
     crate::schema::ensure_doc_schema(&guarded)
         .with_context(|| format!("ensure document schema at {display}"))?;
     Ok(Arc::new(guarded))

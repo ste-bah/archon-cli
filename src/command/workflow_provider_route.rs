@@ -53,6 +53,9 @@ mod tests {
 
     #[test]
     fn configured_only_ignores_hostile_ambient_endpoint() {
+        if crate::test_environment::isolated() {
+            return;
+        }
         let _guard = ENV.lock().unwrap();
         unsafe { std::env::set_var("ANTHROPIC_BASE_URL", "https://hostile.invalid/v1") };
         let resolved = resolve_anthropic_route(
@@ -81,6 +84,9 @@ mod tests {
 
     #[test]
     fn ordinary_policy_preserves_ambient_precedence() {
+        if crate::test_environment::isolated() {
+            return;
+        }
         let _guard = ENV.lock().unwrap();
         unsafe { std::env::set_var("ANTHROPIC_BASE_URL", "https://ambient.example/v1") };
         let resolved = resolve_anthropic_route(

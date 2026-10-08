@@ -277,3 +277,9 @@ pub mod process_liveness;
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+#[cfg(unix)]
+pub mod process_nofile;
+
+// Build-control flags must agree with the child descriptor policy.
+pub mod jobserver;

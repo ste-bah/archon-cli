@@ -34,9 +34,7 @@ pub(crate) async fn run_pdf_ingest_pipeline(
         &chrono::Utc::now().to_rfc3339(),
         extract_result.processing_duration_ms,
     )
-    .map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    .map_err(DocsError::storage)?;
 
     let mut page_ids_by_number = BTreeMap::<u32, String>::new();
     let mut pages_by_number = BTreeMap::<u32, PageArtifact>::new();
@@ -60,9 +58,7 @@ pub(crate) async fn run_pdf_ingest_pipeline(
             height: None,
             provenance_record_id: String::new(),
         };
-        store::insert_page(db, &page).map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
+        store::insert_page(db, &page).map_err(DocsError::storage)?;
         page_ids_by_number.insert(po.page, page_id);
         pages_by_number.insert(po.page, page);
     }
@@ -181,9 +177,7 @@ pub(crate) async fn run_pdf_ingest_pipeline(
         };
         let edges = build_doc_lineage_edges(document_id, &ocr_artifact_id, &chunks, &page_ids);
         for edge in &edges {
-            store::insert_provenance_edge(db, edge).map_err(|e| DocsError::Storage {
-                message: e.to_string(),
-            })?;
+            store::insert_provenance_edge(db, edge).map_err(DocsError::storage)?;
         }
         // V-1: per-chunk integrity hashes + chunks_root provenance record (all ingest, both
         // chunkers) — gives every chunk tamper-evidence and fills the artifact's previously
@@ -195,11 +189,7 @@ pub(crate) async fn run_pdf_ingest_pipeline(
             }
             // Provenance input = the true source-FILE hash (doc_sources.content_hash), not the
             // extracted text — so the extract_text_spatial record's input_hashes name the input.
-            let source_sha256 = store::get_doc_source(db, document_id)
-                .ok()
-                .flatten()
-                .map(|d| d.content_hash)
-                .unwrap_or_default();
+            let source_sha256 = source_hash(db, document_id)?;
             crate::provenance_chunks::persist_chunk_integrity(
                 db,
                 &ocr_artifact_id,
@@ -308,11 +298,7 @@ pub(crate) async fn run_pdf_ingest_pipeline(
             // tamper-evidence a text doc gets (closes the previous "chunks but no root" gap).
             None => {
                 let ocr_artifact_id = format!("ocr-result-{ocr_run_id}");
-                let source_sha256 = store::get_doc_source(db, document_id)
-                    .ok()
-                    .flatten()
-                    .map(|d| d.content_hash)
-                    .unwrap_or_default();
+                let source_sha256 = source_hash(db, document_id)?;
                 store::insert_artifact(
                     db,
                     &ArtifactRecord {
@@ -324,9 +310,7 @@ pub(crate) async fn run_pdf_ingest_pipeline(
                         provenance_record_id: String::new(),
                     },
                 )
-                .map_err(|e| DocsError::Storage {
-                    message: e.to_string(),
-                })?;
+                .map_err(DocsError::storage)?;
                 crate::provenance_chunks::persist_chunk_integrity(
                     db,
                     &ocr_artifact_id,
@@ -354,9 +338,20 @@ pub(crate) async fn run_pdf_ingest_pipeline(
         image_vlm_failures: outcome.pdf_image_vlm_failures as u32,
         pages_rendered: outcome.pdf_pages_rendered as u32,
     };
-    store::upsert_pdf_metrics(db, &metrics).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    store::upsert_pdf_metrics(db, &metrics).map_err(DocsError::storage)?;
 
     Ok(outcome)
 }
+
+fn source_hash(db: &DbInstance, document_id: &str) -> Result<String, DocsError> {
+    store::get_doc_source(db, document_id)
+        .map_err(DocsError::storage)?
+        .map(|source| source.content_hash)
+        .ok_or_else(|| DocsError::Storage {
+            message: format!("PDF ingest references absent document: {document_id}"),
+        })
+}
+
+#[cfg(test)]
+#[path = "ingest_pdf_source_tests.rs"]
+mod source_tests;

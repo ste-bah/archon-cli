@@ -29,7 +29,7 @@ pub fn insert_chunk(db: &DbInstance, chunk: &ChunkArtifact) -> Result<()> {
         ScriptMutability::Mutable,
         "insert doc_chunks",
     )
-    .map_err(|e| anyhow::anyhow!("insert doc_chunks failed: {e}"))?;
+    .map_err(|e| e.context("insert doc_chunks failed"))?;
     crate::index_queue::enqueue_pending_chunk(db, chunk, 0)?;
     Ok(())
 }
@@ -38,15 +38,16 @@ pub fn list_chunks_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<Chu
     let mut params = BTreeMap::new();
     params.insert("did".into(), DataValue::from(document_id));
 
-    let result = db
-        .run_script(
-            "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] \
-             := *doc_chunks{chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status}, \
-             document_id = $did",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list chunks failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status] \
+         := *doc_chunks{chunk_id, document_id, artifact_id, chunk_index, page_start, page_end, content, content_hash, embedding_status}, \
+         document_id = $did",
+        params,
+        ScriptMutability::Immutable,
+        "list chunks for doc",
+    )
+    .map_err(|e| e.context("list chunks failed"))?;
 
     Ok(result
         .rows
@@ -79,7 +80,7 @@ pub fn get_chunk_by_id(db: &DbInstance, chunk_id: &str) -> Result<Option<ChunkAr
             ScriptMutability::Immutable,
             "get chunk by id",
         )
-        .map_err(|e| anyhow::anyhow!("get chunk by id failed: {e}"))?;
+        .map_err(|e| e.context("get chunk by id failed"))?;
 
     if result.rows.is_empty() {
         return Ok(None);
@@ -101,13 +102,14 @@ pub fn get_chunk_by_id(db: &DbInstance, chunk_id: &str) -> Result<Option<ChunkAr
 pub fn chunk_hash_exists(db: &DbInstance, content_hash: &str) -> Result<bool> {
     let mut params = BTreeMap::new();
     params.insert("ch".into(), DataValue::from(content_hash));
-    let result = db
-        .run_script(
-            "?[chunk_id] := *doc_chunks{chunk_id, content_hash}, content_hash = $ch",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("chunk hash check failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[chunk_id] := *doc_chunks{chunk_id, content_hash}, content_hash = $ch",
+        params,
+        ScriptMutability::Immutable,
+        "chunk hash exists",
+    )
+    .map_err(|e| e.context("chunk hash check failed"))?;
     Ok(!result.rows.is_empty())
 }
 
@@ -129,7 +131,7 @@ pub fn insert_chunk_spatial(db: &DbInstance, s: &ChunkSpatial) -> Result<()> {
         ScriptMutability::Mutable,
         "insert doc_chunk_spatial",
     )
-    .map_err(|e| anyhow::anyhow!("insert doc_chunk_spatial failed: {e}"))?;
+    .map_err(|e| e.context("insert doc_chunk_spatial failed"))?;
     Ok(())
 }
 
@@ -146,7 +148,7 @@ pub fn get_chunk_spatial(db: &DbInstance, chunk_id: &str) -> Result<Option<Chunk
         ScriptMutability::Immutable,
         "get doc_chunk_spatial",
     )
-    .map_err(|e| anyhow::anyhow!("get doc_chunk_spatial failed: {e}"))?;
+    .map_err(|e| e.context("get doc_chunk_spatial failed"))?;
     if result.rows.is_empty() {
         return Ok(None);
     }
@@ -177,7 +179,7 @@ pub fn insert_chunk_hashes(db: &DbInstance, h: &ChunkHashes) -> Result<()> {
         ScriptMutability::Mutable,
         "insert doc_chunk_hashes",
     )
-    .map_err(|e| anyhow::anyhow!("insert doc_chunk_hashes failed: {e}"))?;
+    .map_err(|e| e.context("insert doc_chunk_hashes failed"))?;
     Ok(())
 }
 
@@ -193,7 +195,7 @@ pub fn get_chunk_hashes(db: &DbInstance, chunk_id: &str) -> Result<Option<ChunkH
         ScriptMutability::Immutable,
         "get doc_chunk_hashes",
     )
-    .map_err(|e| anyhow::anyhow!("get doc_chunk_hashes failed: {e}"))?;
+    .map_err(|e| e.context("get doc_chunk_hashes failed"))?;
     if result.rows.is_empty() {
         return Ok(None);
     }
@@ -219,7 +221,7 @@ pub fn get_doc_commit_hashes(db: &DbInstance, document_id: &str) -> Result<Vec<S
         ScriptMutability::Immutable,
         "get doc commit hashes",
     )
-    .map_err(|e| anyhow::anyhow!("get doc commit hashes failed: {e}"))?;
+    .map_err(|e| e.context("get doc commit hashes failed"))?;
     Ok(result
         .rows
         .iter()

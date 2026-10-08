@@ -145,10 +145,12 @@ pub fn answer_with_timeref(
 fn lookup_video_timecode(db: &DbInstance, chunk_id: &str) -> Result<Option<TimecodeMs>, DocsError> {
     let mut params = std::collections::BTreeMap::new();
     params.insert("cid".into(), DataValue::from(chunk_id));
-    let result = match db.run_script(
+    let result = match crate::cozo_retry::run_script_guarded(
+        db,
         "?[start] := *video_chunk_timeref{chunk_id, timestamp_start_ms: start}, chunk_id = $cid",
         params,
         ScriptMutability::Immutable,
+        "lookup video timecode",
     ) {
         Ok(result) => result,
         Err(_) => return Ok(None),

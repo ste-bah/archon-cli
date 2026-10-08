@@ -25,7 +25,7 @@ pub fn insert_doc_source(db: &DbInstance, doc: &SourceDocument) -> Result<()> {
         ScriptMutability::Mutable,
         "insert doc_sources",
     )
-    .map_err(|e| anyhow::anyhow!("insert doc_sources failed: {e}"))?;
+    .map_err(|e| e.context("insert doc_sources failed"))?;
     Ok(())
 }
 
@@ -33,15 +33,16 @@ pub fn get_doc_source(db: &DbInstance, document_id: &str) -> Result<Option<Sourc
     let mut params = BTreeMap::new();
     params.insert("did".into(), DataValue::from(document_id));
 
-    let result = db
-        .run_script(
-            "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
-             := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}, \
-             document_id = $did",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get doc_sources failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
+         := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}, \
+         document_id = $did",
+        params,
+        ScriptMutability::Immutable,
+        "get doc source",
+    )
+    .map_err(|e| e.context("get doc_sources failed"))?;
 
     if result.rows.is_empty() {
         return Ok(None);
@@ -58,14 +59,15 @@ pub fn get_doc_source(db: &DbInstance, document_id: &str) -> Result<Option<Sourc
 }
 
 pub fn list_doc_sources(db: &DbInstance) -> Result<Vec<SourceDocument>> {
-    let result = db
-        .run_script(
-            "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
-             := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}",
-            Default::default(),
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list doc_sources failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
+         := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}",
+        Default::default(),
+        ScriptMutability::Immutable,
+        "list doc sources",
+    )
+    .map_err(|e| e.context("list doc_sources failed"))?;
 
     Ok(result
         .rows
@@ -82,11 +84,17 @@ pub fn list_doc_sources(db: &DbInstance) -> Result<Vec<SourceDocument>> {
 }
 
 /// Outcome of [`reserve_doc_source_by_hash`].
-#[derive(Clone, Debug)]
-pub enum HashReservation {
-    /// Nothing owned the hash, so the caller's document was registered.
-    Registered,
-    /// Another document already owned the hash; nothing was written.
+#[derive(Debug)]
+pub enum HashReservation<'a> {
+    /// Nothing owned the hash, so the caller's document was registered and
+    /// the caller owns its ingest.
+    Registered(super::IngestClaim<'a>),
+    /// An earlier ingest of this hash registered the document and stopped
+    /// before its final status (a pause or a crash). Nothing owns it, so the
+    /// caller now owns it and must finish it in place.
+    Resume(Box<SourceDocument>, super::IngestClaim<'a>),
+    /// Another document already owned the hash, finished or still in a live
+    /// ingest; nothing was written.
     Duplicate(Box<SourceDocument>),
 }
 
@@ -97,18 +105,35 @@ pub enum HashReservation {
 /// therefore a read followed by a write, and it only holds if nothing can write
 /// between the two. Callers must not open-code that pair — this is the one place
 /// the window exists, so it is the one place that closes it.
-pub fn reserve_doc_source_by_hash(
+///
+/// The ingest claim in `slot` is taken in the same window: a registration
+/// whose claim is free belongs to an interrupted ingest and is resumed, and
+/// one whose claim is held belongs to a live ingest and is a duplicate.
+pub fn reserve_doc_source_by_hash<'a>(
     db: &DbInstance,
     doc: &SourceDocument,
-) -> Result<HashReservation> {
-    with_reservation_lock_held(db, || {
-        if let Some(existing) = get_doc_by_hash(db, &doc.content_hash)? {
-            return Ok(HashReservation::Duplicate(Box::new(existing)));
+    slot: &'a mut super::ClaimSlot,
+) -> Result<HashReservation<'a>> {
+    with_reservation_lock_held(db, move || match get_doc_by_hash(db, &doc.content_hash)? {
+        Some(existing) if !super::ingest_claim::is_resumable(&existing.status) => {
+            Ok(HashReservation::Duplicate(Box::new(existing)))
         }
-        #[cfg(test)]
-        super::hash_reservation_test_hooks::wait_before_reservation(&doc.content_hash);
-        insert_doc_source(db, doc)?;
-        Ok(HashReservation::Registered)
+        Some(existing) => Ok(match slot.try_claim()? {
+            Some(claim) => HashReservation::Resume(Box::new(existing), claim),
+            None => HashReservation::Duplicate(Box::new(existing)),
+        }),
+        None => {
+            let claim = slot.try_claim()?.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "content hash {} is claimed by a live ingest that has no registration",
+                    doc.content_hash
+                )
+            })?;
+            #[cfg(test)]
+            super::hash_reservation_test_hooks::wait_before_reservation(&doc.content_hash);
+            insert_doc_source(db, doc)?;
+            Ok(HashReservation::Registered(claim))
+        }
     })
 }
 
@@ -116,9 +141,9 @@ const RESERVATION_CONTEXT: &str = "reserve document content hash";
 
 /// Run `reserve` with exclusive access to the backing database.
 ///
-/// The blocking write-lock variant, not the fail-fast one: losing this race is
-/// not recoverable by retrying, because the whole point is that the read and the
-/// write must not be interleaved. It is re-entrant, so a reservation nested
+/// The blocking write lock keeps the read and write in one exclusive window.
+/// A wait continues while the holder progresses and ends as a typed pause
+/// after one no-progress window. It is re-entrant, so a reservation nested
 /// inside an already-guarded mutable operation on the same database runs inline
 /// rather than blocking on the lock its own thread holds.
 ///
@@ -127,13 +152,20 @@ const RESERVATION_CONTEXT: &str = "reserve document content hash";
 /// config has no path either, but that is a mistake rather than a case to
 /// tolerate, and `bound_guard_config` already rejects it here for the same
 /// reason every `:put` in this crate does.
-fn with_reservation_lock_held<T>(
+pub(super) fn with_reservation_lock_held<T>(
     db: &DbInstance,
     reserve: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
     let config = archon_cozo::bound_guard_config(db, RESERVATION_CONTEXT)?;
     match config.write_lock_path.as_deref() {
-        Some(path) => archon_cozo::with_write_lock_blocking(path, RESERVATION_CONTEXT, reserve),
+        Some(path) => archon_cozo::with_write_lock_resuming(
+            path,
+            RESERVATION_CONTEXT,
+            config
+                .write_lock_wait
+                .unwrap_or(archon_cozo::DEFAULT_WRITE_LOCK_WAIT),
+            reserve,
+        ),
         None => reserve(),
     }
 }
@@ -142,15 +174,16 @@ fn with_reservation_lock_held<T>(
 pub fn get_doc_by_hash(db: &DbInstance, content_hash: &str) -> Result<Option<SourceDocument>> {
     let mut params = BTreeMap::new();
     params.insert("ch".into(), DataValue::from(content_hash));
-    let result = db
-        .run_script(
-            "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
-             := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}, \
-             content_hash = $ch",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("get doc by hash failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[document_id, source_path, media_type, content_hash, discovered_at, status] \
+         := *doc_sources{document_id, source_path, media_type, content_hash, discovered_at, status}, \
+         content_hash = $ch",
+        params,
+        ScriptMutability::Immutable,
+        "get doc by hash",
+    )
+    .map_err(|e| e.context("get doc by hash failed"))?;
     if result.rows.is_empty() {
         return Ok(None);
     }
@@ -198,20 +231,21 @@ pub fn assign_document_to_kb(db: &DbInstance, kb_id: &str, document_id: &str) ->
         ScriptMutability::Mutable,
         "assign document to kb",
     )
-    .map_err(|e| anyhow::anyhow!("assign document to kb failed: {e}"))?;
+    .map_err(|e| e.context("assign document to kb failed"))?;
     Ok(())
 }
 
 pub fn list_kb_document_ids(db: &DbInstance, kb_id: &str) -> Result<Vec<String>> {
     let mut params = BTreeMap::new();
     params.insert("kid".into(), DataValue::from(kb_id));
-    let result = db
-        .run_script(
-            "?[document_id] := *doc_kb_memberships{kb_id, document_id}, kb_id = $kid",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list kb documents failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[document_id] := *doc_kb_memberships{kb_id, document_id}, kb_id = $kid",
+        params,
+        ScriptMutability::Immutable,
+        "list kb document ids",
+    )
+    .map_err(|e| e.context("list kb documents failed"))?;
     Ok(result
         .rows
         .iter()
@@ -252,7 +286,7 @@ pub fn insert_ocr_run(db: &DbInstance, run: &OcrRun) -> Result<()> {
         ScriptMutability::Mutable,
         "insert doc_ocr_runs",
     )
-    .map_err(|e| anyhow::anyhow!("insert doc_ocr_runs failed: {e}"))?;
+    .map_err(|e| e.context("insert doc_ocr_runs failed"))?;
     Ok(())
 }
 
@@ -284,15 +318,16 @@ pub fn update_ocr_run_completion(
 fn list_ocr_runs_for_ocr_id(db: &DbInstance, ocr_run_id: &str) -> Result<Vec<OcrRun>> {
     let mut params = BTreeMap::new();
     params.insert("oid".into(), DataValue::from(ocr_run_id));
-    let result = db
-        .run_script(
-            "?[ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms] \
-             := *doc_ocr_runs{ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms}, \
-             ocr_run_id = $oid",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list ocr_runs by id failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms] \
+         := *doc_ocr_runs{ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms}, \
+         ocr_run_id = $oid",
+        params,
+        ScriptMutability::Immutable,
+        "list ocr runs for ocr id",
+    )
+    .map_err(|e| e.context("list ocr_runs by id failed"))?;
     Ok(result
         .rows
         .iter()
@@ -323,15 +358,16 @@ pub fn list_ocr_runs_for_doc(db: &DbInstance, document_id: &str) -> Result<Vec<O
     let mut params = BTreeMap::new();
     params.insert("did".into(), DataValue::from(document_id));
 
-    let result = db
-        .run_script(
-            "?[ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms] \
-             := *doc_ocr_runs{ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms}, \
-             document_id = $did",
-            params,
-            ScriptMutability::Immutable,
-        )
-        .map_err(|e| anyhow::anyhow!("list ocr_runs failed: {e}"))?;
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        "?[ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms] \
+         := *doc_ocr_runs{ocr_run_id, document_id, provider, mode, status, started_at, completed_at, duration_ms}, \
+         document_id = $did",
+        params,
+        ScriptMutability::Immutable,
+        "list ocr runs for doc",
+    )
+    .map_err(|e| e.context("list ocr_runs failed"))?;
 
     Ok(result
         .rows

@@ -6,6 +6,9 @@
 // phase-5 report, a working document held outside the repository.
 #![allow(clippy::too_many_arguments)]
 
+#[cfg(test)]
+mod test_environment;
+
 mod agent_handle;
 pub(crate) mod cli_args;
 mod command;
@@ -31,8 +34,20 @@ use clap::Parser;
 
 use cli_args::Cli;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // SAFETY: no runtime or application threads exist yet. A limit that
+    // cannot be lowered is reported once logging runs; it never stops startup.
+    #[cfg(unix)]
+    unsafe {
+        archon_shell::process_nofile::initialize();
+    }
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(main_outcome())
+}
+
+async fn main_outcome() -> Result<()> {
     let outcome = run().await;
     // Issue 338: a command that read nothing over a task-set publish no read
     // could settle ends as the host-command contract's unsettled publish, so

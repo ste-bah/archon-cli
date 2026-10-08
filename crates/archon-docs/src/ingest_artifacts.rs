@@ -26,9 +26,7 @@ pub(crate) fn persist_text_artifact_chunks(
         created_at: chrono::Utc::now().to_rfc3339(),
         provenance_record_id: String::new(),
     };
-    store::insert_artifact(db, &artifact).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    store::insert_artifact(db, &artifact).map_err(DocsError::storage)?;
 
     let page_chunks = chunk_with_page_anchors(text, page_offsets);
     let chunks = match chunk_id_prefix {
@@ -51,18 +49,14 @@ pub(crate) fn persist_text_artifact_chunks(
     };
 
     for chunk in &chunks {
-        store::insert_chunk(db, chunk).map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
+        store::insert_chunk(db, chunk).map_err(DocsError::storage)?;
     }
 
     store::insert_provenance_edge(
         db,
         &make_edge(artifact_id, document_id, ProvenanceEdgeType::DerivedFrom),
     )
-    .map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    .map_err(DocsError::storage)?;
 
     Ok(chunks)
 }

@@ -440,3 +440,7 @@ fn timeout_message_names_the_limit_that_fired() {
         );
     }
 }
+
+#[cfg(unix)]
+#[path = "bash_jobserver_tests.rs"]
+mod jobserver_tests;

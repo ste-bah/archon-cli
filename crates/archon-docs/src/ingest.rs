@@ -85,9 +85,7 @@ pub async fn ingest_file_with_policy(
     path: &Path,
     policy: &archon_policy::EffectivePolicy,
 ) -> Result<IngestFileResult, DocsError> {
-    ensure_doc_schema(db).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    ensure_doc_schema(db).map_err(DocsError::storage)?;
 
     let source_path = path.to_string_lossy().to_string();
     let media_type = detect_media_type(path);
@@ -121,35 +119,27 @@ pub async fn ingest_file_with_policy(
         status: DocumentStatus::Discovered,
     };
 
+    let mut claim_slot =
+        store::ClaimSlot::for_content(db, &content_hash).map_err(DocsError::storage)?;
     let reservation =
-        store::reserve_doc_source_by_hash(db, &doc).map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
+        store::reserve_doc_source_by_hash(db, &doc, &mut claim_slot).map_err(DocsError::storage)?;
 
-    if let store::HashReservation::Duplicate(existing) = reservation {
-        info!(
-            path = %source_path,
-            hash = %content_hash,
-            existing = %existing.document_id,
-            "Skipping duplicate document"
-        );
-        return Ok(IngestFileResult {
-            document_id: existing.document_id,
-            was_new: false,
-            ocr_skipped: false,
-            pipeline_failed: false,
-            warnings: Vec::new(),
-            image_embeddings_stored: 0,
-            vlm_descriptions: 0,
-            pdf_embedded_images_extracted: 0,
-            pdf_embedded_images_skipped_filter: 0,
-            pdf_image_ocr_runs: 0,
-            pdf_image_vlm_failures: 0,
-            pdf_image_ocr_failures: 0,
-            pdf_pages_rendered: 0,
-            pdf_coord: None,
-        });
-    }
+    let (document_id, claim) = match reservation {
+        store::HashReservation::Registered(claim) => (document_id, claim),
+        store::HashReservation::Resume(existing, claim) => {
+            crate::ingest_resume::resume_registration(db, &existing, &source_path)?;
+            (existing.document_id, claim)
+        }
+        store::HashReservation::Duplicate(existing) => {
+            info!(
+                path = %source_path,
+                hash = %content_hash,
+                existing = %existing.document_id,
+                "Skipping duplicate document"
+            );
+            return Ok(crate::ingest_resume::duplicate_result(existing.document_id));
+        }
+    };
 
     // Create processing job
     let job = ProcessingJob {
@@ -161,9 +151,7 @@ pub async fn ingest_file_with_policy(
         completed_at: None,
         error_message: None,
     };
-    store::insert_processing_job(db, &job).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    store::insert_processing_job(db, &job).map_err(DocsError::storage)?;
 
     // ── OCR → chunk → page → provenance pipeline ──────────────────
     let mut ocr_skipped = false;
@@ -171,11 +159,8 @@ pub async fn ingest_file_with_policy(
     let mut outcome = PipelineOutcome::default();
     if is_ocr_runnable(media_type) {
         // Transition to Ingesting before starting the pipeline
-        store::update_doc_status(db, &document_id, &DocumentStatus::Ingesting).map_err(|e| {
-            DocsError::Storage {
-                message: e.to_string(),
-            }
-        })?;
+        store::update_doc_status(db, &document_id, &DocumentStatus::Ingesting)
+            .map_err(DocsError::storage)?;
 
         match run_ingest_pipeline_with_bytes(
             db,
@@ -189,20 +174,16 @@ pub async fn ingest_file_with_policy(
         {
             Ok(pipeline_outcome) => {
                 outcome = pipeline_outcome;
-                store::update_doc_status(db, &document_id, &DocumentStatus::Ingested).map_err(
-                    |e| DocsError::Storage {
-                        message: e.to_string(),
-                    },
-                )?;
+                store::finish_claimed_ingest(db, &document_id, &DocumentStatus::Ingested, claim)
+                    .map_err(DocsError::storage)?;
             }
+            // The claim is released, not completed: the next run resumes it.
+            Err(e @ DocsError::StoreBusy(_)) => return Err(e),
             Err(e) => {
                 pipeline_failed = true;
                 outcome.warnings.push(format!("OCR pipeline failed: {e}"));
-                store::update_doc_status(db, &document_id, &DocumentStatus::Failed).map_err(
-                    |e| DocsError::Storage {
-                        message: e.to_string(),
-                    },
-                )?;
+                store::finish_claimed_ingest(db, &document_id, &DocumentStatus::Failed, claim)
+                    .map_err(DocsError::storage)?;
                 info!(
                     document_id = %document_id,
                     error = %e,
@@ -219,11 +200,8 @@ pub async fn ingest_file_with_policy(
             media_type = %media_type,
             "OCR pipeline skipped for supported non-OCR media"
         );
-        store::update_doc_status(db, &document_id, &DocumentStatus::Ingested).map_err(|e| {
-            DocsError::Storage {
-                message: e.to_string(),
-            }
-        })?;
+        store::finish_claimed_ingest(db, &document_id, &DocumentStatus::Ingested, claim)
+            .map_err(DocsError::storage)?;
     }
 
     Ok(IngestFileResult {
@@ -271,9 +249,7 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
         completed_at: None,
         duration_ms: None,
     };
-    store::insert_ocr_run(db, &ocr_run).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    store::insert_ocr_run(db, &ocr_run).map_err(DocsError::storage)?;
 
     if media_type == "application/pdf" {
         return crate::ingest_pdf::run_pdf_ingest_pipeline(
@@ -362,9 +338,7 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
             &completed_at,
             extract_result.processing_duration_ms,
         )
-        .map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
+        .map_err(DocsError::storage)?;
     }
 
     let full_text = extract_result.full_text;
@@ -389,9 +363,7 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
             height: None,
             provenance_record_id: String::new(),
         };
-        store::insert_page(db, &page).map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
+        store::insert_page(db, &page).map_err(DocsError::storage)?;
         page_ids.push(page_id);
     }
 
@@ -405,9 +377,7 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
         created_at: chrono::Utc::now().to_rfc3339(),
         provenance_record_id: String::new(),
     };
-    store::insert_artifact(db, &ocr_artifact).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    store::insert_artifact(db, &ocr_artifact).map_err(DocsError::storage)?;
 
     // 5. Chunk text with page anchors
     let page_chunks = chunk_with_page_anchors(&full_text, &page_offsets);
@@ -415,17 +385,13 @@ pub(crate) async fn run_ingest_pipeline_with_bytes(
     // 6. Build chunk artifacts keyed to the OCR-result artifact
     let chunk_artifacts = build_chunk_artifacts(document_id, &ocr_artifact_id, &page_chunks);
     for chunk in &chunk_artifacts {
-        store::insert_chunk(db, chunk).map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
+        store::insert_chunk(db, chunk).map_err(DocsError::storage)?;
     }
 
     // 7. Build and store provenance edges (chunk→page, artifact→document)
     let edges = build_doc_lineage_edges(document_id, &ocr_artifact_id, &chunk_artifacts, &page_ids);
     for edge in &edges {
-        store::insert_provenance_edge(db, edge).map_err(|e| DocsError::Storage {
-            message: e.to_string(),
-        })?;
+        store::insert_provenance_edge(db, edge).map_err(DocsError::storage)?;
     }
 
     if is_image_media_type(media_type) {

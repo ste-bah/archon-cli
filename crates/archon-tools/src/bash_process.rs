@@ -76,6 +76,11 @@ pub(super) async fn prepare_command(
             .join("\n");
         format!("{exports}\n{command}")
     };
+    for (name, value) in &mut env_vars {
+        *value = archon_shell::jobserver::sanitize_variable(name.as_ref(), value.clone().into())
+            .into_string()
+            .expect("sanitization preserves UTF-8");
+    }
     Ok(PreparedBashCommand {
         command,
         env_vars,
@@ -291,10 +296,9 @@ pub(super) fn spawn_bash_child(
 ) -> std::io::Result<Box<dyn ChildWrapper>> {
     let boundary = prepared.write_boundary.as_ref().map(|b| &b.applied);
     let mut command = contained_bash_command(&prepared.command, boundary);
+    archon_shell::spawn::replace_environment(command.as_std_mut(), prepared.env_vars.clone());
     command
         .current_dir(&ctx.working_dir)
-        .env_clear()
-        .envs(prepared.env_vars.clone())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());

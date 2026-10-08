@@ -63,9 +63,18 @@ pub fn search_images(
             ef: 50,
             bind_distance: distance
         }";
-    let result = match db.run_script(script, params, ScriptMutability::Immutable) {
+    let result = match crate::cozo_retry::run_script_guarded(
+        db,
+        script,
+        params,
+        ScriptMutability::Immutable,
+        "search images",
+    ) {
         Ok(r) => r,
         Err(e) => {
+            if e.is::<archon_cozo::StoreBusy>() {
+                return Err(DocsError::storage(e));
+            }
             // No image has ever been embedded → vec_page_images doesn't exist yet. Treat this
             // as "no results" (mirrors the text-search count_indexed guard) instead of a hard
             // CLI error.
@@ -79,16 +88,27 @@ pub fn search_images(
         }
     };
 
+    resolve_hits(db, result)
+}
+
+fn resolve_hits(
+    db: &DbInstance,
+    result: cozo::NamedRows,
+) -> Result<Vec<ImageSearchResult>, DocsError> {
     let mut results = Vec::with_capacity(result.rows.len());
     for row in &result.rows {
         let page_id = row[0].get_str().unwrap_or("").to_string();
         let distance = row[1].get_float().unwrap_or(1.0);
-        let (document_id, page_number) = resolve_page(db, &page_id);
+        let (document_id, page_number) =
+            resolve_page(db, &page_id)?.ok_or_else(|| DocsError::Retrieval {
+                message: format!("image hit references absent page: {page_id}"),
+            })?;
         let source_path = store::get_doc_source(db, &document_id)
-            .ok()
-            .flatten()
-            .map(|d| d.source_path)
-            .unwrap_or_default();
+            .map_err(DocsError::storage)?
+            .ok_or_else(|| DocsError::Retrieval {
+                message: format!("image page references absent document: {document_id}"),
+            })?
+            .source_path;
         results.push(ImageSearchResult {
             page_id,
             document_id,
@@ -109,7 +129,7 @@ pub fn search_images(
 /// Resolve a `page_id` to its `(document_id, page_number)` via `doc_pages`. PDF figure
 /// embeddings use a `"{page_id}-img{N}"` key (multiple figures per page); strip that suffix
 /// back to the real page before lookup so figure hits still resolve to their PDF + page.
-fn resolve_page(db: &DbInstance, page_id: &str) -> (String, u32) {
+fn resolve_page(db: &DbInstance, page_id: &str) -> Result<Option<(String, u32)>, DocsError> {
     let lookup = match page_id.rsplit_once("-img") {
         Some((base, n)) if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) => base,
         _ => page_id,
@@ -118,17 +138,22 @@ fn resolve_page(db: &DbInstance, page_id: &str) -> (String, u32) {
     params.insert("pid".to_string(), DataValue::from(lookup));
     let script = "?[document_id, page_number] := \
                   *doc_pages{page_id, document_id, page_number}, page_id = $pid";
-    match db.run_script(script, params, ScriptMutability::Immutable) {
-        Ok(r) => r
-            .rows
-            .first()
-            .map(|row| {
-                (
-                    row[0].get_str().unwrap_or("").to_string(),
-                    row[1].get_int().unwrap_or(0) as u32,
-                )
-            })
-            .unwrap_or_default(),
-        Err(_) => (String::new(), 0),
-    }
+    let result = crate::cozo_retry::run_script_guarded(
+        db,
+        script,
+        params,
+        ScriptMutability::Immutable,
+        "resolve page",
+    )
+    .map_err(DocsError::storage)?;
+    Ok(result.rows.first().map(|row| {
+        (
+            row[0].get_str().unwrap_or("").to_string(),
+            row[1].get_int().unwrap_or(0) as u32,
+        )
+    }))
 }
+
+#[cfg(test)]
+#[path = "retrieval_image_contention_tests.rs"]
+mod contention_tests;

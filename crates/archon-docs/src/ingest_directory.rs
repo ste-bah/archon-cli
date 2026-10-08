@@ -45,9 +45,7 @@ pub async fn ingest_directory_with_policy(
     dir: &Path,
     policy: &archon_policy::EffectivePolicy,
 ) -> Result<IngestResult> {
-    ensure_doc_schema(db).map_err(|e| DocsError::Storage {
-        message: e.to_string(),
-    })?;
+    ensure_doc_schema(db)?;
 
     let mut result = IngestResult::default();
 
@@ -110,6 +108,7 @@ pub async fn ingest_directory_with_policy(
             Ok(_) => {
                 result.sources_skipped_duplicate += 1;
             }
+            Err(DocsError::StoreBusy(busy)) => return Err(busy.into()),
             Err(e) => {
                 result.sources_failed += 1;
                 result.errors.push(format!("{}: {}", path.display(), e));
