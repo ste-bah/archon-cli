@@ -302,6 +302,8 @@ fn project_relative(root: &Path, path: &Path) -> String {
 pub(crate) mod check_sources;
 #[path = "workflow_acceptance_executability.rs"]
 pub(crate) mod executability;
+#[path = "workflow_acceptance_live_root.rs"]
+pub(crate) mod live_root;
 #[path = "workflow_task_set_publish.rs"]
 mod publish;
 #[path = "workflow_acceptance_reauthor.rs"]

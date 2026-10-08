@@ -102,19 +102,7 @@ async function workflow(w) {
     author: authorAcceptanceEntries,
     capability: "freeze-acceptance",
     retryScopes: new Set(["candidate_artifact"]),
-    prompt: () => [
-      "Author exactly one acceptance entry identified below, not the whole contract.",
-      `Read the PRD at ${args.prdPath}.`,
-      groundingRules(),
-      "Use the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.",
-      "Return one JSON object with id, criterion, check, gap_permitted, judgment. The two examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.",
-      ENTRY_SHAPES,
-      "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
-      "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
-      "covers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.",
-      "Your entire reply must be the entry itself: the raw JSON object, starting with { and ending with }. Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
-      "Do not run commands or write files."
-    ].join("\n")
+    prompt: acceptanceAuthorPrompt
   });
 
   const skeleton = frozen.skeleton ? await verifyFrozenStage(w, "verify-frozen-skeleton") : await authorCandidate(w, skeletonPolicy([]));

@@ -249,10 +249,10 @@ async fn a_check_naming_a_live_root_is_refused_unrun() {
     let copies = tempfile::tempdir().unwrap();
     let probe = round_at(&trees, &trees.base, copies.path());
     let findings = probe.script_defects(&contract, &trees.ids()).await;
-    assert!(
-        findings
-            .get("AC-7-002")
-            .is_some_and(|f| f.contains("names the live root")),
+    // Issue 366: the author step's entry validator gives this same text.
+    assert_eq!(
+        findings.get("AC-7-002"),
+        Some(&crate::command::workflow_task_set::live_root::live_root_finding("AC-7-002", &live)),
         "{findings:?}"
     );
     trees.assert_live_untouched(copies.path());

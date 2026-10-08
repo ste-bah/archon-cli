@@ -208,6 +208,13 @@ fn shape_progress_regression_suite_passes() {
     node_suite_passes("workflow_decompose_shape_progress_test.cjs");
 }
 
+/// Issue 366: the author is told where a check runs and that its paths are
+/// relative, and the author step gives the entry validator the live roots.
+#[test]
+fn check_paths_regression_suite_passes() {
+    node_suite_passes("workflow_decompose_check_paths_test.cjs");
+}
+
 // --- round 5: deterministic refusals and gate operational errors -------------
 
 /// A refusal the host produced (not a model's text) naming the `n`-th task.
