@@ -84,6 +84,9 @@ pub async fn reprocess_document_with_policy(
             update_reprocess_job(db, &job_id, document_id, "completed", None)?;
             outcome
         }
+        // A busy store is a resumable pause, as in ingest: the claim is
+        // released, not completed, so the next run resumes this document.
+        Err(e @ DocsError::StoreBusy(_)) => return Err(e),
         Err(err) => {
             pipeline_failed = true;
             store::finish_claimed_ingest(db, document_id, &DocumentStatus::Failed, claim)
