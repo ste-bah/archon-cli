@@ -43,6 +43,10 @@ mod correction_attribution;
 pub(crate) mod correction_intake;
 pub(crate) mod events;
 mod hook_context;
+#[cfg(all(test, unix))]
+mod hook_progress_delivery_tests;
+#[cfg(all(test, unix))]
+mod hook_warning_scope_tests;
 mod lifecycle;
 #[cfg(test)]
 mod memory_attribution_tests;

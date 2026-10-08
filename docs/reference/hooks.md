@@ -94,7 +94,7 @@ event. Most events discard it.
 | Event | Fields the runtime consumes |
 |---|---|
 | `PreToolUse` | `is_blocked` (tool call fails with the reason), `permission_behavior` (`deny` blocks; `allow` only from a `policy`-tagged hook; `ask` is logged and falls through to the normal flow), `updated_input` if it is a JSON object — the replacement is then re-validated against the tool's input schema. **`additional_context` is dropped.** |
-| `PostToolUse` | `updated_mcp_tool_output` replaces the tool result; **`additional_context` is appended to the tool result**; `retry` re-runs the tool, up to 3 attempts; `prevent_continuation` + `stop_reason` end the turn after this call. |
+| `PostToolUse` | `updated_mcp_tool_output` replaces the tool result; **`additional_context` is appended to the tool result**; `retry` re-runs the tool, up to 3 attempts; `prevent_continuation` + `stop_reason` end the turn after this call. An allowing **no-progress stop** of a hook or callback is appended as one `[Hook Warning] PostToolUse: …` line (see [No-progress timeouts](#no-progress-timeouts)); other non-blocking errors are not appended. |
 | `FileChanged`, `CwdChanged` | `watch_paths` only. Everything else is discarded. |
 | `SessionStart` | `watch_paths`, and **`additional_context` is injected into the system prompt** for the rest of the session, wrapped in `<hook-context>`. Re-fired by `/clear`. |
 | `PostCompact` | **`additional_context`**, appended to whatever `SessionStart` established. This is what lets injected context survive a long session. |
@@ -205,7 +205,18 @@ script that only ever wanted to print a sentence.
 way (`hooks/http.rs`). A non-`https://` URL that is not localhost is rejected
 before the request is made and the failure policy applies. `headers` values are
 templates into which only the env vars named in `allowed_env_vars` are
-interpolated, and the response body is capped at 64 KB. `function` hooks resolve
+interpolated, and the response body is capped at 64 KB. A non-2xx status is
+never a success: it applies the failure policy, and an allowing policy
+records a non-blocking error that names the status and is logged at WARN. Its
+body is still read: if it is a `HookResult`, each refusal in it is kept under
+every failure policy, so a policy server can refuse with `403`. The refusals are
+a block (`outcome: "blocking"` and its `reason`), a deny
+(`permission_behavior: "deny"` and its reason), a stop
+(`prevent_continuation: true` and its `stop_reason`), and an elicitation
+`decline` or `cancel`. Every other field of an error body (an allow or ask, an
+input or output edit, context, permission updates, an elicitation `accept`) is
+dropped.
+`function` hooks resolve
 `command` against an in-process registry that ships with `noop` and
 `block_all`; an unknown name warns and returns success.
 
@@ -227,29 +238,77 @@ interpolated, and the response body is capped at 64 KB. `function` hooks resolve
   than 64 KiB each — the two drain tasks draw from one atomic budget. Whichever
   side overflows gets a `[hook output truncated at 65536 bytes]` marker, and the
   combined output stays inside the bound including the marker.
-- **On timeout the whole process tree dies**, not just the shell: a process
-  group killed with `SIGKILL` on Unix, a Job Object on Windows, with a 2-second
-  deadline on reaping. A hook that backgrounds a child does not outlive its
-  timeout.
+- **A hook runs until its whole process tree has exited**, not only its shell:
+  on Unix the hook's process group must be empty (`wait_group_empty` in
+  `hooks/executor_process_spawn.rs`), on Windows its Job Object. On a
+  no-progress stop the whole tree dies: `SIGKILL` to the group on Unix, the
+  Job Object on Windows, with a 2-second deadline on reaping. After the
+  shell is reaped its process ID stays reserved only while the group has a
+  member, so if a live process holds that ID the group has ended and the ID
+  was reused: that group is never signalled. The residual is a reuse between
+  that check and the `kill` call.
+- **A synchronous hook that starts a background child waits for that child.**
+  A hook such as `nohup indexer >/dev/null 2>&1 &` keeps running while the
+  child lives. If the child writes nothing, the hook is stopped after one
+  no-progress window (its `timeout`, or the 30-second registry fallback) and
+  the child is killed with it. For `PreToolUse`, whose default policy is
+  block, each tool call then waits one window and is blocked. Earlier releases
+  returned at once and left the child running. To start a long-lived process,
+  use `async = true` (allowing policy only), or start it outside the hook's
+  process group with no hook pipe held open; on Unix only the original group
+  is supervised.
 
-## Timeouts and the aggregate budget
+## No-progress timeouts
 
-A single hook's `timeout` defaults to **60 seconds**. All hooks for one event
-share an aggregate budget of **30 seconds**
-(`HookExecutionConfig::aggregate_timeout_ms`), and each hook's timeout is
-clamped down to whatever is left of it, with a floor of one second.
+A process hook's `timeout` is a **no-progress window**, in seconds, rather than
+an overall runtime limit. Its standalone default is **60 seconds**. Any bytes
+read from stdout or stderr renew the window, including bytes discarded after
+the combined 64 KiB capture limit. The same window covers stdin writes,
+process waiting, and pipe draining; descendant output counts after the parent
+exits. A hook that keeps producing output can run for any total duration.
 
-When the budget is exhausted, the remaining hooks are **not run**. Each one
-still contributes a result — its failure policy applied with the reason
-`aggregate timeout exhausted` — and `skipped_count` on the aggregate records how
-many. The budget covers file-configured hooks, session-scoped hooks, and
-in-process callbacks alike.
+A stalled hook's entire process group (Windows job) is terminated. Its result
+names **no progress** as the reason. A blocking failure policy returns
+`Blocking`; an allowing policy returns `NonBlockingError` with the same reason.
+`HookRegistry::execute_hooks` preserves those reasons in the returned
+aggregate's `blocking_errors` or `nonblocking_errors` respectively.
+For a synchronous `PostToolUse` hook or callback, an allowing no-progress
+stop is also appended to the tool result as one `[Hook Warning] PostToolUse: …`
+line. It is visible in TUI tool output, print-mode stderr (all formats), and
+the agent's tool context, and it does not fail the tool or prevent
+continuation. The line names the hook by its id (the `/hooks` id; a session
+hook uses the id computed with no matcher), the event, and a redacted command:
+the program name without its arguments, or an HTTP hook's origin. The full
+command goes only to the WARN log. Other non-blocking errors, such as a
+non-zero exit or an HTTP error status, are logged and are not appended.
+Cancelling a process hook also terminates its group and aborts its pipe readers,
+even after the parent exits.
 
-The test for that clamp spent four months passing on Windows without ever
-starting a hook, because it asserted elapsed time rather than outcome — see
-[postmortem 0002](../postmortem/0002-a-test-passed-on-the-one-platform-where-it-could-not-run.md).
-The arithmetic now lives in `crates/archon-core/src/hooks/registry/budget.rs`
-with unit tests that need no subprocess and no clock.
+`HookExecutionConfig::aggregate_timeout_ms` remains accepted for compatibility.
+It now supplies a **fresh fallback no-progress window for each hook without an
+explicit `timeout`**, including session hooks. Its default remains 30,000 ms.
+Because hook timeout configuration uses whole seconds, positive millisecond
+values round up to the next second; zero is an immediately expired window.
+An explicit hook timeout takes precedence. Earlier hooks never consume later
+hooks' windows, and elapsed event time never causes hooks or callbacks to be
+skipped. HTTP hooks renew their window on response headers and nonempty body
+chunks, including discarded data after the 64 KiB capture limit. HTTP hooks run
+on a `HookHttpTransport`, which has no total or read timeout. Hooks configured
+in settings use the default transport: settings have no key for client
+certificates, private CAs or proxies. Rust embedders can build a transport with
+those options (`HookHttpTransport::builder`) and install it with
+`HookRegistry::with_http_transport`. The public `execute_http_hook` takes a
+`&HookHttpTransport`, so passing an opaque `reqwest::Client` is a compile
+error: construct a `HookHttpTransport` with the same connection settings.
+
+An in-process callback (`HookCallbackEntry`) reports no intermediate progress,
+so its `timeout_secs` is a no-progress window measured from the callback's
+start: a callback that has not answered within it is a no-progress stop. Its
+thread cannot be killed; its late result is discarded. Callbacks have no
+`on_failure` setting, so a stop follows the event's default policy exactly like
+a process hook without `on_failure`: on `PreToolUse` it blocks with a reason
+that names the callback, and on every other event it is an allowing
+no-progress stop (a non-blocking error, plus the `PostToolUse` warning line).
 
 Failure policy is what happens when a hook cannot spawn, times out, or hits an
 I/O error. It is set per hook with `on_failure = "allow" | "block"`. The default
@@ -267,6 +326,11 @@ not stop the session.
 immediately — but only when the effective failure policy is `allow`, and only
 for plain `command` hooks. A hook whose failure blocks must finish before the
 guarded operation proceeds, so `async` is silently ignored for it.
+Background commands still use the no-progress window and process-group cleanup.
+An async no-progress stop is logged once at WARN with the hook command, event
+and reason. Async results are fire-and-forget: they are neither stored nor
+delivered to the agent, TUI or print-mode result channels. Async result delivery
+is tracked separately in issue #359.
 
 ## Other execution details worth knowing
 

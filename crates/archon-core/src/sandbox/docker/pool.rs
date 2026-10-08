@@ -158,7 +158,7 @@ impl ContainerPool {
 
     /// Test seam: a short bound, so a fake daemon that never answers is
     /// observed in milliseconds rather than a minute.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn with_cli_bound(mut self, bound: Duration) -> Self {
         self.cli_bound = bound;
         self

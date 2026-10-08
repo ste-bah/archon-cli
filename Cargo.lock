@@ -537,6 +537,7 @@ dependencies = [
  "libc",
  "moka",
  "notify",
+ "openssl",
  "petgraph",
  "process-wrap",
  "rand 0.9.4",

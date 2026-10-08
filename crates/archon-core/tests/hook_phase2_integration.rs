@@ -124,7 +124,7 @@ async fn test_phase2_http_hook_end_to_end() {
     });
     let url = format!("http://127.0.0.1:{}/hook", addr.port());
 
-    let client = reqwest::Client::new();
+    let client = archon_core::hooks::HookHttpTransport::new();
     let config = HookConfig {
         hook_type: HookCommandType::Http,
         command: url,

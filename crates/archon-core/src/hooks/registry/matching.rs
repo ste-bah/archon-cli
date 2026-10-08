@@ -150,7 +150,8 @@ impl HookRegistry {
                         id: hook_id,
                         event: event.clone(),
                         matcher: entry.matcher.matcher.clone(),
-                        command: hook.command.clone(),
+                        if_condition: hook.if_condition.clone(),
+                        command: hook.redacted_command(),
                         source: entry.source.clone(),
                         enabled,
                     });
@@ -181,6 +182,35 @@ mod tests {
             on_failure: None,
             enabled: true,
         }
+    }
+
+    #[test]
+    fn user_facing_summaries_redact_command_arguments_and_shell_values() {
+        let reg = HookRegistry::new();
+        reg.register_matchers(
+            HookEvent::PreToolUse,
+            vec![HookMatcher {
+                matcher: None,
+                hooks: [
+                    "curl -H 'Authorization: Bearer secret-one' https://example.invalid",
+                    "TOKEN=secret-two command",
+                    "'secret-three' command",
+                ]
+                .into_iter()
+                .map(make_hook)
+                .collect(),
+            }],
+            None,
+        );
+
+        let summaries = reg.summaries();
+        assert_eq!(summaries.len(), 3);
+        for summary in summaries {
+            assert!(!summary.command.contains("secret-"), "{}", summary.command);
+        }
+        assert_eq!(reg.summaries()[0].command, "curl ...");
+        assert_eq!(reg.summaries()[1].command, "<shell command> ...");
+        assert_eq!(reg.summaries()[2].command, "<shell command> ...");
     }
 
     #[test]

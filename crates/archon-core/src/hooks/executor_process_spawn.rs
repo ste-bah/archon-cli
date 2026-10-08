@@ -38,7 +38,7 @@ use super::RunError;
 const SPAWN_BUDGET: Duration = Duration::from_secs(30);
 
 pub(super) struct SpawnedHook {
-    pub child: Box<dyn ChildWrapper>,
+    pub child: OwnedChild,
     pub spawn_latency: Duration,
 }
 
@@ -62,15 +62,19 @@ pub(super) async fn spawn_hook_process(
         event_name: event_name.to_owned(),
     };
     let started = Instant::now();
-    // Dropping this handle on timeout leaves the blocking task to finish and
-    // drop its child, and `KillOnDrop` plus the job object tear the tree down.
+    // Cancellation may leave the blocking task to finish. Its result owns
+    // group cleanup even before the child is handed back to the async caller.
     let spawning = tokio::task::spawn_blocking(move || request.spawn());
     let child = match tokio::time::timeout(SPAWN_BUDGET, spawning).await {
         Ok(Ok(Ok(child))) => child,
-        Ok(Ok(Err(error))) => return Err(RunError::Spawn(format!("{command}: {error}"))),
+        Ok(Ok(Err(error))) => {
+            return Err(RunError::Spawn(format!(
+                "hook process could not start: {error}"
+            )));
+        }
         Ok(Err(error)) => {
             return Err(RunError::Spawn(format!(
-                "{command}: spawn task failed: {error}"
+                "hook process spawn task failed: {error}"
             )));
         }
         Err(_) => return Err(RunError::Timeout("process spawn")),
@@ -89,7 +93,7 @@ struct SpawnRequest {
 }
 
 impl SpawnRequest {
-    fn spawn(self) -> std::io::Result<Box<dyn ChildWrapper>> {
+    fn spawn(self) -> std::io::Result<OwnedChild> {
         let shell = archon_shell::resolve_shell();
         let mut command_builder = archon_shell::spawn::tokio_command(&shell.program);
         command_builder
@@ -110,6 +114,139 @@ impl SpawnRequest {
         command_wrapper.wrap(ProcessGroup::leader());
         #[cfg(windows)]
         command_wrapper.wrap(JobObject);
-        command_wrapper.spawn()
+        let child = command_wrapper.spawn()?;
+        Ok(OwnedChild {
+            #[cfg(unix)]
+            process_group: child.id(),
+            #[cfg(unix)]
+            leader_reaped: false,
+            child,
+        })
+    }
+}
+
+/// Own the original group ID even after the parent has been reaped. This
+/// guard is created inside spawn_blocking so an unclaimed result is safe too.
+pub(super) struct OwnedChild {
+    child: Box<dyn ChildWrapper>,
+    /// Unix only: on Windows the Job Object owns the whole tree.
+    #[cfg(unix)]
+    process_group: Option<u32>,
+    /// Unix only: once the leader is reaped, its ID stays reserved only while
+    /// the group still has a member.
+    #[cfg(unix)]
+    leader_reaped: bool,
+}
+
+impl OwnedChild {
+    /// Wait for (and reap) the group leader. This shadows the wrapper's
+    /// `wait` so the reap is always recorded.
+    pub(super) async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        let status = self.child.wait().await?;
+        #[cfg(unix)]
+        {
+            self.leader_reaped = true;
+        }
+        Ok(status)
+    }
+
+    /// Whether the group ID may now name another group.
+    ///
+    /// The kernel never reuses a process ID while a process group with that
+    /// ID still exists (POSIX; Linux and XNU both enforce it). So once the
+    /// leader is reaped, a live process holding the leader's ID proves this
+    /// group has ended and the ID was reused. Before the reap, the leader
+    /// (running or zombie) holds the ID, so it is always ours.
+    #[cfg(unix)]
+    fn group_reused(&self, pid: u32) -> bool {
+        self.leader_reaped && archon_shell::process_liveness::process_alive(pid)
+    }
+
+    /// SIGKILL the owned group, never a group that reused its ID. Disarms
+    /// on success, when the group is already gone, and when the ID was
+    /// reused; a real failure stays armed so Drop retries.
+    #[cfg(unix)]
+    pub(super) fn kill_group(&mut self) -> Option<std::io::Error> {
+        let pid = self.process_group?;
+        if self.group_reused(pid) {
+            self.process_group = None;
+            return None;
+        }
+        // SAFETY: the ID names the group this spawn created: the leader holds
+        // it, or (after the reap) the group still exists and was not reused.
+        // The residual is a reuse between the check above and this call.
+        if unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) } == 0 {
+            self.process_group = None;
+            return None;
+        }
+        let error = std::io::Error::last_os_error();
+        if self.leader_reaped && error.raw_os_error() == Some(libc::ESRCH) {
+            self.process_group = None;
+            return None;
+        }
+        Some(error)
+    }
+
+    /// Keep supervising the original group after the leader and pipes finish.
+    pub(super) async fn wait_group_empty(&mut self) -> std::io::Result<()> {
+        #[cfg(unix)]
+        if let Some(pid) = self.process_group {
+            loop {
+                if self.group_reused(pid) {
+                    // The group ended and another process took its ID.
+                    break;
+                }
+                // SAFETY: signal 0 observes the owned group without signalling it.
+                if unsafe { libc::kill(-(pid as libc::pid_t), 0) } != 0 {
+                    let error = std::io::Error::last_os_error();
+                    match error.raw_os_error() {
+                        Some(libc::ESRCH) => break,
+                        Some(libc::EPERM) => {} // It still exists.
+                        _ => return Err(error),
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+        // Windows ChildWrapper::wait already waits on the job object.
+        Ok(())
+    }
+
+    pub(super) fn disarm_group(&mut self) {
+        #[cfg(unix)]
+        {
+            self.process_group = None;
+        }
+    }
+
+    /// Test only: point the guard at another group, as if the leader's ID
+    /// had been reused after the reap.
+    #[cfg(all(test, unix))]
+    pub(super) fn retarget_group_for_test(&mut self, pid: u32) {
+        self.process_group = Some(pid);
+    }
+}
+
+impl std::ops::Deref for OwnedChild {
+    type Target = Box<dyn ChildWrapper>;
+    fn deref(&self) -> &Self::Target {
+        &self.child
+    }
+}
+
+impl std::ops::DerefMut for OwnedChild {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.child
+    }
+}
+
+// Windows retains KillOnDrop and the kill-on-close job object.
+#[cfg(unix)]
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        // Drop must not await: signal the whole group synchronously. The
+        // inner KillOnDrop child provides Tokio's parent reaping fallback.
+        let _ = self.kill_group();
+        self.process_group = None;
     }
 }

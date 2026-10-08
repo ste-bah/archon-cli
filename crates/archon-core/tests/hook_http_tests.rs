@@ -71,7 +71,7 @@ async fn test_http_hook_success() {
 
     let config = http_config(&url);
     let context = json!({"event": "PreToolUse", "tool": "Bash"});
-    let client = reqwest::Client::new();
+    let client = archon_core::hooks::HookHttpTransport::new();
 
     let result = execute_http_hook(&config, &context, &client).await;
 
@@ -95,8 +95,7 @@ async fn test_http_hook_timeout() {
     config.timeout = Some(1); // 1 second timeout
 
     let context = json!({"event": "PreToolUse"});
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(1))
+    let client = archon_core::hooks::HookHttpTransport::builder()
         .build()
         .unwrap();
 
@@ -114,7 +113,7 @@ async fn test_http_hook_network_error() {
     let mut config = http_config("http://127.0.0.1:1/hook");
     config.on_failure = Some(HookFailurePolicy::Allow);
     let context = json!({"event": "PreToolUse"});
-    let client = reqwest::Client::new();
+    let client = archon_core::hooks::HookHttpTransport::new();
 
     let result = execute_http_hook(&config, &context, &client).await;
 
@@ -142,7 +141,7 @@ async fn test_http_hook_body_limit() {
     let mut config = http_config(&url);
     config.on_failure = Some(HookFailurePolicy::Allow);
     let context = json!({"event": "PreToolUse"});
-    let client = reqwest::Client::new();
+    let client = archon_core::hooks::HookHttpTransport::new();
 
     let result = execute_http_hook(&config, &context, &client).await;
 
@@ -159,7 +158,7 @@ async fn test_http_hook_tls_required() {
     let mut config = http_config("http://example.com/hook");
     config.on_failure = Some(HookFailurePolicy::Allow);
     let context = json!({"event": "PreToolUse"});
-    let client = reqwest::Client::new();
+    let client = archon_core::hooks::HookHttpTransport::new();
 
     let result = execute_http_hook(&config, &context, &client).await;
 
@@ -185,7 +184,7 @@ async fn test_http_hook_localhost_http_ok() {
 
     let config = http_config(&url);
     let context = json!({"event": "PreToolUse"});
-    let client = reqwest::Client::new();
+    let client = archon_core::hooks::HookHttpTransport::new();
 
     let result = execute_http_hook(&config, &context, &client).await;
 
@@ -225,7 +224,7 @@ async fn test_http_hook_headers() {
     // Content-Type: application/json. Custom headers from HookConfig.headers
     // (added by implementation) will be tested once the field exists.
     let context = json!({"event": "PreToolUse"});
-    let client = reqwest::Client::new();
+    let client = archon_core::hooks::HookHttpTransport::new();
 
     let result = execute_http_hook(&config, &context, &client).await;
 
@@ -343,7 +342,7 @@ async fn test_http_hook_posts_context_json() {
         "tool_name": "Bash",
         "tool_input": {"command": "ls"}
     });
-    let client = reqwest::Client::new();
+    let client = archon_core::hooks::HookHttpTransport::new();
 
     let result = execute_http_hook(&config, &context, &client).await;
 
@@ -366,7 +365,7 @@ async fn test_http_hook_non_json_response() {
     let mut config = http_config(&url);
     config.on_failure = Some(HookFailurePolicy::Allow);
     let context = json!({"event": "PreToolUse"});
-    let client = reqwest::Client::new();
+    let client = archon_core::hooks::HookHttpTransport::new();
 
     let result = execute_http_hook(&config, &context, &client).await;
 
@@ -374,4 +373,77 @@ async fn test_http_hook_non_json_response() {
     // Fail-open: should return default Success.
     assert_eq!(result.outcome, HookOutcome::Success);
     assert!(!result.is_blocking());
+}
+
+// A policy server that refuses with an error status still refuses: an
+// allowing failure policy covers outages, not explicit decisions.
+async fn pre_tool_use_with_status_body(
+    status: u16,
+    body: serde_json::Value,
+) -> archon_core::hooks::AggregatedHookResult {
+    use archon_core::hooks::{HookEvent, HookMatcher, HookRegistry};
+    let url = start_mock_server(move || {
+        let body = body.clone();
+        async move {
+            (
+                axum::http::StatusCode::from_u16(status).unwrap(),
+                axum::Json(body),
+            )
+        }
+    })
+    .await;
+    let mut config = http_config(&url);
+    config.on_failure = Some(HookFailurePolicy::Allow);
+    let registry = HookRegistry::new();
+    registry.register_matchers(
+        HookEvent::PreToolUse,
+        vec![HookMatcher {
+            matcher: None,
+            hooks: vec![config],
+        }],
+        None,
+    );
+    let dir = tempfile::tempdir().unwrap();
+    registry
+        .execute_hooks(
+            HookEvent::PreToolUse,
+            json!({"tool_name": "Bash"}),
+            dir.path(),
+            "status",
+        )
+        .await
+}
+
+#[tokio::test]
+async fn forbidden_blocking_response_blocks_the_tool_under_allow_policy() {
+    let aggregate = pre_tool_use_with_status_body(
+        403,
+        json!({"outcome": "blocking", "reason": "rm -rf denied"}),
+    )
+    .await;
+    assert!(aggregate.is_blocked(), "{aggregate:?}");
+    assert_eq!(aggregate.block_reason().as_deref(), Some("rm -rf denied"));
+}
+
+#[tokio::test]
+async fn client_error_deny_response_denies_the_tool_under_allow_policy() {
+    let aggregate = pre_tool_use_with_status_body(
+        422,
+        json!({"outcome": "success", "permission_behavior": "deny"}),
+    )
+    .await;
+    assert_eq!(
+        aggregate.permission_behavior,
+        Some(archon_core::hooks::PermissionBehavior::Deny),
+        "{aggregate:?}"
+    );
+}
+
+#[tokio::test]
+async fn server_error_without_a_decision_does_not_block_under_allow_policy() {
+    let aggregate = pre_tool_use_with_status_body(500, json!({"outcome": "success"})).await;
+    assert!(!aggregate.is_blocked(), "{aggregate:?}");
+    assert_eq!(aggregate.nonblocking_errors.len(), 1, "{aggregate:?}");
+    assert!(aggregate.nonblocking_errors[0].contains("500"));
+    assert!(aggregate.no_progress_stops.is_empty(), "{aggregate:?}");
 }

@@ -1,9 +1,15 @@
 use std::cell::Cell;
 use std::path::Path;
 
+#[path = "executor_background.rs"]
+mod background;
 #[path = "executor_process.rs"]
 mod executor_process;
+#[path = "executor_progress.rs"]
+mod progress;
+use background::spawn_background;
 use executor_process::run_command;
+pub(super) use progress::NoProgressWindow;
 use tokio::sync::Mutex as TokioMutex;
 
 use super::types::{HookConfig, HookOutcome, HookResult};
@@ -15,6 +21,10 @@ use executor_function::execute_function_hook;
 #[cfg(test)]
 #[path = "executor_tests.rs"]
 mod executor_tests;
+
+#[cfg(all(test, unix))]
+#[path = "executor_progress_tests.rs"]
+mod executor_progress_tests;
 
 // ---------------------------------------------------------------------------
 // Agent hook recursion guard (thread-local) and serialization mutex
@@ -63,10 +73,11 @@ struct CommandOutput {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-enum RunError {
+pub(super) enum RunError {
     Spawn(String),
     Io(String),
     Timeout(&'static str),
+    Cleanup(Box<RunError>, String),
 }
 
 impl std::fmt::Display for RunError {
@@ -74,7 +85,36 @@ impl std::fmt::Display for RunError {
         match self {
             Self::Spawn(s) => write!(f, "spawn error: {s}"),
             Self::Io(s) => write!(f, "I/O error: {s}"),
-            Self::Timeout(phase) => write!(f, "timed out during {phase}"),
+            Self::Timeout("process spawn") => write!(f, "timed out during process spawn"),
+            Self::Cleanup(error, cleanup) => {
+                write!(f, "I/O error: {error}; process cleanup failed: {cleanup}")
+            }
+            Self::Timeout(phase) => write!(f, "timed out: no progress during {phase}"),
+        }
+    }
+}
+
+impl RunError {
+    fn is_no_progress(&self) -> bool {
+        match self {
+            Self::Timeout(phase) => *phase != "process spawn",
+            Self::Cleanup(error, _) => error.is_no_progress(),
+            _ => false,
+        }
+    }
+}
+
+/// Harness-owned stop metadata kept separate from hook and callback results.
+pub(super) struct HookExecutionResult {
+    pub(super) result: HookResult,
+    pub(super) no_progress_stop: Option<String>,
+}
+
+impl From<HookResult> for HookExecutionResult {
+    fn from(result: HookResult) -> Self {
+        Self {
+            result,
+            no_progress_stop: None,
         }
     }
 }
@@ -94,6 +134,7 @@ impl std::fmt::Display for RunError {
 /// If `config.async == Some(true)` and the hook's failure policy allows it,
 /// the command is spawned in the background and a Success result is returned
 /// immediately without waiting.
+#[cfg(test)]
 pub(crate) async fn execute_hook(
     config: &HookConfig,
     input: &serde_json::Value,
@@ -101,9 +142,21 @@ pub(crate) async fn execute_hook(
     session_id: &str,
     event_name: &str,
 ) -> HookResult {
+    execute_hook_with_metadata(config, input, cwd, session_id, event_name)
+        .await
+        .result
+}
+
+pub(super) async fn execute_hook_with_metadata(
+    config: &HookConfig,
+    input: &serde_json::Value,
+    cwd: &Path,
+    session_id: &str,
+    event_name: &str,
+) -> HookExecutionResult {
     // Function hooks: in-process execution, no shell spawn needed
     if matches!(config.hook_type, super::types::HookCommandType::Function) {
-        return execute_function_hook(config, input, cwd, session_id, event_name);
+        return execute_function_hook(config, input, cwd, session_id, event_name).into();
     }
 
     // Agent hooks: serialized with recursion guard
@@ -140,14 +193,14 @@ pub(crate) async fn execute_hook(
             event_name.to_owned(),
             config.timeout.unwrap_or(60),
         );
-        return HookResult::allow();
+        return HookResult::allow().into();
     }
 
     let payload_bytes = match serde_json::to_vec(input) {
         Ok(b) => b,
         Err(e) => {
             tracing::warn!(error = %e, "hook: failed to serialize input payload");
-            return HookResult::allow();
+            return HookResult::allow().into();
         }
     };
 
@@ -163,8 +216,8 @@ pub(crate) async fn execute_hook(
     )
     .await
     {
-        Ok(output) => interpret_exit_code(&config.command, output),
-        Err(e) => hook_failure_result(config, event_name, &e),
+        Ok(output) => interpret_exit_code(config, output).into(),
+        Err(e) => hook_failure_execution_result(config, event_name, &e),
     }
 }
 
@@ -178,7 +231,7 @@ async fn execute_agent_hook(
     cwd: &Path,
     session_id: &str,
     event_name: &str,
-) -> HookResult {
+) -> HookExecutionResult {
     // Acquire mutex so only one agent hook runs at a time.
     let _lock = AGENT_HOOK_MUTEX.lock().await;
 
@@ -190,7 +243,7 @@ async fn execute_agent_hook(
         Ok(b) => b,
         Err(e) => {
             tracing::warn!(error = %e, "agent hook: failed to serialize input");
-            return HookResult::allow();
+            return HookResult::allow().into();
         }
     };
 
@@ -206,28 +259,49 @@ async fn execute_agent_hook(
     )
     .await
     {
-        Ok(output) => interpret_exit_code(&config.command, output),
-        Err(e) => hook_failure_result(config, event_name, &e),
+        Ok(output) => interpret_exit_code(config, output).into(),
+        Err(e) => hook_failure_execution_result(config, event_name, &e),
     }
     // AgentGuard dropped here -> set_in_hook_agent(false)
 }
 
-fn hook_failure_result(config: &HookConfig, event_name: &str, error: &RunError) -> HookResult {
+/// Apply failure policy while keeping no-progress stop metadata harness-owned.
+pub(in crate::hooks) fn hook_failure_execution_result(
+    config: &HookConfig,
+    event_name: &str,
+    error: &RunError,
+) -> HookExecutionResult {
+    // The full command is for the operator log only (an HTTP URL is redacted).
     tracing::warn!(
-        hook = %config.command,
+        hook = %config.operator_command(),
+        event = %event_name,
         error = %error,
         policy = ?config.failure_policy(event_name),
         "hook execution failed"
     );
 
-    config.failure_result(event_name, &error.to_string())
+    let mut result = config.failure_result(event_name, &error.to_string());
+    let mut no_progress_stop = None;
+    if error.is_no_progress() {
+        let error = error.to_string();
+        result.reason = Some(config.no_progress_reason(None, event_name, &error));
+        if result.outcome == HookOutcome::Success {
+            result.outcome = HookOutcome::NonBlockingError;
+            no_progress_stop = Some(error);
+        }
+    }
+    HookExecutionResult {
+        result,
+        no_progress_stop,
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Exit code interpretation + stdout JSON parsing (REQ-HOOK-002)
 // ---------------------------------------------------------------------------
 
-fn interpret_exit_code(command: &str, output: CommandOutput) -> HookResult {
+fn interpret_exit_code(config: &HookConfig, output: CommandOutput) -> HookResult {
+    let command = config.redacted_command();
     // Step 1: Try to parse stdout as JSON HookResult
     let stdout_parsed = if !output.stdout.trim().is_empty() {
         match serde_json::from_str::<HookResult>(&output.stdout) {
@@ -340,12 +414,12 @@ async fn execute_prompt_hook(
     cwd: &Path,
     session_id: &str,
     event_name: &str,
-) -> HookResult {
+) -> HookExecutionResult {
     let payload_bytes = match serde_json::to_vec(input) {
         Ok(b) => b,
         Err(e) => {
             tracing::warn!(error = %e, "prompt hook: failed to serialize input payload");
-            return HookResult::allow();
+            return HookResult::allow().into();
         }
     };
 
@@ -373,18 +447,22 @@ async fn execute_prompt_hook(
                     additional_context,
                     ..HookResult::allow()
                 }
+                .into()
             }
             2 => {
                 let reason = if output.stderr.trim().is_empty() {
-                    format!("prompt hook '{}' blocked (exit 2)", config.command)
+                    format!(
+                        "prompt hook '{}' blocked (exit 2)",
+                        config.redacted_command()
+                    )
                 } else {
                     output.stderr.trim().to_owned()
                 };
-                HookResult::block(reason)
+                HookResult::block(reason).into()
             }
             code => {
                 tracing::warn!(
-                    hook = %config.command,
+                    hook = %config.redacted_command(),
                     exit_code = code,
                     stderr = %output.stderr.trim(),
                     "prompt hook exited with non-zero code"
@@ -394,53 +472,13 @@ async fn execute_prompt_hook(
                     reason: Some(format!("exit code {code}")),
                     ..Default::default()
                 }
+                .into()
             }
         },
-        Err(e) => hook_failure_result(config, event_name, &e),
+        Err(e) => hook_failure_execution_result(config, event_name, &e),
     }
 }
 
 // ---------------------------------------------------------------------------
 // Background (async: true) execution
 // ---------------------------------------------------------------------------
-
-fn spawn_background(
-    command: String,
-    input: serde_json::Value,
-    cwd: std::path::PathBuf,
-    session_id: String,
-    event_name: String,
-    timeout_secs: u32,
-) {
-    tokio::spawn(async move {
-        let payload_bytes = match serde_json::to_vec(&input) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                tracing::warn!(
-                    hook = %command,
-                    event = %event_name,
-                    error = %error,
-                    "failed to serialize background hook payload"
-                );
-                return;
-            }
-        };
-        if let Err(error) = run_command(
-            &command,
-            &payload_bytes,
-            &cwd,
-            &session_id,
-            &event_name,
-            timeout_secs,
-        )
-        .await
-        {
-            tracing::warn!(
-                hook = %command,
-                event = %event_name,
-                error = %error,
-                "background hook execution failed"
-            );
-        }
-    });
-}

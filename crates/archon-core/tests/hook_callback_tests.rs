@@ -171,10 +171,70 @@ async fn test_callback_timeout() {
          as {:?}",
         agg.additional_contexts
     );
-    assert_eq!(
-        agg.skipped_count, 0,
-        "the callback must have been started and abandoned, not skipped before it ran"
+    // PreToolUse defaults to a blocking failure policy, so a callback that
+    // gives no answer within its window blocks; it never passes silently.
+    assert!(agg.is_blocked(), "{agg:?}");
+    let reason = agg.block_reason().unwrap_or_default();
+    assert!(
+        reason.contains("callback 'slow-cb'") && reason.contains("no progress"),
+        "{reason}"
     );
+}
+
+async fn slow_callback_on(
+    event: HookEvent,
+    sleep_ms: u64,
+) -> archon_core::hooks::AggregatedHookResult {
+    let registry = HookRegistry::new();
+    registry.register_callback(
+        event.clone(),
+        HookCallbackEntry {
+            name: "paced-cb".to_string(),
+            callback: Arc::new(move |_ctx: &HookContext| {
+                std::thread::sleep(Duration::from_millis(sleep_ms));
+                let mut result = HookResult::allow();
+                result.additional_context = Some("paced-cb-finished".to_string());
+                result
+            }),
+            authority: SourceAuthority::User,
+            timeout_secs: 1,
+        },
+    );
+    registry
+        .execute_hooks(
+            event,
+            serde_json::json!({}),
+            std::env::temp_dir().as_path(),
+            "sess-paced",
+        )
+        .await
+}
+
+/// An observational event's default policy allows: the stop is a
+/// non-blocking error that names the callback, never a silent success.
+#[tokio::test]
+async fn non_gating_callback_stop_is_a_named_nonblocking_error() {
+    let agg = slow_callback_on(HookEvent::SessionStart, 1_500).await;
+    assert!(!agg.is_blocked(), "{agg:?}");
+    assert!(agg.additional_contexts.is_empty(), "{agg:?}");
+    assert_eq!(agg.nonblocking_errors.len(), 1, "{agg:?}");
+    let reason = &agg.nonblocking_errors[0];
+    assert!(
+        reason.contains("callback 'paced-cb'") && reason.contains("no progress"),
+        "{reason}"
+    );
+    assert_eq!(agg.no_progress_stops, agg.nonblocking_errors, "{agg:?}");
+}
+
+/// The window starts when the callback starts; an answer inside it is used.
+#[tokio::test]
+async fn callback_answering_inside_its_window_is_used() {
+    for event in [HookEvent::PreToolUse, HookEvent::SessionStart] {
+        let agg = slow_callback_on(event, 200).await;
+        assert!(!agg.is_blocked(), "{agg:?}");
+        assert!(agg.nonblocking_errors.is_empty(), "{agg:?}");
+        assert_eq!(agg.additional_contexts, vec!["paced-cb-finished"]);
+    }
 }
 
 #[tokio::test]

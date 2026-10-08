@@ -2,17 +2,22 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use reqwest::Client;
+
+#[path = "http_transport.rs"]
+mod transport;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::Value;
+pub use transport::{HookHttpTransport, HookHttpTransportBuilder};
 use url::{Host, Url};
 
-use super::types::{HookConfig, HookResult};
+use super::executor::{HookExecutionResult, NoProgressWindow, hook_failure_execution_result};
+use super::types::{ElicitationAction, HookConfig, HookOutcome, HookResult, PermissionBehavior};
 use crate::url_redact::redact_url;
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024; // 64KB
-static HTTP_HOOK_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
+static HTTP_HOOK_CLIENT: LazyLock<HookHttpTransport> = LazyLock::new(HookHttpTransport::new);
 
-pub(crate) fn shared_client() -> &'static Client {
+pub(crate) fn shared_client() -> &'static HookHttpTransport {
     &HTTP_HOOK_CLIENT
 }
 
@@ -26,21 +31,33 @@ fn event_name_from_context(context: &Value) -> &str {
 
 /// Execute an HTTP hook by POSTing context JSON to the URL in config.command.
 /// Failure handling follows the hook's configured or event-default policy.
+/// Use HookHttpTransport to retain headers, TLS, proxy and redirect settings
+/// without total/read clocks. An opaque `reqwest::Client` is rejected at
+/// compile time: its total/read clocks cannot be removed or inspected.
+///
+/// ```compile_fail
+/// # async fn f(config: &archon_core::hooks::HookConfig) {
+/// let client = reqwest::Client::new();
+/// archon_core::hooks::execute_http_hook(config, &serde_json::json!({}), &client).await;
+/// # }
+/// ```
 pub async fn execute_http_hook(
     config: &HookConfig,
     context: &Value,
-    client: &Client,
+    client: &HookHttpTransport,
 ) -> HookResult {
     let event_name = event_name_from_context(context);
-    execute_http_hook_for_event(config, context, client, event_name).await
+    execute_http_hook_for_event(config, context, client, event_name)
+        .await
+        .result
 }
 
-pub(crate) async fn execute_http_hook_for_event(
+pub(in crate::hooks) async fn execute_http_hook_for_event(
     config: &HookConfig,
     context: &Value,
-    client: &Client,
+    client: &HookHttpTransport,
     event_name: &str,
-) -> HookResult {
+) -> HookExecutionResult {
     // The configured URL may carry the webhook credential; only its origin
     // is ever logged.
     let shown_url = redact_url(&config.command);
@@ -51,7 +68,7 @@ pub(crate) async fn execute_http_hook_for_event(
         Ok(url) => url,
         Err(reason) => {
             tracing::warn!(url = %shown_url, reason, "HTTP hook rejected");
-            return config.failure_result(event_name, reason);
+            return config.failure_result(event_name, reason).into();
         }
     };
 
@@ -70,17 +87,15 @@ pub(crate) async fn execute_http_hook_for_event(
         }
     }
 
-    // POST with timeout
-    let send_future = client
-        .post(url)
-        .headers(headers)
-        .json(context)
-        .timeout(timeout_duration)
-        .send();
+    // Bound silence while waiting for the response, then renew on body data.
+    let progress = NoProgressWindow::new(timeout_duration);
+    let client = hook_transport(client);
+    let send_future = client.post(url).headers(headers).json(context).send();
 
-    let response = match send_future.await {
-        Ok(resp) => resp,
-        Err(e) => {
+    let response = match progress.wait("HTTP response", send_future).await {
+        Ok(Ok(resp)) => resp,
+        Err(error) => return hook_failure_execution_result(config, event_name, &error),
+        Ok(Err(e)) => {
             // reqwest errors embed the full request URL; strip it.
             let timed_out = e.is_timeout();
             let e = e.without_url();
@@ -89,47 +104,136 @@ pub(crate) async fn execute_http_hook_for_event(
             } else {
                 tracing::warn!(url = %shown_url, error = %e, "HTTP hook network error; applying failure policy");
             }
-            return config.failure_result(event_name, &e.to_string());
+            return transport_failure_result(config, event_name, &e.to_string(), timed_out);
         }
     };
 
-    // Read response body with size limit
-    let body_bytes = match response.bytes().await {
-        Ok(b) => b,
-        Err(e) => {
-            let e = e.without_url();
-            tracing::warn!(
-                url = %shown_url,
-                error = %e,
-                "HTTP hook: failed to read response body; applying failure policy"
-            );
-            return config.failure_result(event_name, &e.to_string());
-        }
-    };
+    read_hook_response(config, event_name, response, &progress, &shown_url).await
+}
 
-    if body_bytes.len() > MAX_RESPONSE_BYTES {
-        tracing::warn!(
-            url = %shown_url,
-            body_len = body_bytes.len(),
-            limit = MAX_RESPONSE_BYTES,
-            "HTTP hook response exceeded 64KB, truncating"
-        );
+async fn read_hook_response(
+    config: &HookConfig,
+    event_name: &str,
+    mut response: reqwest::Response,
+    progress: &NoProgressWindow,
+    shown_url: &str,
+) -> HookExecutionResult {
+    // An error status is read too: its body may carry an explicit refusal.
+    let status = response.status();
+    progress.record_output();
+    let mut body_bytes = Vec::new();
+    let mut received = 0_usize;
+    loop {
+        let chunk = match progress.wait("HTTP body", response.chunk()).await {
+            Ok(Ok(Some(chunk))) => chunk,
+            Ok(Ok(None)) => break,
+            Err(error) => return hook_failure_execution_result(config, event_name, &error),
+            Ok(Err(error)) => {
+                let timed_out = error.is_timeout();
+                let error = error.without_url();
+                tracing::warn!(url = %shown_url, error = %error, "HTTP hook body read failed");
+                if !status.is_success() {
+                    let reason = format!("HTTP hook returned {status}; body read failed: {error}");
+                    return diagnostic_failure_result(config, event_name, &reason);
+                }
+                return transport_failure_result(config, event_name, &error.to_string(), timed_out);
+            }
+        };
+        if !chunk.is_empty() {
+            progress.record_output();
+        }
+        received = received.saturating_add(chunk.len());
+        let retained = chunk
+            .len()
+            .min(MAX_RESPONSE_BYTES.saturating_sub(body_bytes.len()));
+        body_bytes.extend_from_slice(&chunk[..retained]);
+    }
+    if received > MAX_RESPONSE_BYTES {
+        tracing::warn!(url = %shown_url, body_len = received, limit = MAX_RESPONSE_BYTES,
+            "HTTP hook response exceeded 64KB, truncating");
     }
 
     let body_str = String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(MAX_RESPONSE_BYTES)]);
 
+    let parsed = serde_json::from_str::<HookResult>(&body_str);
+    if !status.is_success() {
+        // A refusal is a decision, not an outage: no policy may downgrade it.
+        // Anything else in an error response must not become a clean result.
+        let reason = format!("HTTP hook returned {status}");
+        let mut failure = diagnostic_failure_result(config, event_name, &reason);
+        if let Ok(body) = parsed
+            && keep_refusals(&mut failure.result, body)
+        {
+            tracing::warn!(url = %shown_url, %status, "HTTP hook refused with an error status");
+        }
+        return failure;
+    }
+
     // Parse JSON response as HookResult
-    match serde_json::from_str::<HookResult>(&body_str) {
-        Ok(result) => result,
+    match parsed {
+        Ok(result) => result.into(),
         Err(e) => {
             tracing::warn!(
                 url = %shown_url,
                 error = %e,
                 "HTTP hook response is not valid HookResult JSON; applying failure policy"
             );
-            config.failure_result(event_name, &e.to_string())
+            config.failure_result(event_name, &e.to_string()).into()
         }
     }
+}
+
+/// Copy only the refusal signals of an error-status body onto the failure
+/// result: a block, a deny, a stop, and an elicitation decline or cancel.
+/// Grants and modifications (allow, ask, updated input or output, permission
+/// updates, accept) are dropped. Returns whether any refusal was kept.
+fn keep_refusals(target: &mut HookResult, body: HookResult) -> bool {
+    let mut kept = false;
+    if body.outcome == HookOutcome::Blocking {
+        target.outcome = HookOutcome::Blocking;
+        if body.reason.is_some() {
+            target.reason = body.reason;
+        }
+        kept = true;
+    }
+    if body.permission_behavior == Some(PermissionBehavior::Deny) {
+        target.permission_behavior = Some(PermissionBehavior::Deny);
+        target.permission_decision_reason = body.permission_decision_reason;
+        kept = true;
+    }
+    if body.prevent_continuation == Some(true) {
+        target.prevent_continuation = Some(true);
+        target.stop_reason = body.stop_reason;
+        kept = true;
+    }
+    if matches!(
+        body.elicitation_action,
+        Some(ElicitationAction::Decline | ElicitationAction::Cancel)
+    ) {
+        target.elicitation_action = body.elicitation_action;
+        kept = true;
+    }
+    kept
+}
+
+fn diagnostic_failure_result(
+    config: &HookConfig,
+    event_name: &str,
+    reason: &str,
+) -> HookExecutionResult {
+    tracing::warn!(
+        hook = %config.display_command(),
+        event = %event_name,
+        reason,
+        policy = ?config.failure_policy(event_name),
+        "HTTP hook failed"
+    );
+    let mut result = config.failure_result(event_name, reason);
+    if result.outcome == HookOutcome::Success {
+        result.outcome = HookOutcome::NonBlockingError;
+        result.reason = Some(reason.to_owned());
+    }
+    result.into()
 }
 
 /// Parse a hook URL and admit it only if it is HTTPS, or plain HTTP to a
@@ -259,3 +363,98 @@ mod tests {
         assert!(!logs_contain(SECRET), "secret reached the log");
     }
 }
+
+fn transport_failure_result(
+    config: &HookConfig,
+    event_name: &str,
+    reason: &str,
+    timed_out: bool,
+) -> HookExecutionResult {
+    if timed_out {
+        let mut execution = diagnostic_failure_result(config, event_name, reason);
+        let error = format!("timed out: no progress during {reason}");
+        execution.result.reason = Some(config.no_progress_reason(None, event_name, &error));
+        if execution.result.outcome == HookOutcome::NonBlockingError {
+            execution.no_progress_stop = Some(error);
+        }
+        execution
+    } else {
+        config.failure_result(event_name, reason).into()
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn allowing_transport_timeouts_remain_explicit_errors() {
+    let config: HookConfig = serde_json::from_value(serde_json::json!({
+        "type":"http", "command":"https://example.invalid", "on_failure":"allow"
+    }))
+    .unwrap();
+    for phase in ["response", "body"] {
+        let reason = format!("HTTP {phase} transport timeout");
+        let result = transport_failure_result(&config, "PostToolUse", &reason, true);
+        assert_eq!(result.result.outcome, HookOutcome::NonBlockingError);
+        assert!(
+            result
+                .result
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("no progress")
+        );
+        assert!(
+            result
+                .no_progress_stop
+                .as_deref()
+                .unwrap()
+                .contains("no progress")
+        );
+    }
+}
+
+fn hook_transport(client: &HookHttpTransport) -> &Client {
+    client.client()
+}
+
+#[cfg(test)]
+mod transport_retention_tests {
+    use super::*;
+    #[test]
+    fn authentication_transport_is_not_discarded() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", HeaderValue::from_static("Bearer test"));
+        let client = HookHttpTransport::builder()
+            .default_headers(headers)
+            .build()
+            .unwrap();
+        assert!(std::ptr::eq(hook_transport(&client), client.client()));
+    }
+    #[test]
+    fn private_ca_transport_is_not_discarded() {
+        let material = super::test_tls::generate();
+        assert!(material.dir.path().join("server-key.pem").exists());
+        assert!(!material.client_identity.is_empty());
+        let ca = reqwest::Certificate::from_pem(&material.ca).unwrap();
+        let client = HookHttpTransport::builder()
+            .add_root_certificate(ca)
+            .build()
+            .unwrap();
+        assert!(std::ptr::eq(hook_transport(&client), client.client()));
+    }
+    #[test]
+    fn redirect_transport_is_not_discarded() {
+        let client = HookHttpTransport::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        assert!(std::ptr::eq(hook_transport(&client), client.client()));
+    }
+}
+
+#[cfg(test)]
+#[path = "http_response_tests.rs"]
+mod response_tests;
+
+#[cfg(test)]
+#[path = "../../tests/support/hook_tls.rs"]
+mod test_tls;

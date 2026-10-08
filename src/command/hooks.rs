@@ -323,6 +323,7 @@ mod tests {
                 command: "guard-secrets".to_string(),
                 source: Some("project".to_string()),
                 enabled: true,
+                if_condition: None,
             },
             HookSummary {
                 id: "h8c3d5e7".to_string(),
@@ -331,6 +332,7 @@ mod tests {
                 command: "welcome.sh".to_string(),
                 source: None,
                 enabled: false,
+                if_condition: None,
             },
         ];
         let out_populated = render_list(&summaries);
@@ -357,6 +359,7 @@ mod tests {
                 command: "enabled-hook".to_string(),
                 source: None,
                 enabled: true,
+                if_condition: None,
             },
             HookSummary {
                 id: "h22222222".to_string(),
@@ -365,6 +368,7 @@ mod tests {
                 command: "disabled-hook".to_string(),
                 source: None,
                 enabled: false,
+                if_condition: None,
             },
         ];
         let out = render_list(&summaries);

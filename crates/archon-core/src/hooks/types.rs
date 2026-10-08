@@ -111,7 +111,12 @@ pub struct HookConfig {
     /// Optional condition expression, e.g. `"Bash(git *)"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub if_condition: Option<String>,
-    /// Timeout in seconds. Default 60.
+    /// No-progress window in seconds; standalone default 60.
+    /// Any stdout/stderr bytes (including discarded output and descendant
+    /// output) renew the window across stdin writes, waiting and pipe draining.
+    /// HTTP response data also renews the window. There is no total runtime
+    /// limit. A registry uses `aggregate_timeout_ms`
+    /// as the fallback when this value is absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u32>,
     /// If true, the hook fires at most once per session and is then removed.
@@ -144,13 +149,8 @@ pub struct HookConfig {
 
 impl HookConfig {
     pub(crate) fn failure_policy(&self, event_name: &str) -> HookFailurePolicy {
-        self.on_failure.unwrap_or_else(|| {
-            if is_gating_event(event_name) {
-                HookFailurePolicy::Block
-            } else {
-                HookFailurePolicy::Allow
-            }
-        })
+        self.on_failure
+            .unwrap_or_else(|| event_failure_policy(event_name))
     }
 
     pub(crate) fn failure_result(&self, event_name: &str, error: &str) -> HookResult {
@@ -160,6 +160,15 @@ impl HookConfig {
                 HookResult::block(format!("hook '{}' failed: {error}", self.display_command()))
             }
         }
+    }
+}
+
+/// The failure policy of a hook or callback that sets no `on_failure`.
+pub(crate) fn event_failure_policy(event_name: &str) -> HookFailurePolicy {
+    if is_gating_event(event_name) {
+        HookFailurePolicy::Block
+    } else {
+        HookFailurePolicy::Allow
     }
 }
 
@@ -365,142 +374,9 @@ impl HookResult {
     }
 }
 
-// ---------------------------------------------------------------------------
-// AggregatedHookResult — accumulated result from ALL matching hooks
-// Reference: Claude Code types/hooks.ts:277-290
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Default)]
-pub struct AggregatedHookResult {
-    pub blocking_errors: Vec<String>,
-    pub additional_contexts: Vec<String>,
-    pub updated_input: Option<serde_json::Value>,
-    pub updated_mcp_tool_output: Option<serde_json::Value>,
-    pub permission_behavior: Option<PermissionBehavior>,
-    pub permission_decision_reason: Option<String>,
-    pub prevent_continuation: bool,
-    pub stop_reason: Option<String>,
-    pub retry: bool,
-    pub system_messages: Vec<String>,
-    pub status_messages: Vec<String>,
-    pub updated_permissions: Vec<PermissionUpdate>,
-    /// Collected watch paths from all hook results (REQ-HOOK-017).
-    pub watch_paths: Vec<String>,
-    /// Elicitation auto-respond action — last writer wins (REQ-HOOK-019).
-    pub elicitation_action: Option<ElicitationAction>,
-    /// Elicitation content payload — last writer wins (REQ-HOOK-019).
-    pub elicitation_content: Option<serde_json::Value>,
-    /// Number of hooks skipped due to aggregate timeout budget exhaustion.
-    pub skipped_count: u32,
-}
-
-impl AggregatedHookResult {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Merge a single HookResult into this aggregate (REQ-HOOK-011).
-    pub fn merge(&mut self, result: HookResult) {
-        // outcome: any Blocking -> collect error
-        if result.outcome == HookOutcome::Blocking {
-            let reason = result
-                .reason
-                .clone()
-                .unwrap_or_else(|| "hook blocked (no reason given)".to_owned());
-            self.blocking_errors.push(reason);
-        }
-
-        // updated_input: last writer wins
-        if result.updated_input.is_some() {
-            self.updated_input = result.updated_input;
-        }
-
-        // updated_mcp_tool_output: last writer wins
-        if result.updated_mcp_tool_output.is_some() {
-            self.updated_mcp_tool_output = result.updated_mcp_tool_output;
-        }
-
-        // additional_context: collect all
-        if let Some(ctx) = result.additional_context {
-            self.additional_contexts.push(ctx);
-        }
-
-        // permission_behavior: policy wins; non-policy cannot Allow blocked tools (REQ-HOOK-004a)
-        if let Some(ref pb) = result.permission_behavior
-            && *pb != PermissionBehavior::Passthrough
-        {
-            let is_policy = result.source_authority == Some(SourceAuthority::Policy);
-            match pb {
-                PermissionBehavior::Allow if !is_policy => {
-                    // Non-policy hook cannot grant Allow — silently dropped
-                    tracing::warn!("non-policy hook attempted permission_behavior=allow; dropped");
-                }
-                _ => {
-                    self.permission_behavior = Some(pb.clone());
-                    if result.permission_decision_reason.is_some() {
-                        self.permission_decision_reason = result.permission_decision_reason.clone();
-                    }
-                }
-            }
-        }
-
-        // prevent_continuation: any true wins
-        if result.prevent_continuation == Some(true) {
-            self.prevent_continuation = true;
-            if result.stop_reason.is_some() {
-                self.stop_reason = result.stop_reason;
-            }
-        }
-
-        // retry: any true wins
-        if result.retry == Some(true) {
-            self.retry = true;
-        }
-
-        // system_message: collect all
-        if let Some(msg) = result.system_message {
-            self.system_messages.push(msg);
-        }
-
-        // status_message: collect all
-        if let Some(msg) = result.status_message {
-            self.status_messages.push(msg);
-        }
-
-        // updated_permissions: collect all (REQ-HOOK-016)
-        if !result.updated_permissions.is_empty() {
-            self.updated_permissions.extend(result.updated_permissions);
-        }
-
-        // watch_paths: collect all (REQ-HOOK-017)
-        if !result.watch_paths.is_empty() {
-            self.watch_paths.extend(result.watch_paths);
-        }
-
-        // elicitation_action: last writer wins (REQ-HOOK-019)
-        if result.elicitation_action.is_some() {
-            self.elicitation_action = result.elicitation_action;
-        }
-        // elicitation_content: last writer wins (REQ-HOOK-019)
-        if result.elicitation_content.is_some() {
-            self.elicitation_content = result.elicitation_content;
-        }
-    }
-
-    /// Check if any hook blocked execution.
-    pub fn is_blocked(&self) -> bool {
-        !self.blocking_errors.is_empty()
-    }
-
-    /// Get combined block reason string.
-    pub fn block_reason(&self) -> Option<String> {
-        if self.blocking_errors.is_empty() {
-            None
-        } else {
-            Some(self.blocking_errors.join("; "))
-        }
-    }
-}
+#[path = "types_aggregate.rs"]
+mod aggregate;
+pub use aggregate::AggregatedHookResult;
 
 // ---------------------------------------------------------------------------
 // PermissionUpdateDestination — where permission updates are persisted
@@ -569,14 +445,17 @@ impl PermissionUpdate {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// HookExecutionConfig — aggregate timeout budget for hook execution
+// HookExecutionConfig — registry fallback no-progress window
 // ---------------------------------------------------------------------------
 
-/// Configuration for hook execution behavior (e.g. aggregate timeout budget).
+/// Configuration for hook execution behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookExecutionConfig {
-    /// Maximum total time in milliseconds for all hooks on a single event.
-    /// Default: 30000 (30 seconds).
+    /// Legacy key: fallback no-progress window for each hook without `timeout`.
+    /// Default 30000 ms; positive values round up to whole seconds (saturating
+    /// at `u32::MAX`), and zero expires immediately. Explicit timeouts win.
+    /// Each hook gets a fresh window, including session hooks; event duration
+    /// never clamps or skips hooks or callbacks. This is not a total budget.
     pub aggregate_timeout_ms: u64,
 }
 

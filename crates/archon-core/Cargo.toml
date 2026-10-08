@@ -90,6 +90,7 @@ rayon.workspace = true
 serde_yaml_ng.workspace = true
 
 [dev-dependencies]
+openssl.workspace = true
 archon-session = { path = "../archon-session", features = ["test-support"] }
 archon-tools = { path = "../archon-tools", features = ["test-support"] }
 archon-permissions = { path = "../archon-permissions" }

@@ -137,7 +137,7 @@ kill, the hook was started and then cut short.
 assert!(elapsed.as_secs() < 4, "expected the hook to be killed within ~2s");
 
 // Yes.
-assert_eq!(result.skipped_count, 0, "the hook must have been started, not skipped");
+assert!(entered.load(Ordering::SeqCst), "the hook must have been started");
 assert!(result.block_reason().unwrap_or_default().contains("timed out"));
 ```
 

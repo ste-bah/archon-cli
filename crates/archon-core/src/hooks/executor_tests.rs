@@ -79,7 +79,7 @@ async fn hook_environment_is_allowlisted_and_includes_explicit_context() {
 
 #[tokio::test]
 #[cfg(unix)]
-async fn hook_parent_exit_with_descendant_held_pipes_hits_overall_timeout() {
+async fn hook_parent_exit_with_descendant_held_pipes_hits_no_progress_timeout() {
     let dir = tempfile::tempdir().unwrap();
     let pid_file = dir.path().join("held-pipes.pid");
     let output = tokio::time::timeout(
@@ -133,12 +133,9 @@ async fn wait_until_unix_process_is_absent(pid: &str) {
 
 #[cfg(unix)]
 fn unix_process_exists(pid: &str) -> bool {
-    std::process::Command::new("kill")
-        .args(["-0", pid])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+    let pid: libc::pid_t = pid.parse().expect("valid fixture PID");
+    // SAFETY: signal 0 probes only the fixture PID, without spawning a child.
+    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 #[tokio::test]
@@ -246,14 +243,14 @@ async fn windows_hook_waits_for_descendant_after_parent_exits() {
     let completion_file = dir.path().join("detached-descendant.complete");
     let fixture = write_windows_detached_descendant_fixture(&completion_file);
     let output = tokio::time::timeout(
-        std::time::Duration::from_secs(20),
+        std::time::Duration::from_secs(90),
         super::executor_process::run_command(
             &windows_file_command(&fixture),
             b"{}",
             dir.path(),
             "issue92-session",
             "PreToolUse",
-            15,
+            HANG_GUARD_SECS,
         ),
     )
     .await
@@ -317,7 +314,7 @@ fn rerun_with_forbidden_var(test_name: &str) {
     let module = module_path!();
     let module = module.split_once("::").map_or(module, |(_, rest)| rest);
     let exact = format!("{module}::{test_name}");
-    let output = std::process::Command::new(std::env::current_exe().unwrap())
+    let output = archon_shell::spawn::command(std::env::current_exe().unwrap())
         .args([exact.as_str(), "--exact", "--test-threads=1", "--nocapture"])
         .env(FORBIDDEN_VAR, "must-not-reach-hooks")
         .output()
@@ -486,7 +483,7 @@ fn windows_process_exists(pid: &str) -> bool {
     let script = format!(
         "if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}"
     );
-    std::process::Command::new(powershell_exe())
+    archon_shell::spawn::command(powershell_exe())
         .args(["-NoProfile", "-Command", &script])
         .status()
         .is_ok_and(|status| status.success())

@@ -285,6 +285,12 @@ impl Agent {
                 result.content, context
             ));
         }
+        // Only no-progress stops; other non-blocking errors stay in the log.
+        for reason in &post_agg.no_progress_stops {
+            result
+                .content
+                .push_str(&format!("\n[Hook Warning] PostToolUse: {reason}"));
+        }
         for msg in &post_agg.system_messages {
             tracing::warn!(tool = %pre.tool_name, "[Hook Warning] {}", msg);
         }

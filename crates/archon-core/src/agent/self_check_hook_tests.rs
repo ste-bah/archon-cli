@@ -414,11 +414,7 @@ fn shipped_hooks_survive_registry_deduplication() {
     // hooks sharing one command string would silently collapse into one.
     let home = tempfile::tempdir().expect("home");
     let registry = crate::hooks::HookRegistry::load_all(&repo_root(), home.path());
-    let surviving: Vec<_> = registry
-        .summaries()
-        .into_iter()
-        .filter(|s| s.command.contains("self-check-file.sh"))
-        .collect();
+    let surviving = self_check_survivors(&registry);
 
     assert_eq!(
         surviving.len(),
@@ -433,3 +429,7 @@ fn shipped_hooks_survive_registry_deduplication() {
         "PostToolUse is the only event whose output the model reads"
     );
 }
+
+#[path = "self_check_hook_selection_tests.rs"]
+mod selection;
+use selection::self_check_survivors;

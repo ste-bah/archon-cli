@@ -14,7 +14,11 @@ mod load;
 mod matching;
 mod persist;
 
-use budget::clamp_hook_to_budget;
+#[cfg(test)]
+#[path = "registry/no_progress_tests.rs"]
+mod no_progress_tests;
+
+use budget::with_fallback_timeout;
 
 pub use matching::compute_hook_id;
 
@@ -36,7 +40,9 @@ pub struct HookSummary {
     pub event: HookEvent,
     /// Optional tool-name matcher (e.g. `"Bash"`, `"*"`, `None` = any).
     pub matcher: Option<String>,
-    /// The shell command or URL the hook runs (verbatim from `HookConfig.command`).
+    /// Optional hook condition expression.
+    pub if_condition: Option<String>,
+    /// A redacted display label for the shell command or URL.
     pub command: String,
     /// The source-authority tag assigned at load time: `"user"`,
     /// `"project"`, `"local"`, `"policy"`, or `None` for in-memory /
@@ -57,8 +63,9 @@ pub struct HookRegistry {
     enabled_overrides: RwLock<HashMap<String, bool>>,
     /// Tracks `once: true` hooks that have already fired (event:source:cmd).
     once_fired: Mutex<HashSet<String>>,
-    /// Aggregate timeout budget and execution configuration.
+    /// Fallback no-progress window and execution configuration.
     config: HookExecutionConfig,
+    http_transport: super::http::HookHttpTransport,
     /// In-process callbacks registered by plugins/extensions.
     callbacks: RwLock<HashMap<HookEvent, Vec<HookCallbackEntry>>>,
     /// Session-scoped temporary hooks: session_id -> (event -> hooks).
@@ -74,6 +81,22 @@ pub struct HookRegistry {
 struct PendingHook {
     hook: HookConfig,
     source: Option<String>,
+    /// The configured id, which names the hook in model-visible warnings.
+    id: String,
+}
+
+/// Name an allowing no-progress stop by its configured id. The executor
+/// cannot: the id depends on the matcher.
+fn name_no_progress_stop(
+    mut execution: executor::HookExecutionResult,
+    hook: &HookConfig,
+    id: &str,
+    event_name: &str,
+) -> executor::HookExecutionResult {
+    if let Some(error) = &execution.no_progress_stop {
+        execution.result.reason = Some(hook.no_progress_reason(Some(id), event_name, error));
+    }
+    execution
 }
 
 impl HookRegistry {
@@ -84,6 +107,7 @@ impl HookRegistry {
             enabled_overrides: RwLock::new(HashMap::new()),
             once_fired: Mutex::new(HashSet::new()),
             config: HookExecutionConfig::default(),
+            http_transport: Default::default(),
             callbacks: RwLock::new(HashMap::new()),
             session_hooks: RwLock::new(HashMap::new()),
             project_root: PathBuf::new(),
@@ -98,10 +122,33 @@ impl HookRegistry {
             enabled_overrides: RwLock::new(HashMap::new()),
             once_fired: Mutex::new(HashSet::new()),
             config,
+            http_transport: Default::default(),
             callbacks: RwLock::new(HashMap::new()),
             session_hooks: RwLock::new(HashMap::new()),
             project_root: PathBuf::new(),
             home_dir: PathBuf::new(),
+        }
+    }
+
+    /// Install connection settings for all registry HTTP hooks.
+    pub fn with_http_transport(mut self, transport: super::http::HookHttpTransport) -> Self {
+        self.http_transport = transport;
+        self
+    }
+
+    async fn execute_configured_hook(
+        &self,
+        hook: &HookConfig,
+        input: &serde_json::Value,
+        cwd: &Path,
+        session_id: &str,
+        event_name: &str,
+    ) -> executor::HookExecutionResult {
+        if hook.hook_type == super::types::HookCommandType::Http {
+            super::http::execute_http_hook_for_event(hook, input, &self.http_transport, event_name)
+                .await
+        } else {
+            executor::execute_hook_with_metadata(hook, input, cwd, session_id, event_name).await
         }
     }
 
@@ -187,6 +234,7 @@ impl HookRegistry {
                     out.push(PendingHook {
                         hook: hook.clone(),
                         source: entry.source.clone(),
+                        id: hook_id,
                     });
                 }
             }
@@ -195,11 +243,6 @@ impl HookRegistry {
 
         let event_name = event.to_string();
         let mut aggregated = AggregatedHookResult::new();
-        let mut skipped: u32 = 0;
-
-        // Aggregate timeout budget tracking.
-        let budget_start = std::time::Instant::now();
-        let budget = std::time::Duration::from_millis(self.config.aggregate_timeout_ms);
 
         for pending_hook in &pending {
             // Apply HookMatcher.matcher filter against tool_name in input.
@@ -228,8 +271,7 @@ impl HookRegistry {
             // a matcher were expanded via the HookEntry. The matcher filter
             // is per-HookEntry. For correctness, we need it.
 
-            // Evaluate eligibility before budget accounting. A non-matching or
-            // already-fired hook is not a timeout-skipped execution failure.
+            // Non-matching and already-fired hooks remain ineligible.
             if let Some(ref cond) = hook.if_condition
                 && !condition::evaluate(cond, &input)
             {
@@ -248,24 +290,11 @@ impl HookRegistry {
                 }
             }
 
-            if budget_start.elapsed() >= budget {
-                tracing::warn!(
-                    hook = %hook.display_command(),
-                    event = %event_name,
-                    "aggregate timeout budget exhausted; applying hook failure policy"
-                );
-                skipped += 1;
-                aggregated.merge(hook.failure_result(&event_name, "aggregate timeout exhausted"));
-                continue;
-            }
-
-            // Clamp per-hook timeout to remaining budget.
-            let clamped_hook =
-                clamp_hook_to_budget(hook, budget.saturating_sub(budget_start.elapsed()));
-
-            // Execute the hook command with clamped timeout.
-            let result =
-                executor::execute_hook(&clamped_hook, &input, cwd, session_id, &event_name).await;
+            let configured_hook = with_fallback_timeout(hook, self.config.aggregate_timeout_ms);
+            let execution = self
+                .execute_configured_hook(&configured_hook, &input, cwd, session_id, &event_name)
+                .await;
+            let execution = name_no_progress_stop(execution, hook, &pending_hook.id, &event_name);
 
             // Mark once-hooks as fired after execution.
             if hook.once == Some(true)
@@ -275,7 +304,7 @@ impl HookRegistry {
             }
 
             // Override source_authority from registry source tag.
-            let mut result = result;
+            let mut result = execution.result;
             result.source_authority = match pending_hook.source.as_deref() {
                 Some("policy") => Some(crate::hooks::SourceAuthority::Policy),
                 Some("user") => Some(crate::hooks::SourceAuthority::User),
@@ -285,10 +314,8 @@ impl HookRegistry {
             };
 
             // Accumulate into aggregate (no short-circuit).
-            aggregated.merge(result);
+            aggregated.merge_harness_result(result, execution.no_progress_stop.as_deref());
         }
-
-        aggregated.skipped_count = skipped;
 
         // Execute session-scoped hooks for this session_id.
         let session_hook_configs: Vec<HookConfig> = {
@@ -300,27 +327,17 @@ impl HookRegistry {
                 .unwrap_or_default()
         };
         for config in &session_hook_configs {
-            if budget_start.elapsed() >= budget {
-                tracing::warn!(
-                    hook = %config.display_command(),
-                    event = %event_name,
-                    "aggregate timeout budget exhausted; applying session hook failure policy"
-                );
-                aggregated.skipped_count += 1;
-                aggregated.merge(config.failure_result(&event_name, "aggregate timeout exhausted"));
-                continue;
-            }
+            let configured_hook = with_fallback_timeout(config, self.config.aggregate_timeout_ms);
+            let execution = self
+                .execute_configured_hook(&configured_hook, &input, cwd, session_id, &event_name)
+                .await;
+            let id = compute_hook_id(&event, &config.hook_type, &config.command, None);
+            let execution = name_no_progress_stop(execution, config, &id, &event_name);
 
-            let clamped_config =
-                clamp_hook_to_budget(config, budget.saturating_sub(budget_start.elapsed()));
-
-            let result =
-                executor::execute_hook(&clamped_config, &input, cwd, session_id, &event_name).await;
-
-            let mut result = result;
+            let mut result = execution.result;
             result.source_authority = None;
 
-            aggregated.merge(result);
+            aggregated.merge_harness_result(result, execution.no_progress_stop.as_deref());
         }
 
         // Auto-clear session hooks on SessionEnd.
@@ -359,8 +376,7 @@ impl HookRegistry {
             ctx_builder = ctx_builder.agent_id(subagent_id.to_string());
         }
         let ctx = ctx_builder.build();
-        self.execute_callbacks(&event, &ctx, &mut aggregated, budget_start, budget)
-            .await;
+        self.execute_callbacks(&event, &ctx, &mut aggregated).await;
 
         aggregated
     }
@@ -381,15 +397,15 @@ impl HookRegistry {
         }
     }
 
-    /// Execute registered callbacks for `event`, participating in the aggregate
-    /// timeout budget. Each runs in `spawn_blocking` with `catch_unwind` + timeout.
+    /// Execute callbacks independently. The callback API exposes only its final
+    /// result, so its window is a no-progress window measured from its start.
+    /// A stop follows the event's default failure policy, like a process hook
+    /// without `on_failure`: block, or an allowing no-progress stop.
     async fn execute_callbacks(
         &self,
         event: &HookEvent,
         ctx: &HookContext,
         aggregated: &mut AggregatedHookResult,
-        budget_start: std::time::Instant,
-        budget: std::time::Duration,
     ) {
         let callback_snapshot: Vec<(String, super::callback::HookCallback, u32)> = {
             let map = self.callbacks.read().unwrap_or_else(|p| p.into_inner());
@@ -403,30 +419,19 @@ impl HookRegistry {
         };
 
         for (name, cb, timeout_secs) in callback_snapshot {
-            if budget_start.elapsed() >= budget {
-                tracing::warn!(
-                    callback = %name,
-                    "aggregate timeout budget exhausted; skipping callback"
-                );
-                aggregated.skipped_count += 1;
-                continue;
-            }
-
-            let remaining = budget.saturating_sub(budget_start.elapsed());
-            let effective_timeout = std::cmp::min(
-                std::time::Duration::from_secs(timeout_secs as u64),
-                remaining,
-            );
+            let effective_timeout = std::time::Duration::from_secs(u64::from(timeout_secs));
 
             let ctx_clone = ctx.clone();
 
-            let task_result = tokio::time::timeout(
-                effective_timeout,
-                tokio::task::spawn_blocking(move || {
-                    std::panic::catch_unwind(AssertUnwindSafe(|| cb(&ctx_clone)))
-                }),
-            )
-            .await;
+            let progress = executor::NoProgressWindow::new(effective_timeout);
+            let task_result = progress
+                .wait(
+                    "callback",
+                    tokio::task::spawn_blocking(move || {
+                        std::panic::catch_unwind(AssertUnwindSafe(|| cb(&ctx_clone)))
+                    }),
+                )
+                .await;
 
             match task_result {
                 Ok(Ok(Ok(result))) => {
@@ -438,12 +443,31 @@ impl HookRegistry {
                 Ok(Err(join_err)) => {
                     tracing::warn!(callback = %name, error = %join_err, "callback join error");
                 }
-                Err(_timeout) => {
+                Err(error) => {
+                    let event_name = event.to_string();
+                    let error = error.to_string();
+                    let reason = format!("callback '{name}' on {event_name} stopped: {error}");
                     tracing::warn!(
                         callback = %name,
+                        event = %event_name,
                         timeout_secs,
-                        "callback timed out; treating as success"
+                        error = %error,
+                        "callback stopped: no answer within its window"
                     );
+                    let (result, marker) = match super::types::event_failure_policy(&event_name) {
+                        super::types::HookFailurePolicy::Block => {
+                            (super::types::HookResult::block(reason), None)
+                        }
+                        super::types::HookFailurePolicy::Allow => (
+                            super::types::HookResult {
+                                outcome: super::types::HookOutcome::NonBlockingError,
+                                reason: Some(reason),
+                                ..Default::default()
+                            },
+                            Some(error),
+                        ),
+                    };
+                    aggregated.merge_harness_result(result, marker.as_deref());
                 }
             }
         }
