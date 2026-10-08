@@ -459,7 +459,7 @@ impl CommandEnvironment {
     /// Every child still passes through the process-wide spawn boundary.
     pub fn command(&self, program: impl AsRef<OsStr>) -> std::process::Command {
         let mut command = archon_shell::spawn::command(program);
-        command.env_clear().envs(&self.variables);
+        archon_shell::spawn::replace_environment(&mut command, &self.variables);
         command
     }
 
