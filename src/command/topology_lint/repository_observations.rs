@@ -91,12 +91,32 @@ fn deliverable_paths(task: &WorkflowV2TaskUniverseTask, raw: &str) -> Vec<String
     paths
 }
 
-/// The paths named by one `Files Expected to Change` item head. Ignore wrapped
-/// descriptions, and stop before an observation so prose after it cannot add
-/// deliverables. A head without an observation is its first line.
+/// The paths named by one `Files Expected to Change` item head. Continue a
+/// wrapped head while it is still listing paths or has not named one yet;
+/// stop before an observation or a description so prose cannot add paths.
 fn paths_in_item(item: &str) -> Vec<String> {
-    let first_line = item.lines().next().unwrap_or(item);
-    let head = before_observation(first_line);
+    let mut paths = Vec::new();
+    let mut found_path = false;
+    let mut continued = false;
+    let mut first = true;
+    for line in item.lines() {
+        if !first && !continued && found_path {
+            break;
+        }
+        first = false;
+        let head_line = before_observation(line);
+        let line_paths = paths_in_head(head_line);
+        found_path |= !line_paths.is_empty();
+        paths.extend(line_paths);
+        if head_line.len() != line.len() {
+            break;
+        }
+        continued = ends_head_list(line);
+    }
+    paths
+}
+
+fn paths_in_head(head: &str) -> Vec<String> {
     let mut spans = backticked_spans(head);
     if spans.is_empty() {
         spans.extend(head.split_whitespace().next().map(str::to_string));
@@ -110,18 +130,35 @@ fn paths_in_item(item: &str) -> Vec<String> {
         .collect()
 }
 
+fn ends_head_list(line: &str) -> bool {
+    let trimmed = line.trim_end();
+    trimmed.ends_with(',')
+        || trimmed.ends_with(';')
+        || ["and", "or"].iter().any(|word| {
+            trimmed
+                .rsplit_once(char::is_whitespace)
+                .is_some_and(|(_, last)| last.eq_ignore_ascii_case(word))
+        })
+}
+
 /// The beginning of a valid observation marker in an item head, if present.
 fn before_observation(head: &str) -> &str {
+    let separators = [" — ", " - ", " – ", ": ", ", "];
+    let mut in_backticks = false;
     for (index, character) in head.char_indices() {
-        if matches!(character, '—' | '-' | '–' | ':' | ',' | '`' | '*' | ')')
+        if character == '`' {
+            in_backticks = !in_backticks;
+            continue;
+        }
+        if in_backticks {
+            continue;
+        }
+        if separators
+            .iter()
+            .any(|separator| head[index..].starts_with(*separator))
             && parse_observation(&head[index..]).is_some()
         {
-            let end = if matches!(character, '`' | '*' | ')') {
-                index + character.len_utf8()
-            } else {
-                index
-            };
-            return &head[..end];
+            return &head[..index];
         }
     }
     head

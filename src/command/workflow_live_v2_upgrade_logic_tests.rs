@@ -198,9 +198,9 @@ async fn logic_361_a_logic_change_reruns_only_its_capability() {
         (0, 4)
     );
     // A stricter set lint re-runs the lint alone.
-    let lint = run.upgraded(&[("freeze-skeleton", 2), ("task-set-lint", 3)]);
+    let lint = run.upgraded(&[("freeze-skeleton", 2), ("task-set-lint", 4)]);
     assert_eq!(run.run(lint.clone(), SCRIPT).await, (1, 3));
-    assert!(run.stamps("task-set-lint").contains(&Some(3)));
+    assert!(run.stamps("task-set-lint").contains(&Some(4)));
 }
 
 #[tokio::test]
@@ -234,7 +234,7 @@ async fn logic_361_unversioned_checks_run_again_and_an_unversioned_landing_reuse
         let expected = if check == "verify-frozen-acceptance" || check == "requirements-trace" {
             1
         } else {
-            2
+            3
         };
         assert_eq!(run.stamps(check), vec![Some(expected)], "{check}");
     }

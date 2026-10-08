@@ -211,6 +211,52 @@ fn every_path_in_a_head_list_is_checked() {
 }
 
 #[test]
+fn wrapped_head_lists_keep_paths_until_the_description_starts() {
+    let (_temp, project, tasks, tree) = grounded();
+    let raw = body(
+        "[]",
+        "- `src/missing_a.rs`,\n  `src/missing_b.rs` (create).\n- Module wiring:\n  `src/missing_c.rs`.",
+    );
+    let found = findings(&tasks, &project, &tree, &raw);
+    assert_eq!(found.len(), 3, "{found:?}");
+    for path in ["src/missing_a.rs", "src/missing_b.rs", "src/missing_c.rs"] {
+        assert!(
+            found.iter().any(|finding| finding.contains(path)),
+            "{found:?}"
+        );
+    }
+}
+
+#[test]
+fn wrapped_description_does_not_add_a_path_after_an_observed_head() {
+    let (_temp, project, tasks, tree) = grounded();
+    let raw = body(
+        "[]",
+        "- `/r/x/pine.rs` — exists (438 lines)\n  Pine tests are wired via `mod pine;` rather than duplicating it in `pine.rs`.",
+    );
+    let found = findings(&tasks, &project, &tree, &raw);
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn absent_inside_a_filename_is_not_an_observation_marker() {
+    let (_temp, project, tasks, tree) = grounded();
+    let raw = body("[]", "- `src/path-absent.rs`\n- `src/absent_handler.rs`");
+    let found = findings(&tasks, &project, &tree, &raw);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .any(|finding| finding.contains("src/path-absent.rs"))
+    );
+    assert!(
+        found
+            .iter()
+            .any(|finding| finding.contains("src/absent_handler.rs"))
+    );
+}
+
+#[test]
 fn an_unobserved_head_path_is_found_without_treating_its_description_as_a_path() {
     let (_temp, project, tasks, tree) = grounded();
     let raw = body(
