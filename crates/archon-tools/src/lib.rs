@@ -235,4 +235,7 @@ pub mod workflow_read_guard;
 
 pub mod subagent_session;
 
+/// What of a tool call's input a persisted session trace may keep (#276).
+pub mod tool_trace_input;
+
 pub mod audit_landing;

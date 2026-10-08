@@ -312,3 +312,35 @@ fn redaction_regex_pem_no_catastrophic_backtracking_on_near_match() {
         elapsed.as_millis()
     );
 }
+
+#[test]
+fn secret_value_redaction_keeps_words_and_replaces_credential_shapes() {
+    // Shapes built at run time, so no literal credential sits in the source.
+    let github = format!("ghp_{}", "K3y9".repeat(9));
+    let aws = format!("AKIA{}", "Q".repeat(16));
+    for path in ["src/token_store.rs", "config/secret_rules.md", "api_key.rs"] {
+        assert_eq!(redact_secret_values(path), path);
+        assert_ne!(
+            redact_text(path),
+            path,
+            "the full redaction still hides {path}"
+        );
+    }
+    let path = format!("keys/{github}/{aws}.txt");
+    let redacted = redact_secret_values(&path);
+    assert_eq!(redacted, format!("keys/{REDACTED}/{REDACTED}.txt"));
+}
+
+#[test]
+fn the_full_regex_is_the_shapes_and_the_words_together() {
+    let anthropic = format!("sk-ant-{}", "a1".repeat(12));
+    let text = format!("token={anthropic} password");
+    assert_eq!(
+        redact_text(&text),
+        format!("{REDACTED}={REDACTED} {REDACTED}")
+    );
+    assert_eq!(
+        redact_secret_values(&text),
+        format!("token={REDACTED} password")
+    );
+}

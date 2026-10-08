@@ -296,17 +296,20 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                 })
                 .transpose()?;
             let records = stage_landing::prepare(&mut request, v2_store)?;
-            let response = stage_landing::scope(
-                records.clone(),
-                archon_tools::workflow_read_guard::scope_run_store(
-                    run_store,
-                    archon_tools::workflow_read_guard::scope_read_only_boundary(
-                        read_only,
-                        on_heap(|| client.run_agent_raw_request(&request, request.task.clone())),
+            let (response, captured) =
+                workflow_live_v2_client::structured_trace::capture(stage_landing::scope(
+                    records.clone(),
+                    archon_tools::workflow_read_guard::scope_run_store(
+                        run_store,
+                        archon_tools::workflow_read_guard::scope_read_only_boundary(
+                            read_only,
+                            on_heap(|| {
+                                client.run_agent_raw_request(&request, request.task.clone())
+                            }),
+                        ),
                     ),
-                ),
-            )
-            .await;
+                ))
+                .await;
             if let Some(evidence) = &mut evidence {
                 evidence.finish(&response)?;
             }
@@ -319,7 +322,7 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                 value.as_object_mut().unwrap().remove("records_landed");
                 outcome.content = serde_json::to_string(&value)?;
             }
-            let stop_reason = outcome.stop_reason.ok_or_else(|| {
+            let stop_reason = outcome.stop_reason.take().ok_or_else(|| {
                 WorkflowError::StageFailed(
                     "raw provider outcome returned no typed stop reason".to_string(),
                 )
@@ -329,17 +332,8 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
                     "raw provider outcome returned empty content".to_string(),
                 ));
             }
-            let mut result = WorkflowV2Result::accepted("trusted raw provider outcome captured");
-            result.evidence.push(WorkflowV2Evidence::new(
-                WorkflowV2EvidenceKind::Inspection,
-                "fixed decomposition author returned provider content and typed stop reason",
-            ));
-            result.data = serde_json::json!({
-                "content": outcome.content,
-                "stopReason": stop_reason,
-                "tokensIn": outcome.tokens_in,
-                "tokensOut": outcome.tokens_out,
-            });
+            let mut result = raw_evidence::raw_outcome_result(outcome, stop_reason);
+            archon_workflow::v2::tool_trace::mark_incomplete(&mut result, &captured.lost);
             return Ok(result);
         }
         let provider_env = workflow_live_provider_env::prepare_provider_env_for_v2_request(
@@ -348,23 +342,32 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         )
         .await;
         let call_client = client.with_provider_tier(provider_tier_for_v2_request(&request));
-        match archon_tools::workflow_read_guard::scope_run_store(
-            run_store,
-            archon_tools::workflow_read_guard::scope_read_only_boundary(
-                read_only,
-                on_heap(|| {
-                    run_v2_agent_call_with_rejected_output_log(
-                        adapter,
-                        &call_client,
-                        &request,
-                        v2_store,
-                    )
-                }),
+        let (outcome, captured) = workflow_live_v2_client::structured_trace::capture(
+            archon_tools::workflow_read_guard::scope_run_store(
+                run_store,
+                archon_tools::workflow_read_guard::scope_read_only_boundary(
+                    read_only,
+                    on_heap(|| {
+                        run_v2_agent_call_with_rejected_output_log(
+                            adapter,
+                            &call_client,
+                            &request,
+                            v2_store,
+                        )
+                    }),
+                ),
             ),
         )
-        .await
-        {
+        .await;
+        match outcome {
             Ok(mut result) => {
+                // Issue 276: what the session's own trace saw, beside the
+                // agent's report of itself.
+                archon_workflow::v2::tool_trace::record_structured_trace(
+                    &mut result,
+                    captured.trace.as_deref(),
+                );
+                archon_workflow::v2::tool_trace::mark_incomplete(&mut result, &captured.lost);
                 workflow_live_provider_env::stamp_provider_env_result(
                     &mut result,
                     provider_env.as_ref(),

@@ -27,6 +27,12 @@ impl ContinuationRefused {
     }
 }
 
+/// The tool name of the summary entry that ends a host session trace
+/// (Issue 276). A real tool name cannot hold a `.`, so no tool call can be
+/// mistaken for it. Its presence says the session's history was captured; its
+/// input counts the calls made, kept and dropped by the trace bound.
+pub const TOOL_TRACE_SUMMARY_NAME: &str = "archon.tool_trace";
+
 #[derive(Clone, Default)]
 pub struct CompletedHistory(Arc<Mutex<SessionState>>);
 
@@ -78,6 +84,22 @@ impl CompletedHistory {
             .expect("completed history poisoned")
             .refusal
             .take()
+    }
+
+    /// How many messages are held, without copying them.
+    pub fn message_count(&self) -> usize {
+        self.0
+            .lock()
+            .expect("completed history poisoned")
+            .messages
+            .len()
+    }
+
+    /// Read the messages held from index `start` on, without copying them.
+    /// An out-of-range `start` reads none.
+    pub fn read_since<R>(&self, start: usize, read: impl FnOnce(&[serde_json::Value]) -> R) -> R {
+        let state = self.0.lock().expect("completed history poisoned");
+        read(state.messages.get(start..).unwrap_or_default())
     }
 
     pub fn messages(&self) -> Vec<serde_json::Value> {

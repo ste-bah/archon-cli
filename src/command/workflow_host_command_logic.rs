@@ -208,14 +208,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // is an error) changes acceptance freeze verdicts.
         version: 2,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "690a1cb26ea6de7a896bc2e6927557c80c91f8c0a4ec1b0c1f8340669bd26587",
+        sources_digest: "28718f5d0cecbd2ff2f4258a5766b16b089513bbdfb13a9fd0ffc5f1fe03c5c9",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "690a1cb26ea6de7a896bc2e6927557c80c91f8c0a4ec1b0c1f8340669bd26587",
+        sources_digest: "28718f5d0cecbd2ff2f4258a5766b16b089513bbdfb13a9fd0ffc5f1fe03c5c9",
         build_bound: false,
     },
     CapabilityLogic {
@@ -243,14 +243,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         id: "verify-frozen-acceptance",
         version: 1,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "f4b036c4a7e5844e579a08c44632cb9e936eea6f992f2c4af97293f03a53dec6",
+        sources_digest: "7b3e080b89ea52fa315156341466575c15396a766b3963b7d764282d295ea4da",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "f4b036c4a7e5844e579a08c44632cb9e936eea6f992f2c4af97293f03a53dec6",
+        sources_digest: "7b3e080b89ea52fa315156341466575c15396a766b3963b7d764282d295ea4da",
         build_bound: true,
     },
 ];

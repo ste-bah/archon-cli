@@ -149,63 +149,6 @@ impl LiveV2AgentClient {
         client
     }
 
-    pub(super) async fn run_agent_raw_request(
-        &self,
-        request: &WorkflowV2AgentRequest,
-        prompt: String,
-    ) -> std::result::Result<archon_workflow::WorkflowAgentOutcome, WorkflowV2AgentError> {
-        let tools = self.fixed_raw_tool_policy.as_ref().ok_or_else(|| {
-            WorkflowV2AgentError::Transport(
-                "fixed raw outcome call has no host-owned tool policy".to_string(),
-            )
-        })?;
-        if tools.is_empty() {
-            return Err(WorkflowV2AgentError::Transport(
-                "fixed raw outcome tool policy is empty".to_string(),
-            ));
-        }
-        let stage_request = stage_request_for_v2_agent(
-            &self.run_id,
-            self.provider_tier,
-            self.target_repository_root.clone(),
-            request,
-        );
-        let model_alias = tier_model_alias(self.provider_tier).to_string();
-        let agent = workflow_agent(&stage_request, &model_alias, &self.agent_names);
-        let session_id = workflow_agent_session_id(&stage_request);
-        call_sessions::note_session(&self.run_id, &request.call.id, &session_id);
-        let ordinal = workflow_agent_ordinal(&stage_request);
-        let mut allowed_tools = Vec::with_capacity(tools.len() + 1);
-        allowed_tools.push(EXACT_TOOL_POLICY_MARKER.to_string());
-        allowed_tools.extend(tools.iter().cloned());
-        let call = WorkflowAgentCall {
-            session_id,
-            task: request.task.clone(),
-            cwd: request_target_repository_root(&stage_request),
-            ordinal,
-            attempt: stage_request.attempt as usize,
-            agent,
-            messages: vec![serde_json::json!({ "role": "user", "content": prompt })],
-            system: Vec::new(),
-            tools: Vec::new(),
-            allowed_tools,
-            timeout_secs: self.timeout_secs,
-            disable_auto_background: true,
-            read_roots: Vec::new(),
-            write_roots: Vec::new(),
-            provider_env: self
-                .provider_env_resolution
-                .clone()
-                .map(WorkflowProviderEnv::new),
-        };
-        let attempt = archon_tools::read_boundary::scope(
-            archon_leann::language::default_exclude_patterns(),
-            run_agent_with_transient_retry(&self.llm, call, |_attempt| async { Ok(()) }),
-        );
-        let outcome = author_attempt_deadline(self.timeout_secs, attempt).await?;
-        outcome.map_err(|error| WorkflowV2AgentError::from_call_error(&error))
-    }
-
     fn activity_event(
         request: &StageRunRequest,
         agent_name: &str,
@@ -347,6 +290,7 @@ impl LiveV2AgentClient {
                 .clone()
                 .map(WorkflowProviderEnv::new),
         };
+        let retried = structured_trace::Retried::default();
         let provider_work =
             async {
                 if continuing {
@@ -354,6 +298,7 @@ impl LiveV2AgentClient {
                     self.llm.continue_agent(agent_request).await
                 } else {
                     run_agent_with_transient_retry(&self.llm, agent_request, |attempt| {
+                        retried.mark();
                         let client = self.clone();
                         let stage_request = stage_request.clone();
                         let agent_name = agent_name.clone();
@@ -380,7 +325,9 @@ impl LiveV2AgentClient {
                     .await
                 }
             };
-        let response = match self.admit_provider(provider_work).await {
+        let response = self.admit_provider(provider_work).await;
+        retried.note(response.is_err());
+        let response = match response {
             Ok(response) => response,
             Err(err) => {
                 // Before the emit below, which is itself a `?`.
@@ -418,6 +365,7 @@ impl LiveV2AgentClient {
         .await?;
         // `in_review`, not `resolved`: the branch returned, nothing verified it.
         board.finish(DelegatedOutcome::Completed);
+        structured_trace::note(&response.tool_uses);
         Ok(response.content)
     }
 }
@@ -471,6 +419,10 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
 pub(super) mod call_sessions;
 #[path = "workflow_live_v2_client_context.rs"]
 mod context;
+#[path = "workflow_live_v2_client_raw.rs"]
+mod raw;
+#[path = "workflow_structured_trace.rs"]
+pub(super) mod structured_trace;
 use context::*;
 
 #[cfg(test)]
