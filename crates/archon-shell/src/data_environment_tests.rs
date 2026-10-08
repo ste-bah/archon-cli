@@ -200,7 +200,6 @@ fn round2_controls_and_unknown_names_are_refused() {
         "R_PROFILE_URL",
         "MallocCustom_KEY",
         "UNKNOWN_CONTROL",
-        "HTTPS_PROXY",
         "SSL_CERT_FILE",
         "RUST_LOG",
     ] {
@@ -314,4 +313,20 @@ fn gc_control_refusals_name_the_binding_and_reason() {
         invalid.is_empty(),
         "missing refusal diagnostics: {invalid:?}"
     );
+}
+
+#[test]
+fn standard_proxy_bindings_are_data() {
+    for name in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
+    ] {
+        assert_eq!(super::check_data_variable(name), Ok(()), "{name}");
+    }
 }

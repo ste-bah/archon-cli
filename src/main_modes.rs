@@ -61,6 +61,8 @@ pub(crate) async fn handle_headless_if_requested(
     // Same reason as the print path below: a hard exit would strand any board
     // item whose subagent finished as the run ended.
     archon_tools::task_manager::drain_board_items().await;
+    // Windows: `exit` skips the C exit hook that drains host-command work.
+    crate::command::workflow_host_exit_drain::drain_before_exit();
     std::process::exit(exit_code);
 }
 
@@ -140,6 +142,8 @@ pub(crate) async fn handle_print_mode_if_requested(
     // leaves its item claimed by an agent that no longer exists. Bounded, so a
     // stuck agent delays exit by seconds rather than holding it open.
     archon_tools::task_manager::drain_board_items().await;
+    // Windows: `exit` skips the C exit hook that drains host-command work.
+    crate::command::workflow_host_exit_drain::drain_before_exit();
     std::process::exit(exit_code);
 }
 

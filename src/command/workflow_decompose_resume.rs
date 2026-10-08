@@ -129,6 +129,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &store.run_dir(run_id),
         run_id,
     )?;
+    // Staging a dead executor left unsealed goes before any child runs.
+    crate::command::workflow_host_staging_residue::clear_left(&store.run_dir(run_id))?;
     if run.status == archon_workflow::RunStatus::Running {
         // The lease is held, so the kernel says no live process executes
         // this run: its owner died without a pause (Issue 251). Recorded,

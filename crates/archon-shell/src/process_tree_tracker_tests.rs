@@ -6,10 +6,7 @@ use super::super::*;
 use super::{group_leader, wait_for};
 
 fn sleeper() -> std::process::Child {
-    std::process::Command::new("sleep")
-        .arg("30")
-        .spawn()
-        .unwrap()
+    crate::spawn::command("sleep").arg("30").spawn().unwrap()
 }
 
 fn pin(child: &std::process::Child) -> Pinned {
@@ -139,7 +136,7 @@ fn an_incomplete_or_failed_scan_forgets_nobody() {
 
 #[test]
 fn exited_reports_an_exit_without_reaping_the_child() {
-    let mut child = std::process::Command::new("/bin/sh")
+    let mut child = crate::spawn::command("/bin/sh")
         .args(["-c", "exit 3"])
         .spawn()
         .unwrap();
@@ -287,7 +284,7 @@ fn a_large_adoption_batch_cannot_outlive_its_budget() {
 
 #[test]
 fn an_unreadable_but_proven_exited_leader_does_not_stall() {
-    let mut root = std::process::Command::new("true").spawn().unwrap();
+    let mut root = crate::spawn::command("true").spawn().unwrap();
     while !exited(root.id()).unwrap() {
         std::thread::sleep(Duration::from_millis(2));
     }
@@ -411,3 +408,6 @@ fn a_stopped_child_has_not_exited() {
         "a stopped child was reported as exited"
     );
 }
+
+#[path = "process_tree_recording_r4_tests.rs"]
+mod recording_r4_tests;

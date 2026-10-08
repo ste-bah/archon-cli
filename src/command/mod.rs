@@ -376,6 +376,7 @@ pub(crate) mod workflow_host_command_postcondition;
 mod workflow_host_command_publication_tests;
 pub(crate) mod workflow_host_command_publish;
 pub(crate) mod workflow_host_command_supervisor;
+pub(crate) mod workflow_host_command_teardown_latch;
 #[cfg(test)]
 mod workflow_host_command_terminal_stop_tests;
 #[cfg(test)]
@@ -405,4 +406,10 @@ pub(crate) mod workflow_host_envelope_seal;
 #[cfg(test)]
 mod workflow_host_envelope_seal_tests;
 pub(crate) mod workflow_host_environment;
+pub(crate) mod workflow_host_exit_drain;
 pub(crate) mod workflow_host_secrets;
+pub(crate) mod workflow_host_staging_anchor;
+#[cfg(unix)]
+mod workflow_host_staging_anchor_unix;
+pub(crate) mod workflow_host_staging_pause;
+pub(crate) mod workflow_host_staging_residue;

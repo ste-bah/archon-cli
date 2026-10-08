@@ -3,12 +3,59 @@
 //! and the policy live in `workflow_host_command_operational`.
 use super::*;
 use crate::command::workflow_host_command_operational::{
-    NextStep, OperationalAttempt, OperationalReport, classify, next_step, pause_for_stall,
-    pause_for_unsettled_publish, pause_run, record_retry, reported_progress, require_run_owned,
-    unsettled_publish_evidence,
+    NextStep, OperationalAttempt, OperationalReport, next_step, pause_for_stall,
+    pause_for_unsettled_publish, pause_run, record_retry, require_run_owned,
 };
 
 impl FixedHostCommandExecutor {
+    async fn execute_process_with_run_control(
+        &self,
+        request: ResolvedHostCommand,
+        control: HostCommandControl,
+        handle: HostCommandControlHandle,
+        expected_generation: u64,
+    ) -> WorkflowResult<SupervisedProcessOutput> {
+        let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
+        let run_id = self
+            .run_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                WorkflowError::StateCorrupt(
+                    "fixed HostCommand run root has no UTF-8 run id".to_string(),
+                )
+            })?
+            .to_string();
+        // A run paused meanwhile reports the pause, never a cancellation.
+        crate::command::workflow_host_command_operational::require_run_owned(
+            &store,
+            &run_id,
+            expected_generation,
+        )?;
+        let work = self.process.execute(request, control);
+        tokio::pin!(work);
+        let mut poll = tokio::time::interval(std::time::Duration::from_millis(100));
+        loop {
+            tokio::select! {
+                biased;
+                result = &mut work => return result,
+                _ = poll.tick() => {
+                    let Ok(run) = store.load_state(&run_id) else {
+                        continue;
+                    };
+                    if let Some(signal) = crate::command::workflow_host_command_operational::supervisor_signal(
+                        &store,
+                        &run,
+                        expected_generation,
+                    ) {
+                        handle.signal(signal)?;
+                        return work.await;
+                    }
+                }
+            }
+        }
+    }
+
     /// Runs `command` until it completes. A timeout or an incomplete,
     /// resumable exit runs it again under `next_step`; when that stops, the
     /// run is paused and the call ends with the pause's control error, so it
@@ -19,7 +66,11 @@ impl FixedHostCommandExecutor {
         command: &ResolvedHostCommand,
         call_id: &str,
         expected_generation: u64,
-    ) -> WorkflowResult<SupervisedProcessOutput> {
+        secrets: &HostSecrets,
+        anchor: &crate::command::workflow_host_staging_anchor::StagingAnchor,
+        pause: &crate::command::workflow_host_staging_pause::StagingPause,
+        teardown: &crate::command::workflow_host_command_teardown_latch::TeardownLatch,
+    ) -> WorkflowResult<crate::command::workflow_host_secrets::SealedProcessOutput> {
         let store = archon_workflow::WorkflowStore::project(&self.context.project_root);
         let run_id = self
             .run_root
@@ -36,10 +87,20 @@ impl FixedHostCommandExecutor {
                 require_run_owned(&store, &run_id, expected_generation)?;
                 // The killed attempt's partial staging must not reach the
                 // audit, which requires the staged set to match the manifest.
-                prepare_staging(&self.run_root, call_id)
-                    .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
+                // Cleared through the anchor: a link the killed attempt left
+                // is removed, never followed, and the run pauses when it cannot be.
+                anchor.reset().map_err(|error| {
+                    pause.pause(
+                        anchor.root(),
+                        "staging could not be cleared for the retry",
+                        &secrets.text(&error.to_string()),
+                        true,
+                    )
+                })?;
             }
-            let (control, handle) = HostCommandControl::new();
+            // Every attempt's tree reports to the call's latch, so sealing
+            // after a cancellation waits for it (#297 round 8).
+            let (control, handle) = HostCommandControl::tracked(teardown.clone());
             let started = std::time::Instant::now();
             let observed = self
                 .execute_process_with_run_control(
@@ -48,15 +109,40 @@ impl FixedHostCommandExecutor {
                     handle,
                     expected_generation,
                 )
-                .await?;
-            let Some(kind) = classify(&observed) else {
+                .await;
+            let observed = match observed {
+                Ok(observed) => observed,
+                Err(error @ (WorkflowError::Io { .. } | WorkflowError::HostOperational(_))) => {
+                    let evidence = secrets.text(&error.to_string());
+                    let resume = format!("archon workflow resume --live --yes {run_id}");
+                    let message = format!(
+                        "host command '{}' stalled: {evidence}; repair the host I/O and resume: {resume}",
+                        command.command_id
+                    );
+                    let event = archon_workflow::control_pause::pause_with_evidence(
+                        &store,
+                        &run_id,
+                        expected_generation,
+                        serde_json::json!({"event":"host_command_registration_pause", "call_id":call_id,
+                            "command_id":command.command_id, "evidence":evidence, "resume":resume}),
+                    )?;
+                    if let Err(error) = event {
+                        tracing::warn!(%error, "host command I/O pause event not recorded");
+                    }
+                    return Err(WorkflowError::ControlPaused(message));
+                }
+                Err(error) => return Err(secrets.error(error)),
+            };
+            let observed =
+                secrets.seal_process_output(observed, anchor, pause, &command.command_id)?;
+            let Some(kind) = observed.kind else {
                 return Ok(observed);
             };
             history.push(OperationalAttempt {
                 attempt,
                 reason: kind.label(),
                 elapsed_secs: started.elapsed().as_secs(),
-                progress: reported_progress(&observed.stderr),
+                progress: observed.progress,
             });
             let report = OperationalReport {
                 run_id: &run_id,
@@ -97,19 +183,18 @@ impl FixedHostCommandExecutor {
                     &self.run_root,
                     expected_generation,
                     &report,
-                    &evidence,
+                    &secrets.text(&evidence),
                 ));
             }
             // A child that read nothing over a journal no read could settle
             // already retried the settlement: pause now (Issue 338).
-            if let Some(evidence) = unsettled_publish_evidence(observed.exit_code, &observed.stderr)
-            {
+            if let Some(evidence) = &observed.unsettled_publish {
                 return Err(pause_for_unsettled_publish(
                     &store,
                     &self.run_root,
                     expected_generation,
                     &report,
-                    &evidence,
+                    &secrets.text(&evidence),
                 ));
             }
             match next_step(&history) {

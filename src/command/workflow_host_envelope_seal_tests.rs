@@ -20,6 +20,7 @@ required_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n\
 ## Focused Tests\n- `test -f TASK-X-010.md`\n";
 
 #[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(not(unix), allow(dead_code))]
 enum Child {
     /// A valid envelope whose report (and an unknown field) holds the value.
     Published,
@@ -41,12 +42,33 @@ enum Child {
     Cancelled,
     TypedSecret,
     OperationalTypedSecret,
+    JsonOutput,
+    Scalar,
+    ScalarOperational,
+    ScalarFailed,
+    ScalarVersion,
+    // Constructed only by the Unix link and permission cases (r5, r7).
+    UnreadableStaging,
+    UnreadableNestedStaging,
+    UnreadableDeepStaging,
 }
 
 struct SecretPrintingProcess(Child);
 
 fn envelope(child: Child, secret: &str) -> Vec<u8> {
     let value = match child {
+        Child::Scalar | Child::ScalarOperational | Child::ScalarFailed => {
+            let scalar: serde_json::Value = serde_json::from_str(secret).unwrap();
+            serde_json::json!({"schema_version": 1,
+                "report": {"nested": [scalar, {"pin": scalar}]},
+                "operational_error": if child == Child::ScalarOperational {
+                    Some(serde_json::json!({"kind": "probe", "text": "retry"}))
+                } else { None }
+            })
+        }
+        Child::ScalarVersion => serde_json::json!({
+            "schema_version": secret.parse::<u32>().unwrap(), "report": "probe"
+        }),
         Child::Malformed => return format!("not an envelope {secret}").into_bytes(),
         Child::OperationalTypedSecret => serde_json::json!({
             "schema_version": 1, "report": "probe", "operational_error": {"kind": secret, "text": "failure"}
@@ -79,7 +101,73 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
         use archon_workflow::{
             PREPARED_PUBLICATION_SCHEMA_VERSION, PreparedPublicationEntry, PreparedPublicationV1,
         };
-        let secret = request.environment["ANTHROPIC_API_KEY"].to_str().unwrap();
+        let secret = request
+            .environment
+            .get("ANTHROPIC_API_KEY")
+            .map(|value| value.to_str().unwrap())
+            .unwrap_or_else(|| {
+                request.environment["DATABASE_URL"]
+                    .to_str()
+                    .unwrap()
+                    .split("user:")
+                    .nth(1)
+                    .unwrap()
+                    .split('@')
+                    .next()
+                    .unwrap()
+            });
+        if self.0 == Child::JsonOutput {
+            let output = archon_shell::spawn::command("python3")
+                .args(["-c", "import json,sys; value=json.dumps(sys.argv[1]); sys.stdout.write(value); sys.stderr.write(value); sys.exit(1)", secret])
+                .output().unwrap();
+            return Ok(SupervisedProcessOutput {
+                exit_code: output.status.code(),
+                timed_out: false,
+                stdout_bytes: output.stdout.len() as u64,
+                stderr_bytes: output.stderr.len() as u64,
+                stderr: output.stderr,
+                stdout: output.stdout,
+            });
+        }
+        if matches!(
+            self.0,
+            Child::UnreadableStaging
+                | Child::UnreadableNestedStaging
+                | Child::UnreadableDeepStaging
+        ) {
+            let envelope = request
+                .declared_write_set
+                .iter()
+                .find(|path| {
+                    path.file_name()
+                        .is_some_and(|name| name == "gate-envelope.json")
+                })
+                .expect("declared envelope");
+            let root = envelope.parent().unwrap();
+            let locked = match self.0 {
+                Child::UnreadableStaging => root.to_path_buf(),
+                Child::UnreadableNestedStaging => root.join("locked"),
+                Child::UnreadableDeepStaging => root.join("nested").join("locked"),
+                _ => unreachable!(),
+            };
+            std::fs::create_dir_all(&locked).unwrap();
+            let artifact = locked.join("secret-artifact.txt");
+            std::fs::write(artifact, secret).unwrap();
+            std::fs::write(envelope, b"{}").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0)).unwrap();
+            }
+            return Ok(SupervisedProcessOutput {
+                exit_code: Some(1),
+                timed_out: false,
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            });
+        }
         let mut entries = Vec::new();
         for path in &request.declared_write_set {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -140,7 +228,11 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
         .unwrap();
         let stderr = format!("warning: key {secret} in use").into_bytes();
         Ok(SupervisedProcessOutput {
-            exit_code: Some(if self.0 == Child::Failed { 1 } else { 0 }),
+            exit_code: Some(if matches!(self.0, Child::Failed | Child::ScalarFailed) {
+                1
+            } else {
+                0
+            }),
             timed_out: false,
             stdout_bytes: stdout.len() as u64,
             stderr_bytes: stderr.len() as u64,
@@ -174,7 +266,20 @@ async fn run(child: Child) -> Ran {
 async fn run_secret(child: Child, secret: &str) -> Ran {
     let temp = tempfile::tempdir().unwrap();
     let mut context = context(temp.path());
-    context.freeze_provider_environment = [("ANTHROPIC_API_KEY".into(), secret.into())].into();
+    if ["body", "report", "schema_version"].contains(&secret) {
+        context
+            .acceptance_environment_allowlist
+            .push("DATABASE_URL".into());
+        context.freeze_provider_environment.insert(
+            "DATABASE_URL".into(),
+            format!("postgres://user:{secret}@host/db"),
+        );
+    } else {
+        context.freeze_provider_environment = [("ANTHROPIC_API_KEY".into(), secret.into())].into();
+    }
+    if child == Child::TypedSecret {
+        context.gate_mode = archon_core::config::GateMode::Enforce;
+    }
     let task_file = context.task_root.join("TASK-X-010.md");
     std::fs::write(&task_file, b"live-before").unwrap();
     seed_frozen_chain(&context, &task_file);
@@ -266,13 +371,20 @@ async fn published_envelope_is_redacted_and_its_receipt_still_verifies() {
 }
 
 #[tokio::test]
-async fn an_envelope_without_secrets_is_published_byte_for_byte() {
+async fn an_envelope_without_secrets_is_published_canonically() {
     let ran = run(Child::Clean).await;
     ran.result.as_ref().expect("published");
     assert_eq!(
         std::fs::read(&ran.envelope).unwrap(),
-        envelope(Child::Clean, CANARY),
-        "nothing to redact, nothing rewritten"
+        serde_json::to_vec_pretty(
+            &serde_json::from_slice::<archon_workflow::GateEnvelopeV1>(&envelope(
+                Child::Clean,
+                CANARY
+            ))
+            .unwrap()
+        )
+        .unwrap(),
+        "the verified typed envelope is always re-serialized"
     );
 }
 
@@ -321,57 +433,20 @@ async fn a_manifest_that_misstates_the_envelope_is_still_refused() {
 }
 
 #[tokio::test]
-async fn round2_json_escaped_credentials_are_sealed() {
-    for secret in [
-        "credential-quote\"-canary",
-        "credential-backslash\\-canary",
-        "credential-newline\n-canary",
-    ] {
-        let ran = run_secret(Child::Published, secret).await;
-        ran.result.as_ref().unwrap();
-        let escaped = serde_json::to_string(secret).unwrap();
-        for needle in [secret.as_bytes(), &escaped.as_bytes()[1..escaped.len() - 1]] {
-            assert!(
-                clear_copies(ran.temp.path(), needle).is_empty(),
-                "{secret:?}"
-            );
-        }
-    }
-}
-
-#[tokio::test]
-async fn round2_object_keys_are_sealed() {
-    let ran = run(Child::SecretKey).await;
-    ran.result.as_ref().unwrap();
-    assert_no_clear_copy(&ran);
-    let value: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&ran.envelope).unwrap()).unwrap();
-    assert_eq!(value["report"]["[REDACTED]"], "failure");
-}
-
-#[tokio::test]
-async fn round2_interrupted_temporary_envelopes_are_removed() {
-    for child in [Child::Interrupted, Child::Paused, Child::Cancelled] {
-        let ran = run(child).await;
-        assert!(ran.result.is_err());
-        assert_no_clear_copy(&ran);
-    }
-}
-
-#[tokio::test]
 async fn round2_manifest_claiming_sealed_identity_is_refused() {
-    for child in [Child::SealedIdentity, Child::CanonicalIdentity] {
+    for child in [
+        Child::SealedIdentity,
+        Child::CanonicalIdentity,
+        Child::Lying,
+    ] {
         let ran = run(child).await;
         assert!(ran.result.is_err(), "raw mismatch accepted");
         assert!(!ran.envelope.exists());
+        assert!(
+            !ran.staged.parent().unwrap().exists(),
+            "refused secret-bearing staging tree remains on disk"
+        );
         assert_no_clear_copy(&ran);
-        if child == Child::CanonicalIdentity {
-            assert_eq!(
-                std::fs::read(&ran.staged).unwrap(),
-                claimed_envelope(child),
-                "the dishonest manifest names exactly the current sealed bytes"
-            );
-        }
     }
 }
 
@@ -379,10 +454,47 @@ async fn round2_manifest_claiming_sealed_identity_is_refused() {
 async fn round2_residual_typed_field_is_sealed_fail_closed() {
     for child in [Child::TypedSecret, Child::OperationalTypedSecret] {
         let ran = run(child).await;
-        assert!(
-            ran.result.is_err(),
-            "redaction must not erase a typed failure field"
-        );
+        let result = ran
+            .result
+            .as_ref()
+            .expect("redacted typed failure stays parseable");
+        let envelope = result.gate_envelope.as_ref().unwrap();
+        if child == Child::TypedSecret {
+            assert_eq!(envelope.policy_findings[0].subject, "[REDACTED]");
+        } else {
+            assert_eq!(
+                envelope.operational_error.as_ref().unwrap().kind,
+                "[REDACTED]"
+            );
+        }
+        assert!(result.publication_receipt.is_none());
         assert_no_clear_copy(&ran);
     }
 }
+
+#[tokio::test]
+async fn ascii_json_output_is_redacted_at_the_host_result_boundary() {
+    for secret in [
+        "credential-é-canary",
+        "credential-\u{007f}-canary",
+        "credential-中-canary",
+        "credential-😀-canary",
+    ] {
+        let ran = run_secret(Child::JsonOutput, secret).await;
+        let result = ran.result.unwrap();
+        assert_eq!(result.stdout, "\"[REDACTED]\"");
+        assert_eq!(result.stderr, "\"[REDACTED]\"");
+    }
+}
+
+#[path = "workflow_host_envelope_r2_tests.rs"]
+mod r2_tests;
+
+#[path = "workflow_host_envelope_r3_tests.rs"]
+mod r3_tests;
+
+#[path = "workflow_host_boundary_r4_tests.rs"]
+mod boundary_r4_tests;
+
+#[path = "workflow_host_boundary_r5_tests.rs"]
+mod boundary_r5_tests;

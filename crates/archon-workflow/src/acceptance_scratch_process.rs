@@ -28,12 +28,12 @@ pub struct CheckResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub classification: Option<crate::acceptance_check_crash::CheckClassification>,
 }
-/// The check's child, confined by the owned tracker or Job Object.
+/// The leader's handle; confinement owns the process tree separately.
 type RunChild = tokio::process::Child;
 
 #[path = "acceptance_scratch_confine.rs"]
 mod confine;
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 use confine::Confinement;
 use confine::{leader_exit, reap, terminate};
 
@@ -56,11 +56,23 @@ fn spawn_confined(mut process: tokio::process::Command, cwd: &Path) -> WorkflowR
     process.spawn().map_err(|e| WorkflowError::io(cwd, e))
 }
 #[cfg(windows)]
-fn spawn_confined(mut process: tokio::process::Command, cwd: &Path) -> WorkflowResult<RunChild> {
+fn spawn_confined(
+    mut process: tokio::process::Command,
+    cwd: &Path,
+) -> WorkflowResult<confine::OwnedCheck> {
     process.creation_flags(archon_shell::job_object::CREATE_SUSPENDED_FLAG);
-    process.spawn().map_err(|e| WorkflowError::io(cwd, e))
+    let mut child = process.spawn().map_err(|e| WorkflowError::io(cwd, e))?;
+    let job = archon_shell::job_object::Job::create(None).map_err(|e| WorkflowError::io(cwd, e))?;
+    let (Some(pid), Some(handle)) = (child.id(), child.raw_handle()) else {
+        let _ = child.start_kill();
+        return Err(invalid("scratch child has no process handle"));
+    };
+    job.adopt_suspended(handle, pid)
+        .map_err(|e| WorkflowError::io(cwd, e))?;
+    Ok(confine::OwnedCheck::new(child, job))
 }
 
+/// Take the child's three pipes.
 fn take_pipes(
     child: &mut RunChild,
 ) -> (
@@ -207,7 +219,12 @@ pub async fn run_at(
     if let Some(root) = site.audit_root {
         super::cache::record_group(root, None)?;
     }
+    #[cfg(not(windows))]
     let child = spawn_confined(process, cwd)?;
+    #[cfg(windows)]
+    let mut owned = spawn_confined(process, cwd)?;
+    #[cfg(windows)]
+    let child = &mut owned.child;
     let leader = child
         .id()
         .ok_or_else(|| invalid("scratch child has no process id"))?;
@@ -216,19 +233,19 @@ pub async fn run_at(
     #[cfg(unix)]
     let (child, confinement) = (&mut *owned.child, &mut owned.confinement);
     // Borrowed on every platform, as the Unix owner hands them out.
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let mut confinement = Confinement::new(leader);
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let confinement = &mut confinement;
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    let (child, confinement) = (&mut owned.child, &mut owned.confinement);
+    #[cfg(not(any(unix, windows)))]
     let mut child = child;
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let child = &mut child;
     if let Some(root) = site.audit_root {
         super::cache::record_group(root, Some(leader as i32))?;
     }
-    #[cfg(windows)]
-    confinement.adopt(child)?;
     let (stdout_pipe, stderr_pipe, stdin_pipe) = take_pipes(child);
     let progress = confinement.progress();
     progress.set_report_interval(
@@ -314,13 +331,6 @@ pub async fn run_at(
         None => reap(child, &mut stall).await,
     };
     confinement.leader_reaped();
-    // Windows: terminate the Job Object and wait on it, so every process the
-    // check started is reaped before its output is read (Issue-234).
-    #[cfg(windows)]
-    {
-        let _ = child.start_kill();
-        let _ = tokio::time::timeout(Duration::from_secs(3), child.wait()).await;
-    }
     let pipes = match tokio::time::timeout(Duration::from_secs(3), async {
         let out = (&mut stdout)
             .await
@@ -348,7 +358,7 @@ pub async fn run_at(
     // the leader exited.
     match teardown {
         Ok(()) => confinement.disarm(),
-        Err(evidence) => error = Some(evidence),
+        Err(evidence) => stall = Some(evidence),
     }
     // A scratch is private to the observation: what still holds it after
     // the tree is gone may be a descendant nothing else names any more.
@@ -393,3 +403,7 @@ pub async fn run_at(
 #[cfg(all(test, unix))]
 #[path = "acceptance_scratch_process_tests.rs"]
 mod tests;
+
+#[cfg(all(test, windows))]
+#[path = "acceptance_scratch_process_windows_tests.rs"]
+mod windows_tests;

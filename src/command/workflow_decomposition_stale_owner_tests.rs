@@ -96,7 +96,7 @@ fn hold_executor_lease_until_killed() {
     #[cfg(unix)]
     let _group = std::env::var_os(HOLD_GROUP_ENV).map(|_| {
         use std::os::unix::process::CommandExt;
-        let group = std::process::Command::new("sleep")
+        let group = archon_shell::spawn::command("sleep")
             .arg("300")
             .process_group(0)
             .spawn()
@@ -104,13 +104,27 @@ fn hold_executor_lease_until_killed() {
         let records = store
             .run_dir(run_id)
             .join(crate::command::workflow_host_command_groups::GROUP_RECORDS_DIR);
-        crate::command::workflow_host_command_groups::record_in(
+        let record = crate::command::workflow_host_command_groups::record_in(
             Some(&records),
             Some(group.id()),
             None,
             "test-host-command",
         )
-        .unwrap()
+        .unwrap();
+        // This fixture is one sleeping process that cannot fork. Model a
+        // completed survivor checkpoint, rather than incomplete supervision,
+        // so the test still proves known-identity crash recovery and healing.
+        let start = archon_shell::process_tree::identity_of(group.id())
+            .unwrap()
+            .unwrap();
+        record
+            .as_ref()
+            .unwrap()
+            .evidence()
+            .unwrap()
+            .complete(&[(group.id(), start)])
+            .unwrap();
+        record
     });
     std::fs::write(&ready, "held").unwrap();
     std::thread::sleep(std::time::Duration::from_secs(300));
@@ -141,7 +155,7 @@ fn spawn_lease_holder(
 ) -> LeaseHolderChild {
     let module = module_path!();
     let module = module.split_once("::").map_or(module, |(_, rest)| rest);
-    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    let mut command = archon_shell::spawn::command(std::env::current_exe().unwrap());
     if with_group {
         command.env(HOLD_GROUP_ENV, "1");
     }

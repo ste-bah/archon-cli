@@ -1,5 +1,4 @@
-//! Resume uses the existing named, non-breakaway Job Object as durable scope
-//! evidence. No executor process needs to survive to answer this question.
+//! Resume checks recorded process identities before the named job scope.
 use super::*;
 use archon_shell::job_object::{CREATE_SUSPENDED_FLAG, Job};
 use std::os::windows::io::AsRawHandle;
@@ -22,13 +21,12 @@ fn name() -> String {
 }
 
 #[test]
-fn a_crashed_windows_owners_marker_heals_when_the_named_job_is_empty() {
+fn an_ambiguous_windows_marker_refuses_even_when_the_named_job_is_empty() {
     let run = tempfile::tempdir().unwrap();
     let name = name();
     let _job = Job::create(Some(&name)).unwrap();
     crashed_record(run.path(), Some(&name));
-    // The old marker format was indistinguishable from an unwritten
-    // stall. Job containment still provides conclusive ended evidence.
+    // A legacy marker cannot name processes whose termination is still pending.
     let dir = run.path().join(GROUP_RECORDS_DIR);
     let path = std::fs::read_dir(&dir)
         .unwrap()
@@ -44,23 +42,23 @@ fn a_crashed_windows_owners_marker_heals_when_the_named_job_is_empty() {
         serde_json::to_vec(&legacy).unwrap(),
     )
     .unwrap();
-    assert!(require_no_running_groups(run.path(), "run").is_ok());
+    assert!(require_no_running_groups(run.path(), "run").is_err());
     assert_eq!(
         std::fs::read_dir(run.path().join(GROUP_RECORDS_DIR))
             .unwrap()
             .count(),
-        0
+        2
     );
 }
 
 #[test]
-fn a_crashed_windows_owners_marker_heals_when_the_named_job_is_gone() {
+fn a_crashed_windows_owners_marker_refuses_when_the_named_job_is_gone() {
     let run = tempfile::tempdir().unwrap();
     let name = name();
     let job = Job::create(Some(&name)).unwrap();
     drop(job);
     crashed_record(run.path(), Some(&name));
-    assert!(require_no_running_groups(run.path(), "run").is_ok());
+    assert!(require_no_running_groups(run.path(), "run").is_err());
 }
 
 #[test]
@@ -68,7 +66,7 @@ fn a_crashed_windows_owners_marker_waits_for_every_job_member() {
     let run = tempfile::tempdir().unwrap();
     let name = name();
     let job = Job::create(Some(&name)).unwrap();
-    let mut child = std::process::Command::new("ping")
+    let mut child = archon_shell::spawn::command("ping")
         .args(["-n", "30", "127.0.0.1"])
         .creation_flags(CREATE_SUSPENDED_FLAG)
         .spawn()
@@ -80,7 +78,7 @@ fn a_crashed_windows_owners_marker_waits_for_every_job_member() {
     assert_eq!(job.kill_and_confirm(Duration::from_secs(5)).unwrap(), 0);
     child.wait().unwrap();
     assert!(refused.is_err(), "resume let a live job go");
-    assert!(require_no_running_groups(run.path(), "run").is_ok());
+    assert!(require_no_running_groups(run.path(), "run").is_err());
 }
 
 #[test]
@@ -98,4 +96,142 @@ fn a_windows_job_probe_error_stays_fail_closed() {
     assert!(archon_shell::job_object::named_job_running(invalid).is_err());
     crashed_record(run.path(), Some(invalid));
     assert!(require_no_running_groups(run.path(), "run").is_err());
+}
+
+#[test]
+fn a_missing_job_name_does_not_hide_a_recorded_live_process() {
+    let run = tempfile::tempdir().unwrap();
+    let missing = name();
+    let mut child = archon_shell::spawn::command("ping")
+        .args(["-n", "30", "127.0.0.1"])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let start = archon_shell::job_object::identity_of(pid).unwrap().unwrap();
+    let guard = record_group(
+        &run.path().join(GROUP_RECORDS_DIR),
+        pid,
+        pid,
+        None,
+        Some(&missing),
+        "cmd",
+    )
+    .unwrap();
+    guard.keep(Some(&[(pid, start)]));
+    let refused = require_no_running_groups(run.path(), "run");
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(
+        refused.is_err(),
+        "a disappearing job name allowed early healing"
+    );
+    assert!(require_no_running_groups(run.path(), "run").is_ok());
+}
+
+#[test]
+fn unknown_survivors_outrank_an_empty_job() {
+    let run = tempfile::tempdir().unwrap();
+    let name = name();
+    let _job = Job::create(Some(&name)).unwrap();
+    record_group(
+        &run.path().join(GROUP_RECORDS_DIR),
+        42,
+        42,
+        None,
+        Some(&name),
+        "cmd",
+    )
+    .unwrap()
+    .keep(None);
+    assert!(require_no_running_groups(run.path(), "run").is_err());
+}
+
+#[test]
+fn legacy_stall_without_identities_cannot_heal_on_a_missing_job() {
+    let run = tempfile::tempdir().unwrap();
+    record_group(
+        &run.path().join(GROUP_RECORDS_DIR),
+        42,
+        42,
+        None,
+        Some(&name()),
+        "cmd",
+    )
+    .unwrap()
+    .keep(Some(&[]));
+    assert!(require_no_running_groups(run.path(), "run").is_err());
+}
+
+#[test]
+fn initial_windows_evidence_is_incomplete_before_worker_admission() {
+    for mode in ["missing", "empty", "unnamed"] {
+        let run = tempfile::tempdir().unwrap();
+        let name = name();
+        let job = (mode == "empty").then(|| Job::create(Some(&name)).unwrap());
+        crashed_record(run.path(), (mode != "unnamed").then_some(name.as_str()));
+        let note = require_no_running_groups(run.path(), "run")
+            .unwrap_err()
+            .to_string();
+        assert!(note.contains("unknown survivors"), "{mode}: {note}");
+        assert!(
+            note.contains("remove") && note.contains(".pending") && note.contains(".json"),
+            "{note}"
+        );
+        assert!(!note.contains("kill -TERM"), "{note}");
+        drop(job);
+    }
+}
+
+#[test]
+fn effective_unknown_windows_stalls_name_manual_clearance_files() {
+    for mode in ["missing", "unnamed", "invalid"] {
+        let run = tempfile::tempdir().unwrap();
+        let name = if mode == "invalid" {
+            r"Local\".to_string()
+        } else {
+            name()
+        };
+        let guard = record_group(
+            &run.path().join(GROUP_RECORDS_DIR),
+            42,
+            42,
+            None,
+            (mode != "unnamed").then_some(name.as_str()),
+            "cmd",
+        )
+        .unwrap();
+        let path = guard.path().to_path_buf();
+        guard.keep(Some(&[])); // legacy stalled, unknown flag false
+        let note = require_no_running_groups(run.path(), "run")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            note.contains("unknown survivors") && note.contains("remove"),
+            "{note}"
+        );
+        assert!(note.contains(&path.display().to_string()), "{note}");
+        assert!(!note.contains("kill -TERM"), "{note}");
+    }
+}
+
+#[test]
+fn legacy_unstalled_empty_identity_markers_need_exit_evidence() {
+    for mode in ["missing", "empty", "invalid"] {
+        let mut record: HostCommandGroupRecord = serde_json::from_value(serde_json::json!({
+            "schema_version":1, "pgid":42, "pid":42, "command_id":"cmd",
+            "host_pid":u32::MAX, "started_at":"fixture", "job":name()
+        }))
+        .unwrap();
+        let job = if mode == "empty" {
+            Some(Job::create(record.job.as_deref()).unwrap())
+        } else {
+            None
+        };
+        if mode == "invalid" {
+            record.job = Some(r"Local\".into());
+        }
+        assert_eq!(record_running(&record), None, "{mode}");
+        drop(job);
+    }
 }

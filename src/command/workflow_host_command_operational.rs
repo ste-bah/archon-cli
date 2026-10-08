@@ -85,6 +85,7 @@ pub(crate) fn unsettled_publish_of(error: &anyhow::Error) -> Option<String> {
 pub(crate) fn exit_if_unsettled_publish(error: &anyhow::Error) {
     if let Some(line) = unsettled_publish_of(error) {
         eprintln!("{line}");
+        super::workflow_host_exit_drain::drain_before_exit();
         std::process::exit(EXIT_UNSETTLED_PUBLISH)
     }
 }
@@ -92,6 +93,7 @@ pub(crate) fn exit_if_unsettled_publish(error: &anyhow::Error) {
 /// End this process as an unsettled publish with `evidence`.
 pub(crate) fn exit_unsettled_publish(evidence: &str) -> ! {
     eprintln!("{}", unsettled_publish_line(evidence));
+    super::workflow_host_exit_drain::drain_before_exit();
     std::process::exit(EXIT_UNSETTLED_PUBLISH)
 }
 
@@ -419,7 +421,7 @@ fn progress_text(progress: Option<u64>) -> String {
     progress.map_or_else(|| "none".to_string(), |value| value.to_string())
 }
 
-fn emit(
+pub(crate) fn emit(
     store: &WorkflowStore,
     run_id: &str,
     kind: WorkflowEventKind,
@@ -437,7 +439,7 @@ fn emit(
 
 /// Appends `line` to the fixed decomposition's operator log, when the run is
 /// one. Evidence only: a missing or unreadable log never changes the outcome.
-fn append_log(run_root: &Path, line: &str) {
+pub(crate) fn append_log(run_root: &Path, line: &str) {
     let state_path = run_root.join(super::workflow_decompose_state::FIXED_STATE_PATH);
     let Ok(raw) = std::fs::read(&state_path) else {
         return;

@@ -23,6 +23,8 @@ use super::workflow_host_command_catalog::ResolvedHostCommand;
 pub(crate) struct CommandStaging {
     pub(crate) root: PathBuf,
     pub(crate) call_id: String,
+    /// Every host mutation of the tree goes through the anchor (#297).
+    pub(crate) anchor: std::sync::Arc<super::workflow_host_staging_anchor::StagingAnchor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,7 +69,6 @@ impl LiveMutationSentinels {
 #[derive(Debug)]
 struct AuditedEntry {
     relative_path: String,
-    source_path: PathBuf,
     bytes: Vec<u8>,
 }
 
@@ -79,19 +80,29 @@ pub(crate) struct AuditedPublication {
     sentinels: LiveMutationSentinels,
 }
 
+/// The call's staging directory, created empty under an anchor verified at
+/// creation; a stale tree a previous attempt left is removed through it.
 pub(crate) fn prepare_staging(run_root: &Path, call_id: &str) -> Result<CommandStaging> {
-    let safe = sanitize_component(call_id);
-    let root = run_root.join("host-command-staging").join(safe);
-    if root.exists() {
-        std::fs::remove_dir_all(&root)
-            .with_context(|| format!("clearing stale host command staging {}", root.display()))?;
-    }
-    std::fs::create_dir_all(&root)
-        .with_context(|| format!("creating host command staging {}", root.display()))?;
+    let root = staging_root(run_root, call_id);
+    std::fs::create_dir_all(run_root)
+        .with_context(|| format!("creating run directory {}", run_root.display()))?;
+    let anchor = super::workflow_host_staging_anchor::StagingAnchor::create(
+        run_root,
+        &sanitize_component(call_id),
+    )
+    .with_context(|| format!("preparing host command staging {}", root.display()))?;
     Ok(CommandStaging {
         root,
         call_id: call_id.to_string(),
+        anchor: std::sync::Arc::new(anchor),
     })
+}
+
+/// Where [`prepare_staging`] puts `call_id`'s staging.
+pub(crate) fn staging_root(run_root: &Path, call_id: &str) -> PathBuf {
+    run_root
+        .join(super::workflow_host_staging_anchor::STAGING_DIR)
+        .join(sanitize_component(call_id))
 }
 
 pub(crate) fn audit_prepared_publication(
@@ -184,7 +195,6 @@ pub(crate) fn audit_prepared_publication(
         }
         entries.push(AuditedEntry {
             relative_path,
-            source_path,
             bytes,
         });
     }
@@ -198,7 +208,9 @@ pub(crate) fn audit_prepared_publication(
 
 /// Publish the audited output as one crash-atomic transaction journaled
 /// beside the bound task set's acceptance pin (`journal_pin`), so a kill
-/// mid-publish is settled to one whole version by the next recovery.
+/// mid-publish is settled to one whole version by the next recovery. The
+/// staged sources stay: the caller removes them through the staging anchor,
+/// never by a path a child could have redirected (#297 round 8).
 pub(crate) fn publish_audited(
     audited: AuditedPublication,
     destinations: &BTreeMap<String, PathBuf>,
@@ -256,7 +268,6 @@ pub(crate) fn publish_audited(
                 destination.display()
             ));
         }
-        let _ = std::fs::remove_file(&entry.source_path);
         receipts.push(PublishedArtifactReceipt {
             relative_path: entry.relative_path.clone(),
             destination_path: destination.to_string_lossy().replace('\\', "/"),

@@ -9,7 +9,7 @@ use super::*;
 /// A `cmd` that starts a detached background `ping` (the descendant that
 /// outlives a direct-child kill) and then waits on a foreground one.
 fn spawn_in(job: &Job) -> std::process::Child {
-    let child = std::process::Command::new("cmd")
+    let child = crate::spawn::command("cmd")
         .args([
             "/C",
             "start /B ping -n 30 127.0.0.1 >NUL & ping -n 30 127.0.0.1 >NUL",
@@ -91,4 +91,24 @@ fn a_named_job_runs_while_held_and_is_gone_once_dropped() {
 #[test]
 fn an_unknown_job_name_is_not_running() {
     assert!(!named_job_running("Local\\archon-job-test-never-created").unwrap());
+}
+
+#[test]
+fn job_identity_list_covers_the_leader_and_detached_descendants() {
+    let job = Job::create(None).unwrap();
+    let mut child = spawn_in(&job);
+    wait_for_active(&job, 3);
+    let identities = job.process_identities(Duration::from_secs(3)).unwrap();
+    assert!(identities.len() >= 3);
+    assert!(identities.contains(&(child.id(), identity_of(child.id()).unwrap().unwrap())));
+    for &(pid, start) in &identities {
+        assert_eq!(identity_of(pid).unwrap(), Some(start));
+    }
+    assert_eq!(job.kill_and_confirm(Duration::from_secs(5)).unwrap(), 0);
+    child.wait().unwrap();
+    assert!(
+        job.process_identities(Duration::from_secs(3))
+            .unwrap()
+            .is_empty()
+    );
 }

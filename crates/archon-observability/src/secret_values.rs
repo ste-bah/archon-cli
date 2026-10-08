@@ -41,6 +41,18 @@ impl SecretValues {
         secrets
     }
 
+    /// Every nonempty configured value for persisted evidence, including short
+    /// credentials. Unlike tracing, this boundary cannot discard known values.
+    pub fn for_evidence<'a>(values: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut secrets = Self::default();
+        for value in values.into_iter().filter(|value| !value.is_empty()) {
+            secrets.add(value);
+            secrets = secrets.with_url_credentials(value);
+        }
+        secrets.normalize();
+        secrets
+    }
+
     /// Include a known Authorization scheme's bare credential, even if short.
     pub fn with_authorization(mut self, value: &str) -> Self {
         if let Some((scheme, credential)) = value.trim().split_once(char::is_whitespace)
@@ -51,6 +63,55 @@ impl SecretValues {
             self.normalize();
         }
         self
+    }
+
+    /// Credential-bearing URLs are secrets regardless of the variable name.
+    /// Register the complete address and encoded/decoded credential values.
+    pub fn with_url_credentials(mut self, value: &str) -> Self {
+        let mut found = false;
+        if let Some((_, rest)) = value.split_once("://") {
+            let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+            if let Some((userinfo, _)) = authority.rsplit_once('@')
+                && let Some((_, password)) = userinfo.split_once(':')
+                && !password.is_empty()
+            {
+                found = true;
+                self.add_url_credential(password, false);
+            }
+            // Query values use form encoding: '+' means space. Decode names
+            // as well, so encoded names cannot evade the credential rule.
+            if let Some((_, query)) = rest.split('#').next().unwrap_or_default().split_once('?') {
+                for parameter in query.split('&') {
+                    if let Some((name, credential)) = parameter.split_once('=') {
+                        let name = name.replace('+', " ");
+                        if let Ok(name) = urlencoding::decode(&name)
+                            && is_credential_name(&name)
+                            && !credential.is_empty()
+                        {
+                            found = true;
+                            self.add_url_credential(credential, true);
+                        }
+                    }
+                }
+            }
+        }
+        if found {
+            self.add(value);
+        }
+        self.normalize();
+        self
+    }
+
+    fn add_url_credential(&mut self, credential: &str, form: bool) {
+        self.add(credential);
+        let value = if form {
+            credential.replace('+', " ")
+        } else {
+            credential.to_string()
+        };
+        if let Ok(decoded) = urlencoding::decode(&value) {
+            self.add(&decoded);
+        }
     }
 
     fn add(&mut self, value: &str) {
@@ -65,6 +126,19 @@ impl SecretValues {
         {
             if let Some(inner) = encoded.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
                 self.0.push(inner.to_string());
+                // Python json.dumps defaults to ensure_ascii, including UTF-16
+                // surrogate pairs for supplementary-plane characters.
+                let mut ascii = String::new();
+                for ch in inner.chars() {
+                    if ch.is_ascii() && ch != '\u{007f}' {
+                        ascii.push(ch);
+                    } else {
+                        for unit in ch.encode_utf16(&mut [0; 2]).iter() {
+                            ascii.push_str(&format!("\\u{unit:04x}"));
+                        }
+                    }
+                }
+                self.0.push(ascii);
             }
         }
         let encoded = urlencoding::encode(value).into_owned();

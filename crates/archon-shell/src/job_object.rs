@@ -6,7 +6,7 @@
 //! dropped [`Job`] or a dead owner does, kills every process in it.
 //!
 //! `TerminateJobObject` does not wait, so terminating is not confirming.
-//! [`Job::kill_and_confirm`] terminates and then waits, within a bound, until
+//! [`Job::kill_and_confirm`] terminates and waits with an inactivity bound until
 //! the job's accounting reports no active process, and says how many were
 //! still active if the bound ran out.
 //!
@@ -14,10 +14,11 @@
 //! completion packet of any kind, so it can confirm neither; that is why the
 //! callers own the job here.
 
+use crate::teardown_progress::{Progress, confirm_empty};
 use std::ffi::c_void;
 use std::io;
 use std::os::windows::io::RawHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, GetLastError, HANDLE,
@@ -42,7 +43,6 @@ pub const CREATE_SUSPENDED_FLAG: u32 = CREATE_SUSPENDED;
 
 /// `JOB_OBJECT_QUERY` access: enough to read a job's accounting.
 const JOB_OBJECT_QUERY: u32 = 0x0004;
-const CONFIRM_POLL: Duration = Duration::from_millis(10);
 
 /// An owned Job Object. Dropping it kills every process still in it.
 #[derive(Debug)]
@@ -163,6 +163,17 @@ impl Job {
         ))
     }
 
+    /// Live process ids and creation times, with `bound` limiting inactivity. A failed
+    /// enumeration proves nothing about survivors.
+    pub fn process_identities(&self, bound: Duration) -> io::Result<Vec<(u32, u64)>> {
+        self.process_identities_observed(&Progress::new(bound))
+    }
+
+    /// Enumerate against the same inactivity clock observed by the async owner.
+    pub fn process_identities_observed(&self, progress: &Progress) -> io::Result<Vec<(u32, u64)>> {
+        processes::in_job(self.handle, progress)
+    }
+
     /// Ask every process in the job to end. Does not wait.
     pub fn terminate(&self) -> io::Result<()> {
         // SAFETY: the handle is valid while `self` lives.
@@ -172,29 +183,32 @@ impl Job {
         Ok(())
     }
 
-    /// Terminate the job and wait, within `bound`, until no process in it is
-    /// active. Returns how many still were when the bound ran out: zero means
+    /// Terminate the job and wait until no process in it is active, allowing
+    /// `bound` without a membership decrease. Returns how many still were then: zero means
     /// the job is confirmed empty. Each round terminates again, so a process
     /// started while the last one landed is ended too. Blocking: call it on
     /// a thread that may wait, never on an async runtime thread.
     pub fn kill_and_confirm(&self, bound: Duration) -> io::Result<u32> {
-        kill_and_confirm(self.handle, bound)
+        self.kill_and_confirm_observed(&Progress::new(bound))
+    }
+
+    /// Confirmation and its async watchdog share measurable membership progress.
+    pub fn kill_and_confirm_observed(&self, progress: &Progress) -> io::Result<u32> {
+        confirm_job(self.handle, progress)
     }
 }
 
 fn kill_and_confirm(handle: HANDLE, bound: Duration) -> io::Result<u32> {
-    let deadline = Instant::now() + bound;
-    loop {
+    confirm_job(handle, &Progress::new(bound))
+}
+fn confirm_job(handle: HANDLE, progress: &Progress) -> io::Result<u32> {
+    confirm_empty(progress, || {
         // SAFETY: the handle is valid while its owner holds it.
         if unsafe { TerminateJobObject(handle, 1) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        let active = active_processes(handle)?;
-        if active == 0 || Instant::now() >= deadline {
-            return Ok(active);
-        }
-        std::thread::sleep(CONFIRM_POLL);
-    }
+        active_processes(handle)
+    })
 }
 
 /// How long a dropped job waits for its processes to end.
@@ -251,8 +265,8 @@ fn active_processes(handle: HANDLE) -> io::Result<u32> {
 }
 
 /// Whether the job named `name` still has an active process. A job no
-/// handle holds any more has gone, and with it, killed on close, every
-/// process it held: that is `false`, not an error.
+/// handle holds any more has gone: that is `false`, not proof that every
+/// process it held finished exiting. Resume checks must also retain identities.
 pub fn named_job_running(name: &str) -> io::Result<bool> {
     let encoded = wide(name);
     // SAFETY: a NUL-terminated name; the handle is closed below.
@@ -320,3 +334,7 @@ fn resume_in(snapshot: HANDLE, pid: u32) -> io::Result<()> {
 #[cfg(test)]
 #[path = "job_object_tests.rs"]
 mod tests;
+
+#[path = "job_object_processes.rs"]
+mod processes;
+pub use processes::identity_of;

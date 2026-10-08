@@ -44,6 +44,7 @@ pub(in super::super) fn confine(child: &mut tokio::process::Child) -> WorkflowRe
         .map_err(|error| failed("confining the host command in its job object failed", error))?;
     Ok(Tree {
         leader: Some(pid),
+        evidence: None,
         job: Some(Arc::new(job)),
     })
 }
@@ -66,26 +67,11 @@ pub(in super::super) async fn leader_exit(
     child.wait().await.map(drop)
 }
 
-/// Terminate the job and wait until it is empty, within [`REAP_DEADLINE`].
-fn kill_job(job: &Job) -> Teardown {
-    match job.kill_and_confirm(REAP_DEADLINE) {
-        Ok(0) => Teardown::Confirmed,
-        Ok(active) => Teardown::stalled(format!(
-            "host command job object still has {active} active process(es) after termination"
-        )),
-        Err(error) => {
-            Teardown::stalled(format!("terminating the host command job failed: {error}"))
-        }
-    }
-}
-
 async fn kill_job_off_thread(tree: &Tree) -> Teardown {
     let Some(job) = tree.job.clone() else {
         return Teardown::Confirmed;
     };
-    tokio::task::spawn_blocking(move || kill_job(&job))
-        .await
-        .unwrap_or_else(|error| Teardown::stalled(format!("job termination task failed: {error}")))
+    super::job::kill_job_off_thread(job, tree.evidence.clone(), REAP_DEADLINE).await
 }
 
 pub(in super::super) async fn terminate_and_reap(
@@ -107,8 +93,18 @@ pub(in super::super) async fn terminate_completed_group(tree: &Tree) -> Teardown
 }
 
 /// The teardown of a supervisor that stopped without settling. Synchronous
-/// and multi-second at worst: the guard runs it on a dedicated thread, never
+/// with a bound on inactivity: the guard runs it on a dedicated thread, never
 /// on the async runtime, and keeps the resume record until it reports.
 pub(in super::super) fn kill_blocking(tree: &Tree, _leader_unreaped: bool) -> Teardown {
-    tree.job.as_deref().map_or(Teardown::Confirmed, kill_job)
+    match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => {
+            let teardown = runtime.block_on(kill_job_off_thread(tree));
+            runtime.shutdown_background();
+            teardown
+        }
+        Err(error) => Teardown::stalled(format!("drop job teardown runtime unavailable: {error}")),
+    }
 }

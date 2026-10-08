@@ -283,3 +283,6 @@ pub mod process_nofile;
 
 // Build-control flags must agree with the child descriptor policy.
 pub mod jobserver;
+
+/// Shared inactivity bounds for job enumeration and teardown watchdogs.
+pub mod teardown_progress;
