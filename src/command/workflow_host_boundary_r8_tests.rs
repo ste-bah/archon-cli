@@ -439,3 +439,6 @@ mod finish {
         assert_eq!(residue_paths(&fixture).len(), 1, "only the commit records");
     }
 }
+
+#[path = "workflow_host_boundary_r9_tests.rs"]
+mod r9;

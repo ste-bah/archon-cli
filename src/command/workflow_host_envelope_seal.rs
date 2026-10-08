@@ -29,7 +29,8 @@ pub(crate) struct EnvelopeCleanup {
 
 impl EnvelopeCleanup {
     /// Seals now. A teardown still pending (the supervisor was dropped by an
-    /// early return) gets a second seal once it is settled.
+    /// early return) gets a second seal once it is settled; the residue
+    /// record stays until a seal follows every confirmed teardown.
     pub(crate) fn finish(mut self) -> WorkflowResult<()> {
         self.armed = false;
         let sealed = self
@@ -37,6 +38,8 @@ impl EnvelopeCleanup {
             .seal_staged_evidence(&self.anchor, None, &self.pause);
         if self.teardown.pending() {
             self.teardown.after_teardown(self.reseal());
+        } else if sealed.is_ok() && self.teardown.confirmed() {
+            self.pause.sealed();
         }
         sealed
     }
@@ -65,17 +68,23 @@ impl Drop for EnvelopeCleanup {
 /// Seals the staging of a call whose trees were torn down. Sealing pauses
 /// the run (or, when the run is no longer this call's, records the residue)
 /// before it returns. A teardown that was not confirmed may have left a
-/// process that still writes staging: that is recorded as residue too, and
-/// the next resume clears the staging before its child runs.
+/// process that still writes staging: that is recorded as residue too, its
+/// residue record stays, and the next resume clears the staging before its
+/// child runs.
 fn seal_after_teardown(
     anchor: &StagingAnchor,
     secrets: &HostSecrets,
     pause: &StagingPause,
     confirmed: bool,
 ) {
-    if let Err(error) = secrets.seal_staged_evidence(anchor, None, pause) {
-        let evidence = secrets.text(&error.to_string());
-        tracing::warn!(error = %evidence, "sealing a cancelled call's staging failed");
+    match secrets.seal_staged_evidence(anchor, None, pause) {
+        Err(error) => {
+            let evidence = secrets.text(&error.to_string());
+            tracing::warn!(error = %evidence, "sealing a cancelled call's staging failed");
+        }
+        // Only now does the residue record go (#297 round 9).
+        Ok(()) if confirmed => pause.sealed(),
+        Ok(()) => {}
     }
     if !confirmed {
         let error = pause.pause(

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use archon_workflow::{WorkflowError, WorkflowEventKind, WorkflowResult, WorkflowStore};
 
 use super::workflow_host_command_operational::{append_log, emit};
+use super::workflow_host_staging_residue::StagingResidue;
 
 pub(crate) struct StagingPause {
     store: WorkflowStore,
@@ -18,6 +19,9 @@ pub(crate) struct StagingPause {
     generation: u64,
     call_id: String,
     command_id: String,
+    /// Written before the child can write staging, removed once it is
+    /// sealed (#297 round 9).
+    residue: StagingResidue,
 }
 
 impl StagingPause {
@@ -41,16 +45,28 @@ impl StagingPause {
             generation,
             call_id: call_id.to_string(),
             command_id: command_id.to_string(),
+            residue: StagingResidue::at(run_root, call_id),
         })
     }
 
-    /// The call's staging, created empty under its anchor. Stale staging that
-    /// cannot be cleared pauses the run naming it.
+    /// The call's staging, created empty under its anchor, after its residue
+    /// record. Stale staging that cannot be cleared, or a record that cannot
+    /// be written, pauses the run naming it.
     pub(crate) fn prepare(
         &self,
         run_root: &Path,
     ) -> WorkflowResult<super::workflow_host_command_publish::CommandStaging> {
         use super::workflow_host_command_publish::{prepare_staging, staging_root};
+        self.residue
+            .record(&self.call_id, &self.command_id, self.generation)
+            .map_err(|error| {
+                self.pause(
+                    self.residue.path(),
+                    "the staging residue record could not be written",
+                    &error.to_string(),
+                    false,
+                )
+            })?;
         prepare_staging(run_root, &self.call_id).map_err(|error| {
             self.pause(
                 &staging_root(run_root, &self.call_id),
@@ -59,6 +75,16 @@ impl StagingPause {
                 true,
             )
         })
+    }
+
+    /// The call's staging is sealed and no process of the call can write it:
+    /// its residue record goes. A record that stays only makes the next
+    /// resume remove staging that is already sealed.
+    pub(crate) fn sealed(&self) {
+        if let Err(error) = self.residue.clear() {
+            let path = self.residue.path().display().to_string();
+            tracing::warn!(%error, %path, "host command staging residue record not removed");
+        }
     }
 
     /// Records, without pausing, that `step` left staging at `path` (the

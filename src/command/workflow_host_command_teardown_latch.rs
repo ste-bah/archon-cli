@@ -51,6 +51,11 @@ impl TeardownLatch {
         self.state().pending > 0
     }
 
+    /// Whether every teardown that reported was confirmed.
+    pub(crate) fn confirmed(&self) -> bool {
+        !self.state().unconfirmed
+    }
+
     /// Runs `then` now, on this thread, when no teardown is pending;
     /// otherwise on the thread that settles the last pending teardown.
     pub(crate) fn after_teardown(&self, then: AfterTeardown) {

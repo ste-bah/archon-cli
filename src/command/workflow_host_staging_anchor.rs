@@ -54,6 +54,12 @@ impl StagingAnchor {
         Ok(anchor)
     }
 
+    /// Removes `run_root/host-command-staging/name` through a new anchor
+    /// (on resume, the staging a residue record names; #297 round 9).
+    pub(crate) fn clear(run_root: &Path, name: &str) -> io::Result<()> {
+        Self::open(run_root, name)?.remove_tree()
+    }
+
     /// The path the child is given, and the one evidence names.
     pub(crate) fn root(&self) -> &Path {
         &self.root

@@ -46,6 +46,8 @@ pub(super) async fn take_for_resume(
                 .map_err(|error| anyhow::anyhow!("reporting stale owner recovery: {error}"))?;
         }
     }
+    // Staging an earlier executor left unsealed goes before any child runs.
+    crate::command::workflow_host_staging_residue::clear_left(&store.run_dir(run_id))?;
     Ok(lease)
 }
 

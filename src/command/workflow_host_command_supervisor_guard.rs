@@ -7,6 +7,7 @@
 //! so that a resume refuses while any of them still runs (Issue 270/273).
 use super::super::workflow_host_command_groups::GroupRecordGuard;
 use super::super::workflow_host_command_teardown_latch::TeardownToken;
+use super::super::workflow_host_exit_drain::PendingWork;
 use super::SupervisedProcessOutput;
 use super::io::CapturedPipe;
 use super::termination::{Teardown, Tree, kill_blocking};
@@ -98,13 +99,14 @@ impl ProcessGroupGuard {
             .unwrap_or_default();
         let progress = archon_shell::teardown_progress::Progress::new(super::REAP_DEADLINE);
         // The token moves with the work: it reports even if this future is
-        // dropped while the blocking work still runs.
+        // dropped while the blocking work still runs, and the exit waits for
+        // it (#297 round 9).
         let token = self.teardown.take();
+        let pending = PendingWork::begin();
         let work = tokio::task::spawn_blocking(move || {
-            let evidence = settle_record(record, teardown);
-            if let Some(token) = token {
-                token.settled(evidence.is_none());
-            }
+            let (evidence, confirmed) = settle_record(record, teardown);
+            report(token, evidence.is_none(), confirmed);
+            drop(pending);
             evidence
         });
         progress.watch(work).await.map_err(|error| archon_workflow::WorkflowError::HostOperational(
@@ -113,14 +115,15 @@ impl ProcessGroupGuard {
     }
 }
 
-/// Confirmed: the record goes. Stalled: the record is kept, with the
-/// survivors (or "unknown"), and the evidence is returned.
-fn settle_record(record: Option<GroupRecordGuard>, teardown: Teardown) -> Option<String> {
+/// Confirmed: the record is returned, for [`report`] to remove. Stalled:
+/// the record is kept, with the survivors (or "unknown"), and the evidence
+/// is returned.
+fn settle_record(
+    record: Option<GroupRecordGuard>,
+    teardown: Teardown,
+) -> (Option<String>, Option<GroupRecordGuard>) {
     match teardown {
-        Teardown::Confirmed => {
-            drop(record);
-            None
-        }
+        Teardown::Confirmed => (None, record),
         Teardown::Stalled {
             evidence,
             survivors,
@@ -128,11 +131,22 @@ fn settle_record(record: Option<GroupRecordGuard>, teardown: Teardown) -> Option
             if let Some(record) = record
                 && let Some(error) = record.keep(survivors.as_deref())
             {
-                return Some(format!("{evidence}; {error}"));
+                return (Some(format!("{evidence}; {error}")), None);
             }
-            Some(evidence)
+            (Some(evidence), None)
         }
     }
+}
+
+/// Reports the settled teardown, which runs what waits for it (the
+/// cancelled call's sealing), and only then removes a confirmed record: a
+/// resume refuses while the record exists, so it cannot start while that
+/// sealing still runs on the call's staging (#297 round 9).
+fn report(token: Option<TeardownToken>, empty: bool, confirmed: Option<GroupRecordGuard>) {
+    if let Some(token) = token {
+        token.settled(empty);
+    }
+    drop(confirmed);
 }
 
 impl Drop for ProcessGroupGuard {
@@ -159,10 +173,13 @@ impl Drop for ProcessGroupGuard {
         let reaped = self.reaped;
         // Dropped unreported if the thread cannot start: then unconfirmed.
         let token = self.teardown.take();
+        // The exit waits for this thread on every platform (#297 round 9).
+        let pending = PendingWork::begin();
         let spawned = std::thread::Builder::new()
             .name("archon-host-command-teardown".into())
             .spawn(move || {
                 let teardown = kill_blocking(&tree, !reaped);
+                pending.progressed();
                 #[cfg(unix)]
                 let teardown = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
                     Ok(runtime) => match runtime.block_on(super::termination::reap(&mut child)) {
@@ -173,16 +190,17 @@ impl Drop for ProcessGroupGuard {
                 };
                 #[cfg(unix)]
                 tree.leader_reaped();
+                pending.progressed();
                 let record = held.lock().ok().and_then(|mut record| record.take());
-                let evidence = settle_record(record, teardown);
+                let (evidence, confirmed) = settle_record(record, teardown);
                 if let Some(evidence) = &evidence {
                     tracing::warn!(%evidence, "host command teardown stalled after supervision stopped");
                 }
+                pending.progressed();
                 // Last: what waits for the teardown (the cancelled call's
                 // sealing) runs once no process of the tree can write.
-                if let Some(token) = token {
-                    token.settled(evidence.is_none());
-                }
+                report(token, evidence.is_none(), confirmed);
+                drop(pending);
             });
         match spawned {
             Ok(handle) => {

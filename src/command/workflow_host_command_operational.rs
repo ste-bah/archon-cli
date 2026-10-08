@@ -87,6 +87,7 @@ pub(crate) fn unsettled_publish_of(error: &anyhow::Error) -> Option<String> {
 pub(crate) fn exit_if_unsettled_publish(error: &anyhow::Error) {
     if let Some(line) = unsettled_publish_of(error) {
         eprintln!("{line}");
+        super::workflow_host_exit_drain::drain_before_exit();
         std::process::exit(EXIT_UNSETTLED_PUBLISH)
     }
 }
@@ -94,6 +95,7 @@ pub(crate) fn exit_if_unsettled_publish(error: &anyhow::Error) {
 /// End this process as an unsettled publish with `evidence`.
 pub(crate) fn exit_unsettled_publish(evidence: &str) -> ! {
     eprintln!("{}", unsettled_publish_line(evidence));
+    super::workflow_host_exit_drain::drain_before_exit();
     std::process::exit(EXIT_UNSETTLED_PUBLISH)
 }
 

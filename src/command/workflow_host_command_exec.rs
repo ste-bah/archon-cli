@@ -82,6 +82,13 @@ impl HostCommandProcessAdapter for DirectHostCommandProcessAdapter {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Runs on the call's staging after its work and before its final seal.
+    pub(crate) static AFTER_CALL: std::cell::Cell<Option<Box<dyn FnOnce(&std::path::Path)>>> =
+        const { std::cell::Cell::new(None) };
+}
+
 pub(crate) struct FixedHostCommandExecutor {
     catalog: CommandCapabilityCatalog,
     context: HostCommandResolutionContext,
@@ -442,6 +449,10 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             })
         }
         .await;
+        #[cfg(test)]
+        if let Some(hook) = AFTER_CALL.take() {
+            hook(&staging.root);
+        }
         let sealed = cleanup.finish();
         finish::settle_cleanup(result, sealed, &staging.root, &pause, &secrets)
             .map_err(|error| secrets.error(error))
