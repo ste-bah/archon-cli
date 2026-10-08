@@ -107,7 +107,7 @@ fn reservation_inside_a_guarded_operation_does_not_self_deadlock() {
     std::thread::spawn(move || {
         let outcome = (|| {
             let db = crate::open_docs_db_for_test(&worker_path)?;
-            let config = archon_cozo::CozoGuardConfig::for_db_path(&worker_path);
+            let config = crate::docs_db_cache::guard_config(&worker_path);
             archon_cozo::run_guarded(
                 "docs ingest inside a guarded operation",
                 cozo::ScriptMutability::Mutable,

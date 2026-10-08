@@ -132,25 +132,42 @@ fn test_reserve_by_hash_registers_then_reports_the_duplicate() {
     crate::schema::ensure_doc_schema(&db).unwrap();
 
     let first = test_doc("hash-doc");
-    assert!(matches!(
-        reserve_doc_source_by_hash(&db, &first).unwrap(),
-        HashReservation::Registered
-    ));
+    let mut first_slot = ClaimSlot::for_content(&db, "abc123").unwrap();
+    let HashReservation::Registered(first_claim) =
+        reserve_doc_source_by_hash(&db, &first, &mut first_slot).unwrap()
+    else {
+        panic!("the first reservation of a content hash must register it");
+    };
     assert_eq!(
         get_doc_by_hash(&db, "abc123").unwrap().unwrap().document_id,
         "hash-doc"
     );
 
     // A second document carrying the same hash must not be written, and the
-    // caller must be handed the owner so it can link to it.
+    // caller must be handed the owner so it can link to it. The first ingest
+    // is still live (it holds its claim), so it is not resumable either.
     let second = test_doc("hash-doc-again");
-    let HashReservation::Duplicate(existing) = reserve_doc_source_by_hash(&db, &second).unwrap()
+    let mut second_slot = ClaimSlot::for_content(&db, "abc123").unwrap();
+    let HashReservation::Duplicate(existing) =
+        reserve_doc_source_by_hash(&db, &second, &mut second_slot).unwrap()
     else {
         panic!("second reservation of one content hash must report a duplicate");
     };
     assert_eq!(existing.document_id, "hash-doc");
     assert_eq!(list_doc_sources(&db).unwrap().len(), 1);
     assert!(get_doc_source(&db, "hash-doc-again").unwrap().is_none());
+
+    // The first ingest stops before its final status: its claim is free, so
+    // the next reservation resumes the same registration.
+    drop(first_claim);
+    let mut third_slot = ClaimSlot::for_content(&db, "abc123").unwrap();
+    let HashReservation::Resume(existing, _claim) =
+        reserve_doc_source_by_hash(&db, &second, &mut third_slot).unwrap()
+    else {
+        panic!("an interrupted registration must be resumed");
+    };
+    assert_eq!(existing.document_id, "hash-doc");
+    assert_eq!(list_doc_sources(&db).unwrap().len(), 1);
 }
 
 #[test]

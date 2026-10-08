@@ -58,6 +58,11 @@ pub async fn reprocess_document_with_policy(
         });
     }
 
+    // Own the document's ingest claim, so no other run resumes it meanwhile.
+    let mut claim_slot =
+        store::ClaimSlot::for_content(db, &doc.content_hash).map_err(DocsError::storage)?;
+    let claim =
+        store::claim_for_reprocess(db, document_id, &mut claim_slot).map_err(DocsError::storage)?;
     let cleared = clear_generated_evidence(db, document_id)?;
     store::update_doc_status(db, document_id, &DocumentStatus::Ingesting).map_err(storage)?;
     let job_id = insert_reprocess_job(db, document_id, "running", None)?;
@@ -74,14 +79,15 @@ pub async fn reprocess_document_with_policy(
     .await
     {
         Ok(outcome) => {
-            store::update_doc_status(db, document_id, &DocumentStatus::Ingested)
-                .map_err(storage)?;
+            store::finish_claimed_ingest(db, document_id, &DocumentStatus::Ingested, claim)
+                .map_err(DocsError::storage)?;
             update_reprocess_job(db, &job_id, document_id, "completed", None)?;
             outcome
         }
         Err(err) => {
             pipeline_failed = true;
-            store::update_doc_status(db, document_id, &DocumentStatus::Failed).map_err(storage)?;
+            store::finish_claimed_ingest(db, document_id, &DocumentStatus::Failed, claim)
+                .map_err(DocsError::storage)?;
             update_reprocess_job(db, &job_id, document_id, "failed", Some(&err.to_string()))?;
             let mut outcome = crate::ingest::PipelineOutcome::default();
             outcome.warnings.push(format!("reprocess failed: {err}"));

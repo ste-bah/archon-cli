@@ -3,7 +3,7 @@ use std::os::fd::AsRawFd;
 
 #[test]
 fn startup_limits_sweep_work_and_restores_child_limits() {
-    for case in ["high", "low", "inherited"] {
+    for case in ["high", "low", "inherited", "unreadable"] {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -46,14 +46,38 @@ fn startup_child() {
     } else {
         None
     };
-    unsafe { initialize() }.unwrap();
+    if case == "unreadable" {
+        // A sandbox that denies /dev/fd: startup goes on, nothing changes,
+        // and the reason is kept for a warning.
+        let missing = std::path::Path::new("/archon-no-such-fd-dir");
+        unsafe { initialize_from(missing) };
+        let reason = startup_degradation().expect("a degraded startup must say why");
+        assert!(reason.contains("/archon-no-such-fd-dir"), "{reason}");
+    } else {
+        unsafe { initialize() };
+        assert_eq!(startup_degradation(), None);
+    }
     assert_eq!(
         unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) },
         0
     );
-    assert_eq!(limit.rlim_cur, original.min(4_096));
     let ceiling = crate::process_tree::descriptor_ceiling().unwrap();
-    assert!(ceiling <= 6_001, "startup must bound the sweep: {ceiling}");
+    if case == "unreadable" {
+        assert_eq!(
+            limit.rlim_cur, original,
+            "a degraded startup changes nothing"
+        );
+        assert!(
+            ceiling as u64 >= original,
+            "the fallback sweep must cover the whole soft limit: {ceiling}"
+        );
+    } else {
+        assert_eq!(limit.rlim_cur, original.min(STARTUP_SOFT_LIMIT));
+        assert!(
+            ceiling as u64 <= STARTUP_SOFT_LIMIT.max(6_001),
+            "startup must bound the sweep: {ceiling}"
+        );
+    }
     let script = match high {
         Some(fd) => format!("test ! -e /dev/fd/{fd} || exit 33; ulimit -n"),
         None => "ulimit -n".into(),

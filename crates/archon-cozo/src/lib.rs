@@ -10,11 +10,15 @@ use cozo::{DataValue, DbInstance, NamedRows, ScriptMutability};
 mod busy_observer;
 #[cfg(any(test, feature = "test-support"))]
 pub use busy_observer::{with_busy_observer, with_guarded_failure};
+mod acquire;
 mod busy;
 pub use busy::StoreBusy;
+mod contention;
 mod guard_registry;
 mod in_memory_identity;
 mod locking;
+mod owner_lock;
+pub use owner_lock::{OwnerLock, OwnerLockFile};
 mod progress;
 mod resuming;
 pub use resuming::{run_bound_script_resuming, with_write_lock_resuming};
@@ -33,10 +37,14 @@ pub use guarded_run::{run_guarded, run_guarded_async};
 #[cfg(test)]
 use retry::initial_backoff_ramp;
 
-/// Default no-progress acquisition window for [`with_write_lock_blocking`]. Expiry
-/// returns retryable [`StoreBusy`]; elapsed time alone cannot prove the holder
-/// is stuck. It never caps the operation once the lock has been acquired.
+/// Default no-progress window for a lock or busy wait. Writer progress renews
+/// it; once a full window passes without progress the wait ends as retryable
+/// [`StoreBusy`]. It never caps an operation once the lock has been acquired.
 pub const DEFAULT_WRITE_LOCK_WAIT: Duration = Duration::from_secs(60);
+
+/// The no-progress window for interactive callers, which report a busy store
+/// promptly rather than block a session on a holder that makes no progress.
+pub const INTERACTIVE_BUSY_WAIT: Duration = Duration::from_secs(5);
 
 const DEFAULT_BACKOFF_STEPS: usize = 20;
 const INTERACTIVE_BACKOFF_STEPS: usize = 10;
@@ -45,9 +53,8 @@ const DEFAULT_MAX_BACKOFF_MS: u64 = 2_000;
 
 #[derive(Clone, Debug)]
 pub struct CozoGuardConfig {
-    /// Legacy backoff ramp length, retained for caller compatibility.
-    /// This never limits attempts: raw busy cannot prove writer inactivity.
-    /// Explicit acquisition pauses are returned as typed `StoreBusy`.
+    /// Backoff ramp length. This never limits attempts: retries end only
+    /// after [`CozoGuardConfig::busy_wait`] passes with no writer progress.
     pub max_attempts: usize,
     pub initial_backoff: Duration,
     pub max_backoff: Duration,
@@ -67,6 +74,11 @@ pub struct CozoGuardConfig {
     /// interactive caller would rather report a busy store promptly than block
     /// a keystroke; batch writers are the ones that would rather wait.
     pub write_lock_wait: Option<Duration>,
+    /// No-progress window for contention retries: raw SQLite busy and a
+    /// fail-fast write lock that another handle holds. Writer progress (the
+    /// lock's `.progress` marker, the database, `-wal` or `-journal`) renews
+    /// it. A full window without progress ends the retries as [`StoreBusy`].
+    pub busy_wait: Duration,
 }
 
 impl Default for CozoGuardConfig {
@@ -77,6 +89,7 @@ impl Default for CozoGuardConfig {
             max_backoff: Duration::from_millis(DEFAULT_MAX_BACKOFF_MS),
             write_lock_path: None,
             write_lock_wait: None,
+            busy_wait: DEFAULT_WRITE_LOCK_WAIT,
         }
     }
 }
@@ -89,6 +102,7 @@ impl CozoGuardConfig {
     pub fn for_interactive_db_path(path: impl AsRef<Path>) -> Self {
         Self {
             max_attempts: INTERACTIVE_BACKOFF_STEPS,
+            busy_wait: INTERACTIVE_BUSY_WAIT,
             ..Self::for_db_path(path)
         }
     }
@@ -342,7 +356,6 @@ fn run_guarded_once<T>(
     context: &str,
     mutability: ScriptMutability,
     config: &CozoGuardConfig,
-    resume_acquisition: bool,
     run: &mut impl FnMut() -> Result<T>,
 ) -> Result<T> {
     // One-shot: the flag is cleared *before* panicking, not after. The process
@@ -374,12 +387,7 @@ fn run_guarded_once<T>(
         if let (Some(path), Some(wait)) =
             (config.write_lock_path.as_deref(), config.write_lock_wait)
         {
-            if resume_acquisition {
-                return locking::with_write_lock_resuming(path, context, wait, || {
-                    catch_guarded_operation(context, run)
-                });
-            }
-            return locking::with_write_lock_blocking(path, context, wait, || {
+            return acquire::with_write_lock_blocking(path, context, wait, || {
                 catch_guarded_operation(context, run)
             });
         }
@@ -437,7 +445,7 @@ pub fn with_write_lock_blocking_timeout<T>(
     wait: Duration,
     run: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    locking::with_write_lock_blocking(path, context, wait, run)
+    acquire::with_write_lock_blocking(path, context, wait, run)
 }
 
 pub fn in_guarded_operation() -> bool {

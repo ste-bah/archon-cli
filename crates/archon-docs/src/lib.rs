@@ -27,6 +27,7 @@ pub mod ingest_bytes;
 mod ingest_directory;
 mod ingest_multimodal;
 mod ingest_pdf;
+mod ingest_resume;
 mod ingest_spreadsheet;
 pub mod ingest_text;
 pub mod inspect;
@@ -87,7 +88,8 @@ pub(crate) fn open_docs_db_for_test(
     path: impl AsRef<std::path::Path>,
 ) -> anyhow::Result<archon_cozo::GuardedDbInstance> {
     let path = path.as_ref();
-    let config = archon_cozo::CozoGuardConfig::for_db_path(path);
+    // The production settings, so fixtures exercise the production waits.
+    let config = docs_db_cache::guard_config(path);
     archon_cozo::open_sqlite_guarded_instance(
         &path.to_string_lossy(),
         "open persisted document store test fixture",
@@ -107,3 +109,6 @@ pub fn run_cozo_script_guarded(
 
 #[cfg(test)]
 mod ingest_contention_tests;
+
+#[cfg(test)]
+mod ingest_resume_tests;

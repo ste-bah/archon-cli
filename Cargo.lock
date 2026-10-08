@@ -576,6 +576,7 @@ dependencies = [
  "anyhow",
  "cozo-ce",
  "fd-lock",
+ "libc",
  "sqlite",
  "tempfile",
  "tokio",

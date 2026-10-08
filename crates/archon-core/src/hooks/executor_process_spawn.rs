@@ -92,12 +92,14 @@ impl SpawnRequest {
     fn spawn(self) -> std::io::Result<Box<dyn ChildWrapper>> {
         let shell = archon_shell::resolve_shell();
         let mut command_builder = archon_shell::spawn::tokio_command(&shell.program);
+        archon_shell::spawn::replace_environment(
+            command_builder.as_std_mut(),
+            archon_tools::bash::isolated_env(),
+        );
         command_builder
             .arg(shell.command_arg)
             .arg(&self.command)
             .current_dir(&self.cwd)
-            .env_clear()
-            .envs(archon_tools::bash::isolated_env())
             .env("ARCHON_SESSION_ID", &self.session_id)
             .env("ARCHON_CWD", &self.cwd)
             .env("ARCHON_HOOK_EVENT", &self.event_name)

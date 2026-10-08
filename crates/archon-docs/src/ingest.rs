@@ -119,32 +119,27 @@ pub async fn ingest_file_with_policy(
         status: DocumentStatus::Discovered,
     };
 
-    let reservation = store::reserve_doc_source_by_hash(db, &doc).map_err(DocsError::storage)?;
+    let mut claim_slot =
+        store::ClaimSlot::for_content(db, &content_hash).map_err(DocsError::storage)?;
+    let reservation =
+        store::reserve_doc_source_by_hash(db, &doc, &mut claim_slot).map_err(DocsError::storage)?;
 
-    if let store::HashReservation::Duplicate(existing) = reservation {
-        info!(
-            path = %source_path,
-            hash = %content_hash,
-            existing = %existing.document_id,
-            "Skipping duplicate document"
-        );
-        return Ok(IngestFileResult {
-            document_id: existing.document_id,
-            was_new: false,
-            ocr_skipped: false,
-            pipeline_failed: false,
-            warnings: Vec::new(),
-            image_embeddings_stored: 0,
-            vlm_descriptions: 0,
-            pdf_embedded_images_extracted: 0,
-            pdf_embedded_images_skipped_filter: 0,
-            pdf_image_ocr_runs: 0,
-            pdf_image_vlm_failures: 0,
-            pdf_image_ocr_failures: 0,
-            pdf_pages_rendered: 0,
-            pdf_coord: None,
-        });
-    }
+    let (document_id, claim) = match reservation {
+        store::HashReservation::Registered(claim) => (document_id, claim),
+        store::HashReservation::Resume(existing, claim) => {
+            crate::ingest_resume::resume_registration(db, &existing, &source_path)?;
+            (existing.document_id, claim)
+        }
+        store::HashReservation::Duplicate(existing) => {
+            info!(
+                path = %source_path,
+                hash = %content_hash,
+                existing = %existing.document_id,
+                "Skipping duplicate document"
+            );
+            return Ok(crate::ingest_resume::duplicate_result(existing.document_id));
+        }
+    };
 
     // Create processing job
     let job = ProcessingJob {
@@ -179,14 +174,15 @@ pub async fn ingest_file_with_policy(
         {
             Ok(pipeline_outcome) => {
                 outcome = pipeline_outcome;
-                store::update_doc_status(db, &document_id, &DocumentStatus::Ingested)
+                store::finish_claimed_ingest(db, &document_id, &DocumentStatus::Ingested, claim)
                     .map_err(DocsError::storage)?;
             }
+            // The claim is released, not completed: the next run resumes it.
             Err(e @ DocsError::StoreBusy(_)) => return Err(e),
             Err(e) => {
                 pipeline_failed = true;
                 outcome.warnings.push(format!("OCR pipeline failed: {e}"));
-                store::update_doc_status(db, &document_id, &DocumentStatus::Failed)
+                store::finish_claimed_ingest(db, &document_id, &DocumentStatus::Failed, claim)
                     .map_err(DocsError::storage)?;
                 info!(
                     document_id = %document_id,
@@ -204,7 +200,7 @@ pub async fn ingest_file_with_policy(
             media_type = %media_type,
             "OCR pipeline skipped for supported non-OCR media"
         );
-        store::update_doc_status(db, &document_id, &DocumentStatus::Ingested)
+        store::finish_claimed_ingest(db, &document_id, &DocumentStatus::Ingested, claim)
             .map_err(DocsError::storage)?;
     }
 

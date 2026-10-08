@@ -10,6 +10,7 @@ mod counts;
 mod documents;
 mod embeddings;
 mod images;
+mod ingest_claim;
 mod locators;
 mod pages;
 
@@ -19,6 +20,7 @@ pub use counts::*;
 pub use documents::*;
 pub use embeddings::*;
 pub use images::*;
+pub use ingest_claim::{ClaimSlot, IngestClaim, claim_for_reprocess, finish_claimed_ingest};
 pub use locators::*;
 pub use pages::*;
 

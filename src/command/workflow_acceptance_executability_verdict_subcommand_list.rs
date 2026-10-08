@@ -245,11 +245,9 @@ fn list_in(program: &Path, root: &Path, at: &Context) -> Result<Listing, String>
     }
     let spawn = || {
         let mut command = archon_shell::spawn::command(program);
-        command
+        archon_shell::spawn::replace_environment(&mut command, &environment)
             .arg("--list")
             .current_dir(&work)
-            .env_clear()
-            .envs(&environment)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

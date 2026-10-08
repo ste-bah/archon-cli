@@ -108,6 +108,7 @@ fn retry_config(max_attempts: usize) -> CozoGuardConfig {
         max_backoff: Duration::ZERO,
         write_lock_path: None,
         write_lock_wait: None,
+        busy_wait: DEFAULT_WRITE_LOCK_WAIT,
     }
 }
 
@@ -120,6 +121,7 @@ fn sync_guarded_retry_retries_then_succeeds() {
         max_backoff: Duration::ZERO,
         write_lock_path: None,
         write_lock_wait: None,
+        busy_wait: DEFAULT_WRITE_LOCK_WAIT,
     };
 
     let value = run_guarded("sync retry", ScriptMutability::Immutable, &config, || {
@@ -145,6 +147,7 @@ async fn async_guarded_retry_yields_and_succeeds() {
         max_backoff: Duration::from_secs(1),
         write_lock_path: None,
         write_lock_wait: None,
+        busy_wait: DEFAULT_WRITE_LOCK_WAIT,
     };
     let yielded = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let yielded_for_task = Arc::clone(&yielded);
@@ -211,6 +214,7 @@ async fn async_guarded_operation_runs_off_runtime_worker() {
         max_backoff: Duration::ZERO,
         write_lock_path: None,
         write_lock_wait: None,
+        busy_wait: DEFAULT_WRITE_LOCK_WAIT,
     };
     let guarded = run_guarded_async(
         "blocking guarded operation",
@@ -245,6 +249,7 @@ async fn async_guarded_terminal_error_does_not_retry() {
         max_backoff: Duration::from_secs(1),
         write_lock_path: None,
         write_lock_wait: None,
+        busy_wait: DEFAULT_WRITE_LOCK_WAIT,
     };
 
     let error = run_guarded_async(

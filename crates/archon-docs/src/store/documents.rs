@@ -84,11 +84,17 @@ pub fn list_doc_sources(db: &DbInstance) -> Result<Vec<SourceDocument>> {
 }
 
 /// Outcome of [`reserve_doc_source_by_hash`].
-#[derive(Clone, Debug)]
-pub enum HashReservation {
-    /// Nothing owned the hash, so the caller's document was registered.
-    Registered,
-    /// Another document already owned the hash; nothing was written.
+#[derive(Debug)]
+pub enum HashReservation<'a> {
+    /// Nothing owned the hash, so the caller's document was registered and
+    /// the caller owns its ingest.
+    Registered(super::IngestClaim<'a>),
+    /// An earlier ingest of this hash registered the document and stopped
+    /// before its final status (a pause or a crash). Nothing owns it, so the
+    /// caller now owns it and must finish it in place.
+    Resume(Box<SourceDocument>, super::IngestClaim<'a>),
+    /// Another document already owned the hash, finished or still in a live
+    /// ingest; nothing was written.
     Duplicate(Box<SourceDocument>),
 }
 
@@ -99,18 +105,35 @@ pub enum HashReservation {
 /// therefore a read followed by a write, and it only holds if nothing can write
 /// between the two. Callers must not open-code that pair — this is the one place
 /// the window exists, so it is the one place that closes it.
-pub fn reserve_doc_source_by_hash(
+///
+/// The ingest claim in `slot` is taken in the same window: a registration
+/// whose claim is free belongs to an interrupted ingest and is resumed, and
+/// one whose claim is held belongs to a live ingest and is a duplicate.
+pub fn reserve_doc_source_by_hash<'a>(
     db: &DbInstance,
     doc: &SourceDocument,
-) -> Result<HashReservation> {
-    with_reservation_lock_held(db, || {
-        if let Some(existing) = get_doc_by_hash(db, &doc.content_hash)? {
-            return Ok(HashReservation::Duplicate(Box::new(existing)));
+    slot: &'a mut super::ClaimSlot,
+) -> Result<HashReservation<'a>> {
+    with_reservation_lock_held(db, move || match get_doc_by_hash(db, &doc.content_hash)? {
+        Some(existing) if !super::ingest_claim::is_resumable(&existing.status) => {
+            Ok(HashReservation::Duplicate(Box::new(existing)))
         }
-        #[cfg(test)]
-        super::hash_reservation_test_hooks::wait_before_reservation(&doc.content_hash);
-        insert_doc_source(db, doc)?;
-        Ok(HashReservation::Registered)
+        Some(existing) => Ok(match slot.try_claim()? {
+            Some(claim) => HashReservation::Resume(Box::new(existing), claim),
+            None => HashReservation::Duplicate(Box::new(existing)),
+        }),
+        None => {
+            let claim = slot.try_claim()?.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "content hash {} is claimed by a live ingest that has no registration",
+                    doc.content_hash
+                )
+            })?;
+            #[cfg(test)]
+            super::hash_reservation_test_hooks::wait_before_reservation(&doc.content_hash);
+            insert_doc_source(db, doc)?;
+            Ok(HashReservation::Registered(claim))
+        }
     })
 }
 
@@ -119,7 +142,8 @@ const RESERVATION_CONTEXT: &str = "reserve document content hash";
 /// Run `reserve` with exclusive access to the backing database.
 ///
 /// The blocking write lock keeps the read and write in one exclusive window.
-/// A no-progress pause resumes acquisition without dropping the reservation. It is re-entrant, so a reservation nested
+/// A wait continues while the holder progresses and ends as a typed pause
+/// after one no-progress window. It is re-entrant, so a reservation nested
 /// inside an already-guarded mutable operation on the same database runs inline
 /// rather than blocking on the lock its own thread holds.
 ///
@@ -128,7 +152,7 @@ const RESERVATION_CONTEXT: &str = "reserve document content hash";
 /// config has no path either, but that is a mistake rather than a case to
 /// tolerate, and `bound_guard_config` already rejects it here for the same
 /// reason every `:put` in this crate does.
-fn with_reservation_lock_held<T>(
+pub(super) fn with_reservation_lock_held<T>(
     db: &DbInstance,
     reserve: impl FnOnce() -> Result<T>,
 ) -> Result<T> {

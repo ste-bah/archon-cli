@@ -3,8 +3,8 @@
 //! Two separate judgements live here and they are deliberately not the same
 //! predicate. `is_retryable_cozo_error` answers "should the guard sleep and try
 //! this again?". `is_store_contention` also recognizes legacy acquisition
-//! wait-expiry strings. Raw busy retries have no total limit; explicit
-//! acquisition pauses return typed StoreBusy.
+//! wait-expiry strings. Retries have no attempt limit; they end only after a
+//! full no-progress window (`crate::contention`), as typed StoreBusy.
 
 use std::time::Duration;
 
@@ -20,25 +20,6 @@ pub(crate) fn initial_backoff_ramp(config: &CozoGuardConfig) -> Duration {
     (0..backoff_steps(config).saturating_sub(1))
         .map(|attempt| backoff_duration(config, attempt))
         .sum()
-}
-
-pub(crate) fn retry_backoff(
-    context: &str,
-    config: &CozoGuardConfig,
-    attempt: usize,
-    error: &str,
-) -> Option<Duration> {
-    if !is_retryable_cozo_error(error) {
-        return None;
-    }
-
-    tracing::trace!(
-        context,
-        attempt = attempt + 1,
-        error,
-        "Cozo store busy; retrying guarded operation"
-    );
-    Some(backoff_duration(config, attempt))
 }
 
 pub fn is_retryable_cozo_error(message: &str) -> bool {
@@ -70,8 +51,8 @@ pub fn is_retryable_cozo_error(message: &str) -> bool {
 ///
 /// Broader than [`is_retryable_cozo_error`] on purpose, and asking a different
 /// question. That predicate decides whether the guard should *sleep and try
-/// again*. New acquisition expiry is explicit retryable `StoreBusy`; the guard
-/// returns it to the caller without restarting that acquisition window. This
+/// again*. A no-progress window that expires is explicit retryable
+/// `StoreBusy`; the guard returns it without restarting the window. This
 /// predicate additionally recognizes legacy expiry messages as contention.
 /// Callers with nothing to degrade to must propagate, never substitute success.
 pub fn is_store_contention(message: &str) -> bool {

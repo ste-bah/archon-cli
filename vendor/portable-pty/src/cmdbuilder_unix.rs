@@ -9,7 +9,7 @@ impl CommandBuilder {
     }
 
     fn search_path(&self, exe: &OsStr, cwd: &OsStr) -> anyhow::Result<OsString> {
-        use nix::unistd::{access, AccessFlags};
+        use nix::unistd::{AccessFlags, access};
 
         let exe_path: &Path = exe.as_ref();
         if exe_path.is_relative() {
@@ -120,19 +120,21 @@ impl CommandBuilder {
 
         cmd.current_dir(dir);
 
-        cmd.env_clear();
-        cmd.env("SHELL", shell);
-        cmd.envs(self.envs.values().map(
-            |EnvEntry {
-                 is_from_base_env: _,
-                 preferred_key,
-                 value,
-             }| (preferred_key.as_os_str(), value.as_os_str()),
-        ));
-
-        // envs above replaces the helper's initial inherited flags. Sanitize
-        // again at the launch boundary, including explicit builder overrides.
-        archon_shell::jobserver::sanitize_environment(&mut cmd);
+        // The builder's environment replaces the helper's initial inherited
+        // flags; the shared helper sanitizes jobserver flags after that
+        // overlay, including explicit builder overrides.
+        archon_shell::spawn::replace_environment(
+            &mut cmd,
+            std::iter::once((OsStr::new("SHELL"), OsStr::new(&shell))).chain(
+                self.envs.values().map(
+                    |EnvEntry {
+                         is_from_base_env: _,
+                         preferred_key,
+                         value,
+                     }| (preferred_key.as_os_str(), value.as_os_str()),
+                ),
+            ),
+        );
         Ok(cmd)
     }
 
@@ -140,7 +142,7 @@ impl CommandBuilder {
     /// We take the contents of the $SHELL env var first, then
     /// fall back to looking it up from the password database.
     pub fn get_shell(&self) -> String {
-        use nix::unistd::{access, AccessFlags};
+        use nix::unistd::{AccessFlags, access};
 
         if let Some(shell) = self.get_env("SHELL").and_then(OsStr::to_str) {
             match access(shell, AccessFlags::X_OK) {

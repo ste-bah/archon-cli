@@ -153,6 +153,10 @@ fn init_session_logging(session_id: &str, config: &archon_core::config::ArchonCo
     if let Err(error) = rotate_logs(&log_dir, config.logging.max_files) {
         tracing::warn!("failed to rotate logs: {error}");
     }
+    #[cfg(unix)]
+    if let Some(reason) = archon_shell::process_nofile::startup_degradation() {
+        tracing::warn!(reason, "startup descriptor limit not applied");
+    }
     tracing::debug!(
         "logging: max_files={}, max_file_size_mb={}",
         config.logging.max_files,

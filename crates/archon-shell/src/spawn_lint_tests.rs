@@ -17,6 +17,9 @@ use std::path::{Path, PathBuf};
 #[path = "spawn_lint_lex.rs"]
 mod lex;
 
+#[path = "spawn_env_lint_tests.rs"]
+mod env_overlay;
+
 /// The one file allowed to call `Command::new`.
 const HELPER: &str = "crates/archon-shell/src/spawn.rs";
 

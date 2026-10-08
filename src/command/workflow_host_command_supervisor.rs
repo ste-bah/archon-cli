@@ -117,11 +117,10 @@ pub(crate) async fn supervise_process_group(
     group_records: Option<&std::path::Path>,
 ) -> WorkflowResult<SupervisedProcessOutput> {
     let mut command = archon_shell::spawn::tokio_command(&request.program);
+    archon_shell::spawn::replace_environment(command.as_std_mut(), &request.environment);
     command
         .args(&request.args)
         .current_dir(&request.cwd)
-        .env_clear()
-        .envs(&request.environment)
         .stdin(if request.stdin.is_some() {
             Stdio::piped()
         } else {

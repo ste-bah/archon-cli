@@ -12,6 +12,24 @@ pub(crate) fn inherit(command: &mut Command) {
     }
 }
 
+/// For a library command that inherits this process's environment: give each
+/// jobserver variable that it does not set or remove explicitly the policy
+/// value of this process's own.
+pub(crate) fn inherit_unset(command: &mut Command) {
+    let explicit: Vec<_> = command
+        .get_envs()
+        .map(|(name, _)| name.to_owned())
+        .collect();
+    for name in VARIABLES {
+        if explicit.iter().any(|set| names(set, name)) {
+            continue;
+        }
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, strip_fd_jobserver(&value));
+        }
+    }
+}
+
 /// Sanitize explicitly configured flags, including a library's copied ambient
 /// environment. Never reintroduce variables removed by `env_clear`/`env_remove`.
 pub fn sanitize_environment(command: &mut Command) {
@@ -38,14 +56,17 @@ pub fn sanitize_variable(name: &OsStr, value: OsString) -> OsString {
 }
 
 fn is_variable(name: &OsStr) -> bool {
+    VARIABLES.iter().any(|variable| names(name, variable))
+}
+
+/// Environment names compare case-insensitively on Windows only.
+fn names(name: &OsStr, variable: &str) -> bool {
     name.to_str().is_some_and(|name| {
-        VARIABLES.iter().any(|variable| {
-            if cfg!(windows) {
-                name.eq_ignore_ascii_case(variable)
-            } else {
-                name == *variable
-            }
-        })
+        if cfg!(windows) {
+            name.eq_ignore_ascii_case(variable)
+        } else {
+            name == variable
+        }
     })
 }
 

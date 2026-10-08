@@ -157,6 +157,7 @@ fn writes_through_symlinked_parent_are_serialized_after_lock_creation() {
         max_backoff: Duration::ZERO,
         write_lock_path: Some(alias_path),
         write_lock_wait: None,
+        busy_wait: archon_cozo::DEFAULT_WRITE_LOCK_WAIT,
     };
     let (first_entered_tx, first_entered_rx) = mpsc::channel();
     let (release_first_tx, release_first_rx) = mpsc::channel();
@@ -180,6 +181,7 @@ fn writes_through_symlinked_parent_are_serialized_after_lock_creation() {
                 max_backoff: Duration::ZERO,
                 write_lock_path: Some(real_path),
                 write_lock_wait: None,
+                busy_wait: archon_cozo::DEFAULT_WRITE_LOCK_WAIT,
             },
             || {
                 second_entered_tx.send(()).unwrap();

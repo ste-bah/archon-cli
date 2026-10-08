@@ -62,11 +62,12 @@ impl Tool for PowerShellTool {
         let env_vars = crate::bash::host_env();
 
         let mut cmd = archon_shell::spawn::tokio_command(shell);
+        // The host overlay copies raw jobserver flags; the helper sanitizes
+        // them after the overlay, as for the Bash tool.
+        archon_shell::spawn::replace_environment(cmd.as_std_mut(), env_vars);
         cmd.arg("-Command")
             .arg(command)
             .current_dir(&ctx.working_dir)
-            .env_clear()
-            .envs(env_vars)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null());
@@ -149,3 +150,7 @@ fn which_pwsh() -> bool {
         .map(|s| s.success())
         .unwrap_or(false)
 }
+
+#[cfg(all(test, unix))]
+#[path = "powershell_jobserver_tests.rs"]
+mod jobserver_tests;

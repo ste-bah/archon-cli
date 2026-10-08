@@ -260,10 +260,10 @@ fn blocking_write_lock_returns_busy_without_claiming_the_holder_is_stuck() {
     assert!(started.elapsed() >= Duration::from_millis(50));
     let message = format!("{error:#}");
     assert!(
-        message.contains("still held after waiting 50ms"),
+        message.contains("still held by another handle after 50ms with no writer progress"),
         "{message}"
     );
-    // Elapsed time gives no evidence of a wedged holder. The caller can resume.
+    // A window without progress is a pause, not a verdict. The caller can resume.
     assert!(error.is::<StoreBusy>());
     assert!(is_retryable_cozo_error(&message), "{message}");
 }

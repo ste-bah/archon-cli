@@ -218,11 +218,11 @@ pub(crate) async fn launch_selected(
         "--ignored",
         "--nocapture",
     ]);
+    archon_shell::spawn::replace_environment(
+        command.as_std_mut(),
+        child_environment(&request.policy, |key: &str| std::env::var_os(key)),
+    );
     command
-        .env_clear()
-        .envs(child_environment(&request.policy, |key: &str| {
-            std::env::var_os(key)
-        }))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         // Piped, never discarded: a guardian that dies before writing evidence

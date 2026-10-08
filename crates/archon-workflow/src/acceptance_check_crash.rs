@@ -397,13 +397,14 @@ fn own_callable_called(program: &str, source: &str, qualified: &str) -> bool {
 
 /// Whether the executing shell's parse-only mode rejects `command`.
 fn shell_rejects(command: &str) -> bool {
-    let child = archon_shell::spawn::command(archon_shell::resolve_posix_shell())
-        .args(["-n", "-s"])
-        .env_clear()
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+    let mut shell = archon_shell::spawn::command(archon_shell::resolve_posix_shell());
+    let child =
+        archon_shell::spawn::replace_environment(&mut shell, std::iter::empty::<(&str, &str)>())
+            .args(["-n", "-s"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
     let Ok(mut child) = child else {
         return false;
     };
