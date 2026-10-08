@@ -385,7 +385,7 @@ fn evict_for(chains: &mut HashMap<ChainKey, Chain>, incoming: &ChainKey) {
 /// loops, and it does so silently: there is no failure, only reminders that
 /// stop appearing. Twelve lines buy independence from a flag nobody in this
 /// repo controls.
-fn canonical_arguments(input: &serde_json::Value) -> String {
+pub fn canonical_arguments(input: &serde_json::Value) -> String {
     canonicalise(input).to_string()
 }
 

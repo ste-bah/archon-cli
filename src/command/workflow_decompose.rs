@@ -287,12 +287,13 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             .await
             .context("building the fixed decomposition provider client")?;
         // Proof, not trust: the same guard the authors' tools consult, asked
-        // now for the repository root. A refusal ends the launch here with
-        // the guard's text, before the first author spends an hour on it.
-        super::workflow_read_scope::require_agent_read(
+        // now for the repository root and the author-context directory. A
+        // refusal ends the launch here with the guard's text.
+        super::workflow_read_scope::require_author_reads(
             client.as_ref(),
-            &repository.root,
             "the decomposition authors",
+            Some(&repository.root),
+            &store.run_dir(&run_id),
         )?;
         let program = std::env::current_exe()
             .context("resolving the fixed decomposition binary")?

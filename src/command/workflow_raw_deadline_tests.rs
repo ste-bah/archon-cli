@@ -58,7 +58,7 @@ async fn raw_author_deadline_covers_all_transient_retries() {
     assert!(
         error
             .to_string()
-            .contains("author attempt deadline exceeded after 1s"),
+            .contains("author attempt no-progress deadline exceeded after 1s"),
         "{error}"
     );
     assert!(start.elapsed() < std::time::Duration::from_millis(1800));

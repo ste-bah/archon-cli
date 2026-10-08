@@ -159,7 +159,7 @@ impl SubagentPipelineClient {
 
     /// Cut a session that shows no activity for `secs` — no model output, no
     /// tool round in flight, no tool result — and report it as an inactivity
-    /// timeout rather than a wall-clock one. `None` or `Some(0)` leaves it off,
+    /// timeout rather than a no-progress one. `None` or `Some(0)` leaves it off,
     /// which is what every caller that does not say this gets.
     #[must_use]
     pub fn with_inactivity_timeout(mut self, secs: Option<u64>) -> Self {
@@ -333,7 +333,13 @@ impl LlmClient for SubagentPipelineClient {
     /// (`continuation.rs` clones it per call), so the guard's answer here is
     /// the answer the agent's first `Read` would get.
     fn probe_agent_read(&self, path: &std::path::Path) -> Option<std::result::Result<(), String>> {
-        Some(archon_tools::path_guard_probe::probe_read_access(path, &self.context).map(|_| ()))
+        // The host exclusions of the calling scope apply, as they do to the
+        // session's own tool context (`continuation`).
+        let mut context = self.context.clone();
+        context
+            .denied_directory_names
+            .extend(archon_tools::read_boundary::current());
+        Some(archon_tools::path_guard_probe::probe_read_access(path, &context).map(|_| ()))
     }
     fn resolve_model_alias(&self, model: &str) -> String {
         self.fallback.resolve_model_alias(model)

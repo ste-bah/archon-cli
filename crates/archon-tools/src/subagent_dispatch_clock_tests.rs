@@ -148,15 +148,19 @@ async fn within_cuts_only_after_a_full_no_progress_window() {
         host_progress_scope("agent-a", call, async {
             assert!(admitted("agent-a"));
             tokio::time::sleep(secs(90)).await;
-            subagent_activity::note();
+            progress("new tool call 1");
             tokio::time::sleep(secs(90)).await;
-            subagent_activity::note();
+            progress("new tool call 2");
             tokio::time::sleep(secs(90)).await;
         })
         .await
     })
     .await;
-    assert_eq!(output, Ok(()), "progress renews the window repeatedly");
+    assert_eq!(
+        output,
+        Ok(()),
+        "novel progress renews the window repeatedly"
+    );
     assert_eq!(Instant::now() - started, secs(270));
     // Work that never reaches an executor is cut too, and named.
     let output = within(secs(100), tokio::time::sleep(secs(1_000))).await;
@@ -169,9 +173,10 @@ async fn a_progress_event_resets_the_deadline_and_a_later_stall_is_bounded() {
     host_progress_scope("progress", Arc::clone(&clock), async {
         clock.admit();
         tokio::time::sleep(secs(99)).await;
-        subagent_activity::note();
+        progress("new assistant text");
         tokio::time::sleep(secs(99)).await;
         assert_eq!(clock.elapsed(), secs(99));
+        assert_eq!(clock.last_progress().as_deref(), Some("new assistant text"));
         assert_eq!(
             clock.cut(secs(100)).await,
             DispatchCut::Execution(secs(100))
@@ -185,9 +190,9 @@ async fn repeated_progress_events_keep_a_long_call_alive_without_removing_its_bo
     let clock = DispatchClock::new();
     host_progress_scope("repeated-progress", Arc::clone(&clock), async {
         clock.admit();
-        for _ in 0..5 {
+        for step in 0..5 {
             tokio::time::sleep(secs(99)).await;
-            subagent_activity::note();
+            progress(&format!("new tool call {step}"));
             assert_eq!(clock.elapsed(), Duration::ZERO);
         }
         tokio::time::sleep(secs(100)).await;
@@ -207,7 +212,7 @@ async fn progress_during_a_slot_wait_renews_the_window_after_admission_resumes()
         tokio::time::sleep(secs(80)).await;
         let pause = clock.pause_for_slot();
         tokio::time::sleep(secs(500)).await;
-        subagent_activity::note();
+        progress("new tool call during the wait");
         drop(pause);
         tokio::time::sleep(secs(99)).await;
         assert_eq!(clock.elapsed(), secs(99));
@@ -217,6 +222,35 @@ async fn progress_during_a_slot_wait_renews_the_window_after_admission_resumes()
         );
     })
     .await;
+}
+
+/// Activity is not progress: output, a tool round and its end keep the
+/// inactivity bound away but never renew the no-progress window, so a session
+/// that stays busy repeating itself is cut and the cut names the last novel
+/// activity it made.
+#[tokio::test(start_paused = true)]
+async fn activity_without_novel_progress_never_renews_the_window() {
+    let output = within_named(secs(100), async {
+        let call = current_call().expect("the call clock is installed");
+        host_progress_scope("busy", call, async {
+            assert!(admitted("busy"));
+            progress("turn 1: new tool call Read a.rs");
+            loop {
+                tokio::time::sleep(secs(10)).await;
+                subagent_activity::note();
+                drop(subagent_activity::tool_round());
+            }
+        })
+        .await
+    })
+    .await;
+    let (cut, last) = output.expect_err("a busy loop is cut");
+    assert_eq!(cut, DispatchCut::Execution(secs(100)));
+    assert_eq!(last, "last novel activity: turn 1: new tool call Read a.rs");
+    assert_eq!(
+        last_progress_text(None),
+        "last novel activity: none since the window opened"
+    );
 }
 
 #[tokio::test]

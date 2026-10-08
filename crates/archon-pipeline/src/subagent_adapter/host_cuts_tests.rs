@@ -47,7 +47,7 @@ async fn drive_bounded(
 }
 
 /// Case A: the session's last request stalled and nothing came back. It is cut
-/// at the inactivity bound, hours before its wall clock.
+/// at the inactivity bound, hours before its no-progress window.
 #[tokio::test(start_paused = true)]
 async fn a_silent_session_is_cut_for_inactivity_at_the_bound() {
     let (outcome, cut, elapsed) = drive_bounded(
@@ -101,7 +101,7 @@ async fn slow_but_continuous_tool_calls_are_never_cut() {
 }
 
 /// The stated rule for a long in-flight tool call: it is activity for as long
-/// as it runs, however long — tools carry their own bounds, and the wall clock
+/// as it runs, however long — tools carry their own bounds, and the no-progress window
 /// still bounds a tool that has none. The silence that follows its result is
 /// measured from the result.
 #[tokio::test(start_paused = true)]
@@ -123,29 +123,59 @@ async fn a_long_in_flight_tool_call_is_activity_and_silence_counts_from_its_resu
 }
 
 /// The two bounds end a session with records that cannot be confused.
-/// Issue 288 round 2: the wall clock is a no-progress window that activity
-/// renews, so a session active for longer than it is not cut; a tool round
-/// that never returns holds the inactivity clock open and renews nothing, so
-/// only the wall clock can end it.
+/// Issue 288: the window renews only on NOVEL progress, so a session doing new
+/// work for longer than it is not cut, while a session that stays active but
+/// repeats itself is cut one window after its last novel activity, and the
+/// cut names it. A tool round that never returns holds the inactivity clock
+/// open and renews nothing, so only the no-progress window can end it.
 #[tokio::test(start_paused = true)]
-async fn wall_clock_and_inactivity_cuts_are_told_apart() {
-    // Active throughout, for longer than the wall clock: renewed, never cut.
-    let (active_outcome, active_cut, active_elapsed) = drive_bounded(
+async fn no_progress_and_inactivity_cuts_are_told_apart() {
+    // Novel progress throughout, for longer than the window: never cut.
+    let (novel_outcome, novel_cut, novel_elapsed) = drive_bounded(
         async {
-            for _ in 0..200 {
+            for step in 0..200 {
                 tokio::time::sleep(secs(60)).await;
                 subagent_activity::note();
+                subagent_dispatch_clock::progress(&format!("new tool call {step}"));
             }
         },
         Some(N),
         Some(7_200),
     )
     .await;
-    assert_eq!(active_cut, None);
-    assert!(matches!(active_outcome, SubagentOutcome::Completed(_)));
-    assert_eq!(active_elapsed, secs(12_000));
+    assert_eq!(novel_cut, None);
+    assert!(matches!(novel_outcome, SubagentOutcome::Completed(_)));
+    assert_eq!(novel_elapsed, secs(12_000));
 
-    // A tool round that never returns: only the wall clock can end it.
+    // Active (output every minute) but nothing novel after the first step:
+    // activity keeps the inactivity bound away, never the window.
+    let cancel = CancellationToken::new();
+    let bound = InactivityBound::new(Some(N)).unwrap();
+    let run = bound.install(
+        "session",
+        session(&cancel, async {
+            subagent_dispatch_clock::progress("turn 1: new tool call Read a.rs");
+            loop {
+                tokio::time::sleep(secs(60)).await;
+                subagent_activity::note();
+            }
+        }),
+    );
+    let started = Instant::now();
+    let (clock, run) = install_dispatch_clock("session", run);
+    let (loop_outcome, loop_cut) = drive(run, &cancel, &clock, Some(7_200), Some(&bound)).await;
+    assert_eq!(Instant::now() - started, secs(7_200));
+    assert_eq!(loop_cut, Some(HostCut::NoProgress));
+    let loop_error =
+        crate::subagent_adapter::llm_response_for_subagent_outcome(loop_outcome, true, Some(7_200))
+            .expect_err("a no-progress cut is an error");
+    let loop_text = name_last_progress(loop_error, loop_cut, &clock).to_string();
+    assert!(
+        loop_text.contains("last novel activity: turn 1: new tool call Read a.rs"),
+        "{loop_text}"
+    );
+
+    // A tool round that never returns: only the no-progress window can end it.
     let (wall_outcome, wall_cut, wall_elapsed) = drive_bounded(
         async {
             subagent_activity::note();
@@ -157,11 +187,11 @@ async fn wall_clock_and_inactivity_cuts_are_told_apart() {
     )
     .await;
     assert_eq!(wall_elapsed, secs(7_200));
-    assert_eq!(wall_cut, Some(HostCut::WallClock));
+    assert_eq!(wall_cut, Some(HostCut::NoProgress));
     assert!(inactivity_failure(&wall_outcome, wall_cut).is_none());
     let wall_text =
         crate::subagent_adapter::llm_response_for_subagent_outcome(wall_outcome, true, Some(7_200))
-            .expect_err("a wall-clock cut is an error")
+            .expect_err("a no-progress cut is an error")
             .to_string();
 
     let (idle_outcome, idle_cut, _) = drive_bounded(
@@ -187,7 +217,7 @@ async fn wall_clock_and_inactivity_cuts_are_told_apart() {
 }
 
 /// A session still queued for a subagent slot has not started, so only the
-/// wall clock can end it.
+/// no-progress window can end it.
 #[tokio::test(start_paused = true)]
 async fn a_session_queued_before_it_starts_is_never_cut_for_inactivity() {
     let (outcome, cut, elapsed) = drive_bounded(
@@ -246,12 +276,12 @@ fn a_completed_session_is_never_reported_inactive() {
     });
     assert!(inactivity_failure(&SubagentOutcome::Completed("x".into()), cut).is_none());
     assert!(inactivity_failure(&SubagentOutcome::Cancelled, cut).is_some());
-    assert!(inactivity_failure(&SubagentOutcome::Cancelled, Some(HostCut::WallClock)).is_none());
+    assert!(inactivity_failure(&SubagentOutcome::Cancelled, Some(HostCut::NoProgress)).is_none());
 }
 
 /// Issue 288: a session whose executor reports neither a slot nor a wait for
 /// one is not timed from dispatch in silence, nor left unbounded: it is cut at
-/// its wall clock with a diagnosis naming the missing admission report.
+/// its no-progress window with a diagnosis naming the missing admission report.
 #[tokio::test(start_paused = true)]
 async fn a_session_never_admitted_is_cut_with_its_own_diagnosis() {
     let cancel = CancellationToken::new();

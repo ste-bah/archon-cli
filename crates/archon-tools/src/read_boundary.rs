@@ -8,6 +8,10 @@ pub fn current() -> Vec<String> {
 pub async fn scope<T>(names: Vec<String>, work: impl std::future::Future<Output = T>) -> T {
     DENIED.scope(names, work).await
 }
+/// [`scope`] for synchronous work, such as a launch-time read probe.
+pub fn sync_scope<T>(names: Vec<String>, work: impl FnOnce() -> T) -> T {
+    DENIED.sync_scope(names, work)
+}
 pub(crate) fn check(path: &Path, ctx: &ToolContext) -> Result<(), String> {
     if ctx.denied_directory_names.is_empty() {
         return Ok(());

@@ -129,3 +129,40 @@ async fn raw_author_policy_reaches_spawned_tools() {
             .unwrap();
     assert_eq!(result.content, "verified");
 }
+
+/// Issue 288: the launch probe judges a path under the caller's host
+/// exclusions, as the session's own tools do. A file under `.archon` is
+/// refused unless the host named its directory as a read root.
+#[test]
+fn the_read_probe_applies_the_callers_exclusions() {
+    let root = tempfile::tempdir().unwrap();
+    let context_dir = root.path().join(".archon/workflows/wf-1/author-context");
+    std::fs::create_dir_all(&context_dir).unwrap();
+    let probe = context_dir.join("launch-read-probe.txt");
+    std::fs::write(&probe, "probe").unwrap();
+    let client = |extra_dirs: Vec<std::path::PathBuf>| {
+        SubagentPipelineClient::new(
+            Arc::new(Fallback),
+            ToolContext {
+                working_dir: root.path().into(),
+                extra_dirs,
+                ..Default::default()
+            },
+        )
+    };
+    let excluded = || vec![".archon".to_string()];
+    let without = client(Vec::new());
+    assert_eq!(LlmClient::probe_agent_read(&without, &probe), Some(Ok(())));
+    let refused =
+        archon_tools::read_boundary::sync_scope(excluded(), || without.probe_agent_read(&probe));
+    assert!(
+        refused.as_ref().is_some_and(|verdict| verdict
+            .as_ref()
+            .is_err_and(|text| text.contains("host-excluded"))),
+        "{refused:?}"
+    );
+    let with = client(vec![context_dir.clone()]);
+    let admitted =
+        archon_tools::read_boundary::sync_scope(excluded(), || with.probe_agent_read(&probe));
+    assert_eq!(admitted, Some(Ok(())));
+}

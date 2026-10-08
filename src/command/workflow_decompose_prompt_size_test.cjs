@@ -172,6 +172,8 @@ async function currentFindingsStayWholeAndOversizedPromptsPause() {
   assert.equal(agents, 0, 'never sent');
   assert.deepEqual(pauses.map((p) => p.id), ['pause-acceptance-prompt-AC-001-1', 'pause-acceptance-prompt-AC-001-2'], 'a resumed loop that still measures it pauses again');
   assert.equal(pauses[0].evidence.reason, 'author_prompt_oversized');
+  assert.match(pauses[0].evidence.remedy, /raise AUTHOR_PROMPT_LIMIT/);
+  assert.match(pauses[0].evidence.remedy, /resuming alone pauses again/);
   assert(pauses[0].evidence.prompt_bytes > pauses[0].evidence.limit_bytes);
 }
 

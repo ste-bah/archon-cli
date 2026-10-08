@@ -1,7 +1,7 @@
 //! Host-owned dispatch clocks that count execution, never the wait for a
 //! subagent slot (Issue 288).
 //!
-//! A dispatched call is bounded twice: the session wall clock its pipeline
+//! A dispatched call is bounded twice: the session no-progress window its pipeline
 //! client races against the run, and, for some calls, an outer deadline over
 //! the call and its transient retries. Both used to start when the call was
 //! dispatched. The executor admits a call only when a subagent slot is free,
@@ -15,13 +15,21 @@
 //! slot is taken ([`slot_wait`]). The wait itself is bounded by no clock: each
 //! slot holder is bounded by its own clocks and its inactivity bound.
 //!
+//! Once admitted, a clock is a no-progress window, never a total: it renews
+//! only on NOVEL progress the session's runner reports ([`progress`]) -- a
+//! tool call (tool and canonical arguments) the session has not made before,
+//! or assistant text it has not produced before. Model output that repeats
+//! itself, a repeated identical tool call and a tool round ending are not
+//! progress, so a session that loops is cut one window after its last novel
+//! activity, which the cut names ([`DispatchClock::last_progress`]).
+//!
 //! A pending clock never leaves a call unbounded. Time before admission that
 //! is not a reported slot wait is counted apart, and a call whose executor
 //! reports neither a slot nor a wait for a whole limit is cut with its own
 //! diagnosis ([`DispatchCut::NeverAdmitted`]): a missing admission report is
 //! named, never silently timed from dispatch.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::watch;
@@ -108,6 +116,8 @@ impl std::fmt::Display for DispatchCut {
 #[derive(Debug)]
 pub struct DispatchClock {
     state: watch::Sender<State>,
+    /// The latest novel activity that renewed the window.
+    last: Mutex<Option<String>>,
 }
 
 impl DispatchClock {
@@ -121,7 +131,10 @@ impl DispatchClock {
             unreported: Duration::ZERO,
             unreported_since: Some(Instant::now()),
         });
-        Arc::new(Self { state })
+        Arc::new(Self {
+            state,
+            last: Mutex::new(None),
+        })
     }
 
     /// Time in the current no-progress window.
@@ -153,14 +166,22 @@ impl DispatchClock {
         });
     }
 
-    /// A host-observed progress event renews the no-progress window.
-    pub fn progress(&self) {
+    /// Novel progress, named by `activity`, renews the no-progress window.
+    pub fn progress(&self, activity: &str) {
+        if let Ok(mut last) = self.last.lock() {
+            *last = Some(activity.to_string());
+        }
         self.state.send_modify(|state| {
             if state.admitted {
                 state.spent = Duration::ZERO;
                 state.running_since = (state.waits == 0).then(Instant::now);
             }
         });
+    }
+
+    /// The latest novel activity that renewed the window, if any did.
+    pub fn last_progress(&self) -> Option<String> {
+        self.last.lock().ok().and_then(|last| last.clone())
     }
 
     /// Stop the clock until the returned guard drops.
@@ -305,12 +326,28 @@ pub async fn within<T>(
     limit: Duration,
     work: impl std::future::Future<Output = T>,
 ) -> Result<T, DispatchCut> {
+    within_named(limit, work).await.map_err(|(cut, _)| cut)
+}
+
+/// [`within`], with the cut's last novel activity ([`last_progress_text`]).
+pub async fn within_named<T>(
+    limit: Duration,
+    work: impl std::future::Future<Output = T>,
+) -> Result<T, (DispatchCut, String)> {
     let clock = DispatchClock::new();
     let work = scope_call(Arc::clone(&clock), work);
     tokio::select! {
         biased;
         output = work => Ok(output),
-        cut = clock.cut(limit) => Err(cut),
+        cut = clock.cut(limit) => Err((cut, last_progress_text(clock.last_progress().as_deref()))),
+    }
+}
+
+/// How a no-progress cut names the activity that last renewed its window.
+pub fn last_progress_text(last: Option<&str>) -> String {
+    match last {
+        Some(activity) => format!("last novel activity: {activity}"),
+        None => "last novel activity: none since the window opened".to_string(),
     }
 }
 
@@ -324,10 +361,15 @@ pub fn admitted(agent_id: &str) -> bool {
     })
 }
 
-/// Renew the clocks for the current admitted session after a progress event.
-pub fn progress() {
+/// Renew the clocks of the current admitted session after NOVEL progress,
+/// named by `activity`. Only the session's runner decides novelty; activity
+/// that repeats itself must never reach this.
+pub fn progress(activity: &str) {
     if let Ok(session) = SESSION.try_with(Clone::clone) {
-        session.clocks.iter().for_each(|clock| clock.progress());
+        session
+            .clocks
+            .iter()
+            .for_each(|clock| clock.progress(activity));
     }
 }
 

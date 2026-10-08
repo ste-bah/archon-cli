@@ -161,6 +161,9 @@ fn a_host_timeout_is_recorded_as_call_timeout_in_transport_evidence() {
     // The runner's own turn-boundary wording and the raw author deadline count
     // too; a provider drop does not.
     assert!(host_call_timeout_record("c", "subagent failed: Subagent wall-clock timeout: 7201s elapsed (cap: 7200s) at turn 40/200", Some(7200), "host_call_timeout_secs", 7201).is_some());
+    // Issue 288: the runner's no-progress window and the author deadline's.
+    assert!(host_call_timeout_record("c", "subagent failed: subagent timed out after 7200s without progress during LLM inference at turn 16: no new tool call and no new assistant text for its no-progress window of 7200s, which renews on novel activity only; last novel activity: turn 1: new tool call Read {}", Some(7200), "host_call_timeout_secs", 7700).is_some());
+    assert!(host_call_timeout_record("c", "author attempt no-progress deadline exceeded after 1500s without novel activity, including transient retries; last novel activity: none since the window opened", Some(1500), "host_call_timeout_secs", 1500).is_some());
     assert!(
         host_call_timeout_record(
             "c",

@@ -318,16 +318,16 @@ async fn tool_round_timeout_kills_bash_process_group() {
         runner.run("run the command"),
     )
     .await
-    .expect("the 5s wall-clock cap never fired; the tool round was left running")
+    .expect("the 5s no-progress window never fired; the tool round was left running")
     .unwrap_err();
     let message = error.to_string();
-    assert!(message.contains("during tool round"), "{message}");
+    assert!(message.contains("during a tool round"), "{message}");
     // Built from the same constant the runner was given, so a change to the cap
     // cannot leave this asserting a number nothing configures. It previously
     // read `5s` — the max-turns argument, not the cap — which made the test
     // fail everywhere it actually ran. It only ever ran on unix, and the
     // Windows-only verification that cleared it could not compile this file.
-    let expected_cap = format!("(cap: {SUBAGENT_WALL_CLOCK_CAP_SECS}s)");
+    let expected_cap = format!("no-progress window of {SUBAGENT_WALL_CLOCK_CAP_SECS}s");
     assert!(
         message.contains(&expected_cap),
         "the run must end on the subagent's own cap, not the tool's 60s one: {message}"

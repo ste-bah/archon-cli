@@ -227,15 +227,16 @@ function authorPrompt(base, attempt, feedback, history) {
 
 // A prompt whose own text passes AUTHOR_PROMPT_LIMIT is never sent: its
 // base and current findings cannot be cut without hiding what the author
-// repairs, so the loop pauses with the measured size, and a resumed loop
-// that still measures it pauses again.
+// repairs, so the loop pauses with the measured size and the remedy, and a
+// resumed loop that still measures it pauses again.
 async function requireDispatchable(w, subject, task) {
   for (;;) {
     const bytes = utf8Bytes(task);
     if (bytes <= AUTHOR_PROMPT_LIMIT) return task;
     await pauseLoop(w, subject, {
       reason: "author_prompt_oversized", prompt_bytes: bytes, limit_bytes: AUTHOR_PROMPT_LIMIT, context_budget_bytes: CONTEXT_BUDGET,
-      diagnosis: "the prompt's mandatory text (the phase instructions and the current findings) alone exceeds the dispatch limit; the earlier-work context is already bounded"
+      diagnosis: "the prompt's mandatory text (the phase instructions and the current findings) alone exceeds the dispatch limit; the earlier-work context is already bounded",
+      remedy: "resuming alone pauses again: reduce the current findings this call must repair (split the input that produces them), or raise AUTHOR_PROMPT_LIMIT in the fixed decomposition script (a code change), then resume"
     });
   }
 }

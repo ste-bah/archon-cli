@@ -90,6 +90,51 @@ pub(crate) fn require_agent_read(
     }
 }
 
+/// The file the launch check writes in a run's author-context directory and
+/// asks the authors' guard to admit. Not a content digest, so it can never
+/// collide with a context file.
+const AUTHOR_CONTEXT_PROBE: &str = "launch-read-probe.txt";
+
+/// The launch proof for a run's authors (Issue 288): they can read `root`
+/// (the repository, when the spec names one), and they can read the run's
+/// author-context directory under the same host exclusions every author call
+/// runs with. Author prompts name earlier work by exact path in that
+/// directory, so a composition that refused it would leave every author
+/// reading around a refusal; this ends the launch instead, with its cause.
+pub(crate) fn require_author_reads(
+    client: &dyn WorkflowLlmClient,
+    who: &str,
+    root: Option<&Path>,
+    run_dir: &Path,
+) -> Result<()> {
+    if let Some(root) = root {
+        require_agent_read(client, root, who)?;
+    }
+    let dir = archon_workflow::v2::script::author_context::author_context_dir(run_dir);
+    let probe = dir.join(AUTHOR_CONTEXT_PROBE);
+    std::fs::write(&probe, b"author context read probe\n").map_err(|error| {
+        anyhow!(
+            "writing the author context read probe {}: {error}",
+            probe.display()
+        )
+    })?;
+    let verdict = archon_tools::read_boundary::sync_scope(
+        archon_leann::language::default_exclude_patterns(),
+        || client.probe_agent_read(&probe),
+    );
+    match verdict {
+        None | Some(Ok(())) => Ok(()),
+        Some(Err(refusal)) => Err(anyhow!(
+            "{who} could not read the run's author-context directory {}: the tool sandbox \
+             refused {} before any agent was dispatched ({refusal}); author prompts name \
+             earlier work by exact path there, so the run's read roots must include that \
+             directory",
+            dir.display(),
+            probe.display()
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +227,42 @@ mod tests {
 
         assert!(require_agent_read(&ProbeClient(Some(Ok(()))), repo, "authors").is_ok());
         assert!(require_agent_read(&ProbeClient(None), repo, "authors").is_ok());
+    }
+
+    /// Issue 288: an author-context directory the authors cannot read ends
+    /// the launch with a clear cause; a readable one passes.
+    #[test]
+    fn an_unreadable_author_context_directory_ends_the_launch() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join(".archon/workflows/wf-1");
+        with_author_context(Vec::new(), &run_dir).unwrap();
+        let refused = ProbeClient(Some(Err("Path is in a host-excluded subtree".into())));
+        let text = require_author_reads(&refused, "the authors", None, &run_dir)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            text.contains("the authors could not read the run's author-context directory"),
+            "{text}"
+        );
+        assert!(
+            text.contains("read roots must include that directory"),
+            "{text}"
+        );
+        assert!(
+            run_dir
+                .join("author-context")
+                .join(AUTHOR_CONTEXT_PROBE)
+                .is_file()
+        );
+        let admitted = ProbeClient(Some(Ok(())));
+        assert!(require_author_reads(&admitted, "the authors", None, &run_dir).is_ok());
+        let repo = Path::new("/somewhere/repo");
+        let error = require_author_reads(&refused, "the authors", Some(repo), &run_dir);
+        assert!(
+            error
+                .unwrap_err()
+                .to_string()
+                .contains("could not read /somewhere/repo")
+        );
     }
 }
