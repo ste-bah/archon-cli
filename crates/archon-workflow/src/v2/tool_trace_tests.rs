@@ -218,3 +218,35 @@ fn a_long_input_is_redacted_then_clipped() {
     assert_eq!(command.chars().count(), COMMAND_CHARS);
     assert!(!command.contains("sk-ant"), "{command}");
 }
+
+#[test]
+fn a_file_path_keeps_its_words_and_loses_only_a_credential_shaped_value() {
+    let github = github_token();
+    let mut result = WorkflowV2Result::accepted("raw");
+    record_tool_trace(
+        &mut result,
+        &[
+            call("Read", json!({"file_path": "src/token_store.rs"}), ok()),
+            call("Read", json!({"file_path": "config/secret_rules.md"}), ok()),
+            call(
+                "Read",
+                json!({"file_path": format!("keys/{github}.txt")}),
+                ok(),
+            ),
+            call("Grep", json!({"pattern": "secret", "path": "src"}), ok()),
+            summary(4, 4, 0),
+        ],
+    );
+    let read: Vec<&str> = result.files_read.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(read[..2], ["src/token_store.rs", "config/secret_rules.md"]);
+    assert!(
+        !read[2].contains(&github) && read[2].starts_with("keys/"),
+        "{read:?}"
+    );
+    // Command text keeps the full redaction, words included.
+    let grep = &result.commands_run[0].command;
+    assert!(
+        grep.starts_with("Grep ") && !grep.contains("secret"),
+        "{grep}"
+    );
+}

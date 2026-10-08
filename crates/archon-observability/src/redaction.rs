@@ -47,6 +47,43 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
+/// The secret VALUE shapes of [`REDACTION_RE`]: every alternative that
+/// matches a credential's own format, none that matches a plain word.
+/// Verbose-mode (`(?x)`) pattern text, shared so the two regexes below can
+/// never drift apart.
+const SECRET_SHAPES: &str = r#"
+            sk-ant-[A-Za-z0-9_\-]{20,}                 # Anthropic
+          | sk-(?:proj|svcacct)-[A-Za-z0-9_\-]{20,}    # OpenAI modern (2024+, sk-proj- / sk-svcacct-)
+          | sk-[A-Za-z0-9]{20,}                         # OpenAI legacy
+          | AKIA[0-9A-Z]{16}                            # AWS access key id
+          | gh[pousr]_[A-Za-z0-9]{36}                   # GitHub tokens
+          | (?:sk|pk)_(?:live|test)_[A-Za-z0-9]{24,}    # Stripe secret/publishable
+          | eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}  # JWT
+          | bearer\s+[A-Za-z0-9._\-]+                   # Authorization: bearer ...
+          # TASK-201 GCP service-account JSON: redact the WHOLE blob containing
+          # the `"type":"service_account"` marker. Non-greedy to the next `}`.
+          # Standard GCP SA shape is a flat object (private_key contains `\n`
+          # but no braces), so `[^{}]` before the marker + `[\s\S]*?` after
+          # catches the full object. Over-redaction on atypical nested shapes
+          # is the acceptable secrets-first posture.
+          | \{[^{}]*"type"\s*:\s*"service_account"[\s\S]*?\}
+          # TASK-201 PEM private key block (standalone or embedded). `(?:RSA |EC |)?`
+          # covers `BEGIN PRIVATE KEY`, `BEGIN RSA PRIVATE KEY`, `BEGIN EC PRIVATE KEY`.
+          # Literal spaces are needed (pattern uses `\s` because (?x) ignores
+          # inline whitespace).
+          | -----BEGIN\s(?:RSA\s|EC\s|)?PRIVATE\sKEY-----[\s\S]*?-----END\s(?:RSA\s|EC\s|)?PRIVATE\sKEY-----
+"#;
+
+/// The sensitive field-name words of [`REDACTION_RE`].
+const SENSITIVE_WORDS: &str = r#"
+            password
+          | api[_\-]?key
+          | authorization
+          | credentials                               # TASK-201 GCP field name
+          | secret
+          | token
+"#;
+
 /// Regex for secret shapes we must never log. Alternation covers:
 ///   * OpenAI `sk-...` (20+ alnum)
 ///   * Anthropic `sk-ant-...` (20+ alnum/underscore/dash)
@@ -73,39 +110,14 @@ use tracing_subscriber::registry::LookupSpan;
 /// `*_no_catastrophic_backtracking_*` tests below are regression gates
 /// against that property.
 pub(crate) static REDACTION_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r#"(?ix)
-        (
-            sk-ant-[A-Za-z0-9_\-]{20,}                 # Anthropic
-          | sk-(?:proj|svcacct)-[A-Za-z0-9_\-]{20,}    # OpenAI modern (2024+, sk-proj- / sk-svcacct-)
-          | sk-[A-Za-z0-9]{20,}                         # OpenAI legacy
-          | AKIA[0-9A-Z]{16}                            # AWS access key id
-          | gh[pousr]_[A-Za-z0-9]{36}                   # GitHub tokens
-          | (?:sk|pk)_(?:live|test)_[A-Za-z0-9]{24,}    # Stripe secret/publishable
-          | eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}  # JWT
-          | bearer\s+[A-Za-z0-9._\-]+                   # Authorization: bearer ...
-          # TASK-201 GCP service-account JSON: redact the WHOLE blob containing
-          # the `"type":"service_account"` marker. Non-greedy to the next `}`.
-          # Standard GCP SA shape is a flat object (private_key contains `\n`
-          # but no braces), so `[^{}]` before the marker + `[\s\S]*?` after
-          # catches the full object. Over-redaction on atypical nested shapes
-          # is the acceptable secrets-first posture.
-          | \{[^{}]*"type"\s*:\s*"service_account"[\s\S]*?\}
-          # TASK-201 PEM private key block (standalone or embedded). `(?:RSA |EC |)?`
-          # covers `BEGIN PRIVATE KEY`, `BEGIN RSA PRIVATE KEY`, `BEGIN EC PRIVATE KEY`.
-          # Literal spaces are needed (pattern uses `\s` because (?x) ignores
-          # inline whitespace).
-          | -----BEGIN\s(?:RSA\s|EC\s|)?PRIVATE\sKEY-----[\s\S]*?-----END\s(?:RSA\s|EC\s|)?PRIVATE\sKEY-----
-          | password
-          | api[_\-]?key
-          | authorization
-          | credentials                               # TASK-201 GCP field name
-          | secret
-          | token
-        )
-        "#,
-    )
-    .expect("redaction regex is a compile-time constant")
+    Regex::new(&format!("(?ix)(\n{SECRET_SHAPES}\n|\n{SENSITIVE_WORDS}\n)"))
+        .expect("redaction regex is a compile-time constant")
+});
+
+/// [`SECRET_SHAPES`] alone: credential formats, never words.
+static SECRET_SHAPE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(&format!("(?ix)(\n{SECRET_SHAPES}\n)"))
+        .expect("secret shape regex is a compile-time constant")
 });
 
 /// Replacement token written in place of any redacted substring.
@@ -128,6 +140,19 @@ pub(crate) fn redact(value: &str) -> String {
 #[inline]
 pub fn redact_text(value: &str) -> String {
     redact(value)
+}
+
+/// Redact secret VALUES only: registered secret values and the credential
+/// shapes of [`redact_text`], but not its field-name words.
+///
+/// For text that must stay exact to be true, above all a file path: under
+/// [`redact_text`], `src/token_store.rs` loses the word `token` and stops
+/// naming the file that was read. A credential-shaped value inside the text
+/// is still replaced.
+#[inline]
+pub fn redact_secret_values(value: &str) -> String {
+    let value = crate::secret_values::redact_registered(value);
+    SECRET_SHAPE_RE.replace_all(&value, REDACTED).into_owned()
 }
 
 /// Writer abstraction for the redaction layer. We use a trait-object behind a

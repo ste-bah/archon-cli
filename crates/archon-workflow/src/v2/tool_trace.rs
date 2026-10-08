@@ -15,9 +15,11 @@
 //! captured", so both fields are marked [`NOT_RECORDED`] instead.
 //!
 //! Every string kept here passes the repository's secret redaction first: a
-//! tool input is agent-written and can carry a credential. Only call names,
+//! tool input is agent-written and can carry a credential. Command text gets
+//! the full redaction (credential shapes and sensitive words); a file path
+//! gets only the credential shapes, so it still names the file that was read. Only call names,
 //! inputs and the error flag are read; a tool's output is never stored.
-use archon_observability::redaction::redact_text;
+use archon_observability::redaction::{redact_secret_values, redact_text};
 use archon_tools::subagent_session::TOOL_TRACE_SUMMARY_NAME;
 use serde_json::{Value, json};
 
@@ -56,10 +58,13 @@ pub fn record_tool_trace(result: &mut WorkflowV2Result, tool_uses: &[WorkflowAge
             Some(path) if status == WorkflowV2CommandStatus::Succeeded => {
                 if !seen.contains(&path) {
                     result.files_read.push(WorkflowV2FileRecord {
-                        path: redact_text(&path),
+                        // A path must stay the path that was read: only a
+                        // credential-shaped value in it is replaced, never a
+                        // word such as `token` (`src/token_store.rs`).
+                        path: redact_secret_values(&path),
                         purpose: Some(format!(
                             "{} (host tool trace)",
-                            redact_text(&tool.tool_name)
+                            redact_secret_values(&tool.tool_name)
                         )),
                     });
                     seen.push(path);
