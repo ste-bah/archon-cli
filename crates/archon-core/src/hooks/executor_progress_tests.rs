@@ -126,9 +126,12 @@ async fn blocked_stalls_never_expose_command_arguments() {
 async fn exit_two_fallback_reasons_redact_command_arguments() {
     let dir = tempfile::tempdir().unwrap();
     for command in [
-        "exit 2 # curl -H 'Authorization: Bearer secret-one'",
-        "exit 2 # TOKEN=secret-two command",
-        "exit 2 # 'secret-three' command",
+        // Each reads its input first: an unsuccessful hook that exits before
+        // the payload is written keeps its broken pipe (hooks_tests.rs
+        // `unsuccessful_hook_cannot_hide_stdin_broken_pipe`).
+        "cat >/dev/null; exit 2 # curl -H 'Authorization: Bearer secret-one'",
+        "cat >/dev/null; exit 2 # TOKEN=secret-two command",
+        "cat >/dev/null; exit 2 # 'secret-three' command",
     ] {
         let result = execute_hook(
             &config(command, false),

@@ -5,12 +5,13 @@
 // path, and must change nothing outside its own temporary files; and the
 // author step hands the shared entry validator the task set's roots, so a
 // check naming one is refused in the same call. Generic: no PRD is named.
+const { withAuthorContext } = require('./workflow_decompose_context_stub.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
 const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
-  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js']
+  'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 
 const REPO = '/srv/example/code-repository';
@@ -21,7 +22,7 @@ function context(validator) {
   const ctx = {args:{projectRoot:PROJECT, repositoryRoot:REPO, prdPath:`${PROJECT}/prd.md`, prdDigest:'d',
     taskRoot:`${PROJECT}/tasks`, gateMode:'enforce', authorMaxParallelism:1, acceptanceCriteria:{'AC-1':'one'}},
     __archonValidateAcceptanceEntry: validator || (() => '[]')};
-  vm.createContext(ctx); vm.runInContext(source, ctx);
+  vm.createContext(withAuthorContext(ctx)); vm.runInContext(source, ctx);
   return ctx;
 }
 
