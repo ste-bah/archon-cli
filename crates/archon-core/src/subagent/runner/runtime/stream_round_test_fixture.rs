@@ -17,8 +17,7 @@ impl LlmProvider for FailingCompactionProvider {
     async fn stream(&self, request: LlmRequest) -> Result<mpsc::Receiver<StreamEvent>, LlmError> {
         if request.request_origin.as_deref() == Some("compaction_summary") {
             return Err(LlmError::RateLimited {
-                retry_after_secs: 30,
-            });
+                retry_after_secs: 30, from_provider: true });
         }
         unreachable!("fixture only invokes compaction summary")
     }

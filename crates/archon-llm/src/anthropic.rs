@@ -225,7 +225,9 @@ impl AnthropicClient {
 
             match &err {
                 // 429: wait for retry-after then retry
-                ApiError::RateLimited { retry_after_secs } => {
+                ApiError::RateLimited {
+                    retry_after_secs, ..
+                } => {
                     if body.len() >= LARGE_RATE_LIMIT_RETRY_BODY_BYTES {
                         tracing::warn!(
                             body_len = body.len(),

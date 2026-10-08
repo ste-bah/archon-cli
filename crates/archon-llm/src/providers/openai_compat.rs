@@ -169,6 +169,7 @@ impl OpenAiCompatProvider {
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             return LlmError::RateLimited {
                 retry_after_secs: 0,
+                from_provider: false,
             };
         }
         if status.is_server_error() {

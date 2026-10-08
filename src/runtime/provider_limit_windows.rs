@@ -38,7 +38,9 @@ fn build_limit_window(
 ) -> Option<ProviderRateLimitWindowRecord> {
     let observed_at = Utc::now();
     let (kind, limit_id, limit_name, reset_hint, raw) = match error {
-        LlmError::RateLimited { retry_after_secs } => (
+        LlmError::RateLimited {
+            retry_after_secs, ..
+        } => (
             "rate_limit",
             "retry_after",
             "Provider rate limit",
@@ -170,6 +172,7 @@ mod tests {
             Some("claude-sonnet-4-6"),
             &LlmError::RateLimited {
                 retry_after_secs: 90,
+                from_provider: true,
             },
         );
 

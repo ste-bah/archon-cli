@@ -30,9 +30,13 @@ impl From<ApiError> for LlmError {
                     .unwrap_or(LlmError::Http(msg))
             }
             ApiError::AuthError(msg) => LlmError::Auth(msg),
-            ApiError::RateLimited { retry_after_secs } => {
-                LlmError::RateLimited { retry_after_secs }
-            }
+            ApiError::RateLimited {
+                retry_after_secs,
+                from_provider,
+            } => LlmError::RateLimited {
+                retry_after_secs,
+                from_provider,
+            },
             ApiError::Overloaded => LlmError::Overloaded,
             ApiError::ServerError { status, message } => classify_context_window_error(
                 Some(status),

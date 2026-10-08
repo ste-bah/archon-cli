@@ -175,7 +175,8 @@ mod tests {
     #[test]
     fn rate_limit_classifier_covers_typed_and_http_errors() {
         assert!(is_rate_limited_error(&LlmError::RateLimited {
-            retry_after_secs: 30
+            retry_after_secs: 30,
+            from_provider: true
         }));
         assert!(is_rate_limited_error(&LlmError::Http(
             "HTTP 429: rate_limited".into()

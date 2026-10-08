@@ -777,6 +777,7 @@ fn map_codex_error(status: u16, body: String, refreshed: bool) -> LlmError {
         429 if is_quota_exceeded(&body) => LlmError::QuotaExceeded(body),
         429 => LlmError::RateLimited {
             retry_after_secs: 1,
+            from_provider: false,
         },
         500..=599 => LlmError::Server {
             status,

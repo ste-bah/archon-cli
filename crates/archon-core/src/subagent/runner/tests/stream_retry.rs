@@ -50,23 +50,30 @@ async fn abandoned_partial_tool_is_not_executed_or_concatenated() {
     );
 }
 
+/// Issue 364 round 5: the bound is a no-progress window, and its stop is the
+/// resumable stall marker, never a plain failure after a fixed count.
 #[tokio::test]
-async fn dropped_stream_retries_are_bounded() {
-    let provider = Arc::new(MockProvider::new(vec![
-        abandoned(),
-        abandoned(),
-        abandoned(),
-        abandoned(),
-    ]));
-    let error = make_runner(provider.clone(), 5)
+async fn dropped_stream_retries_are_bounded_by_a_no_progress_window() {
+    let provider = Arc::new(MockProvider::new(vec![abandoned(); 200]));
+    let config = AgentConfig {
+        subagent_stream_idle_timeout_secs: 1,
+        ..AgentConfig::default()
+    };
+    let error = make_runner_with_config(provider.clone(), 5, config)
         .run("answer")
         .await
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
     assert!(
-        error.to_string().contains("stream retry exhausted"),
+        error.starts_with(archon_llm::transport_idle::TRANSPORT_STALL_MARKER),
         "{error}"
     );
-    assert_eq!(provider.requests().len(), 4);
+    assert!(error.contains("no complete answer"), "{error}");
+    let sent = provider.requests().len();
+    assert!(
+        sent > 4 && sent < 200,
+        "it resent inside the window: {sent}"
+    );
 }
 
 #[tokio::test]

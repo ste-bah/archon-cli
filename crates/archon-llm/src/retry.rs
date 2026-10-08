@@ -20,7 +20,7 @@
 //!                  ProviderNotFound
 //!   ```
 //!
-//!   Short `LlmError::RateLimited { retry_after_secs }` values override the
+//!   Short `LlmError::RateLimited { retry_after_secs, .. }` values override the
 //!   backoff formula. Very long retry windows fail fast so the caller can
 //!   surface a visible/cancellable status instead of freezing a turn.
 //!
@@ -190,7 +190,10 @@ impl<P: LlmProvider + ?Sized> RetryProvider<P> {
     /// Determine how long to sleep after the given error on retry `attempt`.
     /// `LlmError::RateLimited` overrides the formula with the server hint.
     fn sleep_for_error(&self, err: &LlmError, attempt: u32) -> Duration {
-        if let LlmError::RateLimited { retry_after_secs } = err {
+        if let LlmError::RateLimited {
+            retry_after_secs, ..
+        } = err
+        {
             return Duration::from_secs(*retry_after_secs);
         }
         self.backoff_for_attempt(attempt)

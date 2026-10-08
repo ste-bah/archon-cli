@@ -75,6 +75,7 @@ fn transient_provider_failures_enter_cooldown_without_disabling_compaction() {
     for error in [
         CompactionError::Provider(LlmError::RateLimited {
             retry_after_secs: 30,
+            from_provider: true,
         }),
         CompactionError::Provider(LlmError::Overloaded),
         CompactionError::Provider(LlmError::Server {
@@ -97,6 +98,7 @@ fn expired_transient_cooldown_allows_later_successful_compaction() {
     let mut state = AutoCompactState::default();
     state.on_failure(&CompactionError::Provider(LlmError::RateLimited {
         retry_after_secs: 30,
+        from_provider: true,
     }));
     state.cooldown_until = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
 
@@ -125,6 +127,7 @@ fn ordinary_success_resets_transient_compaction_state() {
     let mut state = AutoCompactState::default();
     state.on_failure(&CompactionError::Provider(LlmError::RateLimited {
         retry_after_secs: 30,
+        from_provider: true,
     }));
 
     state.on_ordinary_success();

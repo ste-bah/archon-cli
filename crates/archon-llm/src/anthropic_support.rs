@@ -52,8 +52,12 @@ pub enum ApiError {
     #[error("authentication error: {0}")]
     AuthError(String),
 
+    /// `from_provider`: see [`crate::provider::LlmError::RateLimited`].
     #[error("rate limited: retry after {retry_after_secs}s")]
-    RateLimited { retry_after_secs: u64 },
+    RateLimited {
+        retry_after_secs: u64,
+        from_provider: bool,
+    },
 
     #[error("server overloaded (529)")]
     Overloaded,
@@ -356,11 +360,15 @@ pub(crate) fn classify_error(
              identity.spoof_version matches the current Claude Code version, or \
              run /refresh-identity to rediscover beta headers. Body: {body}"
         )),
-        429 => ApiError::RateLimited {
-            retry_after_secs: retry_after_header
-                .and_then(|s| s.parse().ok())
-                .unwrap_or_else(|| extract_retry_after(body)),
-        },
+        429 => {
+            let named = retry_after_header
+                .and_then(|value| retry_after_from_header(value, chrono::Utc::now()))
+                .or_else(|| extract_retry_after(body));
+            ApiError::RateLimited {
+                retry_after_secs: named.unwrap_or(DEFAULT_RATE_LIMIT_WAIT_SECS),
+                from_provider: named.is_some(),
+            }
+        }
         529 => ApiError::Overloaded,
         500 | 502 | 503 => ApiError::ServerError {
             status,
@@ -370,11 +378,75 @@ pub(crate) fn classify_error(
     }
 }
 
-fn extract_retry_after(body: &str) -> u64 {
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body)
-        && let Some(secs) = v.get("retry_after").and_then(|v| v.as_u64())
-    {
-        return secs;
+/// The wait used when a 429 names none.
+const DEFAULT_RATE_LIMIT_WAIT_SECS: u64 = 30;
+
+/// A `Retry-After` header: delay seconds or an HTTP-date (RFC 9110 10.2.3).
+/// `None`, with a warning, for a value that is neither.
+pub(crate) fn retry_after_from_header(
+    value: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<u64> {
+    let value = value.trim();
+    if let Ok(secs) = value.parse::<u64>() {
+        return Some(secs);
     }
-    30
+    if let Ok(at) = chrono::DateTime::parse_from_rfc2822(value) {
+        let wait = at.with_timezone(&chrono::Utc) - now;
+        return Some(u64::try_from(wait.num_seconds()).unwrap_or(0));
+    }
+    tracing::warn!(
+        retry_after = %value.chars().take(64).collect::<String>(),
+        "unparsable Retry-After header; using the body hint or the default wait"
+    );
+    None
+}
+
+fn extract_retry_after(body: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()?
+        .get("retry_after")?
+        .as_u64()
+}
+
+#[cfg(test)]
+mod retry_after_tests {
+    use super::*;
+
+    fn rate_limited(header: Option<&str>, body: &str) -> (u64, bool) {
+        match classify_error(429, body, header) {
+            ApiError::RateLimited {
+                retry_after_secs,
+                from_provider,
+            } => (retry_after_secs, from_provider),
+            other => panic!("expected a rate limit, got {other:?}"),
+        }
+    }
+
+    /// Fails before the fix: an HTTP-date Retry-After was dropped silently
+    /// for a 30 s wait that then read as the provider's.
+    #[test]
+    fn a_retry_after_http_date_is_the_wait_until_that_time() {
+        let now = chrono::DateTime::parse_from_rfc2822("Wed, 21 Oct 2026 07:28:00 GMT")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(
+            retry_after_from_header("Wed, 21 Oct 2026 07:30:00 GMT", now),
+            Some(120)
+        );
+        assert_eq!(
+            retry_after_from_header("Wed, 21 Oct 2026 07:00:00 GMT", now),
+            Some(0)
+        );
+        assert_eq!(retry_after_from_header(" 45 ", now), Some(45));
+        assert_eq!(retry_after_from_header("soon", now), None);
+    }
+
+    #[test]
+    fn a_rate_limit_says_whether_the_provider_named_its_wait() {
+        assert_eq!(rate_limited(Some("12"), ""), (12, true));
+        assert_eq!(rate_limited(None, r#"{"retry_after": 9}"#), (9, true));
+        assert_eq!(rate_limited(Some("soon"), "{}"), (30, false));
+        assert_eq!(rate_limited(None, "not json"), (30, false));
+    }
 }

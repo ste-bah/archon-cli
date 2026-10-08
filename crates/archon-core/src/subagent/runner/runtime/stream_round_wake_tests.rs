@@ -158,8 +158,7 @@ impl LlmProvider for WakeNetworkProvider {
             }
             WakeOpen::RateLimited(secs) => {
                 return Err(LlmError::RateLimited {
-                    retry_after_secs: secs,
-                });
+                    retry_after_secs: secs, from_provider: true });
             }
             WakeOpen::ErrorEvent(error_type) => {
                 let message = format!("{error_type} from the provider");

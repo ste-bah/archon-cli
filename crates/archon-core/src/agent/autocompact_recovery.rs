@@ -155,6 +155,7 @@ pub fn compaction_failure_disposition(error: &CompactionError) -> CompactionFail
         CompactionError::Cancelled => CompactionFailureDisposition::Cancelled,
         CompactionError::Provider(archon_llm::provider::LlmError::RateLimited {
             retry_after_secs,
+            ..
         }) => CompactionFailureDisposition::Transient {
             cooldown: std::time::Duration::from_secs(*retry_after_secs),
         },

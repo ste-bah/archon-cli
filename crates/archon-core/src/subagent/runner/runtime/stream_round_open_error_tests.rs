@@ -88,7 +88,16 @@ async fn a_rejected_request_before_content_fails_the_round_at_once() {
 /// A 5xx-class error before content is still retried and then recovers.
 #[tokio::test]
 async fn a_server_error_before_content_is_retried_until_it_answers() {
-    for error_type in ["api_error", "overloaded_error", "rate_limit_error"] {
+    // Fails before the fix (round 4): an unknown type, `parse_error` and
+    // `timeout_error` failed fast as a fake `Server 400`.
+    for error_type in [
+        "api_error",
+        "overloaded_error",
+        "rate_limit_error",
+        "parse_error",
+        "timeout_error",
+        "some_new_type",
+    ] {
         let opens = Arc::new(AtomicU32::new(0));
         let mut script = vec![WakeOpen::ErrorEvent(error_type); 4];
         script.push(WakeOpen::Answers("recovered"));
@@ -113,4 +122,21 @@ async fn a_rate_limit_past_the_window_pauses_with_the_retry_time() {
     assert!(error.contains("retry after 8004s (at "), "{error}");
     assert!(error.contains("rate limited: retry after 8004s"), "{error}");
     assert_eq!(opens.load(Ordering::SeqCst), 1);
+}
+
+/// Fails before the fix (round 5 item 3): a mid-stream transport error was
+/// in no stop text.
+#[tokio::test]
+async fn a_stream_that_keeps_resetting_names_the_reset_in_the_stop() {
+    let opens = Arc::new(AtomicU32::new(0));
+    let runner = wake_runner(vec![WakeOpen::ErrorEvent("network")], &opens, 1);
+    let error = run_wake(runner, 20).await;
+    assert!(
+        error.starts_with(archon_llm::transport_idle::TRANSPORT_STALL_MARKER),
+        "{error}"
+    );
+    assert!(
+        error.contains("last provider error: network: network from the provider"),
+        "{error}"
+    );
 }

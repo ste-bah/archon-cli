@@ -20,6 +20,7 @@ impl LlmProvider for FailingSummaryProvider {
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
         Err(LlmError::RateLimited {
             retry_after_secs: 30,
+            from_provider: true,
         })
     }
 

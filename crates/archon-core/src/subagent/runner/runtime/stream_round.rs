@@ -99,7 +99,7 @@ pub(super) async fn collect_stream_round(
             }
         }
     };
-    budget.answered();
+    budget.opened();
 
     let mut text_content = String::new();
     let mut thinking_blocks = BTreeMap::<u32, PendingThinkingBlock>::new();
@@ -125,8 +125,14 @@ pub(super) async fn collect_stream_round(
             || matches!(&received, Ok(None))
                 && ((!terminal_marker && finish_reason.is_none()) || empty_terminal);
         if interrupted {
-            if let Err(expired) = &received {
-                budget.note_expiry(*expired);
+            match &received {
+                Err(expired) => budget.note_expiry(*expired),
+                // The cause a later stop names (`connection reset`, ...).
+                Ok(Some(StreamEvent::Error {
+                    error_type,
+                    message,
+                })) => budget.note_stream_error(error_type, message),
+                Ok(_) => {}
             }
             let attempt = match &received {
                 Err(_) => FailedAttempt::Unanswered("stream idle timeout"),
@@ -164,7 +170,7 @@ pub(super) async fn collect_stream_round(
                 let attempt = match opened {
                     Ok(Ok(receiver)) => {
                         rx = receiver;
-                        budget.answered();
+                        budget.opened();
                         break;
                     }
                     Ok(Err(error)) => {
@@ -184,10 +190,10 @@ pub(super) async fn collect_stream_round(
         let Some(event) = received.expect("timeout handled above") else {
             break;
         };
-        if !matches!(event, StreamEvent::Error { .. }) {
-            budget.answered();
-        }
+        // Only model output is progress: a stream that opens and resets, or
+        // sends framing only, again and again must still reach the window.
         if is_model_output(&event) {
+            budget.answered();
             archon_tools::subagent_activity::note();
         }
         usage_acc.record_event(&event);
