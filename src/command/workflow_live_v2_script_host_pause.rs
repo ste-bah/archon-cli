@@ -30,6 +30,7 @@
 //! needs to pause again asks under a new id.
 
 use super::*;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 /// Where the pauses a run took are recorded, relative to its run directory.
 pub(super) const SCRIPT_PAUSE_DIR: &str = "v2/script-pauses";
@@ -135,10 +136,15 @@ impl WorkflowScriptHost {
         let fixed_state_path = store
             .run_dir(&run_id)
             .join(crate::command::workflow_decompose_state::FIXED_STATE_PATH);
-        let _pause_order = pause_request_order_lock(&store.run_dir(&run_id))
+        let pause_order = pause_request_order_lock(&store.run_dir(&run_id))
             .lock_owned()
             .await;
+        let persistence_stage = std::sync::Arc::new(AtomicU8::new(0));
+        let worker_stage = persistence_stage.clone();
         let outcome = tokio::task::spawn_blocking(move || {
+            // Keep the FIFO gate until the blocking transaction ends, even if
+            // the async caller drops its future while this task is still writing.
+            let _pause_order = pause_order;
             lock_store.with_run_lock(&lock_run_id, |locked| {
                 let mut run = locked.load_state(&lock_run_id)?;
                 // A stale session decides nothing: not a pause, a join or a pass.
@@ -187,6 +193,7 @@ impl WorkflowScriptHost {
                     archon_workflow::control_pause::apply_pause(&mut run);
                     locked.save_state(&run)?;
                 }
+                worker_stage.store(1, Ordering::Release);
                 // The run is paused from here whatever happens to the evidence.
                 let detail = serde_json::json!({
                     "action": "pause",
@@ -204,10 +211,11 @@ impl WorkflowScriptHost {
                 WorkflowEventKind::Paused
             };
             let event = emit_event(locked, &lock_run_id, kind, detail).map_err(|error| {
-                WorkflowError::SpecInvalid(format!(
-                    "pause '{lock_pause_id}' was saved, but its evidence event was not recorded: {error}"
+                WorkflowError::ControlPaused(format!(
+                    "pause '{lock_pause_id}' was saved, but its evidence event was not recorded: {error}; run {lock_run_id} is paused, not failed; {lock_resume} resumes it"
                 ))
             })?;
+            worker_stage.store(2, Ordering::Release);
             let record = ScriptPauseRecord {
                 pause_id: lock_pause_id.clone(),
                 joined,
@@ -218,10 +226,11 @@ impl WorkflowScriptHost {
                 judged_at_pause: Default::default(),
             };
             locked.write_run_json(&lock_run_id, &record_path, &record).map_err(|error| {
-                WorkflowError::SpecInvalid(format!(
-                    "pause '{lock_pause_id}' was saved and its event recorded, but its replay record was not written: {error}"
+                WorkflowError::ControlPaused(format!(
+                    "pause '{lock_pause_id}' was saved and its event recorded, but its replay record was not written: {error}; run {lock_run_id} is paused, not failed; {lock_resume} resumes it"
                 ))
             })?;
+            worker_stage.store(3, Ordering::Release);
             Ok(PauseOutcome::Taken {
                 joined,
                 event: Some(event),
@@ -230,7 +239,15 @@ impl WorkflowScriptHost {
         })
         .await
         .map_err(|error| {
-            WorkflowError::SpecInvalid(format!("pause transaction worker failed: {error}"))
+            let evidence_gap = match persistence_stage.load(Ordering::Acquire) {
+                0 => return WorkflowError::SpecInvalid(format!("pause transaction worker failed before saving the pause: {error}")),
+                1 => "its evidence event may not have been recorded",
+                2 => "its replay record may not have been written",
+                _ => "its evidence and replay record were written",
+            };
+            WorkflowError::ControlPaused(format!(
+                "pause '{pause_id}' was saved, but {evidence_gap}; transaction worker failed: {error}; run {run_id} is paused, not failed; {resume} resumes it"
+            ))
         })??;
         let (joined, event) = match outcome {
             PauseOutcome::Cancelled => {
@@ -266,6 +283,7 @@ impl WorkflowScriptHost {
         let fixed_run_id = run_id.clone();
         let fixed_pause_id = pause_id.clone();
         let fixed_evidence = evidence.clone();
+        let failure_run_id = run_id.clone();
         tokio::task::spawn_blocking(move || {
             if fixed_state_path.exists() {
                 let event = event.map_or_else(|| "none".to_string(), |seq| seq.to_string());
@@ -273,7 +291,7 @@ impl WorkflowScriptHost {
                     &fixed_store,
                     &fixed_run_id,
                     &format!(
-                        "event_id={event} transition=script_pause pause_id={} joined={joined} subject={} reason={} next_action=resume run_id={run_id}",
+                        "event_id={event} transition=script_pause pause_id={} joined={joined} subject={} reason={} next_action=resume run_id={fixed_run_id}",
                         crate::command::workflow_decompose_events::log_field(&fixed_pause_id),
                         crate::command::workflow_decompose_events::log_field(
                             fixed_evidence["subject"].as_str().unwrap_or("none")
@@ -286,7 +304,11 @@ impl WorkflowScriptHost {
             }
         })
         .await
-        .map_err(|error| WorkflowError::SpecInvalid(format!("pause log worker failed: {error}")))?;
+        .map_err(|error| {
+            WorkflowError::ControlPaused(format!(
+                "pause '{pause_id}' was saved with its evidence, but its resume log was not written: {error}; run {failure_run_id} is paused, not failed; {resume} resumes it"
+            ))
+        })?;
         Err(WorkflowError::ControlPaused(message))
     }
 

@@ -100,7 +100,7 @@ async fn a_saved_pause_reports_when_its_evidence_event_cannot_be_written() {
         )
         .await;
     assert!(
-        matches!(&outcome, Err(WorkflowError::SpecInvalid(message)) if message.contains("evidence event was not recorded")),
+        matches!(&outcome, Err(WorkflowError::ControlPaused(message)) if message.contains("evidence event was not recorded") && message.contains("archon workflow resume --live --yes")),
         "the missing evidence is explicit: {outcome:?}"
     );
     assert_eq!(
@@ -138,7 +138,7 @@ async fn a_pause_with_event_but_no_replay_record_reports_the_gap() {
         .await;
     std::fs::set_permissions(&pause_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(
-        matches!(&outcome, Err(WorkflowError::SpecInvalid(message)) if message.contains("replay record was not written")),
+        matches!(&outcome, Err(WorkflowError::ControlPaused(message)) if message.contains("replay record was not written") && message.contains("archon workflow resume --live --yes")),
         "the pause reports its missing replay record: {outcome:?}"
     );
     assert_eq!(super::pause_events(&store, &run_id).len(), 1);

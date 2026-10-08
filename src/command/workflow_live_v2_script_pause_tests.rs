@@ -194,7 +194,7 @@ async fn a_resumed_run_passes_the_pause_it_was_resumed_past_and_continues() {
 }
 
 #[tokio::test]
-async fn a_pause_requested_while_a_sibling_already_paused_the_run_joins_that_pause() {
+async fn sibling_pause_requests_join_the_earlier_pause_in_fifo_gate_order() {
     let (_temp, store, run_id) = new_run();
     set_status(&store, &run_id, archon_workflow::RunStatus::Running);
     let before = store.load_state(&run_id).unwrap().generation;
@@ -216,11 +216,13 @@ async fn a_pause_requested_while_a_sibling_already_paused_the_run_joins_that_pau
     assert_eq!(paused.len(), 2, "{paused:?}");
     assert_eq!(paused[0].kind, archon_workflow::WorkflowEventKind::Paused);
     assert_eq!(paused[0].detail["joined"], false);
+    assert_eq!(paused[0].detail["pause_id"], "pause-a-1");
     assert_eq!(
         paused[1].kind,
         archon_workflow::WorkflowEventKind::StageStalled
     );
     assert_eq!(paused[1].detail["joined"], true);
+    assert_eq!(paused[1].detail["pause_id"], "pause-b-1");
     assert_eq!(paused[1].detail["evidence"]["subject"], "b");
     // Both were taken: the resume passes them instead of pausing again.
     resume(&store, &run_id);

@@ -246,6 +246,11 @@ async fn run_subagent_owned(
         && session.continuing
         && !has_completed_assistant_history(&session.history.messages())
     {
+        session
+            .history
+            .refuse(
+                "cannot continue agent: validation repair has no completed assistant history; start a new agent",
+            );
         return SubagentOutcome::Failed(
             "validation repair has no completed assistant history".to_string(),
         );
@@ -415,25 +420,8 @@ fn has_completed_assistant_history(messages: &[serde_json::Value]) -> bool {
 }
 
 #[cfg(test)]
-mod continuation_preflight_tests {
-    use super::has_completed_assistant_history;
-
-    #[test]
-    fn continuation_preflight_requires_the_last_message_to_be_assistant() {
-        assert!(!has_completed_assistant_history(&[]));
-        assert!(!has_completed_assistant_history(&[
-            serde_json::json!({"role":"assistant","content":"answer"}),
-            serde_json::json!({"role":"user","content":"repair"}),
-        ]));
-        assert!(!has_completed_assistant_history(&[
-            serde_json::json!({"role":"assistant","content":"answer"}),
-            serde_json::json!({"role":"tool","content":"result"}),
-        ]));
-        assert!(has_completed_assistant_history(&[
-            serde_json::json!({"role":"assistant","content":"completed answer"}),
-        ]));
-    }
-}
+#[path = "run/continuation_preflight_tests.rs"]
+mod continuation_preflight_tests;
 
 /// Describe why a subagent's task ended without a result.
 ///
