@@ -29,6 +29,15 @@ impl Warnings {
         let shown = path.display().to_string();
         self.lines().iter().any(|line| line.contains(&shown))
     }
+
+    /// How many warnings name `path`.
+    pub fn count(&self, path: &Path) -> usize {
+        let shown = path.display().to_string();
+        self.lines()
+            .iter()
+            .filter(|line| line.contains(&shown))
+            .count()
+    }
 }
 
 struct Capture(Warnings);

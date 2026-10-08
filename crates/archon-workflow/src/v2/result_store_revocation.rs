@@ -233,8 +233,9 @@ fn stored_outcomes_in(dir: &Path) -> WorkflowResult<Vec<(PathBuf, WorkflowV2Bran
 /// Every entry reuse can read: what `store_file` reads (a regular file, or
 /// a link to one inside the directory, within the bound). Current outcomes
 /// use `.json`; the landing reader accepts every filename in the archive.
-/// A link that cannot be resolved is included so reading it fails the plan
-/// before mutation. Every other entry is reported and left out.
+/// A link whose target is missing is included so reading it fails the plan
+/// before mutation. Every other entry (a link loop too) is reported and
+/// left out.
 fn outcome_files_in(dir: &Path, archived: bool) -> WorkflowResult<Vec<PathBuf>> {
     let mut files = Vec::new();
     for (path, verdict) in store_entries_in(dir, archived)? {

@@ -10,7 +10,7 @@ use crate::{WorkflowError, WorkflowResult};
 
 use super::store_file::{
     read_store_file, read_store_file_in, read_store_file_or_report, read_store_text,
-    report_skipped_store_entry, report_skipped_store_entry_once, store_dir_entries,
+    report_skipped_store_entry, store_dir_entries,
 };
 use super::{WorkflowV2BranchOutcome, WorkflowV2HostCall, WorkflowV2Result, WorkflowV2Status};
 
@@ -220,9 +220,21 @@ impl WorkflowV2ResultStore {
     /// only here. An unreadable archived file is skipped, never fatal: the
     /// archive is history, and one bad row must not hide the rest. Only
     /// regular files are read (`store_file`); any other entry is reported.
+    ///
+    /// Which entries are candidates, by rule: in `branches/`, a directory
+    /// or a link (a link is then refused entry by entry, as a linked
+    /// directory); in a call's `superseded/`, a `.json` entry. Anything else
+    /// is never a record (agents keep notes in `branches/`), so it is
+    /// skipped silently on every fan-out. Only a candidate that is refused
+    /// is reported.
     pub fn load_superseded_branch_outcomes(&self) -> Vec<WorkflowV2BranchOutcome> {
         let mut outcomes = Vec::new();
         for call_dir in store_dir_entries(&self.root.join("branches")) {
+            let is_candidate = fs::symlink_metadata(&call_dir)
+                .is_ok_and(|meta| meta.is_dir() || meta.file_type().is_symlink());
+            if !is_candidate {
+                continue;
+            }
             for path in store_dir_entries(&call_dir.join("superseded")) {
                 if path.extension().and_then(|value| value.to_str()) != Some("json") {
                     continue;
