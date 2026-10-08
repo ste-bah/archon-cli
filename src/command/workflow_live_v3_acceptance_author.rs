@@ -465,7 +465,7 @@ pub(super) async fn heal_unfrozen(site: &Site<'_>) -> WorkflowResult<Option<Auth
 #[path = "workflow_live_v3_acceptance_author_tests.rs"]
 mod tests;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "workflow_live_v3_acceptance_author_recovery_tests.rs"]
 mod recovery_tests;
 
