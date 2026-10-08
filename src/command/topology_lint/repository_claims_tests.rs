@@ -106,6 +106,46 @@ fn runtime_output_paths_are_not_repository_existence_claims() {
             claims(text)
         );
     }
+
+    for (text, expected) in [
+        (
+            "The existing runtime file `src/existing.rs` does not exist yet.",
+            Claim::Absent,
+        ),
+        (
+            "The runtime output `src/existing.rs` does not exist yet.",
+            Claim::Absent,
+        ),
+    ] {
+        assert_eq!(
+            claims(text),
+            vec![(
+                if text.contains("existing.rs") {
+                    "src/existing.rs"
+                } else {
+                    "src/ghost.rs"
+                }
+                .to_string(),
+                expected,
+            )],
+            "{text:?}"
+        );
+    }
+}
+
+#[test]
+fn generic_runtime_and_runner_mentions_keep_repository_claims() {
+    for text in [
+        "The runtime module `src/ghost.rs` already exists.",
+        "Extend `src/ghost.rs` so the runtime check passes.",
+        "Edit `src/ghost.rs`, which the test runner writes nothing to.",
+    ] {
+        assert_eq!(
+            claims(text),
+            vec![("src/ghost.rs".to_string(), Claim::Exists)],
+            "{text:?}"
+        );
+    }
 }
 
 #[test]
@@ -189,7 +229,7 @@ fn a_false_does_not_exist_is_a_blocking_finding_naming_path_and_truth() {
 #[test]
 fn a_false_exists_is_a_blocking_finding_and_a_true_claim_is_not() {
     let (_temp, project, _tasks, tree) = grounded();
-    let body = "`src/ghost.rs` exists and this task adds the field.\n`src/lib.rs` exists (1 line) and `src/new.rs` does not exist.\n";
+    let body = "Modify `src/ghost.rs` to add the field.\n`src/lib.rs` exists (1 line) and `src/new.rs` does not exist.\n";
     let findings = findings_against(&tree, &project, "TASK-X-002", body);
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert!(

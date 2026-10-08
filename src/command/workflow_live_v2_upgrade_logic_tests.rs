@@ -69,7 +69,10 @@ impl Run {
                 self.launch.clone(),
                 self.context.clone(),
                 self.store.run_dir(&self.run_id),
-            ),
+            )
+            // Model the prior build so this suite can verify that bumping
+            // task-set-lint from 1 to 2 invalidates its saved verdict.
+            .with_logic_version("task-set-lint", Some(1)),
             calls: AtomicUsize::new(0),
         }
     }
@@ -87,7 +90,8 @@ impl Run {
             self.context.clone(),
             self.store.run_dir(&self.run_id),
         )
-        .with_launch_catalog(self.launch.clone());
+        .with_launch_catalog(self.launch.clone())
+        .with_logic_version("task-set-lint", Some(1));
         for (id, version) in bumps {
             keys = keys.with_logic_version(id, Some(*version));
         }

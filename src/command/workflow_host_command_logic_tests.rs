@@ -227,7 +227,7 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
             .unwrap()
     };
     let baseline = executor(None);
-    for command in ["freeze-skeleton", "land-task-body"] {
+    for command in ["freeze-skeleton"] {
         assert!(
             holds(&baseline, command, &unstamped),
             "{command}: landed artifact"
@@ -239,6 +239,7 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     for command in [
         "verify-frozen-acceptance",
         "verify-frozen-skeleton",
+        "land-task-body",
         "task-set-lint",
         "requirements-trace",
     ] {
@@ -248,7 +249,7 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
         );
         let request = HostCommandRequest::new(command, None).unwrap();
         let stamped = serde_json::json!({
-            LOGIC_VERSION_STAMP: BASELINE_LOGIC_VERSION,
+            LOGIC_VERSION_STAMP: baseline.logic_version(&request).unwrap(),
             LOGIC_DIGEST_STAMP: baseline.logic_digest(&request).unwrap(),
             LOGIC_BUILD_STAMP: baseline.logic_build(&request).unwrap(),
         });
@@ -256,7 +257,9 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     }
     let bumped = executor(Some("freeze-skeleton"));
     assert!(!holds(&bumped, "freeze-skeleton", &unstamped));
-    assert!(holds(&bumped, "land-task-body", &unstamped), "others keep");
+    // land-task-body has its own version-2 verdict and independently rejects
+    // an unstamped landing from the prior logic.
+    assert!(!holds(&bumped, "land-task-body", &unstamped));
     // The stamp the host writes is the version the key names.
     let request = HostCommandRequest::new("freeze-skeleton", Some("c".into())).unwrap();
     assert_eq!(bumped.logic_version(&request).unwrap(), Some(2));
@@ -279,7 +282,6 @@ fn logic_361_keys_at_the_baseline_are_the_keys_records_already_hold() {
     for (command, stdin) in [
         ("verify-frozen-acceptance", None),
         ("freeze-skeleton", Some("candidate")),
-        ("task-set-lint", None),
         ("requirements-trace", None),
     ] {
         let request = HostCommandRequest::new(command, stdin.map(str::to_string)).unwrap();
