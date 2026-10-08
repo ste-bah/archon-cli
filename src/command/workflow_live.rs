@@ -318,3 +318,8 @@ pub(crate) mod audit_test_support;
 #[cfg(test)]
 #[path = "workflow_criterion_results_test_support.rs"]
 pub(crate) mod criterion_results_test_support;
+
+/// Layered learning toggles for the fixed-decomposition Rust host fold.
+pub(crate) fn load_learning_config_for_fixed(cwd: &Path) -> archon_core::config::LearningConfig {
+    workflow_live_config_layers::load_learning_config(cwd, None)
+}

@@ -48,6 +48,16 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
             if lost_ownership(store, &run.id, execution_generation).is_some() {
                 return Ok(lost_ownership_report(LABEL, &run.id, &message));
             }
+            crate::command::workflow_decompose_learning::fold_best_effort(
+                store
+                    .root()
+                    .parent()
+                    .and_then(std::path::Path::parent)
+                    .unwrap_or_else(|| std::path::Path::new(".")),
+                store,
+                &run.id,
+            )
+            .await;
             return Ok(format!(
                 "Fixed decomposition paused: {}\n{}\nResume with: archon workflow resume --live --yes {}\n",
                 run.id, message, run.id
@@ -57,6 +67,16 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
             if lost_ownership(store, &run.id, execution_generation).is_some() {
                 return Ok(lost_ownership_report(LABEL, &run.id, &message));
             }
+            crate::command::workflow_decompose_learning::fold_best_effort(
+                store
+                    .root()
+                    .parent()
+                    .and_then(std::path::Path::parent)
+                    .unwrap_or_else(|| std::path::Path::new(".")),
+                store,
+                &run.id,
+            )
+            .await;
             return Ok(format!(
                 "Fixed decomposition cancelled: {}\n{}\n",
                 run.id, message
@@ -87,6 +107,16 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
             );
             match paused {
                 Ok(Ok(_)) => {
+                    crate::command::workflow_decompose_learning::fold_best_effort(
+                        store
+                            .root()
+                            .parent()
+                            .and_then(std::path::Path::parent)
+                            .unwrap_or_else(|| std::path::Path::new(".")),
+                        store,
+                        &run.id,
+                    )
+                    .await;
                     return Ok(format!(
                         "Fixed decomposition paused: {}\n{}\nResume with: archon workflow resume --live --yes {}\n",
                         run.id, text, run.id
@@ -132,6 +162,16 @@ pub(crate) async fn execute_fixed_decomposition_v2_run(
         Some(execution_generation),
     )
     .await?;
+    crate::command::workflow_decompose_learning::fold_best_effort(
+        store
+            .root()
+            .parent()
+            .and_then(std::path::Path::parent)
+            .unwrap_or_else(|| std::path::Path::new(".")),
+        store,
+        &run.id,
+    )
+    .await;
     let mut report = format!(
         "Fixed decomposition {}: status {:?}, completed {}, executed {}, reused {}\n",
         run.id, summary.status, summary.completed, summary.executed, summary.reused

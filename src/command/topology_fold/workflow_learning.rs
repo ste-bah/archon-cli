@@ -35,6 +35,7 @@ use std::path::Path;
 
 use archon_pipeline::learning::integration::{LearningIntegration, LearningIntegrationConfig};
 use archon_workflow::{WorkflowLearningRecord, WorkflowStore};
+use std::io::Write;
 
 /// Hook names that name a subsystem reachable through `LearningIntegration`.
 ///
@@ -89,6 +90,53 @@ pub(crate) fn bridge_workflow_learning(
     run_id: &str,
 ) -> LearningDispatchOutcome {
     write_run_records(store, run_id);
+    fold_workflow_learning(project_root, store, run_id)
+}
+
+/// Write generated stage records plus additional Rust-host records, then route them.
+pub(crate) fn bridge_workflow_learning_with_records(
+    project_root: &Path,
+    store: &WorkflowStore,
+    run_id: &str,
+    extra: &[WorkflowLearningRecord],
+) -> LearningDispatchOutcome {
+    write_run_records(store, run_id);
+    if !extra.is_empty() {
+        let path = store
+            .run_dir(run_id)
+            .join(archon_workflow::LEARNING_RECORDS_FILE);
+        let mut known = std::collections::BTreeSet::new();
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            for line in text.lines() {
+                if let Ok(record) = serde_json::from_str::<WorkflowLearningRecord>(line) {
+                    known.insert(record.stage_id);
+                }
+            }
+        }
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            for record in extra {
+                if known.insert(record.stage_id.clone()) {
+                    let line = match serde_json::to_string(record) {
+                        Ok(line) => line,
+                        Err(error) => {
+                            tracing::warn!(%error, %run_id, "additional workflow learning record could not be serialized");
+                            break;
+                        }
+                    };
+                    if let Err(error) = writeln!(file, "{line}") {
+                        tracing::warn!(%error, %run_id, "additional workflow learning record not written");
+                        break;
+                    }
+                }
+            }
+        } else {
+            tracing::warn!(%run_id, "additional workflow learning records not written");
+        }
+    }
     fold_workflow_learning(project_root, store, run_id)
 }
 
@@ -213,16 +261,20 @@ fn dispatch_call(record: &WorkflowLearningRecord) -> DispatchCall {
         task: format!("{} / {}", record.name, record.stage_id),
         pipeline_id: record.run_id.clone(),
         quality: record.quality(),
-        summary: format!(
-            "workflow '{}' stage '{}' finished {:?} ({:?}); attempt {}; {} artifact(s){}",
-            record.name,
-            record.stage_id,
-            record.status,
-            record.verification,
-            record.telemetry.attempt,
-            record.telemetry.artifact_count,
-            if record.durable { "; durable" } else { "" }
-        ),
+        summary: if record.phase == "decomposition_lesson" {
+            format!("fixed decomposition lesson: {}", record.name)
+        } else {
+            format!(
+                "workflow '{}' stage '{}' finished {:?} ({:?}); attempt {}; {} artifact(s){}",
+                record.name,
+                record.stage_id,
+                record.status,
+                record.verification,
+                record.telemetry.attempt,
+                record.telemetry.artifact_count,
+                if record.durable { "; durable" } else { "" }
+            )
+        },
     }
 }
 
