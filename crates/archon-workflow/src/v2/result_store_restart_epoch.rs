@@ -12,7 +12,7 @@ const RESTART_EPOCH_FILE: &str = "restart-epoch.json";
 /// restart.
 fn read_restart_epoch(root: &Path) -> WorkflowResult<u64> {
     let path = root.join(RESTART_EPOCH_FILE);
-    let raw = match fs::read(&path) {
+    let raw = match read_store_file(&path) {
         Ok(raw) => raw,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
         Err(err) => return Err(WorkflowError::io(&path, err)),

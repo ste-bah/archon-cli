@@ -81,7 +81,7 @@ impl WorkflowV2ResultStore {
         if !first_write {
             return;
         }
-        let Some(record) = std::fs::read(path)
+        let Some(record) = super::super::store_file::read_store_file(&path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<super::WorkflowV2CallRecord>(&bytes).ok())
         else {
@@ -217,7 +217,7 @@ impl WorkflowV2ResultStore {
         // disk -- an invalidation, a status rewrite -- restates nothing this
         // session replayed, and stamping it would pin an older execution's
         // finish on a record of a later one.
-        let on_disk = std::fs::read(self.result_path(&record.call.id))
+        let on_disk = super::super::store_file::read_store_file(&self.result_path(&record.call.id))
             .ok()
             .and_then(|bytes| serde_json::from_slice::<super::WorkflowV2CallRecord>(&bytes).ok());
         if on_disk.is_some_and(|earlier| earlier.attempt >= record.attempt) {
@@ -228,9 +228,12 @@ impl WorkflowV2ResultStore {
         else {
             return;
         };
-        let source = std::fs::read(self.result_path(&replayed.call_id))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<super::WorkflowV2CallRecord>(&bytes).ok());
+        let source =
+            super::super::store_file::read_store_file(&self.result_path(&replayed.call_id))
+                .ok()
+                .and_then(|bytes| {
+                    serde_json::from_slice::<super::WorkflowV2CallRecord>(&bytes).ok()
+                });
         // Issue-109: a fix that replayed its own record by re-deriving a
         // drifted sibling's answer restates the sibling's execution, whose
         // manifest is filed under the sibling's stage; the finish is the

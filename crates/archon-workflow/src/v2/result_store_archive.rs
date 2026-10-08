@@ -62,6 +62,8 @@ impl WorkflowV2ResultStore {
                 let entry = entry.map_err(|err| WorkflowError::io(&flat, err))?;
                 let path = entry.path();
                 if !path.is_file() {
+                    // Met again on every lookup while it stays: said once.
+                    report_skipped_store_entry_once(&path, &"not a regular file; left unmigrated");
                     continue;
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
@@ -124,8 +126,8 @@ impl WorkflowV2ResultStore {
                 .map(str::to_string)
         });
         from_name.or_else(|| {
-            let raw = fs::read_to_string(path).ok()?;
-            let value = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+            let raw = read_store_file(path).ok()?;
+            let value = serde_json::from_slice::<serde_json::Value>(&raw).ok()?;
             let call_id = value.get("call")?.get("id")?.as_str()?;
             self.call_history_dir(call_id)
                 .file_name()
@@ -160,8 +162,10 @@ fn archive_superseded_json_into<T: DeserializeOwned>(
     if !path.exists() {
         return Ok(());
     }
-    if let Ok(raw) = fs::read_to_string(path)
-        && let Ok(existing) = serde_json::from_str::<T>(&raw)
+    // A slot that is not a regular file is never the same execution: it is
+    // moved aside unread (Issue-292).
+    if let Ok(raw) = read_store_file(path)
+        && let Ok(existing) = serde_json::from_slice::<T>(&raw)
         && same_execution(&existing)
     {
         return Ok(());

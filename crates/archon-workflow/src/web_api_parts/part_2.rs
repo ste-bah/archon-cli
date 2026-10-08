@@ -14,7 +14,9 @@ fn v2_result_views(
         if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
         }
-        let raw = fs::read_to_string(&path).map_err(|e| WorkflowError::io(&path, e))?;
+        let Some(raw) = store_view_text(&path)? else {
+            continue;
+        };
         let value: serde_json::Value = serde_json::from_str(&raw)?;
         // v2 results are stored unredacted (Issue-245); the view drops
         // forbidden keys and redacts text instead of hiding the whole record.
@@ -87,7 +89,9 @@ fn collect_v2_branch_views(
             if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                 continue;
             }
-            let raw = fs::read_to_string(&path).map_err(|e| WorkflowError::io(&path, e))?;
+            let Some(raw) = store_view_text(&path)? else {
+                continue;
+            };
             let value: serde_json::Value = serde_json::from_str(&raw)?;
             // Stored unredacted (Issue-245): redact the view, keep the row.
             let clean = sanitize_value(value);
@@ -110,13 +114,33 @@ fn collect_v2_branch_views(
     Ok(())
 }
 
+/// A store file's text for a view: `None` for an entry the store's readers
+/// refuse (a directory, FIFO, outside link or oversized file), which
+/// `store_file` reports (Issue-292).
+fn store_view_text(path: &Path) -> WorkflowResult<Option<String>> {
+    match crate::v2::store_file::read_store_text(path) {
+        Ok(raw) => Ok(Some(raw)),
+        Err(e) if crate::v2::store_file::store_file_refusal(&e).is_some() => Ok(None),
+        Err(e) => Err(WorkflowError::io(path, e)),
+    }
+}
+
+/// The branch outcomes of `call_id` its readers would read: `.json`
+/// entries `store_file` accepts, never a FIFO, directory or outside link.
 fn branch_count_for_call(root: &Path, call_id: &str) -> usize {
     let branch_root = root.join("branches").join(sanitize_v2_id(call_id));
-    fs::read_dir(branch_root)
+    fs::read_dir(&branch_root)
         .ok()
         .into_iter()
         .flat_map(|entries| entries.filter_map(|entry| entry.ok()))
-        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .filter(|path| {
+            matches!(
+                crate::v2::store_file::classify_store_entry(path, &branch_root),
+                Ok(None)
+            )
+        })
         .count()
 }
 

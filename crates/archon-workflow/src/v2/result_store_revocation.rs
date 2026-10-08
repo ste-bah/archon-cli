@@ -218,7 +218,13 @@ fn stored_outcomes_in(dir: &Path) -> WorkflowResult<Vec<(PathBuf, WorkflowV2Bran
         }
     }
     for path in outcome_files_in(&dir.join("superseded"), true)? {
-        let raw = fs::read(&path).map_err(|err| WorkflowError::io(&path, err))?;
+        // An entry swapped for a special file since it was listed is refused
+        // (and reported) here, never read: no reader counts it either.
+        let raw = match read_store_file_in(&path, dir) {
+            Ok(raw) => raw,
+            Err(err) if super::store_file::store_file_refusal(&err).is_some() => continue,
+            Err(err) => return Err(WorkflowError::io(&path, err)),
+        };
         if let Ok(outcome) = serde_json::from_slice::<WorkflowV2BranchOutcome>(&raw) {
             stored.push((path, outcome));
         }
@@ -226,35 +232,49 @@ fn stored_outcomes_in(dir: &Path) -> WorkflowResult<Vec<(PathBuf, WorkflowV2Bran
     Ok(stored)
 }
 
-/// Every entry reuse can read, including symlinks. Current outcomes use
-/// `.json`; the landing reader accepts every filename in the archive.
-/// An unreadable link is included so reading it fails the plan before mutation.
+/// Every entry reuse can read: what `store_file` reads (a regular file, or
+/// a link to one inside the directory, within the bound). Current outcomes
+/// use `.json`; the landing reader accepts every filename in the archive.
+/// A link that cannot be resolved is included so reading it fails the plan
+/// before mutation. Every other entry is reported and left out.
 fn outcome_files_in(dir: &Path, archived: bool) -> WorkflowResult<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for (path, verdict) in store_entries_in(dir, archived)? {
+        match verdict {
+            Ok(None) | Err(_) => files.push(path),
+            Ok(Some(refusal)) => super::store_file::report_skipped_store_entry(&path, &refusal),
+        }
+    }
+    Ok(files)
+}
+
+/// Each entry of `dir` a reader could name (see [`outcome_files_in`]) with
+/// how `store_file` judges it, unread.
+type StoreEntryVerdict = std::io::Result<Option<super::store_file::StoreRefusal>>;
+fn store_entries_in(
+    dir: &Path,
+    archived: bool,
+) -> WorkflowResult<Vec<(PathBuf, StoreEntryVerdict)>> {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(err) => return Err(WorkflowError::io(dir, err)),
     };
-    let mut files = Vec::new();
+    // An archive's links are read within its call directory (`store_file`).
+    let root = if archived {
+        dir.parent().unwrap_or(dir)
+    } else {
+        dir
+    };
+    let mut listed = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|err| WorkflowError::io(dir, err))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|err| WorkflowError::io(&path, err))?;
-        // A FIFO, socket or device is never an outcome and reading one could
-        // block while restart holds the run lock; a link is kept unless it
-        // resolves to such a file, and an unresolvable link fails the plan.
-        let readable = file_type.is_file()
-            || (file_type.is_symlink()
-                && fs::metadata(&path).map_or(true, |target| target.is_file()));
-        if readable
-            && (archived || path.extension().and_then(|value| value.to_str()) == Some("json"))
-        {
-            files.push(path);
+        let path = entry.map_err(|err| WorkflowError::io(dir, err))?.path();
+        if archived || path.extension().and_then(|value| value.to_str()) == Some("json") {
+            let verdict = super::store_file::classify_store_entry(&path, root);
+            listed.push((path, verdict));
         }
     }
-    Ok(files)
+    Ok(listed)
 }
 
 /// The branch store is written only as real directories: `branches/`, each
@@ -315,34 +335,16 @@ fn file_identity(path: &Path) -> String {
 }
 
 /// Entries reuse could name but this scan cannot read without blocking: a
-/// FIFO, socket or device, or a link resolving to one.
+/// FIFO, socket or device, or a link resolving to one. A link that cannot be
+/// resolved is left for the outcome scan, which fails the plan on it.
 fn special_files_in(dir: &Path, archived: bool) -> WorkflowResult<Vec<PathBuf>> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(WorkflowError::io(dir, err)),
-    };
-    let mut files = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|err| WorkflowError::io(dir, err))?;
-        let path = entry.path();
-        let named = archived || path.extension().and_then(|value| value.to_str()) == Some("json");
-        if !named {
-            continue;
-        }
-        // A link that cannot be resolved is left for the outcome scan, which
-        // fails the plan on it; any other classification error fails here,
-        // before anything moves.
-        let target = match fs::metadata(&path) {
-            Ok(target) => target,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(err) => return Err(WorkflowError::io(&path, err)),
-        };
-        if !target.is_file() && !target.is_dir() {
-            files.push(path);
-        }
-    }
-    Ok(files)
+    Ok(store_entries_in(dir, archived)?
+        .into_iter()
+        .filter(|(_, verdict)| {
+            matches!(verdict, Ok(Some(super::store_file::StoreRefusal::Special)))
+        })
+        .map(|(path, _)| path)
+        .collect())
 }
 
 /// The stored files of `item_id` in `dir`: its current outcome file, read

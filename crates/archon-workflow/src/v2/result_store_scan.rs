@@ -43,9 +43,15 @@ impl StoreRecord for WorkflowV2CallRecord {
 /// Read one record file from inside the store.
 ///
 /// `Ok(None)` means the file is not one of this store's records and the caller
-/// should carry on as if it were not there.
+/// should carry on as if it were not there. An entry that is not a regular
+/// file (a FIFO, a link out of its directory, an oversized file) is not one,
+/// and is skipped unread and reported (`store_file`, Issue-292).
 pub(super) fn read_store_record<T: StoreRecord>(path: &Path) -> WorkflowResult<Option<T>> {
-    let raw = fs::read_to_string(path).map_err(|err| WorkflowError::io(path, err))?;
+    let raw = match read_store_text(path) {
+        Ok(raw) => raw,
+        Err(err) if super::store_file::store_file_refusal(&err).is_some() => return Ok(None),
+        Err(err) => return Err(WorkflowError::io(path, err)),
+    };
     parse_store_record(&raw, path)
 }
 

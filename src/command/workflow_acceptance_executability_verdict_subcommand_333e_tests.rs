@@ -34,7 +34,10 @@ const MUST_NOT: &str = "must not depend on it";
 const GUARD: &str = "--list | grep -qw";
 
 /// A tool at an absolute path whose `--list` writes its environment to
-/// `record` and lists `build`; it rejects every other word.
+/// `record` and lists `build`; it rejects every other word. It is run once
+/// before it is returned, as [`warm`] does for the other 333 tests, so a
+/// new script's first start (which the system may check at length, Issue
+/// 363) is not part of the listing's no-progress window.
 fn spy(dir: &Path, record: &Path) -> PathBuf {
     let tool = dir.join("archon333spy");
     let script = format!(
@@ -43,6 +46,13 @@ fn spy(dir: &Path, record: &Path) -> PathBuf {
     );
     std::fs::write(&tool, script).unwrap();
     std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let warmed = archon_shell::spawn::command(&tool)
+        .arg("warm")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the spy starts");
+    assert_eq!(warmed.status.code(), Some(2), "the spy rejects `warm`");
+    assert!(!record.exists(), "warming never lists");
     tool
 }
 

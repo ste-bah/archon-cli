@@ -63,10 +63,18 @@ impl WorkflowV2ResultStore {
     /// nothing moves.
     pub fn load_call_slot_healing(&self, call_id: &str) -> WorkflowResult<WorkflowV2CallSlot> {
         let path = self.result_path(call_id);
-        let raw = match fs::read(&path) {
+        let raw = match read_store_file(&path) {
             Ok(raw) => raw,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(WorkflowV2CallSlot::Empty);
+            }
+            // Not a regular file (Issue-292): damage, moved aside unread.
+            Err(err) if super::store_file::store_file_refusal(&err).is_some() => {
+                let reason = format!("it is not a record file: {err}");
+                return Ok(match self.quarantine_call_slot(call_id, &path, reason)? {
+                    Some(evidence) => WorkflowV2CallSlot::Damaged(evidence),
+                    None => WorkflowV2CallSlot::Empty,
+                });
             }
             Err(err) => return Err(WorkflowError::io(&path, err)),
         };
