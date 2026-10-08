@@ -250,3 +250,110 @@ fn a_file_path_keeps_its_words_and_loses_only_a_credential_shaped_value() {
         "{grep}"
     );
 }
+
+fn agent_reported_result() -> WorkflowV2Result {
+    let mut result = WorkflowV2Result::accepted("structured");
+    result
+        .files_read
+        .push(WorkflowV2FileRecord::new("agent/said.rs"));
+    result.commands_run.push(WorkflowV2CommandRecord {
+        kind: WorkflowV2CommandKind::Test,
+        command: "cargo test".to_string(),
+        status: WorkflowV2CommandStatus::Succeeded,
+        exit_code: Some(0),
+        output_summary: "test result: ok. 1 passed".to_string(),
+        pre_existing: false,
+    });
+    result
+}
+
+#[test]
+fn a_structured_result_keeps_its_lists_and_carries_the_observed_trace_beside_them() {
+    let mut result = agent_reported_result();
+    result.data = json!({"toolTrace": "agent forged", "other": 1});
+    let trace = [
+        call("Read", json!({"file_path": "src/a.rs"}), ok()),
+        call("Bash", json!({"command": "ls"}), ok()),
+        summary(2, 2, 0),
+    ];
+    record_structured_trace(&mut result, Some(&trace));
+    assert_eq!(result.files_read[0].path, "agent/said.rs");
+    assert_eq!(result.commands_run.len(), 1);
+    assert_eq!(result.commands_run[0].exit_code, Some(0));
+    assert!(
+        result.evidence.is_empty(),
+        "gates count evidence: none is added"
+    );
+    let marker = &result.data["toolTrace"];
+    assert_eq!(marker["topLevelLists"], AGENT_REPORTED);
+    assert_eq!(marker["recorded"], true);
+    assert_eq!(marker["filesRead"][0]["path"], "src/a.rs");
+    assert_eq!(marker["commandsRun"][0]["command"], "ls");
+    assert_eq!(result.data["other"], 1);
+}
+
+#[test]
+fn a_structured_result_without_a_trace_is_marked_agent_reported_and_not_recorded() {
+    for trace in [None, Some(&[][..])] {
+        let mut result = agent_reported_result();
+        record_structured_trace(&mut result, trace);
+        let marker = &result.data["toolTrace"];
+        assert_eq!(marker["topLevelLists"], AGENT_REPORTED);
+        assert_eq!(marker["recorded"], false);
+        assert_eq!(marker["filesRead"], NOT_RECORDED);
+        assert_eq!(result.files_read.len(), 1);
+        assert!(result.evidence.is_empty());
+    }
+}
+
+#[test]
+fn structured_data_that_is_not_an_object_is_left_as_written() {
+    let mut result = agent_reported_result();
+    result.data = json!(["agent", "list"]);
+    record_structured_trace(&mut result, None);
+    assert_eq!(result.data, json!(["agent", "list"]));
+}
+
+#[test]
+fn a_raw_result_says_its_lists_came_from_the_host_trace() {
+    let mut result = WorkflowV2Result::accepted("raw");
+    record_tool_trace(&mut result, &[summary(0, 0, 0)]);
+    assert_eq!(result.data["toolTrace"]["topLevelLists"], HOST_TRACE);
+    let mut result = WorkflowV2Result::accepted("raw");
+    record_tool_trace(&mut result, &[]);
+    assert_eq!(result.data["toolTrace"]["topLevelLists"], NOT_RECORDED);
+}
+
+#[test]
+fn session_traces_merge_in_order_and_sum_their_summaries() {
+    let first = vec![
+        call("Read", json!({"file_path": "a"}), ok()),
+        summary(1, 1, 0),
+    ];
+    let repair = vec![
+        call("Bash", json!({"command": "ls"}), ok()),
+        summary(3, 1, 1),
+    ];
+    let merged = merge_session_traces(vec![first.clone(), repair]).unwrap();
+    let names: Vec<_> = merged.iter().map(|t| t.tool_name.as_str()).collect();
+    assert_eq!(names, ["Read", "Bash", TOOL_TRACE_SUMMARY_NAME]);
+    let totals = &merged[2].input;
+    assert_eq!(
+        (
+            &totals["calls"],
+            &totals["kept"],
+            &totals["dropped"],
+            &totals["inputs_truncated"]
+        ),
+        (&json!(4), &json!(2), &json!(2), &json!(1))
+    );
+    // One session not captured: no summary, so never claimed complete.
+    let uncaptured = vec![call("Grep", json!({"pattern": "x"}), ok())];
+    let merged = merge_session_traces(vec![first, uncaptured]).unwrap();
+    assert!(
+        merged
+            .iter()
+            .all(|t| t.tool_name != TOOL_TRACE_SUMMARY_NAME)
+    );
+    assert!(merge_session_traces(Vec::new()).is_none());
+}

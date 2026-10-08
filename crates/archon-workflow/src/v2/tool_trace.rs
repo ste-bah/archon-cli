@@ -117,10 +117,100 @@ pub fn record_tool_trace(result: &mut WorkflowV2Result, tool_uses: &[WorkflowAge
             })
         }
     };
+    let mut marker = marker;
+    marker["topLevelLists"] = if marker["recorded"] == json!(true) {
+        json!(HOST_TRACE)
+    } else {
+        json!(NOT_RECORDED)
+    };
     if !result.data.is_object() {
         result.data = json!({});
     }
     result.data["toolTrace"] = marker;
+}
+
+/// `toolTrace.topLevelLists` when `files_read` / `commands_run` came from
+/// the host session trace.
+pub const HOST_TRACE: &str = "host_trace";
+/// `toolTrace.topLevelLists` when `files_read` / `commands_run` are what the
+/// agent reported about itself.
+pub const AGENT_REPORTED: &str = "agent_reported";
+
+/// Stamp a structured (agent-reported) result with what the host trace saw.
+///
+/// The agent's own `files_read` and `commands_run` stay where they are, and
+/// `toolTrace.topLevelLists` says they are agent-reported: verification
+/// gates read their `kind`, `exit_code`, `pre_existing` and output text,
+/// which a trace record never carries (it stores no tool output), so
+/// swapping them would let failing tests through and reject good results.
+/// The observed records sit beside them in `toolTrace.filesRead` /
+/// `toolTrace.commandsRun`, or are marked [`NOT_RECORDED`] when no trace
+/// was captured. `toolTrace` is host-owned: an agent-written one is
+/// replaced. No evidence entry is added, since gates count evidence. A
+/// `data` that is neither null nor an object is left as the agent wrote it.
+pub fn record_structured_trace(
+    result: &mut WorkflowV2Result,
+    tool_uses: Option<&[WorkflowAgentToolUse]>,
+) {
+    if !(result.data.is_null() || result.data.is_object()) {
+        return;
+    }
+    let mut observed = WorkflowV2Result::default();
+    record_tool_trace(&mut observed, tool_uses.unwrap_or_default());
+    let mut marker = observed.data["toolTrace"].take();
+    if marker["recorded"] == json!(true) {
+        marker["filesRead"] = json!(observed.files_read);
+        marker["commandsRun"] = json!(observed.commands_run);
+    }
+    marker["topLevelLists"] = json!(AGENT_REPORTED);
+    if result.data.is_null() {
+        result.data = json!({});
+    }
+    result.data["toolTrace"] = marker;
+}
+
+/// One trace for a call whose answer took several sessions (first answer,
+/// repairs, a restarted agent): every call in order, and one summary that
+/// sums theirs. When any session's history was not captured (no summary),
+/// the merged trace carries no summary, so it is never claimed complete.
+/// `None` when no session returned.
+pub fn merge_session_traces(
+    sessions: Vec<Vec<WorkflowAgentToolUse>>,
+) -> Option<Vec<WorkflowAgentToolUse>> {
+    if sessions.is_empty() {
+        return None;
+    }
+    let mut calls = Vec::new();
+    let mut totals: Option<serde_json::Map<String, Value>> = Some(Default::default());
+    for session in sessions {
+        let mut summary = None;
+        for tool in session {
+            if tool.tool_name == TOOL_TRACE_SUMMARY_NAME {
+                summary = Some(tool.input);
+            } else {
+                calls.push(tool);
+            }
+        }
+        totals = match (totals, summary) {
+            (Some(mut totals), Some(summary)) => {
+                for key in ["calls", "kept", "dropped", "inputs_truncated"] {
+                    let add = summary.get(key).and_then(Value::as_u64).unwrap_or(0);
+                    let sum = totals.get(key).and_then(Value::as_u64).unwrap_or(0) + add;
+                    totals.insert(key.to_string(), json!(sum));
+                }
+                Some(totals)
+            }
+            _ => None,
+        };
+    }
+    if let Some(totals) = totals {
+        calls.push(WorkflowAgentToolUse {
+            tool_name: TOOL_TRACE_SUMMARY_NAME.to_string(),
+            input: Value::Object(totals),
+            output: Value::Null,
+        });
+    }
+    Some(calls)
 }
 
 /// The file a read call names, unless the trace cut its input: a cut path is

@@ -337,23 +337,31 @@ pub(super) async fn run_single_v2_agent_call_in_repository(
         )
         .await;
         let call_client = client.with_provider_tier(provider_tier_for_v2_request(&request));
-        match archon_tools::workflow_read_guard::scope_run_store(
-            run_store,
-            archon_tools::workflow_read_guard::scope_read_only_boundary(
-                read_only,
-                on_heap(|| {
-                    run_v2_agent_call_with_rejected_output_log(
-                        adapter,
-                        &call_client,
-                        &request,
-                        v2_store,
-                    )
-                }),
+        let (outcome, trace) = workflow_live_v2_client::structured_trace::capture(
+            archon_tools::workflow_read_guard::scope_run_store(
+                run_store,
+                archon_tools::workflow_read_guard::scope_read_only_boundary(
+                    read_only,
+                    on_heap(|| {
+                        run_v2_agent_call_with_rejected_output_log(
+                            adapter,
+                            &call_client,
+                            &request,
+                            v2_store,
+                        )
+                    }),
+                ),
             ),
         )
-        .await
-        {
+        .await;
+        match outcome {
             Ok(mut result) => {
+                // Issue 276: what the session's own trace saw, beside the
+                // agent's report of itself.
+                archon_workflow::v2::tool_trace::record_structured_trace(
+                    &mut result,
+                    trace.as_deref(),
+                );
                 workflow_live_provider_env::stamp_provider_env_result(
                     &mut result,
                     provider_env.as_ref(),

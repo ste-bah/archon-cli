@@ -418,6 +418,7 @@ impl LiveV2AgentClient {
         .await?;
         // `in_review`, not `resolved`: the branch returned, nothing verified it.
         board.finish(DelegatedOutcome::Completed);
+        structured_trace::note(&response.tool_uses);
         Ok(response.content)
     }
 }
@@ -471,6 +472,8 @@ impl WorkflowV2AgentClient for LiveV2AgentClient {
 pub(super) mod call_sessions;
 #[path = "workflow_live_v2_client_context.rs"]
 mod context;
+#[path = "workflow_structured_trace.rs"]
+pub(super) mod structured_trace;
 use context::*;
 
 #[cfg(test)]
