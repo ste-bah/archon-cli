@@ -464,6 +464,7 @@ include!("result_store_quarantine.rs");
 
 include!("result_store_invalidation.rs");
 include!("result_store_revocation.rs");
+include!("result_store_restart_branches.rs");
 include!("result_store_archive.rs");
 include!("result_store_durable.rs");
 include!("result_store_restart_epoch.rs");

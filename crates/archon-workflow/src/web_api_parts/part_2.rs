@@ -152,22 +152,74 @@ fn store_view_text(path: &Path) -> WorkflowResult<Option<String>> {
 /// The branch outcomes of `call_id` its readers would read: `.json`
 /// entries `store_file` accepts, never a FIFO, directory or outside link.
 fn branch_count_for_call(root: &Path, call_id: &str) -> usize {
-    let branch_root = root.join("branches").join(crate::v2::result_store::branch_component(call_id));
-    let legacy_root = root.join("branches").join(sanitize_v2_id(call_id));
-    let branch_root = if branch_root.exists() { branch_root } else { legacy_root };
-    fs::read_dir(&branch_root)
-        .ok()
-        .into_iter()
-        .flat_map(|entries| entries.filter_map(|entry| entry.ok()))
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
-        .filter(|path| {
-            matches!(
-                crate::v2::store_file::classify_store_entry(path, &branch_root),
-                Ok(None)
-            )
-        })
-        .count()
+    let branch_roots = [
+        root.join("branches")
+            .join(crate::v2::result_store::branch_component(call_id)),
+        root.join("branches").join(sanitize_v2_id(call_id)),
+    ];
+    let mut seen_dirs = std::collections::BTreeSet::new();
+    let mut items = std::collections::BTreeSet::new();
+    for branch_root in branch_roots
+        .iter()
+        .filter(|branch_root| seen_dirs.insert((*branch_root).clone()))
+    {
+        for path in fs::read_dir(branch_root)
+            .ok()
+            .into_iter()
+            .flat_map(|entries| entries.filter_map(|entry| entry.ok()))
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .filter(|path| {
+                matches!(
+                    crate::v2::store_file::classify_store_entry(path, branch_root),
+                    Ok(None)
+                )
+            })
+        {
+            let Ok(raw) = crate::v2::store_file::read_store_text(&path) else {
+                continue;
+            };
+            if let Ok(outcome) = serde_json::from_str::<crate::WorkflowV2BranchOutcome>(&raw) {
+                items.insert(outcome.item_id);
+            }
+        }
+    }
+    items.len()
+}
+
+#[cfg(test)]
+mod branch_count_tests {
+    use super::*;
+
+    #[test]
+    fn branch_count_includes_legacy_items_without_counting_duplicates() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let store = crate::WorkflowV2ResultStore::new(root);
+        let call_id = "call/a";
+        let outcome = |item_id: &str| crate::WorkflowV2BranchOutcome {
+            item_id: item_id.into(),
+            role: "agent".into(),
+            status: crate::WorkflowV2Status::Accepted,
+            result: None,
+            error: None,
+            failure_kind: None,
+            item_input_hash: None,
+            completion_evidence: Vec::new(),
+        };
+        store.save_branch_outcome(call_id, &outcome("same")).unwrap();
+        let legacy = root.join("branches/call_a");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("same.json"), serde_json::to_vec(&outcome("same")).unwrap())
+            .unwrap();
+        fs::write(
+            legacy.join("older.json"),
+            serde_json::to_vec(&outcome("older")).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(branch_count_for_call(root, call_id), 2);
+    }
 }
 
 fn sanitize_v2_id(raw: &str) -> String {

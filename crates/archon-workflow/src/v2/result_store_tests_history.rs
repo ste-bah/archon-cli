@@ -140,6 +140,29 @@ fn accepted_then_interrupted_attempt_resume_reuses_and_restores_accepted() {
 }
 
 #[test]
+fn legacy_branch_folder_keeps_the_slot_on_the_resume_reuse_path() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = WorkflowV2ResultStore::new(temp.path());
+    let id = "legacy/branch-call";
+    let slot = interrupted_at(id, 2, "input-y", "paused", T2_END);
+    let older = accepted_at(id, 1, "input-x", T1);
+    store.save_call_record(&slot).expect("save slot");
+    let history = store.call_history_dir(id);
+    std::fs::create_dir_all(&history).unwrap();
+    std::fs::write(history.join("older.json"), serde_json::to_vec(&older).unwrap()).unwrap();
+    let legacy = temp.path().join("branches").join(id.replace('/', "_"));
+    std::fs::create_dir_all(&legacy).unwrap();
+    std::fs::write(legacy.join("item.json"), b"legacy outcome").unwrap();
+
+    let candidate = store
+        .call_record_for_reuse(&call(id), "input-x")
+        .unwrap()
+        .unwrap();
+    assert!(!candidate.from_history, "legacy branch folder keeps slot");
+    assert_eq!(candidate.record, slot);
+}
+
+#[test]
 fn drifted_input_never_reuses_the_last_accepted_record() {
     let temp = tempfile::tempdir().expect("tempdir");
     let store = WorkflowV2ResultStore::new(temp.path());

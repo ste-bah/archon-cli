@@ -4,11 +4,13 @@ mod branch;
 mod restart_run;
 
 use archon_workflow::{
-    LifecycleAction, LifecycleController, WorkflowV2HostCall, WorkflowV2HostMethod,
-    WorkflowV2ResultStore, WorkflowV2Status,
+    LifecycleAction, LifecycleController, WorkflowV2CallRecord, WorkflowV2HostCall,
+    WorkflowV2HostMethod, WorkflowV2Result, WorkflowV2ResultStore, WorkflowV2Status,
 };
 use branch::{CALL, item, outcome};
-use restart_run::{accepted, generated_run, generated_run_with_stages, v2_store};
+use restart_run::{
+    accepted, agent_call, generated_run, generated_run_with_stages, interrupted, v2_store,
+};
 
 #[test]
 fn branch_archive_is_partitioned_by_item_and_migrates_flat_entries_on_save() {
@@ -108,6 +110,57 @@ fn an_older_run_resumes_all_legacy_branch_records_after_a_new_save() {
         Some(current.clone())
     );
     assert!(v2.load_superseded_branch_outcomes().contains(&archived));
+
+    let accepted_call = accepted(CALL, "T-A");
+    v2.save_call_record(&accepted_call).unwrap();
+    let interrupted_call = interrupted(CALL);
+    v2.save_call_record(&interrupted_call).unwrap();
+    let candidate = v2
+        .call_record_for_reuse(&agent_call(CALL), &accepted_call.input_hash)
+        .unwrap()
+        .unwrap();
+    assert!(
+        !candidate.from_history,
+        "legacy layout keeps the slot selected"
+    );
+    assert_eq!(candidate.record, interrupted_call);
+
+    let lineage_id = "remediate-task-1";
+    let mut remediation = agent_call(lineage_id);
+    remediation.options.extra.insert(
+        "remediationContract".into(),
+        serde_json::json!({
+            "version": 1,
+            "stage": "remediate",
+            "taskId": "T-A",
+            "round": 1,
+            "maxRounds": 2,
+            "sourceReduceCallIds": ["review"],
+        }),
+    );
+    let mut lineage_record = WorkflowV2CallRecord::new(
+        "wf",
+        remediation,
+        1,
+        "lineage-input".into(),
+        WorkflowV2Result::accepted("done"),
+        Vec::new(),
+    );
+    let finish = (chrono::Utc::now() + chrono::Duration::seconds(30)).to_rfc3339();
+    lineage_record.started_at = finish.clone();
+    lineage_record.finished_at = finish;
+    let lineage_dir = temp.path().join("branches").join(lineage_id);
+    std::fs::create_dir_all(&lineage_dir).unwrap();
+    std::fs::write(
+        lineage_dir.join("item.json"),
+        serde_json::to_vec(&outcome("T-A", WorkflowV2Status::Accepted, "lineage", true)).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        archon_workflow::v2::branch_cache::replayed_fix(&v2, &lineage_record).is_some(),
+        "legacy branch directory supplies the replay lineage"
+    );
+
     v2.save_branch_outcome(
         CALL,
         &outcome("T-B", WorkflowV2Status::Accepted, "new", true),
@@ -118,6 +171,55 @@ fn an_older_run_resumes_all_legacy_branch_records_after_a_new_save() {
         Some(current)
     );
     assert!(v2.load_superseded_branch_outcomes().contains(&archived));
+}
+
+#[cfg(unix)]
+#[test]
+fn restart_preflights_legacy_archives_before_invalidating_anything() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run) = generated_run_with_stages(&temp, &["call-a"], &["call-a"]);
+    let v2 = v2_store(&store, &run);
+    v2.save_call_record(&accepted("call-a", "T-A")).unwrap();
+    let legacy = v2.root().join("branches/call-a");
+    let archive = legacy.join("superseded");
+    std::fs::create_dir_all(&archive).unwrap();
+    let current = legacy.join("item.json");
+    let archived = archive.join("old.json");
+    std::fs::write(
+        &current,
+        serde_json::to_vec(&outcome("T-A", WorkflowV2Status::Accepted, "one", true)).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        &archived,
+        serde_json::to_vec(&outcome("T-A", WorkflowV2Status::Noop, "two", false)).unwrap(),
+    )
+    .unwrap();
+    let current_before = std::fs::read(&current).unwrap();
+    let archived_before = std::fs::read(&archived).unwrap();
+    std::fs::set_permissions(&archived, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let slot_path = v2.result_path("call-a");
+    let state_path = store.state_path(&run.id);
+    let slot_before = std::fs::read(&slot_path).unwrap();
+    let state_before = std::fs::read(&state_path).unwrap();
+    let epoch_before = v2.restart_epoch().unwrap();
+
+    let result = LifecycleController::new(store.clone())
+        .apply_restart(&run.id, LifecycleAction::RestartStage("call-a".into()));
+
+    std::fs::set_permissions(&archived, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let error = result.expect_err("restart must refuse an unreadable legacy archive");
+    assert!(error.to_string().contains("old.json"), "{error}");
+    assert_eq!(std::fs::read(&slot_path).unwrap(), slot_before);
+    assert_eq!(std::fs::read(&state_path).unwrap(), state_before);
+    assert_eq!(v2.restart_epoch().unwrap(), epoch_before);
+    assert_eq!(std::fs::read(&current).unwrap(), current_before);
+    assert_eq!(std::fs::read(&archived).unwrap(), archived_before);
+    assert_eq!(std::fs::read_dir(&legacy).unwrap().count(), 2);
+    assert!(!legacy.join("revoked").exists());
 }
 
 #[test]
