@@ -177,6 +177,10 @@ async fn an_unreadable_acceptance_call_record_pauses_the_run() {
         .expect_err("an unreadable record pauses the run");
 
     let message = paused_message(&error).unwrap_or_else(|| panic!("{error:#}"));
-    assert!(message.contains("cannot be read"), "{message}");
+    // #292: a non-file record is refused unread and quarantined as damaged.
+    assert!(
+        message.contains("cannot be read") || message.contains("is damaged"),
+        "{message}"
+    );
     assert_eq!(status(&fixture), RunStatus::Paused);
 }
