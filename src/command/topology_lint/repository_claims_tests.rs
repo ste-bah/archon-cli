@@ -192,7 +192,7 @@ fn a_task_set_without_a_record_is_not_checked_and_the_set_gate_names_each_task()
     let (_temp, project, tasks, _tree) = grounded();
     std::fs::write(
         tasks.join("TASK-X-001.md"),
-        "# TASK-X-001\n\n```yaml\ntask_id: TASK-X-001\ntitle: T\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [\"AC-X-001\"]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Plan\n\n`src/existing.rs` does not exist.\n\n## Focused Tests\n\n- `cargo test -p x`\n",
+        "```yaml\ntask_id: TASK-X-001\ntitle: T\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [\"AC-X-001\"]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n# TASK-X-001\n\n## Plan\n\n`src/existing.rs` does not exist.\n\n## Focused Tests\n\n- `cargo test -p x`\n",
     )
     .unwrap();
     let findings = set_findings(&project, &tasks).unwrap();

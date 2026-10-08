@@ -95,41 +95,69 @@ pub(crate) fn unwrap_outer_fence(text: &str) -> Option<&str> {
     (fence_lines % 2 == 0).then_some(interior)
 }
 
-/// Locate an otherwise valid whole-document fence and report any nonblank
-/// text outside it. Pure wrappers retain the historical unwrap behaviour.
-pub(crate) fn outer_fence_with_surrounding_text(text: &str) -> Option<bool> {
-    let lines: Vec<_> = line_spans(text).collect();
-    for first in 0..lines.len() {
-        if !is_outer_opener(lines[first].2) {
-            continue;
+/// `text` without a leading UTF-8 byte order mark and without its leading
+/// blank lines (whitespace only, ended by `\n` or `\r\n`). The rest is the
+/// same bytes.
+pub(crate) fn strip_leading_blank_lines(text: &str) -> &str {
+    let mut rest = text.strip_prefix('\u{feff}').unwrap_or(text);
+    while let Some(end) = rest.find('\n') {
+        if !rest[..end].trim().is_empty() {
+            break;
         }
-        let opener_end = lines[first].1;
-        for last in first + 1..lines.len() {
-            if lines[last].2.trim() != "```" {
-                continue;
-            }
-            let interior = &text[after_line_end(text, opener_end)..lines[last].0];
-            let mut inner = interior.lines().filter(|line| !line.trim().is_empty());
-            if !inner
-                .next()
-                .is_some_and(|line| matches!(line.trim(), "```yaml" | "```yml"))
-            {
-                continue;
-            }
-            let fence_lines = interior.lines().filter(|line| is_fence_line(line)).count();
-            if fence_lines % 2 != 0 {
-                continue;
-            }
-            let before = lines[..first]
-                .iter()
-                .any(|(_, _, line)| !line.trim().is_empty());
-            let after = lines[last + 1..]
-                .iter()
-                .any(|(_, _, line)| !line.trim().is_empty());
-            return Some(before || after);
-        }
+        rest = &rest[end + 1..];
     }
-    None
+    rest
+}
+
+/// The first line of `text` after [`strip_leading_blank_lines`], without its
+/// line terminator.
+pub(crate) fn first_nonblank_line(text: &str) -> &str {
+    let rest = strip_leading_blank_lines(text);
+    let line = rest.split('\n').next().unwrap_or_default();
+    line.strip_suffix('\r').unwrap_or(line)
+}
+
+/// The task file's own frontmatter opener: ```` ```yaml ```` or
+/// ```` ```yml ````, with surrounding whitespace allowed (the parser reads
+/// the line trimmed).
+pub(crate) fn is_frontmatter_opener(line: &str) -> bool {
+    matches!(line.trim(), "```yaml" | "```yml")
+}
+
+/// How a task file's first non-blank line places its frontmatter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskFileShape<'a> {
+    /// The frontmatter opener is the first non-blank line.
+    Frontmatter,
+    /// A pure whole-document fence ([`unwrap_outer_fence`]); the interior.
+    Wrapped(&'a str),
+    /// Anything else: the first non-blank line, which is not the frontmatter.
+    TextBefore(&'a str),
+}
+
+pub(crate) fn task_file_shape(text: &str) -> TaskFileShape<'_> {
+    let first = first_nonblank_line(text);
+    if is_frontmatter_opener(first) {
+        return TaskFileShape::Frontmatter;
+    }
+    match unwrap_outer_fence(strip_leading_blank_lines(text)) {
+        Some(interior) => TaskFileShape::Wrapped(interior),
+        None => TaskFileShape::TextBefore(first),
+    }
+}
+
+/// `line` trimmed and cut to at most 120 characters, for a finding.
+pub(crate) fn quoted_first_line(line: &str) -> String {
+    line.trim().chars().take(120).collect()
+}
+
+/// The one finding for a task file whose first non-blank line is not its
+/// frontmatter.
+pub(crate) fn text_before_frontmatter_finding(first_line: &str) -> String {
+    format!(
+        "the task file starts with text before its frontmatter (first line: \"{}\"); return only the task file, starting with its ```yaml frontmatter block",
+        quoted_first_line(first_line)
+    )
 }
 
 /// A fence opener that can only be wrapping the document: bare, or carrying

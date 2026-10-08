@@ -64,7 +64,7 @@ fn recorded(
 
 fn body(contracts: &str, files_section: &str) -> String {
     format!(
-        "# TASK-X-001\n\n```yaml\ntask_id: TASK-X-001\ntitle: T\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [\"AC-X-001\"]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: {contracts}\n```\n\n## Plan\n\nDo the thing.\n\n## Files Expected to Change\n\n{files_section}\n\n## Focused Tests\n\n- `cargo test -p x`\n"
+        "```yaml\ntask_id: TASK-X-001\ntitle: T\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [\"AC-X-001\"]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: {contracts}\n```\n\n# TASK-X-001\n\n## Plan\n\nDo the thing.\n\n## Files Expected to Change\n\n{files_section}\n\n## Focused Tests\n\n- `cargo test -p x`\n"
     )
 }
 
@@ -303,9 +303,10 @@ fn the_body_lint_and_set_gate_report_each_path_once() {
 /// Issue-61: the reply run wf-7acf8d4a's author returned for TASK-TRADING-002,
 /// wrapped whole in an outer ```` ```markdown ```` fence. Read raw, the shared
 /// toggle inverts at line 1 and every observation under `## Files Expected to
-/// Change` is invisible. The linter reports the single wrapping cause instead
-/// of seven per-deliverable findings. Unwrapped at the gate's entry, the six
-/// observations are found and checked, leaving only the genuinely unobserved path.
+/// Change` is invisible to it. The lint (Issue-367), like the gate's entry,
+/// reads the document inside the fence: the six observations are found and
+/// checked, and the one finding left names the only path the body really did
+/// not observe.
 #[test]
 fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
     const LANDED: &str = super::super::fences::fences_tests::TASK_TRADING_002_FENCED;
@@ -328,7 +329,7 @@ fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
     let task_id = "TASK-TRADING-002";
 
     // Raw: the frontmatter still parses (the parser looks for ```yaml, not
-    // for line 1), but all paths share one actionable wrapper finding.
+    // for line 1), and the shared toggle sees no observation for any path.
     let task = archon_workflow::task_universe::parsing::parse_task_file(&path, LANDED).unwrap();
     for (relative, _) in observed {
         assert_eq!(
@@ -337,9 +338,9 @@ fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
             "{relative} is invisible on the raw reply"
         );
     }
+    // Issue-367: the lint reads a pure wrapper as the document inside it, so
+    // the raw reply gets the same findings as the unwrapped one (below).
     let raw_findings = findings_against(&tree, &project, task_id, LANDED, &task);
-    assert_eq!(raw_findings.len(), 1, "{raw_findings:?}");
-    assert!(raw_findings[0].1.contains("wrapped in an outer code fence"));
 
     // Unwrapped: every observation is found and matches the checkout.
     let unwrapped = super::super::fences::unwrap_outer_fence(LANDED).expect("outer fence removed");
@@ -353,6 +354,7 @@ fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
         );
     }
     let found = findings_against(&tree, &project, task_id, unwrapped, &task);
+    assert_eq!(raw_findings, found);
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(
         found[0].0, "registry-migration-report.json",
@@ -363,4 +365,40 @@ fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
         "{}",
         found[0].1
     );
+}
+
+/// Issue-367: a landed file holding the author's chat line, a blank line and
+/// the whole task file in a ```` ```markdown ```` wrapper. Its frontmatter
+/// still parses, but every observation reads as fenced: one finding names the
+/// cause, never one per deliverable.
+#[test]
+fn a_landed_chat_and_wrapper_file_is_one_finding_not_one_per_deliverable() {
+    let (_temp, project, tasks, tree) = grounded();
+    let inner = body(
+        "[]",
+        "- `src/lib.rs` — exists (1 line)\n- `src/existing.rs` — exists (3 lines)\n- `src/new.rs` — absent",
+    );
+    assert!(findings(&tasks, &project, &tree, &inner).is_empty());
+    let chat = "All facts verified. Authoring the repaired TASK body now.";
+    let landed = format!("{chat}\n\n```markdown\n{inner}```\n");
+    let found = findings(&tasks, &project, &tree, &landed);
+    assert_eq!(
+        found,
+        vec![format!(
+            "TASK-X-001: the task file starts with text before its frontmatter (first line: \"{chat}\"); return only the task file, starting with its ```yaml frontmatter block"
+        )]
+    );
+    // The set gate's per-body findings: the same one, no claim on top.
+    let path = tasks.join("TASK-X-001.md");
+    let set = super::super::repository_claims::body_findings(
+        &tree,
+        &project,
+        "TASK-X-001",
+        &path,
+        &landed,
+    );
+    assert_eq!(set, found);
+    // A pure wrapper is read as the document inside it: no finding at all.
+    let wrapped = format!("```markdown\n{inner}```\n");
+    assert!(findings(&tasks, &project, &tree, &wrapped).is_empty());
 }

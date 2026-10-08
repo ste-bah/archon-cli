@@ -140,7 +140,7 @@ mod redaction_tests;
 
 #[cfg(test)]
 mod tests {
-    const RAW: &str = "# Body\n\n```yaml\ntask_id: TASK-X-001\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts:\n  - kind: first\n    artifact_path: out.json\n    typed_verifier_command: 'true'\n  - kind: second\n    artifact_path: out.json\n    typed_verifier_command: 'true'\n```\n\n## Focused Tests\n- `sh -c 'exit 1'`\n";
+    const RAW: &str = "```yaml\ntask_id: TASK-X-001\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts:\n  - kind: first\n    artifact_path: out.json\n    typed_verifier_command: 'true'\n  - kind: second\n    artifact_path: out.json\n    typed_verifier_command: 'true'\n```\n\n# Body\n\n## Focused Tests\n- `sh -c 'exit 1'`\n";
 
     // Guard: distinct structural slots can have byte-identical diagnostics.
     #[test]
@@ -249,8 +249,13 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            stages("broken task"),
+            stages("```yaml\nbroken task\n```\n"),
             [("unparseable_task_file".to_string(), "parse".to_string())]
+        );
+        // Issue-367: text before the frontmatter is one shape finding.
+        assert_eq!(
+            stages("broken task"),
+            [("invalid_candidate_shape".to_string(), "shape".to_string())]
         );
         let shaped = RAW
             .replace("## Focused Tests\n- `sh -c 'exit 1'`\n", "")

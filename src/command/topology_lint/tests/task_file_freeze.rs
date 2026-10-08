@@ -50,7 +50,7 @@ fn write_task_file_lint_fixture(root: &Path) -> std::path::PathBuf {
     let task_path = tasks.join("TASK-X-010-body.md");
     std::fs::write(
         &task_path,
-        "# Body\n\n```yaml\ntask_id: TASK-X-010\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [AC-X-001]\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n## Acceptance Criteria\n- Output is valid.\n\n## Files Expected to Change\n- `out/report.txt` — absent\n\n## Focused Tests\n- `sh -c 'grep -q Body TASK-X-010-body.md'`\n",
+        "```yaml\ntask_id: TASK-X-010\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [AC-X-001]\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n# Body\n\n## Acceptance Criteria\n- Output is valid.\n\n## Files Expected to Change\n- `out/report.txt` — absent\n\n## Focused Tests\n- `sh -c 'grep -q Body TASK-X-010-body.md'`\n",
     )
     .unwrap();
     let skeleton = TaskSkeleton {
@@ -210,7 +210,7 @@ fn legacy_directory_without_freezes_is_not_reported_as_frozen_or_blocked_on_abse
     std::fs::create_dir_all(&tasks).unwrap();
     std::fs::write(
         tasks.join("TASK-X-010-body.md"),
-        "# Body\n\n```yaml\ntask_id: TASK-X-010\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n## Focused Tests\n- `sh -c 'grep -q Body TASK-X-010-body.md'`\n",
+        "```yaml\ntask_id: TASK-X-010\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n# Body\n\n## Focused Tests\n- `sh -c 'grep -q Body TASK-X-010-body.md'`\n",
     )
     .unwrap();
     let source = LintSource::Tasks(tasks);
@@ -323,7 +323,7 @@ fn unfrozen_task_sets_still_run_structured_edge_policy() {
         std::fs::write(
             tasks.join(format!("{task_id}-body.md")),
             format!(
-                "# Body\n\n```yaml\ntask_id: {task_id}\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: {depends_on}\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n## Focused Tests\n- `sh -c 'exit 1'`\n"
+                "```yaml\ntask_id: {task_id}\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: {depends_on}\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n# Body\n\n## Focused Tests\n- `sh -c 'exit 1'`\n"
             ),
         )
         .unwrap();

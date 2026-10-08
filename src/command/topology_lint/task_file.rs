@@ -100,19 +100,24 @@ pub(super) fn inspect_raw(
     let mut blockers = Vec::new();
     let mut deterministic: BTreeMap<_, VecDeque<_>> = BTreeMap::new();
     let mut inherited_blockers = BTreeSet::new();
-    if super::fences::outer_fence_with_surrounding_text(raw) == Some(false) {
-        let text = format!(
-            "{}: the task file is wrapped in an outer code fence; return only the task file starting with its ```yaml frontmatter",
-            path.display()
-        );
-        block(
-            &mut blockers,
-            &mut deterministic,
-            text,
-            DeterministicDefect::new("task_file_outer_fence", "task_file", "shape"),
-        );
-        return finish(report, blockers, inherited_blockers, deterministic);
-    }
+    // Issue-367: one cause for a file whose first line is not its
+    // frontmatter, never one finding per section the misread hides; a pure
+    // outer fence (Issue-61) is linted as the document inside it.
+    let raw = match super::fences::task_file_shape(raw) {
+        super::fences::TaskFileShape::Frontmatter => raw,
+        super::fences::TaskFileShape::Wrapped(interior) => interior,
+        super::fences::TaskFileShape::TextBefore(first) => {
+            let text = format!(
+                "{}: {}",
+                path.display(),
+                super::fences::text_before_frontmatter_finding(first)
+            );
+            let defect =
+                DeterministicDefect::new("invalid_candidate_shape", "task_file", "frontmatter");
+            block(&mut blockers, &mut deterministic, text, defect);
+            return finish(report, blockers, inherited_blockers, deterministic);
+        }
+    };
     let task = match parse_task_file(&path, raw) {
         Ok(task) => task,
         Err(error) => {
