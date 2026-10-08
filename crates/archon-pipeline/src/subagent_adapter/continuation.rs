@@ -345,9 +345,9 @@ impl SubagentPipelineClient {
         // Workflow sessions only: the coding pipeline reads `tool_uses` for its
         // own verification signals, which this does not change.
         if request.pipeline_type == PipelineType::Workflow {
-            let messages = lease.history.messages();
-            response.tool_uses =
-                super::tool_trace::tool_uses(messages.get(history_start..).unwrap_or_default());
+            response.tool_uses = lease
+                .history
+                .read_since(history_start, super::tool_trace::tool_uses);
         }
         lease.complete()?;
         Ok(response)

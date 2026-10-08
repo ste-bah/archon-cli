@@ -4,10 +4,21 @@
 //! A result that carries no agent report (a raw provider outcome) had
 //! `files_read` and `commands_run` left at their empty defaults, so a session
 //! that made 80 inspection calls was stored as having read nothing. These
-//! records come from the trace, never from the agent. When the trace holds no
-//! call, the result says the fields are not recorded: the host cannot tell
-//! "nothing ran" from "nothing was captured", and an empty list would claim
-//! the first.
+//! records come from the trace, never from the agent.
+//!
+//! When an empty list is the truth: the host's session trace ends with a
+//! summary entry ([`TOOL_TRACE_SUMMARY_NAME`]) that is written only when the
+//! session's history was captured. That history holds every `tool_use`
+//! block the session made, so a summary that counts zero calls proves the
+//! session made none, and empty lists are then stored as fact. With no
+//! summary and no call, the host cannot tell "nothing ran" from "nothing was
+//! captured", so both fields are marked [`NOT_RECORDED`] instead.
+//!
+//! Every string kept here passes the repository's secret redaction first: a
+//! tool input is agent-written and can carry a credential. Only call names,
+//! inputs and the error flag are read; a tool's output is never stored.
+use archon_observability::redaction::redact_text;
+use archon_tools::subagent_session::TOOL_TRACE_SUMMARY_NAME;
 use serde_json::{Value, json};
 
 use super::result::{
@@ -16,8 +27,8 @@ use super::result::{
 };
 use crate::llm_client_port::WorkflowAgentToolUse;
 
-/// The value `toolTrace.filesRead` / `toolTrace.commandsRun` carry when the
-/// trace recorded no tool call.
+/// The value `toolTrace.filesRead` / `toolTrace.commandsRun` carry when no
+/// trace was recorded.
 pub const NOT_RECORDED: &str = "not_recorded";
 
 /// The most characters of a tool input kept in one command record.
@@ -29,37 +40,77 @@ const FILE_READ_TOOLS: &[&str] = &["Read", "NotebookRead"];
 /// Fill `files_read` and `commands_run` from `tool_uses` and stamp
 /// `data.toolTrace` with what the trace held.
 pub fn record_tool_trace(result: &mut WorkflowV2Result, tool_uses: &[WorkflowAgentToolUse]) {
-    for tool in tool_uses {
+    let summary = tool_uses
+        .iter()
+        .rev()
+        .find(|tool| tool.tool_name == TOOL_TRACE_SUMMARY_NAME)
+        .map(|tool| &tool.input);
+    let calls: Vec<_> = tool_uses
+        .iter()
+        .filter(|tool| tool.tool_name != TOOL_TRACE_SUMMARY_NAME)
+        .collect();
+    let mut seen = Vec::new();
+    for tool in &calls {
         let status = status(&tool.output);
         match read_path(tool) {
             Some(path) if status == WorkflowV2CommandStatus::Succeeded => {
-                if !result.files_read.iter().any(|file| file.path == path) {
+                if !seen.contains(&path) {
                     result.files_read.push(WorkflowV2FileRecord {
-                        path,
-                        purpose: Some(format!("{} (host tool trace)", tool.tool_name)),
+                        path: redact_text(&path),
+                        purpose: Some(format!(
+                            "{} (host tool trace)",
+                            redact_text(&tool.tool_name)
+                        )),
                     });
+                    seen.push(path);
                 }
             }
             _ => result.commands_run.push(command_record(tool, status)),
         }
     }
-    let marker = if tool_uses.is_empty() {
-        result.evidence.push(WorkflowV2Evidence::new(
-            WorkflowV2EvidenceKind::Inspection,
-            "the host recorded no tool call for this session: files_read and commands_run are \
-             not recorded, not empty",
-        ));
-        json!({
-            "recorded": false,
-            "filesRead": NOT_RECORDED,
-            "commandsRun": NOT_RECORDED,
-        })
-    } else {
-        json!({
+    let marker = match summary {
+        None if calls.is_empty() => {
+            result.evidence.push(WorkflowV2Evidence::new(
+                WorkflowV2EvidenceKind::Inspection,
+                "the host recorded no tool trace for this session: files_read and commands_run \
+                 are not recorded, not empty",
+            ));
+            json!({
+                "recorded": false,
+                "filesRead": NOT_RECORDED,
+                "commandsRun": NOT_RECORDED,
+            })
+        }
+        None => json!({
             "recorded": true,
-            "source": "host session trace",
-            "toolCalls": tool_uses.len(),
-        })
+            "source": "agent outcome tool uses",
+            "toolCalls": calls.len(),
+            "complete": false,
+        }),
+        Some(summary) => {
+            let count = |key: &str| summary.get(key).and_then(Value::as_u64).unwrap_or(0);
+            let (dropped, cut) = (count("dropped"), count("inputs_truncated"));
+            if dropped > 0 {
+                result.evidence.push(WorkflowV2Evidence::new(
+                    WorkflowV2EvidenceKind::Inspection,
+                    format!(
+                        "the host session trace held {} tool calls and kept the first {}: \
+                         files_read and commands_run cover only those",
+                        count("calls"),
+                        calls.len()
+                    ),
+                ));
+            }
+            json!({
+                "recorded": true,
+                "source": "host session trace",
+                "toolCalls": count("calls"),
+                "kept": calls.len(),
+                "dropped": dropped,
+                "inputsTruncated": cut,
+                "complete": dropped == 0,
+            })
+        }
     };
     if !result.data.is_object() {
         result.data = json!({});
@@ -67,8 +118,10 @@ pub fn record_tool_trace(result: &mut WorkflowV2Result, tool_uses: &[WorkflowAge
     result.data["toolTrace"] = marker;
 }
 
+/// The file a read call names, unless the trace cut its input: a cut path is
+/// not the path that was read.
 fn read_path(tool: &WorkflowAgentToolUse) -> Option<String> {
-    if !FILE_READ_TOOLS.contains(&tool.tool_name.as_str()) {
+    if !FILE_READ_TOOLS.contains(&tool.tool_name.as_str()) || input_truncated(tool) {
         return None;
     }
     ["file_path", "notebook_path", "path"]
@@ -77,6 +130,10 @@ fn read_path(tool: &WorkflowAgentToolUse) -> Option<String> {
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .map(str::to_string)
+}
+
+fn input_truncated(tool: &WorkflowAgentToolUse) -> bool {
+    tool.output.get("input_truncated").and_then(Value::as_bool) == Some(true)
 }
 
 /// A call with a result is a success unless the result was an error; a call
@@ -103,16 +160,23 @@ fn command_record(
         WorkflowV2CommandStatus::Failed => "host tool trace: call returned an error",
         WorkflowV2CommandStatus::Skipped => "host tool trace: no result recorded for this call",
     };
+    let output_summary = if input_truncated(tool) {
+        format!("{output_summary}; input cut by the trace bound")
+    } else {
+        output_summary.to_string()
+    };
     WorkflowV2CommandRecord {
         kind: if tool.tool_name == "Bash" {
             WorkflowV2CommandKind::Other
         } else {
             WorkflowV2CommandKind::Inspect
         },
-        command: clip(&command),
+        // Redacted before it is clipped: a cut could split a credential
+        // into a fragment the redaction no longer recognises.
+        command: clip(&redact_text(&command)),
         status,
         exit_code: None,
-        output_summary: output_summary.to_string(),
+        output_summary,
         pre_existing: false,
     }
 }

@@ -137,9 +137,13 @@ async fn repair_reuses_completed_session_across_spawn_without_second_pipeline_ru
         .iter()
         .map(|t| t.tool_name.as_str())
         .collect();
-    assert_eq!(names, ["Read"]);
+    let summary = archon_tools::subagent_session::TOOL_TRACE_SUMMARY_NAME;
+    assert_eq!(names, ["Read", summary]);
     assert_eq!(first.tool_uses[0].output, json!({"is_error": false}));
+    assert_eq!(first.tool_uses[1].input["calls"], 1);
     req.messages = vec![json!({"role":"user","content":"validation feedback"})];
+    // This repair appended no message, so its history was not captured and
+    // no trace (not even an empty one) is claimed.
     let repair = client.continue_agent(req.clone()).await.unwrap();
     assert!(repair.tool_uses.is_empty(), "{:?}", repair.tool_uses);
     client.run_agent(req).await.unwrap();

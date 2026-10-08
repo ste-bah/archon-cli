@@ -48,6 +48,13 @@ fn tool_use(
 async fn run_raw_author(
     tool_uses: Vec<archon_workflow::WorkflowAgentToolUse>,
 ) -> archon_workflow::WorkflowV2Result {
+    run_raw_author_with_files(tool_uses).await.0
+}
+
+/// The stored author result and the text of every file the run wrote.
+async fn run_raw_author_with_files(
+    tool_uses: Vec<archon_workflow::WorkflowAgentToolUse>,
+) -> (archon_workflow::WorkflowV2Result, String) {
     let temp = tempfile::tempdir().expect("tempdir");
     let spec = test_spec();
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
@@ -85,11 +92,19 @@ async fn run_raw_author(
         .await
         .expect("raw outcome run");
     let records = v2_store.load_call_records().expect("call records");
-    records
+    let result = records
         .into_iter()
         .find(|record| record.call.id.contains("acceptance-author-1"))
         .expect("author record")
-        .result
+        .result;
+    let written = walkdir::WalkDir::new(temp.path())
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (result, written)
 }
 
 #[tokio::test]
@@ -162,4 +177,55 @@ async fn raw_outcome_without_a_tool_trace_says_not_recorded_instead_of_none() {
         "{}",
         result.data
     );
+}
+
+#[tokio::test]
+async fn raw_outcome_with_a_host_trace_of_zero_calls_stores_empty_lists_as_fact() {
+    let summary = archon_workflow::WorkflowAgentToolUse {
+        tool_name: archon_tools::subagent_session::TOOL_TRACE_SUMMARY_NAME.to_string(),
+        input: serde_json::json!({"calls": 0, "kept": 0, "dropped": 0, "inputs_truncated": 0}),
+        output: serde_json::Value::Null,
+    };
+    let result = run_raw_author(vec![summary]).await;
+
+    assert!(result.files_read.is_empty());
+    assert!(result.commands_run.is_empty());
+    let trace = &result.data["toolTrace"];
+    assert_eq!(trace["recorded"], true, "{trace}");
+    assert_eq!(trace["toolCalls"], 0, "{trace}");
+    assert!(!trace.to_string().contains("not_recorded"), "{trace}");
+}
+
+#[tokio::test]
+async fn raw_outcome_trace_never_persists_a_credential_from_a_tool_input() {
+    // Token-shaped values built at run time, so no literal sits in the source.
+    let github = format!("ghp_{}", "Q7w8E9r0T1".repeat(4).get(..36).unwrap());
+    let anthropic = format!("sk-ant-api03-{}", "Yy8".repeat(10));
+    let (result, written) = run_raw_author_with_files(vec![
+        tool_use(
+            "Grep",
+            serde_json::json!({"pattern": github.clone()}),
+            false,
+        ),
+        tool_use(
+            "Bash",
+            serde_json::json!({"command": format!("deploy --key {anthropic}")}),
+            false,
+        ),
+    ])
+    .await;
+
+    assert_eq!(result.commands_run.len(), 2, "{result:?}");
+    assert!(written.contains("toolTrace"), "the run wrote its result");
+    for secret in [&github, &anthropic] {
+        assert!(
+            !written.contains(secret.as_str()),
+            "a run file holds {secret}"
+        );
+        assert!(
+            !serde_json::to_string(&result)
+                .unwrap()
+                .contains(secret.as_str())
+        );
+    }
 }
