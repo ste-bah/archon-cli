@@ -473,9 +473,15 @@ async fn an_unbindable_body_candidate_is_refused_instead_of_ending_the_run() {
         .expect("a refusal envelope")
         .policy_findings;
     assert_eq!(findings.len(), 1);
+    // It names TASK-X-010, so the refusal is that subject's parse cause.
     assert_eq!(
         findings[0].remediation_scope,
-        archon_workflow::RemediationScope::CandidateArtifact
+        archon_workflow::RemediationScope::Body
     );
-    assert!(findings[0].text.contains("frozen subjects"), "{findings:?}");
+    assert!(
+        findings[0]
+            .text
+            .contains("the ```yaml frontmatter block is not closed"),
+        "{findings:?}"
+    );
 }

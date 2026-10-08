@@ -88,9 +88,11 @@ async fn the_live_shape_refusal_reaches_the_author_as_a_retryable_body_finding()
         run_root,
         Arc::new(ShapeRefusingChild),
     );
+    // A wrapper after chat that is not the answer's last line is not a pure
+    // outer fence, so the host cannot say which bytes are the task file.
     let chat = "All facts verified. Authoring the repaired TASK body now.";
     let answer = format!(
-        "{chat}\n\n```markdown\n```yaml\ntask_id: TASK-X-010\ntitle: Candidate\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Plan\n\nText.\n```\n"
+        "{chat}\n\n```markdown\n```yaml\ntask_id: TASK-X-010\ntitle: Candidate\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Plan\n\nText.\n```\nDone!\n"
     );
     let request = HostCommandRequest::new("land-task-body", Some(answer)).unwrap();
 

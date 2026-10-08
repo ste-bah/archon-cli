@@ -1,10 +1,13 @@
 //! Binding a candidate TASK body to the one frozen subject it belongs to.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use archon_workflow::{HostCommandRequest, WorkflowError, WorkflowResult};
+use archon_workflow::{HostCommandRequest, HostCommandResult, WorkflowError, WorkflowResult};
 
 use super::workflow_host_command_catalog::HostCommandResolutionContext;
+use super::workflow_host_command_decision::{
+    candidate_refusal_envelope, shape_refusal_evaluation, unpublished,
+};
 use super::workflow_host_command_postcondition::read_acceptance_pin;
 
 pub(crate) fn unbound_context(
@@ -14,6 +17,41 @@ pub(crate) fn unbound_context(
     let mut context = base.clone();
     context.run_staging_root = run_root.join("host-command-staging");
     context
+}
+
+/// Why a candidate body binds no single frozen subject.
+#[derive(Debug)]
+pub(crate) enum Unbound {
+    /// It names a frozen subject by its `task_id` line and does not parse as
+    /// that subject's file: the parse cause, refused as a body shape.
+    Unparsed(UnparsedSubject),
+    /// It binds zero (naming none) or several subjects.
+    Binding(String),
+}
+
+impl Unbound {
+    fn reason(&self) -> &str {
+        match self {
+            Self::Unparsed(subject) => &subject.reason,
+            Self::Binding(reason) => reason,
+        }
+    }
+
+    /// The refusal the author gets, as an unpublished outcome.
+    pub(crate) fn refused(self, command_id: &str) -> WorkflowResult<HostCommandResult> {
+        let envelope = match self {
+            Self::Unparsed(subject) => subject.envelope()?,
+            Self::Binding(reason) => candidate_refusal_envelope(command_id, &reason),
+        };
+        Ok(unpublished(
+            Some(0),
+            String::new(),
+            String::new(),
+            (0, 0),
+            envelope,
+            "candidate refused before staging",
+        ))
+    }
 }
 
 /// Which frozen subject a candidate body belongs to.
@@ -26,11 +64,22 @@ pub(crate) fn context_for_request(
     run_root: &Path,
     request: &HostCommandRequest,
 ) -> WorkflowResult<HostCommandResolutionContext> {
+    bind_request(base, run_root, request)?
+        .map_err(|unbound| WorkflowError::SpecInvalid(unbound.reason().to_string()))
+}
+
+/// [`context_for_request`], keeping why a candidate is unbound, so `execute`
+/// can refuse it with the cause the author can act on.
+pub(crate) fn bind_request(
+    base: &HostCommandResolutionContext,
+    run_root: &Path,
+    request: &HostCommandRequest,
+) -> WorkflowResult<Result<HostCommandResolutionContext, Unbound>> {
     let mut context = unbound_context(base, run_root);
     if request.command_id != "land-task-body"
         || (context.frozen_task_id.is_some() && context.frozen_task_file.is_some())
     {
-        return Ok(context);
+        return Ok(Ok(context));
     }
     let candidate = request.stdin.as_deref().ok_or_else(|| {
         WorkflowError::SpecInvalid("land-task-body requires candidate stdin".to_string())
@@ -50,14 +99,86 @@ pub(crate) fn context_for_request(
             matches.push((frozen.task_id.clone(), path));
         }
     }
+    if matches.is_empty()
+        && let Some(subject) = named_subject_refusal(&skeleton.tasks, &context.task_root, candidate)
+    {
+        return Ok(Err(Unbound::Unparsed(subject)));
+    }
     if matches.len() != 1 {
-        return Err(WorkflowError::SpecInvalid(format!(
+        return Ok(Err(Unbound::Binding(format!(
             "candidate TASK body binds {} frozen subjects; return exactly one body preserving a frozen task_id and file_name",
             matches.len()
-        )));
+        ))));
     }
     let (task_id, task_file) = matches.pop().expect("one candidate subject");
     context.frozen_task_id = Some(task_id);
     context.frozen_task_file = Some(task_file);
-    Ok(context)
+    Ok(Ok(context))
+}
+
+/// A candidate that binds no frozen subject but names one by its `task_id`
+/// line: that subject's file, and why the candidate does not parse as it.
+#[derive(Debug)]
+pub(crate) struct UnparsedSubject {
+    pub(crate) task_file: PathBuf,
+    pub(crate) reason: String,
+}
+
+impl UnparsedSubject {
+    /// The shape refusal the child would stage, built by the host: one
+    /// `Body` finding with the parse cause.
+    fn envelope(self) -> WorkflowResult<archon_workflow::GateEnvelopeV1> {
+        shape_refusal_evaluation(&self.task_file, self.reason)
+            .into_envelope()
+            .map_err(|error| WorkflowError::StateCorrupt(error.to_string()))
+    }
+}
+
+/// The subject `candidate` names by its first `task_id:` line, when it is a
+/// frozen one the candidate fails to parse as.
+fn named_subject_refusal(
+    tasks: &[archon_workflow::task_skeleton::FrozenTask],
+    task_root: &Path,
+    candidate: &str,
+) -> Option<UnparsedSubject> {
+    let named = candidate
+        .lines()
+        .find_map(|line| line.trim_start().strip_prefix("task_id:"))?
+        .trim()
+        .trim_matches(|ch| ch == '"' || ch == '\'');
+    let frozen = tasks.iter().find(|frozen| frozen.task_id == named)?;
+    let task_file = task_root.join(&frozen.file_name);
+    let error =
+        archon_workflow::task_universe::parsing::parse_task_file(&task_file, candidate).err()?;
+    let cause = unclosed_frontmatter(candidate).unwrap_or_else(|| match error {
+        WorkflowError::SpecInvalid(text) => text,
+        other => other.to_string(),
+    });
+    Some(UnparsedSubject {
+        reason: format!(
+            "candidate TASK body for {named} does not parse: {cause}; return the whole task file"
+        ),
+        task_file,
+    })
+}
+
+/// The cause for a candidate whose ```` ```yaml ```` frontmatter opens and
+/// never closes (the parser reads that as no block at all): where the answer
+/// ends, and its last 40 characters.
+fn unclosed_frontmatter(candidate: &str) -> Option<String> {
+    let mut lines = candidate.lines().map(str::trim);
+    lines.find(|line| matches!(*line, "```yaml" | "```yml"))?;
+    if lines.any(|line| line == "```" || line == "---") {
+        return None;
+    }
+    let ends = candidate.chars().count();
+    let tail: String = candidate
+        .chars()
+        .skip(ends.saturating_sub(40))
+        .collect::<String>()
+        .replace('\r', "\\r")
+        .replace('\n', "\\n");
+    Some(format!(
+        "the ```yaml frontmatter block is not closed; the answer ends at char {ends} with '{tail}'"
+    ))
 }

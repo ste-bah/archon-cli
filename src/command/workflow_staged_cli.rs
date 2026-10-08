@@ -191,7 +191,7 @@ pub(super) async fn handle_staged_task_file_lint(
     // frontmatter, or the inside of one outer fence; any other answer has
     // text before the task file and goes back to the author as one finding,
     // before any lint reads it and before anything is staged.
-    let (candidate, unwrapped) = match candidate::normalize_task_candidate(candidate) {
+    let normalized = match candidate::normalize_task_candidate(candidate) {
         Ok(candidate) => candidate,
         Err(reason) => {
             let manifest = candidate::stage_shape_refusal(
@@ -205,6 +205,11 @@ pub(super) async fn handle_staged_task_file_lint(
             return Ok(());
         }
     };
+    let candidate::TaskCandidate {
+        bytes: candidate,
+        unwrapped,
+        packaging,
+    } = normalized;
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -212,7 +217,9 @@ pub(super) async fn handle_staged_task_file_lint(
         .to_string();
     let mut evaluation =
         crate::command::topology_lint::evaluate_task_file_candidate(cwd, &path, &candidate, mode)?;
-    if unwrapped {
+    if let Some(packaging) = &packaging {
+        evaluation.report.push_str(&packaging.report());
+    } else if unwrapped {
         evaluation.report.push_str(
             "\n## candidate normalisation\n  the reply was wrapped in one outer code fence; the fence pair was removed before lint and the document inside it is the candidate\n",
         );
@@ -317,27 +324,31 @@ mod tests {
     #[test]
     fn the_body_gate_unwraps_an_outer_fence_before_lint_and_staging() {
         let wrapped = b"```markdown\n```yaml\ntask_id: TASK-WS-001\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n```\n".to_vec();
-        let (bytes, unwrapped) = candidate::normalize_task_candidate(wrapped).unwrap();
-        assert!(unwrapped);
+        let landed = candidate::normalize_task_candidate(wrapped).unwrap();
+        assert!(landed.unwrapped);
         assert_eq!(
-            bytes,
+            landed.bytes,
             b"```yaml\ntask_id: TASK-WS-001\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n"
                 .to_vec()
         );
         let plain = b"```yaml\ntask_id: TASK-WS-001\n```\n\n# TASK-WS-001\n".to_vec();
-        assert_eq!(
-            candidate::normalize_task_candidate(plain.clone()).unwrap(),
-            (plain, false)
-        );
-        // Issue-367: a heading before the frontmatter is text before the task
-        // file, refused rather than landed.
+        let landed = candidate::normalize_task_candidate(plain.clone()).unwrap();
+        assert_eq!((landed.bytes, landed.unwrapped), (plain, false));
+        // A heading before the frontmatter is packaging the host discards,
+        // recorded in the report; the task file after it lands unchanged.
         let headed = b"# TASK-WS-001\n\n```yaml\ntask_id: TASK-WS-001\n```\n".to_vec();
+        let landed = candidate::normalize_task_candidate(headed).unwrap();
+        assert_eq!(
+            landed.bytes,
+            b"```yaml\ntask_id: TASK-WS-001\n```\n".to_vec()
+        );
+        assert_eq!(landed.packaging.map(|p| p.lines), Some(2));
+        // No frontmatter with a task_id at all is still refused.
+        let headed = b"# TASK-WS-001\n\nno task file\n".to_vec();
         assert!(candidate::normalize_task_candidate(headed).is_err());
         let not_utf8 = vec![0x60, 0x60, 0x60, 0x0a, 0xff, 0xfe];
-        assert_eq!(
-            candidate::normalize_task_candidate(not_utf8.clone()).unwrap(),
-            (not_utf8, false)
-        );
+        let landed = candidate::normalize_task_candidate(not_utf8.clone()).unwrap();
+        assert_eq!((landed.bytes, landed.unwrapped), (not_utf8, false));
     }
 
     /// Issue-44: the body gate must refuse, not pass, when the critic cannot

@@ -1,5 +1,5 @@
 //! Issue-367: which bytes of a body author's answer land as the task file.
-use super::candidate::normalize_task_candidate;
+use super::candidate::{TaskCandidate, normalize_task_candidate};
 
 const FRONTMATTER: &str = "```yaml\ntask_id: TASK-X-001\ntitle: T\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n";
 
@@ -14,7 +14,9 @@ fn valid_body() -> String {
 
 fn refusal(candidate: &str) -> String {
     match normalize_task_candidate(candidate.as_bytes().to_vec()) {
-        Ok((bytes, unwrapped)) => panic!(
+        Ok(TaskCandidate {
+            bytes, unwrapped, ..
+        }) => panic!(
             "landed ({unwrapped}): {:?}",
             String::from_utf8_lossy(&bytes)
         ),
@@ -23,10 +25,16 @@ fn refusal(candidate: &str) -> String {
 }
 
 fn landed(candidate: &[u8]) -> (Vec<u8>, bool) {
-    let (bytes, unwrapped) = normalize_task_candidate(candidate.to_vec())
+    let landed = landed_with_packaging(candidate);
+    assert_eq!(landed.packaging, None, "no packaging expected");
+    (landed.bytes, landed.unwrapped)
+}
+
+fn landed_with_packaging(candidate: &[u8]) -> TaskCandidate {
+    let landed = normalize_task_candidate(candidate.to_vec())
         .unwrap_or_else(|reason| panic!("refused: {reason}"));
-    assert!(opens_with_frontmatter(&bytes), "{bytes:?}");
-    (bytes, unwrapped)
+    assert!(opens_with_frontmatter(&landed.bytes), "{:?}", landed.bytes);
+    landed
 }
 
 /// The landed-file shape: the first non-blank line (after a BOM) is the
@@ -38,9 +46,6 @@ fn opens_with_frontmatter(bytes: &[u8]) -> bool {
         .find(|line| !line.trim().is_empty())
         .is_some_and(|line| matches!(line.trim(), "```yaml" | "```yml"))
 }
-
-const ONE_FINDING: &str =
-    "; return only the task file, starting with its ```yaml frontmatter block";
 
 #[test]
 fn a_valid_body_with_bash_yaml_and_plain_blocks_lands_byte_identical() {
@@ -92,33 +97,10 @@ fn a_pure_markdown_wrapper_with_an_inner_plain_block_is_stripped() {
     }
 }
 
-/// The #367 shape: a chat line, a blank line, then the whole task file in a
-/// ```` ```markdown ```` wrapper.
-#[test]
-fn the_live_chat_line_and_markdown_wrapper_is_refused_with_one_finding() {
-    let chat = "All facts verified. Authoring the repaired TASK body now.";
-    let answer = format!("{chat}\n\n```markdown\n{}```\n", valid_body());
-    assert_eq!(
-        refusal(&answer),
-        format!("the answer has text before the task file (first line: \"{chat}\"){ONE_FINDING}")
-    );
-}
-
-#[test]
-fn a_chat_line_before_a_bare_frontmatter_body_is_refused() {
-    let answer = format!("Here is the task file:\n{}", valid_body());
-    assert_eq!(
-        refusal(&answer),
-        format!(
-            "the answer has text before the task file (first line: \"Here is the task file:\"){ONE_FINDING}"
-        )
-    );
-}
-
 #[test]
 fn a_long_first_line_is_quoted_at_most_120_characters() {
     let long = "é".repeat(200);
-    let reason = refusal(&format!("{long}\n{}", valid_body()));
+    let reason = refusal(&format!("{long}\nno task file here\n"));
     assert!(
         reason.contains(&format!("\"{}\"", "é".repeat(120))),
         "{reason}"
@@ -137,10 +119,9 @@ fn a_wrapper_with_text_after_it_or_unpaired_fences_is_refused() {
 #[test]
 fn bytes_that_are_not_utf8_pass_through_for_the_lint_to_report() {
     let bytes = vec![0x60, 0x60, 0x60, 0x0a, 0xff, 0xfe];
-    assert_eq!(
-        normalize_task_candidate(bytes.clone()).unwrap(),
-        (bytes, false)
-    );
+    let passed = normalize_task_candidate(bytes.clone()).unwrap();
+    assert_eq!((passed.bytes, passed.unwrapped), (bytes, false));
+    assert_eq!(passed.packaging, None);
 }
 
 #[test]
@@ -157,3 +138,6 @@ fn the_landed_shape_check_needs_the_frontmatter_first() {
         "{reason}"
     );
 }
+
+#[path = "workflow_staged_packaging_tests.rs"]
+mod packaging;

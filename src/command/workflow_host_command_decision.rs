@@ -122,6 +122,29 @@ pub(crate) fn candidate_refusal_envelope(command_id: &str, reason: &str) -> Gate
     }
 }
 
+/// The body gate's shape refusal: one `Body` finding on the task file, coded
+/// `invalid_candidate_shape`, so the script measures it as a refused attempt
+/// at the shape stage. The staged child and the host's binding both use it.
+pub(crate) fn shape_refusal_evaluation(
+    path: &std::path::Path,
+    reason: String,
+) -> super::workflow_gate::GateEvaluation {
+    use super::workflow_gate::{GateEvaluation, GateFinding, GateId};
+    let finding = GateFinding::new(
+        GateId::WorkflowLintTaskFile,
+        reason,
+        format!("task file {}", path.display()),
+        Some(path.to_path_buf()),
+        RemediationScope::Body,
+    )
+    .with_defect(archon_workflow::defect::DeterministicDefect::new(
+        "invalid_candidate_shape",
+        "task_file",
+        "candidate",
+    ));
+    GateEvaluation::new("candidate task file shape refused", vec![finding])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

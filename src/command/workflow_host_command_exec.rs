@@ -241,8 +241,14 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         // artifact being wrong, not the host failing: it belongs in the findings
         // channel that gives the author its next attempt, exactly like a
         // candidate the gate refuses.
-        let context = match self.context_for_request(&request) {
-            Ok(context) => context,
+        let bound = super::workflow_host_command_binding::bind_request(
+            &self.context,
+            &self.run_root,
+            &request,
+        );
+        let context = match bound {
+            Ok(Ok(context)) => context,
+            Ok(Err(unbound)) => return unbound.refused(&request.command_id),
             Err(WorkflowError::SpecInvalid(reason)) => {
                 return Ok(unpublished(
                     Some(0),
