@@ -236,6 +236,50 @@ fn malformed_replies_are_errors_not_passes() {
     }
 }
 
+/// A reply refused for a stray key or a missing field says where: the
+/// critic is shown the error, so the path is what lets it fix one verdict.
+/// The prompt lists the exact keys a verdict has, and they are the keys the
+/// verdict type serializes.
+#[test]
+fn prompt_lists_the_exact_verdict_keys_and_parse_errors_name_their_path() {
+    let keys = "obligation_id, necessarily_true, weakest_task_id, reason, quoted_task_text";
+    let prompt = fidelity_prompt(&obligations(), &tasks(), &SkeletonSummary::absent());
+    assert!(
+        prompt.contains(&format!(
+            "Each verdict has exactly these keys and no others: {keys}."
+        )),
+        "{prompt}"
+    );
+    let verdict = FidelityVerdict {
+        obligation_id: String::new(),
+        necessarily_true: true,
+        weakest_task_id: String::new(),
+        reason: String::new(),
+        quoted_task_text: String::new(),
+    };
+    let serialized: std::collections::BTreeSet<String> = serde_json::to_value(&verdict)
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    let listed: std::collections::BTreeSet<String> = keys.split(", ").map(str::to_string).collect();
+    assert_eq!(serialized, listed);
+    let stray = r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"reason":"r"},{"obligation_id":"DONE-9","necessarily_true":true,"reason":"r","weakest_task_text":""}]}"#;
+    let error = parse_fidelity_response(stray, &obligations(), &tasks()).expect_err("stray key");
+    assert!(
+        error.contains("verdicts[1]") && error.contains("unknown field `weakest_task_text`"),
+        "{error}"
+    );
+    let missing = r#"{"verdicts":[{"obligation_id":"AC-WS-003","reason":"r"},{"obligation_id":"DONE-9","necessarily_true":true,"reason":"r"}]}"#;
+    let error = parse_fidelity_response(missing, &obligations(), &tasks()).expect_err("missing");
+    assert!(
+        error.contains("verdicts[0]") && error.contains("missing field `necessarily_true`"),
+        "{error}"
+    );
+}
+
 /// Issue-42: a verbose critic is cut, not refused. Live, two true verdicts
 /// failed the gate operationally because one reason ran past 400 characters.
 #[test]

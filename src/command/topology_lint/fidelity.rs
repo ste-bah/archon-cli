@@ -73,7 +73,7 @@ use archon_workflow::task_universe::parsing::parse_task_file;
 use super::LintSource;
 use super::fidelity_critic::CRITIC_MODEL_ALIAS;
 #[cfg(test)]
-use super::fidelity_critic::FIDELITY_ATTEMPTS;
+use super::fidelity_critic::FIDELITY_NO_PROGRESS_WINDOW;
 use super::fidelity_resume::{LintIncomplete, Resolved, resolve};
 use super::fidelity_store::{StoreIdentity, VerdictStore, store_dir};
 use crate::command::topology_task_graph::task_requirement_claims_tolerant;

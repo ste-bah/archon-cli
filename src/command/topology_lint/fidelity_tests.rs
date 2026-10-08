@@ -19,12 +19,16 @@ use crate::command::topology_lint::fidelity_waivers::{
 mod body;
 #[path = "fidelity_chain_tests.rs"]
 mod chain;
+#[path = "fidelity_reask_tests.rs"]
+mod reask;
 #[path = "fidelity_skeleton_tests.rs"]
 mod skeleton;
 
 struct FakeCritic {
     replies: Mutex<Vec<Result<String, String>>>,
     prompts: Mutex<Vec<String>>,
+    /// Every request's whole message list, in call order.
+    conversations: Mutex<Vec<Vec<serde_json::Value>>>,
 }
 
 impl FakeCritic {
@@ -32,6 +36,7 @@ impl FakeCritic {
         Arc::new(Self {
             replies: Mutex::new(replies),
             prompts: Mutex::new(Vec::new()),
+            conversations: Mutex::new(Vec::new()),
         })
     }
     fn calls(&self) -> usize {
@@ -78,6 +83,7 @@ impl WorkflowLlmClient for FakeCritic {
         assert_eq!(temperature, 0.0);
         let prompt = messages[0]["content"].as_str().unwrap().to_string();
         self.prompts.lock().unwrap().push(prompt);
+        self.conversations.lock().unwrap().push(messages);
         let mut replies = self.replies.lock().unwrap();
         assert!(!replies.is_empty(), "critic asked more often than scripted");
         match replies.remove(0) {
@@ -218,11 +224,12 @@ async fn a_true_verdict_adds_no_finding_and_is_served_from_cache_next_time() {
 }
 
 #[tokio::test]
-async fn a_malformed_reply_is_re_asked_once_then_operational_never_a_pass() {
+async fn a_malformed_reply_is_re_asked_until_no_progress_then_operational_never_a_pass() {
     let temp = corpus();
-    let critic = FakeCritic::new(vec![Ok("not json".into()), Ok(r#"{"verdicts":[]}"#.into())]);
+    let attempts = 1 + FIDELITY_NO_PROGRESS_WINDOW;
+    let critic = FakeCritic::new(vec![Ok("not json".into()); attempts]);
     let evaluation = evaluate(temp.path(), Ok(critic.clone())).await;
-    assert_eq!(critic.calls(), FIDELITY_ATTEMPTS);
+    assert_eq!(critic.calls(), attempts);
     let error = evaluation
         .operational_error()
         .expect("operational, not a pass");
@@ -230,7 +237,10 @@ async fn a_malformed_reply_is_re_asked_once_then_operational_never_a_pass() {
         error.contains("obligation fidelity audit failed operationally"),
         "{error}"
     );
-    assert!(error.contains("after 2 attempts"), "{error}");
+    assert!(
+        error.contains(&format!("after {attempts} attempts")),
+        "{error}"
+    );
     let cache = temp.path().join(".archon/lint-cache/fidelity");
     let entries: Vec<_> = std::fs::read_dir(&cache)
         .expect("cache dir")
@@ -243,8 +253,8 @@ async fn a_malformed_reply_is_re_asked_once_then_operational_never_a_pass() {
     );
     assert_eq!(
         std::fs::read_dir(cache.join("rejected")).unwrap().count(),
-        FIDELITY_ATTEMPTS,
-        "both raw replies are kept for diagnosis"
+        attempts,
+        "every raw reply is kept for diagnosis"
     );
     assert!(error.contains("reply kept at"), "{error}");
 

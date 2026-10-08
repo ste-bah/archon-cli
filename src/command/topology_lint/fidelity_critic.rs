@@ -4,13 +4,14 @@
 //! answers; this file asks and bounds. Verdicts are remembered by
 //! `fidelity_store.rs`.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use archon_workflow::fidelity_audit::{
-    ClaimedObligation, ClaimingTask, FidelityVerdict, SkeletonSummary, fidelity_prompt,
-    parse_fidelity_response,
+    ClaimedObligation, ClaimingTask, DOCUMENT_KEYS, FidelityVerdict, SkeletonSummary, VERDICT_KEYS,
+    fidelity_prompt, parse_fidelity_response,
 };
 use archon_workflow::llm_client_port::{WorkflowAgentOutcome, WorkflowLlmClient};
 
@@ -20,9 +21,15 @@ use crate::command::workflow_freeze_budget::FreezeBudget;
 /// asked to find the sentence that lets a claim go hollow; that is the
 /// strongest tier the provider offers, whatever it resolves to.
 pub(super) const CRITIC_MODEL_ALIAS: &str = "opus";
-/// One re-ask on a malformed reply, then the failure is operational. A
-/// formatting slip often corrects on a second pass; a third pass is spend.
-pub(super) const FIDELITY_ATTEMPTS: usize = 2;
+/// Rejected replies in a row that make no progress before the failure is
+/// operational. A reply makes no progress when it is byte-identical to an
+/// earlier reply, or is refused with the same error as an earlier reply:
+/// shown its error, the critic did not move. A reply refused for a new
+/// error is progress and resets the window, so the number of attempts has no
+/// fixed total — only this window bounds it. Observed live: one stray empty
+/// key in a complete document, re-sent unchanged at temperature 0.0, came
+/// back byte-identical and ended a fixed two-attempt loop.
+pub(super) const FIDELITY_NO_PROGRESS_WINDOW: usize = 3;
 const CRITIC_TEMPERATURE: f64 = 0.0;
 const FIDELITY_CALL_TIMEOUT_SECS: u64 =
     crate::command::workflow_task_set::judge::JUDGE_TIMEOUT_SECS;
@@ -50,9 +57,13 @@ pub(super) enum Asked {
     Stopped,
 }
 
-/// Ask once, re-ask once on a malformed reply, and keep every rejected reply
-/// under `rejected/` in the cache directory — the operator who is told "no
-/// usable verdict" needs to see what the critic actually said.
+/// Ask, and answer each rejected reply in the same conversation: the reply
+/// goes back as the critic's turn, then a turn that quotes the exact parse
+/// error and lists the allowed keys. Ask again while the replies make
+/// progress; after [`FIDELITY_NO_PROGRESS_WINDOW`] replies in a row with no
+/// progress the failure is operational. Every rejected reply is kept under
+/// `rejected/` in the cache directory — the operator who is told "no usable
+/// verdict" needs to see what the critic actually said.
 ///
 /// Each stream gets the complete no-progress window. A stalled call is
 /// `Asked::Stopped`, never a verdict or a candidate defect.
@@ -66,14 +77,19 @@ pub(super) async fn ask(
     _budget: &FreezeBudget,
 ) -> Result<Asked> {
     let request = request(obligations, tasks, skeleton);
-    let mut last = String::from("never asked");
-    for attempt in 1..=FIDELITY_ATTEMPTS {
+    let mut messages = request.messages.clone();
+    let mut replies = BTreeSet::new();
+    let mut errors = BTreeSet::new();
+    let mut stalled = 0;
+    let mut attempt = 0;
+    let last = loop {
+        attempt += 1;
         let progress = archon_shell::progress::Progress::new(true);
         let outcome = match progress
             .bound(
                 Duration::from_secs(FIDELITY_CALL_TIMEOUT_SECS),
                 client.send_message_with_progress(
-                    request.messages.clone(),
+                    messages.clone(),
                     request.system.clone(),
                     request.tools.to_vec(),
                     &request.model,
@@ -104,17 +120,68 @@ pub(super) async fn ask(
                     .and_then(|()| std::fs::write(&path, &outcome.content))
                     .map(|()| path.display().to_string())
                     .unwrap_or_else(|error| format!("not kept: {error}"));
-                last = format!("{error} (reply kept at {kept})");
+                // Both sets are updated: `|` does not short-circuit.
+                let repeated = !replies.insert(outcome.content.clone())
+                    | !errors.insert(error_identity(&error));
+                stalled = if repeated { stalled + 1 } else { 0 };
+                if stalled >= FIDELITY_NO_PROGRESS_WINDOW {
+                    break format!("{error} (reply kept at {kept})");
+                }
+                // A provider may refuse an empty assistant turn; say what it was.
+                let said = if outcome.content.trim().is_empty() {
+                    "(an empty reply)".to_string()
+                } else {
+                    outcome.content
+                };
+                messages.push(serde_json::json!({"role": "assistant", "content": said}));
+                messages.push(serde_json::json!({"role": "user", "content": reask(&error)}));
             }
         }
-    }
+    };
     Err(anyhow!(
-        "fidelity critic returned no usable verdict for {:?} after {FIDELITY_ATTEMPTS} attempts: {last}",
+        "fidelity critic returned no usable verdict for {:?} after {attempt} attempts, the last {FIDELITY_NO_PROGRESS_WINDOW} without progress: {last}",
         obligations
             .iter()
             .map(|o| o.id.as_str())
             .collect::<Vec<_>>()
     ))
+}
+
+/// The turn that answers a rejected reply: its exact error and the keys the
+/// document and each verdict may have.
+fn reask(error: &str) -> String {
+    format!(
+        "Your reply above was refused, and no verdict was taken from it: {error}\n\nReply again with the whole JSON document and nothing else; every rule of the first message still applies. The document has exactly one key: {}. Each verdict has exactly these keys and no others: {}.",
+        DOCUMENT_KEYS.join(", "),
+        VERDICT_KEYS.join(", "),
+    )
+}
+
+/// An error without its position in the reply (` at line N column M`): the
+/// same defect moved by a few bytes is the same error, not progress.
+fn error_identity(error: &str) -> String {
+    const AT_LINE: &str = " at line ";
+    let digits = |text: &str| {
+        text.find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(text.len())
+    };
+    let mut identity = String::with_capacity(error.len());
+    let mut rest = error;
+    while let Some(at) = rest.find(AT_LINE) {
+        identity.push_str(&rest[..at]);
+        let tail = &rest[at + AT_LINE.len()..];
+        let line = digits(tail);
+        let column = tail[line..].strip_prefix(" column ").filter(|_| line > 0);
+        match column.map(|column| (column, digits(column))) {
+            Some((column, width)) if width > 0 => rest = &column[width..],
+            _ => {
+                identity.push_str(AT_LINE);
+                rest = tail;
+            }
+        }
+    }
+    identity.push_str(rest);
+    identity
 }
 
 fn require_complete(outcome: &WorkflowAgentOutcome) -> Result<()> {
