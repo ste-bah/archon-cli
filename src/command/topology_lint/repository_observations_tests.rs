@@ -157,6 +157,118 @@ fn a_deliverable_with_no_observation_is_a_blocking_finding_naming_the_path() {
 }
 
 #[test]
+fn a_description_basename_is_not_a_deliverable_path() {
+    let (_temp, project, tasks, tree) = grounded();
+    let raw = body(
+        "[]",
+        "- `src/lib.rs` — exists (1 line)\n  Pine parity tests are wired via `pine.rs`.",
+    );
+    let found = findings(&tasks, &project, &tree, &raw);
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn parse_task_file_keeps_wrapped_files_expected_items_space_joined() {
+    let path = std::path::Path::new("TASK-X-001.md");
+    let raw = body(
+        "[]",
+        "- `src/lib.rs` — exists (1 line)\n  wrapped description text",
+    );
+    let task = archon_workflow::task_universe::parsing::parse_task_file(path, &raw).unwrap();
+    assert_eq!(
+        task.files_expected_to_change,
+        ["`src/lib.rs` — exists (1 line) wrapped description text"]
+    );
+}
+
+#[test]
+fn a_description_relative_path_is_not_a_deliverable_path() {
+    let (_temp, project, tasks, tree) = grounded();
+    let raw = body(
+        "[]",
+        "- `src/lib.rs` — exists (1 line)\n  The helper is described in `src/description.rs`.",
+    );
+    let found = findings(&tasks, &project, &tree, &raw);
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn every_path_in_a_head_list_is_checked() {
+    let (_temp, project, tasks, tree) = grounded();
+    let raw = body("[]", "- `src/missing_a.rs`, `src/missing_b.rs`");
+    let found = findings(&tasks, &project, &tree, &raw);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .any(|finding| finding.contains("`src/missing_a.rs`"))
+    );
+    assert!(
+        found
+            .iter()
+            .any(|finding| finding.contains("`src/missing_b.rs`"))
+    );
+}
+
+#[test]
+fn wrapped_head_lists_keep_paths_until_the_description_starts() {
+    let (_temp, project, tasks, tree) = grounded();
+    let raw = body(
+        "[]",
+        "- `src/missing_a.rs`,\n  `src/missing_b.rs` (create).\n- Module wiring:\n  `src/missing_c.rs`.",
+    );
+    let found = findings(&tasks, &project, &tree, &raw);
+    assert_eq!(found.len(), 3, "{found:?}");
+    for path in ["src/missing_a.rs", "src/missing_b.rs", "src/missing_c.rs"] {
+        assert!(
+            found.iter().any(|finding| finding.contains(path)),
+            "{found:?}"
+        );
+    }
+}
+
+#[test]
+fn wrapped_description_does_not_add_a_path_after_an_observed_head() {
+    let (_temp, project, tasks, tree) = grounded();
+    let raw = body(
+        "[]",
+        "- `/r/x/pine.rs` — exists (438 lines)\n  Pine tests are wired via `mod pine;` rather than duplicating it in `pine.rs`.",
+    );
+    let found = findings(&tasks, &project, &tree, &raw);
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn absent_inside_a_filename_is_not_an_observation_marker() {
+    let (_temp, project, tasks, tree) = grounded();
+    let raw = body("[]", "- `src/path-absent.rs`\n- `src/absent_handler.rs`");
+    let found = findings(&tasks, &project, &tree, &raw);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .any(|finding| finding.contains("src/path-absent.rs"))
+    );
+    assert!(
+        found
+            .iter()
+            .any(|finding| finding.contains("src/absent_handler.rs"))
+    );
+}
+
+#[test]
+fn an_unobserved_head_path_is_found_without_treating_its_description_as_a_path() {
+    let (_temp, project, tasks, tree) = grounded();
+    let raw = body(
+        "[]",
+        "- `src/new.rs`\n  describe output using `src/description.rs`",
+    );
+    let found = findings(&tasks, &project, &tree, &raw);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("deliverable path `src/new.rs` has no verifiable observation"));
+}
+
+#[test]
 fn unobserved_wording_is_a_blocking_finding_even_with_the_literal_grammar_in_it() {
     let (_temp, project, tasks, tree) = grounded();
     let repo = tree.root().display();
@@ -368,3 +480,6 @@ fn the_wrapped_trading_body_yields_its_six_observations_once_unwrapped() {
         found[0].1
     );
 }
+
+#[path = "repository_observations_list_tests.rs"]
+mod list_tests;

@@ -70,9 +70,8 @@ const UNOBSERVED_WORDING: &[&str] = &[
 ];
 
 /// The deliverable paths a parsed task names, as written.
-fn deliverable_paths(task: &WorkflowV2TaskUniverseTask) -> Vec<String> {
-    let mut paths: Vec<String> = task
-        .files_expected_to_change
+fn deliverable_paths(task: &WorkflowV2TaskUniverseTask, raw: &str) -> Vec<String> {
+    let mut paths: Vec<String> = archon_workflow::task_universe::parsing::declared_files_expected_to_change_items_preserving_lines(raw)
         .iter()
         .flat_map(|item| paths_in_item(item))
         .collect();
@@ -92,12 +91,93 @@ fn deliverable_paths(task: &WorkflowV2TaskUniverseTask) -> Vec<String> {
     paths
 }
 
-/// The paths in one `Files Expected to Change` item: its backticked spans,
-/// or its first token when it has none, split on `,`/`;`, path-shaped only.
+/// The paths named by one `Files Expected to Change` item head. Continue a
+/// wrapped head while it is still listing paths or has not named one yet;
+/// stop before an observation or a description so prose cannot add paths.
 fn paths_in_item(item: &str) -> Vec<String> {
-    let mut spans = backticked_spans(item);
+    let mut paths = Vec::new();
+    let mut found_path = false;
+    let mut continued = false;
+    let mut first = true;
+    for line in item.lines() {
+        if !first && !continued && found_path {
+            break;
+        }
+        first = false;
+        let head_line = before_observation(line);
+        let line_paths = paths_in_head(head_line);
+        found_path |= !line_paths.is_empty();
+        paths.extend(line_paths);
+        if head_line.len() != line.len() {
+            paths.extend(paths_after_observed_list_item(&line[head_line.len()..]));
+            break;
+        }
+        continued = ends_head_list(line);
+    }
+    paths
+}
+
+/// Continue a same-line path list after an observed path. A description that
+/// does not use the `, ` or `; ` list form cannot contribute another path.
+fn paths_after_observed_list_item(after_observation: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut rest = after_observation;
+    loop {
+        let Some(observation_len) = observation_end(rest) else {
+            break;
+        };
+        rest = &rest[observation_len..];
+        let Some(listed) = rest.strip_prefix(", ").or_else(|| rest.strip_prefix("; ")) else {
+            break;
+        };
+        let spans = backticked_spans(listed);
+        let Some(span) = spans.first() else {
+            break;
+        };
+        if !listed.starts_with('`') || !is_path_shaped(span) {
+            break;
+        }
+        paths.push(span.clone());
+        let Some(close) = listed[1..].find('`') else {
+            break;
+        };
+        rest = &listed[close + 2..];
+        let head = before_observation(rest);
+        if head.len() == rest.len() {
+            break;
+        }
+        rest = &rest[head.len()..];
+    }
+    paths
+}
+
+/// Byte length of the observation prefix accepted by `parse_observation`.
+fn observation_end(after: &str) -> Option<usize> {
+    parse_observation(after)?;
+    let lowered = after.to_ascii_lowercase();
+    let mut rest = lowered.trim_start();
+    let mut offset = lowered.len() - rest.len();
+    loop {
+        let trimmed = rest
+            .trim_start_matches(['—', '-', '–', ':', ',', '`', '*', ')'])
+            .trim_start();
+        if trimmed.len() == rest.len() {
+            break;
+        }
+        offset += rest.len() - trimmed.len();
+        rest = trimmed;
+    }
+    if rest.starts_with("absent") {
+        return Some(offset + "absent".len());
+    }
+    let close = rest.find(')')?;
+    Some(offset + close + 1)
+}
+
+fn paths_in_head(head: &str) -> Vec<String> {
+    let mut spans = backticked_spans(head);
     if spans.is_empty() {
-        spans.extend(item.split_whitespace().next().map(str::to_string));
+        spans.extend(head.split_whitespace().next().map(str::to_string));
     }
     spans
         .iter()
@@ -106,6 +186,40 @@ fn paths_in_item(item: &str) -> Vec<String> {
         .filter(|token| is_path_shaped(token))
         .map(str::to_string)
         .collect()
+}
+
+fn ends_head_list(line: &str) -> bool {
+    let trimmed = line.trim_end();
+    trimmed.ends_with(',')
+        || trimmed.ends_with(';')
+        || ["and", "or", "and/or", "+"].iter().any(|word| {
+            trimmed
+                .rsplit_once(char::is_whitespace)
+                .is_some_and(|(_, last)| last.eq_ignore_ascii_case(word))
+        })
+}
+
+/// The beginning of a valid observation marker in an item head, if present.
+fn before_observation(head: &str) -> &str {
+    let separators = [" — ", " - ", " – ", ": ", ", "];
+    let mut in_backticks = false;
+    for (index, character) in head.char_indices() {
+        if character == '`' {
+            in_backticks = !in_backticks;
+            continue;
+        }
+        if in_backticks {
+            continue;
+        }
+        if separators
+            .iter()
+            .any(|separator| head[index..].starts_with(*separator))
+            && parse_observation(&head[index..]).is_some()
+        {
+            return &head[..index];
+        }
+    }
+    head
 }
 
 fn backticked_spans(text: &str) -> Vec<String> {
@@ -249,7 +363,7 @@ pub(crate) fn findings_against(
     task: &WorkflowV2TaskUniverseTask,
 ) -> Vec<(String, String)> {
     let mut findings = Vec::new();
-    for path in deliverable_paths(task) {
+    for path in deliverable_paths(task, raw) {
         let Some(relative) = tree.relative_to_root(&path).filter(|r| !r.is_empty()) else {
             continue;
         };

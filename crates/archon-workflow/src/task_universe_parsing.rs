@@ -31,6 +31,13 @@ use super::{
     WorkflowV2TaskUniverseTask, canonical_task_id_from_ref, sorted_unique, task_id_from_task_path,
 };
 
+/// Read `Files Expected to Change` items with their original line boundaries.
+/// This is for the repository-observation lint, which must ignore wrapped
+/// descriptions when identifying deliverable paths.
+pub fn declared_files_expected_to_change_items_preserving_lines(raw: &str) -> Vec<String> {
+    list_items::declared_task_section_items_preserving_lines(raw, "files expected to change")
+}
+
 /// Keys a task file must declare for its record to mean anything.
 ///
 /// These are the contract-bearing keys of the decomposed-PRD task standard.
