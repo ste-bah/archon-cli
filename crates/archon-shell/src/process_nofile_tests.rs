@@ -67,9 +67,15 @@ fn startup_child() {
             limit.rlim_cur, original,
             "a degraded startup changes nothing"
         );
+        // No descriptor can exist above the process's table size, which an
+        // OS may hold below the soft limit (macOS: kern.maxfilesperproc).
+        #[cfg(target_vendor = "apple")]
+        let reachable = original.min(unsafe { libc::getdtablesize() } as u64);
+        #[cfg(not(target_vendor = "apple"))]
+        let reachable = original;
         assert!(
-            ceiling as u64 >= original,
-            "the fallback sweep must cover the whole soft limit: {ceiling}"
+            ceiling as u64 >= reachable,
+            "the fallback sweep must cover every reachable descriptor: {ceiling} < {reachable}"
         );
     } else {
         assert_eq!(limit.rlim_cur, original.min(STARTUP_SOFT_LIMIT));

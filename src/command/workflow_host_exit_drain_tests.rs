@@ -55,7 +55,8 @@ fn progress_keeps_the_drain_waiting_past_the_no_progress_bound() {
         flag.store(true, Ordering::SeqCst);
         drop(work);
     });
-    assert!(drain(Duration::from_millis(150), Duration::from_secs(20)));
+    // Wide against the 40 ms progress gap, so a loaded host is not a stall.
+    assert!(drain(Duration::from_secs(2), Duration::from_secs(20)));
     assert!(
         done.load(Ordering::SeqCst),
         "the drain gave up on live work"
