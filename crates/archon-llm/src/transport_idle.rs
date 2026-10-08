@@ -13,3 +13,12 @@ pub(crate) fn receiver() -> tokio::sync::mpsc::Receiver<crate::streaming::Stream
     });
     rx
 }
+
+/// Issue 364: the text a session ends with when the provider gave no answer
+/// for a whole no-progress window, however many resends it took (a network
+/// that is not up yet after a wake, a provider that is down). Nothing was
+/// wrong with the request, and the work is not judged: callers pause the run
+/// (resumable) on it and never re-ask at once. The text crosses process and
+/// crate boundaries as a string, so its callers match on this marker.
+pub const TRANSPORT_STALL_MARKER: &str =
+    "provider transport stall (no answer for a whole no-progress window; resumable):";

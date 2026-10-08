@@ -15,6 +15,10 @@ use super::*;
 pub(super) struct ScriptHostCallBridge {
     pub(super) host: Arc<WorkflowScriptHost>,
     pub(super) watchdog: WorkflowJsWatchdog,
+    /// Issue 364: the script thread's heartbeat; a call's start and end are
+    /// progress.
+    pub(super) heartbeat:
+        archon_workflow::v2::script::script_thread_heartbeat::ScriptThreadHeartbeat,
     /// A notification failure the HOST raised.
     pub(super) notification: Arc<StdMutex<Option<String>>>,
     /// The run control stop a call resolved to.
@@ -41,12 +45,14 @@ impl ScriptHostCallBridge {
             let Self {
                 host,
                 watchdog,
+                heartbeat,
                 notification,
                 control,
                 issued,
                 fault,
             } = self;
             watchdog.pause();
+            heartbeat.beat();
             let result = Box::pin(host.execute_issued(method, payload, Some(order))).await;
             host.note_delivered(&result, &issued).await;
             // Issue-285/329: refused calls are instant, so after
@@ -54,10 +60,10 @@ impl ScriptHostCallBridge {
             if host.accumulator.lock().await.session_stopped() {
                 watchdog.start_terminal_budget();
             }
-            // Issue 364: a call that finished on its first poll must still
-            // give the thread's timers and sockets a turn, or a script looping
-            // over such calls holds the whole runtime.
+            // Issue 364: a call that finished on its first poll still gives
+            // the thread's timers and sockets a turn (defense in depth).
             archon_workflow::v2::script::host_call_yield::yield_to_script_runtime().await;
+            heartbeat.beat();
             watchdog.resume();
             if let Err(WorkflowError::NotificationDelivery(message)) = &result
                 && let Ok(mut slot) = notification.lock()

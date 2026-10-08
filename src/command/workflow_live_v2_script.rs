@@ -246,13 +246,14 @@ impl WorkflowV2ScriptRunner {
         // Issue 332: a CPU-time budget of the script thread, so machine load
         // never spends it.
         let watchdog = WorkflowJsWatchdog::install(&runtime).await;
+        let starvation = ScriptStarvationGuard::install(&host, &runtime, &watchdog).await;
         let context = AsyncContext::full(&runtime)
             .await
             .map_err(|err| WorkflowError::SpecInvalid(format!("quickjs context failed: {err}")))?;
         #[cfg(test)]
         workflow_live_v2_script_watchdog::stall_engine_start(&host.runner.run_id);
         let source = script_source(harness_source, script_args.as_ref());
-        let watchdog_for_deadline = watchdog.clone();
+        let (watchdog_for_deadline, heartbeat) = (watchdog.clone(), starvation.heartbeat.clone());
         // A notification failure the HOST raised, recorded here so the
         // outcome never depends on text a script can write.
         let notification_failure: Arc<StdMutex<Option<String>>> = Arc::default();
@@ -262,6 +263,7 @@ impl WorkflowV2ScriptRunner {
         let bridge = ScriptHostCallBridge {
             host: host.clone(),
             watchdog: watchdog.clone(),
+            heartbeat: starvation.heartbeat.clone(),
             notification: notification_failure.clone(),
             control: host_control.clone(),
             // Issue 329: the order in which the script issued its host calls.
@@ -287,17 +289,12 @@ impl WorkflowV2ScriptRunner {
                         ));
                     }
                 };
-                // Issue-285: a script idle forever after a terminal stop runs
-                // no JavaScript to interrupt, so the budget also ends the wait.
-                let settled = tokio::select! {
-                    biased;
-                    settled = promise.into_future::<String>() => settled,
-                    () = watchdog_for_deadline.terminal_budget_spent() => {
-                        return Ok(Err(format!(
-                            "workflow.js did not settle within {WORKFLOW_JS_WATCHDOG:?} of the host's terminal stop"
-                        )));
-                    }
-                };
+                let settled = promise.into_future::<String>();
+                let settled =
+                    match settle_or_stop(settled, &watchdog_for_deadline, &heartbeat).await {
+                        Ok(settled) => settled,
+                        Err(stopped) => return Ok(Err(stopped)),
+                    };
                 Ok(match settled.catch(&ctx) {
                     Ok(result) => Ok(result),
                     Err(err) => Err(rquickjs::Error::new_from_js_message(
@@ -357,6 +354,9 @@ impl WorkflowV2ScriptRunner {
             summary.script_result = outcome.ok();
             return Ok(summary);
         }
+        if let Some(paused) = starvation.finish(&host).await {
+            return paused;
+        }
         match outcome {
             Ok(result) => {
                 let mut summary = host.summary().await;
@@ -390,10 +390,14 @@ mod workflow_live_v2_script_host_pending;
 
 #[path = "workflow_live_v2_script_watchdog.rs"]
 mod workflow_live_v2_script_watchdog;
-use workflow_live_v2_script_watchdog::{WORKFLOW_JS_WATCHDOG, WorkflowJsWatchdog};
+#[cfg(test)]
+use workflow_live_v2_script_watchdog::WORKFLOW_JS_WATCHDOG;
+use workflow_live_v2_script_watchdog::WorkflowJsWatchdog;
+#[path = "workflow_live_v2_script_starvation.rs"]
+mod workflow_live_v2_script_starvation;
+use workflow_live_v2_script_starvation::{ScriptStarvationGuard, settle_or_stop};
 
-// The run-scoped call accumulator lives beside this file to hold the 500-line
-// ceiling.
+// The run-scoped call accumulator (beside this file for the 500-line ceiling).
 #[path = "workflow_live_v2_script_accumulator.rs"]
 mod workflow_live_v2_script_accumulator;
 use workflow_live_v2_script_accumulator::WorkflowScriptAccumulator;
@@ -488,9 +492,6 @@ mod workflow_live_v2_script_pause_rerun_tests;
 #[cfg(test)]
 #[path = "workflow_live_v2_lifecycle_e2e_tests.rs"]
 mod workflow_live_v2_lifecycle_e2e_tests;
-#[cfg(test)]
-#[path = "workflow_live_v3_compaction_tests.rs"]
-mod workflow_live_v3_compaction_tests;
 
 #[path = "workflow_repository_audit.rs"]
 mod workflow_repository_audit;

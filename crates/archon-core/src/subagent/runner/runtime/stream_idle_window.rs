@@ -1,4 +1,4 @@
-//! The stream idle window, measured on both clocks (Issue 364).
+//! The stream idle window, measured on more than one clock (Issue 364).
 //!
 //! tokio's clock is monotonic, and on macOS a monotonic clock stops while the
 //! machine sleeps. A window measured on it alone resumes after a wake where it
@@ -10,8 +10,18 @@
 //! for the whole limit. The wall clock is re-read at least every
 //! [`WALL_RECHECK`], so after a wake the window ends within that period and the
 //! round resends its request. A wall clock set backwards only reads as no time
-//! passed; the monotonic clock still bounds the window. It is a no-progress
-//! window like before: every event the caller receives starts a new one.
+//! passed; the monotonic clock still bounds the window.
+//!
+//! A wall clock stepped FORWARD (NTP at a wake, an operator) is not a sleep,
+//! and it must not cut a healthy stream. So the wall clock ends the window only
+//! when a clock that cannot be set agrees: the boot clock, which counts time
+//! asleep (`CLOCK_MONOTONIC` on Apple platforms, `CLOCK_BOOTTIME` on Linux). A
+//! step moves the wall clock alone; a sleep moves both. Where no boot clock can
+//! be read, the wall clock ends the window only after [`STEP_FLOOR`] (or the
+//! whole limit, when it is shorter) of monotonic silence too.
+//!
+//! It is a no-progress window like before: every event the caller receives
+//! starts a new one.
 
 use std::future::Future;
 use std::time::{Duration, SystemTime};
@@ -22,6 +32,12 @@ const WALL_RECHECK: Duration = Duration::from_secs(5);
 #[cfg(test)]
 const WALL_RECHECK: Duration = Duration::from_millis(20);
 
+/// Without a boot clock: the monotonic silence a wall-clock end also needs.
+#[cfg(not(test))]
+const STEP_FLOOR: Duration = Duration::from_secs(60);
+#[cfg(test)]
+const STEP_FLOOR: Duration = Duration::from_millis(150);
+
 /// The window ended before the awaited work did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct IdleExpired;
@@ -29,8 +45,13 @@ pub(super) struct IdleExpired;
 #[cfg(test)]
 thread_local! {
     /// Test seam: how far this thread's wall clock has jumped forward, as a
-    /// wake from a long sleep jumps it while the monotonic clock does not.
+    /// wake from a long sleep or a clock step jumps it.
     pub(super) static WALL_JUMP: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+    /// Test seam: how far this thread's boot clock has jumped forward, as a
+    /// sleep (and never a clock step) jumps it.
+    pub(super) static BOOT_JUMP: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+    /// Test seam: this thread reads no boot clock.
+    pub(super) static NO_BOOT_CLOCK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn wall_now() -> SystemTime {
@@ -40,19 +61,50 @@ fn wall_now() -> SystemTime {
     now
 }
 
-/// Run `work` until it finishes, or until `limit` has passed on either the
-/// monotonic or the wall clock. `work` must be cancel safe: it is polled
-/// across re-checks and dropped when the window ends.
+/// The boot clock: monotonic, never set, and counting time asleep.
+#[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
+fn read_boot_clock() -> Option<Duration> {
+    #[cfg(target_vendor = "apple")]
+    let clock = libc::CLOCK_MONOTONIC;
+    #[cfg(not(target_vendor = "apple"))]
+    let clock = libc::CLOCK_BOOTTIME;
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `now` is a valid, writable timespec for the call.
+    let status = unsafe { libc::clock_gettime(clock, &mut now) };
+    (status == 0).then(|| Duration::new(now.tv_sec as u64, now.tv_nsec as u32))
+}
+
+#[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
+fn read_boot_clock() -> Option<Duration> {
+    None
+}
+
+fn boot_now() -> Option<Duration> {
+    #[cfg(test)]
+    if NO_BOOT_CLOCK.with(std::cell::Cell::get) {
+        return None;
+    }
+    let now = read_boot_clock();
+    #[cfg(test)]
+    let now = now.map(|now| now + BOOT_JUMP.with(std::cell::Cell::get));
+    now
+}
+
+/// Run `work` until it finishes, or until `limit` has passed on the monotonic
+/// clock, or on the wall clock confirmed as a sleep (see the module doc).
+/// `work` must be cancel safe: it is polled across re-checks and dropped when
+/// the window ends.
 pub(super) async fn within<F: Future>(limit: Duration, work: F) -> Result<F::Output, IdleExpired> {
     let started = tokio::time::Instant::now();
     let wall_started = wall_now();
+    let boot_started = boot_now();
     let mut work = std::pin::pin!(work);
     loop {
-        let wall_silent = wall_now()
-            .duration_since(wall_started)
-            .unwrap_or(Duration::ZERO);
         let left = limit.saturating_sub(started.elapsed());
-        if left.is_zero() || wall_silent >= limit {
+        if left.is_zero() || slept_through(limit, started, wall_started, boot_started) {
             return Err(IdleExpired);
         }
         if let Ok(output) = tokio::time::timeout(left.min(WALL_RECHECK), &mut work).await {
@@ -61,57 +113,26 @@ pub(super) async fn within<F: Future>(limit: Duration, work: F) -> Result<F::Out
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn work_that_finishes_inside_the_window_is_returned() {
-        let out = within(Duration::from_secs(5), async { 7 }).await;
-        assert_eq!(out, Ok(7));
+/// Has the wall clock passed the whole `limit`, and is that a sleep rather
+/// than a step of the wall clock?
+fn slept_through(
+    limit: Duration,
+    started: tokio::time::Instant,
+    wall_started: SystemTime,
+    boot_started: Option<Duration>,
+) -> bool {
+    let wall_silent = wall_now()
+        .duration_since(wall_started)
+        .unwrap_or(Duration::ZERO);
+    if wall_silent < limit {
+        return false;
     }
-
-    #[tokio::test]
-    async fn the_monotonic_clock_still_ends_a_silent_window() {
-        let started = std::time::Instant::now();
-        let out = within(Duration::from_millis(60), std::future::pending::<()>()).await;
-        assert_eq!(out, Err(IdleExpired));
-        assert!(started.elapsed() >= Duration::from_millis(60));
-    }
-
-    #[tokio::test]
-    async fn a_wall_clock_jump_ends_the_window_soon_after_the_wake() {
-        // A provider stream that went silent: open, never sending.
-        let (_tx, mut rx) = tokio::sync::mpsc::channel::<u8>(1);
-        let jump = async {
-            tokio::time::sleep(Duration::from_millis(30)).await;
-            WALL_JUMP.with(|jump| jump.set(Duration::from_secs(7 * 3600)));
-        };
-        let started = std::time::Instant::now();
-        let (out, ()) = tokio::join!(within(Duration::from_secs(3600), rx.recv()), jump);
-        WALL_JUMP.with(|jump| jump.set(Duration::ZERO));
-        assert_eq!(out, Err(IdleExpired));
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "the window must end within a re-check of the wake, took {:?}",
-            started.elapsed()
-        );
-    }
-
-    #[tokio::test]
-    async fn a_wall_clock_set_backwards_does_not_end_the_window() {
-        WALL_JUMP.with(|jump| jump.set(Duration::from_secs(3600)));
-        let set_back = async {
-            tokio::time::sleep(Duration::from_millis(30)).await;
-            WALL_JUMP.with(|jump| jump.set(Duration::ZERO));
-        };
-        let (out, ()) = tokio::join!(
-            within(Duration::from_millis(200), async {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                1
-            }),
-            set_back
-        );
-        assert_eq!(out, Ok(1));
+    match (boot_started, boot_now()) {
+        (Some(from), Some(now)) => now.saturating_sub(from) >= limit,
+        _ => started.elapsed() >= limit.min(STEP_FLOOR),
     }
 }
+
+#[cfg(test)]
+#[path = "stream_idle_window_tests.rs"]
+mod tests;

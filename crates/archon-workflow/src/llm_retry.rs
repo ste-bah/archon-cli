@@ -103,7 +103,11 @@ where
 
 pub fn transient_live_agent_error(message: &str) -> bool {
     // Issue-213 C2d: the runner's own stop, never a provider blink.
-    if crate::error::is_no_progress_stop_text(message) {
+    // Issue 364: the round already resent through a whole no-progress
+    // window; the host pauses on it instead of re-asking now.
+    if crate::error::is_no_progress_stop_text(message)
+        || message.contains(crate::error::TRANSPORT_STALL_MARKER)
+    {
         return false;
     }
     let text = message.to_ascii_lowercase();

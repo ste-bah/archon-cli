@@ -46,6 +46,19 @@ pub fn is_no_progress_stop_text(error: &str) -> bool {
     error.contains(NO_PROGRESS_STOP_MARKER)
 }
 
+/// Issue 364: the text a session ends with when its provider gave no answer
+/// for a whole no-progress window of resends. Spelled by
+/// `archon_llm::transport_idle::TRANSPORT_STALL_MARKER`. Not a verdict on the
+/// work and not worth an immediate re-ask: the host pauses the run on it.
+pub const TRANSPORT_STALL_MARKER: &str = archon_llm::transport_idle::TRANSPORT_STALL_MARKER;
+
+/// Did the provider stay silent for a whole no-progress window, however
+/// wrapped? Reads the whole source chain of `error`.
+pub fn is_transport_stall(error: &(dyn std::error::Error + 'static)) -> bool {
+    std::iter::successors(Some(error), |error| error.source())
+        .any(|error| error.to_string().contains(TRANSPORT_STALL_MARKER))
+}
+
 /// The prefix of the error a session ends with when the host cut it for
 /// inactivity — no model output, tool round or tool result for the configured
 /// bound — rather than at its wall clock. Spelled by

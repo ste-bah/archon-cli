@@ -13,6 +13,14 @@
 //! Every host call ends with one deferred yield. tokio wakes a deferred task
 //! only after it has polled its I/O and timer driver, so between two host
 //! calls the runtime always gets one turn of timers and sockets.
+//!
+//! This is defense in depth, not the cause of the Issue 364 spin: the live
+//! bridge already awaits a tokio mutex in every call, and that await spends
+//! tokio's cooperative budget and returns to the driver every few dozen
+//! calls. The test below drives a bare host function, which the live bridge
+//! is not. JavaScript that starves the thread without calling the host (a
+//! microtask loop while a call is in flight) is ended by the script thread's
+//! heartbeat ([`super::script_thread_heartbeat`]).
 
 /// Yield the script thread to its runtime's driver once.
 pub async fn yield_to_script_runtime() {

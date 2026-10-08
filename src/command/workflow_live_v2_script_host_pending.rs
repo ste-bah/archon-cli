@@ -17,6 +17,26 @@ pub(super) struct PendingCall {
 
 pub(super) type PendingCalls = Arc<StdMutex<BTreeMap<String, PendingCall>>>;
 
+/// Issue 364: what is in flight, for a starvation record. Readable from any
+/// thread; a poisoned lock still reads.
+pub(super) fn in_flight_summary(calls: &PendingCalls) -> Vec<serde_json::Value> {
+    let calls = match calls.lock() {
+        Ok(calls) => calls,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    calls
+        .values()
+        .map(|call| {
+            serde_json::json!({
+                "id": call.execution.call.id,
+                "method": call.execution.call.method,
+                "attempt": call.attempt,
+                "running_ms": u64::try_from(call.started.elapsed().as_millis()).unwrap_or(u64::MAX),
+            })
+        })
+        .collect()
+}
+
 impl WorkflowScriptHost {
     pub(super) fn track_pending_call(
         &self,

@@ -1,10 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::stream_idle_window::within;
+use super::stream_resend_budget::{FailedAttempt, ResendBudget, retryable_open_error};
 use super::*;
-
-const STREAM_RECONNECT_BACKOFF: Duration = Duration::from_secs(1);
-const STREAM_RETRIES: usize = 3;
 
 /// How long the provider may go silent before the round is abandoned.
 ///
@@ -49,7 +47,9 @@ pub(super) async fn collect_stream_round(
     (request_body_bytes, large_retry_body_bytes): (usize, usize),
     telemetry: &crate::agent::autocompact::CompactionTelemetry,
 ) -> anyhow::Result<StreamRoundResult> {
-    let mut reconnects = 0;
+    // Issue 364: resends renew on every answer from the provider; see
+    // `stream_resend_budget`.
+    let mut budget = ResendBudget::new(stream_idle_timeout(runner));
     // `request` is the body that actually opened the stream. Mid-stream
     // recovery classifies and measures against it rather than against the
     // template, which carries no messages of its own (#171 part 2).
@@ -77,15 +77,17 @@ pub(super) async fn collect_stream_round(
         .await
         {
             Ok(result) => break result?,
-            Err(_) if reconnects < STREAM_RETRIES => {
-                reconnects += 1;
-                tokio::time::sleep(STREAM_RECONNECT_BACKOFF).await;
-            }
             Err(_) => {
-                anyhow::bail!("Subagent LLM stream idle timeout while opening response")
+                let backoff = budget
+                    .failed(FailedAttempt::Unanswered(
+                        "stream idle timeout while opening",
+                    ))
+                    .map_err(anyhow::Error::msg)?;
+                tokio::time::sleep(backoff).await;
             }
         }
     };
+    budget.answered();
 
     let mut text_content = String::new();
     let mut thinking_blocks = BTreeMap::<u32, PendingThinkingBlock>::new();
@@ -111,19 +113,16 @@ pub(super) async fn collect_stream_round(
             || matches!(&received, Ok(None))
                 && ((!terminal_marker && finish_reason.is_none()) || empty_terminal);
         if interrupted {
-            if reconnects >= STREAM_RETRIES {
-                let reason = if received.is_err() {
-                    "stream idle timeout"
-                } else {
-                    "incomplete response"
-                };
-                anyhow::bail!(
-                    "subagent stream retry exhausted after {STREAM_RETRIES} retries: {reason}; prior conversation retained"
-                );
-            }
-            reconnects += 1;
+            let attempt = match &received {
+                Err(_) => FailedAttempt::Unanswered("stream idle timeout"),
+                Ok(Some(StreamEvent::Error { error_type, .. })) if error_type != "protocol" => {
+                    FailedAttempt::Unanswered("transport error")
+                }
+                _ => FailedAttempt::Incomplete,
+            };
+            let mut backoff = budget.failed(attempt).map_err(anyhow::Error::msg)?;
             if let Some(scope) = archon_observability::transport::current() {
-                scope.record(serde_json::json!({"kind":"stream_round_retry","attempt":reconnects,
+                scope.record(serde_json::json!({"kind":"stream_round_retry","attempt":budget.failures(),
                     "reason":if received.is_err(){"idle_timeout"}else{"incomplete_stream"},
                     "discarded_text_bytes":text_content.len(),"discarded_tool_calls":pending_tools.len()}));
             }
@@ -138,30 +137,40 @@ pub(super) async fn collect_stream_round(
             finish_reason = None;
             terminal_marker = false;
             usage_acc = archon_llm::usage::UsageAccumulator::default();
+            // Issue 364: a resend that cannot open yet (the network is not up
+            // after a wake) backs off and tries again inside the window.
             loop {
-                tokio::time::sleep(STREAM_RECONNECT_BACKOFF * reconnects as u32).await;
+                tokio::time::sleep(backoff).await;
                 let opened = within(
                     stream_idle_timeout(runner),
                     runner.provider.stream(request.clone()),
                 )
                 .await;
-                match opened {
+                let attempt = match opened {
                     Ok(Ok(receiver)) => {
                         rx = receiver;
+                        budget.answered();
                         break;
                     }
-                    Ok(Err(error)) => return Err(error.into()),
-                    Err(_) if reconnects < STREAM_RETRIES => {
-                        reconnects += 1;
+                    Ok(Err(error)) => {
+                        let error = anyhow::Error::from(error);
+                        if !retryable_open_error(&error) {
+                            return Err(error);
+                        }
+                        FailedAttempt::Unanswered("resend could not open")
                     }
-                    Err(_) => anyhow::bail!("subagent stream retry exhausted while reconnecting"),
-                }
+                    Err(_) => FailedAttempt::Unanswered("stream idle timeout while reconnecting"),
+                };
+                backoff = budget.failed(attempt).map_err(anyhow::Error::msg)?;
             }
             continue;
         }
         let Some(event) = received.expect("timeout handled above") else {
             break;
         };
+        if !matches!(event, StreamEvent::Error { .. }) {
+            budget.answered();
+        }
         if is_model_output(&event) {
             archon_tools::subagent_activity::note();
         }

@@ -67,6 +67,7 @@ pub mod resume_freshness;
 pub mod resume_ordinals;
 mod resume_review;
 pub mod resume_verdict;
+pub mod script_thread_heartbeat;
 mod source;
 mod v3_author_a;
 mod v3_author_acceptance;

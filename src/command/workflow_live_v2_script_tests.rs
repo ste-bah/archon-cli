@@ -27,6 +27,8 @@ mod workflow_live_v2_script_judged_resume_tests;
 mod workflow_live_v2_script_pause_tests;
 #[path = "workflow_live_v2_script_stale_executor_tests.rs"]
 mod workflow_live_v2_script_stale_executor_tests;
+#[path = "workflow_live_v2_script_starvation_tests.rs"]
+mod workflow_live_v2_script_starvation_tests;
 #[path = "workflow_live_v2_script_terminal_race_tests.rs"]
 mod workflow_live_v2_script_terminal_race_tests;
 #[path = "workflow_live_v2_script_tests_b.rs"]
@@ -57,6 +59,8 @@ mod workflow_live_v2_reuse_verify_lineage_tests;
 mod workflow_live_v2_script_tests_e;
 #[path = "workflow_live_v2_script_tests_f.rs"]
 mod workflow_live_v2_script_tests_f;
+#[path = "workflow_live_v3_compaction_tests.rs"]
+mod workflow_live_v3_compaction_tests;
 // Issue #162 — the events.jsonl / v2-results agreement invariant.
 #[path = "workflow_live_v2_blocking_gap_tests.rs"]
 mod workflow_live_v2_blocking_gap_tests;

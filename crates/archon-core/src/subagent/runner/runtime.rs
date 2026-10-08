@@ -9,6 +9,7 @@ mod progress_stop;
 mod request_round;
 mod request_round_pressure;
 mod stream_idle_window;
+mod stream_resend_budget;
 mod stream_round;
 mod tool_round;
 
