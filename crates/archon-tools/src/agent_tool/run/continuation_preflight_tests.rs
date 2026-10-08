@@ -62,7 +62,9 @@ fn continuation_preflight_requires_the_last_message_to_be_assistant() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn unusable_repair_records_refusal_without_starting_or_mutating_a_session() {
+    let _executor = crate::subagent_executor::executor_test_lock::lock();
     let executor_calls = Arc::new(AtomicUsize::new(0));
     install_subagent_executor(Arc::new(CountingExecutor(executor_calls.clone())));
     let history = CompletedHistory::default();

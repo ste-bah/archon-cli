@@ -86,7 +86,9 @@ fn continuation_retains_raw_history_identity_and_read_budget() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn completed_session_disarms_its_scope_but_abandonment_still_cancels() {
+    let _executor = archon_tools::subagent_executor::executor_test_lock::lock();
     let captured = Arc::new(Mutex::new(None));
     install_subagent_executor(Arc::new(CaptureCancellation(captured.clone())));
     let client = client();
