@@ -36,6 +36,17 @@ async fn client(
         .context("building the acceptance author and judge client")
 }
 
+/// The author's scope, or the freeze ends incomplete and resumable (the
+/// host's, operational): a repository record that cannot be believed leaves
+/// the true repository root unknown, and nothing runs until it is repaired.
+fn author_scope(cwd: &Path, tasks_root: &Path, prd_path: &Path) -> Result<AuthorScope> {
+    AuthorScope::for_task_set(cwd, tasks_root, prd_path).map_err(|why| {
+        exit_if_incomplete(
+            crate::command::workflow_freeze_budget::FreezeIncomplete::unsaved(why).into(),
+        )
+    })
+}
+
 pub(super) async fn freeze_acceptance(
     cwd: &Path,
     tasks: &Path,
@@ -49,7 +60,7 @@ pub(super) async fn freeze_acceptance(
     }
     let tasks_root = required_path(cwd, tasks, "--tasks")?;
     let prd_path = required_path(cwd, prd, "--prd")?;
-    let scope = AuthorScope::for_task_set(cwd, &tasks_root, &prd_path);
+    let scope = author_scope(cwd, &tasks_root, &prd_path)?;
     let client = client(config, env_vars, cwd, "workflow-freeze-acceptance", &scope).await?;
     let prepared = crate::command::workflow_task_set::prepare_acceptance_freeze_reauthoring(
         cwd,
@@ -111,7 +122,7 @@ pub(super) async fn reauthor_acceptance(
         .map(|id| id.trim().to_string())
         .filter(|id| !id.is_empty())
         .collect();
-    let scope = AuthorScope::for_task_set(cwd, &tasks_root, &prd_path);
+    let scope = author_scope(cwd, &tasks_root, &prd_path)?;
     let client = client(
         config,
         env_vars,

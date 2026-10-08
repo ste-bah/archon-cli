@@ -24,6 +24,7 @@ use archon_workflow::task_set_contract::{
 };
 
 use super::executability::ExecutabilityProbe;
+use super::live_root;
 use super::*;
 
 /// Consecutive author-then-judge attempts that repair no named check before
@@ -50,20 +51,19 @@ pub(crate) struct AuthorScope {
 
 impl AuthorScope {
     /// The repository the task set was decomposed against (its
-    /// `repository.lock`), else the project root.
-    pub(crate) fn for_task_set(project_root: &Path, tasks_root: &Path, prd_path: &Path) -> Self {
-        let repository_root =
-            archon_workflow::repository_record::read_repository_record(tasks_root)
-                .ok()
-                .flatten()
-                .map(|record| PathBuf::from(record.repository_root))
-                .filter(|root| root.is_dir())
-                .unwrap_or_else(|| project_root.to_path_buf());
-        Self {
+    /// `repository.lock`), else the project root. A lock that cannot be
+    /// believed is an error ([`live_root::recorded_repository`]): the author
+    /// is never told, nor confined to, a guessed root.
+    pub(crate) fn for_task_set(
+        project_root: &Path,
+        tasks_root: &Path,
+        prd_path: &Path,
+    ) -> std::result::Result<Self, String> {
+        Ok(Self {
             prd_path: prd_path.to_path_buf(),
             project_root: project_root.to_path_buf(),
-            repository_root,
-        }
+            repository_root: live_root::recorded_repository(project_root, tasks_root)?,
+        })
     }
 }
 
@@ -250,6 +250,7 @@ pub(crate) async fn reauthor(
     // Bounded by progress: every attempt that repairs a check resets the
     // count, and with finitely many named checks the loop always ends.
     let (mut attempt, mut idle) = (0, 0);
+    let refused = author::refused_forms(scope, gate.probe);
     while !pending.is_empty() && idle < REAUTHOR_ATTEMPTS {
         attempt += 1;
         let before = pending.len();
@@ -259,6 +260,7 @@ pub(crate) async fn reauthor(
             let notes = feedback.get_mut(id).expect("feedback seeded per id");
             let reply = author_entry(client, scope, frozen, notes, attempt).await?;
             match candidate_entry(&reply, frozen)
+                .and_then(|candidate| author::live_root_refusal(candidate, &refused))
                 .and_then(|candidate| check_defects(&working, candidate))
             {
                 Ok(candidate) => authored.push(candidate),
@@ -472,6 +474,9 @@ use author::author_entry;
 #[cfg(test)]
 #[path = "workflow_acceptance_reauthor_boundary_tests.rs"]
 mod boundary_tests;
+#[cfg(test)]
+#[path = "workflow_acceptance_reauthor_live_root_tests.rs"]
+mod live_root_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_reauthor_test_client.rs"]
 pub(crate) mod test_client;

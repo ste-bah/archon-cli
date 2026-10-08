@@ -57,6 +57,7 @@ use archon_workflow::task_set_contract::{
 use async_trait::async_trait;
 
 use crate::command::acceptance_scratch_policy::NativeBinding;
+use crate::command::workflow_task_set::live_root;
 
 /// Bytes of a crashed check's stderr shown to its author.
 const FINDING_TAIL_BYTES: usize = 3000;
@@ -123,6 +124,11 @@ pub(crate) trait ExecutabilityProbe: Send + Sync {
     /// on, if it has one (Issue 328: recorded in the lock it publishes).
     fn baseline_commit(&self) -> Option<String> {
         None
+    }
+
+    /// The live root forms this probe refuses a check for naming (366).
+    fn refused_roots(&self) -> Vec<PathBuf> {
+        Vec::new()
     }
 }
 
@@ -283,21 +289,6 @@ impl HostProbe {
         }
     }
 
-    /// Fail the next `count` hermetic runs as the host's environment would.
-    #[cfg(all(test, unix))]
-    pub(crate) fn with_injected_failures(self, count: usize) -> Self {
-        (self.injected_failures).store(count, std::sync::atomic::Ordering::SeqCst);
-        self
-    }
-
-    #[cfg(test)]
-    fn take_injected_failure(&self) -> bool {
-        use std::sync::atomic::Ordering::SeqCst;
-        (self.injected_failures)
-            .fetch_update(SeqCst, SeqCst, |left| left.checked_sub(1))
-            .is_ok()
-    }
-
     /// At an acceptance round's own site: its scratch policy, else the live
     /// target repository the round runs its checks in.
     pub(crate) fn at(
@@ -326,28 +317,17 @@ impl HostProbe {
     /// At freeze time, before any run: the hermetic scratch site when one is
     /// configured (building warm from a per-repository cache), otherwise the
     /// probe's own hermetic copy -- never the live repository. A configured
-    /// policy that cannot be captured runs nothing. The probe carries the
+    /// policy that cannot be captured, or a repository record that cannot be
+    /// believed, runs nothing (`sites::freeze_site`). The probe carries the
     /// task set's pre-implementation baseline (`Baseline::for_task_set`).
     pub(crate) fn for_task_set(project: &std::path::Path, tasks_root: &std::path::Path) -> Self {
-        let repository = baseline::task_set_repository(project, tasks_root);
-        let site = match crate::command::acceptance_scratch_policy::capture(project, tasks_root) {
-            Ok(Some(binding)) => {
-                let key = content_digest(binding.policy.repository.to_string_lossy().as_bytes());
-                Site::Scratch(Box::new(
-                    binding.with_run_build_cache(&format!("acceptance-probe-{}", &key[..12])),
-                ))
-            }
-            Ok(None) => Site::Hermetic,
-            Err(error) => Site::Unavailable(format!(
-                "the [workflow.acceptance_execution] policy could not be captured ({error}); nothing is run until it is repaired"
-            )),
-        };
-        let repository = match &site {
-            Site::Scratch(binding) => binding.policy.repository.clone(),
-            Site::Direct | Site::Hermetic | Site::Unavailable(_) => repository,
-        };
+        let (site, repository) = sites::freeze_site(project, tasks_root);
+        let unavailable = matches!(site, Site::Unavailable(_));
         let mut probe = Self::new(project.to_path_buf(), repository, site);
         probe.memo = true;
+        if unavailable {
+            return probe;
+        }
         probe.baseline = Baseline::for_task_set(&probe.repository, tasks_root);
         if let Site::Scratch(binding) = &probe.site
             && let Some(cache) = &binding.policy.build_cache

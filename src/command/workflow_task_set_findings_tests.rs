@@ -103,7 +103,8 @@ async fn a_whole_set_freeze_reauthors_a_check_that_passes_before_any_implementat
         |entry, _| command_entry(entry, SOUND),
         |_, _| true,
     ));
-    let scope = AuthorScope::for_task_set(project.path(), &tasks, &prd);
+    let scope = AuthorScope::for_task_set(project.path(), &tasks, &prd)
+        .expect("the task set's repository record is believed");
     let prepared = prepare_acceptance_freeze_reauthoring(
         project.path(),
         &tasks,
@@ -139,7 +140,8 @@ async fn an_enforce_freeze_on_a_check_that_cannot_fail_stops_and_escalates() {
         |entry, attempt| command_entry(entry, &format!("{VACUOUS} # attempt {attempt}")),
         |_, _| true,
     ));
-    let scope = AuthorScope::for_task_set(project.path(), &tasks, &prd);
+    let scope = AuthorScope::for_task_set(project.path(), &tasks, &prd)
+        .expect("the task set's repository record is believed");
     let error = prepare_acceptance_freeze_reauthoring(
         project.path(),
         &tasks,
@@ -234,7 +236,8 @@ async fn a_freeze_under_a_broken_scratch_policy_refuses_without_asking_an_author
         |entry, _| command_entry(entry, SOUND),
         |_, _| true,
     ));
-    let scope = AuthorScope::for_task_set(project.path(), &tasks, &prd);
+    let scope = AuthorScope::for_task_set(project.path(), &tasks, &prd)
+        .expect("the task set's repository record is believed");
     let error = prepare_acceptance_freeze_reauthoring(
         project.path(),
         &tasks,
@@ -286,7 +289,8 @@ async fn a_freeze_records_the_baseline_it_proved_on_and_keeps_it() {
         |entry, _| command_entry(entry, SOUND),
         |_, _| true,
     ));
-    let scope = AuthorScope::for_task_set(project.path(), &tasks, &prd);
+    let scope = AuthorScope::for_task_set(project.path(), &tasks, &prd)
+        .expect("the task set's repository record is believed");
     let prepared = prepare_acceptance_freeze_reauthoring(
         project.path(),
         &tasks,

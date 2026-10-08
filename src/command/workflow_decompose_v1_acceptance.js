@@ -2,6 +2,48 @@
 // Loaded after workflow_decompose_v1.js as one script: every declaration
 // here is hoisted into the same scope as `workflow`.
 
+// Issue 366: where a check runs, stated before the author writes one, true
+// for every configuration: the freeze proves a check in a copy, but an
+// acceptance round with no isolated execution runs it in the live checkout,
+// so the rule is what holds everywhere (paths relative to the working
+// directory, nothing changed outside its own temporary files). A check that
+// names a live root by its absolute path is refused unrun, by the freeze and
+// by the author step's entry validator, in the words of the last sentence.
+// The text is the host re-author's too (`live_root::check_path_rule`, held
+// equal by test).
+function checkPathRule() {
+  return [
+    "Where a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; never reach one root from the other with ..: the roots do not sit the same way in every copy.",
+    `In every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (${args.repositoryRoot}, ${args.projectRoot}) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.`
+  ].join("\n");
+}
+
+// The per-entry acceptance author's prompt (supplementary checks included).
+function acceptanceAuthorPrompt() {
+  return [
+    "Author exactly one acceptance entry identified below, not the whole contract.",
+    `Read the PRD at ${args.prdPath}.`,
+    groundingRules(),
+    "Use the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.",
+    checkPathRule(),
+    "Return one JSON object with id, criterion, check, gap_permitted, judgment. The two examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.",
+    ENTRY_SHAPES,
+    "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
+    "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
+    "covers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.",
+    "Your entire reply must be the entry itself: the raw JSON object, starting with { and ending with }. Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
+    "Do not run commands or write files."
+  ].join("\n");
+}
+
+// The live roots a check must not name, as the validator reads them: the
+// roots this prompt names, and the task root the host reads the freeze's own
+// roots from (its configured scratch repository), so both steps refuse a
+// check from one source.
+function liveRootsText() {
+  return JSON.stringify({repository: args.repositoryRoot, project: args.projectRoot, tasks: args.taskRoot});
+}
+
 // Completed entries survive a sibling's incomplete reply. The host validates
 // each authored entry with freeze's shape validator; freeze assembles and
 // judges the full contract. Neither step trusts model-side validation.
@@ -137,8 +179,9 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
         // Native binding uses freeze's element_shape_defects with one entry;
         // text it cannot parse (an unpaired surrogate, too deep) is its
         // invalid_json refusal. A missing binding or a validator fault must
-        // propagate, never accept. Each text names the entry by its id.
-        const defects = JSON.parse(__archonValidateAcceptanceEntry(id, serialized));
+        // propagate, never accept. Each text names the entry by its id. The
+        // live roots let it refuse a check naming one, as freeze does (366).
+        const defects = JSON.parse(__archonValidateAcceptanceEntry(id, serialized, liveRootsText()));
         if (defects.length === 0) return {entry};
         return {failure:{status:"failed",malformed:true,findings:defects,entryId:id,
           summary:defects.map(defect => defect.text).join("; ")}};
@@ -174,7 +217,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   const textOf = (id) => {
     if (Object.prototype.hasOwnProperty.call(criteria, id)) return criteria[id];
     const sup = owedMap.get(id);
-    return `SUPPLEMENTARY check owed to PRD requirement ${sup.requirement} (no other check covers it): ${sup.text}\nIts covers is exactly ["${sup.requirement}"]; it must fail whenever ${sup.requirement} is violated on the path it drives.`;
+    return `SUPPLEMENTARY check owed to PRD requirement ${sup.requirement} (no other check covers it): ${sup.text}\nIts covers is exactly ["${sup.requirement}"]; it must fail whenever ${sup.requirement} is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.`;
   };
   const all = ids.concat(owed);
   const pending = all.filter(id => !state.entries.has(id) || state.retryIds === null || state.retryIds.has(id));

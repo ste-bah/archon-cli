@@ -141,7 +141,7 @@ fn assert_author_shape_refusal(entry: Value) {
     let context = rquickjs::Context::full(&runtime).unwrap();
     context.with(|ctx| {
         install_entry_validator(&ctx).unwrap();
-        ctx.eval::<(), _>(format!("const args = {{}};\n{source}")).unwrap();
+        ctx.eval::<(), _>(format!("const args = {{repositoryRoot:'/archon-test-roots/repo',projectRoot:'/archon-test-roots/project',}};\n{source}")).unwrap();
         let candidate = serde_json::to_vec(&json!({"entries": [entry.clone()]})).unwrap();
         // Each refusal names the entry (Issue 357 round 4), not `entries/0`.
         let expected: Vec<_> = element_shape_defects(&candidate, &ENTRY_SHAPE)
@@ -200,7 +200,7 @@ fn native_refuted_entry_shape_repairs_decrease_five_to_zero_without_pause() {
     context.with(|ctx| {
         install_entry_validator(&ctx).unwrap();
         let script = format!(
-            r#"const args = {{acceptanceCriteria:{{A:'a'}},authorMaxParallelism:1,gateMode:'enforce'}};
+            r#"const args = {{repositoryRoot:'/archon-test-roots/repo',projectRoot:'/archon-test-roots/project',acceptanceCriteria:{{A:'a'}},authorMaxParallelism:1,gateMode:'enforce'}};
             {source}
             (async () => {{
                 let calls = 0, freezes = 0;

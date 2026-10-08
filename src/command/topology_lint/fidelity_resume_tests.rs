@@ -463,7 +463,7 @@ fn the_staged_set_gate_reads_its_catalog_no_progress_window() {
 
 /// The catalog identity changes with #356 (schema 2: timeout semantics); rebuilding
 /// schema 1 reproduces the old catalog. The fixed script digest moves by design
-/// (Issues 261, 288, 337, 357, 360); older runs resume via #358 and the #360 seed.
+/// (Issues 261, 288, 337, 357, 360, 366); older runs resume via #358 and the #360 seed.
 #[test]
 fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     let catalog =
@@ -481,7 +481,7 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "6b940f9072b62c54b4351e1dd7aa73be3115f037c200dfa2dc4a6fb318a1822a"
+        "aef9c2c1e6d9cb634eec7b16d705546a331ced112b7ceb98a02e2d42e4523e15"
     );
 }
 

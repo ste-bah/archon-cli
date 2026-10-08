@@ -127,14 +127,23 @@ pub fn resolve_cli_flags(
 // broken, which is exactly what had happened — both built a mock audio source
 // (#192).
 
+/// ARCHON_* names owned outside archon-core: trading data, and the marker
+/// a supervisor sets on host commands whose stderr renews its no-progress
+/// window (`archon_shell::progress`).
+pub(crate) fn extra_known_env_vars() -> Vec<&'static str> {
+    crate::command::trading_data::trading_data_env::TRADING_ENV_VARS
+        .iter()
+        .copied()
+        .chain([archon_shell::progress::SUPERVISED_ENV])
+        .collect()
+}
+
 /// Load environment variables and warn about unrecognized ARCHON_* vars.
 pub fn load_env_vars() -> ArchonEnvVars {
     let env_vars = env_vars::load_env_vars();
     let all_env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let unrecognized = env_vars::warn_unrecognized_archon_vars(
-        &all_env,
-        crate::command::trading_data::trading_data_env::TRADING_ENV_VARS,
-    );
+    let unrecognized =
+        env_vars::warn_unrecognized_archon_vars(&all_env, &crate::setup::extra_known_env_vars());
     for var_name in &unrecognized {
         eprintln!("warning: unrecognized environment variable: {var_name}");
     }
@@ -253,4 +262,24 @@ pub fn log_startup_info(config: &archon_core::config::ArchonConfig, session_id: 
 /// Generate a new session ID.
 pub fn generate_session_id() -> String {
     uuid::Uuid::new_v4().to_string()
+}
+
+#[cfg(test)]
+mod extra_known_env_tests {
+    #[test]
+    fn the_supervised_progress_marker_is_not_reported_unrecognized() {
+        let env: std::collections::HashMap<String, String> = [
+            (
+                archon_shell::progress::SUPERVISED_ENV.to_string(),
+                "1".to_string(),
+            ),
+            ("ARCHON_NOT_A_REAL_SETTING".to_string(), "1".to_string()),
+        ]
+        .into();
+        let unrecognized = archon_core::env_vars::warn_unrecognized_archon_vars(
+            &env,
+            &super::extra_known_env_vars(),
+        );
+        assert_eq!(unrecognized, vec!["ARCHON_NOT_A_REAL_SETTING".to_string()]);
+    }
 }

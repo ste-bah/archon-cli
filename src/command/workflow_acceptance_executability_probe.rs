@@ -2,6 +2,7 @@
 //! trees it must be proven on (see the parent module docs).
 
 use super::*;
+use crate::command::workflow_task_set::live_root;
 
 impl HostProbe {
     /// The commit the site observes, when it observes one.
@@ -14,18 +15,13 @@ impl HostProbe {
     }
 
     /// The live roots, canonical where they resolve, as check text could
-    /// name them.
+    /// name them (the one rule the authors share, Issue 366). A relative
+    /// root is the tree the probe itself resolves: under its process's
+    /// working directory.
     pub(super) fn live_roots(&self) -> Vec<PathBuf> {
-        let mut roots = Vec::new();
-        for root in [&self.repository, &self.project] {
-            roots.push(root.clone());
-            if let Ok(canonical) = root.canonicalize().map(archon_shell::paths::plain) {
-                roots.push(canonical);
-            }
-        }
-        roots.sort();
-        roots.dedup();
-        roots
+        let absolute = |root: &PathBuf| std::path::absolute(root).unwrap_or_else(|_| root.clone());
+        let roots = [absolute(&self.repository), absolute(&self.project)];
+        live_root::root_forms(roots.iter().map(PathBuf::as_path))
     }
 
     /// Author findings for every check of `refs` whose text names a live
@@ -43,17 +39,10 @@ impl HostProbe {
                     .chain(&contract.supplementary)
                     .find(|entry| entry.id == reference.acceptance_id)?;
                 let (_, text) = executed_text(entry)?;
-                let named = roots.iter().find(|root| {
-                    let root = root.to_string_lossy();
-                    !root.is_empty() && root != "/" && text.contains(root.as_ref())
-                })?;
+                let named = live_root::named_root(text, &roots)?;
                 Some((
                     entry.id.clone(),
-                    format!(
-                        "check '{}': it names the live root {} by its absolute path, so no hermetic copy can keep it off the live tree and the host never runs it; name every path relative to the check's working directory",
-                        entry.id,
-                        named.display()
-                    ),
+                    live_root::live_root_finding(&entry.id, named),
                 ))
             })
             .collect()
@@ -313,6 +302,10 @@ impl HostProbe {
 
 #[async_trait]
 impl ExecutabilityProbe for HostProbe {
+    fn refused_roots(&self) -> Vec<PathBuf> {
+        self.live_roots()
+    }
+
     async fn script_defects(
         &self,
         contract: &AcceptanceContract,

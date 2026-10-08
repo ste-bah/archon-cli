@@ -36,7 +36,8 @@ async fn a_republish_pins_the_chain_it_publishes_and_keeps_every_other_checks_pi
         |entry, _| command_entry(entry, "bash scripts/three.sh"),
         |_, _| true,
     );
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd);
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+        .expect("the task set's repository record is believed");
     reauthor_and_republish(
         &client,
         ReauthorRequest {
@@ -73,7 +74,8 @@ fn republish_two(
         |entry, _| command_entry(entry, "bash scripts/three.sh"),
         |_, _| true,
     );
-    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd);
+    let scope = AuthorScope::for_task_set(set.project.path(), &set.tasks, &set.prd)
+        .expect("the task set's repository record is believed");
     futures_block(reauthor_and_republish(
         &client,
         ReauthorRequest {

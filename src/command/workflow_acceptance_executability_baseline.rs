@@ -207,16 +207,6 @@ impl HostProbe {
     }
 }
 
-/// The repository a task set was decomposed against, else the project.
-pub(super) fn task_set_repository(project: &Path, tasks_root: &Path) -> PathBuf {
-    archon_workflow::repository_record::read_repository_record(tasks_root)
-        .ok()
-        .flatten()
-        .map(|record| PathBuf::from(record.repository_root))
-        .filter(|root| root.is_dir())
-        .unwrap_or_else(|| project.to_path_buf())
-}
-
 /// How the check a repair replaces fared on the tree it ran on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Original {
