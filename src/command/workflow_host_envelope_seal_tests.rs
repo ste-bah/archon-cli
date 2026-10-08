@@ -157,7 +157,7 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0)).unwrap();
+                std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
             }
             return Ok(SupervisedProcessOutput {
                 exit_code: Some(1),
