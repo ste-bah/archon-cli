@@ -287,7 +287,7 @@ impl WorkflowV2ResultStore {
             || self
                 .root
                 .join("branches")
-                .join(sanitize_call_id(&call.id))
+                .join(super::result_store::branch_component(&call.id))
                 .exists();
         if !slot_answers
             && !keeps_slot

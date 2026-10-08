@@ -425,6 +425,13 @@ fn branch_files_in(
 /// synced after the rename.
 fn archive_file_into(path: &Path, dir: &Path, durable: bool) -> WorkflowResult<PathBuf> {
     fs::create_dir_all(dir).map_err(|err| WorkflowError::io(dir, err))?;
+    if durable
+        && let Some(parent) = dir.parent()
+    {
+        // Persist a newly created `superseded/<item>/` (or `revoked/`)
+        // entry in the directory that contains it before the state commit.
+        crate::durable_io::sync_dir(parent)?;
+    }
     let stem = path
         .file_stem()
         .and_then(|value| value.to_str())
@@ -443,6 +450,9 @@ fn archive_file_into(path: &Path, dir: &Path, durable: bool) -> WorkflowResult<P
         crate::durable_io::sync_dir(dir)?;
         if let Some(source) = path.parent() {
             crate::durable_io::sync_dir(source)?;
+            if let Some(parent) = source.parent() {
+                crate::durable_io::sync_dir(parent)?;
+            }
         }
     }
     Ok(target)

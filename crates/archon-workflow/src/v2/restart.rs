@@ -115,9 +115,6 @@ pub fn invalidate_generated_v2_restart_cache(
 pub fn reset_invalidated_stages(run: &mut WorkflowRun, invalidated: &[String]) -> bool {
     let mut changed = false;
     for call_id in invalidated {
-        if call_id.contains(':') {
-            continue;
-        }
         if run.stages.contains_key(call_id) {
             run.stages
                 .insert(call_id.clone(), StageState::pending(call_id.clone()));
@@ -276,18 +273,21 @@ fn invalidate_generated_v2_call_cache(
     let executions = generated_v2_restart_executions(store, run)?;
     let v2_store =
         WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2")).with_durable_writes();
+    // Complete read-side validation before the first record is invalidated.
+    v2_store.validate_branch_store()?;
+    v2_store.load_call_record_history()?;
     let mut invalidated = v2_store
         .invalidate_call_and_dependents(&executions, call_id)?
         .into_iter()
         .collect::<BTreeSet<_>>();
     invalidated.extend(v2_store.invalidate_dynamic_wave_dependents(call_id)?);
     if clear_branch_outcomes {
-        let calls = invalidated
-            .iter()
-            .filter(|id| !id.contains(':'))
-            .cloned()
-            .collect::<Vec<_>>();
-        for invalidated_call in calls {
+        // At this point the set contains only call ids. Branch-count
+        // annotations are appended below, after every call has been handled;
+        // keep this as a typed phase boundary instead of parsing `:` out of
+        // the values (dynamic calls need not be in the static manifest).
+        let calls_to_clear = invalidated.iter().cloned().collect::<Vec<_>>();
+        for invalidated_call in calls_to_clear {
             let deleted = v2_store.delete_branch_outcomes_for_call(&invalidated_call)?;
             if deleted > 0 {
                 invalidated.insert(format!("{invalidated_call}:branches({deleted})"));

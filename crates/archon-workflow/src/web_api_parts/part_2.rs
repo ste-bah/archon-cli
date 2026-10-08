@@ -70,6 +70,16 @@ fn collect_v2_branch_views(
     branches_root: &Path,
     out: &mut Vec<WorkflowV2BranchView>,
 ) -> WorkflowResult<()> {
+    let mut call_ids = std::collections::HashMap::new();
+    let results = root.join("results");
+    if let Ok(entries) = fs::read_dir(&results) {
+        for entry in entries.flatten() {
+            let Some(raw) = store_view_text(&entry.path())? else { continue; };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else { continue; };
+            let Some(id) = value.get("call").and_then(|call| string_field(call, "id")) else { continue; };
+            call_ids.insert(crate::v2::result_store::branch_component(&id), id);
+        }
+    }
     for call_entry in
         fs::read_dir(branches_root).map_err(|e| WorkflowError::io(branches_root, e))?
     {
@@ -78,11 +88,15 @@ fn collect_v2_branch_views(
         if !call_path.is_dir() {
             continue;
         }
-        let call_id = call_path
+        let folder_name = call_path
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("unknown")
             .to_string();
+        let call_id = call_ids
+            .get(&folder_name)
+            .cloned()
+            .unwrap_or_else(|| display_call_id_from_branch_folder(&folder_name));
         for entry in fs::read_dir(&call_path).map_err(|e| WorkflowError::io(&call_path, e))? {
             let entry = entry.map_err(|e| WorkflowError::io(&call_path, e))?;
             let path = entry.path();
@@ -114,6 +128,16 @@ fn collect_v2_branch_views(
     Ok(())
 }
 
+fn display_call_id_from_branch_folder(name: &str) -> String {
+    if let Some((call_id, digest)) = name.rsplit_once('-')
+        && digest.len() == 16
+        && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return call_id.to_string();
+    }
+    name.to_string()
+}
+
 /// A store file's text for a view: `None` for an entry the store's readers
 /// refuse (a directory, FIFO, outside link or oversized file), which
 /// `store_file` reports (Issue-292).
@@ -128,7 +152,9 @@ fn store_view_text(path: &Path) -> WorkflowResult<Option<String>> {
 /// The branch outcomes of `call_id` its readers would read: `.json`
 /// entries `store_file` accepts, never a FIFO, directory or outside link.
 fn branch_count_for_call(root: &Path, call_id: &str) -> usize {
-    let branch_root = root.join("branches").join(sanitize_v2_id(call_id));
+    let branch_root = root.join("branches").join(crate::v2::result_store::branch_component(call_id));
+    let legacy_root = root.join("branches").join(sanitize_v2_id(call_id));
+    let branch_root = if branch_root.exists() { branch_root } else { legacy_root };
     fs::read_dir(&branch_root)
         .ok()
         .into_iter()

@@ -248,8 +248,29 @@ fn apply_control(
                 path: lease_path.clone(),
                 source,
             })?;
-        lease.try_lock().map_err(|err| archon_workflow::WorkflowError::ControlCancelled(format!("workflow restart of {} refused: executor lease is held: {err}", request.run_id)))?;
-        return controller.apply_restart(&request.run_id, action).map(|(run, _)| run);
+        match lease.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => {
+                return Err(archon_workflow::WorkflowError::ControlCancelled(format!(
+                    "workflow restart of {} refused: executor lease is held",
+                    request.run_id
+                )));
+            }
+            Err(std::fs::TryLockError::Error(source)) => {
+                return Err(archon_workflow::WorkflowError::Io {
+                    path: lease_path.clone(),
+                    source,
+                });
+            }
+        }
+        let result = controller.apply_restart(&request.run_id, action).map(|(run, _)| run);
+        lease
+            .unlock()
+            .map_err(|source| archon_workflow::WorkflowError::Io {
+                path: lease_path.clone(),
+                source,
+            })?;
+        return result;
     }
     controller.apply(&request.run_id, action)
 }

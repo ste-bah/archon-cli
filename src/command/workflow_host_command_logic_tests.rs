@@ -256,10 +256,7 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     }
     let bumped = executor(Some("freeze-skeleton"));
     assert!(!holds(&bumped, "freeze-skeleton", &unstamped));
-    assert!(
-        holds(&bumped, "land-task-body", &unstamped),
-        "others keep"
-    );
+    assert!(holds(&bumped, "land-task-body", &unstamped), "others keep");
     // The stamp the host writes is the version the key names.
     let request = HostCommandRequest::new("freeze-skeleton", Some("c".into())).unwrap();
     assert_eq!(bumped.logic_version(&request).unwrap(), Some(2));

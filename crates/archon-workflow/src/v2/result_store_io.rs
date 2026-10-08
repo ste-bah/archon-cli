@@ -59,7 +59,7 @@ impl WorkflowV2ResultStore {
     }
 }
 
-fn branch_component(raw: &str) -> String {
+pub(crate) fn branch_component(raw: &str) -> String {
     let digest = blake3::hash(raw.as_bytes()).to_hex();
     format!("{}-{}", sanitize_call_id(raw), &digest[..16])
 }
@@ -106,11 +106,14 @@ fn migrate_legacy_branch_archive(
             continue;
         }
         for path in entries {
-            if !path.is_file() { continue; }
-            let raw = read_store_file(&path).map_err(|err| WorkflowError::io(&path, err))?;
+            if !fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file()) { continue; }
+            let Some(raw) = read_store_file_or_report(&path, &archive) else { continue; };
             let Ok(outcome) = serde_json::from_slice::<WorkflowV2BranchOutcome>(&raw) else { continue; };
             let target_dir = archive.join(branch_component(&outcome.item_id));
             fs::create_dir_all(&target_dir).map_err(|err| WorkflowError::io(&target_dir, err))?;
+            if store.durable {
+                crate::durable_io::sync_dir(&archive)?;
+            }
             let target = target_dir.join(path.file_name().unwrap_or_default());
             fs::rename(&path, &target).map_err(|err| WorkflowError::io(&target, err))?;
         }

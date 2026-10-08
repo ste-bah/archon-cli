@@ -85,6 +85,42 @@ fn hashed_branch_paths_do_not_alias_and_legacy_current_paths_load() {
 }
 
 #[test]
+fn an_older_run_resumes_all_legacy_branch_records_after_a_new_save() {
+    let temp = tempfile::tempdir().unwrap();
+    let v2 = WorkflowV2ResultStore::new(temp.path());
+    let legacy = temp.path().join("branches").join(CALL);
+    let current = outcome("T-A", WorkflowV2Status::Accepted, "current", true);
+    let archived = outcome("T-A", WorkflowV2Status::Noop, "archived", false);
+    std::fs::create_dir_all(legacy.join("superseded")).unwrap();
+    std::fs::write(
+        legacy.join(format!("{}.json", current.item_id)),
+        serde_json::to_vec(&current).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        legacy.join("superseded/old.json"),
+        serde_json::to_vec(&archived).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        v2.load_branch_outcome(CALL, &current.item_id).unwrap(),
+        Some(current.clone())
+    );
+    assert!(v2.load_superseded_branch_outcomes().contains(&archived));
+    v2.save_branch_outcome(
+        CALL,
+        &outcome("T-B", WorkflowV2Status::Accepted, "new", true),
+    )
+    .unwrap();
+    assert_eq!(
+        v2.load_branch_outcome(CALL, &current.item_id).unwrap(),
+        Some(current)
+    );
+    assert!(v2.load_superseded_branch_outcomes().contains(&archived));
+}
+
+#[test]
 fn whole_call_branch_restart_preserves_current_superseded_and_prior_revoked_records() {
     let temp = tempfile::tempdir().unwrap();
     let (store, run) = generated_run(&temp, &[CALL]);

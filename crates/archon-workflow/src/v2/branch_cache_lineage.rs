@@ -31,7 +31,8 @@ pub(in crate::v2::branch_cache) fn label_last_written(
     if !crate::v2::script::resume_drift::is_remediation_call(call) {
         return None;
     }
-    // Directory names are the store's sanitized call ids.
+    // Legacy directories use sanitized ids. Current directories append a
+    // sixteen digit digest after the sanitized call id.
     let label: String = call_family(call_id)
         .0
         .chars()
@@ -44,6 +45,13 @@ pub(in crate::v2::branch_cache) fn label_last_written(
         })
         .collect();
     let root = v2_store.root().join("branches");
+    let mut call_ids_by_dir = std::collections::HashMap::new();
+    for record in v2_store.load_call_record_history().ok()? {
+        call_ids_by_dir.insert(
+            crate::v2::result_store::branch_component(&record.call.id),
+            record.call.id,
+        );
+    }
     let mut latest = SystemTime::UNIX_EPOCH;
     let calls = match std::fs::read_dir(&root) {
         Ok(calls) => calls,
@@ -54,7 +62,8 @@ pub(in crate::v2::branch_cache) fn label_last_written(
     for dir in calls {
         let dir = dir.ok()?;
         let name = dir.file_name().to_string_lossy().into_owned();
-        if !dir.file_type().ok()?.is_dir() || call_family(&name).0 != label {
+        let matches_family = branch_dir_call_family(&name).as_deref() == Some(label.as_str());
+        if !dir.file_type().ok()?.is_dir() || !matches_family {
             continue;
         }
         // Batch H: another unit filed under the same label (an acceptance
@@ -62,7 +71,10 @@ pub(in crate::v2::branch_cache) fn label_last_written(
         // A directory with no readable record, or a record that carries no
         // contract (a killed call's start record), is counted: it may be the
         // answer a killed session left without one.
-        let other = v2_store.load_call_record(&name).ok().flatten();
+        let record_id = call_ids_by_dir
+            .get(&name)
+            .map_or(name.as_str(), String::as_str);
+        let other = v2_store.load_call_record(record_id).ok().flatten();
         if other
             .and_then(|other| remediation_round_key(&other.call))
             .is_some_and(|other| Some(other) != round)
@@ -77,6 +89,18 @@ pub(in crate::v2::branch_cache) fn label_last_written(
         }
     }
     Some(latest)
+}
+
+/// Decode both legacy sanitized directories and current directories with a
+/// sixteen digit hash suffix.
+fn branch_dir_call_family(name: &str) -> Option<String> {
+    if let Some((call, digest)) = name.rsplit_once('-')
+        && digest.len() == 16
+        && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Some(call_family(call).0.to_string());
+    }
+    Some(call_family(name).0.to_string())
 }
 
 /// The fix `record` answers as, replayed whole or per branch: its call id
