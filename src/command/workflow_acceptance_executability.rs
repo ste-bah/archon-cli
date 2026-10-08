@@ -57,6 +57,7 @@ use archon_workflow::task_set_contract::{
 use async_trait::async_trait;
 
 use crate::command::acceptance_scratch_policy::NativeBinding;
+use crate::command::workflow_task_set::live_root;
 
 /// Bytes of a crashed check's stderr shown to its author.
 const FINDING_TAIL_BYTES: usize = 3000;
@@ -123,6 +124,11 @@ pub(crate) trait ExecutabilityProbe: Send + Sync {
     /// on, if it has one (Issue 328: recorded in the lock it publishes).
     fn baseline_commit(&self) -> Option<String> {
         None
+    }
+
+    /// The live root forms this probe refuses a check for naming (366).
+    fn refused_roots(&self) -> Vec<PathBuf> {
+        Vec::new()
     }
 }
 
@@ -283,21 +289,6 @@ impl HostProbe {
         }
     }
 
-    /// Fail the next `count` hermetic runs as the host's environment would.
-    #[cfg(all(test, unix))]
-    pub(crate) fn with_injected_failures(self, count: usize) -> Self {
-        (self.injected_failures).store(count, std::sync::atomic::Ordering::SeqCst);
-        self
-    }
-
-    #[cfg(test)]
-    fn take_injected_failure(&self) -> bool {
-        use std::sync::atomic::Ordering::SeqCst;
-        (self.injected_failures)
-            .fetch_update(SeqCst, SeqCst, |left| left.checked_sub(1))
-            .is_ok()
-    }
-
     /// At an acceptance round's own site: its scratch policy, else the live
     /// target repository the round runs its checks in.
     pub(crate) fn at(
@@ -329,7 +320,6 @@ impl HostProbe {
     /// policy that cannot be captured runs nothing. The probe carries the
     /// task set's pre-implementation baseline (`Baseline::for_task_set`).
     pub(crate) fn for_task_set(project: &std::path::Path, tasks_root: &std::path::Path) -> Self {
-        let repository = baseline::task_set_repository(project, tasks_root);
         let site = match crate::command::acceptance_scratch_policy::capture(project, tasks_root) {
             Ok(Some(binding)) => {
                 let key = content_digest(binding.policy.repository.to_string_lossy().as_bytes());
@@ -342,10 +332,11 @@ impl HostProbe {
                 "the [workflow.acceptance_execution] policy could not be captured ({error}); nothing is run until it is repaired"
             )),
         };
-        let repository = match &site {
-            Site::Scratch(binding) => binding.policy.repository.clone(),
-            Site::Direct | Site::Hermetic | Site::Unavailable(_) => repository,
+        let binding = match &site {
+            Site::Scratch(binding) => Some(&**binding),
+            Site::Direct | Site::Hermetic | Site::Unavailable(_) => None,
         };
+        let repository = live_root::freeze_repository(project, tasks_root, binding);
         let mut probe = Self::new(project.to_path_buf(), repository, site);
         probe.memo = true;
         probe.baseline = Baseline::for_task_set(&probe.repository, tasks_root);

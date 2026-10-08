@@ -11,6 +11,23 @@ use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, ObserveHooks, observe_
 use super::hermetic::{Unrun, data_digest};
 use super::*;
 
+#[cfg(test)]
+impl HostProbe {
+    /// Fail the next `count` hermetic runs as the host's environment would.
+    #[cfg(unix)]
+    pub(crate) fn with_injected_failures(self, count: usize) -> Self {
+        (self.injected_failures).store(count, std::sync::atomic::Ordering::SeqCst);
+        self
+    }
+
+    pub(super) fn take_injected_failure(&self) -> bool {
+        use std::sync::atomic::Ordering::SeqCst;
+        (self.injected_failures)
+            .fetch_update(SeqCst, SeqCst, |left| left.checked_sub(1))
+            .is_ok()
+    }
+}
+
 /// Verdicts already observed in this process, by site, tree and check: a
 /// freeze's trees do not move under it, so each check is run once per tree.
 fn memo() -> &'static Mutex<BTreeMap<String, CheckResult>> {

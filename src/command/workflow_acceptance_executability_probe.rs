@@ -15,9 +15,13 @@ impl HostProbe {
     }
 
     /// The live roots, canonical where they resolve, as check text could
-    /// name them (the one rule the author step shares, Issue 366).
+    /// name them (the one rule the authors share, Issue 366). A relative
+    /// root is the tree the probe itself resolves: under its process's
+    /// working directory.
     pub(super) fn live_roots(&self) -> Vec<PathBuf> {
-        live_root::root_forms([self.repository.as_path(), self.project.as_path()])
+        let absolute = |root: &PathBuf| std::path::absolute(root).unwrap_or_else(|_| root.clone());
+        let roots = [absolute(&self.repository), absolute(&self.project)];
+        live_root::root_forms(roots.iter().map(PathBuf::as_path))
     }
 
     /// Author findings for every check of `refs` whose text names a live
@@ -298,6 +302,10 @@ impl HostProbe {
 
 #[async_trait]
 impl ExecutabilityProbe for HostProbe {
+    fn refused_roots(&self) -> Vec<PathBuf> {
+        self.live_roots()
+    }
+
     async fn script_defects(
         &self,
         contract: &AcceptanceContract,

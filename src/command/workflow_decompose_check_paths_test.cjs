@@ -1,7 +1,9 @@
-// Issue 366: the acceptance author is told, before it writes a check, that the
-// check runs from its working directory in a hermetic copy and must name every
-// path relative to it, never by the repository's or project's absolute path;
-// and the author step hands the shared entry validator the live roots, so a
+// Issue 366: the acceptance author is told, before it writes a check, where
+// the check can run (a copy at the freeze, a copy or the live checkout at an
+// acceptance round), that it starts from its working directory and must name
+// every path relative to it, never by the repository's or project's absolute
+// path, and must change nothing outside its own temporary files; and the
+// author step hands the shared entry validator the task set's roots, so a
 // check naming one is refused in the same call. Generic: no PRD is named.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -45,7 +47,6 @@ test('the acceptance prompt states the execution model and the relative-path rul
   const ctx = context();
   assert.equal(typeof ctx.acceptanceAuthorPrompt, 'function', 'the acceptance prompt is one named function');
   const prompt = ctx.acceptanceAuthorPrompt();
-  assert.match(prompt, /hermetic copy/);
   assert.match(prompt, /working directory/);
   assert.match(prompt, /project_root/);
   assert.match(prompt, /repo_root/);
@@ -55,6 +56,21 @@ test('the acceptance prompt states the execution model and the relative-path rul
   const rule = prompt.split('\n').find(line => line.includes(RULE));
   assert.ok(rule.includes(REPO) && rule.includes(PROJECT), rule);
   assert.match(rule, /never write/i);
+});
+
+test('the prompt claims no isolation that may not exist', () => {
+  const prompt = context().acceptanceAuthorPrompt();
+  // Without an isolated execution policy an acceptance round runs checks in
+  // the live checkout: the prompt must not promise otherwise.
+  assert.ok(!/never runs a check in the live/i.test(prompt), 'the prompt promises a copy every time');
+  assert.match(prompt, /in the live repository and project/);
+  // The rule that holds at every site: change nothing outside its own
+  // temporary files.
+  assert.match(prompt, /must not change, delete or reset anything outside its own temporary files/);
+  // Each site copies different project files, and places the two roots
+  // differently: a check never reaches one root from the other.
+  assert.match(prompt, /project files the host is configured to copy/);
+  assert.match(prompt, /never reach one root from the other with \.\./);
 });
 
 test('the rule is generic: it names no PRD, project or language', () => {
@@ -71,9 +87,10 @@ test('a supplementary entry is told the same rule', async () => {
   assert.ok(sup, 'the owed supplementary check was authored');
   const own = sup.slice(sup.indexOf('Author ONLY entry SUP-REQ-9'));
   assert.ok(own.includes(RULE), 'the supplementary entry text itself repeats the rule');
+  assert.ok(!/hermetic copy/.test(own), 'the supplementary text claims no isolation');
 });
 
-test('the author step gives the validator both live roots', async () => {
+test('the author step gives the validator the task set it validates for', async () => {
   const calls = [];
   const ctx = context((...argv) => { calls.push(argv); return '[]'; });
   await round(ctx);
@@ -81,7 +98,9 @@ test('the author step gives the validator both live roots', async () => {
   const [id, serialized, roots] = calls[0];
   assert.equal(id, 'AC-1');
   assert.equal(JSON.parse(serialized).id, 'AC-1');
-  assert.deepEqual(JSON.parse(roots), [REPO, PROJECT]);
+  // The roots the prompt names, and the task root the host reads the
+  // freeze's own repository from: one source for both steps.
+  assert.deepEqual(JSON.parse(roots), {repository:REPO, project:PROJECT, tasks:`${PROJECT}/tasks`});
 });
 
 test('a live-root refusal reaches the same entry\'s next call', async () => {

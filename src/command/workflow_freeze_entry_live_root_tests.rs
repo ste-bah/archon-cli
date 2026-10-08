@@ -204,3 +204,93 @@ return JSON.stringify({{out, kept:state.entries.has('A')}});"
         .collect();
     assert_eq!(texts, [expected(&roots.repository)], "{outcome}");
 }
+
+#[test]
+fn a_relative_root_is_a_binding_fault_never_a_match() {
+    let body = "try { __archonValidateAcceptanceEntry('A', '{}', JSON.stringify(['r'])); return '\"applied\"'; } catch (e) { return JSON.stringify(String(e.message)); }";
+    let roots = roots();
+    let message = run(&roots.repository, &roots.project, body);
+    let message = message.as_str().unwrap();
+    assert!(
+        message.contains("not absolute"),
+        "a relative root is refused, not applied: {message}"
+    );
+}
+
+/// A git checkout with one commit.
+fn committed_repository(dir: &Path) {
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "base",
+    ]);
+}
+
+#[test]
+fn the_author_step_refuses_the_repository_the_freeze_probes_from_the_same_source() {
+    // The freeze probes a configured scratch policy's repository; the author
+    // step reads the task set's roots from the same source, so a check
+    // naming that repository is refused at author time too, even when the
+    // script's own repository root is another checkout.
+    let roots = roots();
+    let policy_repo = tempfile::tempdir().unwrap();
+    committed_repository(policy_repo.path());
+    let policy_repo = policy_repo.path().canonicalize().unwrap();
+    let tasks = roots.project.join("tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    let scratch = roots.project.join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    std::fs::create_dir_all(roots.project.join(".archon")).unwrap();
+    std::fs::write(
+        roots.project.join(".archon/config.toml"),
+        format!(
+            "[workflow.acceptance_execution]\nrepository={policy_repo:?}\nscratch_parent={scratch:?}\nproject_inputs=[\"data\"]\nproject_repository_view=\"separate\"\ntoolchain_path=\"/usr/bin:/bin:/usr/sbin:/sbin\"\ntimeout_secs=60\noutput_bytes=8192\nscratch_bytes=16777216\n"
+        ),
+    )
+    .unwrap();
+    let entry = command(&format!("test -f {}/out", policy_repo.display()));
+    let body = format!(
+        "args.taskRoot = {}; return __archonValidateAcceptanceEntry('A', {}, liveRootsText());",
+        serde_json::to_string(&tasks).unwrap(),
+        serde_json::to_string(&entry.to_string()).unwrap()
+    );
+    let found = run(&roots.repository, &roots.project, &body);
+    assert_eq!(
+        live_root_texts(found.as_array().unwrap()),
+        [expected(&policy_repo)]
+    );
+}
+
+#[test]
+fn both_acceptance_authors_are_told_one_check_path_rule() {
+    // The host re-author's text is the decomposition author's, byte for byte.
+    let roots = roots();
+    let script = run(
+        &roots.repository,
+        &roots.project,
+        "return JSON.stringify(checkPathRule());",
+    );
+    assert_eq!(
+        script.as_str().unwrap(),
+        crate::command::workflow_task_set::live_root::check_path_rule(
+            &roots.repository.display().to_string(),
+            &roots.project.display().to_string()
+        )
+    );
+}

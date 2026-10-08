@@ -35,6 +35,11 @@ fn author_prompt(
             "{} is the project root. It holds the PRD and the task root; read source under the repository root alone.",
             scope.project_root.display()
         ),
+        // Issue 366: the decomposition author's own text.
+        live_root::check_path_rule(
+            &scope.repository_root.display().to_string(),
+            &scope.project_root.display().to_string(),
+        ),
         "Return one JSON object with id, criterion, check, gap_permitted, judgment. The two examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.".to_string(),
         ENTRY_SHAPES.to_string(),
         "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges the entry adversarially against the criterion, then runs it once against the current tree: a check whose own script crashes (a syntax error, an undefined name, a call that does not match a helper it defines) is returned to you. Repairing a crash never licenses weakening the check: keep every assertion, fix only the script defect.".to_string(),
@@ -52,6 +57,36 @@ fn author_prompt(
         "Do not run commands or write files.".to_string(),
     ]
     .join("\n")
+}
+
+/// The live root forms a re-authored check must not name (Issue 366): the
+/// roots the prompt names, absolute, and every root the probe refuses.
+pub(super) fn refused_forms(
+    scope: &AuthorScope,
+    probe: &dyn super::executability::ExecutabilityProbe,
+) -> Vec<PathBuf> {
+    let absolute = |root: &PathBuf| std::path::absolute(root).unwrap_or_else(|_| root.clone());
+    let mut roots = vec![
+        absolute(&scope.repository_root),
+        absolute(&scope.project_root),
+    ];
+    roots.extend(probe.refused_roots());
+    live_root::root_forms(roots.iter().map(PathBuf::as_path))
+}
+
+/// A candidate whose check names a live root by its absolute path never
+/// reaches the judge: it goes back to its author in the freeze probe's own
+/// words, as the decomposition author step refuses it.
+pub(super) fn live_root_refusal(
+    candidate: AcceptanceCriterion,
+    forms: &[PathBuf],
+) -> std::result::Result<AcceptanceCriterion, String> {
+    let named = super::executability::executed_text(&candidate)
+        .and_then(|(_, text)| live_root::named_root(text, forms));
+    match named {
+        Some(root) => Err(live_root::live_root_finding(&candidate.id, root)),
+        None => Ok(candidate),
+    }
 }
 
 pub(super) async fn author_entry(

@@ -2,15 +2,18 @@
 // Loaded after workflow_decompose_v1.js as one script: every declaration
 // here is hoisted into the same scope as `workflow`.
 
-// Issue 366: where a check runs, stated before the author writes one. The host
-// proves every check in a hermetic copy (a clone of the repository at its
-// committed HEAD, and the project's tracked copy in it or a copy of its data
-// beside it) and starts it from its working directory there; a check that
+// Issue 366: where a check runs, stated before the author writes one, true
+// for every configuration: the freeze proves a check in a copy, but an
+// acceptance round with no isolated execution runs it in the live checkout,
+// so the rule is what holds everywhere (paths relative to the working
+// directory, nothing changed outside its own temporary files). A check that
 // names a live root by its absolute path is refused unrun, by the freeze and
 // by the author step's entry validator, in the words of the last sentence.
+// The text is the host re-author's too (`live_root::check_path_rule`, held
+// equal by test).
 function checkPathRule() {
   return [
-    "Where a check runs: the host never runs a check in the live repository or project. It proves every check in a hermetic copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project's files (its tracked copy inside that clone, or a copy of its data beside it, without credentials, engine configuration, run state or build output). The command starts in a POSIX shell whose working directory is the copy's project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the copy's repository root when cwd is repo_root. Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests.",
+    "Where a check runs: a check starts in a POSIX shell whose working directory is the project root when cwd is project_root (a floor's typed_verifier_command always starts there) or the repository root when cwd is repo_root, of whichever tree the host runs it in. Before acceptance the host proves each check in a disposable copy: a clone of the code repository at its committed HEAD (uncommitted changes are not in it) and the project files the host is configured to copy, which may be fewer than the project holds. An acceptance round runs the same check in such a copy or, when no isolated acceptance execution is configured, in the live repository and project themselves. So a check must not change, delete or reset anything outside its own temporary files (build output its own commands produce excepted). Choose the cwd whose root holds the files the command reads: repo_root for repository source and tests; never reach one root from the other with ..: the roots do not sit the same way in every copy.",
     `In every check command, name every path relative to the check's working directory; never write the repository's or the project's absolute path (${args.repositoryRoot}, ${args.projectRoot}) or any path under them: those paths are for your reading only. The host refuses a check that names either root by its absolute path and never runs it.`
   ].join("\n");
 }
@@ -33,9 +36,12 @@ function acceptanceAuthorPrompt() {
   ].join("\n");
 }
 
-// The live roots a check must not name, as the validator reads them.
+// The live roots a check must not name, as the validator reads them: the
+// roots this prompt names, and the task root the host reads the freeze's own
+// roots from (its configured scratch repository), so both steps refuse a
+// check from one source.
 function liveRootsText() {
-  return JSON.stringify([args.repositoryRoot, args.projectRoot].filter(root => typeof root === "string" && root !== ""));
+  return JSON.stringify({repository: args.repositoryRoot, project: args.projectRoot, tasks: args.taskRoot});
 }
 
 // Completed entries survive a sibling's incomplete reply. The host validates
@@ -211,7 +217,7 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   const textOf = (id) => {
     if (Object.prototype.hasOwnProperty.call(criteria, id)) return criteria[id];
     const sup = owedMap.get(id);
-    return `SUPPLEMENTARY check owed to PRD requirement ${sup.requirement} (no other check covers it): ${sup.text}\nIts covers is exactly ["${sup.requirement}"]; it must fail whenever ${sup.requirement} is violated on the path it drives. Like every check, it runs in a hermetic copy from its working directory: name every path relative to the check's working directory, never by the repository's or the project's absolute path.`;
+    return `SUPPLEMENTARY check owed to PRD requirement ${sup.requirement} (no other check covers it): ${sup.text}\nIts covers is exactly ["${sup.requirement}"]; it must fail whenever ${sup.requirement} is violated on the path it drives. Like every check, it starts from its working directory, which may be in a copy or in the live checkout: name every path relative to the check's working directory, never by the repository's or the project's absolute path, and change nothing outside its own temporary files.`;
   };
   const all = ids.concat(owed);
   const pending = all.filter(id => !state.entries.has(id) || state.retryIds === null || state.retryIds.has(id));

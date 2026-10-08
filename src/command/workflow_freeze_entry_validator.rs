@@ -93,13 +93,52 @@ fn binding_error(what: &'static str, message: String) -> rquickjs::Error {
     rquickjs::Error::new_from_js_message(what, "JSON", message)
 }
 
+/// The live roots the author step names: the roots themselves, or the
+/// task set they are read from (Issue 366, L4).
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum LiveRoots {
+    /// Exactly these roots.
+    Listed(Vec<PathBuf>),
+    /// The roots the script names, and the task set's own as its freeze
+    /// probe sees them ([`live_root::task_set_roots`]): one source. A root
+    /// the script does not carry is not named.
+    TaskSet {
+        repository: Option<PathBuf>,
+        project: Option<PathBuf>,
+        tasks: Option<PathBuf>,
+    },
+}
+
+/// The absolute live roots `text` (a [`LiveRoots`] JSON value) names.
+fn live_roots(text: &str) -> Result<Vec<PathBuf>, String> {
+    let roots = match serde_json::from_str(text).map_err(|error| error.to_string())? {
+        LiveRoots::Listed(roots) => roots,
+        LiveRoots::TaskSet {
+            repository,
+            project,
+            tasks,
+        } => {
+            let mut roots: Vec<PathBuf> = ([repository, project.clone()].into_iter().flatten())
+                .filter(|root| !root.as_os_str().is_empty())
+                .collect();
+            if let (Some(project), Some(tasks)) = (project, tasks) {
+                roots.extend(live_root::task_set_roots(&project, &tasks));
+            }
+            roots
+        }
+    };
+    live_root::absolute_roots(&roots)
+}
+
 /// Installs `__archonValidateAcceptanceEntry(id, entryJson, rootsJson?)`,
 /// which returns the JSON list of `{text, deterministic_defect}` refusals
-/// (empty: valid). `rootsJson` is the JSON list of live roots a check must
-/// not name (Issue 366); without it only the shape is validated. Only a
-/// binding fault throws (a non-string argument, roots that are not a JSON
-/// list of strings, or text that is not one JSON value); every defect of the
-/// model's reply is a refusal.
+/// (empty: valid). `rootsJson` names the live roots a check must not name
+/// (Issue 366): a JSON list of them, or `{repository, project, tasks?}`,
+/// whose task root adds the roots its freeze probe refuses; without it only
+/// the shape is validated. Only a binding fault throws (a non-string
+/// argument, roots that are neither form or not absolute, or text that is
+/// not one JSON value); every defect of the model's reply is a refusal.
 pub(crate) fn install_entry_validator<'js>(ctx: &rquickjs::Ctx<'js>) -> rquickjs::Result<()> {
     ctx.globals().set(
         "__archonValidateAcceptanceEntry",
@@ -109,8 +148,9 @@ pub(crate) fn install_entry_validator<'js>(ctx: &rquickjs::Ctx<'js>) -> rquickjs
              roots: rquickjs::function::Opt<String>|
              -> rquickjs::Result<String> {
                 let roots: Vec<PathBuf> = match roots.0 {
-                    Some(text) => serde_json::from_str(&text)
-                        .map_err(|error| binding_error("roots", error.to_string()))?,
+                    Some(text) => {
+                        live_roots(&text).map_err(|message| binding_error("roots", message))?
+                    }
                     None => Vec::new(),
                 };
                 let defects = match entry.to_string() {

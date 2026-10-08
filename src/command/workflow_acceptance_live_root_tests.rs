@@ -82,3 +82,37 @@ fn the_finding_is_the_freeze_text() {
         "check 'AC-1': it names the live root /work/repo by its absolute path, so no hermetic copy can keep it off the live tree and the host never runs it; name every path relative to the check's working directory"
     );
 }
+
+#[test]
+fn every_form_the_old_substring_rule_refused_is_still_named_but_a_true_sibling() {
+    let forms = forms();
+    for text in [
+        // printf and concatenation forms that build the root's path.
+        "ls \"$(printf /work/repo%s /src)\"",
+        "ls \"/work/repo\"/src",
+        "ROOT=/work/repo; ls \"$ROOT\"/src",
+        "ls /work/repo@x /work/repo~ /work/repo+x",
+        // A sibling's path that leads back under the root.
+        "cd /work/repo-x/../repo/src",
+        // The root's text spelled with redundant separators.
+        "cat /work//repo/x",
+        "cat /work/./repo/x",
+        "cat /work/x/../repo/y",
+    ] {
+        assert_eq!(
+            named_root(text, &forms),
+            Some(&PathBuf::from("/work/repo")),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn a_relative_root_never_matches_a_command() {
+    // A relative root would match nearly any text ("bar " holds "r "): it
+    // has no form at all, and only absolute roots are matched.
+    assert!(root_forms([Path::new("r"), Path::new("p"), Path::new("./p")]).is_empty());
+    let forms = root_forms([Path::new("r"), Path::new("/work/repo")]);
+    assert_eq!(forms, [PathBuf::from("/work/repo")]);
+    assert_eq!(named_root("bar baz r p", &forms), None);
+}
