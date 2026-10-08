@@ -67,37 +67,76 @@ fn history_without_an_assistant_message_was_not_captured_and_yields_nothing() {
     assert!(tool_uses(&[json!({"role": "user", "content": "task"})]).is_empty());
 }
 
+/// A PEM private key block, built at run time so no literal key sits in the
+/// source.
+fn pem_block() -> String {
+    let kind = "PRIVATE KEY";
+    format!(
+        "-----BEGIN {kind}-----\n{}\n-----END {kind}-----",
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC".repeat(40)
+    )
+}
+
 #[test]
-fn a_one_megabyte_input_is_cut_to_the_bound_and_the_cut_is_recorded() {
-    let huge = "x".repeat(1024 * 1024);
+fn a_one_megabyte_write_keeps_its_path_and_no_content() {
+    let huge = format!("{}{}", "x".repeat(1024 * 1024), pem_block());
     let messages = vec![assistant(vec![json!({
         "type": "tool_use", "id": "w1", "name": "Write",
         "input": {"file_path": "big.txt", "content": huge, "nested": {"blob": huge}},
     })])];
     let uses = tool_uses(&messages);
-    let kept = serde_json::to_string(&uses[0].input).unwrap();
-    assert!(kept.len() <= MAX_INPUT_BYTES, "{} bytes kept", kept.len());
-    assert_eq!(uses[0].input["file_path"], "big.txt");
+    assert_eq!(uses[0].input, json!({"file_path": "big.txt"}));
+    assert_eq!(uses[0].output["input_keys_dropped"], 2);
+    let stored = serde_json::to_string(&uses).unwrap();
+    assert!(stored.len() < 1024, "{} bytes stored", stored.len());
+    assert!(!stored.contains("MIIEvQ"));
+}
+
+#[test]
+fn a_write_of_service_account_json_stores_none_of_it() {
+    let account = json!({"type": "service_account", "private_key_id": "abcdef0123456789",
+        "private_key": pem_block()})
+    .to_string();
+    let messages = vec![assistant(vec![json!({
+        "type": "tool_use", "id": "w1", "name": "Write",
+        "input": {"file_path": "sa.json", "content": account},
+    })])];
+    let stored = serde_json::to_string(&tool_uses(&messages)).unwrap();
     assert!(
-        uses[0].input["content"]
-            .as_str()
-            .unwrap()
-            .ends_with('\u{2026}')
+        !stored.contains("abcdef0123456789") && !stored.contains("MIIEvQ"),
+        "{stored}"
+    );
+}
+
+#[test]
+fn a_long_bash_command_is_redacted_before_it_is_cut() {
+    let command = format!(
+        "cat <<'EOF' > key.pem\n{}\nEOF\n{}",
+        pem_block(),
+        "x".repeat(900)
+    );
+    let messages = vec![assistant(vec![json!({
+        "type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": command},
+    })])];
+    let uses = tool_uses(&messages);
+    let kept = uses[0].input["command"].as_str().unwrap();
+    assert!(
+        kept.len() <= MAX_VALUE_BYTES && !kept.contains("MIIEvQ"),
+        "{kept}"
     );
     assert_eq!(uses[0].output["input_truncated"], true);
-    assert!(uses[0].output["input_bytes"].as_u64().unwrap() > 2 * 1024 * 1024);
     assert_eq!(summary(&uses)["inputs_truncated"], 1);
 }
 
 #[test]
-fn a_huge_non_object_input_is_cut_too() {
+fn a_non_object_input_is_dropped_and_counted() {
     let messages = vec![assistant(vec![json!({
         "type": "tool_use", "id": "w1", "name": "Odd",
         "input": vec!["y".repeat(10_000); 50],
     })])];
     let uses = tool_uses(&messages);
-    assert!(serde_json::to_string(&uses[0].input).unwrap().len() <= MAX_INPUT_BYTES);
-    assert_eq!(uses[0].output["input_truncated"], true);
+    assert_eq!(uses[0].input, Value::Null);
+    assert_eq!(uses[0].output["input_keys_dropped"], 1);
 }
 
 #[test]
@@ -116,12 +155,4 @@ fn many_calls_keep_the_first_bounded_number_and_count_the_rest() {
     assert_eq!(summary["calls"], total);
     assert_eq!(summary["kept"], MAX_TRACE_CALLS);
     assert_eq!(summary["dropped"], 57);
-}
-
-#[test]
-fn clip_cuts_on_a_character_boundary() {
-    let text = "\u{e9}".repeat(100);
-    let cut = clip(&text, 11);
-    assert!(cut.len() <= 11);
-    assert!(cut.ends_with('\u{2026}'));
 }

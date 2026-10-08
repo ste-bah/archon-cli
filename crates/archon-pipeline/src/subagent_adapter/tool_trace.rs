@@ -8,33 +8,36 @@
 //! and the `tool_result` that answered it; only the call's name, its input
 //! and whether the result was an error are kept, never the tool's output.
 //!
-//! The trace is persisted, so it is bounded: at most [`MAX_TRACE_CALLS`]
-//! calls, each input at most [`MAX_INPUT_BYTES`] of JSON. Nothing is cut
-//! silently: a cut input is marked on its call, and the trace ends with one
-//! summary entry named [`TOOL_TRACE_SUMMARY_NAME`] that counts every call,
-//! the calls kept, the calls dropped and the inputs cut. The summary is also
-//! what tells a reader the trace was captured at all, so a session that made
-//! no call is told apart from one whose calls were not recorded.
+//! The trace is persisted, so each input is reduced to the allow-list of
+//! [`archon_tools::tool_trace_input`]: what a call touched (paths, a URL
+//! without its query, a Bash command with credential values replaced),
+//! never its content, each value redacted before it is cut to
+//! [`MAX_VALUE_BYTES`]. At most [`MAX_TRACE_CALLS`] calls are kept. Nothing
+//! is cut silently: a cut or reduced input is marked on its call, and the
+//! trace ends with one summary entry named [`TOOL_TRACE_SUMMARY_NAME`] that
+//! counts every call, the calls kept, the calls dropped and the inputs cut.
+//! The summary is also what tells a reader the trace was captured at all,
+//! so a session that made no call is told apart from one whose calls were
+//! not recorded.
 use crate::runner::ToolUseEntry;
 use archon_tools::subagent_session::TOOL_TRACE_SUMMARY_NAME;
+use archon_tools::tool_trace_input::{clip, safe_input};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 
 /// The most calls one trace keeps. Later calls are counted, not kept.
 pub(super) const MAX_TRACE_CALLS: usize = 400;
-/// The most bytes of serialized JSON one kept input may hold.
-pub(super) const MAX_INPUT_BYTES: usize = 4096;
-/// The most top-level fields a cut input keeps.
-const MAX_INPUT_FIELDS: usize = 8;
-/// The most bytes a cut input keeps of one field name.
-const MAX_KEY_BYTES: usize = 64;
-/// The most bytes a cut input keeps of one field value.
-const MAX_VALUE_BYTES: usize = 384;
+/// The most bytes one kept input value may hold. With the allow-list this
+/// bounds a kept input to a few KiB.
+pub(super) const MAX_VALUE_BYTES: usize = 384;
+/// The most bytes of a call's tool name kept.
+const MAX_NAME_BYTES: usize = 64;
 
 /// Every `tool_use` block in `messages`, in call order, bounded as the
 /// module says, followed by the trace summary. `output` is
 /// `{"is_error": bool}` when a `tool_result` answered the call, and has no
-/// `is_error` when none did (the session ended before the tool returned).
+/// `is_error` when none did (the session ended before the tool returned);
+/// `input_truncated` and `input_keys_dropped` mark a reduced input.
 ///
 /// Returns nothing when `messages` holds no assistant message: then the
 /// history was not captured for this dispatch, and an empty trace with a
@@ -72,26 +75,29 @@ pub(super) fn tool_uses(messages: &[Value]) -> Vec<ToolUseEntry> {
             continue;
         }
         let id = block.get("id").and_then(Value::as_str).unwrap_or_default();
-        let mut output = Map::new();
-        if let Some(is_error) = errors.get(id) {
-            output.insert("is_error".into(), json!(is_error));
-        }
-        let input = match bounded_input(block.get("input").unwrap_or(&Value::Null)) {
-            Ok(input) => input,
-            Err((input, original_bytes)) => {
-                inputs_cut += 1;
-                output.insert("input_truncated".into(), json!(true));
-                output.insert("input_bytes".into(), json!(original_bytes));
-                input
-            }
-        };
         let name = block
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        let mut output = Map::new();
+        if let Some(is_error) = errors.get(id) {
+            output.insert("is_error".into(), json!(is_error));
+        }
+        let safe = safe_input(
+            name,
+            block.get("input").unwrap_or(&Value::Null),
+            MAX_VALUE_BYTES,
+        );
+        if safe.cut {
+            inputs_cut += 1;
+            output.insert("input_truncated".into(), json!(true));
+        }
+        if safe.dropped_keys > 0 {
+            output.insert("input_keys_dropped".into(), json!(safe.dropped_keys));
+        }
         entries.push(ToolUseEntry {
-            tool_name: clip(name, MAX_KEY_BYTES),
-            input,
+            tool_name: clip(name, MAX_NAME_BYTES),
+            input: safe.input,
             output: if output.is_empty() {
                 Value::Null
             } else {
@@ -108,53 +114,11 @@ pub(super) fn tool_uses(messages: &[Value]) -> Vec<ToolUseEntry> {
             "dropped": calls - kept,
             "inputs_truncated": inputs_cut,
             "max_calls": MAX_TRACE_CALLS,
-            "max_input_bytes": MAX_INPUT_BYTES,
+            "max_value_bytes": MAX_VALUE_BYTES,
         }),
         output: Value::Null,
     });
     entries
-}
-
-/// The input itself when it fits; otherwise a cut copy and the original
-/// size. The cut copy keeps the first fields, each clipped, and is never
-/// larger than [`MAX_INPUT_BYTES`].
-fn bounded_input(input: &Value) -> Result<Value, (Value, usize)> {
-    let size = serde_json::to_string(input).map_or(usize::MAX, |text| text.len());
-    if size <= MAX_INPUT_BYTES {
-        return Ok(input.clone());
-    }
-    let cut = match input {
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .take(MAX_INPUT_FIELDS)
-                .map(|(key, value)| (clip(key, MAX_KEY_BYTES), clipped_value(value)))
-                .collect(),
-        ),
-        other => clipped_value(other),
-    };
-    let fits = serde_json::to_string(&cut).is_ok_and(|text| text.len() <= MAX_INPUT_BYTES);
-    Err((if fits { cut } else { Value::Null }, size))
-}
-
-fn clipped_value(value: &Value) -> Value {
-    match value {
-        Value::String(text) => Value::String(clip(text, MAX_VALUE_BYTES)),
-        Value::Null | Value::Bool(_) | Value::Number(_) => value.clone(),
-        other => Value::String(clip(&other.to_string(), MAX_VALUE_BYTES)),
-    }
-}
-
-/// At most `max` bytes of `text`, cut on a character boundary and ended with
-/// an ellipsis when cut.
-fn clip(text: &str, max: usize) -> String {
-    if text.len() <= max {
-        return text.to_string();
-    }
-    let mut end = max - '\u{2026}'.len_utf8();
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}\u{2026}", &text[..end])
 }
 
 #[cfg(test)]

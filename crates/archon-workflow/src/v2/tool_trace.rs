@@ -14,13 +14,16 @@
 //! summary and no call, the host cannot tell "nothing ran" from "nothing was
 //! captured", so both fields are marked [`NOT_RECORDED`] instead.
 //!
-//! Every string kept here passes the repository's secret redaction first: a
-//! tool input is agent-written and can carry a credential. Command text gets
-//! the full redaction (credential shapes and sensitive words); a file path
-//! gets only the credential shapes, so it still names the file that was read. Only call names,
-//! inputs and the error flag are read; a tool's output is never stored.
+//! A tool input is agent-written and can carry anything, so only the
+//! allow-list of [`archon_tools::tool_trace_input`] is read from it (what a
+//! call touched, never its content), whichever client produced the trace.
+//! Command text then gets the full redaction (credential shapes and
+//! sensitive words); a file path gets only the credential shapes, so it
+//! still names the file that was read. Only call names, those inputs and
+//! the error flag are read; a tool's output is never stored.
 use archon_observability::redaction::{redact_secret_values, redact_text};
 use archon_tools::subagent_session::TOOL_TRACE_SUMMARY_NAME;
+use archon_tools::tool_trace_input::{SafeInput, safe_input};
 use serde_json::{Value, json};
 
 use super::result::{
@@ -35,6 +38,8 @@ pub const NOT_RECORDED: &str = "not_recorded";
 
 /// The most characters of a tool input kept in one command record.
 const COMMAND_CHARS: usize = 240;
+/// The most bytes of one input value read from a trace.
+const VALUE_BYTES: usize = 384;
 
 /// Tools whose successful call reads the one file its input names.
 const FILE_READ_TOOLS: &[&str] = &["Read", "NotebookRead"];
@@ -54,7 +59,8 @@ pub fn record_tool_trace(result: &mut WorkflowV2Result, tool_uses: &[WorkflowAge
     let mut seen = Vec::new();
     for tool in &calls {
         let status = status(&tool.output);
-        match read_path(tool) {
+        let safe = safe_input(&tool.tool_name, &tool.input, VALUE_BYTES);
+        match read_path(tool, &safe) {
             Some(path) if status == WorkflowV2CommandStatus::Succeeded => {
                 if !seen.contains(&path) {
                     result.files_read.push(WorkflowV2FileRecord {
@@ -70,7 +76,9 @@ pub fn record_tool_trace(result: &mut WorkflowV2Result, tool_uses: &[WorkflowAge
                     seen.push(path);
                 }
             }
-            _ => result.commands_run.push(command_record(tool, status)),
+            _ => result
+                .commands_run
+                .push(command_record(tool, &safe, status)),
         }
     }
     let marker = match summary {
@@ -132,96 +140,43 @@ pub fn record_tool_trace(result: &mut WorkflowV2Result, tool_uses: &[WorkflowAge
 /// `toolTrace.topLevelLists` when `files_read` / `commands_run` came from
 /// the host session trace.
 pub const HOST_TRACE: &str = "host_trace";
-/// `toolTrace.topLevelLists` when `files_read` / `commands_run` are what the
-/// agent reported about itself.
-pub const AGENT_REPORTED: &str = "agent_reported";
-
-/// Stamp a structured (agent-reported) result with what the host trace saw.
-///
-/// The agent's own `files_read` and `commands_run` stay where they are, and
-/// `toolTrace.topLevelLists` says they are agent-reported: verification
-/// gates read their `kind`, `exit_code`, `pre_existing` and output text,
-/// which a trace record never carries (it stores no tool output), so
-/// swapping them would let failing tests through and reject good results.
-/// The observed records sit beside them in `toolTrace.filesRead` /
-/// `toolTrace.commandsRun`, or are marked [`NOT_RECORDED`] when no trace
-/// was captured. `toolTrace` is host-owned: an agent-written one is
-/// replaced. No evidence entry is added, since gates count evidence. A
-/// `data` that is neither null nor an object is left as the agent wrote it.
-pub fn record_structured_trace(
-    result: &mut WorkflowV2Result,
-    tool_uses: Option<&[WorkflowAgentToolUse]>,
-) {
-    if !(result.data.is_null() || result.data.is_object()) {
+/// Say that `data.toolTrace` misses calls: a session whose tool calls never
+/// reached the trace (a failed attempt a transient retry replaced, a repair
+/// session that ended in an error). Without a reason this does nothing.
+pub fn mark_incomplete(result: &mut WorkflowV2Result, reasons: &[String]) {
+    let Some(trace) = result
+        .data
+        .get_mut("toolTrace")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    let mut reasons: Vec<&String> = reasons.iter().collect();
+    reasons.sort();
+    reasons.dedup();
+    if reasons.is_empty() {
         return;
     }
-    let mut observed = WorkflowV2Result::default();
-    record_tool_trace(&mut observed, tool_uses.unwrap_or_default());
-    let mut marker = observed.data["toolTrace"].take();
-    if marker["recorded"] == json!(true) {
-        marker["filesRead"] = json!(observed.files_read);
-        marker["commandsRun"] = json!(observed.commands_run);
+    trace.insert("complete".into(), json!(false));
+    trace.insert("incompleteReasons".into(), json!(reasons));
+    if let Some(check) = trace
+        .get_mut("claimCheck")
+        .and_then(|check| check.get_mut("filesRead"))
+        .and_then(Value::as_object_mut)
+    {
+        check.insert("traceComplete".into(), json!(false));
     }
-    marker["topLevelLists"] = json!(AGENT_REPORTED);
-    if result.data.is_null() {
-        result.data = json!({});
-    }
-    result.data["toolTrace"] = marker;
-}
-
-/// One trace for a call whose answer took several sessions (first answer,
-/// repairs, a restarted agent): every call in order, and one summary that
-/// sums theirs. When any session's history was not captured (no summary),
-/// the merged trace carries no summary, so it is never claimed complete.
-/// `None` when no session returned.
-pub fn merge_session_traces(
-    sessions: Vec<Vec<WorkflowAgentToolUse>>,
-) -> Option<Vec<WorkflowAgentToolUse>> {
-    if sessions.is_empty() {
-        return None;
-    }
-    let mut calls = Vec::new();
-    let mut totals: Option<serde_json::Map<String, Value>> = Some(Default::default());
-    for session in sessions {
-        let mut summary = None;
-        for tool in session {
-            if tool.tool_name == TOOL_TRACE_SUMMARY_NAME {
-                summary = Some(tool.input);
-            } else {
-                calls.push(tool);
-            }
-        }
-        totals = match (totals, summary) {
-            (Some(mut totals), Some(summary)) => {
-                for key in ["calls", "kept", "dropped", "inputs_truncated"] {
-                    let add = summary.get(key).and_then(Value::as_u64).unwrap_or(0);
-                    let sum = totals.get(key).and_then(Value::as_u64).unwrap_or(0) + add;
-                    totals.insert(key.to_string(), json!(sum));
-                }
-                Some(totals)
-            }
-            _ => None,
-        };
-    }
-    if let Some(totals) = totals {
-        calls.push(WorkflowAgentToolUse {
-            tool_name: TOOL_TRACE_SUMMARY_NAME.to_string(),
-            input: Value::Object(totals),
-            output: Value::Null,
-        });
-    }
-    Some(calls)
 }
 
 /// The file a read call names, unless the trace cut its input: a cut path is
 /// not the path that was read.
-fn read_path(tool: &WorkflowAgentToolUse) -> Option<String> {
-    if !FILE_READ_TOOLS.contains(&tool.tool_name.as_str()) || input_truncated(tool) {
+fn read_path(tool: &WorkflowAgentToolUse, safe: &SafeInput) -> Option<String> {
+    if !FILE_READ_TOOLS.contains(&tool.tool_name.as_str()) || safe.cut || input_truncated(tool) {
         return None;
     }
     ["file_path", "notebook_path", "path"]
         .iter()
-        .find_map(|key| tool.input.get(*key).and_then(Value::as_str))
+        .find_map(|key| safe.input.get(*key).and_then(Value::as_str))
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .map(str::to_string)
@@ -241,21 +196,24 @@ fn status(output: &Value) -> WorkflowV2CommandStatus {
     }
 }
 
+/// A Bash call is its (already reduced) command; any other call is its
+/// name and its allow-listed input, never its whole input.
 fn command_record(
     tool: &WorkflowAgentToolUse,
+    safe: &SafeInput,
     status: WorkflowV2CommandStatus,
 ) -> WorkflowV2CommandRecord {
-    let shell = tool.input.get("command").and_then(Value::as_str);
+    let shell = safe.input.get("command").and_then(Value::as_str);
     let command = match (tool.tool_name.as_str(), shell) {
         ("Bash", Some(command)) => command.to_string(),
-        _ => format!("{} {}", tool.tool_name, tool.input),
+        _ => format!("{} {}", tool.tool_name, safe.input),
     };
     let output_summary = match status {
         WorkflowV2CommandStatus::Succeeded => "host tool trace: call returned",
         WorkflowV2CommandStatus::Failed => "host tool trace: call returned an error",
         WorkflowV2CommandStatus::Skipped => "host tool trace: no result recorded for this call",
     };
-    let output_summary = if input_truncated(tool) {
+    let output_summary = if input_truncated(tool) || safe.cut {
         format!("{output_summary}; input cut by the trace bound")
     } else {
         output_summary.to_string()
@@ -284,6 +242,10 @@ fn clip(text: &str) -> String {
     cut.push('\u{2026}');
     cut
 }
+
+#[path = "tool_trace_structured.rs"]
+mod structured;
+pub use structured::{AGENT_REPORTED, merge_session_traces, record_structured_trace};
 
 #[cfg(test)]
 #[path = "tool_trace_tests.rs"]
