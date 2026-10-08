@@ -8,6 +8,7 @@
 //! reads a run.
 
 use super::*;
+use crate::command::test_support::absolute_toolchain_path;
 use std::path::{Path, PathBuf};
 
 const FIXTURE: &str = concat!(
@@ -85,7 +86,7 @@ fn pre_binding_run_copy_with_an_added_binding_is_refused() {
     let run = RunCopy::new();
     for binding in [
         serde_json::Value::Null,
-        serde_json::json!({"toolchain_path": "/usr/bin:/bin", "bound": {}, "forwarded": []}),
+        serde_json::json!({"toolchain_path": absolute_toolchain_path(), "bound": {}, "forwarded": []}),
     ] {
         let mut metadata: serde_json::Value = run.json("v2/generated-metadata.json");
         metadata[CHECK_POLICY_KEY] = binding;

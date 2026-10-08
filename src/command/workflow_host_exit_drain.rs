@@ -12,8 +12,9 @@
 //!
 //! The drain runs from a C exit hook (`atexit`). That covers a return from
 //! `main` on every platform and `std::process::exit` on Unix. On Windows
-//! `std::process::exit` ends the process without the hook, so the CLI's own
-//! exits call [`drain_before_exit`] first.
+//! `std::process::exit` is `ExitProcess`, which ends every other thread
+//! before any hook can run, so the workflow exits end through
+//! [`exit_after_drain`], which drains first.
 use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -107,6 +108,14 @@ pub(crate) fn drain_before_exit() {
             "host command teardown or sealing did not finish before exit; its residue record stays for the next resume"
         );
     }
+}
+
+/// Ends the process with `code` after the bounded drain. Every exit that
+/// can follow host-command work uses this, never `std::process::exit`
+/// alone: on Windows only a drain before the exit can wait for the work.
+pub(crate) fn exit_after_drain(code: i32) -> ! {
+    drain_before_exit();
+    std::process::exit(code)
 }
 
 extern "C" fn exit_drain() {

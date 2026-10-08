@@ -64,9 +64,9 @@ fn progress_keeps_the_drain_waiting_past_the_no_progress_bound() {
     worker.join().unwrap();
 }
 
-/// A process that exits while work is pending finishes the work first.
-#[test]
-fn process_exit_drains_pending_work() {
+/// A child of this test binary runs `name` with pending work, which ends
+/// the process by `exit`; true when the work finished before the exit.
+fn child_exit_finishes_pending_work(name: &str, exit: fn(i32) -> !) -> bool {
     const FLAG: &str = "ARCHON_TEST_HOST_EXIT_DRAIN";
     if let Some(path) = std::env::var_os(FLAG) {
         let work = PendingWork::begin();
@@ -75,14 +75,14 @@ fn process_exit_drains_pending_work() {
             std::fs::write(path, "finished").unwrap();
             drop(work);
         });
-        std::process::exit(0);
+        exit(0);
     }
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("finished");
     let status = archon_shell::spawn::command(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "command::workflow_host_exit_drain::tests::process_exit_drains_pending_work",
+            &format!("command::workflow_host_exit_drain::tests::{name}"),
         ])
         .env(FLAG, &path)
         .stdout(std::process::Stdio::null())
@@ -90,5 +90,29 @@ fn process_exit_drains_pending_work() {
         .status()
         .unwrap();
     assert!(status.success(), "{status:?}");
-    assert!(path.exists(), "the exit abandoned pending work");
+    path.exists()
+}
+
+/// The workflow exits finish pending work first, on every platform.
+#[test]
+fn process_exit_drains_pending_work() {
+    assert!(
+        child_exit_finishes_pending_work("process_exit_drains_pending_work", exit_after_drain),
+        "the exit abandoned pending work"
+    );
+}
+
+/// A bare `std::process::exit` drains through the C exit hook. Unix only:
+/// on Windows it is `ExitProcess`, which ends the work's thread before any
+/// hook runs, so the workflow exits there use `exit_after_drain`.
+#[cfg(unix)]
+#[test]
+fn std_exit_drains_pending_work_through_the_exit_hook() {
+    assert!(
+        child_exit_finishes_pending_work(
+            "std_exit_drains_pending_work_through_the_exit_hook",
+            std::process::exit,
+        ),
+        "the exit hook abandoned pending work"
+    );
 }

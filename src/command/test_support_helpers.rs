@@ -252,3 +252,17 @@ pub fn make_usage_ctx(
 ) -> (CommandContext, archon_tui::event_channel::TuiEventReceiver) {
     CtxBuilder::new().with_usage_snapshot_opt(snapshot).build()
 }
+
+/// A toolchain PATH of absolute directories on this platform. A launch
+/// refuses a relative entry, and `/usr/bin` has no drive on Windows.
+pub fn absolute_toolchain_path() -> String {
+    let dirs: &[&str] = if cfg!(windows) {
+        &[r"C:\Windows\System32", r"C:\Windows"]
+    } else {
+        &["/usr/bin", "/bin"]
+    };
+    std::env::join_paths(dirs)
+        .expect("toolchain directories join")
+        .into_string()
+        .expect("toolchain PATH is UTF-8")
+}

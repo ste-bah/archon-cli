@@ -83,7 +83,7 @@ pub(super) async fn handle_staged_task_set_lint(
             // staged.
             if let Some((report, status)) = crate::command::topology_lint::resumable_exit(&error) {
                 eprintln!("{report}");
-                std::process::exit(status);
+                crate::command::workflow_host_exit_drain::exit_after_drain(status);
             }
             // Issue 338: a set no read can settle is the run's pause, never
             // the gate's operational error.

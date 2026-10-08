@@ -4,6 +4,7 @@
 //! still resume; a run whose metadata and anchor disagree must not.
 
 use super::*;
+use crate::command::test_support::absolute_toolchain_path;
 use crate::command::workflow_decompose::FIXED_LAUNCH_DIGEST_PERMISSION;
 use crate::command::workflow_provider_route::TrustedProviderRouteSnapshot;
 
@@ -91,7 +92,7 @@ async fn pre_binding_fixed_run_resumes_past_admission() {
 async fn pre_binding_anchor_with_a_recorded_binding_is_refused() {
     for binding in [
         serde_json::Value::Null,
-        serde_json::json!({"toolchain_path": "/usr/bin:/bin", "bound": {}, "forwarded": []}),
+        serde_json::json!({"toolchain_path": absolute_toolchain_path(), "bound": {}, "forwarded": []}),
     ] {
         let project = fixture_project();
         let config = launch_config(project.path());

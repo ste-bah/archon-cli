@@ -1,4 +1,5 @@
 use super::*;
+use crate::command::test_support::absolute_toolchain_path;
 
 #[tokio::test]
 async fn fixed_resume_round_trips_both_recorded_check_policy_states() {
@@ -13,7 +14,7 @@ async fn fixed_resume_round_trips_both_recorded_check_policy_states() {
                     project_inputs: Vec::new(),
                     project_input_excludes: Vec::new(),
                     project_repository_view: Default::default(),
-                    toolchain_path: "/usr/bin:/bin".into(),
+                    toolchain_path: absolute_toolchain_path(),
                     environment: Default::default(),
                     environment_allowlist: vec!["FIXTURE_API_KEY".into()],
                     cargo_seed: None,
@@ -72,7 +73,7 @@ async fn fixed_resume_refuses_missing_or_changed_check_policy_binding() {
                 project_inputs: Vec::new(),
                 project_input_excludes: Vec::new(),
                 project_repository_view: Default::default(),
-                toolchain_path: "/usr/bin:/bin".into(),
+                toolchain_path: absolute_toolchain_path(),
                 environment: Default::default(),
                 environment_allowlist: vec!["FIXTURE_API_KEY".into()],
                 cargo_seed: None,

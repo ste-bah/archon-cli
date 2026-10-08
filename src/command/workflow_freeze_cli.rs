@@ -320,7 +320,9 @@ fn exit_incomplete_resumable(
     incomplete: &crate::command::workflow_freeze_budget::FreezeIncomplete,
 ) -> ! {
     eprintln!("{}", incomplete.report());
-    std::process::exit(crate::command::workflow_host_command_operational::EXIT_INCOMPLETE_RESUMABLE)
+    crate::command::workflow_host_exit_drain::exit_after_drain(
+        crate::command::workflow_host_command_operational::EXIT_INCOMPLETE_RESUMABLE,
+    )
 }
 
 #[path = "workflow_freeze_defects.rs"]

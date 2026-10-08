@@ -62,8 +62,7 @@ pub(crate) async fn handle_headless_if_requested(
     // item whose subagent finished as the run ended.
     archon_tools::task_manager::drain_board_items().await;
     // Windows: `exit` skips the C exit hook that drains host-command work.
-    crate::command::workflow_host_exit_drain::drain_before_exit();
-    std::process::exit(exit_code);
+    crate::command::workflow_host_exit_drain::exit_after_drain(exit_code);
 }
 
 pub(crate) fn handle_catalog_modes_if_requested(
@@ -143,8 +142,7 @@ pub(crate) async fn handle_print_mode_if_requested(
     // stuck agent delays exit by seconds rather than holding it open.
     archon_tools::task_manager::drain_board_items().await;
     // Windows: `exit` skips the C exit hook that drains host-command work.
-    crate::command::workflow_host_exit_drain::drain_before_exit();
-    std::process::exit(exit_code);
+    crate::command::workflow_host_exit_drain::exit_after_drain(exit_code);
 }
 
 pub(crate) fn ensure_interactive_tty() -> Result<()> {
