@@ -720,7 +720,7 @@ async fn exit_0_returns_not_blocked() {
 async fn exit_2_returns_blocked_with_stderr() {
     let registry = make_registry_with_command(
         HookEvent::PreToolUse,
-        "echo 'blocked by policy' >&2; exit 2",
+        "cat >/dev/null; echo 'blocked by policy' >&2; exit 2",
         None,
         None,
     );
@@ -731,6 +731,39 @@ async fn exit_2_returns_blocked_with_stderr() {
     assert!(
         reason.contains("blocked by policy"),
         "block reason should contain stderr: got '{reason}'"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn exit_2_with_stdin_broken_pipe_preserves_stderr_and_reports_pipe() {
+    let registry = make_registry_with_command(
+        HookEvent::PreToolUse,
+        "echo 'blocked by policy' >&2; exit 2",
+        None,
+        None,
+    );
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let result = registry
+        .execute_hooks(
+            HookEvent::PreToolUse,
+            serde_json::json!({
+                "tool_name": "Bash",
+                "tool_input": {"payload": "x".repeat(2 * 1024 * 1024)}
+            }),
+            &cwd,
+            "test-session",
+        )
+        .await;
+
+    assert!(result.is_blocked(), "exit 2 must block");
+    let reason = result.block_reason().expect("should have block reason");
+    assert!(
+        reason.contains("blocked by policy"),
+        "block reason should contain stderr: got '{reason}'"
+    );
+    assert!(
+        reason.contains("hook did not read all of its stdin: Broken pipe"),
+        "block reason should report the incomplete stdin write: got '{reason}'"
     );
 }
 
@@ -769,6 +802,28 @@ async fn unsuccessful_hook_cannot_hide_stdin_broken_pipe() {
     assert!(
         result.is_blocked(),
         "BrokenPipe is ignorable only when the short-lived hook succeeds"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn successful_hook_may_exit_after_stdin_broken_pipe() {
+    let registry = make_registry_with_command(HookEvent::PreToolUse, "exit 0", None, None);
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let result = registry
+        .execute_hooks(
+            HookEvent::PreToolUse,
+            serde_json::json!({
+                "tool_name": "Bash",
+                "tool_input": {"payload": "x".repeat(2 * 1024 * 1024)}
+            }),
+            &cwd,
+            "test-session",
+        )
+        .await;
+
+    assert!(
+        !result.is_blocked(),
+        "BrokenPipe remains ignorable when the short-lived hook succeeds"
     );
 }
 

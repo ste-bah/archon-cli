@@ -80,9 +80,10 @@ fn resuming_acquisition_pauses_when_a_file_lock_holder_is_wedged() {
         .recv_timeout(GIVE_UP)
         .expect("resuming acquisition never returned while the holder was wedged");
     assert_pause(result, entered, &store.lock);
+    let elapsed = returned.duration_since(started);
     assert!(
-        returned.duration_since(started) >= WINDOW,
-        "paused before one full no-progress window"
+        elapsed >= WINDOW,
+        "paused before one full no-progress window: returned after {elapsed:?}, window {WINDOW:?}"
     );
 }
 
@@ -132,7 +133,9 @@ fn resuming_acquisition_waits_through_progress_then_pauses_one_window_after_it_s
                     &config,
                 )
                 .unwrap();
-                std::thread::sleep(Duration::from_millis(100));
+                if value != 11 {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
             }
             last.send(Instant::now()).unwrap();
             let _ = released.recv();
@@ -147,14 +150,16 @@ fn resuming_acquisition_waits_through_progress_then_pauses_one_window_after_it_s
     let (result, returned, entered) =
         outcome.expect("resuming acquisition never returned after the holder stopped");
     assert_pause(result, entered, &store.lock);
-    let last_write = written.recv().unwrap() - Duration::from_millis(100);
+    let last_write = written.recv().unwrap();
+    let elapsed = returned.duration_since(started);
     assert!(
-        returned.duration_since(started) >= Duration::from_millis(1_000),
-        "progress must keep the acquisition waiting"
+        elapsed >= Duration::from_millis(1_000),
+        "progress must keep the acquisition waiting: returned after {elapsed:?}"
     );
+    let since_last_write = returned.duration_since(last_write);
     assert!(
-        returned.duration_since(last_write) >= WINDOW,
-        "paused before a full window without progress"
+        since_last_write >= WINDOW,
+        "paused before a full window without progress: {since_last_write:?} since last write, window {WINDOW:?}"
     );
 }
 

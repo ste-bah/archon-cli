@@ -89,12 +89,15 @@ pub(super) async fn run_command(
     }
     // The group was just seen empty: never signal its ID again, on any path.
     child.disarm_group();
-    check_write_error(write_error, status.success())?;
-    Ok(CommandOutput::from_pipes(
-        status.code().unwrap_or(-1),
-        stdout,
-        stderr,
-    ))
+    let exit_code = status.code().unwrap_or(-1);
+    let stdin_was_incomplete = check_write_error(write_error, exit_code)?;
+    let mut output = CommandOutput::from_pipes(exit_code, stdout, stderr);
+    if stdin_was_incomplete {
+        output
+            .stderr
+            .push_str("\n(hook did not read all of its stdin: Broken pipe)");
+    }
+    Ok(output)
 }
 
 async fn timeout_with_cleanup(
@@ -173,13 +176,22 @@ fn combine_cleanup_error(error: RunError, cleanup_error: Option<String>) -> RunE
     }
 }
 
-fn check_write_error(error: Option<std::io::Error>, success: bool) -> Result<(), RunError> {
-    if let Some(error) = error
-        && (error.kind() != std::io::ErrorKind::BrokenPipe || !success)
-    {
-        return Err(RunError::Io(error.to_string()));
+fn check_write_error(error: Option<std::io::Error>, exit_code: i32) -> Result<bool, RunError> {
+    let Some(error) = error else {
+        return Ok(false);
+    };
+    if error.kind() == std::io::ErrorKind::BrokenPipe {
+        // Rust maps Windows ERROR_NO_DATA (232) to BrokenPipe as well. A
+        // deliberate exit 2 still supplies a useful block reason in stderr;
+        // report the incomplete write alongside it. Other failures remain
+        // fail-closed because the hook may not have seen its input.
+        return match exit_code {
+            0 => Ok(false),
+            2 => Ok(true),
+            _ => Err(RunError::Io(error.to_string())),
+        };
     }
-    Ok(())
+    Err(RunError::Io(error.to_string()))
 }
 
 struct PipeOutput {
