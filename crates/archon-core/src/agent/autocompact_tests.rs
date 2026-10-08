@@ -142,6 +142,7 @@ impl LlmProvider for RateLimitedProvider {
     ) -> Result<tokio::sync::mpsc::Receiver<StreamEvent>, LlmError> {
         Err(LlmError::RateLimited {
             retry_after_secs: 30,
+            from_provider: true,
         })
     }
 
@@ -386,6 +387,7 @@ impl LlmProvider for RateLimitThenSuccessProvider {
         match (self.mode, call) {
             (RateLimitFailureMode::PreStream, 0) => Err(LlmError::RateLimited {
                 retry_after_secs: 30,
+                from_provider: true,
             }),
             (RateLimitFailureMode::MidStream, 0) => Ok(stream_from_events(vec![
                 StreamEvent::ThinkingDelta {

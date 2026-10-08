@@ -14,6 +14,7 @@ pub(super) fn error_kind(error: &LlmError) -> &'static str {
         LlmError::QuotaExceeded(_) => "quota_exceeded",
         LlmError::Aborted => "aborted",
         LlmError::ContextWindowExceeded { .. } => "context_window_exceeded",
+        LlmError::Rejected { .. } => "request_rejected",
         _ => "unknown_error",
     }
 }
@@ -31,6 +32,7 @@ pub(super) fn error_message(error: &LlmError) -> &'static str {
         LlmError::Overloaded => "provider reported overload",
         LlmError::Serialize(_) => "provider request or response serialization failed",
         LlmError::ContextWindowExceeded { .. } => "provider context window was exceeded",
+        LlmError::Rejected { .. } => "provider rejected the request",
         _ => "provider request failed",
     }
 }
@@ -54,9 +56,13 @@ pub(super) fn limit_event_type(error: &LlmError) -> Option<ProviderRuntimeEventT
 
 pub(super) fn error_metadata(error: &LlmError) -> serde_json::Value {
     match error {
-        LlmError::RateLimited { retry_after_secs } => serde_json::json!({
+        LlmError::RateLimited {
+            retry_after_secs,
+            from_provider,
+        } => serde_json::json!({
             "error_kind": error_kind(error),
             "retry_after_secs": retry_after_secs,
+            "retry_after_from_provider": from_provider,
         }),
         LlmError::Server { status, .. } => serde_json::json!({
             "error_kind": error_kind(error),

@@ -359,9 +359,15 @@ impl WorkflowScriptHost {
         let dispatched = match dispatched {
             // Issue 263: a streak of never-started dispatches pauses the run,
             // recorded below like any other pause.
-            Err(err) => Err(self
-                .pause_on_never_started_streak(&call_id, dispatch_generation, err)
-                .await),
+            // Issue 364: so does a provider silent for a whole window.
+            Err(err) => {
+                let err = self
+                    .pause_on_never_started_streak(&call_id, dispatch_generation, err)
+                    .await;
+                Err(self
+                    .pause_on_transport_stall(&call_id, dispatch_generation, err)
+                    .await)
+            }
             ok => ok,
         };
         let result = match dispatched {

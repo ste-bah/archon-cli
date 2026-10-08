@@ -20,6 +20,7 @@ impl LlmProvider for FailingProvider {
     async fn stream(&self, _request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         Err(LlmError::RateLimited {
             retry_after_secs: 30,
+            from_provider: true,
         })
     }
 

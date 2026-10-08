@@ -87,6 +87,17 @@ impl WorkflowScriptHost {
         &self,
         error: &str,
     ) -> Option<WorkflowError> {
+        self.pause_on_script_stop(error, "script_error").await
+    }
+
+    /// [`Self::pause_on_script_error`] for any stop of the script the host
+    /// decided (Issue 364: a starved script thread); `cause` names it in the
+    /// pause event while it does not recur.
+    pub(in super::super) async fn pause_on_script_stop(
+        &self,
+        error: &str,
+        cause: &str,
+    ) -> Option<WorkflowError> {
         let script_error = crate::command::workflow_decompose_events::bounded_log_field(error);
         let point = {
             let acc = self.accumulator.lock().await;
@@ -146,7 +157,10 @@ impl WorkflowScriptHost {
         };
         let detail = serde_json::json!({
             "event": "script_error_pause",
-            "cause": if recurring { "recurring_script_error" } else { "script_error" },
+            "cause": if recurring { "recurring_script_error" } else { cause },
+            // A recurrence keeps what stopped the script (Issue 364: a starved
+            // script thread is not a script error).
+            "stop_cause": cause,
             "call_id": "workflow.js",
             "script_error": script_error,
             "calls_answered": point.calls,

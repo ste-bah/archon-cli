@@ -58,6 +58,13 @@ impl WorkflowJsWatchdog {
         }
     }
 
+    /// Whether the host's terminal stop has been seen (its budget runs).
+    pub(super) fn after_terminal_stop(&self) -> bool {
+        self.terminal_since
+            .lock()
+            .map_or(true, |since| since.is_some())
+    }
+
     fn terminal_budget_elapsed(&self) -> bool {
         let Ok(since) = self.terminal_since.lock() else {
             return true;

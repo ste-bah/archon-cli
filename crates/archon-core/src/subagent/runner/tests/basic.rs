@@ -316,6 +316,7 @@ impl LlmProvider for CompactionFailsProvider {
         if origin == "compaction_summary" {
             return Err(archon_llm::provider::LlmError::RateLimited {
                 retry_after_secs: 30,
+                from_provider: true,
             });
         }
         let events = text_response("survived");

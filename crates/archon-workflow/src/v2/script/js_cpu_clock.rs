@@ -68,6 +68,55 @@ fn read_thread_cpu_time() -> Option<Duration> {
     None
 }
 
+/// CPU time the calling thread has used so far; `None` when it cannot be read.
+pub fn thread_cpu_time() -> Option<Duration> {
+    read_thread_cpu_time()
+}
+
+/// CPU time the whole process has used so far, readable from any thread;
+/// `None` when it cannot be read (Issue 364: the script-thread monitor).
+#[cfg(unix)]
+pub fn process_cpu_time() -> Option<Duration> {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `now` is a valid, writable timespec for the call.
+    let status = unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut now) };
+    (status == 0).then(|| Duration::new(now.tv_sec as u64, now.tv_nsec as u32))
+}
+
+/// CPU time (kernel plus user) of the whole process, from `GetProcessTimes`.
+#[cfg(windows)]
+pub fn process_cpu_time() -> Option<Duration> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+    let zero = || FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut creation, mut exit, mut kernel, mut user) = (zero(), zero(), zero(), zero());
+    // SAFETY: the pseudo handle of the current process needs no closing, and
+    // every out pointer is a valid, writable FILETIME for the call.
+    let ok = unsafe {
+        GetProcessTimes(
+            GetCurrentProcess(),
+            &mut creation,
+            &mut exit,
+            &mut kernel,
+            &mut user,
+        )
+    };
+    let ticks =
+        |time: FILETIME| (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+    (ok != 0).then(|| Duration::from_nanos((ticks(kernel) + ticks(user)).saturating_mul(100)))
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn process_cpu_time() -> Option<Duration> {
+    None
+}
+
 /// Warns once per process that a budget fell back to the wall clock.
 fn warn_wall_clock_fallback() {
     static WARNED: AtomicBool = AtomicBool::new(false);

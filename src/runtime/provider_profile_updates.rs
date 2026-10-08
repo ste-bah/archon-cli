@@ -149,9 +149,9 @@ fn mark_failure_inner(
 
 fn cooldown_until(error: &LlmError, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     match error {
-        LlmError::RateLimited { retry_after_secs } => {
-            crate::runtime::provider_limit_windows::reset_after_secs(now, *retry_after_secs)
-        }
+        LlmError::RateLimited {
+            retry_after_secs, ..
+        } => crate::runtime::provider_limit_windows::reset_after_secs(now, *retry_after_secs),
         LlmError::QuotaExceeded(message) => {
             crate::runtime::provider_limit_windows::reset_hint_from_text(message, now)
         }
@@ -172,6 +172,7 @@ fn error_reason(error: &LlmError) -> &'static str {
         LlmError::Http(_) => "http_error",
         LlmError::Serialize(_) => "serialization_error",
         LlmError::ContextWindowExceeded { .. } => "context_window_exceeded",
+        LlmError::Rejected { .. } => "request_rejected",
         _ => "unknown_error",
     }
 }
@@ -286,6 +287,7 @@ mod tests {
             Some("req-1"),
             &LlmError::RateLimited {
                 retry_after_secs: 60,
+                from_provider: true,
             },
         );
 

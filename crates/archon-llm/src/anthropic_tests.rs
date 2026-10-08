@@ -341,7 +341,8 @@ async fn long_retry_after_returns_without_sleeping() {
     assert!(matches!(
         result,
         Err(crate::anthropic::ApiError::RateLimited {
-            retry_after_secs: 8004
+            retry_after_secs: 8004,
+            from_provider: true
         })
     ));
 }
@@ -376,7 +377,8 @@ async fn large_rate_limited_body_returns_for_caller_compaction() {
     assert!(matches!(
         result,
         Err(crate::anthropic::ApiError::RateLimited {
-            retry_after_secs: 5
+            retry_after_secs: 5,
+            from_provider: true
         })
     ));
 }

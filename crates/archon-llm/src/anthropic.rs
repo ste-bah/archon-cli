@@ -225,7 +225,9 @@ impl AnthropicClient {
 
             match &err {
                 // 429: wait for retry-after then retry
-                ApiError::RateLimited { retry_after_secs } => {
+                ApiError::RateLimited {
+                    retry_after_secs, ..
+                } => {
                     if body.len() >= LARGE_RATE_LIMIT_RETRY_BODY_BYTES {
                         tracing::warn!(
                             body_len = body.len(),
@@ -456,6 +458,10 @@ mod transport_backstop_tests {
         assert!(AnthropicClient::read_backstop_for_idle_guard(5400) > 5400);
     }
 }
+
+#[cfg(test)]
+#[path = "anthropic_dead_connection_tests.rs"]
+mod dead_connection_tests;
 
 #[path = "anthropic_body.rs"]
 mod body;

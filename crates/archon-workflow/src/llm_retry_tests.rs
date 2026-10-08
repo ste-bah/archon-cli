@@ -15,6 +15,26 @@ fn workflow_foreground_subagent_timeout_is_not_transient_retry() {
     ));
 }
 
+/// Issue 364: a stall after a whole no-progress window of resends says
+/// "request" and "timeout" too, and is re-asked never; the host pauses on it.
+#[test]
+fn a_transport_stall_is_not_transient_retry() {
+    let text = format!(
+        "subagent failed: {} subagent stream retry exhausted: no answer (last: stream idle timeout); error sending request",
+        crate::error::TRANSPORT_STALL_MARKER
+    );
+    assert!(!transient_live_agent_error(&text));
+    assert!(!transient_live_agent_error_for_request(
+        &request(false),
+        &text
+    ));
+    let wrapped = WorkflowError::port(std::io::Error::other(text.clone()));
+    assert!(crate::error::is_transport_stall(&wrapped));
+    assert!(!crate::error::is_transport_stall(
+        &WorkflowError::StageFailed("error sending request".into())
+    ));
+}
+
 /// An inactivity cut says "timeout" too, and is the host's decision exactly
 /// like the wall clock: never a provider blink to re-ask.
 #[test]

@@ -26,8 +26,20 @@ pub enum LlmError {
     #[error("authentication error: {0}")]
     Auth(String),
 
+    /// `from_provider` is true when the provider named the wait (a
+    /// Retry-After header or body field); false when `retry_after_secs` is
+    /// this client's default wait because the provider named none.
     #[error("rate limited: retry after {retry_after_secs}s")]
-    RateLimited { retry_after_secs: u64 },
+    RateLimited {
+        retry_after_secs: u64,
+        from_provider: bool,
+    },
+
+    /// The provider rejected the request itself (an error event such as
+    /// `invalid_request_error`, `permission_error` or `not_found_error`).
+    /// Sending it again cannot help. No HTTP status is known.
+    #[error("provider rejected the request ({error_type}): {message}")]
+    Rejected { error_type: String, message: String },
 
     #[error("server overloaded")]
     Overloaded,
@@ -58,49 +70,9 @@ pub enum LlmError {
     },
 }
 
-impl LlmError {
-    pub fn request_pressure_kind(&self) -> Option<crate::context_window::RequestPressureKind> {
-        match self {
-            Self::ContextWindowExceeded { .. } => {
-                Some(crate::context_window::RequestPressureKind::AggregateContext)
-            }
-            Self::Http(message) => {
-                crate::context_window::classify_request_pressure_error(None, None, None, message)
-            }
-            Self::Server { status, message } => {
-                crate::context_window::classify_request_pressure_error(
-                    Some(*status),
-                    None,
-                    None,
-                    message,
-                )
-            }
-            _ => None,
-        }
-    }
-
-    pub fn is_context_window_exceeded(&self) -> bool {
-        match self {
-            Self::ContextWindowExceeded { .. } => true,
-            Self::Http(message) => crate::context_window::classify_context_window_error(
-                None, None, None, message, None, None,
-            )
-            .is_some(),
-            Self::Server { status, message } => {
-                crate::context_window::classify_context_window_error(
-                    Some(*status),
-                    None,
-                    None,
-                    message,
-                    None,
-                    None,
-                )
-                .is_some()
-            }
-            _ => false,
-        }
-    }
-}
+// Request-pressure and context-window classification of an error.
+#[path = "provider_error_class.rs"]
+mod error_class;
 
 // ---------------------------------------------------------------------------
 // Feature flags
