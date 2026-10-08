@@ -200,3 +200,62 @@ fn the_shared_toggle_matches_the_lints_old_behaviour_on_a_well_formed_body() {
     assert!(is_fence_line("   ```bash"));
     assert!(!is_fence_line("text ```"));
 }
+
+/// Issue-367: `workflow lint --task-file` on a landed chat-and-wrapper file
+/// reports one cause, and lints a pure wrapper as the document inside it.
+#[test]
+fn the_task_file_lint_names_text_before_the_frontmatter_once() {
+    let temp = tempfile::tempdir().unwrap();
+    let tasks = temp.path().join("tasks").join("PRD-X");
+    std::fs::create_dir_all(&tasks).unwrap();
+    let path = tasks.join("TASK-X-001.md");
+    let inner = "```yaml\ntask_id: TASK-X-001\ntitle: T\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Focused Tests\n\n```bash\ntest -f TASK-X-001.md\n```\n";
+    let lint = |raw: &str| {
+        super::super::task_file::inspect_raw(
+            temp.path(),
+            &path,
+            raw,
+            archon_core::config::GateMode::Enforce,
+        )
+        .blockers
+    };
+    let chat = "All facts verified. Authoring the repaired TASK body now.";
+    let landed = format!("{chat}\n\n```markdown\n{inner}```\n");
+    assert_eq!(
+        lint(&landed),
+        vec![format!(
+            "{}: the task file starts with text before its frontmatter (first line: \"{chat}\"); return only the task file, starting with its ```yaml frontmatter block",
+            path.display()
+        )]
+    );
+    assert_eq!(lint(&format!("```markdown\n{inner}```\n")), lint(inner));
+}
+
+#[test]
+fn the_task_file_shape_reads_the_first_nonblank_line_after_a_bom() {
+    let front = "```yaml\ntask_id: T\n```\n\nText.\n";
+    for text in [
+        front.to_string(),
+        format!("\n\n{front}"),
+        format!("\u{feff}\r\n{}", front.replace('\n', "\r\n")),
+        front.replacen("```yaml", "```yaml  ", 1),
+    ] {
+        assert_eq!(
+            task_file_shape(&text),
+            TaskFileShape::Frontmatter,
+            "{text:?}"
+        );
+    }
+    assert_eq!(
+        task_file_shape(&format!("\u{feff}```markdown\n{front}```\n")),
+        TaskFileShape::Wrapped(front)
+    );
+    assert_eq!(
+        task_file_shape(&format!("Chat.\n\n```markdown\n{front}```\n")),
+        TaskFileShape::TextBefore("Chat.")
+    );
+    assert_eq!(
+        task_file_shape(&format!("```markdown\n{front}```\nDone.\n")),
+        TaskFileShape::TextBefore("```markdown")
+    );
+}

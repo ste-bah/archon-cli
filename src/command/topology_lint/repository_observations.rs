@@ -362,6 +362,17 @@ pub(crate) fn findings_against(
     raw: &str,
     task: &WorkflowV2TaskUniverseTask,
 ) -> Vec<(String, String)> {
+    // Issue-367: a file whose first line is not its frontmatter is one
+    // finding, not one per deliverable the misread hides; a pure outer fence
+    // (Issue-61) is read as the document inside it.
+    let raw = match super::fences::task_file_shape(raw) {
+        super::fences::TaskFileShape::Frontmatter => raw,
+        super::fences::TaskFileShape::Wrapped(interior) => interior,
+        super::fences::TaskFileShape::TextBefore(first) => {
+            let text = super::fences::text_before_frontmatter_finding(first);
+            return vec![(task_id.to_string(), format!("{task_id}: {text}"))];
+        }
+    };
     let mut findings = Vec::new();
     for path in deliverable_paths(task, raw) {
         let Some(relative) = tree.relative_to_root(&path).filter(|r| !r.is_empty()) else {

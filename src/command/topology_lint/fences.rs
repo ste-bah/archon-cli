@@ -95,6 +95,71 @@ pub(crate) fn unwrap_outer_fence(text: &str) -> Option<&str> {
     (fence_lines % 2 == 0).then_some(interior)
 }
 
+/// `text` without a leading UTF-8 byte order mark and without its leading
+/// blank lines (whitespace only, ended by `\n` or `\r\n`). The rest is the
+/// same bytes.
+pub(crate) fn strip_leading_blank_lines(text: &str) -> &str {
+    let mut rest = text.strip_prefix('\u{feff}').unwrap_or(text);
+    while let Some(end) = rest.find('\n') {
+        if !rest[..end].trim().is_empty() {
+            break;
+        }
+        rest = &rest[end + 1..];
+    }
+    rest
+}
+
+/// The first line of `text` after [`strip_leading_blank_lines`], without its
+/// line terminator.
+pub(crate) fn first_nonblank_line(text: &str) -> &str {
+    let rest = strip_leading_blank_lines(text);
+    let line = rest.split('\n').next().unwrap_or_default();
+    line.strip_suffix('\r').unwrap_or(line)
+}
+
+/// The task file's own frontmatter opener: ```` ```yaml ```` or
+/// ```` ```yml ````, with surrounding whitespace allowed (the parser reads
+/// the line trimmed).
+pub(crate) fn is_frontmatter_opener(line: &str) -> bool {
+    matches!(line.trim(), "```yaml" | "```yml")
+}
+
+/// How a task file's first non-blank line places its frontmatter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskFileShape<'a> {
+    /// The frontmatter opener is the first non-blank line.
+    Frontmatter,
+    /// A pure whole-document fence ([`unwrap_outer_fence`]); the interior.
+    Wrapped(&'a str),
+    /// Anything else: the first non-blank line, which is not the frontmatter.
+    TextBefore(&'a str),
+}
+
+pub(crate) fn task_file_shape(text: &str) -> TaskFileShape<'_> {
+    let first = first_nonblank_line(text);
+    if is_frontmatter_opener(first) {
+        return TaskFileShape::Frontmatter;
+    }
+    match unwrap_outer_fence(strip_leading_blank_lines(text)) {
+        Some(interior) => TaskFileShape::Wrapped(interior),
+        None => TaskFileShape::TextBefore(first),
+    }
+}
+
+/// `line` trimmed and cut to at most 120 characters, for a finding.
+pub(crate) fn quoted_first_line(line: &str) -> String {
+    line.trim().chars().take(120).collect()
+}
+
+/// The one finding for a task file whose first non-blank line is not its
+/// frontmatter.
+pub(crate) fn text_before_frontmatter_finding(first_line: &str) -> String {
+    format!(
+        "the task file starts with text before its frontmatter (first line: \"{}\"); return only the task file, starting with its ```yaml frontmatter block",
+        quoted_first_line(first_line)
+    )
+}
+
 /// A fence opener that can only be wrapping the document: bare, or carrying
 /// one info word that is not the frontmatter's own `yaml`/`yml`.
 fn is_outer_opener(line: &str) -> bool {

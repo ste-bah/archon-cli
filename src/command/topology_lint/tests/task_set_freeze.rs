@@ -190,7 +190,7 @@ fn graph_lowering_failure_preserves_report_but_is_operational_in_observe() {
         std::fs::write(
             tasks.join(format!("{task_id}-body.md")),
             format!(
-                "# Body\n\n```yaml\ntask_id: {task_id}\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: [{dependency}]\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n## Focused Tests\n- `sh -c 'exit 1'`\n"
+                "```yaml\ntask_id: {task_id}\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: [{dependency}]\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: [sh]\ndeliverable_contracts: []\n```\n\n# Body\n\n## Focused Tests\n- `sh -c 'exit 1'`\n"
             ),
         )
         .unwrap();

@@ -6,6 +6,9 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use archon_workflow::WorkflowLlmClientFactory;
 
+#[path = "workflow_staged_candidate.rs"]
+mod candidate;
+
 /// The decomposition's set gate: the point at which a task set with bodies is
 /// accepted, so the obligation fidelity audit runs here unconditionally.
 ///
@@ -179,15 +182,28 @@ pub(super) async fn handle_staged_task_file_lint(
             archon_workflow::HostCommandRequest::MAX_STDIN_BYTES
         ));
     }
-    // Issue-61: an author who wrapped the whole reply in one outer code fence
-    // is unwrapped here, before any lint reads the body and before the bytes
-    // are staged, so the lints, the critic, the landed file and every reader
-    // of it downstream see one and the same document.
-    let (candidate, unwrapped) = unwrap_outer_fence(candidate);
     let path = if task_file.is_absolute() {
         task_file.to_path_buf()
     } else {
         cwd.join(task_file)
+    };
+    // Issue-61/367: the task file is the answer when it opens with its
+    // frontmatter, or the inside of one outer fence; any other answer has
+    // text before the task file and goes back to the author as one finding,
+    // before any lint reads it and before anything is staged.
+    let (candidate, unwrapped) = match candidate::normalize_task_candidate(candidate) {
+        Ok(candidate) => candidate,
+        Err(reason) => {
+            let manifest = candidate::stage_shape_refusal(
+                staging_root,
+                gate_envelope,
+                call_id,
+                &path,
+                reason,
+            )?;
+            println!("{}", serde_json::to_string(&manifest)?);
+            return Ok(());
+        }
     };
     let file_name = path
         .file_name()
@@ -215,6 +231,13 @@ pub(super) async fn handle_staged_task_file_lint(
     } else {
         evaluation
     };
+    // The landed file opens with its frontmatter, whatever the lints said.
+    if let Err(reason) = candidate::landed_shape(&candidate) {
+        let manifest =
+            candidate::stage_shape_refusal(staging_root, gate_envelope, call_id, &path, reason)?;
+        println!("{}", serde_json::to_string(&manifest)?);
+        return Ok(());
+    }
     let manifest = crate::command::workflow_gate_envelope::stage_gate_evaluation(
         staging_root,
         gate_envelope,
@@ -228,19 +251,6 @@ pub(super) async fn handle_staged_task_file_lint(
     )?;
     println!("{}", serde_json::to_string(&manifest)?);
     Ok(())
-}
-
-/// Issue-61: the candidate with a whole-document code fence removed, and
-/// whether one was. Bytes that are not UTF-8 pass through untouched; the
-/// mechanical checks report those.
-fn unwrap_outer_fence(candidate: Vec<u8>) -> (Vec<u8>, bool) {
-    match std::str::from_utf8(&candidate)
-        .ok()
-        .and_then(crate::command::topology_lint::unwrap_outer_fence)
-    {
-        Some(inner) => (inner.as_bytes().to_vec(), true),
-        None => (candidate, false),
-    }
 }
 
 /// Issue-44: the fidelity section of the body gate. Runs only once the body
@@ -302,22 +312,32 @@ mod tests {
     use super::*;
 
     /// Issue-61: the bytes the gate lints and stages are the document inside
-    /// an author's outer fence; anything else passes through byte-for-byte,
-    /// including a candidate that is not UTF-8.
+    /// an author's outer fence; a task file that opens with its frontmatter
+    /// passes through byte-for-byte, as does a candidate that is not UTF-8.
     #[test]
     fn the_body_gate_unwraps_an_outer_fence_before_lint_and_staging() {
         let wrapped = b"```markdown\n```yaml\ntask_id: TASK-WS-001\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n```\n".to_vec();
-        let (bytes, unwrapped) = unwrap_outer_fence(wrapped);
+        let (bytes, unwrapped) = candidate::normalize_task_candidate(wrapped).unwrap();
         assert!(unwrapped);
         assert_eq!(
             bytes,
             b"```yaml\ntask_id: TASK-WS-001\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n"
                 .to_vec()
         );
-        let plain = b"# TASK-WS-001\n\n```yaml\ntask_id: TASK-WS-001\n```\n".to_vec();
-        assert_eq!(unwrap_outer_fence(plain.clone()), (plain, false));
+        let plain = b"```yaml\ntask_id: TASK-WS-001\n```\n\n# TASK-WS-001\n".to_vec();
+        assert_eq!(
+            candidate::normalize_task_candidate(plain.clone()).unwrap(),
+            (plain, false)
+        );
+        // Issue-367: a heading before the frontmatter is text before the task
+        // file, refused rather than landed.
+        let headed = b"# TASK-WS-001\n\n```yaml\ntask_id: TASK-WS-001\n```\n".to_vec();
+        assert!(candidate::normalize_task_candidate(headed).is_err());
         let not_utf8 = vec![0x60, 0x60, 0x60, 0x0a, 0xff, 0xfe];
-        assert_eq!(unwrap_outer_fence(not_utf8.clone()), (not_utf8, false));
+        assert_eq!(
+            candidate::normalize_task_candidate(not_utf8.clone()).unwrap(),
+            (not_utf8, false)
+        );
     }
 
     /// Issue-44: the body gate must refuse, not pass, when the critic cannot
@@ -335,7 +355,7 @@ mod tests {
             "## Acceptance Criteria\n| ID | Criterion |\n|---|---|\n| AC-WS-001 | Widgets land. |\n",
         )
         .expect("prd");
-        let candidate = "# TASK-WS-001\n\n```yaml\ntask_id: TASK-WS-001\ntitle: T\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"AC-WS-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- crates/w/src/lib.rs\n\n## Focused Tests\n\n- `cargo test -p w`\n";
+        let candidate = "```yaml\ntask_id: TASK-WS-001\ntitle: T\ncomplexity: small\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"AC-WS-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n# TASK-WS-001\n\n## Files Expected to Change\n\n- crates/w/src/lib.rs\n\n## Focused Tests\n\n- `cargo test -p w`\n";
         let path = tasks.join("TASK-WS-001.md");
         let clean = crate::command::topology_lint::evaluate_task_file_candidate(
             cwd,
@@ -455,3 +475,11 @@ mod tests {
         assert!(error.contains("critic client"), "{error}");
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_staged_candidate_tests.rs"]
+mod candidate_tests;
+
+#[cfg(test)]
+#[path = "workflow_staged_candidate_routing_tests.rs"]
+mod candidate_routing_tests;

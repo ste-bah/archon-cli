@@ -6,7 +6,7 @@ fn write_unfrozen_task(root: &Path) -> std::path::PathBuf {
     let task = tasks.join("TASK-X-010-body.md");
     std::fs::write(
         &task,
-        "# Body\n\n```yaml\ntask_id: TASK-X-010\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Focused Tests\n- Verification remains to be made runnable.\n",
+        "```yaml\ntask_id: TASK-X-010\ntitle: Body\ncomplexity: medium\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n# Body\n\n## Focused Tests\n- Verification remains to be made runnable.\n",
     )
     .unwrap();
     task
