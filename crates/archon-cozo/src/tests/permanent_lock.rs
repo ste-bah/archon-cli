@@ -1,20 +1,46 @@
-//! A socket produces a real permanent OS lock error, not a busy string.
+//! A descriptor that cannot be locked produces a real permanent OS lock
+//! error, not a busy string: on Linux a path-only (`O_PATH`) descriptor
+//! (flock gives EBADF), elsewhere a socket (flock gives EOPNOTSUPP); Linux
+//! locks a socket without complaint.
 use super::*;
-use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn permanent_error(calls: &AtomicUsize, context: &str) -> Result<()> {
+#[cfg(target_os = "linux")]
+fn unlockable() -> std::fs::File {
+    use std::os::unix::fs::OpenOptionsExt;
+    let path = tempfile::NamedTempFile::new()
+        .unwrap()
+        .into_temp_path()
+        .keep()
+        .unwrap();
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_PATH)
+        .open(path)
+        .unwrap()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn unlockable() -> std::fs::File {
     let socket = std::os::unix::net::UnixStream::pair().unwrap().0;
-    let file = std::fs::File::from(OwnedFd::from(socket));
+    std::fs::File::from(std::os::fd::OwnedFd::from(socket))
+}
+
+fn permanent_error(calls: &AtomicUsize, context: &str) -> Result<()> {
+    let file = unlockable();
     if calls.fetch_add(1, Ordering::SeqCst) == 0 {
         locking::with_file_write_lock(file, Path::new("socket.lock"), context, || {
-            panic!("a socket must not acquire a file lock")
+            panic!("an unlockable descriptor must not acquire a file lock")
         })
     } else {
         // If the old classifier retries, terminate the fixture with the same
         // real syscall error, without the faulty wrapper. No hung test thread.
         let mut lock = fd_lock::RwLock::new(file);
-        Err(lock.try_write().err().expect("socket flock fails").into())
+        Err(lock
+            .try_write()
+            .err()
+            .expect("flock on an unlockable descriptor fails")
+            .into())
     }
 }
 fn assert_permanent(error: anyhow::Error, calls: &AtomicUsize) {
@@ -153,18 +179,17 @@ fn queued_guarded_write_permanent_lock_error_names_the_lock_path() {
     assert_names_lock(&error, &path, "queued write");
 }
 
-/// Portable: the queued acquisition loop itself, on a socket whose `flock`
+/// Portable: the queued acquisition loop itself, on a descriptor whose `flock`
 /// fails permanently, returns at once and names the lock path.
 #[test]
 fn queued_acquisition_permanent_error_names_the_lock_path() {
-    let socket = std::os::unix::net::UnixStream::pair().unwrap().0;
-    let file = std::fs::File::from(OwnedFd::from(socket));
+    let file = unlockable();
     let path = Path::new("/archon-fixture/socket.archon-cozo-write.lock");
     let mut pending =
         crate::acquire::AcquireWait::new(path, "socket fixture", DEFAULT_WRITE_LOCK_WAIT);
     let started = std::time::Instant::now();
     let error = crate::acquire::acquire_file_lock(file, &mut pending, || -> Result<()> {
-        panic!("a socket must not acquire a file lock")
+        panic!("an unlockable descriptor must not acquire a file lock")
     })
     .unwrap_err();
     assert!(started.elapsed() < Duration::from_secs(5), "must not wait");

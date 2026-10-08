@@ -14,25 +14,11 @@ fn entire_fix_uses_shared_spawn_boundary() {
     }
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let changed = archon_shell::spawn::command("git")
-        .current_dir(root)
-        // The fix's own commits: its merge brings other work whose files are
-        // covered by their own spawn lints, not by this one.
-        .args(["diff", "--name-only", "332c35a52", "b9c8e63f4"])
-        .output()
-        .unwrap();
-    assert!(changed.status.success());
-    let added = archon_shell::spawn::command("git")
-        .current_dir(root)
-        .args(["ls-files", "--others", "--exclude-standard"])
-        .output()
-        .unwrap();
-    assert!(added.status.success());
-    let paths = format!(
-        "{}\n{}",
-        String::from_utf8(changed.stdout).unwrap(),
-        String::from_utf8(added.stdout).unwrap()
-    );
+    // The fix's own files, fixed at landing: a CI checkout is shallow and has
+    // none of the fix's commits, and its merge brings other work whose files
+    // are covered by their own spawn lints, not by this one.
+    let paths = include_str!("workflow_host_spawn_r3_files.txt");
+    assert!(paths.lines().count() > 50, "the fix's file list is present");
     let violations: Vec<_> = paths
         .lines()
         .filter(|p| !p.is_empty() && root.join(p).is_file())
