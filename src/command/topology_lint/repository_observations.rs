@@ -70,9 +70,8 @@ const UNOBSERVED_WORDING: &[&str] = &[
 ];
 
 /// The deliverable paths a parsed task names, as written.
-fn deliverable_paths(task: &WorkflowV2TaskUniverseTask) -> Vec<String> {
-    let mut paths: Vec<String> = task
-        .files_expected_to_change
+fn deliverable_paths(task: &WorkflowV2TaskUniverseTask, raw: &str) -> Vec<String> {
+    let mut paths: Vec<String> = archon_workflow::task_universe::parsing::declared_files_expected_to_change_items_preserving_lines(raw)
         .iter()
         .flat_map(|item| paths_in_item(item))
         .collect();
@@ -92,12 +91,15 @@ fn deliverable_paths(task: &WorkflowV2TaskUniverseTask) -> Vec<String> {
     paths
 }
 
-/// The paths in one `Files Expected to Change` item: its backticked spans,
-/// or its first token when it has none, split on `,`/`;`, path-shaped only.
+/// The paths named by one `Files Expected to Change` item head. Ignore wrapped
+/// descriptions, and stop before an observation so prose after it cannot add
+/// deliverables. A head without an observation is its first line.
 fn paths_in_item(item: &str) -> Vec<String> {
-    let mut spans = backticked_spans(item);
+    let first_line = item.lines().next().unwrap_or(item);
+    let head = before_observation(first_line);
+    let mut spans = backticked_spans(head);
     if spans.is_empty() {
-        spans.extend(item.split_whitespace().next().map(str::to_string));
+        spans.extend(head.split_whitespace().next().map(str::to_string));
     }
     spans
         .iter()
@@ -106,6 +108,23 @@ fn paths_in_item(item: &str) -> Vec<String> {
         .filter(|token| is_path_shaped(token))
         .map(str::to_string)
         .collect()
+}
+
+/// The beginning of a valid observation marker in an item head, if present.
+fn before_observation(head: &str) -> &str {
+    for (index, character) in head.char_indices() {
+        if matches!(character, '—' | '-' | '–' | ':' | ',' | '`' | '*' | ')')
+            && parse_observation(&head[index..]).is_some()
+        {
+            let end = if matches!(character, '`' | '*' | ')') {
+                index + character.len_utf8()
+            } else {
+                index
+            };
+            return &head[..end];
+        }
+    }
+    head
 }
 
 fn backticked_spans(text: &str) -> Vec<String> {
@@ -249,7 +268,7 @@ pub(crate) fn findings_against(
     task: &WorkflowV2TaskUniverseTask,
 ) -> Vec<(String, String)> {
     let mut findings = Vec::new();
-    for path in deliverable_paths(task) {
+    for path in deliverable_paths(task, raw) {
         let Some(relative) = tree.relative_to_root(&path).filter(|r| !r.is_empty()) else {
             continue;
         };

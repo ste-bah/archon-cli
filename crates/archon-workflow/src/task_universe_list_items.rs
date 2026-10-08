@@ -51,6 +51,23 @@ pub(super) fn list_item_text(trimmed: &str) -> Option<&str> {
 /// A blank line ends an item: it separates bullets in every markdown flavour,
 /// and without it a trailing paragraph would be swallowed into the last one.
 pub(super) fn declared_task_section_items(raw: &str, section: &str) -> Vec<String> {
+    declared_task_section_items_with_separator(raw, section, " ")
+}
+
+/// List items under a heading, retaining the line boundary between an item's
+/// head and wrapped description text.
+pub(super) fn declared_task_section_items_preserving_lines(
+    raw: &str,
+    section: &str,
+) -> Vec<String> {
+    declared_task_section_items_with_separator(raw, section, "\n")
+}
+
+fn declared_task_section_items_with_separator(
+    raw: &str,
+    section: &str,
+    continuation_separator: &str,
+) -> Vec<String> {
     let mut items: Vec<String> = Vec::new();
     let mut in_section = false;
     let mut current: Option<String> = None;
@@ -72,9 +89,11 @@ pub(super) fn declared_task_section_items(raw: &str, section: &str) -> Vec<Strin
             push_section_item(&mut items, current.take());
             current = Some(item.to_string());
         } else if let Some(open) = current.as_mut() {
-            // A continuation of the bullet above. Joined with a space because
-            // the newline it replaces is a wrap, not a separator.
-            open.push(' ');
+            // A continuation of the bullet above. Most consumers join with a
+            // space because the newline is a wrap, not a separator. One needs
+            // the original boundary to distinguish a declaration head from
+            // its prose description.
+            open.push_str(continuation_separator);
             open.push_str(trimmed);
         }
     }

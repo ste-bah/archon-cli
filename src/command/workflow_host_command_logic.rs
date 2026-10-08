@@ -219,23 +219,23 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     },
     CapabilityLogic {
         id: "land-task-body",
-        version: 1,
+        version: 2,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "2c1055af0cd67659ed0d5cad54aedbc420610c6c548d416ef285299d166d925d",
+        sources_digest: "7a1765f831c56082bd5278ae6ca0e421099b5f04aba5b66e41087557b35b0f86",
         build_bound: false,
     },
     CapabilityLogic {
         id: "task-set-lint",
-        version: 1,
+        version: 2,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "2c1055af0cd67659ed0d5cad54aedbc420610c6c548d416ef285299d166d925d",
+        sources_digest: "7a1765f831c56082bd5278ae6ca0e421099b5f04aba5b66e41087557b35b0f86",
         build_bound: false,
     },
     CapabilityLogic {
         id: "requirements-trace",
         version: 1,
         sources: &[GATE, CONTRACT, TRACE],
-        sources_digest: "640cd3112901eba0df28e41271e91beb300e98abad2e552c408de8f56b88ca39",
+        sources_digest: "8d203e6ca0679ad995dfc6ecb45d9c646a44eac1039ff0cdc306c3d1eea130b7",
         build_bound: true,
     },
     CapabilityLogic {
