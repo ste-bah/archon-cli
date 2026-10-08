@@ -322,6 +322,7 @@ async fn gc_obsolete_output(case: u8) {
         } else {
             let result = archon_workflow::acceptance_scratch::CheckResult {
                 acceptance_id: "AC-X".into(),
+                environment_note: None,
                 exit_code: Some(1),
                 quota_walk_count: 0,
                 stdout: b"output".to_vec(),

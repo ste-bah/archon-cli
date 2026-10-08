@@ -48,6 +48,7 @@ async fn takeover(case: u8) {
         let at = context(&probe, &contract);
         let result = CheckResult {
             acceptance_id: "check".into(),
+            environment_note: None,
             exit_code: Some(if case == 2 { 1 } else { 127 }),
             quota_walk_count: 0,
             stdout: vec![],
