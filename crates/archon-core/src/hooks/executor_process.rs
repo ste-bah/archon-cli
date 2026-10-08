@@ -116,18 +116,13 @@ async fn within_window<T>(
     window.wait(phase, future).await
 }
 
-/// A hook may exit, or close its stdin, without reading the payload (`exit 2`
-/// is a common blocking hook): that broken pipe is the hook's choice, not a
-/// failure. Its outcome is read from its exit status and output as usual.
 async fn write_payload(child: &mut OwnedChild, payload: &[u8]) -> Option<std::io::Error> {
     let mut stdin = child.stdin().take()?;
-    let unread =
-        |error: std::io::Error| (error.kind() != std::io::ErrorKind::BrokenPipe).then_some(error);
     if let Err(error) = stdin.write_all(payload).await {
-        return unread(error);
+        return Some(error);
     }
     if let Err(error) = stdin.flush().await {
-        return unread(error);
+        return Some(error);
     }
     drop(stdin);
     None
