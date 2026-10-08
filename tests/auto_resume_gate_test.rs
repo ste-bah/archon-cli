@@ -113,6 +113,35 @@ max_checkpoints = 10
     )
 }
 
+/// Inherited prefixes that carry provider routing, credentials or Archon
+/// state paths. The test sets the few values it needs after this.
+const STRIPPED_ENV_PREFIXES: &[&str] = &[
+    "ARCHON_",
+    "ANTHROPIC_",
+    "CLAUDE_",
+    "OPENAI_",
+    "GOOGLE_",
+    "GROQ_",
+    "AWS_",
+    "POLYGON_",
+    "OPENBB_",
+];
+const STRIPPED_ENV_SUFFIXES: &[&str] = &["_API_KEY", "_AUTH_TOKEN", "_BASE_URL"];
+
+/// Remove inherited env values that reach the network or real user state, so a
+/// developer shell (provider keys, proxy base URL, a live run's ARCHON_*) cannot
+/// change what the child does. Only names are inspected; values are never read.
+fn strip_inherited_provider_env(cmd: &mut Command) {
+    for (name, _) in std::env::vars_os() {
+        let Some(key) = name.to_str() else { continue };
+        if STRIPPED_ENV_PREFIXES.iter().any(|p| key.starts_with(p))
+            || STRIPPED_ENV_SUFFIXES.iter().any(|s| key.ends_with(s))
+        {
+            cmd.env_remove(&name);
+        }
+    }
+}
+
 fn archon_bin() -> Option<PathBuf> {
     std::env::var_os("CARGO_BIN_EXE_archon").map(PathBuf::from)
 }
@@ -129,9 +158,13 @@ fn run(auto_resume: bool, extra_args: &[&str]) -> String {
     std::fs::create_dir_all(&work_dir).expect("create work dir");
 
     let mut cmd = Command::new(&bin);
+    strip_inherited_provider_env(&mut cmd);
     cmd.current_dir(&work_dir)
         .env("ARCHON_CONFIG_DIR", &config_dir)
         .env("ANTHROPIC_API_KEY", "sk-fake-test-key-not-real")
+        // `ANTHROPIC_BASE_URL` wins over config. Point it at a closed local
+        // port so the model call fails fast and never leaves this machine.
+        .env("ANTHROPIC_BASE_URL", "http://127.0.0.1:9")
         .env("ARCHON_LOG_DIR", &log_dir)
         // XDG_DATA_HOME only redirects `dirs::data_dir()` on Linux -- Windows
         // reads the shell known-folder API and macOS ~/Library/Application
