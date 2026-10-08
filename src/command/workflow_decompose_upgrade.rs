@@ -135,6 +135,8 @@ fn validate_call_directory(
                         | archon_workflow::WorkflowV2Status::Noop
                         | archon_workflow::WorkflowV2Status::NeedsReview
                 )
+                && !(record.status == archon_workflow::WorkflowV2Status::NeedsReview
+                    && is_interruption_record(&record.result.data))
             {
                 let _: archon_workflow::HostCommandResult =
                     decode(record.result.data.clone(), &format!("{field}.result.data"))?;
@@ -148,6 +150,14 @@ fn validate_call_directory(
         }
     }
     Ok(())
+}
+
+/// A host command cut short (a pause, or the host process ending) leaves a
+/// `NeedsReview` record whose data names the interruption reason instead of a
+/// command result. It is never reused, so it has no command result to map.
+fn is_interruption_record(data: &serde_json::Value) -> bool {
+    data.get("interrupted")
+        .is_some_and(serde_json::Value::is_string)
 }
 
 /// One durable transition per runtime change, even if preparation is
@@ -444,3 +454,7 @@ mod store_read_tests {
         assert!(!error.contains(&fifo.display().to_string()), "{error}");
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_decompose_upgrade_tests.rs"]
+mod interruption_tests;
