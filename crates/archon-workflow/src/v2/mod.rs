@@ -45,6 +45,7 @@ pub mod host_command;
 pub mod host_fault;
 pub mod host_tool_log;
 pub mod implementation_inspection;
+pub mod inspection_read_proof;
 pub(crate) mod inventory_artifact_seeding;
 pub mod json_document;
 pub mod lifecycle_driver;

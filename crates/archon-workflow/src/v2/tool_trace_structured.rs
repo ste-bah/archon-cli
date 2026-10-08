@@ -66,9 +66,17 @@ pub fn record_structured_trace(
             .filter(|claimed| !observed_paths.iter().any(|seen| same_file(seen, claimed)))
             .map(|claimed| clip(&redact_secret_values(claimed), PATH_BYTES))
             .collect();
+        let claimed = result
+            .files_read
+            .iter()
+            .filter(|file| !file.path.trim().is_empty())
+            .count();
         marker["claimCheck"] = json!({
             "filesRead": {
                 "claimed": result.files_read.len(),
+                // Non-empty claims an observed read matches: the only
+                // claimed reads a gate may take as proof of inspection.
+                "confirmed": claimed - unobserved.len(),
                 "observedReads": observed.files_read.len(),
                 "unobservedCount": unobserved.len(),
                 "unobserved": unobserved.iter().take(MAX_UNOBSERVED_NAMED).collect::<Vec<_>>(),
