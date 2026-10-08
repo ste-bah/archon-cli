@@ -52,8 +52,23 @@ fn a_url_keeps_scheme_host_and_path_only() {
         strip_url("https://host.invalid/a#frag"),
         "https://host.invalid/a"
     );
-    // An `@` after the authority is not user info.
-    assert_eq!(strip_url("https://h/x?u=a@b/c"), "https://h/x");
+    // Any `@` ends user info at the last one, whatever the password holds.
+    assert_eq!(
+        strip_url("postgres://app:ab/cd@db/main"),
+        "postgres://db/main"
+    );
+    assert_eq!(
+        strip_url("postgres://app:Pa?ss@db/main"),
+        "postgres://db/main"
+    );
+    assert_eq!(
+        strip_url("postgres://user:p@ss@host/db"),
+        "postgres://host/db"
+    );
+    // An `@` in the query strips the host too: wrong host, no secret kept.
+    let stripped = strip_url("https://u:hunter2@h/x?u=a@b/c");
+    assert_eq!(stripped, "https://b/c");
+    assert!(!stripped.contains("hunter2") && !stripped.contains("u=a"));
 }
 
 /// Shell commands that carry a credential in forms no redaction rule can

@@ -149,24 +149,18 @@ pub fn command_program(command: &str) -> String {
 
 /// `scheme://host/path` of `url`: no user info, query or fragment.
 ///
-/// The authority ends at the first `/` after `scheme://`, and only an `@`
-/// inside it ends user info (at its last `@`): an `@` in the path or query
-/// is never user info (`https://h/x?u=a@b/c` is `https://h/x`). User info
-/// is removed BEFORE the cut at `?` or `#`, so a `?` or `#` inside a
-/// password cannot keep part of it (`postgres://app:Pa#ss@db/main` is
-/// `postgres://db/main`); an address whose `?` or `#` comes before an `@`
-/// in that first segment is read the same way, losing its host rather
-/// than risk keeping a password. Text without a scheme is cut at its first
-/// `?` or `#`.
+/// User info is removed FIRST and greedily: when anything after
+/// `scheme://` holds an `@`, everything up to and including the LAST `@`
+/// goes, so no character of a password (`/`, `?`, `#` or `@` in it) can
+/// survive. Only then is the address cut at its first `?` or `#`. An `@` in
+/// a path or query also strips the host and path before it: a wrong host,
+/// never a kept secret. Text without a scheme is cut at its first `?` or
+/// `#`.
 pub fn strip_url(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return url.split(['?', '#']).next().unwrap_or_default().to_string();
     };
-    let authority = &rest[..rest.find('/').unwrap_or(rest.len())];
-    let rest = match authority.rfind('@') {
-        Some(at) => &rest[at + 1..],
-        None => rest,
-    };
+    let rest = rest.rsplit_once('@').map_or(rest, |(_, after)| after);
     let rest = rest.split(['?', '#']).next().unwrap_or_default();
     format!("{scheme}://{rest}")
 }
