@@ -8,7 +8,13 @@
 //! that no limit cut short stays reusable across a limit change. A result that
 //! a limit did cut short is replayed only under the limits it recorded
 //! ([`FixedHostCommandExecutor::outcome_limits_hold_for`]).
+//!
+//! Issue 361: the key also names the logic version of the subcommand the
+//! capability runs (`workflow_host_command_logic`), so a binary that changes
+//! how one capability judges re-keys that capability alone, and every outcome
+//! records the version that judged it.
 use super::*;
+use crate::command::workflow_host_command_logic as logic;
 use archon_workflow::CommandCapability;
 
 /// Every catalog schema this build knows, with the schema whose meaning of
@@ -136,13 +142,82 @@ impl FixedHostCommandExecutor {
                 self.catalog.starting_binary_revision.as_str(),
             ),
         };
+        let mut tokens = host_command_identity_tokens(context, &request.command_id)?;
+        if let Some(version) = logic::key_token(self.logic_version_for(&request.command_id)?) {
+            tokens.insert(logic::LOGIC_VERSION_TOKEN.to_string(), version);
+        }
         Ok(host_command_call_id(
             &request.command_id,
             &digest,
             revision,
-            &host_command_identity_tokens(context, &request.command_id)?,
+            &tokens,
             request.stdin.as_deref().unwrap_or_default().as_bytes(),
         ))
+    }
+
+    /// The logic version capability `id` is judged by in this build.
+    pub(super) fn logic_version_for(&self, id: &str) -> WorkflowResult<u32> {
+        self.logic
+            .get(id)
+            .copied()
+            .ok_or_else(|| logic::undeclared(id))
+    }
+
+    /// A build whose capability `id` runs logic `version`, or declares none
+    /// (tests).
+    #[cfg(test)]
+    pub(crate) fn with_logic_version(mut self, id: &str, version: Option<u32>) -> Self {
+        match version {
+            Some(version) => self.logic.insert(id.to_string(), version),
+            None => self.logic.remove(id),
+        };
+        self
+    }
+
+    /// Another binary, whose build fingerprint is `build` (tests).
+    #[cfg(test)]
+    pub(crate) fn with_build(mut self, build: &str) -> Self {
+        self.build = build.to_string();
+        self
+    }
+
+    /// Whether a recorded outcome was judged by the logic this build runs
+    /// ([`logic::outcome_logic_holds`]). A command this build no longer
+    /// declares runs no logic that could vouch for it.
+    pub(super) fn outcome_logic_holds_for(
+        &self,
+        record: &WorkflowV2CallRecord,
+    ) -> WorkflowResult<bool> {
+        if record.call.method != archon_workflow::WorkflowV2HostMethod::HostCommand {
+            return Ok(true);
+        }
+        let request = record.call.options.host_command.as_ref().ok_or_else(|| {
+            WorkflowError::StateCorrupt("persisted HostCommand record has no typed request".into())
+        })?;
+        let Some(capability) = self.catalog.capabilities.get(&request.command_id) else {
+            return Ok(false);
+        };
+        let bound = self
+            .logic_digests
+            .get(&request.command_id)
+            .is_some_and(|(_, bound)| *bound)
+            .then_some(self.build.as_str());
+        let holds = logic::outcome_logic_holds(
+            &record.result.data,
+            self.logic_version_for(&request.command_id)?,
+            logic::judges_only(capability),
+            bound,
+        );
+        if !holds {
+            tracing::info!(
+                call_id = %record.call.id,
+                command_id = %request.command_id,
+                recorded = %record.result.data.get(logic::LOGIC_VERSION_STAMP).map_or_else(|| "none".to_string(), ToString::to_string),
+                recorded_build = %record.result.data.get(logic::LOGIC_BUILD_STAMP).map_or_else(|| "none".to_string(), ToString::to_string),
+                "host command outcome was judged by other logic; it runs again"
+            );
+        }
+        Ok(holds)
     }
 
     /// The limits a call of `request` runs under here, stamped into its

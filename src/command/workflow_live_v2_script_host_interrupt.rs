@@ -158,7 +158,7 @@ impl WorkflowScriptHost {
                 if let (Some(data), Some(progress)) = (data.as_object_mut(), progress.as_object()) {
                     data.extend(progress.clone());
                 }
-                self.stamp_host_limits(&execution.call, data)?
+                self.stamp_host_outcome(&execution.call, data)?
             },
             ..WorkflowV2Result::default()
         };

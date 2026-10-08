@@ -226,14 +226,19 @@ impl HostPauseCoverage {
 }
 
 impl WorkflowScriptHost {
-    /// Issue 358: an answer a limit cut short is an answer about that limit;
-    /// after an upgrade changed it, the call runs again under the new one.
-    pub(super) fn outcome_limits_hold(
+    /// Whether a recorded answer still answers on this build. Issue 358: an
+    /// answer a limit cut short is an answer about that limit; after an
+    /// upgrade changed it, the call runs again under the new one. Issue 361:
+    /// a verdict is an answer of the logic that gave it; after an upgrade
+    /// changed that logic, the call runs again under the new one.
+    pub(super) fn outcome_holds(
         &self,
         record: &WorkflowV2CallRecord,
     ) -> archon_workflow::WorkflowResult<bool> {
         match self.runner.host_command_executor.as_ref() {
-            Some(executor) => executor.outcome_limits_hold(record),
+            Some(executor) => Ok(
+                executor.outcome_logic_holds(record)? && executor.outcome_limits_hold(record)?
+            ),
             None => Ok(true),
         }
     }
@@ -270,7 +275,7 @@ impl WorkflowScriptHost {
         let covered = pauses
             .iter()
             .any(|pause| pause.covered.contains(&wanted) && credit_holds(pause, &slots));
-        if !covered || !self.outcome_limits_hold(&record)? {
+        if !covered || !self.outcome_holds(&record)? {
             return Ok(None);
         }
         // Issue 337: a covered answer replays only while it is still one.

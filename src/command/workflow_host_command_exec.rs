@@ -29,7 +29,7 @@ use super::workflow_host_command_publish::{
     LiveMutationSentinels, audit_prepared_publication, publish_audited,
 };
 use super::workflow_host_command_supervisor::{
-    HostCommandControl, HostCommandControlHandle, SupervisedProcessOutput, supervise_process_group,
+    HostCommandControl, SupervisedProcessOutput, supervise_process_group,
 };
 use super::workflow_host_command_teardown_latch::TeardownLatch;
 use super::workflow_host_envelope_seal::{ENVELOPE_FILE, EnvelopeCleanup, owner_only};
@@ -62,6 +62,26 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
         &self,
         _request: &HostCommandRequest,
     ) -> WorkflowResult<Option<serde_json::Value>> {
+        Ok(None)
+    }
+    /// Issue 361: the logic version a call of `request` is judged by,
+    /// stamped into its outcome; `None` for an executor that versions none.
+    fn logic_version(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<u32>> {
+        Ok(None)
+    }
+    /// Issue 361: whether a recorded outcome was judged by the logic this
+    /// build runs; every reuse and replay path asks before answering from it.
+    fn outcome_logic_holds(&self, _record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        Ok(true)
+    }
+    /// Issue 361: the digest of the source a call of `request` is judged
+    /// by, stamped into its outcome; `None` for an executor that hashes none.
+    fn logic_digest(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
+        Ok(None)
+    }
+    /// Issue 361: the build a call of `request` is judged by, stamped into
+    /// its outcome; `None` for an executor that names none.
+    fn logic_build(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
         Ok(None)
     }
 
@@ -109,6 +129,13 @@ thread_local! {
 pub(crate) struct FixedHostCommandExecutor {
     catalog: CommandCapabilityCatalog,
     launch_catalog: Option<CommandCapabilityCatalog>,
+    /// Issue 361: each capability's logic version, part of its reuse key.
+    logic: BTreeMap<String, u32>,
+    /// Issue 361: each capability's pinned logic digest, and whether its
+    /// reuse binds to the build.
+    logic_digests: BTreeMap<String, (String, bool)>,
+    /// Issue 361: the build that judges every call here.
+    build: String,
     context: HostCommandResolutionContext,
     run_root: PathBuf,
     process: Arc<dyn HostCommandProcessAdapter>,
@@ -139,6 +166,9 @@ impl FixedHostCommandExecutor {
         Self {
             catalog,
             launch_catalog: None,
+            logic: super::workflow_host_command_logic::versions(),
+            logic_digests: super::workflow_host_command_logic::digests(),
+            build: super::workflow_host_command_logic::THIS_BUILD.to_string(),
             context,
             run_root,
             process,
@@ -225,6 +255,25 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         request: &HostCommandRequest,
     ) -> WorkflowResult<Option<serde_json::Value>> {
         self.limits_fingerprint_for(request)
+    }
+
+    fn logic_version(&self, request: &HostCommandRequest) -> WorkflowResult<Option<u32>> {
+        self.logic_version_for(&request.command_id).map(Some)
+    }
+
+    fn outcome_logic_holds(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        self.outcome_logic_holds_for(record)
+    }
+
+    fn logic_digest(&self, request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
+        Ok(self
+            .logic_digests
+            .get(&request.command_id)
+            .map(|(digest, _)| digest.clone()))
+    }
+
+    fn logic_build(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
+        Ok(Some(self.build.clone()))
     }
 
     async fn execute(

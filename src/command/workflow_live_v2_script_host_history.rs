@@ -37,7 +37,7 @@ impl WorkflowScriptHost {
         if !history && !self.landed_record_still_on_disk(&record, input_hash)? {
             return Ok(None);
         }
-        if !self.outcome_limits_hold(&record)? {
+        if !self.outcome_holds(&record)? {
             return Ok(None);
         }
         if !self.refresh_audit_for_cache(&record).await? {

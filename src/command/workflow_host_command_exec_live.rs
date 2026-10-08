@@ -50,6 +50,10 @@ impl FixedHostCommandExecutor {
         {
             return Ok(false);
         }
+        // Issue 361: judged by other logic, it is not this build's answer.
+        if !self.outcome_logic_holds_for(record)? {
+            return Ok(false);
+        }
         let request = record.call.options.host_command.as_ref().ok_or_else(|| {
             WorkflowError::StateCorrupt("persisted HostCommand record has no typed request".into())
         })?;

@@ -13,15 +13,13 @@ impl WorkflowScriptHost {
         if record.call.method != WorkflowV2HostMethod::HostCommand {
             return self.refresh_audit_for_cache(record).await;
         }
-        self.runner
-            .host_command_executor
-            .as_ref()
-            .ok_or_else(|| {
-                WorkflowError::PolicyDenied(
-                    "HostCommand reuse requires the trusted fixed executor".to_string(),
-                )
-            })?
-            .record_is_reusable(record)
+        let executor = self.runner.host_command_executor.as_ref().ok_or_else(|| {
+            WorkflowError::PolicyDenied(
+                "HostCommand reuse requires the trusted fixed executor".to_string(),
+            )
+        })?;
+        // Issue 361: a verdict other logic gave is not this build's answer.
+        Ok(executor.outcome_logic_holds(record)? && executor.record_is_reusable(record)?)
     }
 
     fn audit_cache_paths(record: &WorkflowV2CallRecord) -> Vec<String> {

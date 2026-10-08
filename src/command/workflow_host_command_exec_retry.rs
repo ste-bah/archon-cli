@@ -6,6 +6,7 @@ use crate::command::workflow_host_command_operational::{
     NextStep, OperationalAttempt, OperationalReport, next_step, pause_for_stall,
     pause_for_unsettled_publish, pause_run, record_retry, require_run_owned,
 };
+use crate::command::workflow_host_command_supervisor::HostCommandControlHandle;
 
 impl FixedHostCommandExecutor {
     async fn execute_process_with_run_control(

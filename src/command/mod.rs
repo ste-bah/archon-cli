@@ -367,6 +367,19 @@ mod workflow_host_command_integrity_tests;
 pub(crate) mod workflow_host_command_judged_inputs;
 #[cfg(test)]
 mod workflow_host_command_judged_inputs_tests;
+pub(crate) mod workflow_host_command_logic;
+#[cfg(test)]
+mod workflow_host_command_logic_closure;
+#[cfg(test)]
+mod workflow_host_command_logic_guard_tests;
+#[cfg(test)]
+mod workflow_host_command_logic_items;
+#[cfg(test)]
+mod workflow_host_command_logic_source;
+#[cfg(test)]
+mod workflow_host_command_logic_tests;
+#[cfg(test)]
+mod workflow_host_command_logic_walk_tests;
 pub(crate) mod workflow_host_command_manifest;
 pub(crate) mod workflow_host_command_occurrence;
 pub(crate) mod workflow_host_command_operational;

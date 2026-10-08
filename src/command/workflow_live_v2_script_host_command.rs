@@ -3,10 +3,12 @@
 use super::*;
 
 impl WorkflowScriptHost {
-    /// Issue 358: `data` with the limits the host command `call` ran under,
-    /// so a resume replays an outcome a limit cut short only under the same
-    /// limits. Other calls, and executors that apply no limits, are unchanged.
-    pub(super) fn stamp_host_limits(
+    /// `data` with what the host command `call` ran under: its limits
+    /// (Issue 358), so a resume replays an outcome a limit cut short only
+    /// under the same limits, and the logic version, source digest and build
+    /// that judged it (Issue 361), so a resume replays a verdict only under
+    /// the same logic. Other calls, and executors that apply none, are unchanged.
+    pub(super) fn stamp_host_outcome(
         &self,
         call: &archon_workflow::WorkflowV2HostCall,
         mut data: serde_json::Value,
@@ -20,13 +22,35 @@ impl WorkflowScriptHost {
         ) else {
             return Ok(data);
         };
-        if let (Some(stamp), Some(map)) =
-            (executor.limits_fingerprint(request)?, data.as_object_mut())
-        {
-            map.insert(
-                crate::command::workflow_host_command_exec::identity::LIMITS_FINGERPRINT.into(),
-                stamp,
-            );
+        let limits = executor.limits_fingerprint(request)?;
+        let logic = executor.logic_version(request)?;
+        let digest = executor.logic_digest(request)?;
+        let build = executor.logic_build(request)?;
+        if let Some(map) = data.as_object_mut() {
+            if let Some(stamp) = limits {
+                map.insert(
+                    crate::command::workflow_host_command_exec::identity::LIMITS_FINGERPRINT.into(),
+                    stamp,
+                );
+            }
+            if let Some(version) = logic {
+                map.insert(
+                    crate::command::workflow_host_command_logic::LOGIC_VERSION_STAMP.into(),
+                    serde_json::json!(version),
+                );
+            }
+            if let Some(digest) = digest {
+                map.insert(
+                    crate::command::workflow_host_command_logic::LOGIC_DIGEST_STAMP.into(),
+                    serde_json::json!(digest),
+                );
+            }
+            if let Some(build) = build {
+                map.insert(
+                    crate::command::workflow_host_command_logic::LOGIC_BUILD_STAMP.into(),
+                    serde_json::json!(build),
+                );
+            }
         }
         Ok(data)
     }
@@ -69,7 +93,7 @@ impl WorkflowScriptHost {
                 "host command '{}' completed with exit {:?}",
                 execution.call.id, outcome.exit_code
             ),
-            data: self.stamp_host_limits(&execution.call, serde_json::to_value(&outcome)?)?,
+            data: self.stamp_host_outcome(&execution.call, serde_json::to_value(&outcome)?)?,
             ..WorkflowV2Result::default()
         };
         result.evidence.push(WorkflowV2Evidence::new(
