@@ -191,7 +191,7 @@ pub(super) async fn handle_staged_task_file_lint(
     // frontmatter, or the inside of one outer fence; any other answer has
     // text before the task file and goes back to the author as one finding,
     // before any lint reads it and before anything is staged.
-    let normalized = match candidate::normalize_task_candidate(candidate) {
+    let normalized = match candidate::normalize_task_candidate(candidate, &path) {
         Ok(candidate) => candidate,
         Err(reason) => {
             let manifest = candidate::stage_shape_refusal(
@@ -314,13 +314,18 @@ async fn audit_candidate_fidelity(
 mod tests {
     use super::*;
 
+    /// The frozen file the fixtures below are bound to.
+    fn ws() -> &'static Path {
+        Path::new("tasks/TASK-WS-001.md")
+    }
+
     /// Issue-61: the bytes the gate lints and stages are the document inside
     /// an author's outer fence; a task file that opens with its frontmatter
     /// passes through byte-for-byte, as does a candidate that is not UTF-8.
     #[test]
     fn the_body_gate_unwraps_an_outer_fence_before_lint_and_staging() {
         let wrapped = b"```markdown\n```yaml\ntask_id: TASK-WS-001\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n```\n".to_vec();
-        let landed = candidate::normalize_task_candidate(wrapped).unwrap();
+        let landed = candidate::normalize_task_candidate(wrapped, ws()).unwrap();
         assert!(landed.unwrapped());
         assert_eq!(
             landed.bytes,
@@ -328,12 +333,12 @@ mod tests {
                 .to_vec()
         );
         let plain = b"```yaml\ntask_id: TASK-WS-001\n```\n\n# TASK-WS-001\n".to_vec();
-        let landed = candidate::normalize_task_candidate(plain.clone()).unwrap();
+        let landed = candidate::normalize_task_candidate(plain.clone(), ws()).unwrap();
         assert_eq!((landed.bytes.clone(), landed.unwrapped()), (plain, false));
         // A heading before the frontmatter is packaging the host discards,
         // recorded in the report; the task file after it lands unchanged.
         let headed = b"# TASK-WS-001\n\n```yaml\ntask_id: TASK-WS-001\n```\n".to_vec();
-        let landed = candidate::normalize_task_candidate(headed).unwrap();
+        let landed = candidate::normalize_task_candidate(headed, ws()).unwrap();
         assert_eq!(
             landed.bytes,
             b"```yaml\ntask_id: TASK-WS-001\n```\n".to_vec()
@@ -341,9 +346,9 @@ mod tests {
         assert_eq!(landed.packaging.map(|p| p.lines), Some(2));
         // No frontmatter with a task_id at all is still refused.
         let headed = b"# TASK-WS-001\n\nno task file\n".to_vec();
-        assert!(candidate::normalize_task_candidate(headed).is_err());
+        assert!(candidate::normalize_task_candidate(headed, ws()).is_err());
         let not_utf8 = vec![0x60, 0x60, 0x60, 0x0a, 0xff, 0xfe];
-        let landed = candidate::normalize_task_candidate(not_utf8.clone()).unwrap();
+        let landed = candidate::normalize_task_candidate(not_utf8.clone(), ws()).unwrap();
         assert_eq!(
             (landed.bytes.clone(), landed.unwrapped()),
             (not_utf8, false)

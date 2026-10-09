@@ -12,8 +12,13 @@ fn valid_body() -> String {
     )
 }
 
+/// The frozen file these answers are bound to.
+pub(super) fn subject() -> &'static std::path::Path {
+    std::path::Path::new("tasks/TASK-X-001.md")
+}
+
 fn refusal(candidate: &str) -> String {
-    match normalize_task_candidate(candidate.as_bytes().to_vec()) {
+    match normalize_task_candidate(candidate.as_bytes().to_vec(), subject()) {
         Ok(landed) => panic!(
             "landed ({}): {:?}",
             landed.unwrapped(),
@@ -30,7 +35,7 @@ fn landed(candidate: &[u8]) -> (Vec<u8>, bool) {
 }
 
 fn landed_with_packaging(candidate: &[u8]) -> TaskCandidate {
-    let landed = normalize_task_candidate(candidate.to_vec())
+    let landed = normalize_task_candidate(candidate.to_vec(), subject())
         .unwrap_or_else(|reason| panic!("refused: {reason}"));
     assert!(opens_with_frontmatter(&landed.bytes), "{:?}", landed.bytes);
     landed
@@ -124,7 +129,7 @@ fn a_wrapper_with_text_after_it_or_unpaired_fences_is_refused() {
 #[test]
 fn bytes_that_are_not_utf8_pass_through_for_the_lint_to_report() {
     let bytes = vec![0x60, 0x60, 0x60, 0x0a, 0xff, 0xfe];
-    let passed = normalize_task_candidate(bytes.clone()).unwrap();
+    let passed = normalize_task_candidate(bytes.clone(), subject()).unwrap();
     assert_eq!((passed.bytes.clone(), passed.unwrapped()), (bytes, false));
     assert_eq!(passed.packaging, None);
 }

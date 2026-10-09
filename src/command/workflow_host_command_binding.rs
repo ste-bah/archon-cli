@@ -22,8 +22,9 @@ pub(crate) fn unbound_context(
 /// Why a candidate body binds no single frozen subject.
 #[derive(Debug)]
 pub(crate) enum Unbound {
-    /// It names a frozen subject by its `task_id` line and does not parse as
-    /// that subject's file: the parse cause, refused as a body shape.
+    /// It names a frozen subject and does not parse as that subject's file
+    /// (the parse cause), or holds several frozen subjects' task files:
+    /// refused as a body shape.
     Unparsed(UnparsedSubject),
     /// It binds zero (naming none) or several subjects.
     Binding(String),
@@ -93,8 +94,34 @@ pub(crate) fn bind_request(
     let skeleton = archon_workflow::task_skeleton::validate_full_chain(&context.task_root, &pin)
         .map_err(|error| WorkflowError::SpecInvalid(error.to_string()))?;
     // The task file opens where the body gate's packaging strip says it does,
-    // so a yaml block in chat before it is never read as its frontmatter.
-    let anchor = crate::command::topology_lint::task_file_anchor(candidate);
+    // so a yaml block in chat before it is never read as its frontmatter. The
+    // anchor is the one frozen subject's task file in the answer; two or more
+    // are ambiguous and refused, never picked.
+    //
+    // Limit: the request carries no target, so the host cannot check that
+    // the subject bound here is the one THIS call authors. Follow-up issue:
+    // "land-task-body cannot verify the call's target subject".
+    let paths: Vec<_> = skeleton
+        .tasks
+        .iter()
+        .map(|frozen| context.task_root.join(&frozen.file_name))
+        .collect();
+    let subjects: Vec<_> = skeleton
+        .tasks
+        .iter()
+        .zip(&paths)
+        .map(|(frozen, path)| (frozen.task_id.as_str(), path.as_path()))
+        .collect();
+    let anchor = match crate::command::topology_lint::task_file_anchor(candidate, &subjects) {
+        Ok(anchor) => anchor,
+        Err(several) => {
+            let ids: Vec<&str> = several.iter().map(|(id, _)| id.as_str()).collect();
+            return Ok(Err(Unbound::Unparsed(UnparsedSubject {
+                task_file: paths[several[0].1].clone(),
+                reason: crate::command::topology_lint::several_task_files_finding(&ids),
+            })));
+        }
+    };
     let task_file = anchor
         .as_ref()
         .map_or(candidate, |anchor| &candidate[anchor.opener..]);

@@ -37,7 +37,9 @@ impl HostCommandProcessAdapter for ShapeRefusingChild {
         _control: HostCommandControl,
     ) -> WorkflowResult<SupervisedProcessOutput> {
         let candidate = request.stdin.clone().expect("candidate stdin");
-        let reason = normalize_task_candidate(candidate).expect_err("the shape is refused");
+        let subject = std::path::Path::new(arg(&request, "--task-file"));
+        let reason =
+            normalize_task_candidate(candidate, subject).expect_err("the shape is refused");
         let manifest = stage_shape_refusal(
             std::path::Path::new(arg(&request, "--staging-root")),
             std::path::Path::new(arg(&request, "--gate-envelope")),

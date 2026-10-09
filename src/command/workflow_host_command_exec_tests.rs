@@ -36,6 +36,19 @@ pub(super) fn seed_frozen_chain(
     context: &HostCommandResolutionContext,
     task_file: &std::path::Path,
 ) {
+    let name = task_file
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    seed_frozen_subjects(context, &[("TASK-X-010", &name)]);
+}
+
+/// A frozen chain whose skeleton holds these `(task_id, file_name)` subjects.
+pub(super) fn seed_frozen_subjects(
+    context: &HostCommandResolutionContext,
+    subjects: &[(&str, &str)],
+) {
     use archon_workflow::task_set_contract::{
         ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceLock, AcceptancePin,
         FreezeGateMode, FreezeGateStamp, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
@@ -67,18 +80,17 @@ pub(super) fn seed_frozen_chain(
     let skeleton = TaskSkeleton {
         schema_version: 1,
         acceptance_digest: acceptance_digest.clone(),
-        tasks: vec![FrozenTask {
-            task_id: "TASK-X-010".into(),
-            file_name: task_file
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .into_owned(),
-            depends_on: Vec::new(),
-            blocks: Vec::new(),
-            implements: Vec::new(),
-            deliverable_contracts: Vec::new(),
-        }],
+        tasks: subjects
+            .iter()
+            .map(|(task_id, file_name)| FrozenTask {
+                task_id: (*task_id).into(),
+                file_name: (*file_name).into(),
+                depends_on: Vec::new(),
+                blocks: Vec::new(),
+                implements: Vec::new(),
+                deliverable_contracts: Vec::new(),
+            })
+            .collect(),
     };
     let skeleton_bytes = serde_json::to_vec_pretty(&skeleton).unwrap();
     let skeleton_digest = content_digest(&skeleton_bytes);

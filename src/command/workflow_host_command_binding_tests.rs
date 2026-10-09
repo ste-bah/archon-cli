@@ -6,7 +6,7 @@ use archon_workflow::{HostCommandRequest, RemediationScope};
 
 use super::workflow_host_command_catalog::fixed_decomposition_catalog;
 use super::workflow_host_command_exec::{FixedHostCommandExecutor, WorkflowHostCommandExecutor};
-use super::workflow_host_command_exec_tests::{context, seed_frozen_chain};
+use super::workflow_host_command_exec_tests::{context, seed_frozen_chain, seed_frozen_subjects};
 
 async fn refusal(answer: &str) -> archon_workflow::GatePolicyFinding {
     let temp = tempfile::tempdir().unwrap();
@@ -218,4 +218,68 @@ fn a_complete_example_in_chat_does_not_stop_the_real_file_binding() {
     )
     .expect("binds");
     assert_eq!(bound.frozen_task_id.as_deref(), Some("TASK-X-010"));
+}
+
+/// A whole task file for `id`, as the parser accepts it.
+fn whole(id: &str) -> String {
+    format!(
+        "```yaml\ntask_id: {id}\ntitle: T\ncomplexity: small\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n# {id}\n"
+    )
+}
+
+/// Binds `answer` against a chain freezing TASK-X-010 and TASK-X-011.
+async fn bind_two(answer: String) -> Result<String, archon_workflow::GatePolicyFinding> {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    seed_frozen_subjects(
+        &context,
+        &[
+            ("TASK-X-010", "TASK-X-010.md"),
+            ("TASK-X-011", "TASK-X-011.md"),
+        ],
+    );
+    let run_root = temp.path().join("run");
+    let request = HostCommandRequest::new("land-task-body", Some(answer)).unwrap();
+    if let Ok(bound) =
+        super::workflow_host_command_binding::context_for_request(&context, &run_root, &request)
+    {
+        return Ok(bound.frozen_task_id.unwrap());
+    }
+    let executor = FixedHostCommandExecutor::new(
+        fixed_decomposition_catalog("rev-1").unwrap(),
+        context,
+        run_root,
+    );
+    let outcome = executor.execute(request, Some(1)).await.unwrap();
+    let mut findings = outcome.gate_envelope.expect("a refusal").policy_findings;
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    Err(findings.pop().unwrap())
+}
+
+/// Two frozen subjects' task files in one answer are ambiguous: refused,
+/// naming both, with or without chat before them; the host never picks one.
+#[tokio::test]
+async fn two_frozen_subjects_in_one_answer_are_refused_naming_both() {
+    let two = format!("{}\n{}", whole("TASK-X-010"), whole("TASK-X-011"));
+    for answer in [format!("Here it is:\n\n{two}"), two.clone()] {
+        let finding = bind_two(answer).await.expect_err("refused");
+        assert_eq!(
+            finding.text,
+            "the answer holds 2 task files (TASK-X-010, TASK-X-011); return only one task file, starting with its ```yaml frontmatter block; if TASK-X-011 is an example, put it inside a ```markdown fence"
+        );
+        assert_eq!(finding.remediation_scope, RemediationScope::Body);
+    }
+}
+
+/// A whole example for a task that is not frozen is packaging; the frozen
+/// subject after it binds, and one alone binds unchanged.
+#[tokio::test]
+async fn a_non_frozen_example_is_skipped_and_one_frozen_subject_binds() {
+    let answer = format!(
+        "An example:\n\n{}\n{}",
+        whole("TASK-X-999"),
+        whole("TASK-X-011")
+    );
+    assert_eq!(bind_two(answer).await.unwrap(), "TASK-X-011");
+    assert_eq!(bind_two(whole("TASK-X-010")).await.unwrap(), "TASK-X-010");
 }

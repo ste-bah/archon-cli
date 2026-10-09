@@ -224,45 +224,82 @@ pub(crate) struct TaskFileAnchor {
     pub(crate) task_id: String,
 }
 
+/// A frozen subject: its `task_id` and the path of its frozen file.
+pub(crate) type Subject<'a> = (&'a str, &'a std::path::Path);
+
 /// The one anchor the body gate and the host's binding share.
 ///
 /// A candidate block is a top-level ```` ```yaml ```` block (outside every
 /// fenced block, under the lints' shared toggle) that names a `task_id`, or
 /// such a block directly inside a top-level wrapper opener
 /// ([`unwrap_outer_fence`] rule 1) that is the last non-blank line before it.
-/// The anchor is the first candidate from which the rest of the answer
-/// holds exactly one task file: the task parser accepts it under its own
-/// `task_id`, and no other task file follows ([`task_files`]). So an example
-/// in chat, incomplete or whole, is never it when a real file follows. An
-/// answer that opens with a candidate has no packaging, so that one is. If no
-/// candidate holds exactly one, it is the first that parses (the body gate
-/// then refuses the second file), else the first candidate, which names the
-/// subject whose parse error the author gets. A block nested in another fence (a
-/// ```` ```markdown ```` example) is never a candidate.
-pub(crate) fn task_file_anchor(text: &str) -> Option<TaskFileAnchor> {
+/// A block nested in another fence (a ```` ```markdown ```` example) is
+/// never a candidate.
+///
+/// The anchor is the one candidate from which the task parser accepts the
+/// rest as the task file of a frozen `subject` (its `task_id` and
+/// `file_name`). A whole example for a task that is not frozen is never it,
+/// so it is packaging. Two or more such candidates are ambiguous: `Err` with
+/// each one's `task_id` and subject index, and the caller refuses; the host
+/// never picks one. With none, the anchor is the first candidate naming a
+/// subject's `task_id` (whose parse error the author then gets), else the
+/// first that parses under its own `task_id` with no task file after it,
+/// the first that parses, or the first candidate.
+pub(crate) fn task_file_anchor(
+    text: &str,
+    subjects: &[Subject<'_>],
+) -> Result<Option<TaskFileAnchor>, Vec<(String, usize)>> {
+    use archon_workflow::task_universe::parsing::parse_task_file;
     let candidates = anchor_candidates(text);
+    let frozen: Vec<(&TaskFileAnchor, usize)> = candidates
+        .iter()
+        .filter_map(|anchor| {
+            let rest = &text[anchor.opener..];
+            let subject = subjects
+                .iter()
+                .position(|(_, path)| parse_task_file(path, rest).is_ok())?;
+            Some((anchor, subject))
+        })
+        .collect();
+    match frozen.as_slice() {
+        [] => {}
+        [(one, _)] => return Ok(Some((*one).clone())),
+        several => {
+            return Err(several
+                .iter()
+                .map(|(anchor, subject)| (anchor.task_id.clone(), *subject))
+                .collect());
+        }
+    }
+    if let Some(named) = candidates
+        .iter()
+        .find(|anchor| subjects.iter().any(|(id, _)| *id == anchor.task_id))
+    {
+        return Ok(Some(named.clone()));
+    }
     let parses = |anchor: &&TaskFileAnchor| {
         let path = std::path::PathBuf::from(format!("{}.md", anchor.task_id));
-        archon_workflow::task_universe::parsing::parse_task_file(&path, &text[anchor.opener..])
-            .is_ok()
+        parse_task_file(&path, &text[anchor.opener..]).is_ok()
     };
-    // An answer that opens with a candidate (bare, or as a pure wrapper's
-    // interior) has no packaging: that block is the task file, exactly as
-    // the body gate's fast paths take it, and a second file is refused.
-    let first_line = offset_in(text, strip_leading_blank_lines(text));
-    if let Some(opening) = candidates
-        .first()
-        .filter(|anchor| anchor.wrapper.unwrap_or(anchor.opener) == first_line)
-    {
-        return Some(opening.clone());
-    }
     let alone = |anchor: &&TaskFileAnchor| task_files(&text[anchor.opener..]).1.is_empty();
-    candidates
+    Ok(candidates
         .iter()
         .find(|anchor| parses(anchor) && alone(anchor))
         .or_else(|| candidates.iter().find(parses))
         .or_else(|| candidates.first())
-        .cloned()
+        .cloned())
+}
+
+/// The finding for an answer holding several task files, by `task_id`: a
+/// top-level second file cannot be told apart from a second answer, so it
+/// is refused, and the text says how to keep an example instead.
+pub(crate) fn several_task_files_finding(ids: &[&str]) -> String {
+    format!(
+        "the answer holds {} task files ({}); return only one task file, starting with its ```yaml frontmatter block; if {} is an example, put it inside a ```markdown fence",
+        ids.len(),
+        ids.join(", "),
+        ids[1..].join(", ")
+    )
 }
 
 /// Every anchor candidate of [`task_file_anchor`], in answer order.
@@ -308,21 +345,28 @@ fn anchor_candidates(text: &str) -> Vec<TaskFileAnchor> {
 /// task file. Every line before the opener is packaging; nothing after the
 /// task file is touched except that wrapper's closer. Whether the rest holds
 /// one task file is [`task_files`]'s question, asked of every candidate.
-pub(crate) fn strip_packaging(text: &str) -> Option<Packaged<'_>> {
-    let anchor = task_file_anchor(text)?;
+pub(crate) fn strip_packaging<'a>(
+    text: &'a str,
+    subjects: &[Subject<'_>],
+) -> Result<Option<Packaged<'a>>, Vec<(String, usize)>> {
+    let Some(anchor) = task_file_anchor(text, subjects)? else {
+        return Ok(None);
+    };
     let (leading, task_file) = match anchor.wrapper {
         Some(wrapper) => {
-            let interior = unwrap_outer_fence(&text[wrapper..])?;
+            let Some(interior) = unwrap_outer_fence(&text[wrapper..]) else {
+                return Ok(None);
+            };
             let task_file = strip_leading_blank_lines(interior);
             (&text[..offset_in(text, task_file)], task_file)
         }
         None => text.split_at(anchor.opener),
     };
-    (!leading.is_empty()).then_some(Packaged {
+    Ok((!leading.is_empty()).then_some(Packaged {
         leading,
         task_file,
         wrapper: anchor.wrapper.is_some(),
-    })
+    }))
 }
 
 /// The byte offset of `part`, a slice of `text`, within it.

@@ -14,8 +14,8 @@
 use std::path::Path;
 
 use crate::command::topology_lint::{
-    first_nonblank_line, is_frontmatter_opener, offset_in, strip_leading_blank_lines,
-    strip_packaging, task_files, unwrap_outer_fence,
+    first_nonblank_line, is_frontmatter_opener, offset_in, several_task_files_finding,
+    strip_leading_blank_lines, strip_packaging, task_files, unwrap_outer_fence,
 };
 
 /// The task file the host lands from a body author's answer.
@@ -103,17 +103,28 @@ fn redacted_preview(text: &str) -> String {
 /// Bytes that are not UTF-8 pass through untouched for the mechanical checks
 /// to report. Whatever the host removes is recorded as [`Packaging`], and
 /// the rest must hold one task file whichever way it was found.
-pub(super) fn normalize_task_candidate(candidate: Vec<u8>) -> Result<TaskCandidate, String> {
+///
+/// `subject` is the frozen file the host bound this answer to (the host
+/// binds only an answer holding exactly one frozen subject's task file), so
+/// the packaging strip anchors on that subject's file.
+pub(super) fn normalize_task_candidate(
+    candidate: Vec<u8>,
+    subject: &Path,
+) -> Result<TaskCandidate, String> {
     let Ok(text) = std::str::from_utf8(&candidate) else {
         return Ok(TaskCandidate {
             bytes: candidate,
             packaging: None,
         });
     };
-    let (task_file, wrapper) = located_task_file(text)?;
+    let (task_file, wrapper) = located_task_file(text, subject)?;
     let (first, others) = task_files(task_file);
     if !others.is_empty() {
-        return Err(several_task_files(first, &others));
+        let first = first.as_deref().unwrap_or("one without a task_id");
+        let ids: Vec<&str> = std::iter::once(first)
+            .chain(others.iter().map(String::as_str))
+            .collect();
+        return Err(several_task_files_finding(&ids));
     }
     let start = offset_in(text, task_file);
     let (leading, trailing) = (&text[..start], &text[start + task_file.len()..]);
@@ -138,7 +149,7 @@ pub(super) fn normalize_task_candidate(candidate: Vec<u8>) -> Result<TaskCandida
 /// answer itself when it opens with the frontmatter (after a BOM and blank
 /// lines), the inside of one outer fence (Issue-61), or what follows chat
 /// before it ([`strip_packaging`]); else the refusal.
-fn located_task_file(text: &str) -> Result<(&str, bool), String> {
+fn located_task_file<'a>(text: &'a str, subject: &Path) -> Result<(&'a str, bool), String> {
     let rest = strip_leading_blank_lines(text);
     if is_frontmatter_opener(first_nonblank_line(rest)) {
         return Ok((rest, false));
@@ -153,24 +164,19 @@ fn located_task_file(text: &str) -> Result<(&str, bool), String> {
     // Issue-367 follow-up: chat before the task file is packaging, removed
     // exactly and recorded, because an author that repeats it every attempt
     // can never act on a refusal.
-    match strip_packaging(text) {
-        Some(packaged) => Ok((packaged.task_file, packaged.wrapper)),
-        None => Err(text_before_task_file(first_nonblank_line(rest))),
+    // The subject's task_id only names it if no block parses as it.
+    let named = subject
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default();
+    match strip_packaging(text, &[(named, subject)]) {
+        Ok(Some(packaged)) => Ok((packaged.task_file, packaged.wrapper)),
+        Ok(None) => Err(text_before_task_file(first_nonblank_line(rest))),
+        Err(several) => {
+            let ids: Vec<&str> = several.iter().map(|(id, _)| id.as_str()).collect();
+            Err(several_task_files_finding(&ids))
+        }
     }
-}
-
-/// A top-level second task file cannot be told apart from a second answer,
-/// so it is refused; the finding says how to keep an example instead.
-fn several_task_files(first: Option<String>, others: &[String]) -> String {
-    let ids: Vec<&str> = std::iter::once(first.as_deref().unwrap_or("one without a task_id"))
-        .chain(others.iter().map(String::as_str))
-        .collect();
-    format!(
-        "the answer holds {} task files ({}); return only one task file, starting with its ```yaml frontmatter block; if {} is an example, put it inside a ```markdown fence",
-        ids.len(),
-        ids.join(", "),
-        others.join(", ")
-    )
 }
 
 /// The landed-file shape check: a UTF-8 task file about to land opens with
