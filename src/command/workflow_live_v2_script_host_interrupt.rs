@@ -214,6 +214,23 @@ impl WorkflowScriptHost {
                         current.status
                     )));
                 }
+                // Review round 2: a stop observed after this attempt's result
+                // was committed (a publication receipt, or an accepted
+                // answer) never replaces it. The commit stays the call's
+                // answer, so a resume reuses it and lands nothing twice.
+                if let Some(committed) = self.runner.v2_store.load_call_record(call_id)?
+                    && committed.attempt == attempt
+                    && committed_result(&committed)
+                {
+                    tracing::warn!(
+                        %call_id,
+                        attempt,
+                        reason,
+                        error = %detail,
+                        "call stopped after its result was committed; committed record kept"
+                    );
+                    return Ok(None);
+                }
                 self.runner.v2_store.save_call_record(&record)?;
                 let event = crate::command::workflow_decompose_state::project_fixed_call(
                     locked,
@@ -225,11 +242,15 @@ impl WorkflowScriptHost {
                 // completed mark but never creates a checkpoint.
                 self.forget_completed_call(&record.call.id)?;
                 self.emit_call_finished_event(&record);
-                Ok(event)
+                Ok(Some(event))
             },
         );
         let event = match persisted {
-            Ok(event) => event,
+            Ok(Some(event)) => event,
+            Ok(None) => {
+                self.clear_inflight(call_id);
+                return Ok(());
+            }
             Err(err) => {
                 tracing::warn!(%call_id, reason, %err, "interrupted call evidence not saved");
                 return Err(err);
@@ -246,6 +267,13 @@ impl WorkflowScriptHost {
         }
         Ok(())
     }
+}
+
+/// A result that committed: it carries a publication receipt, or its status
+/// is one a resume reuses.
+fn committed_result(record: &WorkflowV2CallRecord) -> bool {
+    !record.result.data["publicationReceipt"].is_null()
+        || archon_workflow::v2::script::is_reusable_status(record.status)
 }
 
 /// The progress facts of a call's sessions, for its interrupted record: the

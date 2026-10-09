@@ -27,17 +27,21 @@ pub fn call_family(call_id: &str) -> (&str, Option<u64>) {
 }
 
 /// The recorded call is history and arrives with the input it was recorded
-/// with: replay it verbatim. An interrupted record is never history: it holds
-/// no answer, only the stop, so the call runs again (Issue 375).
+/// with: replay it verbatim.
 pub fn replayable_history(
     record: &WorkflowV2CallRecord,
     records: &[WorkflowV2CallRecord],
     input_hash: &str,
 ) -> bool {
-    record.invalidated_by.is_none()
-        && !interrupted(record)
-        && record.input_hash == input_hash
-        && superseded(record, records)
+    replayable_answer(record, input_hash) && superseded(record, records)
+}
+
+/// The one rule every verbatim replay path applies first: the record still
+/// stands (no restart invalidated it), it holds an answer (no pause, cancel
+/// or failed delivery interrupted it, Issue 375), and it answers exactly
+/// this input.
+pub fn replayable_answer(record: &WorkflowV2CallRecord, input_hash: &str) -> bool {
+    record.invalidated_by.is_none() && !interrupted(record) && record.input_hash == input_hash
 }
 
 /// A record a pause or cancel stopped mid-flight carries the reason as text;

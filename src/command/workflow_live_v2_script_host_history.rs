@@ -1,7 +1,7 @@
 //! History replay for a resumed fixed run: see
 //! `archon_workflow::v2::script::history_replay`.
 use super::*;
-use archon_workflow::v2::script::history_replay::replayable_history;
+use archon_workflow::v2::script::history_replay::{replayable_answer, replayable_history};
 
 impl WorkflowScriptHost {
     /// The recorded result of a call that a later call over the same subject
@@ -105,8 +105,7 @@ impl WorkflowScriptHost {
         input_hash: &str,
     ) -> archon_workflow::WorkflowResult<bool> {
         if record.call.method != WorkflowV2HostMethod::HostCommand
-            || record.invalidated_by.is_some()
-            || record.input_hash != input_hash
+            || !replayable_answer(record, input_hash)
             || record.result.data["publicationReceipt"].is_null()
         {
             return Ok(false);

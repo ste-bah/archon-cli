@@ -22,7 +22,7 @@
 //! they run again on resume, as any interrupted call does.
 
 use super::*;
-use archon_workflow::v2::script::history_replay::interrupted;
+use archon_workflow::v2::script::history_replay::{interrupted, replayable_answer};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct CoveredAttempt {
@@ -259,7 +259,7 @@ impl WorkflowScriptHost {
             attempt: record.attempt,
             input_hash: record.input_hash.clone(),
         };
-        if record.input_hash != input_hash || record.invalidated_by.is_some() {
+        if !replayable_answer(&record, input_hash) {
             return Ok(None);
         }
         let slots = self.runner.v2_store.load_call_records()?;
