@@ -4,6 +4,10 @@ use std::path::{Component, Path, PathBuf};
 use crate::filesystem::HostWriteTarget;
 use crate::tool::ToolContext;
 
+pub(crate) fn guard_refusal(reason: impl AsRef<str>) -> String {
+    format!("{} {}", crate::tool::TOOL_REFUSAL_MARKER, reason.as_ref())
+}
+
 pub(crate) fn resolve_existing_file_path(
     requested_path: &str,
     ctx: &ToolContext,
@@ -117,13 +121,13 @@ fn ensure_world_write_allowed(world_target: &Path, ctx: &ToolContext) -> Result<
         }
         // A remote world has no identifiable host file to judge against host roots.
         HostWriteTarget::Unknown if ctx.write_roots.is_empty() => Ok(()),
-        HostWriteTarget::Unknown => Err(format!(
+        HostWriteTarget::Unknown => Err(guard_refusal(format!(
             "Cannot write '{}': this agent's writes are confined to directories on this \
              machine, and the execution world cannot say which file on this machine that \
              path names. Confinement is expressed in host paths and cannot be evaluated \
              against a world that does not share the host filesystem.",
             world_target.display()
-        )),
+        ))),
     }
 }
 
@@ -187,11 +191,11 @@ fn ensure_write_allowed(
         .map(|root| root.display().to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    Err(format!(
+    Err(guard_refusal(format!(
         "Path '{}' is readable but outside this agent's writable directories: {allowed}. \
          Make the change in your own workspace; another agent owns that tree.",
         resolved_path.display()
-    ))
+    )))
 }
 
 /// The execution world's answer for a path it names itself, if it has one.
@@ -222,10 +226,9 @@ fn world_path(requested_path: &str, ctx: &ToolContext) -> Option<Result<PathBuf,
                             crate::read_boundary::check(&canonicalize_write_target(&host)?, ctx)?;
                         }
                         _ => {
-                            return Err(
-                                "Excluded-subtree policy requires a host-resolvable filesystem"
-                                    .into(),
-                            );
+                            return Err(guard_refusal(
+                                "Excluded-subtree policy requires a host-resolvable filesystem",
+                            ));
                         }
                     }
                 }
@@ -293,10 +296,10 @@ fn ensure_allowed(resolved_path: &Path, ctx: &ToolContext) -> Result<(), String>
         .map(|root| root.display().to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    Err(format!(
+    Err(guard_refusal(format!(
         "Path '{}' is outside allowed directories: {allowed}",
         resolved_path.display()
-    ))
+    )))
 }
 
 fn canonicalize_write_target(path: &Path) -> Result<PathBuf, String> {
@@ -348,10 +351,10 @@ fn normalize_lexically(path: &Path) -> Result<PathBuf, String> {
             Component::CurDir => {}
             Component::ParentDir => {
                 if !normalized.pop() {
-                    return Err(format!(
+                    return Err(guard_refusal(format!(
                         "Path '{}' cannot traverse above the filesystem root",
                         path.display()
-                    ));
+                    )));
                 }
             }
             Component::Normal(part) => normalized.push(part),

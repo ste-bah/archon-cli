@@ -18,7 +18,7 @@ impl ToolRegistry {
             Some(fence) => fence
                 .execute(work)
                 .await
-                .unwrap_or_else(|stop| ToolResult::error(stop.to_string())),
+                .unwrap_or_else(|stop| ToolResult::refusal(stop.to_string())),
             None => work.await,
         }
     }
@@ -62,7 +62,7 @@ impl ToolRegistry {
                 AgentActivityKind::ToolFailed,
                 AgentActivityStatus::Failed,
             );
-            return ToolResult::error(format!(
+            return ToolResult::refusal(format!(
                 "Tool '{tool_name}' is not available in Plan Mode. Plan Mode blocks working-tree mutations by default; only the canonical Plan-safe allowlist is available, including TaskCreate, TaskUpdate, and Agent. The call has been recorded in the session audit for review."
             ));
         }

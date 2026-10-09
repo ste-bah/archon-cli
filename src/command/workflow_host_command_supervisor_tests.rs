@@ -122,7 +122,9 @@ async fn stdout_overflow_terminates_group_and_prevents_late_mutation() {
         .expect_err("overflow must fail operationally");
 
     assert!(
-        error.to_string().contains("stdout output exceeded"),
+        error.to_string().contains("stdout output cap exceeded")
+            && error.to_string().contains("cap=256 bytes")
+            && error.to_string().contains("observed="),
         "{error}"
     );
     descendant

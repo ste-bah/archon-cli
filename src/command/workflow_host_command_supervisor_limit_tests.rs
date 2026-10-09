@@ -53,8 +53,17 @@ async fn exit_seen_before_events(
 
 fn failure(result: WorkflowResult<SupervisedProcessOutput>) -> String {
     match result {
-        Err(WorkflowError::StageFailed(message)) => message,
+        Err(WorkflowError::HostOperational(message) | WorkflowError::StageFailed(message)) => {
+            message
+        }
         other => panic!("expected the call to fail, got {other:?}"),
+    }
+}
+
+fn operational_failure(result: WorkflowResult<SupervisedProcessOutput>) -> String {
+    match result {
+        Err(WorkflowError::HostOperational(message)) => message,
+        other => panic!("output cap must pause operationally, got {other:?}"),
     }
 }
 
@@ -64,9 +73,10 @@ async fn stdout_overflow_fails_the_call_when_the_exit_is_seen_first() {
     let body = "sleep 0.5\nhead -c 300 /dev/zero\nexit 0";
     let mut request = command(script(temp.path(), "overflow-exit", body));
     request.max_stdout_bytes = 256;
-    let message = failure(exit_seen_before_events(request).await);
+    let message = operational_failure(exit_seen_before_events(request).await);
     assert!(
-        message.contains("stdout output exceeded 256 bytes"),
+        message.contains("stdout output cap exceeded: cap=256 bytes")
+            && message.contains("observed=300 bytes"),
         "{message}"
     );
 }
@@ -77,9 +87,10 @@ async fn stderr_overflow_by_one_byte_fails_the_call_when_the_exit_is_seen_first(
     let body = "sleep 0.5\nhead -c 257 /dev/zero >&2\nexit 0";
     let mut request = command(script(temp.path(), "overflow-stderr", body));
     request.max_stderr_bytes = 256;
-    let message = failure(exit_seen_before_events(request).await);
+    let message = operational_failure(exit_seen_before_events(request).await);
     assert!(
-        message.contains("stderr output exceeded 256 bytes"),
+        message.contains("stderr output cap exceeded: cap=256 bytes")
+            && message.contains("observed=257 bytes"),
         "{message}"
     );
 }
@@ -90,8 +101,8 @@ async fn overflow_then_a_failing_exit_is_the_overflow_not_a_returned_exit_code()
     let body = "sleep 0.5\nhead -c 300 /dev/zero\nexit 3";
     let mut request = command(script(temp.path(), "overflow-fail", body));
     request.max_stdout_bytes = 256;
-    let message = failure(exit_seen_before_events(request).await);
-    assert!(message.contains("stdout output exceeded"), "{message}");
+    let message = operational_failure(exit_seen_before_events(request).await);
+    assert!(message.contains("stdout output cap exceeded"), "{message}");
 }
 
 #[tokio::test]

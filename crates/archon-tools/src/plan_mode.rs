@@ -33,7 +33,7 @@ impl Tool for EnterPlanModeTool {
 
     async fn execute(&self, _input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
         if ctx.subagent_id.is_some() {
-            return ToolResult::error("subagents cannot enter plan mode");
+            return ToolResult::refusal("subagents cannot enter plan mode");
         }
         // The agent loop will intercept this and set AgentMode::Plan.
         // The tool itself just signals the intent.
@@ -78,10 +78,10 @@ impl Tool for ExitPlanModeTool {
 
     async fn execute(&self, _input: serde_json::Value, ctx: &ToolContext) -> ToolResult {
         if ctx.subagent_id.is_some() {
-            return ToolResult::error("subagents cannot exit plan mode");
+            return ToolResult::refusal("subagents cannot exit plan mode");
         }
         if ctx.mode != AgentMode::Plan {
-            return ToolResult::error("Not in plan mode. Use EnterPlanMode first.");
+            return ToolResult::refusal("Not in plan mode. Use EnterPlanMode first.");
         }
         // The agent loop will intercept this and set AgentMode::Normal.
         ToolResult::success("Plan mode exited. All tools are now available.")
@@ -181,6 +181,7 @@ mod bridge_tests {
 
         assert!(result.is_error);
         assert!(result.content.contains("subagents cannot enter plan mode"));
+        assert!(result.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
         assert_eq!(ctx.mode, AgentMode::Normal);
     }
 
@@ -196,7 +197,17 @@ mod bridge_tests {
 
         assert!(result.is_error);
         assert!(result.content.contains("subagents cannot exit plan mode"));
+        assert!(result.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
         assert_eq!(ctx.mode, AgentMode::Plan);
+    }
+
+    #[tokio::test]
+    async fn exiting_plan_mode_outside_plan_mode_is_a_typed_refusal() {
+        let ctx = ToolContext::default();
+        let result = ExitPlanModeTool.execute(json!({}), &ctx).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("Not in plan mode"));
+        assert!(result.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
     }
 
     #[test]

@@ -86,7 +86,7 @@ impl Tool for TerminalCreateTool {
         );
         let launch = match world::plan(ctx, shell.as_deref(), &cwd) {
             Ok(launch) => launch,
-            Err(error) => return ToolResult::error(error),
+            Err(error) => return ToolResult::refusal(error),
         };
 
         let id = format!("term-{}", uuid::Uuid::new_v4().simple());
@@ -179,7 +179,7 @@ impl Tool for TerminalWriteTool {
         // typing into that shell afterwards would run on the host while
         // everything else went through the backend.
         if !terminal.sandboxed && !world::host_terminals_allowed(ctx) {
-            return ToolResult::error(format!(
+            return ToolResult::refusal(format!(
                 "terminal {id} is a host shell, opened before the sandbox took \
                  effect. Writing to it would run outside the sandbox. Close it \
                  with TerminalClose and open a new one with TerminalCreate."

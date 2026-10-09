@@ -105,7 +105,7 @@ impl Tool for LandAuditRecordTool {
     }
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let Some(landing) = &ctx.audit_landing else {
-            return ToolResult::error("land-audit-record requires host audit authority");
+            return ToolResult::refusal("land-audit-record requires host audit authority");
         };
         let path = input
             .get("declared_path")
@@ -159,7 +159,7 @@ impl Tool for ScopedLandingTool {
             .as_ref()
             .is_some_and(|cap| Arc::ptr_eq(cap, &self.0))
         {
-            return ToolResult::error("record landing capability does not belong to this call");
+            return ToolResult::refusal("record landing capability does not belong to this call");
         }
         LandAuditRecordTool.execute(input, ctx).await
     }
@@ -189,6 +189,38 @@ mod progress_tests {
             Ok(())
         }
     }
+    #[tokio::test]
+    async fn landing_without_host_authority_is_a_guard_refusal() {
+        let result = LandAuditRecordTool
+            .execute(
+                json!({"declared_path":"src/main.rs"}),
+                &ToolContext::default(),
+            )
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("requires host audit authority"));
+        assert!(result.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
+    }
+
+    #[tokio::test]
+    async fn landing_with_another_calls_capability_is_a_guard_refusal() {
+        let owned = Arc::new(AuditLanding::new(Arc::new(Host), Some(900)));
+        let foreign = Arc::new(AuditLanding::new(Arc::new(Host), Some(900)));
+        let tool = ScopedLandingTool(owned);
+        let result = tool
+            .execute(
+                json!({"declared_path":"src/main.rs"}),
+                &ToolContext {
+                    audit_landing: Some(foreign),
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("does not belong to this call"));
+        assert!(result.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn progress_nudges_twice_before_failure_and_new_landing_resets() {
         let landing = Arc::new(AuditLanding::new(Arc::new(Host), Some(900)));

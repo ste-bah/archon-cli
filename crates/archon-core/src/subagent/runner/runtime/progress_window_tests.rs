@@ -133,10 +133,7 @@ impl Tool for FixedRead {
     }
     async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
         if self.refusal {
-            ToolResult::error(format!(
-                "{} inspection calls; answer now",
-                archon_tools::workflow_read_guard::READ_CEILING_MARKER
-            ))
+            ToolResult::refusal("read-only inspection refused")
         } else {
             ToolResult::success("fn main() {}")
         }

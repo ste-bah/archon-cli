@@ -88,7 +88,6 @@ impl WorkflowReadGuard {
                 GuardMode::ReadOnly => read_only_scope.map(|(_, root)| root),
             },
             read_only_soft_ceiling: settings.read_only_soft_call_ceiling,
-            read_only_hard_ceiling: settings.read_only_hard_call_ceiling,
             state: Mutex::new(State {
                 allowance: settings.max_reads_before_first_write,
                 focused,

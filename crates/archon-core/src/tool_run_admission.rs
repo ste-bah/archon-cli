@@ -25,7 +25,7 @@ pub(crate) async fn execute_tool_attempt(
         Some(fence) => fence
             .execute(work)
             .await
-            .unwrap_or_else(|stop| ToolResult::error(stop.to_string())),
+            .unwrap_or_else(|stop| ToolResult::refusal(stop.to_string())),
         None => work.await,
     }
 }
@@ -45,7 +45,7 @@ async fn execute_tool_attempt_owned(
     if admission_enabled && let Some(admission) = &ctx.tool_run_admission {
         let request = admission_request(ctx, tool.name(), &input, permission_level);
         if let ToolRunAdmission::Blocked { reason } = admission(request) {
-            let result = ToolResult::error(format!("ToolRun blocked: {reason}"));
+            let result = ToolResult::refusal(format!("ToolRun blocked: {reason}"));
             crate::dispatch::emit_tool_activity(
                 ctx,
                 tool.name(),
@@ -86,7 +86,7 @@ async fn execute_tool_attempt_owned(
             admission_enabled,
         );
         observe_tool_attempt(ctx, tool.name(), &input, true);
-        return ToolResult::error(reason);
+        return ToolResult::refusal(reason);
     }
 
     if let Some(guard) = &ctx.workflow_read_guard
@@ -108,7 +108,7 @@ async fn execute_tool_attempt_owned(
             AgentActivityKind::ToolFailed,
             AgentActivityStatus::Failed,
         );
-        return ToolResult::error(reason);
+        return ToolResult::refusal(reason);
     }
 
     crate::dispatch::emit_tool_activity(

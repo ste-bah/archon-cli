@@ -93,6 +93,7 @@ fn an_isolated_agent_cannot_create_a_file_in_the_canonical_tree() {
         error.contains("outside this agent's writable directories"),
         "the refusal must say why: {error}"
     );
+    assert!(error.contains(crate::tool::TOOL_REFUSAL_MARKER), "{error}");
 }
 
 /// And the one that actually happened: editing a file that already exists in
@@ -109,6 +110,7 @@ fn an_isolated_agent_cannot_edit_a_file_in_the_canonical_tree() {
         error.contains("outside this agent's writable directories"),
         "the refusal must say why: {error}"
     );
+    assert!(error.contains(crate::tool::TOOL_REFUSAL_MARKER), "{error}");
 }
 
 /// Reading it stays legitimate. Confining writes must not blind the agent to

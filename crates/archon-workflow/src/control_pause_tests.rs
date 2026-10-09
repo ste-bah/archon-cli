@@ -34,6 +34,14 @@ fn the_owning_generation_pauses_the_run_with_evidence() {
     )
     .unwrap()
     .unwrap();
+    let event: serde_json::Value = std::fs::read_to_string(store.events_path(&run_id))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .find(|event: &serde_json::Value| event["kind"] == "paused")
+        .unwrap();
+    assert_eq!(event["detail"]["cause_kind"], "x");
+    assert_eq!(event["detail"]["call_id"], format!("run-control:{run_id}"));
     let run = store.load_state(&run_id).unwrap();
     assert_eq!(run.status, RunStatus::Paused);
     assert_eq!(run.generation, generation + 1);

@@ -342,7 +342,7 @@ impl Tool for BashTool {
         {
             return limit_tool_result(
                 self.max_output_bytes,
-                ToolResult::error(crate::isolation::build_refusal(&segment)),
+                ToolResult::refusal(crate::isolation::build_refusal(&segment)),
             );
         }
 

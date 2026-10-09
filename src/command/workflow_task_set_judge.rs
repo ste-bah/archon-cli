@@ -170,7 +170,7 @@ mod workflow_task_set_judge_tests;
 /// is [`JudgeIncomplete`], which a staged freeze reports as resumable, so the
 /// host retries the freeze while it makes progress and otherwise pauses.
 /// A truncated reply is not counted here: it is continued (Issue 260).
-const JUDGE_ATTEMPTS: usize = 3;
+const JUDGE_NO_PROGRESS_WINDOW: usize = 3;
 
 /// What the judge is asked when its reply was cut off by the output limit.
 pub(super) const CONTINUE_PROMPT: &str = "Your previous reply was cut off by the output limit. Continue it from exactly the next character: output only the remaining text, repeat nothing already written, and add no preamble, commentary or code fence.";
@@ -266,12 +266,31 @@ pub(super) async fn judge_prompted(
     validate: impl Fn(&AcceptanceContract) -> Result<()>,
     partial: Option<&PartialReply<'_>>,
 ) -> Result<AcceptanceContract> {
-    let mut last = String::from("the acceptance judge was never asked");
-    for _ in 0..JUDGE_ATTEMPTS {
-        let content = match complete_reply(client, task, model, partial).await? {
+    let mut messages = vec![serde_json::json!({"role":"user","content":task})];
+    let mut seen = BTreeSet::new();
+    let mut no_progress = 0usize;
+    let mut attempts = 0usize;
+    let mut last: String;
+    loop {
+        attempts += 1;
+        let content = match complete_reply(client, &messages, model, partial).await? {
             Ok(content) => content,
             Err(unusable) => {
-                last = unusable;
+                last = unusable.clone();
+                let class = judge_error_class(&unusable);
+                if seen.insert(class) {
+                    no_progress = 0;
+                } else {
+                    no_progress += 1;
+                }
+                if no_progress >= JUDGE_NO_PROGRESS_WINDOW {
+                    break;
+                }
+                // `complete_reply` returns this path only when there is no
+                // complete reply to quote (for example, a truncation before
+                // JSON starts). Ask afresh; parsed rejections below preserve
+                // the actual assistant reply and exact validation error.
+                messages = vec![serde_json::json!({"role":"user","content":task})];
                 continue;
             }
         };
@@ -301,13 +320,52 @@ pub(super) async fn judge_prompted(
                 }
                 return Ok(attempt);
             }
-            Err(error) => last = format!("{error:#}"),
+            Err(error) => {
+                last = format!("{error:#}");
+                let class = judge_error_class(&last);
+                if seen.insert(class) {
+                    no_progress = 0;
+                } else {
+                    no_progress += 1;
+                }
+                if no_progress >= JUDGE_NO_PROGRESS_WINDOW {
+                    break;
+                }
+                let said = if content.trim().is_empty() {
+                    "(an empty reply)"
+                } else {
+                    &content
+                };
+                messages = vec![
+                    serde_json::json!({"role":"user","content":task}),
+                    serde_json::json!({"role":"assistant","content":said}),
+                    serde_json::json!({"role":"user","content":format!("Your reply was rejected: {last}\nReply again with the complete JSON document required by the first message.")}),
+                ];
+            }
         }
     }
     Err(JudgeIncomplete(format!(
-        "{JUDGE_ATTEMPTS} consecutive replies gave no usable verdict; the last: {last}"
+        "{attempts} replies; the last {JUDGE_NO_PROGRESS_WINDOW} gave no new first-error class or usable verdict; the last: {last}"
     ))
     .into())
+}
+
+fn judge_error_class(error: &str) -> &'static str {
+    if error.contains("malformed batched JSON") {
+        "malformed_json"
+    } else if error.contains("duplicated decision") {
+        "duplicate_decision"
+    } else if error.contains("decision ids do not match") {
+        "decision_ids"
+    } else if error.contains("left 'counterexample' empty") {
+        "empty_counterexample"
+    } else if error.contains("left 'reason' empty") {
+        "empty_reason"
+    } else if error.contains("unsupported stop reason") || error.contains("no finish reason") {
+        "finish_reason"
+    } else {
+        "invalid_judgment"
+    }
 }
 
 /// The judge could not complete its batch (Issue 260): an operational,

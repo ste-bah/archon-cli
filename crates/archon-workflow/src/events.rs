@@ -16,8 +16,10 @@ const FORBIDDEN_FIELDS: &[&str] = &[
     "oauth_token",
     "access_token",
     "refresh_token",
+    "token",
     "api_key",
     "authorization",
+    "password",
     "raw_text",
 ];
 
@@ -150,16 +152,210 @@ impl WorkflowEventLog {
         kind: WorkflowEventKind,
         detail: Value,
     ) -> WorkflowResult<WorkflowEvent> {
+        // Sanitize structured input before deriving any string cause fields:
+        // serializing evidence first would hide nested secret-shaped keys from
+        // the recursive field redactor.
+        let detail = sanitize_value(detail);
+        let detail = if kind == WorkflowEventKind::Paused {
+            pause_cause(detail, run_id)
+        } else {
+            detail
+        };
         let event = WorkflowEvent {
             seq,
             run_id: run_id.to_string(),
             ts: Utc::now(),
             kind,
-            detail: sanitize_value(detail),
+            detail,
         };
         let line = serde_json::to_string(&event)?;
         self.store.append_event_line(run_id, &line)?;
         Ok(event)
+    }
+}
+
+fn pause_cause(detail: Value, run_id: &str) -> Value {
+    let mut object = match detail {
+        Value::Object(object) => object,
+        other => serde_json::Map::from_iter([("detail".to_string(), other)]),
+    };
+    let kind = usable_cause_string(object.get("cause_kind"))
+        .or_else(|| {
+            usable_cause_string(object.get("event")).filter(|event| *event != "terminal_status")
+        })
+        .or_else(|| usable_cause_string(object.get("action")))
+        .unwrap_or("workflow_pause")
+        .to_string();
+    let reason = usable_cause_string(object.get("cause_reason"))
+        .or_else(|| usable_cause_string(object.get("cause")))
+        .or_else(|| usable_cause_string(object.get("reason")))
+        .or_else(|| usable_cause_string(object.get("error")))
+        .or_else(|| usable_cause_string(object.get("detail")))
+        .map(str::to_string)
+        .or_else(|| structured_cause(object.get("evidence")))
+        .unwrap_or_else(|| "workflow entered a resumable paused state".to_string());
+    let call_id = usable_cause_string(object.get("call_id"))
+        .or_else(|| usable_cause_string(object.get("pause_id")))
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("run-control:{run_id}"));
+    object.insert("cause_kind".into(), kind.into());
+    object.insert("cause_reason".into(), reason.into());
+    object.insert("call_id".into(), call_id.into());
+    Value::Object(object)
+}
+
+/// Script pauses often carry evidence as a JSON object or array. Prefer its
+/// human-written explanation fields, then retain the structured evidence in a
+/// compact form so a pause event never loses its cause.
+fn structured_cause(value: Option<&Value>) -> Option<String> {
+    let value = value.filter(|value| !value.is_null())?;
+    if let Some(text) = usable_cause_string(Some(value)) {
+        return Some(text.to_string());
+    }
+    for field in ["summary", "reason", "message", "text", "detail"] {
+        if let Some(text) = usable_cause_string(value.get(field)) {
+            return Some(text.to_string());
+        }
+    }
+    match value {
+        Value::Object(_) | Value::Array(_) => serde_json::to_string(value).ok(),
+        _ => None,
+    }
+}
+
+fn usable_cause_string(value: Option<&Value>) -> Option<&str> {
+    value
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(test)]
+mod pause_cause_tests {
+    use super::{WorkflowEventLog, pause_cause, sanitize_value};
+    use crate::{WorkflowEventKind, WorkflowStore};
+    use serde_json::json;
+
+    #[test]
+    fn pause_cause_is_mandatory_and_uses_recorded_evidence_when_available() {
+        let detail = pause_cause(
+            json!({"action":"pause","pause_id":"call-7","reason":"stalled"}),
+            "run-1",
+        );
+        assert_eq!(detail["cause_kind"], "pause");
+        assert_eq!(detail["cause_reason"], "stalled");
+        assert_eq!(detail["call_id"], "call-7");
+
+        let detail = pause_cause(json!("legacy detail"), "run-2");
+        assert_eq!(detail["detail"], "legacy detail");
+        assert_eq!(detail["cause_kind"], "workflow_pause");
+        assert_eq!(detail["cause_reason"], "legacy detail");
+        assert_eq!(detail["call_id"], "run-control:run-2");
+
+        let detail = pause_cause(json!({"evidence":"stdout cap=256, observed=300"}), "run-3");
+        assert_eq!(detail["cause_reason"], "stdout cap=256, observed=300");
+
+        let detail = pause_cause(
+            json!({"event":"script_pause", "pause_id":"pause-7", "evidence":{"summary":"host judge needs review", "kind":"gate"}}),
+            "run-3",
+        );
+        assert_eq!(detail["cause_reason"], "host judge needs review");
+        assert_eq!(detail["call_id"], "pause-7");
+
+        let detail = pause_cause(
+            json!({
+                "cause_kind": null, "event": "host_command_pause",
+                "cause_reason": "", "evidence": "stderr output cap exceeded",
+                "call_id": null, "pause_id": "call-8"
+            }),
+            "run-4",
+        );
+        assert_eq!(detail["cause_kind"], "host_command_pause");
+        assert_eq!(detail["cause_reason"], "stderr output cap exceeded");
+        assert_eq!(detail["call_id"], "call-8");
+    }
+
+    #[test]
+    fn emitted_script_pause_event_sanitizes_nested_evidence_before_stringifying_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::project(temp.path());
+        let run = store
+            .create_run(crate::WorkflowSpec {
+                schema: crate::spec::WORKFLOW_SCHEMA.into(),
+                name: "pause event".into(),
+                task: "test".into(),
+                target_repository_root: None,
+                max_parallelism: 1,
+                max_agents: 1,
+                stages: Vec::new(),
+                permissions: Default::default(),
+                learning_hooks: Vec::new(),
+            })
+            .unwrap();
+        let event = WorkflowEventLog::new(store)
+            .emit(
+                &run.id,
+                1,
+                WorkflowEventKind::Paused,
+                json!({
+                    "event":"script_pause",
+                    "pause_id":"pause-acceptance-2",
+                    "evidence":{
+                        "kind":"host_command",
+                        "context":{
+                            "api_key":"api-secret",
+                            "nested":{
+                                "token":"token-secret",
+                                "authorization":"Bearer auth-secret",
+                                "password":"password-secret"
+                            }
+                        }
+                    }
+                }),
+            )
+            .unwrap();
+        assert_eq!(event.detail["cause_kind"], "script_pause");
+        let reason = event.detail["cause_reason"].as_str().unwrap();
+        assert!(reason.contains("\"kind\":\"host_command\""), "{reason}");
+        for secret in [
+            "api-secret",
+            "token-secret",
+            "auth-secret",
+            "password-secret",
+        ] {
+            assert!(!reason.contains(secret), "leaked {secret}: {reason}");
+        }
+        assert_eq!(event.detail["call_id"], "pause-acceptance-2");
+    }
+
+    #[test]
+    fn nested_secret_fields_are_removed_before_evidence_becomes_cause_reason() {
+        let evidence = json!({
+            "category": "host_command",
+            "context": {
+                "api_key": "api-secret",
+                "nested": {
+                    "token": "token-secret",
+                    "authorization": "Bearer auth-secret",
+                    "password": "password-secret"
+                }
+            }
+        });
+        let sanitized = sanitize_value(json!({"evidence": evidence}));
+        let detail = pause_cause(sanitized, "run-secret-test");
+        let reason = detail["cause_reason"].as_str().unwrap();
+        assert!(reason.contains("\"category\":\"host_command\""), "{reason}");
+        for secret in [
+            "api-secret",
+            "token-secret",
+            "auth-secret",
+            "password-secret",
+        ] {
+            assert!(!reason.contains(secret), "leaked {secret}: {reason}");
+        }
+        assert!(!detail["evidence"].to_string().contains("api_key"));
+        assert!(!detail["evidence"].to_string().contains("token\""));
+        assert!(!detail["evidence"].to_string().contains("authorization"));
+        assert!(!detail["evidence"].to_string().contains("password"));
     }
 }
 

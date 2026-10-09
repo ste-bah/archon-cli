@@ -387,12 +387,7 @@ pub fn require_no_terminal_stop(
 
 fn emit(store: &WorkflowStore, run_id: &str, detail: serde_json::Value) -> WorkflowResult<u64> {
     let seq = store.next_event_seq(run_id)?;
-    WorkflowEventLog::new(store.clone()).emit(
-        run_id,
-        seq,
-        WorkflowEventKind::Paused,
-        crate::events::sanitize_value(detail),
-    )?;
+    WorkflowEventLog::new(store.clone()).emit(run_id, seq, WorkflowEventKind::Paused, detail)?;
     Ok(seq)
 }
 

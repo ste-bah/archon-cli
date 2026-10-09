@@ -152,7 +152,7 @@ impl Agent {
             return true;
         };
 
-        let result = ToolResult::error(reason);
+        let result = ToolResult::refusal(reason);
         self.send_event(AgentEvent::ToolCallComplete {
             name: tool.name.clone(),
             id: tool.id.clone(),

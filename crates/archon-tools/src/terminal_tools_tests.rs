@@ -125,6 +125,11 @@ async fn an_unknown_shell_is_refused_before_anything_is_registered() {
 
     assert!(result.is_error);
     assert!(result.content.contains("fish"), "{}", result.content);
+    assert!(
+        result.content.contains(crate::tool::TOOL_REFUSAL_MARKER),
+        "{}",
+        result.content
+    );
 }
 
 /// Closing a session's terminals is the way out, and it must not blow up when
@@ -278,6 +283,11 @@ mod under_a_sandbox {
         assert!(refused.is_error, "{}", refused.content);
         assert!(
             refused.content.contains("outside the sandbox"),
+            "{}",
+            refused.content
+        );
+        assert!(
+            refused.content.contains(crate::tool::TOOL_REFUSAL_MARKER),
             "{}",
             refused.content
         );

@@ -18,6 +18,7 @@ pub(super) enum SupervisorEvent {
     OutputLimit {
         stream: &'static str,
         limit: u64,
+        observed: u64,
     },
     /// The rest of the message after "host command '<id>' ".
     Failed(String),
@@ -56,7 +57,11 @@ pub(super) async fn drain_pipe(
                     retained.extend_from_slice(&chunk[..read.min(remaining)]);
                 }
                 if total > limit && !reported {
-                    let _ = events.send(SupervisorEvent::OutputLimit { stream, limit });
+                    let _ = events.send(SupervisorEvent::OutputLimit {
+                        stream,
+                        limit,
+                        observed: total,
+                    });
                     reported = true;
                 }
             }
@@ -161,8 +166,12 @@ pub(super) fn over_limit(
     request: &ResolvedHostCommand,
     stream: &'static str,
     limit: u64,
+    observed: u64,
 ) -> WorkflowError {
-    failed(request, &format!("{stream} output exceeded {limit} bytes"))
+    WorkflowError::HostOperational(format!(
+        "host command '{}' {stream} output cap exceeded: cap={limit} bytes, observed={observed} bytes; resumable operational pause",
+        request.command_id
+    ))
 }
 
 /// An overflow on either pipe, from the bytes the child actually wrote.
@@ -177,7 +186,7 @@ pub(super) fn overflow(
     ]
     .into_iter()
     .find(|(_, pipe, limit)| pipe.total > *limit)
-    .map(|(stream, _, limit)| over_limit(request, stream, limit))
+    .map(|(stream, pipe, limit)| over_limit(request, stream, limit, pipe.total))
 }
 
 /// What fails a command that exited on its own: an overflow first, then a

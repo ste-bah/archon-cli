@@ -197,7 +197,7 @@ impl SubagentPipelineClient {
         } else {
             Self::prompt_for_request(&request)
         };
-        // A read-only call is told its inspection ceilings up front (Issue-58)
+        // A read-only call gets its soft inspection reminder up front (Issue-58)
         // in the guard's own words, so the numbers it plans around are the
         // numbers that will be enforced. A write-capable guard has no preamble.
         if !continuing

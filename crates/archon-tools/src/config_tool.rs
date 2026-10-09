@@ -394,7 +394,7 @@ impl ConfigTool {
     fn handle_set(&self, key: &str, value: &str) -> ToolResult {
         // personality.* is read-only
         if key.starts_with("personality.") {
-            return ToolResult::error(
+            return ToolResult::refusal(
                 "personality.* keys are read-only. Edit the personality profile directly.",
             );
         }
@@ -411,7 +411,7 @@ impl ConfigTool {
         };
 
         if meta.read_only {
-            return ToolResult::error(format!("Config key \"{key}\" is read-only."));
+            return ToolResult::refusal(format!("Config key \"{key}\" is read-only."));
         }
 
         if let Err(e) = validate_type(meta.ty, value) {

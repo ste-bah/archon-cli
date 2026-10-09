@@ -1,15 +1,10 @@
-//! Issue-58: the read-only guard's inspection ceilings. The write-capable
-//! guard must not notice any of this.
-use super::{
-    GuardMode, READ_CEILING_MARKER, REFUSAL_RECORD_KIND, TOOL_CALL_RECORD_KIND, WorkflowReadGuard,
-    WorkflowReadGuardSettings,
-};
+//! Issue-58: read-only inspection reminders; progress windows bound the call.
+use super::{GuardMode, WorkflowReadGuard, WorkflowReadGuardSettings};
 use serde_json::{Value, json};
 
-fn settings(soft: u32, hard: u32) -> WorkflowReadGuardSettings {
+fn settings(soft: u32, _legacy_hard: u32) -> WorkflowReadGuardSettings {
     WorkflowReadGuardSettings {
         read_only_soft_call_ceiling: soft,
-        read_only_hard_call_ceiling: hard,
         ..Default::default()
     }
 }
@@ -64,11 +59,11 @@ fn every_inspection_shape_counts_and_nothing_else_does() {
         assert_eq!(guard.result_note(tool, &input), None, "{tool} {input}");
     }
     assert_eq!(guard.read_only_inspections(), 4);
-    // Shell inspection is the fifth and is refused.
-    let refusal = guard
-        .before_tool("Bash", &bash_input("sed -n '1,40p' src/lib.rs"))
-        .unwrap();
-    assert!(refusal.starts_with(READ_CEILING_MARKER), "{refusal}");
+    assert_eq!(
+        guard.before_tool("Bash", &bash_input("sed -n '1,40p' src/lib.rs")),
+        None
+    );
+    assert_eq!(guard.read_only_inspections(), 5);
 }
 
 #[test]
@@ -83,17 +78,13 @@ fn the_soft_ceiling_appends_the_nudge_from_the_threshold_on() {
     assert_eq!(verdict, None);
     assert_eq!(
         note.as_deref(),
-        Some(
-            "You have made 3 inspection calls; produce your deliverable now — further reading past 6 will be refused."
-        )
+        Some("You have made 3 inspection calls; produce your deliverable now.")
     );
     let (verdict, note) = inspect(&guard, "Bash", &bash_input("git diff --stat"));
     assert_eq!(verdict, None, "the soft ceiling never refuses");
     assert_eq!(
         note.as_deref(),
-        Some(
-            "You have made 4 inspection calls; produce your deliverable now — further reading past 6 will be refused."
-        )
+        Some("You have made 4 inspection calls; produce your deliverable now.")
     );
     // A build between two reads is neither counted nor annotated.
     let (verdict, note) = inspect(&guard, "Bash", &bash_input("cargo test -p some-crate"));
@@ -102,36 +93,12 @@ fn the_soft_ceiling_appends_the_nudge_from_the_threshold_on() {
 }
 
 #[test]
-fn the_hard_ceiling_refuses_at_the_threshold_and_keeps_refusing() {
+fn a_legacy_hard_ceiling_setting_never_refuses_inspection() {
     let guard = read_only(2, 4);
-    for _ in 0..4 {
+    for _ in 0..30 {
         assert_eq!(guard.before_tool("Read", &read_input()), None);
     }
-    let expected = format!(
-        "{READ_CEILING_MARKER} 4 inspection calls; answer now with your deliverable from what you have read. Further Read, Grep, Glob and shell inspection calls are refused; build and test commands still run."
-    );
-    for tool_input in [
-        ("Read", read_input()),
-        ("Grep", json!({"pattern": "x"})),
-        ("Glob", json!({"pattern": "*.rs"})),
-        ("read-own-evidence", json!({"offset": 0})),
-        ("Bash", bash_input("cat src/lib.rs")),
-        ("Bash", bash_input("rg -n needle src")),
-        ("Read", read_input()),
-    ] {
-        let (tool, input) = tool_input;
-        assert_eq!(
-            guard.before_tool(tool, &input).as_deref(),
-            Some(expected.as_str()),
-            "{tool}"
-        );
-    }
-    assert_eq!(
-        guard.read_only_inspections(),
-        4,
-        "refused calls are not counted"
-    );
-    // The session is not ended: no terminal failure, and build/test still run.
+    assert_eq!(guard.read_only_inspections(), 30);
     assert_eq!(guard.terminal_failure(), None);
     for command in [
         "cargo test -p some-crate guard",
@@ -163,7 +130,8 @@ fn a_zero_ceiling_is_off() {
         let (verdict, note) = inspect(&refuse_only, "Read", &read_input());
         assert_eq!((verdict, note), (None, None));
     }
-    assert!(refuse_only.before_tool("Read", &read_input()).is_some());
+    assert_eq!(refuse_only.before_tool("Read", &read_input()), None);
+    assert_eq!(refuse_only.read_only_inspections(), 3);
     let off = read_only(0, 0);
     for _ in 0..300 {
         let (verdict, note) = inspect(&off, "Glob", &json!({"pattern": "*"}));
@@ -176,32 +144,20 @@ fn a_zero_ceiling_is_off() {
 fn the_defaults_are_eighty_and_one_hundred_twenty() {
     let settings = WorkflowReadGuardSettings::default();
     assert_eq!(settings.read_only_soft_call_ceiling, 80);
-    assert_eq!(settings.read_only_hard_call_ceiling, 120);
     let guard = WorkflowReadGuard::shell_only(&settings);
-    for call in 1..=120 {
+    for call in 1..=150 {
         let (verdict, note) = inspect(&guard, "Read", &read_input());
         assert_eq!(verdict, None, "call {call}");
         assert_eq!(note.is_some(), call >= 80, "call {call}: {note:?}");
     }
-    let refusal = guard.before_tool("Read", &read_input()).unwrap();
-    assert!(
-        refusal.starts_with("read ceiling reached: 120 inspection calls;"),
-        "{refusal}"
-    );
+    assert_eq!(guard.before_tool("Read", &read_input()), None);
 }
 
 #[test]
-fn the_preamble_states_both_ceilings_for_a_read_only_call_only() {
+fn the_preamble_states_only_the_progress_reminder_for_a_read_only_call() {
     let both = read_only(80, 120).preamble().unwrap();
-    assert!(
-        both.starts_with("Inspection ceiling for this read-only call:"),
-        "{both}"
-    );
-    assert!(both.contains("from 80 inspection calls"), "{both}");
-    assert!(
-        both.contains("past 120 such calls further reading is refused"),
-        "{both}"
-    );
+    assert!(both.starts_with("From 80 inspection calls"), "{both}");
+    assert!(both.contains("From 80 inspection calls"), "{both}");
     assert!(
         both.contains("build and test commands are not counted"),
         "{both}"
@@ -209,14 +165,10 @@ fn the_preamble_states_both_ceilings_for_a_read_only_call_only() {
     assert_eq!(both.matches(". ").count(), 0, "one sentence: {both}");
     let soft_only = read_only(80, 0).preamble().unwrap();
     assert!(
-        soft_only.contains("from 80 inspection calls") && !soft_only.contains("refused"),
+        soft_only.contains("From 80 inspection calls") && !soft_only.contains("refused"),
         "{soft_only}"
     );
-    let hard_only = read_only(0, 120).preamble().unwrap();
-    assert!(
-        hard_only.contains("past 120 inspection calls") && !hard_only.contains("reminds"),
-        "{hard_only}"
-    );
+    assert_eq!(read_only(0, 120).preamble(), None);
     let writer = WorkflowReadGuard::from_settings(&settings(80, 120));
     assert_eq!(writer.mode(), GuardMode::WriteCapable);
     assert_eq!(writer.preamble(), None);
@@ -229,7 +181,6 @@ fn the_write_capable_guard_never_counts_notes_or_refuses_on_the_ceilings() {
     let guard = WorkflowReadGuard::from_settings(&WorkflowReadGuardSettings {
         max_reads_before_first_write: 5,
         read_only_soft_call_ceiling: 1,
-        read_only_hard_call_ceiling: 2,
         ..Default::default()
     });
     for _ in 0..5 {
@@ -242,41 +193,20 @@ fn the_write_capable_guard_never_counts_notes_or_refuses_on_the_ceilings() {
         refusal.starts_with("read budget exhausted (5 reads, 0 substantive writes)."),
         "{refusal}"
     );
-    assert!(!refusal.contains(READ_CEILING_MARKER));
+    assert!(!refusal.contains("read ceiling reached:"));
     assert_eq!(guard.result_note("Read", &read_input()), None);
 }
 
 #[tokio::test]
-async fn a_ceiling_refusal_is_recorded_like_any_other() {
+async fn a_legacy_hard_ceiling_does_not_refuse_or_record_a_false_refusal() {
     let temp = tempfile::tempdir().unwrap();
     let sidecar = temp.path().join("read-set.jsonl");
     let guard = super::scope_read_set(sidecar.clone(), async { read_only(0, 1) }).await;
-    assert_eq!(guard.before_tool("Read", &read_input()), None);
-    assert!(!sidecar.exists(), "an admitted read leaves no record");
+    for _ in 0..3 {
+        assert_eq!(guard.before_tool("Read", &read_input()), None);
+    }
     assert!(
-        guard
-            .before_tool("Grep", &json!({"pattern": "needle", "path": "src"}))
-            .is_some()
-    );
-    let records: Vec<Value> = std::fs::read_to_string(&sidecar)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    assert_eq!(records.len(), 2, "{records:?}");
-    assert_eq!(records[0]["kind"], REFUSAL_RECORD_KIND);
-    assert_eq!(records[0]["tool"], "Grep");
-    assert!(
-        records[0]["reason"]
-            .as_str()
-            .unwrap()
-            .starts_with(READ_CEILING_MARKER)
-    );
-    assert_eq!(records[1]["kind"], TOOL_CALL_RECORD_KIND);
-    assert!(
-        records[1]["status"]
-            .as_str()
-            .unwrap()
-            .starts_with("refused: read ceiling reached:")
+        !sidecar.exists(),
+        "admitted reads do not create refusal records"
     );
 }

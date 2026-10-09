@@ -251,7 +251,12 @@ fn apply_action(
         }
         LifecycleAction::Pause => {
             run.status = RunStatus::Paused;
-            Ok((WorkflowEventKind::Paused, json!({"action": "pause"})))
+            Ok((WorkflowEventKind::Paused, json!({
+                "action": "pause",
+                "cause_kind": "operator_pause",
+                "cause_reason": "operator requested the run pause",
+                "call_id": "operator-pause"
+            })))
         }
         LifecycleAction::Cancel => {
             run.status = RunStatus::Cancelled;

@@ -6,18 +6,9 @@ pub(super) fn is_guard_refusal(result: &ToolResult) -> bool {
     if !result.is_error {
         return false;
     }
-    let content = result
-        .content
-        .trim_start()
-        .strip_prefix("Error: ")
-        .unwrap_or(result.content.trim_start());
-    [
-        archon_tools::workflow_read_guard::READ_CEILING_MARKER,
-        archon_tools::workflow_read_guard::READ_WALL_THRASH_MARKER,
-        archon_tools::workflow_read_guard::REPEATED_FAILURE_MARKER,
-    ]
-    .iter()
-    .any(|marker| content.starts_with(marker))
+    let content = result.content.trim_start();
+    let content = content.strip_prefix("Error: ").unwrap_or(content);
+    content.starts_with(archon_tools::tool::TOOL_REFUSAL_MARKER)
 }
 
 pub(super) fn tool_allows_empty_input(runner: &SubagentRunner, name: &str) -> bool {
@@ -28,4 +19,26 @@ pub(super) fn tool_allows_empty_input(runner: &SubagentRunner, name: &str) -> bo
             crate::agent::tool_input_json::schema_allows_empty_input(&tool_arc.input_schema())
         })
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_guard_refusal;
+    use archon_tools::tool::ToolResult;
+
+    #[test]
+    fn every_guard_refusal_kind_shares_one_class_and_ordinary_errors_remain_progress() {
+        for reason in [
+            "read ceiling refusal",
+            "freshness refusal",
+            "sandbox refusal",
+            "tool-run admission refusal",
+            "workflow guard refusal",
+        ] {
+            assert!(is_guard_refusal(&ToolResult::refusal(reason)), "{reason}");
+        }
+        assert!(!is_guard_refusal(&ToolResult::error(
+            "ordinary command failed"
+        )));
+    }
 }

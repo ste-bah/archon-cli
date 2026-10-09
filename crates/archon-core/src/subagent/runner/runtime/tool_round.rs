@@ -277,7 +277,7 @@ async fn execute_prepared_tools(
                 )
                 .await
                 {
-                    return ToolResult::error(reason);
+                    return ToolResult::refusal(reason);
                 }
                 let result = registry.dispatch(&name, input.clone(), &ctx).await;
                 crate::agent::tool_preflight_freshness::record(

@@ -157,6 +157,7 @@ async fn an_isolated_branch_cannot_rewrite_project_data_from_its_shell() {
     }
     let ctx = branch_ctx(&layout, true);
     let result = bash(&ctx, &heredoc_rewrite(&layout.data)).await;
+    assert!(result.is_error, "{}", result.content);
     assert_eq!(
         read(&layout.data),
         "{\"shape\":\"v1\"}",
@@ -165,6 +166,11 @@ async fn an_isolated_branch_cannot_rewrite_project_data_from_its_shell() {
     );
     assert!(
         result.content.contains(WRITE_BOUNDARY_NOTE_MARKER),
+        "{}",
+        result.content
+    );
+    assert!(
+        !result.content.contains(crate::tool::TOOL_REFUSAL_MARKER),
         "{}",
         result.content
     );
@@ -484,17 +490,5 @@ fn the_shared_git_directory_opens_only_its_commit_state_for_git_mutation() {
     assert!(!allow.contains(&subpath(&common)), "{with}");
 }
 
-#[test]
-fn no_host_stamp_means_no_boundary() {
-    let layout = layout();
-    let worktree = layout.worktree.to_str().unwrap();
-    let unstamped = WorkflowReadGuard::new(40, 20, false, false).with_declared_targets(
-        DeclaredTargetScope::new(&["src/lib.rs".to_string()], Some(worktree))
-            .in_isolated_worktree(true),
-    );
-    assert_eq!(unstamped.boundary_paths(), None);
-    assert_eq!(
-        unstamped.before_tool("Write", &json!({"file_path": path_str(&layout.data)})),
-        None
-    );
-}
+#[path = "bash_write_sandbox_boundary_tests.rs"]
+mod boundary_tests;
