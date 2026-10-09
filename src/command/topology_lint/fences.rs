@@ -230,11 +230,14 @@ pub(crate) struct TaskFileAnchor {
 /// fenced block, under the lints' shared toggle) that names a `task_id`, or
 /// such a block directly inside a top-level wrapper opener
 /// ([`unwrap_outer_fence`] rule 1) that is the last non-blank line before it.
-/// The anchor is the first candidate from which the task parser accepts the
-/// rest of the answer as one task file under its own `task_id`, so an
-/// incomplete yaml example in chat is never it. Only when no candidate
-/// parses is it the first candidate, which then names the subject whose
-/// parse error the author gets. A block nested in another fence (a
+/// The anchor is the first candidate from which the rest of the answer
+/// holds exactly one task file: the task parser accepts it under its own
+/// `task_id`, and no other task file follows ([`task_files`]). So an example
+/// in chat, incomplete or whole, is never it when a real file follows. An
+/// answer that opens with a candidate has no packaging, so that one is. If no
+/// candidate holds exactly one, it is the first that parses (the body gate
+/// then refuses the second file), else the first candidate, which names the
+/// subject whose parse error the author gets. A block nested in another fence (a
 /// ```` ```markdown ```` example) is never a candidate.
 pub(crate) fn task_file_anchor(text: &str) -> Option<TaskFileAnchor> {
     let candidates = anchor_candidates(text);
@@ -243,9 +246,21 @@ pub(crate) fn task_file_anchor(text: &str) -> Option<TaskFileAnchor> {
         archon_workflow::task_universe::parsing::parse_task_file(&path, &text[anchor.opener..])
             .is_ok()
     };
+    // An answer that opens with a candidate (bare, or as a pure wrapper's
+    // interior) has no packaging: that block is the task file, exactly as
+    // the body gate's fast paths take it, and a second file is refused.
+    let first_line = offset_in(text, strip_leading_blank_lines(text));
+    if let Some(opening) = candidates
+        .first()
+        .filter(|anchor| anchor.wrapper.unwrap_or(anchor.opener) == first_line)
+    {
+        return Some(opening.clone());
+    }
+    let alone = |anchor: &&TaskFileAnchor| task_files(&text[anchor.opener..]).1.is_empty();
     candidates
         .iter()
-        .find(parses)
+        .find(|anchor| parses(anchor) && alone(anchor))
+        .or_else(|| candidates.iter().find(parses))
         .or_else(|| candidates.first())
         .cloned()
 }

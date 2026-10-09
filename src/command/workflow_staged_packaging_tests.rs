@@ -135,8 +135,9 @@ fn chat_that_leaves_a_block_open_before_the_task_file_is_refused() {
     );
 }
 
-/// A second complete task file after the first is refused on every path:
-/// no packaging, a pure wrapper, and chat before it.
+/// Two real top-level task files are refused, bare or in a pure wrapper.
+/// After chat, the first is indistinguishable from a whole example in the
+/// chat, so the last one lands (see the complete-example test).
 #[test]
 fn a_second_complete_task_file_is_refused_on_every_path() {
     let second = format!(
@@ -144,11 +145,7 @@ fn a_second_complete_task_file_is_refused_on_every_path() {
         FRONTMATTER.replace("TASK-X-001", "TASK-X-002")
     );
     let two = format!("{}\n{second}", valid_body());
-    for answer in [
-        two.clone(),
-        format!("```markdown\n{two}```\n"),
-        format!("{CHAT}\n\n{two}"),
-    ] {
+    for answer in [two.clone(), format!("```markdown\n{two}```\n")] {
         assert_eq!(
             refusal(&answer),
             "the answer holds 2 task files (TASK-X-001, TASK-X-002); return only one task file, starting with its ```yaml frontmatter block; if TASK-X-002 is an example, put it inside a ```markdown fence",
@@ -243,6 +240,21 @@ fn the_wrapper_closer_and_trailing_whitespace_are_counted() {
 fn an_incomplete_yaml_example_in_chat_is_packaging_before_the_valid_file() {
     let body = valid_body();
     let chat = format!("{CHAT}\n```yaml\ntask_id: TASK-X-001\nnote: the shape only\n```\n\n");
+    let (bytes, unwrapped, packaging) = discarded(&format!("{chat}{body}"));
+    assert_eq!((bytes, unwrapped), (body.into_bytes(), false));
+    assert_eq!(packaging.bytes, chat.len());
+}
+
+/// A complete, valid example task file in the chat is packaging: the task
+/// file opens at the first block after which no other task file follows.
+#[test]
+fn a_complete_example_task_file_in_chat_is_packaging_before_the_real_file() {
+    let body = valid_body();
+    let example = format!(
+        "{}\n# TASK-X-002\n",
+        FRONTMATTER.replace("TASK-X-001", "TASK-X-002")
+    );
+    let chat = format!("{CHAT}\n\n{example}\n");
     let (bytes, unwrapped, packaging) = discarded(&format!("{chat}{body}"));
     assert_eq!((bytes, unwrapped), (body.into_bytes(), false));
     assert_eq!(packaging.bytes, chat.len());

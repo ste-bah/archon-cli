@@ -191,3 +191,31 @@ fn an_incomplete_named_example_in_chat_does_not_stop_the_valid_file_binding() {
     .expect("binds");
     assert_eq!(bound.frozen_task_id.as_deref(), Some("TASK-X-010"));
 }
+
+/// A complete example task file in chat, for another task, does not stop
+/// the real task file after it binding to its own subject.
+#[test]
+fn a_complete_example_in_chat_does_not_stop_the_real_file_binding() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    let task_file = context.task_root.join("TASK-X-010.md");
+    seed_frozen_chain(&context, &task_file);
+    let file = |id: &str| {
+        format!(
+            "```yaml\ntask_id: {id}\ntitle: T\ncomplexity: small\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n# {id}\n"
+        )
+    };
+    let answer = format!(
+        "An example:\n\n{}\n{}",
+        file("TASK-X-999"),
+        file("TASK-X-010")
+    );
+    let request = HostCommandRequest::new("land-task-body", Some(answer)).unwrap();
+    let bound = super::workflow_host_command_binding::context_for_request(
+        &context,
+        &temp.path().join("run"),
+        &request,
+    )
+    .expect("binds");
+    assert_eq!(bound.frozen_task_id.as_deref(), Some("TASK-X-010"));
+}
