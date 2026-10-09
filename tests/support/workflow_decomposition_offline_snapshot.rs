@@ -65,7 +65,6 @@ pub fn result_store_records(
             let mut value: serde_json::Value =
                 serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
             strip_timestamps(&mut value);
-            normalize_lifecycle_metadata(&mut value);
             // Result filenames are hashes of call and attempt data. Compare the
             // retained records by their normalized contents, not those opaque IDs.
             Some((String::new(), value))
@@ -77,8 +76,11 @@ pub fn result_store_records(
         (endpoint, "<provider-endpoint>"),
         (run_id, "<run-id>"),
     ];
+    // Receipts are read through their raw destination paths, so they are
+    // normalised before the host call ids inside those paths are replaced.
     normalize_publication_receipts(&mut records, &replacements);
     for (_, value) in &mut records {
+        normalize_lifecycle_metadata(value);
         normalize_values(value, &replacements);
     }
     records.sort_by_key(|record| serde_json::to_string(&record.1).unwrap());
