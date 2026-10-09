@@ -1,10 +1,10 @@
 //! The re-ask: the original question, then only the last rejected reply and
 //! its exact parse error with the allowed keys. The critic is asked again
-//! while its replies make progress — each one parses further than every
-//! earlier one. A reply whose first error is at the same or an earlier
-//! position is no progress, whatever its error text; the audit is
-//! operational once [`FIDELITY_NO_PROGRESS_WINDOW`] of them come in a row.
-//! A verdict with a missing or unknown field is never accepted.
+//! while its replies make progress — each refused reply's first error falls
+//! in a (verdict, kind) class no earlier reply had. The same class again is
+//! no progress, whatever its error text; the audit is operational once
+//! [`FIDELITY_NO_PROGRESS_WINDOW`] of them come in a row. A verdict with a
+//! missing or unknown field is never accepted.
 
 use super::*;
 
@@ -148,7 +148,7 @@ async fn identical_bad_replies_are_operational_after_the_no_progress_window_not_
     );
 }
 
-/// Different bytes that fail at the same position are no progress.
+/// Different bytes that fail in the same (verdict, kind) class are no progress.
 #[tokio::test]
 async fn the_same_error_from_different_bytes_is_no_progress() {
     let temp = corpus();
@@ -166,7 +166,7 @@ async fn the_same_error_from_different_bytes_is_no_progress() {
 #[tokio::test]
 async fn bad_replies_with_new_errors_are_progress_and_keep_the_conversation_going() {
     let temp = corpus();
-    // Each reply parses further than the one before it.
+    // Each reply fails in a (verdict, kind) class no earlier reply had.
     let bad = vec![
         "not json".to_string(),
         stray_key_reply(0, "weakest_task_text", ""),
@@ -226,21 +226,110 @@ async fn a_verdict_missing_a_required_field_is_never_accepted() {
     }
 }
 
-/// New error text at the same position is not progress: progress is
-/// parsing further, which a finite reply bounds.
+/// New unknown-field names in the same verdict are one error kind there:
+/// no progress, however the names (and so the byte offsets) differ.
 #[tokio::test]
-async fn new_errors_at_the_same_position_stop_after_the_window() {
+async fn new_unknown_field_names_in_the_same_verdict_stop_after_the_window() {
     let temp = corpus();
-    let replies = (0..10)
-        .map(|n| Ok(stray_key_reply(1, &format!("zz_stray_{n}"), "")))
+    let replies = (1..=10)
+        .map(|n| Ok(stray_key_reply(1, &format!("zz_{}", "x".repeat(n)), "")))
         .collect();
     let critic = FakeCritic::new(replies);
     let evaluation = evaluate(temp.path(), Ok(critic.clone())).await;
     assert_eq!(critic.calls(), 1 + FIDELITY_NO_PROGRESS_WINDOW);
     let error = evaluation.operational_error().expect("operational");
-    assert!(error.contains("unknown field `zz_stray_3`"), "{error}");
+    assert!(error.contains("unknown field `zz_xxxx`"), "{error}");
     assert_eq!(
         rejected_files(temp.path()).len(),
         1 + FIDELITY_NO_PROGRESS_WINDOW
+    );
+}
+
+/// The base corpus with six more obligations claimed by its one task: one
+/// call batch of eight, in sorted order. Returns the cwd and the ids.
+fn wide_corpus() -> (tempfile::TempDir, Vec<String>) {
+    let temp = corpus();
+    let cwd = temp.path();
+    let extra: Vec<String> = (1..=6).map(|n| format!("REQ-WS-{n:03}")).collect();
+    let prd_path = cwd.join("tasks/PRD-WS-001.md");
+    let mut prd = std::fs::read_to_string(&prd_path).unwrap();
+    prd.push_str("\n## Requirements\n\n");
+    for id in &extra {
+        prd.push_str(&format!("- {id}: requirement {id}\n"));
+    }
+    std::fs::write(&prd_path, prd).unwrap();
+    let task = cwd.join("tasks/PRD-WS-001/TASK-WS-001.md");
+    let quoted: Vec<String> = extra.iter().map(|id| format!("\"{id}\"")).collect();
+    let body = std::fs::read_to_string(&task).unwrap().replace(
+        "implements: [\"G-WS-001\", \"AC-WS-001\"]",
+        &format!(
+            "implements: [\"G-WS-001\", \"AC-WS-001\", {}]",
+            quoted.join(", ")
+        ),
+    );
+    std::fs::write(&task, body).unwrap();
+    let mut ids = vec!["AC-WS-001".to_string(), "G-WS-001".to_string()];
+    ids.extend(extra);
+    (temp, ids)
+}
+
+/// True verdicts for `ids`, with one stray key in verdict `stray_at`.
+fn wide_reply(ids: &[String], stray_at: Option<usize>) -> String {
+    let verdicts: Vec<_> = ids
+        .iter()
+        .enumerate()
+        .map(|(n, id)| {
+            let mut verdict = serde_json::json!({"obligation_id": id, "necessarily_true": true, "weakest_task_id": "", "reason": "obliged", "quoted_task_text": ""});
+            if stray_at == Some(n) {
+                verdict["zz_stray"] = "".into();
+            }
+            verdict
+        })
+        .collect();
+    serde_json::json!({ "verdicts": verdicts }).to_string()
+}
+
+/// A reply that fixes the reported error in verdict 5 and shows one in
+/// verdict 2 parsed less far, yet it is progress: that error is new there.
+#[tokio::test]
+async fn a_reply_fixing_a_later_verdict_with_an_error_in_an_earlier_one_is_progress() {
+    let (temp, ids) = wide_corpus();
+    let earlier = wide_reply(&ids, Some(2));
+    let critic = FakeCritic::new(vec![
+        Ok(wide_reply(&ids, Some(5))),
+        Ok(earlier.clone()),
+        Ok(earlier.clone()),
+        Ok(earlier),
+        Ok(wide_reply(&ids, None)),
+    ]);
+    let evaluation = evaluate(temp.path(), Ok(critic.clone())).await;
+    assert!(
+        evaluation.operational_error().is_none(),
+        "{:?}",
+        evaluation.operational_error()
+    );
+    assert_eq!(critic.calls(), 5);
+}
+
+/// Errors that move between verdicts are progress until every (verdict,
+/// kind) pair has been seen; then the window ends the run.
+#[tokio::test]
+async fn errors_moving_between_verdicts_progress_until_the_pairs_run_out() {
+    let (temp, ids) = wide_corpus();
+    let mut replies: Vec<_> = (0..ids.len())
+        .rev()
+        .map(|n| Ok(wide_reply(&ids, Some(n))))
+        .collect();
+    let progress = replies.len();
+    for n in 0..FIDELITY_NO_PROGRESS_WINDOW {
+        replies.push(Ok(wide_reply(&ids, Some(n))));
+    }
+    let critic = FakeCritic::new(replies);
+    let evaluation = evaluate(temp.path(), Ok(critic.clone())).await;
+    assert_eq!(critic.calls(), progress + FIDELITY_NO_PROGRESS_WINDOW);
+    assert!(evaluation.operational_error().is_some());
+    assert_eq!(
+        rejected_files(temp.path()).len(),
+        progress + FIDELITY_NO_PROGRESS_WINDOW
     );
 }

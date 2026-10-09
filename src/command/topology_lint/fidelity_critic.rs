@@ -4,13 +4,14 @@
 //! answers; this file asks and bounds. Verdicts are remembered by
 //! `fidelity_store.rs`.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use archon_workflow::fidelity_audit::{
-    ClaimedObligation, ClaimingTask, DOCUMENT_KEYS, FidelityVerdict, ReplyPosition,
-    SkeletonSummary, VERDICT_KEYS, fidelity_prompt, parse_fidelity_reply,
+    ClaimedObligation, ClaimingTask, DOCUMENT_KEYS, FidelityVerdict, SkeletonSummary, VERDICT_KEYS,
+    fidelity_prompt, parse_fidelity_reply,
 };
 use archon_workflow::llm_client_port::{WorkflowAgentOutcome, WorkflowLlmClient};
 
@@ -21,18 +22,20 @@ use crate::command::workflow_freeze_budget::FreezeBudget;
 /// strongest tier the provider offers, whatever it resolves to.
 pub(super) const CRITIC_MODEL_ALIAS: &str = "opus";
 /// Rejected replies in a row that make no progress before the failure is
-/// operational. Progress is parsing further: a refused reply makes progress
-/// only when its first error is at a later [`ReplyPosition`] than that of
-/// every earlier reply (a later byte offset in the JSON shape, then the id
-/// check, then a later verdict). An error at the same or an earlier
-/// position is no progress, even when its text is new, and a byte-identical
-/// reply always is. Positions are finite — offsets are bounded by the
-/// reply's length, which the provider's output limit bounds, and verdict
-/// indexes by the cluster size — so progress is bounded with no fixed
-/// total on attempts; only this window ends a run of no progress. Observed
-/// live: one stray empty key in a complete document, re-sent unchanged at
-/// temperature 0.0, came back byte-identical and ended a fixed two-attempt
-/// loop.
+/// operational. Each refused reply's first error has a class: the verdict
+/// it is in (or the document as a whole) and its kind, from the closed set
+/// [`archon_workflow::fidelity_audit::RefusalKind`]. A reply makes progress
+/// when it parses fully or when its class is new — not among the classes of
+/// earlier replies. A new error kind in a verdict is progress even if that
+/// verdict comes earlier than the last error (a shorter reply that fixed a
+/// later verdict). The same class again is no progress, whatever its text:
+/// a new unknown key name in the same verdict, or a byte-identical reply.
+/// There are at most (verdicts + 1) × 29 classes (each verdict of the
+/// cluster plus the document, times 29 kinds), so progress is bounded by the
+/// definition itself; there is no fixed total on attempts, and only this
+/// window ends a run of no progress. Observed live: one stray empty key in
+/// a complete document, re-sent unchanged at temperature 0.0, came back
+/// byte-identical and ended a fixed two-attempt loop.
 pub(super) const FIDELITY_NO_PROGRESS_WINDOW: usize = 3;
 const CRITIC_TEMPERATURE: f64 = 0.0;
 const FIDELITY_CALL_TIMEOUT_SECS: u64 =
@@ -83,7 +86,7 @@ pub(super) async fn ask(
 ) -> Result<Asked> {
     let request = request(obligations, tasks, skeleton);
     let mut messages = request.messages.clone();
-    let mut furthest: Option<ReplyPosition> = None;
+    let mut seen = BTreeSet::new();
     let mut stalled = 0;
     let mut attempt = 0;
     let last = loop {
@@ -124,8 +127,7 @@ pub(super) async fn ask(
                     .and_then(|()| std::fs::write(&path, &outcome.content))
                     .map(|()| path.display().to_string())
                     .unwrap_or_else(|error| format!("not kept: {error}"));
-                if furthest.is_none_or(|furthest| error.position > furthest) {
-                    furthest = Some(error.position);
+                if seen.insert(error.class()) {
                     stalled = 0;
                 } else {
                     stalled += 1;

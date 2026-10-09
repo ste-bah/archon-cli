@@ -429,3 +429,6 @@ fn cluster_digest_changes_with_any_text_or_the_skeleton_and_nothing_else() {
         fidelity_cluster_digest(&obligations(), &tasks(), &SkeletonSummary::absent())
     );
 }
+
+#[path = "fidelity_audit_reply_tests.rs"]
+mod reply;

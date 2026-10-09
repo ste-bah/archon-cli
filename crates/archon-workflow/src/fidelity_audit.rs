@@ -176,8 +176,8 @@ pub struct FidelityVerdict {
 
 #[path = "fidelity_audit_reply.rs"]
 mod reply;
-pub use reply::{FidelityRefusal, ReplyPosition};
-use reply::{ReplyVerdict, byte_offset, checked_verdict};
+pub use reply::{FidelityRefusal, RefusalKind};
+use reply::{ReplyVerdict, checked_verdict, json_kind, shape_class};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -248,24 +248,26 @@ pub fn parse_fidelity_reply(
 ) -> Result<Vec<FidelityVerdict>, FidelityRefusal> {
     let document = document.trim();
     let not_the_document =
-        |error: &dyn std::fmt::Display, json: &serde_json::Error| FidelityRefusal {
+        |error: &dyn std::fmt::Display, class: (Option<usize>, RefusalKind)| FidelityRefusal {
             message: format!("fidelity reply is not the verdict document: {error}"),
-            position: ReplyPosition::Shape(byte_offset(document, json.line(), json.column())),
+            verdict: class.0,
+            kind: class.1,
         };
     let mut deserializer = serde_json::Deserializer::from_str(document);
     let response: FidelityResponse = serde_path_to_error::deserialize(&mut deserializer)
-        .map_err(|error| not_the_document(&error, error.inner()))?;
+        .map_err(|error| not_the_document(&error, shape_class(&error, obligations.len())))?;
     deserializer
         .end()
-        .map_err(|error| not_the_document(&error, &error))?;
+        .map_err(|error| not_the_document(&error, (None, json_kind(&error, None))))?;
     let ids = |message: String| FidelityRefusal {
         message,
-        position: ReplyPosition::Ids,
+        verdict: None,
+        kind: RefusalKind::WrongObligationIds,
     };
     let mut by_id = std::collections::BTreeMap::new();
-    for verdict in response.verdicts {
+    for (index, verdict) in response.verdicts.into_iter().enumerate() {
         if by_id
-            .insert(verdict.obligation_id.clone(), verdict)
+            .insert(verdict.obligation_id.clone(), (index, verdict))
             .is_some()
         {
             return Err(ids("fidelity reply repeats an obligation id".to_string()));
@@ -282,15 +284,18 @@ pub fn parse_fidelity_reply(
         )));
     }
     let mut verdicts = Vec::with_capacity(by_id.len());
-    for (index, obligation) in obligations.iter().enumerate() {
-        let reply = by_id.remove(&obligation.id).expect("id set checked");
+    // The ids match the cluster with none repeated, so every reply index is
+    // below the cluster size.
+    for obligation in obligations {
+        let (index, reply) = by_id.remove(&obligation.id).expect("id set checked");
         let checked = checked_verdict(reply).and_then(|mut verdict| {
             check_verdict(&mut verdict, tasks)?;
             Ok(verdict)
         });
-        verdicts.push(checked.map_err(|message| FidelityRefusal {
+        verdicts.push(checked.map_err(|(kind, message)| FidelityRefusal {
             message,
-            position: ReplyPosition::Verdict(index),
+            verdict: Some(index),
+            kind,
         })?);
     }
     Ok(verdicts)
@@ -309,10 +314,17 @@ pub fn parse_fidelity_reply(
 /// still refused outright: a weakest task outside the cluster, a false verdict
 /// that names no weakest task or quotes nothing, or a quote the named task
 /// does not contain.
-fn check_verdict(verdict: &mut FidelityVerdict, tasks: &[ClaimingTask]) -> Result<(), String> {
+fn check_verdict(
+    verdict: &mut FidelityVerdict,
+    tasks: &[ClaimingTask],
+) -> Result<(), (RefusalKind, String)> {
     let id = &verdict.obligation_id;
+    let other = |message: String| Err((RefusalKind::Other, message));
     if verdict.reason.trim().is_empty() {
-        return Err(format!("verdict for {id} has an empty reason"));
+        return Err((
+            RefusalKind::BlankRequired("reason"),
+            format!("verdict for {id} has an empty reason"),
+        ));
     }
     if verdict.reason.chars().count() > MAX_REASON_CHARS {
         let mut cut: String = verdict.reason.chars().take(MAX_REASON_CHARS).collect();
@@ -335,7 +347,7 @@ fn check_verdict(verdict: &mut FidelityVerdict, tasks: &[ClaimingTask]) -> Resul
         .find(|task| task.task_id == verdict.weakest_task_id);
     if verdict.necessarily_true {
         if !verdict.weakest_task_id.is_empty() && weakest.is_none() {
-            return Err(format!(
+            return other(format!(
                 "verdict for {id} names weakest task '{}' which is not in the audited cluster",
                 verdict.weakest_task_id
             ));
@@ -343,19 +355,20 @@ fn check_verdict(verdict: &mut FidelityVerdict, tasks: &[ClaimingTask]) -> Resul
         return Ok(());
     }
     let Some(weakest) = weakest else {
-        return Err(format!(
+        return other(format!(
             "false verdict for {id} names weakest task '{}' which is not in the audited cluster",
             verdict.weakest_task_id
         ));
     };
     let quote = collapse_whitespace(&verdict.quoted_task_text);
     if quote.is_empty() {
-        return Err(format!(
-            "false verdict for {id} quotes nothing from the task"
+        return Err((
+            RefusalKind::BlankRequired("quoted_task_text"),
+            format!("false verdict for {id} quotes nothing from the task"),
         ));
     }
     if !collapse_whitespace(&weakest.text).contains(&quote) {
-        return Err(format!(
+        return other(format!(
             "false verdict for {id} quotes text that does not appear verbatim in task '{}'",
             weakest.task_id
         ));
