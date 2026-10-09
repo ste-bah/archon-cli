@@ -36,7 +36,7 @@ pub(crate) fn ensure_not_sealed(
     requested: &Path,
     resolved: &Path,
     ctx: &ToolContext,
-) -> Result<(), String> {
+) -> Result<(), crate::path_guard_error::GuardError> {
     if ctx.sealed_repositories.is_empty() || !in_workflow(ctx) {
         return Ok(());
     }
@@ -95,7 +95,11 @@ fn normalise(path: &Path) -> PathBuf {
 }
 
 /// `named` is the path the agent asked for when `path` is where it leads.
-fn judge(path: &Path, ctx: &ToolContext, named: Option<&Path>) -> Result<(), String> {
+fn judge(
+    path: &Path,
+    ctx: &ToolContext,
+    named: Option<&Path>,
+) -> Result<(), crate::path_guard_error::GuardError> {
     let Some(checkout) = sealed_checkout_of(path, ctx) else {
         return Ok(());
     };

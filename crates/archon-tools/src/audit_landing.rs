@@ -199,7 +199,7 @@ mod progress_tests {
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("requires host audit authority"));
-        assert!(result.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
+        assert!(result.is_guard_refusal());
     }
 
     #[tokio::test]
@@ -218,7 +218,7 @@ mod progress_tests {
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("does not belong to this call"));
-        assert!(result.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
+        assert!(result.is_guard_refusal());
     }
 
     #[tokio::test(start_paused = true)]

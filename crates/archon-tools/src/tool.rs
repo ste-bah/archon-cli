@@ -271,10 +271,9 @@ pub struct ToolResult {
     pub is_error: bool,
     #[serde(skip)]
     authoritative_bash_execution: Option<Box<AuthoritativeBashExecution>>,
+    #[serde(skip)]
+    guard_refusal: bool,
 }
-
-/// Shared typed prefix for a tool result returned by a guard before work ran.
-pub const TOOL_REFUSAL_MARKER: &str = "[[ARCHON_TOOL_REFUSAL]]";
 
 impl ToolResult {
     pub fn from_parts(content: impl Into<String>, is_error: bool) -> Self {
@@ -282,23 +281,21 @@ impl ToolResult {
             content: content.into(),
             is_error,
             authoritative_bash_execution: None,
+            guard_refusal: false,
         }
     }
 
     /// A guard refusal. Its classification is independent of the guard's
     /// explanatory text, so no-progress accounting never learns per-guard prose.
     pub fn refusal(reason: impl AsRef<str>) -> Self {
-        Self::error(format!("{TOOL_REFUSAL_MARKER} {}", reason.as_ref()))
+        let mut result = Self::error(reason.as_ref());
+        result.guard_refusal = true;
+        result
     }
 
-    /// Mark an existing result as guard-refused while preserving its other
-    /// execution metadata.
-    pub fn mark_refusal(mut self) -> Self {
-        if !self.content.trim_start().starts_with(TOOL_REFUSAL_MARKER) {
-            self.content = format!("{TOOL_REFUSAL_MARKER} {}", self.content);
-        }
-        self.is_error = true;
-        self
+    /// Whether a guard refused this result before the tool was allowed to run.
+    pub fn is_guard_refusal(&self) -> bool {
+        self.guard_refusal
     }
 
     pub(crate) fn from_authoritative_bash_execution(
@@ -320,6 +317,7 @@ impl ToolResult {
             })),
             content,
             is_error: exit_code != 0,
+            guard_refusal: false,
         }
     }
 
@@ -332,6 +330,7 @@ impl ToolResult {
             content: content.into(),
             is_error: false,
             authoritative_bash_execution: None,
+            guard_refusal: false,
         }
     }
 
@@ -346,6 +345,7 @@ impl ToolResult {
             content,
             is_error: true,
             authoritative_bash_execution: None,
+            guard_refusal: false,
         }
     }
 }

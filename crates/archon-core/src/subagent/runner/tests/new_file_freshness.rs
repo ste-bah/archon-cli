@@ -57,10 +57,8 @@ async fn freshness_still_refuses_unread_existing_file() {
     let refusal = requests[1].messages.last().unwrap()["content"][0]["content"]
         .as_str()
         .unwrap();
-    assert!(
-        refusal.contains(archon_tools::tool::TOOL_REFUSAL_MARKER),
-        "{refusal}"
-    );
+    assert!(refusal.starts_with("Error: "), "{refusal}");
+    assert!(!refusal.contains("[[ARCHON_TOOL_REFUSAL]]"), "{refusal}");
 }
 
 /// Issue-115: the live write-branch sequence through the real runner and

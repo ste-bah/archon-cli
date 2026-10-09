@@ -154,7 +154,7 @@ impl Tool for AgentTool {
         .await
         {
             Ok(snapshots) => snapshots,
-            Err(err) => return ToolResult::error(err),
+            Err(err) => return err.into_tool_result(),
         };
 
         // Record what this agent says it will write, and warn if a running

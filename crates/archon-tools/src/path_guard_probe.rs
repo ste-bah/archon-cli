@@ -15,7 +15,7 @@ use crate::tool::ToolContext;
 /// The canonical path an agent holding `ctx` would be handed for `path`, or
 /// the exact refusal text its `Read` of `path` would have returned.
 pub fn probe_read_access(path: &Path, ctx: &ToolContext) -> Result<PathBuf, String> {
-    crate::path_guard::resolve_existing_path(&path.display().to_string(), ctx)
+    crate::path_guard::resolve_existing_path(&path.display().to_string(), ctx).map_err(Into::into)
 }
 
 #[cfg(test)]

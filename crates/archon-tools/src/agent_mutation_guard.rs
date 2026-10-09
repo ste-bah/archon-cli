@@ -17,7 +17,7 @@ pub(crate) async fn snapshot_expected_targets(
     requested_paths: &[String],
     cwd: Option<&str>,
     ctx: &ToolContext,
-) -> Result<Vec<ExpectedMutationSnapshot>, String> {
+) -> Result<Vec<ExpectedMutationSnapshot>, crate::path_guard_error::GuardError> {
     let snapshot_ctx = mutation_context(cwd, ctx);
     let mut snapshots = Vec::with_capacity(requested_paths.len());
     for requested_path in requested_paths {
@@ -67,7 +67,7 @@ async fn snapshot_one(
     fs: &dyn FileSystem,
     requested_path: &str,
     ctx: &ToolContext,
-) -> Result<ExpectedMutationSnapshot, String> {
+) -> Result<ExpectedMutationSnapshot, crate::path_guard_error::GuardError> {
     let resolved_path = resolve_write_target_path(requested_path, ctx)?;
     let (existed, hash) = match fs.read(&resolved_path).await {
         Ok(bytes) => (true, Some(content_hash(&bytes))),
@@ -76,7 +76,8 @@ async fn snapshot_one(
             return Err(format!(
                 "Failed to snapshot expected target '{}': {err}",
                 resolved_path.display()
-            ));
+            )
+            .into());
         }
     };
     Ok(ExpectedMutationSnapshot {

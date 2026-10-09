@@ -93,7 +93,40 @@ fn an_isolated_agent_cannot_create_a_file_in_the_canonical_tree() {
         error.contains("outside this agent's writable directories"),
         "the refusal must say why: {error}"
     );
-    assert!(error.contains(crate::tool::TOOL_REFUSAL_MARKER), "{error}");
+    assert!(!error.contains("[[ARCHON_TOOL_REFUSAL]]"), "{error}");
+}
+
+#[tokio::test]
+async fn file_write_guard_returns_typed_refusal_without_changing_content() {
+    use crate::tool::Tool;
+
+    let trees = trees();
+    let ctx = isolated(&trees);
+    let target = trees.canonical.join("smuggled.rs");
+    let result = crate::file_write::WriteTool
+        .execute(
+            serde_json::json!({
+                "file_path": target.display().to_string(),
+                "content": "must not be written",
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_guard_refusal(), "{}", result.content);
+    assert!(
+        result.content.starts_with("Error: Path '"),
+        "{}",
+        result.content
+    );
+    assert!(
+        result
+            .content
+            .contains("outside this agent's writable directories"),
+        "{}",
+        result.content
+    );
+    assert!(!result.content.contains("[[ARCHON_TOOL_REFUSAL]]"));
 }
 
 /// And the one that actually happened: editing a file that already exists in
@@ -110,7 +143,7 @@ fn an_isolated_agent_cannot_edit_a_file_in_the_canonical_tree() {
         error.contains("outside this agent's writable directories"),
         "the refusal must say why: {error}"
     );
-    assert!(error.contains(crate::tool::TOOL_REFUSAL_MARKER), "{error}");
+    assert!(!error.contains("[[ARCHON_TOOL_REFUSAL]]"), "{error}");
 }
 
 /// Reading it stays legitimate. Confining writes must not blind the agent to

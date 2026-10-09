@@ -297,11 +297,7 @@ mod tests {
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("host-only interactive action"));
-        assert!(
-            result
-                .content
-                .contains(archon_tools::tool::TOOL_REFUSAL_MARKER)
-        );
+        assert!(result.is_guard_refusal());
     }
 
     #[tokio::test]

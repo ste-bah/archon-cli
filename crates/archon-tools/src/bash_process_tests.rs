@@ -18,11 +18,7 @@ async fn workflow_build_restriction_is_a_typed_guard_refusal() {
         )
         .await;
     assert!(result.is_error);
-    assert!(
-        result.content.contains(crate::tool::TOOL_REFUSAL_MARKER),
-        "{}",
-        result.content
-    );
+    assert!(result.is_guard_refusal(), "{}", result.content);
     assert!(result.content.contains("cargo check"), "{}", result.content);
 }
 

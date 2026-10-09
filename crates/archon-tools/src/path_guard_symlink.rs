@@ -42,7 +42,9 @@ use std::path::{Component, Path};
 ///
 /// `symlink_metadata` rather than `metadata`, since the whole difficulty is
 /// that following the link is what hides it.
-pub(crate) fn reject_symlinked_target(requested: &Path) -> Result<(), String> {
+pub(crate) fn reject_symlinked_target(
+    requested: &Path,
+) -> Result<(), crate::path_guard_error::GuardError> {
     if is_symlink(requested) {
         return Err(refusal(requested, requested));
     }
@@ -62,7 +64,7 @@ pub(crate) fn reject_symlinked_descent(
     root: &Path,
     requested: &Path,
     resolved: &Path,
-) -> Result<(), String> {
+) -> Result<(), crate::path_guard_error::GuardError> {
     // 2. Every component between the root and the target. A link here diverts
     //    the whole subtree below it, and it is the component that lexical `..`
     //    removal silently mis-resolves.
@@ -149,7 +151,7 @@ fn is_symlink(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
 }
 
-fn refusal(requested: &Path, offender: &Path) -> String {
+fn refusal(requested: &Path, offender: &Path) -> crate::path_guard_error::GuardError {
     crate::path_guard::guard_refusal(format!(
         "Path '{}' reaches its target through the symbolic link '{}'. \
          This agent's writes are confined to declared directories, and a link is a \

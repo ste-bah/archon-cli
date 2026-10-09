@@ -60,7 +60,7 @@ impl Tool for LargeEditBeginTool {
                 })
                 .to_string(),
             ),
-            Err(err) => ToolResult::error(err),
+            Err(err) => err.into_tool_result(),
         }
     }
 
@@ -233,7 +233,10 @@ impl Tool for LargeEditCommitTool {
             None => return ToolResult::error("edit_id is required and must be a string"),
         };
         let required = string_array_field(&input, "required_fragments");
-        tool_result(session::commit(&edit_id, ctx, &required).await)
+        match session::commit(&edit_id, ctx, &required).await {
+            Ok(message) => ToolResult::success(message),
+            Err(err) => err.into_tool_result(),
+        }
     }
 
     fn working_tree_effect(&self) -> WorkingTreeEffect {

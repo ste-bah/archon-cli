@@ -81,11 +81,11 @@ impl Tool for GrepTool {
         let search_path = match input.get("path").and_then(|v| v.as_str()) {
             Some(path) => match resolve_existing_path(path, ctx) {
                 Ok(path) => path,
-                Err(err) => return ToolResult::error(err),
+                Err(err) => return err.into_tool_result(),
             },
             None => match resolve_existing_path(".", ctx) {
                 Ok(path) => path,
-                Err(err) => return ToolResult::error(err),
+                Err(err) => return err.into_tool_result(),
             },
         };
 

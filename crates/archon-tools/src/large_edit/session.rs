@@ -34,7 +34,10 @@ pub(super) struct LargeEditSession {
     pub meta: LargeEditMeta,
 }
 
-pub(super) async fn begin(file_path: &str, ctx: &ToolContext) -> Result<LargeEditSession, String> {
+pub(super) async fn begin(
+    file_path: &str,
+    ctx: &ToolContext,
+) -> Result<LargeEditSession, crate::path_guard_error::GuardError> {
     let fs = ctx.fs();
     let target = resolve_existing_write_target(file_path, ctx)?;
     let original = fs
@@ -112,7 +115,7 @@ pub(super) async fn commit(
     edit_id: &str,
     ctx: &ToolContext,
     required_fragments: &[String],
-) -> Result<String, String> {
+) -> Result<String, crate::path_guard_error::GuardError> {
     let session = load(edit_id, ctx).await?;
     let fs = ctx.fs();
     let target = resolve_existing_write_target(&session.meta.target_path, ctx)?;
@@ -126,7 +129,8 @@ pub(super) async fn commit(
             "Target changed since LargeEditBegin. Expected hash {}, found {}. \
              Abort this session or re-read the file and begin a new large edit.",
             session.meta.original_hash, current_hash
-        ));
+        )
+        .into());
     }
 
     let staged = fs.read(&staged_path(&session.dir)).await.map_err(|e| {

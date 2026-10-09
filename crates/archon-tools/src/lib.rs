@@ -106,6 +106,7 @@ pub mod grep;
 pub mod large_edit;
 pub mod monitor;
 pub(crate) mod path_guard;
+mod path_guard_error;
 /// Host-side probe of the read guard, for a dispatcher to ask before dispatching.
 pub mod path_guard_probe;
 pub(crate) mod path_guard_sealed;

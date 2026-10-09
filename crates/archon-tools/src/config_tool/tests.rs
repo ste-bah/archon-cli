@@ -109,7 +109,7 @@ async fn personality_key_is_read_only() {
         .await;
     assert!(result.is_error);
     assert!(result.content.contains("read-only"));
-    assert!(result.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
+    assert!(result.is_guard_refusal());
 }
 
 #[tokio::test]

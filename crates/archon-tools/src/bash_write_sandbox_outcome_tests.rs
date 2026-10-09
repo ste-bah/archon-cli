@@ -25,11 +25,7 @@ fn denial_words_add_guidance_to_failed_execution_without_making_it_a_refusal() {
         "{}",
         successful.content
     );
-    assert!(
-        !successful
-            .content
-            .contains(crate::tool::TOOL_REFUSAL_MARKER)
-    );
+    assert!(!successful.is_guard_refusal());
 
     let denied = ToolResult::from_authoritative_bash_execution(
         "Permission denied".into(),
@@ -41,6 +37,6 @@ fn denial_words_add_guidance_to_failed_execution_without_making_it_a_refusal() {
     );
     let denied = boundary.annotate(denied);
     assert!(denied.is_error, "{}", denied.content);
-    assert!(!denied.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
+    assert!(!denied.is_guard_refusal());
     assert!(denied.content.contains(WRITE_BOUNDARY_NOTE_MARKER));
 }
