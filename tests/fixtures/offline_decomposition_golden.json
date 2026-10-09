@@ -112,8 +112,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "ee799af55f1c368be2c06ad8798b2f948e8c1db9a59080a26f1c62413e65dc91",
-        "output_hash": "e9d7507732feb55b02f8b21736116707dd5b81d10a7802c491578686dcecdba1",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [],
@@ -170,8 +170,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "c651bdcd26eede619f501d36c1156d3cf8147649edb29f68000efc07413337d3",
-        "output_hash": "315ebc285864c7d8149c82f2872cfd03f8d1769c2bd5db59cca32a5be42a50a1",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [],
@@ -228,8 +228,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "1ca248db300662585c1446d86bfad05c98e49e818ea44f17231f1b6e94d19a25",
-        "output_hash": "d2f908624baf1c63efcdd4ba98c45a12f834ccfc7bbdcd6eab6bef6288bee6d6",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [],
@@ -286,8 +286,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "e88d5b2f43fab20d0ae6860f10633ce72b717e0742f2e118bd200f3fbcf60dfa",
-        "output_hash": "ccc9da934fb474a83df165d41439a5b1721c47f732427554720cc87124bd8196",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [],
@@ -344,8 +344,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "52054f956ea5dd4e4322d5ed5aae5ba24e3faf7e68f3c183811e05b5a9c32138",
-        "output_hash": "a49856702674ef498561213113bfd2ab6d18b7bdd2388ea0494720e0de77feb0",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [],
@@ -403,8 +403,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "35f1ee71c77061b8cb8f536d5191afd281ef72ef22cbae43c3815af123453f02",
-        "output_hash": "6e5091c90c52cc4e189c0720df03bf5f597a55caaff0ff95732df0853ccd9d57",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [],
@@ -464,8 +464,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "878ccd1ed3021e88159cbce7dabaf167eaef5911afde0ac49ffac6ccbf6b44b8",
-        "output_hash": "0898738da923e794234fe6ad9019b34e8ccbffbc47aae20cf15c26111d19eefe",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [
@@ -631,13 +631,13 @@
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "6d8a664c632a7adfee533d0c97004bddac903db2317249d1f104d8a688d2e9af",
+                  "blake3": "1f5becd910c9d6b526ea744d4dda08158b312fa2c296cd0b4ad951fe12e509aa",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
                     "digest": "5106f12b56e603cf03ccbd7621890b3448f4e117393034ff31b5fd77772212c3",
                     "gate": {
-                      "binary_commit": "8f24ce3e5",
+                      "binary_commit": "0ea16047e",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
@@ -647,11 +647,11 @@
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "cc174015da7d4d811e47da4780ab4e848fc96f580ba31bbff5f9a7df9f894331",
+                  "blake3": "779a25636abb4e29526fdc36b440db322726b60f115c4a0e3c8164fc25ff122d",
                   "content": {
                     "acceptance_digest": "5106f12b56e603cf03ccbd7621890b3448f4e117393034ff31b5fd77772212c3",
                     "acceptance_gate": {
-                      "binary_commit": "8f24ce3e5",
+                      "binary_commit": "0ea16047e",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
@@ -660,7 +660,7 @@
                     "lineage_recording": 1,
                     "skeleton_digest": "cd78e2a2313703fda6aeb54b5407fa0940560e53284bdaf7391fc6553f33f218",
                     "skeleton_gate": {
-                      "binary_commit": "8f24ce3e5",
+                      "binary_commit": "0ea16047e",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
@@ -713,7 +713,7 @@
             "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-progress: 2\nacceptance judge: 1 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (0 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 3\n",
             "stderrBytes": 357,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"5a2a5f87e39a987b0d4e20fa6b1efbcee1d67211139b1985172c77ac1ce64fc1\",\"byte_len\":1371,\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"dba14cf7b6ec12ac8584fd4bf61206dc3cdf8db00108c858add4df272ea7f9f9\",\"byte_len\":416,\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"68e574c7d924698f7d61a1d28348b683bb2c41b4cd921a39d65adabc2a386056\",\"byte_len\":527,\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"93db50ec2c6f5793db06d5863a82b05bbdc49589054a7f8e64e62472f359b075\",\"byte_len\":1560,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"<receipt-digest-with-compared-content>\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"<receipt-digest-with-compared-content>\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"56206d692db01b84463ab3a7e51e5a7c8733ecbb6b9024b10f0b92fa9a1585fc\",\"byte_len\":1560,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 678,
             "stdoutTruncated": false,
             "timedOut": false
@@ -758,8 +758,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "719b9b7fd898183af77ed7af45ad32537916e629b061e61c6c6b81023ffaddbe",
-        "output_hash": "24c260f1e7bc7e1da9589901154e9d4db7e7715b3d23f185e4e1d359fc4a7b68",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [
@@ -895,32 +895,32 @@
                     ]
                   },
                   "destination_path": "/private<project-root>/tasks/PRD-X/acceptance-contract.json",
-                  "prior_blake3": "5a2a5f87e39a987b0d4e20fa6b1efbcee1d67211139b1985172c77ac1ce64fc1",
+                  "prior_blake3": "<receipt-digest-with-compared-content>",
                   "relative_path": "acceptance-contract.json"
                 },
                 {
-                  "blake3": "6d8a664c632a7adfee533d0c97004bddac903db2317249d1f104d8a688d2e9af",
+                  "blake3": "1f5becd910c9d6b526ea744d4dda08158b312fa2c296cd0b4ad951fe12e509aa",
                   "content": {
                     "algorithm": "blake3",
                     "baseline_commit": "0f4c5252b9ad70e010da5958e0a1fc7c08647e9e",
                     "digest": "5106f12b56e603cf03ccbd7621890b3448f4e117393034ff31b5fd77772212c3",
                     "gate": {
-                      "binary_commit": "8f24ce3e5",
+                      "binary_commit": "0ea16047e",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
                     }
                   },
                   "destination_path": "/private<project-root>/tasks/PRD-X/acceptance-contract.lock",
-                  "prior_blake3": "dba14cf7b6ec12ac8584fd4bf61206dc3cdf8db00108c858add4df272ea7f9f9",
+                  "prior_blake3": "<receipt-digest-with-compared-content>",
                   "relative_path": "acceptance-contract.lock"
                 },
                 {
-                  "blake3": "cc174015da7d4d811e47da4780ab4e848fc96f580ba31bbff5f9a7df9f894331",
+                  "blake3": "779a25636abb4e29526fdc36b440db322726b60f115c4a0e3c8164fc25ff122d",
                   "content": {
                     "acceptance_digest": "5106f12b56e603cf03ccbd7621890b3448f4e117393034ff31b5fd77772212c3",
                     "acceptance_gate": {
-                      "binary_commit": "8f24ce3e5",
+                      "binary_commit": "0ea16047e",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
@@ -929,7 +929,7 @@
                     "lineage_recording": 1,
                     "skeleton_digest": "cd78e2a2313703fda6aeb54b5407fa0940560e53284bdaf7391fc6553f33f218",
                     "skeleton_gate": {
-                      "binary_commit": "8f24ce3e5",
+                      "binary_commit": "0ea16047e",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
@@ -937,7 +937,7 @@
                     "task_root": "/private<project-root>/tasks/PRD-X"
                   },
                   "destination_path": "/private<project-root>/.archon/task-set-pins/<pin>.json",
-                  "prior_blake3": "68e574c7d924698f7d61a1d28348b683bb2c41b4cd921a39d65adabc2a386056",
+                  "prior_blake3": "<receipt-digest-of-overwritten-content>",
                   "relative_path": "acceptance-pin.json"
                 },
                 {
@@ -956,7 +956,7 @@
             "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\n",
             "stderrBytes": 541,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"5106f12b56e603cf03ccbd7621890b3448f4e117393034ff31b5fd77772212c3\",\"byte_len\":3134,\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"f2097618818b8efbb9cdd1a1be1737d60b69401f13dca36ba3c2f267888dd7c9\",\"byte_len\":416,\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"3b89cffec470ad8e4f58c0d6cf6437cc8d4dba3c4fd3058e8122615a227886b5\",\"byte_len\":527,\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"55deac36bc88bf0941641adaa521802a5a47fafc46741cf0f02d9a0e58103497\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8a680cbb16842e231ed8e88a6a653d0ed395310b07da04231165bdccee11b3ac\",\"byte_len\":3134,\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"1f5becd910c9d6b526ea744d4dda08158b312fa2c296cd0b4ad951fe12e509aa\",\"byte_len\":416,\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 676,
             "stdoutTruncated": false,
             "timedOut": false
@@ -1001,8 +1001,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "815e7f16788c595995dc44736647be93e4834f30c59f89f492f430a7c800d249",
-        "output_hash": "abfe46b35d1dac4a25f0768ba7593e64b0e80ff1727268158810bcc219cebe43",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [
@@ -1041,11 +1041,11 @@
               "command_id": "freeze-skeleton",
               "entries": [
                 {
-                  "blake3": "cc174015da7d4d811e47da4780ab4e848fc96f580ba31bbff5f9a7df9f894331",
+                  "blake3": "779a25636abb4e29526fdc36b440db322726b60f115c4a0e3c8164fc25ff122d",
                   "content": {
                     "acceptance_digest": "5106f12b56e603cf03ccbd7621890b3448f4e117393034ff31b5fd77772212c3",
                     "acceptance_gate": {
-                      "binary_commit": "8f24ce3e5",
+                      "binary_commit": "0ea16047e",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
@@ -1054,7 +1054,7 @@
                     "lineage_recording": 1,
                     "skeleton_digest": "cd78e2a2313703fda6aeb54b5407fa0940560e53284bdaf7391fc6553f33f218",
                     "skeleton_gate": {
-                      "binary_commit": "8f24ce3e5",
+                      "binary_commit": "0ea16047e",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
@@ -1062,7 +1062,7 @@
                     "task_root": "/private<project-root>/tasks/PRD-X"
                   },
                   "destination_path": "/private<project-root>/.archon/task-set-pins/<pin>.json",
-                  "prior_blake3": "3b89cffec470ad8e4f58c0d6cf6437cc8d4dba3c4fd3058e8122615a227886b5",
+                  "prior_blake3": "<receipt-digest-of-overwritten-content>",
                   "relative_path": "acceptance-pin.json"
                 },
                 {
@@ -1155,13 +1155,13 @@
                   "relative_path": "task-skeleton.json"
                 },
                 {
-                  "blake3": "fbe8952fb79e5b7b7d310599083b0d6655e902dbc88db322d6dc552f6252708a",
+                  "blake3": "c40baffc97d3580d220fce770e56bbaebbf5c890d39857c2cd51bd0aebc1886a",
                   "content": {
                     "acceptance_digest": "5106f12b56e603cf03ccbd7621890b3448f4e117393034ff31b5fd77772212c3",
                     "algorithm": "blake3",
                     "digest": "cd78e2a2313703fda6aeb54b5407fa0940560e53284bdaf7391fc6553f33f218",
                     "gate": {
-                      "binary_commit": "8f24ce3e5",
+                      "binary_commit": "0ea16047e",
                       "finding_count": 0,
                       "findings_digest": "d53d18c23212ea7b6300594bb89bce60218f6eff2b9d628b8cc42d3e79bbd5ab",
                       "mode": "observe"
@@ -1176,7 +1176,7 @@
             "stderr": "",
             "stderrBytes": 0,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"cc0931e3c7590fc9621e79b888bbb9b06f866aa3549f05ee5dadc1a5ec6fd31d\",\"byte_len\":869,\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"55deac36bc88bf0941641adaa521802a5a47fafc46741cf0f02d9a0e58103497\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"cd78e2a2313703fda6aeb54b5407fa0940560e53284bdaf7391fc6553f33f218\",\"byte_len\":1813,\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"9427caa856358fcf767605b283e4a97c90b9637f98ee6cd2069914739b52ecd4\",\"byte_len\":442,\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"779a25636abb4e29526fdc36b440db322726b60f115c4a0e3c8164fc25ff122d\",\"byte_len\":869,\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"b73ca20a2db1fb2d73dca117b6132f931337aa7d6994b6598c5bf544688b691b\",\"byte_len\":1813,\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"c40baffc97d3580d220fce770e56bbaebbf5c890d39857c2cd51bd0aebc1886a\",\"byte_len\":442,\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
             "stdoutBytes": 662,
             "stdoutTruncated": false,
             "subjects": [
@@ -1231,8 +1231,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "1b6126ea9afa1d5394dbc4103b0290347ad7f0bfd8e1217f778349c91e8768c1",
-        "output_hash": "44d6e42830d01de11bd429ad4114f701144f0e298c01046506bbbd65c6f647d6",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [
@@ -1292,7 +1292,7 @@
             "stderr": "archon-host-activity: child making progress\n",
             "stderrBytes": 44,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"76ef12b4e456f5d11fe9da854170a18b9f67fe98fa8a279dbad0e419df560242\",\"byte_len\":1040,\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"1bd453b0f4a60305a80ca029066a9942b9653b169b6266e6a6a1ad214d782579\",\"byte_len\":1380,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"f4163e5c1ef1c908b3141402d48eba9b277ee0abb11cd105326c736c83c8aeaa\",\"byte_len\":1040,\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"f5bf37695a46d9178be521439f00ce1c6bfb99623031d03e9cbad387d98bb59c\",\"byte_len\":1380,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 397,
             "stdoutTruncated": false,
             "subjects": [
@@ -1343,8 +1343,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "52a7e44fc5d25d4f94908f4ac30c6ebfc54bb33fcabcd5d91c8143cb601d4f33",
-        "output_hash": "c71889ec6ec4457ebda75bd6970e04336b9d90181ade94530ef72c6f193f3177",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [
@@ -1404,7 +1404,7 @@
             "stderr": "archon-host-activity: child making progress\n",
             "stderrBytes": 44,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"38a0148b96fd43ac286e71e0d08c44a7704190c90151ce6160b3add82488894a\",\"byte_len\":797,\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"84999e20b4a53d06d85c19ad82ec6a0874ea66eea5643951b8fb0c83b40aed9f\",\"byte_len\":1490,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"e8db745dc8d0d29653dab2bc4af742d0c9b3aacb43adbf150418dc6333cf55be\",\"byte_len\":797,\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"dce52f9cead2f2c16113b48ea049013570423de0117a501ee4817b6647bf116d\",\"byte_len\":1490,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 396,
             "stdoutTruncated": false,
             "subjects": [
@@ -1454,8 +1454,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "a427016e61a71ab18b002e5c3ba473adc6133d0ec26a028c26296f519a2b07e6",
-        "output_hash": "ee033b3c32d3ea74c5644e6e4c766f7f9b78690edd28f8ca2d6ea46eda6fd017",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [
@@ -1509,7 +1509,7 @@
             "stderr": "",
             "stderrBytes": 0,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"requirements-trace\",\"entries\":[{\"blake3\":\"4bf85caa19cc212633fa1b5738e8654180b57e5ab68c1fe40b6b55f32b36ff19\",\"byte_len\":1517,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"requirements-trace\",\"entries\":[{\"blake3\":\"199d95c677d3fc59d85a9b7b84005e23f57715ff747f9c5b429fe981a6db4206\",\"byte_len\":1517,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 275,
             "stdoutTruncated": false,
             "subjects": [
@@ -1563,8 +1563,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "fc4972d843fcdb05a3ec8b4163f408c6f94f57161daa70b0fe89f6fe8047e3e2",
-        "output_hash": "2c7368fc14ddeb1d676cabc1ebf14a31a444087528cff90d556d1b31b437885e",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [],
           "commands_run": [
@@ -1618,7 +1618,7 @@
             "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\n",
             "stderrBytes": 92,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"f97ee27dc1be60422f4aa39554202af1df496d2d9975d1e1c02fb6b45ef6f2b6\",\"byte_len\":2165,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"7ad49eecfa1de93f3dcc1a37560e69d1ded7af75d3eefe35a2c0babda06b578e\",\"byte_len\":2165,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 270,
             "stdoutTruncated": false,
             "subjects": [
@@ -1689,28 +1689,27 @@
                     "command_id": "freeze-acceptance",
                     "entries": [
                       {
-                        "blake3": "5106f12b56e603cf03ccbd7621890b3448f4e117393034ff31b5fd77772212c3",
+                        "blake3": "8a680cbb16842e231ed8e88a6a653d0ed395310b07da04231165bdccee11b3ac",
                         "byte_len": 3134,
                         "destination_path": "/private<project-root>/tasks/PRD-X/acceptance-contract.json",
-                        "prior_blake3": "5a2a5f87e39a987b0d4e20fa6b1efbcee1d67211139b1985172c77ac1ce64fc1",
+                        "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.json"
                       },
                       {
-                        "blake3": "f2097618818b8efbb9cdd1a1be1737d60b69401f13dca36ba3c2f267888dd7c9",
+                        "blake3": "1f5becd910c9d6b526ea744d4dda08158b312fa2c296cd0b4ad951fe12e509aa",
                         "byte_len": 416,
                         "destination_path": "/private<project-root>/tasks/PRD-X/acceptance-contract.lock",
-                        "prior_blake3": "dba14cf7b6ec12ac8584fd4bf61206dc3cdf8db00108c858add4df272ea7f9f9",
+                        "prior_blake3": "<receipt-digest-with-compared-content>",
                         "relative_path": "acceptance-contract.lock"
                       },
                       {
-                        "blake3": "3b89cffec470ad8e4f58c0d6cf6437cc8d4dba3c4fd3058e8122615a227886b5",
-                        "byte_len": 527,
+                        "blake3": "<receipt-digest-of-overwritten-content>",
                         "destination_path": "/private<project-root>/.archon/task-set-pins/<pin>.json",
-                        "prior_blake3": "68e574c7d924698f7d61a1d28348b683bb2c41b4cd921a39d65adabc2a386056",
+                        "prior_blake3": "<receipt-digest-of-overwritten-content>",
                         "relative_path": "acceptance-pin.json"
                       },
                       {
-                        "blake3": "55deac36bc88bf0941641adaa521802a5a47fafc46741cf0f02d9a0e58103497",
+                        "blake3": "da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec",
                         "byte_len": 66,
                         "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                         "relative_path": "gate-envelope.json"
@@ -1756,28 +1755,27 @@
                         "command_id": "freeze-acceptance",
                         "entries": [
                           {
-                            "blake3": "5106f12b56e603cf03ccbd7621890b3448f4e117393034ff31b5fd77772212c3",
+                            "blake3": "8a680cbb16842e231ed8e88a6a653d0ed395310b07da04231165bdccee11b3ac",
                             "byte_len": 3134,
                             "destination_path": "/private<project-root>/tasks/PRD-X/acceptance-contract.json",
-                            "prior_blake3": "5a2a5f87e39a987b0d4e20fa6b1efbcee1d67211139b1985172c77ac1ce64fc1",
+                            "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.json"
                           },
                           {
-                            "blake3": "f2097618818b8efbb9cdd1a1be1737d60b69401f13dca36ba3c2f267888dd7c9",
+                            "blake3": "1f5becd910c9d6b526ea744d4dda08158b312fa2c296cd0b4ad951fe12e509aa",
                             "byte_len": 416,
                             "destination_path": "/private<project-root>/tasks/PRD-X/acceptance-contract.lock",
-                            "prior_blake3": "dba14cf7b6ec12ac8584fd4bf61206dc3cdf8db00108c858add4df272ea7f9f9",
+                            "prior_blake3": "<receipt-digest-with-compared-content>",
                             "relative_path": "acceptance-contract.lock"
                           },
                           {
-                            "blake3": "3b89cffec470ad8e4f58c0d6cf6437cc8d4dba3c4fd3058e8122615a227886b5",
-                            "byte_len": 527,
+                            "blake3": "<receipt-digest-of-overwritten-content>",
                             "destination_path": "/private<project-root>/.archon/task-set-pins/<pin>.json",
-                            "prior_blake3": "68e574c7d924698f7d61a1d28348b683bb2c41b4cd921a39d65adabc2a386056",
+                            "prior_blake3": "<receipt-digest-of-overwritten-content>",
                             "relative_path": "acceptance-pin.json"
                           },
                           {
-                            "blake3": "55deac36bc88bf0941641adaa521802a5a47fafc46741cf0f02d9a0e58103497",
+                            "blake3": "da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec",
                             "byte_len": 66,
                             "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                             "relative_path": "gate-envelope.json"
@@ -1788,7 +1786,7 @@
                       "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\n",
                       "stderrBytes": 541,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"5106f12b56e603cf03ccbd7621890b3448f4e117393034ff31b5fd77772212c3\",\"byte_len\":3134,\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"f2097618818b8efbb9cdd1a1be1737d60b69401f13dca36ba3c2f267888dd7c9\",\"byte_len\":416,\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"3b89cffec470ad8e4f58c0d6cf6437cc8d4dba3c4fd3058e8122615a227886b5\",\"byte_len\":527,\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"55deac36bc88bf0941641adaa521802a5a47fafc46741cf0f02d9a0e58103497\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8a680cbb16842e231ed8e88a6a653d0ed395310b07da04231165bdccee11b3ac\",\"byte_len\":3134,\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"1f5becd910c9d6b526ea744d4dda08158b312fa2c296cd0b4ad951fe12e509aa\",\"byte_len\":416,\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 676,
                       "stdoutTruncated": false,
                       "timedOut": false
@@ -1810,7 +1808,7 @@
                   "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\n",
                   "stderrBytes": 541,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"5106f12b56e603cf03ccbd7621890b3448f4e117393034ff31b5fd77772212c3\",\"byte_len\":3134,\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"f2097618818b8efbb9cdd1a1be1737d60b69401f13dca36ba3c2f267888dd7c9\",\"byte_len\":416,\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"3b89cffec470ad8e4f58c0d6cf6437cc8d4dba3c4fd3058e8122615a227886b5\",\"byte_len\":527,\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"55deac36bc88bf0941641adaa521802a5a47fafc46741cf0f02d9a0e58103497\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8a680cbb16842e231ed8e88a6a653d0ed395310b07da04231165bdccee11b3ac\",\"byte_len\":3134,\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"1f5becd910c9d6b526ea744d4dda08158b312fa2c296cd0b4ad951fe12e509aa\",\"byte_len\":416,\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 676,
                   "stdoutTruncated": false,
                   "summary": "host command '<host-call-id>' completed with exit Some(0)",
@@ -1843,26 +1841,26 @@
                     "command_id": "freeze-skeleton",
                     "entries": [
                       {
-                        "blake3": "cc0931e3c7590fc9621e79b888bbb9b06f866aa3549f05ee5dadc1a5ec6fd31d",
+                        "blake3": "779a25636abb4e29526fdc36b440db322726b60f115c4a0e3c8164fc25ff122d",
                         "byte_len": 869,
                         "destination_path": "/private<project-root>/.archon/task-set-pins/<pin>.json",
-                        "prior_blake3": "3b89cffec470ad8e4f58c0d6cf6437cc8d4dba3c4fd3058e8122615a227886b5",
+                        "prior_blake3": "<receipt-digest-of-overwritten-content>",
                         "relative_path": "acceptance-pin.json"
                       },
                       {
-                        "blake3": "55deac36bc88bf0941641adaa521802a5a47fafc46741cf0f02d9a0e58103497",
+                        "blake3": "da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec",
                         "byte_len": 66,
                         "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                         "relative_path": "gate-envelope.json"
                       },
                       {
-                        "blake3": "cd78e2a2313703fda6aeb54b5407fa0940560e53284bdaf7391fc6553f33f218",
+                        "blake3": "b73ca20a2db1fb2d73dca117b6132f931337aa7d6994b6598c5bf544688b691b",
                         "byte_len": 1813,
                         "destination_path": "/private<project-root>/tasks/PRD-X/task-skeleton.json",
                         "relative_path": "task-skeleton.json"
                       },
                       {
-                        "blake3": "9427caa856358fcf767605b283e4a97c90b9637f98ee6cd2069914739b52ecd4",
+                        "blake3": "c40baffc97d3580d220fce770e56bbaebbf5c890d39857c2cd51bd0aebc1886a",
                         "byte_len": 442,
                         "destination_path": "/private<project-root>/tasks/PRD-X/task-skeleton.lock",
                         "relative_path": "task-skeleton.lock"
@@ -1908,26 +1906,26 @@
                         "command_id": "freeze-skeleton",
                         "entries": [
                           {
-                            "blake3": "cc0931e3c7590fc9621e79b888bbb9b06f866aa3549f05ee5dadc1a5ec6fd31d",
+                            "blake3": "779a25636abb4e29526fdc36b440db322726b60f115c4a0e3c8164fc25ff122d",
                             "byte_len": 869,
                             "destination_path": "/private<project-root>/.archon/task-set-pins/<pin>.json",
-                            "prior_blake3": "3b89cffec470ad8e4f58c0d6cf6437cc8d4dba3c4fd3058e8122615a227886b5",
+                            "prior_blake3": "<receipt-digest-of-overwritten-content>",
                             "relative_path": "acceptance-pin.json"
                           },
                           {
-                            "blake3": "55deac36bc88bf0941641adaa521802a5a47fafc46741cf0f02d9a0e58103497",
+                            "blake3": "da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec",
                             "byte_len": 66,
                             "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                             "relative_path": "gate-envelope.json"
                           },
                           {
-                            "blake3": "cd78e2a2313703fda6aeb54b5407fa0940560e53284bdaf7391fc6553f33f218",
+                            "blake3": "b73ca20a2db1fb2d73dca117b6132f931337aa7d6994b6598c5bf544688b691b",
                             "byte_len": 1813,
                             "destination_path": "/private<project-root>/tasks/PRD-X/task-skeleton.json",
                             "relative_path": "task-skeleton.json"
                           },
                           {
-                            "blake3": "9427caa856358fcf767605b283e4a97c90b9637f98ee6cd2069914739b52ecd4",
+                            "blake3": "c40baffc97d3580d220fce770e56bbaebbf5c890d39857c2cd51bd0aebc1886a",
                             "byte_len": 442,
                             "destination_path": "/private<project-root>/tasks/PRD-X/task-skeleton.lock",
                             "relative_path": "task-skeleton.lock"
@@ -1938,7 +1936,7 @@
                       "stderr": "",
                       "stderrBytes": 0,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"cc0931e3c7590fc9621e79b888bbb9b06f866aa3549f05ee5dadc1a5ec6fd31d\",\"byte_len\":869,\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"55deac36bc88bf0941641adaa521802a5a47fafc46741cf0f02d9a0e58103497\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"cd78e2a2313703fda6aeb54b5407fa0940560e53284bdaf7391fc6553f33f218\",\"byte_len\":1813,\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"9427caa856358fcf767605b283e4a97c90b9637f98ee6cd2069914739b52ecd4\",\"byte_len\":442,\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"779a25636abb4e29526fdc36b440db322726b60f115c4a0e3c8164fc25ff122d\",\"byte_len\":869,\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"b73ca20a2db1fb2d73dca117b6132f931337aa7d6994b6598c5bf544688b691b\",\"byte_len\":1813,\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"c40baffc97d3580d220fce770e56bbaebbf5c890d39857c2cd51bd0aebc1886a\",\"byte_len\":442,\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                       "stdoutBytes": 662,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -1970,7 +1968,7 @@
                   "stderr": "",
                   "stderrBytes": 0,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"cc0931e3c7590fc9621e79b888bbb9b06f866aa3549f05ee5dadc1a5ec6fd31d\",\"byte_len\":869,\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"55deac36bc88bf0941641adaa521802a5a47fafc46741cf0f02d9a0e58103497\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"cd78e2a2313703fda6aeb54b5407fa0940560e53284bdaf7391fc6553f33f218\",\"byte_len\":1813,\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"9427caa856358fcf767605b283e4a97c90b9637f98ee6cd2069914739b52ecd4\",\"byte_len\":442,\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-skeleton\",\"entries\":[{\"blake3\":\"779a25636abb4e29526fdc36b440db322726b60f115c4a0e3c8164fc25ff122d\",\"byte_len\":869,\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"byte_len\":66,\"relative_path\":\"gate-envelope.json\"},{\"blake3\":\"b73ca20a2db1fb2d73dca117b6132f931337aa7d6994b6598c5bf544688b691b\",\"byte_len\":1813,\"relative_path\":\"task-skeleton.json\"},{\"blake3\":\"c40baffc97d3580d220fce770e56bbaebbf5c890d39857c2cd51bd0aebc1886a\",\"byte_len\":442,\"relative_path\":\"task-skeleton.lock\"}],\"schema_version\":1}",
                   "stdoutBytes": 662,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2013,13 +2011,13 @@
                     "command_id": "land-task-body",
                     "entries": [
                       {
-                        "blake3": "76ef12b4e456f5d11fe9da854170a18b9f67fe98fa8a279dbad0e419df560242",
+                        "blake3": "f4163e5c1ef1c908b3141402d48eba9b277ee0abb11cd105326c736c83c8aeaa",
                         "byte_len": 1040,
                         "destination_path": "/private<project-root>/tasks/PRD-X/TASK-X-010.md",
                         "relative_path": "TASK-X-010.md"
                       },
                       {
-                        "blake3": "1bd453b0f4a60305a80ca029066a9942b9653b169b6266e6a6a1ad214d782579",
+                        "blake3": "f5bf37695a46d9178be521439f00ce1c6bfb99623031d03e9cbad387d98bb59c",
                         "byte_len": 1380,
                         "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                         "relative_path": "gate-envelope.json"
@@ -2065,13 +2063,13 @@
                         "command_id": "land-task-body",
                         "entries": [
                           {
-                            "blake3": "76ef12b4e456f5d11fe9da854170a18b9f67fe98fa8a279dbad0e419df560242",
+                            "blake3": "f4163e5c1ef1c908b3141402d48eba9b277ee0abb11cd105326c736c83c8aeaa",
                             "byte_len": 1040,
                             "destination_path": "/private<project-root>/tasks/PRD-X/TASK-X-010.md",
                             "relative_path": "TASK-X-010.md"
                           },
                           {
-                            "blake3": "1bd453b0f4a60305a80ca029066a9942b9653b169b6266e6a6a1ad214d782579",
+                            "blake3": "f5bf37695a46d9178be521439f00ce1c6bfb99623031d03e9cbad387d98bb59c",
                             "byte_len": 1380,
                             "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                             "relative_path": "gate-envelope.json"
@@ -2082,7 +2080,7 @@
                       "stderr": "archon-host-activity: child making progress\n",
                       "stderrBytes": 44,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"76ef12b4e456f5d11fe9da854170a18b9f67fe98fa8a279dbad0e419df560242\",\"byte_len\":1040,\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"1bd453b0f4a60305a80ca029066a9942b9653b169b6266e6a6a1ad214d782579\",\"byte_len\":1380,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"f4163e5c1ef1c908b3141402d48eba9b277ee0abb11cd105326c736c83c8aeaa\",\"byte_len\":1040,\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"f5bf37695a46d9178be521439f00ce1c6bfb99623031d03e9cbad387d98bb59c\",\"byte_len\":1380,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 397,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2110,7 +2108,7 @@
                   "stderr": "archon-host-activity: child making progress\n",
                   "stderrBytes": 44,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"76ef12b4e456f5d11fe9da854170a18b9f67fe98fa8a279dbad0e419df560242\",\"byte_len\":1040,\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"1bd453b0f4a60305a80ca029066a9942b9653b169b6266e6a6a1ad214d782579\",\"byte_len\":1380,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"f4163e5c1ef1c908b3141402d48eba9b277ee0abb11cd105326c736c83c8aeaa\",\"byte_len\":1040,\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"f5bf37695a46d9178be521439f00ce1c6bfb99623031d03e9cbad387d98bb59c\",\"byte_len\":1380,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 397,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2149,13 +2147,13 @@
                     "command_id": "land-task-body",
                     "entries": [
                       {
-                        "blake3": "38a0148b96fd43ac286e71e0d08c44a7704190c90151ce6160b3add82488894a",
+                        "blake3": "e8db745dc8d0d29653dab2bc4af742d0c9b3aacb43adbf150418dc6333cf55be",
                         "byte_len": 797,
                         "destination_path": "/private<project-root>/tasks/PRD-X/TASK-X-020.md",
                         "relative_path": "TASK-X-020.md"
                       },
                       {
-                        "blake3": "84999e20b4a53d06d85c19ad82ec6a0874ea66eea5643951b8fb0c83b40aed9f",
+                        "blake3": "dce52f9cead2f2c16113b48ea049013570423de0117a501ee4817b6647bf116d",
                         "byte_len": 1490,
                         "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                         "relative_path": "gate-envelope.json"
@@ -2201,13 +2199,13 @@
                         "command_id": "land-task-body",
                         "entries": [
                           {
-                            "blake3": "38a0148b96fd43ac286e71e0d08c44a7704190c90151ce6160b3add82488894a",
+                            "blake3": "e8db745dc8d0d29653dab2bc4af742d0c9b3aacb43adbf150418dc6333cf55be",
                             "byte_len": 797,
                             "destination_path": "/private<project-root>/tasks/PRD-X/TASK-X-020.md",
                             "relative_path": "TASK-X-020.md"
                           },
                           {
-                            "blake3": "84999e20b4a53d06d85c19ad82ec6a0874ea66eea5643951b8fb0c83b40aed9f",
+                            "blake3": "dce52f9cead2f2c16113b48ea049013570423de0117a501ee4817b6647bf116d",
                             "byte_len": 1490,
                             "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                             "relative_path": "gate-envelope.json"
@@ -2218,7 +2216,7 @@
                       "stderr": "archon-host-activity: child making progress\n",
                       "stderrBytes": 44,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"38a0148b96fd43ac286e71e0d08c44a7704190c90151ce6160b3add82488894a\",\"byte_len\":797,\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"84999e20b4a53d06d85c19ad82ec6a0874ea66eea5643951b8fb0c83b40aed9f\",\"byte_len\":1490,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"e8db745dc8d0d29653dab2bc4af742d0c9b3aacb43adbf150418dc6333cf55be\",\"byte_len\":797,\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"dce52f9cead2f2c16113b48ea049013570423de0117a501ee4817b6647bf116d\",\"byte_len\":1490,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 396,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2246,7 +2244,7 @@
                   "stderr": "archon-host-activity: child making progress\n",
                   "stderrBytes": 44,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"38a0148b96fd43ac286e71e0d08c44a7704190c90151ce6160b3add82488894a\",\"byte_len\":797,\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"84999e20b4a53d06d85c19ad82ec6a0874ea66eea5643951b8fb0c83b40aed9f\",\"byte_len\":1490,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"e8db745dc8d0d29653dab2bc4af742d0c9b3aacb43adbf150418dc6333cf55be\",\"byte_len\":797,\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"dce52f9cead2f2c16113b48ea049013570423de0117a501ee4817b6647bf116d\",\"byte_len\":1490,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 396,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2285,7 +2283,7 @@
                     "command_id": "task-set-lint",
                     "entries": [
                       {
-                        "blake3": "f97ee27dc1be60422f4aa39554202af1df496d2d9975d1e1c02fb6b45ef6f2b6",
+                        "blake3": "7ad49eecfa1de93f3dcc1a37560e69d1ded7af75d3eefe35a2c0babda06b578e",
                         "byte_len": 2165,
                         "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                         "relative_path": "gate-envelope.json"
@@ -2331,7 +2329,7 @@
                         "command_id": "task-set-lint",
                         "entries": [
                           {
-                            "blake3": "f97ee27dc1be60422f4aa39554202af1df496d2d9975d1e1c02fb6b45ef6f2b6",
+                            "blake3": "7ad49eecfa1de93f3dcc1a37560e69d1ded7af75d3eefe35a2c0babda06b578e",
                             "byte_len": 2165,
                             "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                             "relative_path": "gate-envelope.json"
@@ -2342,7 +2340,7 @@
                       "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\n",
                       "stderrBytes": 92,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"f97ee27dc1be60422f4aa39554202af1df496d2d9975d1e1c02fb6b45ef6f2b6\",\"byte_len\":2165,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"7ad49eecfa1de93f3dcc1a37560e69d1ded7af75d3eefe35a2c0babda06b578e\",\"byte_len\":2165,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 270,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2374,7 +2372,7 @@
                   "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\n",
                   "stderrBytes": 92,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"f97ee27dc1be60422f4aa39554202af1df496d2d9975d1e1c02fb6b45ef6f2b6\",\"byte_len\":2165,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"task-set-lint\",\"entries\":[{\"blake3\":\"7ad49eecfa1de93f3dcc1a37560e69d1ded7af75d3eefe35a2c0babda06b578e\",\"byte_len\":2165,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 270,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2417,7 +2415,7 @@
                     "command_id": "requirements-trace",
                     "entries": [
                       {
-                        "blake3": "4bf85caa19cc212633fa1b5738e8654180b57e5ab68c1fe40b6b55f32b36ff19",
+                        "blake3": "199d95c677d3fc59d85a9b7b84005e23f57715ff747f9c5b429fe981a6db4206",
                         "byte_len": 1517,
                         "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                         "relative_path": "gate-envelope.json"
@@ -2463,7 +2461,7 @@
                         "command_id": "requirements-trace",
                         "entries": [
                           {
-                            "blake3": "4bf85caa19cc212633fa1b5738e8654180b57e5ab68c1fe40b6b55f32b36ff19",
+                            "blake3": "199d95c677d3fc59d85a9b7b84005e23f57715ff747f9c5b429fe981a6db4206",
                             "byte_len": 1517,
                             "destination_path": "/private<project-root>/.archon/workflows/<run-id>/host-command-results/<host-call-id>/gate-envelope.json",
                             "relative_path": "gate-envelope.json"
@@ -2474,7 +2472,7 @@
                       "stderr": "",
                       "stderrBytes": 0,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"requirements-trace\",\"entries\":[{\"blake3\":\"4bf85caa19cc212633fa1b5738e8654180b57e5ab68c1fe40b6b55f32b36ff19\",\"byte_len\":1517,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"requirements-trace\",\"entries\":[{\"blake3\":\"199d95c677d3fc59d85a9b7b84005e23f57715ff747f9c5b429fe981a6db4206\",\"byte_len\":1517,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 275,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2506,7 +2504,7 @@
                   "stderr": "",
                   "stderrBytes": 0,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"requirements-trace\",\"entries\":[{\"blake3\":\"4bf85caa19cc212633fa1b5738e8654180b57e5ab68c1fe40b6b55f32b36ff19\",\"byte_len\":1517,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"requirements-trace\",\"entries\":[{\"blake3\":\"199d95c677d3fc59d85a9b7b84005e23f57715ff747f9c5b429fe981a6db4206\",\"byte_len\":1517,\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 275,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2531,8 +2529,8 @@
           }
         },
         "depends_on": [],
-        "input_hash": "b4e2d7d6270adde7cdd8f2b311d6140671af4e5fe009180f0cde97f3bb9fc40a",
-        "output_hash": "2e290b2fa90d674c6b79aeb6c28035f4d9eab3cabb294206f7cf896969e9d8a5",
+        "input_hash": "<normalized-call-input>",
+        "output_hash": "<normalized-call-result>",
         "result": {
           "artifacts": [
             {

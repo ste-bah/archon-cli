@@ -1,6 +1,6 @@
 use super::{
-    digest_normalized, normalize_derived_hashes, normalize_publication_receipts,
-    normalized_published_content, strip_timestamps,
+    digest_normalized, normalize_derived_hashes, normalize_embedded_receipt_for_test,
+    normalize_publication_receipts, normalized_published_content, strip_timestamps,
 };
 
 fn normalized_record(mut record: serde_json::Value) -> serde_json::Value {
@@ -125,4 +125,33 @@ fn receipt_digests_follow_compared_normalized_content_and_keep_unknown_prior_raw
     assert_eq!(first["prior_blake3"], "prior-not-in-snapshot");
     assert_eq!(second["blake3"], expected);
     assert_eq!(second["prior_blake3"], expected);
+}
+
+#[test]
+fn embedded_stdout_receipts_use_normalized_content_and_keep_content_changes() {
+    let first_content = serde_json::json!({"ready": true, "path": "<project-root>/a"});
+    let same_content = serde_json::json!({"path": "<project-root>/a", "ready": true});
+    let changed_content = serde_json::json!({"ready": false, "path": "<project-root>/a"});
+    let digest_one = "run-one-digest";
+    let digest_two = "run-two-digest";
+    let digest_changed = "changed-digest";
+    let mut first = serde_json::json!({"stdout": format!(
+        r#"{{"entries":[{{"blake3":"{digest_one}","relative_path":"acceptance-pin.json"}}]}}"#
+    )});
+    let mut same = serde_json::json!({"stdout": format!(
+        r#"{{"entries":[{{"blake3":"{digest_two}","relative_path":"acceptance-pin.json"}}]}}"#
+    )});
+    let mut changed = serde_json::json!({"stdout": format!(
+        r#"{{"entries":[{{"blake3":"{digest_changed}","relative_path":"acceptance-pin.json"}}]}}"#
+    )});
+    let map_one = [(digest_one.to_owned(), first_content)].into();
+    let map_same = [(digest_two.to_owned(), same_content)].into();
+    let map_changed = [(digest_changed.to_owned(), changed_content)].into();
+
+    normalize_embedded_receipt_for_test(&mut first, &map_one);
+    normalize_embedded_receipt_for_test(&mut same, &map_same);
+    normalize_embedded_receipt_for_test(&mut changed, &map_changed);
+
+    assert_eq!(first, same);
+    assert_ne!(first, changed);
 }

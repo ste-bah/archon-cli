@@ -110,7 +110,8 @@ pub fn result_store_records(
     ];
     // Receipts are read through their raw destination paths, so they are
     // normalised before the host call ids inside those paths are replaced.
-    normalize_publication_receipts(&mut records, &replacements);
+    let (content_by_digest, compared_paths) =
+        normalize_publication_receipts(&mut records, &replacements);
     // A host call id is a digest of its inputs, so it differs per run; later
     // records carry earlier ids in their inputs, receipts and stdout.
     let host_call_ids: Vec<String> = records
@@ -136,7 +137,7 @@ pub fn result_store_records(
         normalize_values(value, &host_call_replacements);
         normalize_lifecycle_metadata(value);
         normalize_values(value, &replacements);
-        normalize_run_specific(value);
+        normalize_run_specific_with_receipts(value, &content_by_digest, &compared_paths);
     }
     records.sort_by_key(|record| serde_json::to_string(&record.1).unwrap());
     records
@@ -145,8 +146,12 @@ pub fn result_store_records(
 pub fn normalize_publication_receipts(
     records: &mut [(String, serde_json::Value)],
     replacements: &[(&str, &str)],
+) -> (
+    std::collections::HashMap<String, serde_json::Value>,
+    std::collections::HashSet<String>,
 ) {
     let mut content_by_digest = std::collections::HashMap::new();
+    let mut compared_paths = std::collections::HashSet::new();
     for (_, record) in records.iter() {
         let Some(entries) = record
             .pointer("/result/data/publicationReceipt/entries")
@@ -169,66 +174,73 @@ pub fn normalize_publication_receipts(
                 continue;
             }
             let content = normalized_published_content(&bytes, replacements);
+            content_by_digest.insert(digest_normalized(&content), content.clone());
             content_by_digest.insert(digest.to_owned(), content);
+            compared_paths.insert(path.to_owned());
         }
     }
 
     for (_, record) in records.iter_mut() {
-        let Some(entries) = record
+        if let Some(entries) = record
             .pointer_mut("/result/data/publicationReceipt/entries")
             .and_then(serde_json::Value::as_array_mut)
-        else {
-            continue;
-        };
-        for entry in entries {
-            let path = entry
-                .get("destination_path")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned)
-                .unwrap_or_else(|| panic!("publication receipt entry is missing destination_path"));
-            let bytes = fs::read(&path)
-                .unwrap_or_else(|error| panic!("reading published receipt file {path}: {error}"));
-            let content = normalized_published_content(&bytes, replacements);
-            if let Some(map) = entry.as_object_mut() {
-                let prior_content = map
-                    .get("prior_blake3")
+        {
+            for entry in entries {
+                let path = entry
+                    .get("destination_path")
                     .and_then(serde_json::Value::as_str)
-                    .and_then(|digest| content_by_digest.get(digest).cloned());
-                if let Some(prior_content) = prior_content {
-                    // The prior digest is replaceable only because its earlier
-                    // published preimage is also present in this snapshot.
-                    map.insert("prior_content".into(), prior_content.clone());
-                    map.insert(
-                        "prior_blake3".into(),
-                        digest_normalized(&prior_content).into(),
-                    );
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| {
+                        panic!("publication receipt entry is missing destination_path")
+                    });
+                let bytes = fs::read(&path).unwrap_or_else(|error| {
+                    panic!("reading published receipt file {path}: {error}")
+                });
+                let content = normalized_published_content(&bytes, replacements);
+                if let Some(map) = entry.as_object_mut() {
+                    let prior_content = map
+                        .get("prior_blake3")
+                        .and_then(serde_json::Value::as_str)
+                        .and_then(|digest| content_by_digest.get(digest).cloned());
+                    if let Some(prior_content) = prior_content {
+                        // The prior digest is replaceable only because its earlier
+                        // published preimage is also present in this snapshot.
+                        map.insert("prior_content".into(), prior_content.clone());
+                        map.insert(
+                            "prior_blake3".into(),
+                            digest_normalized(&prior_content).into(),
+                        );
+                    }
+                    map.remove("byte_len");
+                    map.insert("blake3".into(), digest_normalized(&content).into());
+                    map.insert("content".into(), content);
                 }
-                map.remove("byte_len");
-                map.insert("blake3".into(), digest_normalized(&content).into());
-                map.insert("content".into(), content);
             }
         }
     }
+    (content_by_digest, compared_paths)
 }
 
 fn normalize_derived_hashes(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
-            // Call hashes are normalized only when their exact preimages are
-            // compared too: this record's call input and result are retained
-            // in the snapshot, so hash their normalized content rather than
-            // erasing the digest. Other digest-looking fields stay raw here.
-            let is_call_record = ["call", "attempt", "input_hash", "status", "result"]
-                .iter()
-                .all(|key| map.contains_key(*key));
+            // The preimages are this record's own call input and result, which
+            // the snapshot compares after normalisation, so these run-specific
+            // hashes are represented by placeholders.
+            // Copies of a record nested in a later call's inputs carry the
+            // same hashes without every top-level key, so a record is any
+            // object holding the hashes beside its call or result.
+            let is_call_record = (map.contains_key("input_hash")
+                || map.contains_key("output_hash"))
+                && (map.contains_key("call") || map.contains_key("result"));
             let normalized_input = is_call_record
                 .then(|| map.get("call"))
                 .flatten()
-                .map(|call| digest_normalized(call.get("input").unwrap_or(call)));
+                .map(|_| "<normalized-call-input>".to_owned());
             let normalized_output = is_call_record
                 .then(|| map.get("result"))
                 .flatten()
-                .map(digest_normalized);
+                .map(|_| "<normalized-call-result>".to_owned());
             if is_call_record
                 && map.contains_key("input_hash")
                 && let Some(digest) = normalized_input
@@ -275,19 +287,112 @@ fn digest_normalized(value: &serde_json::Value) -> String {
 /// Strip timestamps in records and JSON carried as a string (stdout, embedded
 /// receipts); preserve every digest unless the compared preimage is in-snapshot.
 fn normalize_run_specific(value: &mut serde_json::Value) {
+    normalize_run_specific_with_receipts(value, &Default::default(), &Default::default());
+}
+
+fn normalize_run_specific_with_receipts(
+    value: &mut serde_json::Value,
+    content_by_digest: &std::collections::HashMap<String, serde_json::Value>,
+    compared_paths: &std::collections::HashSet<String>,
+) {
     strip_timestamps(value);
     normalize_derived_hashes(value);
+    normalize_receipt_hashes(value, content_by_digest, compared_paths);
     match value {
         serde_json::Value::String(text) => {
             if let Ok(mut embedded @ (serde_json::Value::Object(_) | serde_json::Value::Array(_))) =
                 serde_json::from_str::<serde_json::Value>(text)
             {
-                normalize_run_specific(&mut embedded);
+                normalize_run_specific_with_receipts(
+                    &mut embedded,
+                    content_by_digest,
+                    compared_paths,
+                );
                 *text = embedded.to_string();
             }
         }
-        serde_json::Value::Object(map) => map.values_mut().for_each(normalize_run_specific),
-        serde_json::Value::Array(values) => values.iter_mut().for_each(normalize_run_specific),
+        serde_json::Value::Object(map) => map.values_mut().for_each(|nested| {
+            normalize_run_specific_with_receipts(nested, content_by_digest, compared_paths)
+        }),
+        serde_json::Value::Array(values) => values.iter_mut().for_each(|nested| {
+            normalize_run_specific_with_receipts(nested, content_by_digest, compared_paths)
+        }),
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+fn normalize_embedded_receipt_for_test(
+    value: &mut serde_json::Value,
+    content_by_digest: &std::collections::HashMap<String, serde_json::Value>,
+) {
+    normalize_run_specific_with_receipts(value, content_by_digest, &Default::default());
+}
+
+fn normalize_receipt_hashes(
+    value: &mut serde_json::Value,
+    content_by_digest: &std::collections::HashMap<String, serde_json::Value>,
+    compared_paths: &std::collections::HashSet<String>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            let relative_path = map
+                .get("relative_path")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            let is_receipt_entry = relative_path.is_some()
+                && (map.contains_key("blake3") || map.contains_key("prior_blake3"));
+            if is_receipt_entry {
+                let compared_file = relative_path
+                    .as_deref()
+                    .map(|relative| {
+                        let relative = Path::new(relative);
+                        compared_paths
+                            .iter()
+                            .any(|destination| Path::new(destination).ends_with(relative))
+                    })
+                    .unwrap_or(false);
+                for key in ["blake3", "prior_blake3"] {
+                    let Some(digest) = map.get(key).and_then(serde_json::Value::as_str) else {
+                        continue;
+                    };
+                    if let Some(content) = content_by_digest.get(digest) {
+                        map.insert(key.into(), digest_normalized(content).into());
+                    } else if digest.starts_with('<')
+                        || content_by_digest
+                            .values()
+                            .any(|content| digest_normalized(content) == digest)
+                    {
+                        // Already normalised by an outer pass: keep it.
+                    } else {
+                        // The bytes behind this digest were overwritten later
+                        // (a pin or lock rewritten by a later call) and embed
+                        // timestamps, so the digest and length are run-specific.
+                        // The final bytes at every destination are compared as
+                        // the snapshot's artifacts; `compared_file` says so.
+                        let label = if compared_file {
+                            "<receipt-digest-with-compared-content>"
+                        } else {
+                            "<receipt-digest-of-overwritten-content>"
+                        };
+                        map.insert(key.into(), label.into());
+                    }
+                }
+                if map
+                    .get("blake3")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|d| d.starts_with('<'))
+                {
+                    map.remove("byte_len");
+                }
+            }
+            for nested in map.values_mut() {
+                normalize_receipt_hashes(nested, content_by_digest, compared_paths);
+            }
+        }
+        serde_json::Value::Array(values) => values
+            .iter_mut()
+            .for_each(|nested| normalize_receipt_hashes(nested, content_by_digest, compared_paths)),
         _ => {}
     }
 }
