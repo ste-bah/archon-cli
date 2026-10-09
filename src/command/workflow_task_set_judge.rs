@@ -203,10 +203,22 @@ pub(super) async fn judge_contract_resumable(
         contract,
         "sonnet",
         |attempt| {
-            archon_workflow::task_set_contract::validate_acceptance_structure(
-                attempt, expected, true,
-            )
-            .map_err(anyhow::Error::new)
+            if expected.is_empty()
+                && attempt.acceptance.is_empty()
+                && !attempt.supplementary.is_empty()
+            {
+                // A freeze can reuse every primary acceptance verdict while
+                // newly authored supplementary checks still need judging.
+                // That subset is not a standalone contract, so validate the
+                // judged fields here; the merged full contract is validated
+                // by the incremental freeze caller.
+                require_judged_prose(attempt)
+            } else {
+                archon_workflow::task_set_contract::validate_acceptance_structure(
+                    attempt, expected, true,
+                )
+                .map_err(anyhow::Error::new)
+            }
         },
         partial,
     )

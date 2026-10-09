@@ -76,7 +76,7 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
                 "acceptance_digest": "",
                 "tasks": [
                     {
-                        "task_id": "TASK-X-010", "file_name": "TASK-X-010.md", "depends_on": [], "blocks": ["TASK-X-020"], "implements": ["REQ-X-001"],
+                        "task_id": "TASK-X-010", "file_name": "TASK-X-010.md", "depends_on": [], "blocks": ["TASK-X-020"], "implements": ["REQ-X-001", "AC-X-001"],
                         "deliverable_contracts": [
                             {"kind": "alpha_text", "artifact_path": "src/alpha.txt", "artifact_format": "text", "min_instances": 1},
                             {"kind": "generic_outcome", "artifact_path": ".archon/proof/outcome.json", "artifact_format": "json", "required_true_fields": ["ready"], "min_instances": 1}
@@ -109,7 +109,7 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
                 "Create alpha data",
                 "[]",
                 "[TASK-X-020]",
-                "REQ-X-001",
+                "REQ-X-001, AC-X-001",
                 "src/alpha.txt",
                 "Write the nonempty line alpha ready and create the JSON outcome artifact with ready set to true.",
                 "- kind: alpha_text\n    artifact_path: src/alpha.txt\n    artifact_format: text\n    min_instances: 1\n  - kind: generic_outcome\n    artifact_path: .archon/proof/outcome.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1",
@@ -159,11 +159,29 @@ mod tests {
 
     #[test]
     fn supplementary_answer_covers_the_requirement_named_by_the_id() {
-        let prompt = r#"{"task":"Author exactly one acceptance entry identified below. Author ONLY entry SUP-REQ-X-001: The first artifact is ready."}"#;
-        let (role, answer) = scripted_answer(prompt);
-        assert_eq!(role, "acceptance");
-        assert!(answer.contains(r#""covers":["REQ-X-001"]"#), "{answer}");
-        assert!(answer.contains("src/alpha.txt"), "{answer}");
+        for (id, requirement, artifact) in [
+            ("SUP-REQ-X-001", "REQ-X-001", "src/alpha.txt"),
+            ("SUP-REQ-X-002", "REQ-X-002", "src/beta.json"),
+        ] {
+            let prompt = format!(
+                r#"{{"task":"Author exactly one acceptance entry identified below. Author ONLY entry {id}: Check {artifact}."}}"#
+            );
+            let (role, answer) = scripted_answer(&prompt);
+            assert_eq!(role, "acceptance");
+            let entry: serde_json::Value = serde_json::from_str(&answer).unwrap();
+            assert_eq!(entry["id"], id, "{entry}");
+            assert_eq!(entry["covers"], serde_json::json!([requirement]), "{entry}");
+            assert_eq!(entry["gap_permitted"], false, "{entry}");
+            assert_eq!(entry["check"]["kind"], "command", "{entry}");
+            assert_eq!(entry["check"]["cwd"], "repo_root", "{entry}");
+            assert!(
+                entry["check"]["command"]
+                    .as_str()
+                    .unwrap()
+                    .contains(artifact),
+                "{entry}"
+            );
+        }
     }
 
     #[test]
@@ -171,8 +189,10 @@ mod tests {
         let (_, skeleton) = scripted_answer("Author one complete task-skeleton JSON artifact");
         assert!(skeleton.contains("REQ-X-001"), "{skeleton}");
         assert!(skeleton.contains("REQ-X-002"), "{skeleton}");
+        assert!(skeleton.contains("AC-X-001"), "{skeleton}");
         let (_, body) = scripted_answer("Author the complete TASK body");
         assert!(body.contains("REQ-X-001"), "{body}");
+        assert!(body.contains("AC-X-001"), "{body}");
     }
 
     #[test]
