@@ -78,12 +78,12 @@ fn changed_file_in_the_bounded_repository_closure_changes_key() {
 }
 
 #[test]
-fn unbounded_checks_have_no_reuse_key() {
+fn unbounded_checks_keep_the_full_closure_reuse_key() {
     let trees = trees(&[("AC-I-003", "cargo test", TrustedCwd::RepoRoot)]);
     let tree = Baseline {
         repository: trees.repo.clone(),
         commit: git_head(&trees.repo).unwrap(),
     };
     let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
-    assert!(check_key(&probe, &tree, &trees.contract(), "AC-I-003").is_none());
+    assert!(check_key(&probe, &tree, &trees.contract(), "AC-I-003").is_some());
 }

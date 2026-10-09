@@ -141,24 +141,21 @@ pub(super) async fn run_at(
             .chain(&contract.supplementary)
             .find(|entry| entry.id == reference.acceptance_id);
         let why = if let Some(entry) = entry {
-            match &entry.check {
-                AcceptanceCheck::Command { command, .. } => {
-                    let assessment = crate::command::workflow_task_set::workflow_acceptance_check_reuse::assess(
-                        command,
-                        key.as_deref().unwrap_or(""),
-                        &crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
-                            .map_or_else(|| String::new(), |(version, _, _)| version.to_string()),
-                        "site environment",
-                    );
-                    if saved.is_some() {
-                        "all inputs are host-proven identical"
-                    } else if key.is_none() {
-                        assessment.reason
-                    } else {
-                        "no matching prior verdict"
-                    }
-                }
-                _ => "check type has no bounded repository read closure",
+            if saved.is_some() {
+                reuse::memo_reason(probe, tree, &data, entry)
+            } else if key.is_some() {
+                "no matching prior verdict"
+            } else if let AcceptanceCheck::Command { command, .. } = &entry.check {
+                crate::command::workflow_task_set::workflow_acceptance_check_reuse::assess(
+                    command,
+                    "",
+                    &crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
+                        .map_or_else(|| String::new(), |(version, _, _)| version.to_string()),
+                    "site environment",
+                )
+                .reason
+            } else {
+                "full input closure: same commit and project data"
             }
         } else {
             "check is absent from the contract"

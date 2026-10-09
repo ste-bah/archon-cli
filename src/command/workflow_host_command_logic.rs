@@ -211,14 +211,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // their filesystem state, the shell, environment and this logic.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "4b79cde7dd607249a65c375b02a19e37a1a15d39e5e1efa14c333235de686eeb",
+        sources_digest: "1493de7029a9403d6c65b086d454ace36e73c42fb65c75f6799f7de912b5f11c",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "4b79cde7dd607249a65c375b02a19e37a1a15d39e5e1efa14c333235de686eeb",
+        sources_digest: "1493de7029a9403d6c65b086d454ace36e73c42fb65c75f6799f7de912b5f11c",
         build_bound: false,
     },
     CapabilityLogic {
@@ -251,14 +251,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         id: "verify-frozen-acceptance",
         version: 1,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "e0c5913c7635f5b982c99c14ebbce9cea91201564dcfa7f2cba1101586737bf8",
+        sources_digest: "5ee895f908f99f91d792783f8da42570efc01f09c7febd101e0bf2e289a3c41a",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "e0c5913c7635f5b982c99c14ebbce9cea91201564dcfa7f2cba1101586737bf8",
+        sources_digest: "5ee895f908f99f91d792783f8da42570efc01f09c7febd101e0bf2e289a3c41a",
         build_bound: true,
     },
 ];

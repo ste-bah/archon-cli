@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use archon_workflow::task_set_contract::{AcceptanceCheck, AcceptanceContract, TrustedCwd};
 
-use super::super::probe_tests::{Trees, trees};
-use super::super::{ExecutabilityProbe, HostProbe};
+use super::super::probe_tests::{Trees, git, trees};
+use super::super::{Baseline, ExecutabilityProbe, HostProbe};
 use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeResume};
 
 const REPO: TrustedCwd = TrustedCwd::RepoRoot;
@@ -100,6 +100,53 @@ async fn saved_verdicts_are_reused_by_a_retry_and_never_after_their_inputs_chang
     assert!(unsaved.copies_made.load(SeqCst) > 0);
 }
 
+#[tokio::test]
+async fn a_nonliteral_check_reuses_only_for_the_same_commit_and_project_data() {
+    let runs = tempfile::tempdir().unwrap();
+    let check = counted(
+        runs.path(),
+        "AC-R-UNBOUNDED",
+        "grep -q absent src/state.txt",
+    );
+    let trees = trees(&[("AC-R-UNBOUNDED", &check, REPO)]);
+    let copies = tempfile::tempdir().unwrap();
+    let resume = saving(FreezeBudget::unlimited());
+    let at = |commit: &str| {
+        freeze(&trees, copies.path(), &resume).with_baseline(Baseline {
+            commit: commit.to_string(),
+            repository: trees.repo.clone(),
+        })
+    };
+
+    let first = at(&trees.base);
+    first.script_defects(&trees.contract(), &trees.ids()).await;
+    assert_eq!(runs_of(runs.path(), "AC-R-UNBOUNDED"), 2);
+
+    let retry = at(&trees.base);
+    retry.script_defects(&trees.contract(), &trees.ids()).await;
+    assert_eq!(retry.copies_made.load(SeqCst), 0, "same closure reuses");
+    assert_eq!(runs_of(runs.path(), "AC-R-UNBOUNDED"), 2);
+
+    std::fs::write(trees.repo.join("later.txt"), "later").unwrap();
+    git(&trees.repo, &["add", "later.txt"]);
+    git(&trees.repo, &["commit", "-qm", "later commit"]);
+    let later_commit = git(&trees.repo, &["rev-parse", "HEAD"]);
+    let changed_commit = at(&later_commit);
+    changed_commit
+        .script_defects(&trees.contract(), &trees.ids())
+        .await;
+    assert!(changed_commit.copies_made.load(SeqCst) > 0);
+    assert_eq!(runs_of(runs.path(), "AC-R-UNBOUNDED"), 3);
+
+    std::fs::write(trees.set.project.path().join("data/extra.txt"), "new").unwrap();
+    let changed_data = at(&trees.base);
+    changed_data
+        .script_defects(&trees.contract(), &trees.ids())
+        .await;
+    assert!(changed_data.copies_made.load(SeqCst) > 0);
+    assert_eq!(runs_of(runs.path(), "AC-R-UNBOUNDED"), 5);
+}
+
 /// A clock that stands still for its first `reads` reads, then jumps a
 /// day: the old total deadline would stop before the base observation.
 fn spent_after(reads: u64) -> crate::command::workflow_freeze_budget::Clock {
@@ -112,7 +159,7 @@ fn spent_after(reads: u64) -> crate::command::workflow_freeze_budget::Clock {
 }
 
 #[tokio::test]
-async fn issue356_elapsed_freeze_completes_and_reruns_volatile_checks() {
+async fn issue356_elapsed_freeze_completes_and_reuses_full_closure_checks() {
     let runs = tempfile::tempdir().unwrap();
     let one = counted(runs.path(), "AC-D-001", "test -f feature.txt");
     let two = counted(runs.path(), "AC-D-002", "test -s feature.txt");
@@ -130,8 +177,8 @@ async fn issue356_elapsed_freeze_completes_and_reruns_volatile_checks() {
     assert!(first.take_unproven().is_empty());
     assert_eq!(
         first.resume.progress.saved_count(),
-        0,
-        "unbounded checks are volatile"
+        4,
+        "both checks have saved verdicts for HEAD and base"
     );
     assert_eq!(runs_of(runs.path(), "AC-D-001"), 2, "HEAD and base");
     assert_eq!(runs_of(runs.path(), "AC-D-002"), 2);
@@ -143,11 +190,11 @@ async fn issue356_elapsed_freeze_completes_and_reruns_volatile_checks() {
     assert!(retry.take_unproven().is_empty());
     assert_eq!(
         runs_of(runs.path(), "AC-D-001"),
-        4,
-        "volatile check reran on both trees"
+        2,
+        "saved verdicts cover both trees"
     );
-    assert_eq!(runs_of(runs.path(), "AC-D-002"), 4);
-    assert!(retry.copies_made.load(SeqCst) > 0, "volatile checks rerun");
+    assert_eq!(runs_of(runs.path(), "AC-D-002"), 2);
+    assert_eq!(retry.copies_made.load(SeqCst), 0, "no check reran");
 }
 
 #[tokio::test]
@@ -191,7 +238,7 @@ async fn a_check_past_the_cap_is_unproven_timed_out_and_never_rerun() {
 /// the live freeze probes: verdicts are saved under its build cache, apart
 /// from every live root; elapsed totals cannot stop either observation.
 #[tokio::test]
-async fn issue356_elapsed_scratch_freeze_does_not_cache_volatile_results() {
+async fn issue356_elapsed_scratch_freeze_reuses_full_closure_results() {
     let runs = tempfile::tempdir().unwrap();
     let one = counted(runs.path(), "AC-S-001", "test -f feature.txt");
     let two = counted(runs.path(), "AC-S-002", "test -s feature.txt");
@@ -221,7 +268,7 @@ async fn issue356_elapsed_scratch_freeze_does_not_cache_volatile_results() {
     first.script_defects(&trees.contract(), &trees.ids()).await;
     assert!(first.incomplete().is_none(), "both trees were observed");
     assert!(first.take_unproven().is_empty());
-    assert_eq!(saved(), 0, "unbounded check read closures are volatile");
+    assert_eq!(saved(), 4, "both checks have verdicts for both trees");
     assert_eq!(runs_of(runs.path(), "AC-S-001"), 2);
 
     let retry = freeze(&trees, copies.path(), &saving(FreezeBudget::unlimited()));
@@ -233,9 +280,10 @@ async fn issue356_elapsed_scratch_freeze_does_not_cache_volatile_results() {
     );
     assert!(retry.incomplete().is_none());
     assert!(retry.take_unproven().is_empty());
-    assert_eq!(runs_of(runs.path(), "AC-S-001"), 4, "both trees rerun");
-    assert_eq!(runs_of(runs.path(), "AC-S-002"), 4);
-    assert_eq!(saved(), 0);
+    assert_eq!(runs_of(runs.path(), "AC-S-001"), 2, "both trees reused");
+    assert_eq!(runs_of(runs.path(), "AC-S-002"), 2);
+    assert_eq!(saved(), 4);
+    assert_eq!(retry.copies_made.load(SeqCst), 0);
     trees.assert_live_untouched(copies.path());
 }
 

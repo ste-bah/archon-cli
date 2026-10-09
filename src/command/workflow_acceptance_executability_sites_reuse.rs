@@ -50,6 +50,20 @@ pub(super) fn memo_key(
     let entry = (contract.acceptance.iter())
         .chain(&contract.supplementary)
         .find(|entry| entry.id == id)?;
+    if let Some(key) = bounded_memo_key(probe, tree, data, entry) {
+        return Some(key);
+    }
+    full_closure_memo_key(probe, tree, data, entry)
+}
+
+/// Checks with a literal repository path can reuse across commits when that
+/// path's complete tree is unchanged.
+fn bounded_memo_key(
+    probe: &HostProbe,
+    tree: &Baseline,
+    data: &[String],
+    entry: &archon_workflow::task_set_contract::AcceptanceCriterion,
+) -> Option<String> {
     let site = match &probe.site {
         Site::Scratch(binding) => serde_json::to_string(&binding.policy).ok()?,
         Site::Direct | Site::Hermetic | Site::Unavailable(_) => "hermetic".to_string(),
@@ -106,6 +120,49 @@ pub(super) fn memo_key(
         environment,
     ]);
     Some(content_digest(key.to_string().as_bytes()))
+}
+
+/// The original freeze memo key: every check reuses only for the same site,
+/// runtime, repository commit, project, data, and exact check definition.
+fn full_closure_memo_key(
+    probe: &HostProbe,
+    tree: &Baseline,
+    data: &[String],
+    entry: &archon_workflow::task_set_contract::AcceptanceCriterion,
+) -> Option<String> {
+    let site = match &probe.site {
+        Site::Scratch(binding) => serde_json::to_string(&binding.policy).ok()?,
+        Site::Direct | Site::Hermetic | Site::Unavailable(_) => "hermetic".to_string(),
+    };
+    let key = serde_json::json!([
+        site,
+        runtime_identity(probe),
+        tree.repository,
+        probe.project,
+        tree.commit,
+        data,
+        entry.id,
+        entry.check,
+    ]);
+    Some(content_digest(key.to_string().as_bytes()))
+}
+
+/// The reuse guarantee represented by the key selected for this check.
+pub(super) fn memo_reason(
+    probe: &HostProbe,
+    tree: &Baseline,
+    data: &[String],
+    entry: &archon_workflow::task_set_contract::AcceptanceCriterion,
+) -> &'static str {
+    match &entry.check {
+        AcceptanceCheck::Command {
+            command,
+            cwd: archon_workflow::task_set_contract::TrustedCwd::RepoRoot,
+        } if bounded_memo_key(probe, tree, data, entry).is_some() => {
+            "all inputs are host-proven identical"
+        }
+        _ => "full input closure: same commit and project data",
+    }
 }
 
 /// The memo key of check `id` of `contract` on `tree`, with the project
