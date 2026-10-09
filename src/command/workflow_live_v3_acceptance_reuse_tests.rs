@@ -183,20 +183,19 @@ fn acceptance_freeze_reuse_logic_literal_predicates_match_sh_test_for_same_snaps
         let check = criterion_for(command);
         let snapshot = super::reuse::snapshot(&context(repo), &check)
             .unwrap_or_else(|| panic!("unsupported bounded command: {command}"));
-        let host = super::reuse::evaluate_snapshot(&snapshot, &check).unwrap();
+        let host = super::reuse::evaluate_snapshot(&snapshot, &check);
+        // Off Unix the host gives no verdict for -r/-w/-x: the shell runs them.
+        #[cfg(not(unix))]
+        if ["-r", "-w", "-x"].contains(&command.split_whitespace().nth(1).unwrap()) {
+            assert!(host.is_none(), "{command} must stay volatile off Unix");
+            continue;
+        }
+        let host = host.unwrap();
         let shell = std::process::Command::new("sh")
             .args(["-c", command])
             .current_dir(repo)
             .status()
             .unwrap();
-        #[cfg(not(unix))]
-        if ["-r", "-w", "-x"].contains(&command.split_whitespace().nth(1).unwrap()) {
-            assert_eq!(
-                host.exit_code, None,
-                "{command} must stay volatile off Unix"
-            );
-            continue;
-        }
         assert_eq!(host.exit_code, shell.code(), "{command}");
     }
 }
