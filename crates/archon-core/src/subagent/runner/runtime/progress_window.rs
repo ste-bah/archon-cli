@@ -1,13 +1,11 @@
 //! The no-progress window of one subagent session (Issue 288).
 //!
 //! A session's own limit is a no-progress window, never a total. It opens
-//! when the session starts and renews only on NOVEL activity: a tool call
-//! whose tool and canonical arguments this session has not made before, or
-//! assistant text this session has not produced before. A repeated identical
-//! call, an alternation between two identical calls and repeated text renew
-//! nothing, so a looping session ends one window after its last novel
-//! activity, and a session that keeps doing new work runs for as long as it
-//! does. There is no turn-count cap here.
+//! when the session starts and renews only on NOVEL activity: an admitted
+//! tool call whose tool and canonical arguments this session has not made
+//! before, or assistant text this session has not produced before. A refused
+//! call, a repeated identical call, an alternation between two identical
+//! calls and repeated text renew nothing. There is no turn-count cap here.
 //!
 //! The same novelty renews the host's dispatch clocks
 //! (`archon_tools::subagent_dispatch_clock::progress`), so the runner and the
@@ -32,6 +30,7 @@ pub(super) struct ProgressWindow {
     renewed_at: Instant,
     seen: HashSet<u64>,
     last: Option<String>,
+    refused_calls: u64,
 }
 
 impl ProgressWindow {
@@ -51,6 +50,7 @@ impl ProgressWindow {
             renewed_at: now,
             seen: HashSet::new(),
             last: None,
+            refused_calls: 0,
         })
     }
 
@@ -69,17 +69,33 @@ impl ProgressWindow {
     }
 
     /// Observe one finished model turn: its text and the tool calls it made.
-    /// Any novel part renews the window; `true` when it did.
-    pub(super) fn observe_turn(&mut self, turn: u32, text: &str, tools: &[PendingTool]) -> bool {
+    /// Any novel text or admitted call renews the window; `true` when it did.
+    pub(super) fn observe_turn(
+        &mut self,
+        turn: u32,
+        text: &str,
+        tools: &[PendingTool],
+        refused: &[bool],
+    ) -> bool {
         let mut novel = None;
         let text = text.trim();
-        if !text.is_empty() && self.seen.insert(digest(&("text", text))) {
+        let echoes_tool = tools.iter().any(|tool| {
+            let arguments = serde_json::from_str::<serde_json::Value>(&tool.input_json)
+                .map(|value| archon_tools::repeat_tool_guard::canonical_arguments(&value))
+                .unwrap_or_else(|_| tool.input_json.trim().to_string());
+            text == format!("{} {}", tool.name, arguments) || text == arguments || text == tool.name
+        });
+        if !text.is_empty() && !echoes_tool && self.seen.insert(digest(&("text", text))) {
             novel = Some(format!(
                 "turn {turn}: new assistant text \"{}\"",
                 preview(text)
             ));
         }
-        for tool in tools {
+        for (index, tool) in tools.iter().enumerate() {
+            if refused.get(index).copied().unwrap_or(false) {
+                self.refused_calls = self.refused_calls.saturating_add(1);
+                continue;
+            }
             let arguments = serde_json::from_str::<serde_json::Value>(&tool.input_json)
                 .map(|value| archon_tools::repeat_tool_guard::canonical_arguments(&value))
                 .unwrap_or_else(|_| tool.input_json.trim().to_string());
@@ -115,7 +131,11 @@ impl ProgressWindow {
              on novel activity only; {}",
             self.renewed_at.elapsed().as_secs(),
             self.window.map_or(0, |window| window.as_secs()),
-            archon_tools::subagent_dispatch_clock::last_progress_text(self.last.as_deref()),
+            format!(
+                "{}; refused tool calls: {}",
+                archon_tools::subagent_dispatch_clock::last_progress_text(self.last.as_deref()),
+                self.refused_calls
+            ),
         )
     }
 }

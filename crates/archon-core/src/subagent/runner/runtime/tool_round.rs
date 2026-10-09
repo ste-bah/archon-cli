@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 
+use super::tool_helpers::{is_guard_refusal, tool_allows_empty_input};
 use super::*;
 
 /// A tool call with its input decoded exactly once (#171 part 8).
@@ -26,10 +27,15 @@ pub(super) async fn replay_tool_round(
     thinking_blocks: BTreeMap<u32, PendingThinkingBlock>,
     pending_tools: Vec<PendingTool>,
     round_cancel: tokio_util::sync::CancellationToken,
-) {
+) -> Vec<bool> {
     let prepared = prepare_tools_for_execution(runner, &pending_tools);
     record_assistant_tool_use_message(runner, messages, text_content, thinking_blocks, &prepared);
     let exec_results = execute_prepared_tools(runner, &prepared, round_cancel).await;
+    let refused = prepared
+        .iter()
+        .zip(&exec_results)
+        .map(|(_, result)| is_guard_refusal(result))
+        .collect();
     // Before the results are recorded, not after: recording is what writes the
     // text into the history and the transcript, and an unrouted SendMessage
     // writes its own request envelope there as though it had been delivered.
@@ -38,6 +44,7 @@ pub(super) async fn replay_tool_round(
     drain_pending_user_turns(runner, messages).await;
     super::message_history::drain_repeat_tool_reminders(runner, messages);
     super::message_history::deliver_focused_test_completion(runner, messages);
+    refused
 }
 
 /// Deliver any `SendMessage` this round produced.
@@ -233,16 +240,6 @@ fn prepare_tools_for_execution(
         });
     }
     prepared
-}
-
-fn tool_allows_empty_input(runner: &SubagentRunner, name: &str) -> bool {
-    runner
-        .registry
-        .lookup(name)
-        .map(|tool_arc| {
-            crate::agent::tool_input_json::schema_allows_empty_input(&tool_arc.input_schema())
-        })
-        .unwrap_or(false)
 }
 
 async fn execute_prepared_tools(

@@ -14,6 +14,7 @@ mod request_round_pressure;
 mod stream_idle_window;
 mod stream_resend_budget;
 mod stream_round;
+mod tool_helpers;
 mod tool_round;
 
 use cargo_credit::CargoCredit;
@@ -147,12 +148,6 @@ impl SubagentRunner {
             if stream.retry_after_compact {
                 continue;
             }
-            // Only novel text or a novel tool call renews the window.
-            window.observe_turn(
-                turn.saturating_add(1),
-                &stream.text_content,
-                &stream.pending_tools,
-            );
             reasoning_encrypted = stream.reasoning_encrypted;
             recovery_ladder = crate::agent::autocompact::RecoveryLadder::default();
             emergency_projection_pending = false;
@@ -164,6 +159,7 @@ impl SubagentRunner {
 
             // If no tool calls, subagent is done — return accumulated text
             if stream.pending_tools.is_empty() {
+                window.observe_turn(turn.saturating_add(1), &stream.text_content, &[], &[]);
                 if let Some(landing) = &self.tool_context.audit_landing {
                     let parsed = serde_json::from_str::<serde_json::Value>(&stream.text_content);
                     let compact = parsed.as_ref().ok().and_then(|v| {
@@ -209,13 +205,15 @@ impl SubagentRunner {
                 .as_ref()
                 .map(tokio_util::sync::CancellationToken::child_token)
                 .unwrap_or_default();
+            let activity_text = stream.text_content.clone();
+            let activity_tools = stream.pending_tools.clone();
             // A tool round in flight is activity for the host's inactivity
             // bound for as long as it runs; its end is activity too.
             let round_activity = progress_stop::RoundActivity::of(
                 stream.pending_tools.iter().map(|tool| tool.name.as_str()),
             );
             let activity = archon_tools::subagent_activity::tool_round();
-            let round_end = await_tool_round(
+            let (round_end, refused_calls) = await_tool_round(
                 replay_tool_round(
                     self,
                     &mut messages,
@@ -241,6 +239,14 @@ impl SubagentRunner {
             if round_end == RoundEnd::TimedOut {
                 return Err(window.stall_error("during a tool round", turn.saturating_add(1)));
             }
+            // A novel request earns progress only when its result was admitted.
+            // New assistant text remains independent progress.
+            window.observe_turn(
+                turn.saturating_add(1),
+                &activity_text,
+                &activity_tools,
+                &refused_calls,
+            );
             // The workflow read guard has refused this round terminally
             // (Issue-54): the agent thrashed past the read wall without
             // writing. Its next turn could only be more of the same, so the
@@ -329,9 +335,9 @@ async fn await_tool_round<F>(
     session_id: &str,
     deadline: Option<tokio::time::Instant>,
     credit: &CargoCredit,
-) -> RoundEnd
+) -> (RoundEnd, Vec<bool>)
 where
-    F: std::future::Future<Output = ()>,
+    F: std::future::Future<Output = Vec<bool>>,
 {
     tokio::pin!(future);
     loop {
@@ -351,15 +357,15 @@ where
                 }
                 round_cancel.cancel();
                 let _ = tokio::time::timeout(ROUND_CLEANUP, &mut future).await;
-                return RoundEnd::TimedOut;
+                return (RoundEnd::TimedOut, Vec::new());
             }
-            _ = &mut future => return RoundEnd::Finished,
+            result = &mut future => return (RoundEnd::Finished, result),
             // Issue-136: the round's token is the session's child, so a
             // cancelled session is seen here; tools that watch the token end
             // themselves, and the rest are dropped after the grace.
             _ = round_cancel.cancelled() => {
                 let _ = tokio::time::timeout(ROUND_CLEANUP, &mut future).await;
-                return RoundEnd::Cancelled;
+                return (RoundEnd::Cancelled, Vec::new());
             }
         }
     }

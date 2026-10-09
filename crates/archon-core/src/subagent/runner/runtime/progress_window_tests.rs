@@ -116,7 +116,9 @@ impl LlmProvider for ScriptedProvider {
 }
 
 /// A read-only `Read` that answers instantly with fixed text.
-struct FixedRead;
+struct FixedRead {
+    refusal: bool,
+}
 
 #[async_trait::async_trait]
 impl Tool for FixedRead {
@@ -130,7 +132,14 @@ impl Tool for FixedRead {
         serde_json::json!({ "type": "object" })
     }
     async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
-        ToolResult::success("fn main() {}")
+        if self.refusal {
+            ToolResult::error(format!(
+                "{} inspection calls; answer now",
+                archon_tools::workflow_read_guard::READ_CEILING_MARKER
+            ))
+        } else {
+            ToolResult::success("fn main() {}")
+        }
     }
     fn permission_level(&self, _input: &serde_json::Value) -> PermissionLevel {
         PermissionLevel::Safe
@@ -141,8 +150,16 @@ impl Tool for FixedRead {
 }
 
 fn runner(provider: Arc<ScriptedProvider>, session: &str) -> SubagentRunner {
+    runner_with_read(provider, session, false)
+}
+
+fn runner_with_read(
+    provider: Arc<ScriptedProvider>,
+    session: &str,
+    refusal: bool,
+) -> SubagentRunner {
     let mut registry = crate::dispatch::ToolRegistry::new();
-    registry.register(Box::new(FixedRead));
+    registry.register(Box::new(FixedRead { refusal }));
     let definitions = registry.tool_definitions();
     let context = ToolContext {
         working_dir: std::env::current_dir().unwrap_or_default(),
@@ -233,6 +250,32 @@ async fn repeating_the_same_read_and_text_stops_at_the_window() {
         .last_progress()
         .expect("turn 1 renewed the host clock");
     assert!(text.contains(&last), "one signal for both: {last}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn refused_reads_do_not_renew_and_end_as_resumable_no_progress() {
+    let mut turns = vec![(
+        Some(r#"Read {"file_path":"/src/refused_0.rs"}"#),
+        read("/src/refused_0.rs"),
+    )];
+    for offset in 1..20 {
+        turns.push((None, read(&format!("/src/refused_{offset}.rs"))));
+    }
+    let clock = DispatchClock::new();
+    clock.admit();
+    let runner = runner_with_read(ScriptedProvider::new(turns), "pw-refused", true);
+    let started = tokio::time::Instant::now();
+    let result = scope_session(
+        "pw-refused",
+        vec![Arc::clone(&clock)],
+        scope(HostTimeout::Finite(WINDOW), runner.run("go")),
+    )
+    .await;
+    let elapsed = started.elapsed().as_secs();
+    let error = stall_text(result);
+    assert_eq!(elapsed, WINDOW, "{error}");
+    assert!(error.contains("refused tool calls: 14"), "{error}");
+    assert!(!error.contains("READ_CEILING_MARKER"), "{error}");
 }
 
 #[tokio::test(start_paused = true)]
