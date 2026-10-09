@@ -20,10 +20,76 @@ pub(crate) fn logic_identity() -> Option<(u32, String, String)> {
 
 /// The shell that evaluates the literal `test` predicate is part of the
 /// execution environment even when its path and PATH variable stay constant.
-pub(crate) fn shell_binary_digest() -> Option<String> {
-    let shell = std::path::Path::new("/bin/sh").canonicalize().ok()?;
-    let bytes = std::fs::read(shell).ok()?;
-    Some(super::content_digest(&bytes))
+pub(crate) fn shell_binary_digest(path: Option<&str>) -> Option<String> {
+    let paths = path.map(std::ffi::OsStr::new)?;
+    shell_identity_for(
+        archon_shell::resolve_posix_shell(),
+        &std::env::split_paths(paths).collect::<Vec<_>>(),
+    )
+}
+
+/// Resolve the selected shell as the process launcher will and commit to its
+/// location, executable mode, and bytes. An unknown identity makes the caller
+/// volatile instead of allowing a verdict to survive an unproven shell.
+fn shell_identity_for(
+    selected: &std::path::Path,
+    search_paths: &[std::path::PathBuf],
+) -> Option<String> {
+    let candidate = if selected.is_absolute() {
+        selected.to_path_buf()
+    } else if selected.components().count() == 1 {
+        search_paths
+            .iter()
+            .map(|directory| directory.join(selected))
+            .find(|path| executable_file(path))?
+    } else {
+        return None;
+    };
+    let shell = candidate.canonicalize().ok()?;
+    let metadata = std::fs::metadata(&shell).ok()?;
+    if !metadata.is_file() || !executable_metadata(&metadata) {
+        return None;
+    }
+    let bytes = std::fs::read(&shell).ok()?;
+    let path = shell.to_str()?;
+    Some(super::content_digest(
+        serde_json::json!([
+            path,
+            executable_mode(&metadata),
+            super::content_digest(&bytes)
+        ])
+        .to_string()
+        .as_bytes(),
+    ))
+}
+
+fn executable_file(path: &std::path::Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    metadata.is_file() && executable_metadata(&metadata)
+}
+
+#[cfg(unix)]
+fn executable_metadata(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn executable_metadata(_metadata: &std::fs::Metadata) -> bool {
+    true
+}
+
+#[cfg(unix)]
+fn executable_mode(metadata: &std::fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    metadata.permissions().mode() & 0o777
+}
+
+#[cfg(not(unix))]
+fn executable_mode(_metadata: &std::fs::Metadata) -> u32 {
+    0
 }
 
 /// Only one literal repository-relative filesystem predicate has a bounded

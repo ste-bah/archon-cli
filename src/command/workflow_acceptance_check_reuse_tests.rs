@@ -57,3 +57,64 @@ fn shell_globs_and_expansions_are_volatile() {
     assert!(!assess("test -f *.txt", "tree", "logic-1", "env-1").reusable);
     assert!(!assess("test -f $FILE", "tree", "logic-1", "env-1").reusable);
 }
+
+#[test]
+fn acceptance_freeze_reuse_logic_selected_shell_identity_reruns() {
+    let root = std::env::temp_dir().join(format!(
+        "archon-shell-identity-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let selected = root.join("selected-sh");
+    std::fs::write(&selected, b"shell version one").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&selected, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let original = shell_identity_for(&selected, std::slice::from_ref(&root)).unwrap();
+    std::fs::write(&selected, b"shell version two").unwrap();
+    let changed = shell_identity_for(&selected, std::slice::from_ref(&root)).unwrap();
+    let _ = std::fs::remove_dir_all(root);
+    assert_ne!(
+        original, changed,
+        "changed selected shell must invalidate reuse"
+    );
+}
+
+#[test]
+fn acceptance_freeze_reuse_logic_selected_shell_path_change_reruns() {
+    let root = std::env::temp_dir().join(format!(
+        "archon-shell-path-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let first = root.join("first");
+    let second = root.join("second");
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    for directory in [&first, &second] {
+        let shell = directory.join("sh");
+        std::fs::write(&shell, b"same shell bytes").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    let selected = std::path::Path::new("sh");
+    let original = shell_identity_for(selected, std::slice::from_ref(&first)).unwrap();
+    let changed = shell_identity_for(selected, std::slice::from_ref(&second)).unwrap();
+    let _ = std::fs::remove_dir_all(root);
+    assert_ne!(
+        original, changed,
+        "a different selected shell path must invalidate reuse"
+    );
+}

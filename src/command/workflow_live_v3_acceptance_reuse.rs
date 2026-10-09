@@ -91,7 +91,9 @@ pub(super) fn key(context: &StageContext, criterion: &AcceptanceCriterion) -> Op
         version,
         digest,
         build,
-        crate::command::workflow_task_set::workflow_acceptance_check_reuse::shell_binary_digest()?,
+        crate::command::workflow_task_set::workflow_acceptance_check_reuse::shell_binary_digest(
+            environment.get("PATH").map(String::as_str),
+        )?,
         environment,
         policy,
     ]);

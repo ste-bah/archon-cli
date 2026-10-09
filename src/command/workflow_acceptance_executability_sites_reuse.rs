@@ -55,6 +55,7 @@ pub(super) fn memo_key(
         Site::Direct | Site::Hermetic | Site::Unavailable(_) => "hermetic".to_string(),
     };
     let (environment, _) = site_environment(probe);
+    let shell_path = environment.get("PATH").cloned();
     let environment = serde_json::to_string(&environment).ok()?;
     let AcceptanceCheck::Command {
         command,
@@ -99,7 +100,9 @@ pub(super) fn memo_key(
         logic,
         logic_digest,
         build,
-        crate::command::workflow_task_set::workflow_acceptance_check_reuse::shell_binary_digest()?,
+        crate::command::workflow_task_set::workflow_acceptance_check_reuse::shell_binary_digest(
+            shell_path.as_deref(),
+        )?,
         environment,
     ]);
     Some(content_digest(key.to_string().as_bytes()))
