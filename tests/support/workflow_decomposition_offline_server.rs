@@ -275,8 +275,8 @@ fn scripted_answer(prompt: &str) -> (&'static str, String) {
                 serde_json::json!({
                     "id": id,
                     "verdict": "accepted",
-                    "counterexample": "No passing false state is constructible.",
-                    "reason": "The declared check directly measures its criterion."
+                    "counterexample": "",
+                    "reason": "The command directly checks the declared outcome and exits non-zero when it is false."
                 })
             })
             .collect::<Vec<_>>();
@@ -303,19 +303,19 @@ fn scripted_answer(prompt: &str) -> (&'static str, String) {
             return (
                 "acceptance",
                 format!(
-                    r#"{{"id":"{id}","criterion":"The second artifact is ready JSON.","check":{{"kind":"command","command":"test -f src/beta.json && grep -q '\"ready\":true' src/beta.json","cwd":"repo_root"}},"gap_permitted":false,"covers":["REQ-X-002"],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
+                    r#"{{"id":"{id}","criterion":"The second artifact is ready JSON.","check":{{"kind":"command","command":"python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json","cwd":"repo_root"}},"gap_permitted":false,"covers":["REQ-X-002"],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
                 ),
             );
         }
         return (
             "acceptance",
             format!(
-                r#"{{"id":"{id}","criterion":"The declared outcome artifact is ready.","check":{{"kind":"floor","contract":{{"kind":"generic_outcome","artifact_path":".archon/proof/outcome.json","artifact_format":"json","required_true_fields":["ready"]}}}},"gap_permitted":false,"covers":[],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
+                r#"{{"id":"{id}","criterion":"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.","check":{{"kind":"command","command":"python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json","cwd":"repo_root"}},"gap_permitted":false,"covers":[],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
             ),
         );
     }
     if prompt.contains("Author one complete task-skeleton JSON artifact") {
-        return ("skeleton", r#"{"schema_version":1,"acceptance_digest":"","tasks":[{"task_id":"TASK-X-010","file_name":"TASK-X-010.md","depends_on":[],"blocks":["TASK-X-020"],"implements":["REQ-X-001"],"deliverable_contracts":[{"kind":"alpha_text","artifact_path":"src/alpha.txt","artifact_format":"text","min_instances":1}]},{"task_id":"TASK-X-020","file_name":"TASK-X-020.md","depends_on":[{"task_id":"TASK-X-010","consumes":[{"artifact_path":"src/alpha.txt"}],"ordering_only":false}],"blocks":[],"implements":["REQ-X-002"],"deliverable_contracts":[{"kind":"beta_json","artifact_path":"src/beta.json","artifact_format":"json","required_true_fields":["ready"],"min_instances":1}]}]}"#.into());
+        return ("skeleton", r#"{"schema_version":1,"acceptance_digest":"","tasks":[{"task_id":"TASK-X-010","file_name":"TASK-X-010.md","depends_on":[],"blocks":["TASK-X-020"],"implements":["REQ-X-001"],"deliverable_contracts":[{"kind":"alpha_text","artifact_path":"src/alpha.txt","artifact_format":"text","min_instances":1},{"kind":"generic_outcome","artifact_path":".archon/proof/outcome.json","artifact_format":"json","required_true_fields":["ready"],"min_instances":1}]},{"task_id":"TASK-X-020","file_name":"TASK-X-020.md","depends_on":[{"task_id":"TASK-X-010","consumes":[{"artifact_path":"src/alpha.txt"}],"ordering_only":false}],"blocks":[],"implements":["REQ-X-002"],"deliverable_contracts":[{"kind":"beta_json","artifact_path":"src/beta.json","artifact_format":"json","required_true_fields":["ready"],"min_instances":1}]}]}"#.into());
     }
     if prompt.contains("Author the complete TASK body") {
         let second = prompt.contains("task_id TASK-X-020");
@@ -328,7 +328,7 @@ fn scripted_answer(prompt: &str) -> (&'static str, String) {
                 "REQ-X-002",
                 "src/beta.json",
                 "Write a JSON object with ready set to true.",
-                "- kind: beta_json\n  artifact_path: src/beta.json\n  artifact_format: json\n  required_true_fields: [ready]\n  min_instances: 1",
+                "- kind: beta_json\n    artifact_path: src/beta.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1",
             )
         } else {
             (
@@ -338,14 +338,28 @@ fn scripted_answer(prompt: &str) -> (&'static str, String) {
                 "[TASK-X-020]",
                 "REQ-X-001",
                 "src/alpha.txt",
-                "Write the nonempty line alpha ready.",
-                "- kind: alpha_text\n  artifact_path: src/alpha.txt\n  artifact_format: text\n  min_instances: 1",
+                "Write the nonempty line alpha ready and create the JSON outcome artifact with ready set to true.",
+                "- kind: alpha_text\n    artifact_path: src/alpha.txt\n    artifact_format: text\n    min_instances: 1\n  - kind: generic_outcome\n    artifact_path: .archon/proof/outcome.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1",
+            )
+        };
+        let observations = if second {
+            format!("`{path}` — absent")
+        } else {
+            format!("`{path}` — absent\n`.archon/proof/outcome.json` — absent")
+        };
+        let focused_tests = if second {
+            format!(
+                "- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' {path}`"
+            )
+        } else {
+            format!(
+                "- `test -s {path}`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`"
             )
         };
         return (
             "body",
             format!(
-                "```yaml\ntask_id: {id}\ntitle: {title}\ncomplexity: low\nstatus: ready\ndepends_on: {dep}\nblocks: {blocks}\nimplements: [{req}]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts:\n  {contracts}\n```\n\n## Objective\n{text}\n\n## Files Expected to Change\n`{path}` — absent\n\n## Focused Tests\n- `test -f {path}`\n"
+                "```yaml\ntask_id: {id}\ntitle: {title}\ncomplexity: low\nstatus: ready\ndepends_on: {dep}\nblocks: {blocks}\nimplements: [{req}]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts:\n  {contracts}\n```\n\n## Objective\n{text}\n\n## Files Expected to Change\n{observations}\n\n## Focused Tests\n{focused_tests}\n"
             ),
         );
     }
@@ -386,5 +400,63 @@ mod tests {
         assert!(skeleton.contains("REQ-X-002"), "{skeleton}");
         let (_, body) = scripted_answer("Author the complete TASK body");
         assert!(body.contains("REQ-X-001"), "{body}");
+    }
+
+    #[test]
+    fn golden_answers_make_the_outcome_check_executable_and_owned() {
+        let prompt = r#"{"task":"Author exactly one acceptance entry identified below. Author ONLY entry AC-X-001: The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true."}"#;
+        let (_, answer) = scripted_answer(prompt);
+        let entry: serde_json::Value = serde_json::from_str(&answer).unwrap();
+        assert_eq!(entry["check"]["kind"], "command");
+        assert_eq!(entry["check"]["cwd"], "repo_root");
+        assert!(
+            entry["check"]["command"]
+                .as_str()
+                .unwrap()
+                .contains("[\"ready\"] is True"),
+            "{entry}"
+        );
+
+        let (_, skeleton) = scripted_answer("Author one complete task-skeleton JSON artifact");
+        let skeleton: serde_json::Value = serde_json::from_str(&skeleton).unwrap();
+        let contracts = skeleton["tasks"][0]["deliverable_contracts"]
+            .as_array()
+            .unwrap();
+        assert!(
+            contracts
+                .iter()
+                .any(|contract| contract["artifact_path"] == ".archon/proof/outcome.json"),
+            "{skeleton}"
+        );
+
+        let prompt = "Author the complete TASK body for host-frozen task_id TASK-X-010.";
+        let (_, body) = scripted_answer(prompt);
+        assert!(
+            body.contains("`.archon/proof/outcome.json` — absent"),
+            "{body}"
+        );
+        assert!(body.contains("json.load(open(sys.argv[1]))"), "{body}");
+        let yaml = body
+            .split("```yaml\n")
+            .nth(1)
+            .unwrap()
+            .split("\n```")
+            .next()
+            .unwrap();
+        let body_yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
+        assert_eq!(
+            body_yaml["deliverable_contracts"]
+                .as_sequence()
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let (_, judge) = scripted_answer(
+            r#"{"task":"Adversarially judge every acceptance check. decisions include ","id":"AC-X-001"}"#,
+        );
+        let judge: serde_json::Value = serde_json::from_str(&judge).unwrap();
+        assert_eq!(judge["decisions"][0]["verdict"], "accepted");
+        assert_eq!(judge["decisions"][0]["counterexample"], "");
     }
 }
