@@ -70,42 +70,53 @@ impl FakeProvider {
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let thread_stop = stop.clone();
         let thread = thread::spawn(move || {
-            let mut connections = Vec::new();
+            let mut connections: Vec<(thread::JoinHandle<()>, std::net::TcpStream)> = Vec::new();
             while !thread_stop.load(std::sync::atomic::Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        let shutdown_stream = match stream.try_clone() {
+                            Ok(stream) => stream,
+                            Err(_) => continue,
+                        };
                         let counts = request_counts.clone();
                         let requests = request_log.clone();
                         let blocked_role = thread_blocked_role.clone();
                         let release = thread_release.clone();
                         let entered = thread_entered.clone();
                         let stop = thread_stop.clone();
-                        connections.push(thread::spawn(move || {
-                            let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
-                            serve_connection(
-                                &mut stream,
-                                &counts,
-                                &requests,
-                                &blocked_role,
-                                &release,
-                                &entered,
-                                &stop,
-                            );
-                        }));
+                        connections.push((
+                            thread::spawn(move || {
+                                serve_connection(
+                                    &mut stream,
+                                    &counts,
+                                    &requests,
+                                    &blocked_role,
+                                    &release,
+                                    &entered,
+                                    &stop,
+                                );
+                            }),
+                            shutdown_stream,
+                        ));
                     }
                     Err(_) => thread::sleep(Duration::from_millis(5)),
                 }
                 let mut active = Vec::new();
-                for connection in connections {
+                for (connection, shutdown_stream) in connections {
                     if connection.is_finished() {
                         let _ = connection.join();
                     } else {
-                        active.push(connection);
+                        active.push((connection, shutdown_stream));
                     }
                 }
                 connections = active;
             }
-            for connection in connections {
+            // Stop is the only server-initiated reason to close a keep-alive
+            // socket. Shutting down each tracked socket unblocks its reader.
+            for (_, stream) in &connections {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
+            for (connection, _) in connections {
                 let _ = connection.join();
             }
         });
@@ -379,7 +390,7 @@ use script::scripted_answer;
 
 #[cfg(test)]
 mod tests {
-    use super::next_request;
+    use super::{FakeProvider, next_request};
     use std::io::Cursor;
 
     #[test]
@@ -411,5 +422,39 @@ mod tests {
         assert_eq!(second.body, second_body.as_bytes());
         assert!(second.keep_alive());
         assert!(next_request(&mut reader, &mut pending).unwrap().is_none());
+    }
+
+    #[test]
+    #[ignore = "requires local socket access; run outside the restricted test sandbox"]
+    fn pooled_client_sends_fifty_sequential_requests_without_errors() {
+        let provider = FakeProvider::start();
+        let client = reqwest::blocking::Client::builder()
+            .pool_idle_timeout(None)
+            .build()
+            .unwrap();
+
+        for index in 0..50 {
+            let response = client
+                .post(&provider.base_url)
+                .header("x-api-key", "offline-test-key")
+                .json(&serde_json::json!({
+                    "stream": false,
+                    "messages": [{"role": "user", "content": format!("request {index}")}]
+                }))
+                .send()
+                .unwrap_or_else(|error| panic!("request {index} failed: {error}"));
+            // Unknown prompts intentionally return HTTP 500, which still
+            // proves the keep-alive exchange completed and its body was read.
+            assert_eq!(
+                response.status(),
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR
+            );
+            let _ = response.bytes().unwrap();
+        }
+
+        assert_eq!(provider.requests.snapshot().len(), 50);
+        assert_eq!(provider.counts.snapshot().values().sum::<usize>(), 50);
+        drop(client);
+        drop(provider);
     }
 }
