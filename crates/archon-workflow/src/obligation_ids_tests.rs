@@ -134,6 +134,14 @@ fn obligation_texts_carry_the_exact_statement_for_every_shape() {
 }
 
 #[test]
+fn obligation_ids_and_texts_are_identical_for_crlf_prds() {
+    let crlf = PRD.replace('\n', "\r\n");
+    assert_eq!(obligation_ids(&crlf), obligation_ids(PRD));
+    assert_eq!(obligation_texts(&crlf), obligation_texts(PRD));
+    assert_eq!(acceptance_criteria(&crlf), acceptance_criteria(PRD));
+}
+
+#[test]
 fn wrapped_requirement_text_stops_at_the_next_list_item() {
     let prd = "## Requirements\n\n- REQ-X-001: The first line\n  continues here\n- REQ-X-002: The sibling\n";
     let texts = obligation_texts(prd);
