@@ -36,14 +36,14 @@ fn quoted_flow_sequence_items_are_decoded_by_yaml() {
 
 #[test]
 fn malformed_implements_keeps_the_existing_refusal_message() {
-    let raw = "```yaml\ntask_id: TASK-X-001\nimplements: [REQ-X-001\n```\n";
+    let raw = "```yaml\ntask_id: TASK-X-001\nimplements: REQ-X-001\n```\n";
     let error = parse_task_binding(raw, "tasks/broken.md").unwrap_err();
     assert!(
         error
             .to_string()
             .contains("must be a single-line flow sequence")
     );
-    assert!(error.to_string().contains("found `[REQ-X-001`"));
+    assert!(error.to_string().contains("found `REQ-X-001`"));
 }
 
 #[test]
@@ -74,4 +74,15 @@ fn malformed_required_tools_scalar_does_not_fail_the_task() {
     let binding = parse_task_binding(raw, "tasks/TASK-W-001.md").expect("tolerated");
     assert_eq!(binding.implements, ["REQ-4"]);
     assert!(binding.required_tools.is_empty());
+}
+
+#[test]
+fn yaml_syntax_errors_report_the_parse_error_and_source_path() {
+    let raw = "```yaml\ntask_id: TASK-X-001\nimplements: [REQ-X-001\n```\n";
+    let error = parse_task_binding(raw, "tasks/TASK-X-001.md")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("tasks/TASK-X-001.md"), "{error}");
+    assert!(error.contains("YAML parse error"), "{error}");
+    assert!(!error.contains("no `task_id:"), "{error}");
 }

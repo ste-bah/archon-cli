@@ -203,17 +203,10 @@ pub fn parse_task_binding(raw: &str, source_path: &str) -> Result<TaskBinding> {
         ..TaskBinding::default()
     };
 
-    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_block(raw)).map_err(|_| {
-        if let Some(body) = yaml_field_body(yaml_block(raw), "implements") {
-            KnowledgeError::Traceability(format!(
-                "{source_path}: `implements:` must be a single-line flow sequence \
-                 like `implements: [REQ-X-001]`; found `{body}`"
-            ))
-        } else {
-            KnowledgeError::Traceability(format!(
-                "{source_path}: no `task_id:` in the task's yaml block"
-            ))
-        }
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_block(raw)).map_err(|error| {
+        KnowledgeError::Traceability(format!(
+            "{source_path}: YAML parse error in task yaml block: {error}"
+        ))
     })?;
     let mapping = yaml.as_mapping();
     let field = |name: &str| {
