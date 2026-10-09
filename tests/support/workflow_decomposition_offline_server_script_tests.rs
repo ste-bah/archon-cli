@@ -13,13 +13,13 @@ fn supplementary_answer_covers_the_requirement_named_by_the_id() {
     for (id, criterion, requirement, artifact) in [
         (
             "SUP-REQ-X-001",
-            "The first artifact contains the required line.",
+            "The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.",
             "REQ-X-001",
             "src/alpha.txt",
         ),
         (
             "SUP-REQ-X-002",
-            "The second artifact is ready JSON.",
+            "The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.",
             "REQ-X-002",
             "src/beta.json",
         ),

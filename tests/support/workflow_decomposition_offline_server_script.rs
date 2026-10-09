@@ -55,8 +55,14 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
             "AC-X-001" => {
                 "The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true."
             }
-            "SUP-REQ-X-001" => "The first artifact contains the required line.",
-            "SUP-REQ-X-002" => "The second artifact is ready JSON.",
+            // A supplementary prompt quotes the PRD requirement it covers
+            // (tests/fixtures/offline_decomposition/prd.md:9-10).
+            "SUP-REQ-X-001" => {
+                "The first task creates `src/alpha.txt` with the nonempty line `alpha ready`."
+            }
+            "SUP-REQ-X-002" => {
+                "The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true."
+            }
             _ => return unknown_prompt(),
         };
         if !text.contains(criterion) {
