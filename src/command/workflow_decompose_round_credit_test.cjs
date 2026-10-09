@@ -99,8 +99,10 @@ async function passCreditedOnce() {
   const out = await run({A:['ok', 1, 'ok'], B:['ok', 1, 'bad']}, [refute(['A', 'B']), clean]);
   assert.equal(out.error, 'paused');
   assert.deepEqual(out.flags, [true, true, true, false, false, false]);
-  assert.deepEqual(credited(out.history[2]), [['A', true]]);
-  for (const step of out.history.slice(3)) assert.equal(step.entries, undefined, 'A is not credited again');
+  assert.deepEqual(credited(out.history[2]), [['B', false], ['A', true]]);
+  for (const step of out.history.slice(3)) {
+    assert.ok(!(step.entries || []).some(entry => entry.subject === 'A' && entry.progress), 'A is not credited again');
+  }
 }
 
 // Issue 261 kept: a rewrite of a judge-refuted entry that passes the author
@@ -109,8 +111,11 @@ async function passCreditedOnce() {
 async function unmeasuredRewriteIsNotCredited(kind) {
   const out = await run({A:['ok'], B:['ok', kind]}, [refute(['A', 'B']), clean]);
   assert.equal(out.error, 'paused');
-  assert.deepEqual(out.flags, [true, false, false, false]);
-  assert.equal(out.history[1].entries, undefined, 'A was never measured in the episode');
+  const expected = kind === 'bad' ? [true, true, false, false, false] : [true, false, false, false];
+  assert.deepEqual(out.flags, expected);
+  if (kind === 'bad') assert.ok(credited(out.history[1]).some(([id, improved]) => id === 'B' && improved),
+    'a new malformed-reply class is progress once for its entry');
+  else assert.equal(out.history[1].entries, undefined, 'a rewrite beside transport failure is not measured');
 }
 
 // B's unparseable reply is B's own note: C (whose call failed in the same

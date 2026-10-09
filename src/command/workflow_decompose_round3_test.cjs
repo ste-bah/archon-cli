@@ -61,8 +61,8 @@ async function partial(operational, replacing) {
     throw new Error(replacing ? `unexpected pause with retained work ${completed}: ${JSON.stringify(e)}` : 'paused');
   } };
   if (replacing) {
-    await assert.rejects(ctx.authorCandidate(w, policy(ctx)), /unexpected pause/);
-    assert.ok(!completed.includes('D'), 'rewrites alone must not extend the progress window');
+    await ctx.authorCandidate(w, policy(ctx));
+    assert.equal(gates, 2, 'a new malformed-reply refusal class advances once, then the repair reaches the gate');
   } else {
     await assert.rejects(ctx.authorCandidate(w, policy(ctx)), /paused/);
     assert.ok(!completed.includes('D'), 'three provider failures pause despite retained author work');
@@ -86,9 +86,9 @@ async function mixed() {
   const w = { agent: async () => ++calls % 3 === 0 ? { status: 'failed', summary: 'transport' }
     : answer('malformed'), pause: async (_, e) => { paused = e; throw new Error('paused'); } };
   await assert.rejects(ctx.authorCandidate(w, policy(ctx)), /paused/);
-  assert.equal(calls, 4, `mixed failures use independent no-progress windows: ${calls}`);
-  assert.equal(paused.author_calls, 4, JSON.stringify(paused));
-  assert.equal(paused.answered_attempts, 3);
+  assert.equal(calls, 5, `a new malformed-reply refusal class advances before the independent windows stall: ${calls}`);
+  assert.equal(paused.author_calls, 5, JSON.stringify(paused));
+  assert.equal(paused.answered_attempts, 4);
 }
 (async () => {
   let failed = 0;

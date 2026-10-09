@@ -282,7 +282,10 @@ fn a_gate_operational_error_pauses_the_author_loop_instead_of_failing() {
         r##"{ operational: (n, capability) => capability === "land-task-body" ? "judge response was truncated" : null }"##,
     );
     assert_paused(&out);
-    assert_eq!(out["calls"], 3, "{out}");
+    assert_eq!(
+        out["calls"], 1,
+        "the authored candidate is retried at the gate without another author call: {out}"
+    );
     let evidence = evidence(&out, 0);
     assert_eq!(evidence["reason"], "operational_no_progress", "{evidence}");
     assert_eq!(

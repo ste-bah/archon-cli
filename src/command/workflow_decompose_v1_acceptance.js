@@ -29,6 +29,7 @@ function acceptanceAuthorPrompt() {
     "Return one JSON object with id, criterion, check, gap_permitted, judgment. The two examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.",
     ENTRY_SHAPES,
     "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
+    "Every check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.",
     "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
     "covers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.",
     "Your entire reply must be the entry itself: the raw JSON object, starting with { and ending with }. Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
@@ -70,8 +71,13 @@ function unwrapEntry(parsed, id) {
   if (!parsed || typeof parsed !== "object") return parsed;
   if (parsed.id === id) return parsed;
   const list = Array.isArray(parsed.acceptance) ? parsed.acceptance : null;
-  if (list && list.length === 1 && list[0] && list[0].id === id) return list[0];
+  if (list && list.length === 1 && list[0] && typeof list[0] === "object") return list[0];
   return parsed;
+}
+
+function malformedAcceptanceFailure(id, reason) {
+  const finding = {text:`candidate artifact was refused: acceptance entry ${id}: ${reason}`, subject:id};
+  return {failure:{status:"failed",malformed:true,entryId:id,findings:[finding],summary:finding.text}};
 }
 
 function extractJsonObject(text) {
@@ -188,13 +194,19 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   if (result.status !== "failed") state.roundAnswered += 1;
   if (result.dry_run === true) return {entry:setHostOwnedFields({id}, criteria)};
   if (result.status === "failed") return {failure:result};
-  if (result.stopReason === "end_turn" && result.content) {
+  if (result.stopReason !== "end_turn") {
+    return malformedAcceptanceFailure(id, `expected stop reason end_turn, got ${result.stopReason || "missing"}`);
+  }
+  if (typeof result.content !== "string" || result.content.length === 0) {
+    return malformedAcceptanceFailure(id, "stop reason was end_turn but content was missing or empty");
+  }
+  {
     let entry;
     const json = extractJsonObject(result.content);
     try {
       entry = unwrapEntry(JSON.parse(json), id);
     } catch (error) {
-      return {failure:{status:"failed",malformed:true,summary:acceptanceParseRefusal(id, json, error)}};
+      return malformedAcceptanceFailure(id, acceptanceParseRefusal(id, json, error));
     }
     if (entry && entry.id === id) {
       setHostOwnedFields(entry, criteria);
@@ -214,8 +226,11 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
           summary:defects.map(defect => defect.text).join("; ")}};
       }
     }
+    if (entry && Object.prototype.hasOwnProperty.call(entry, "id")) {
+      return malformedAcceptanceFailure(id, `expected id ${id}, got id ${JSON.stringify(entry.id)}`);
+    }
   }
-  return {failure:{status:"failed",malformed:true,summary:`acceptance entry ${id} returned no complete entry`}};
+  return malformedAcceptanceFailure(id, `reply did not contain a complete entry with id ${id}`);
 }
 
 // Parsed JSON objects have no meaningful property order. Formatting changes

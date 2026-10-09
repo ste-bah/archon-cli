@@ -171,6 +171,7 @@ function skeletonPolicy(initialFeedback) {
       SKELETON_SHAPE,
       "Every <...> above is a placeholder describing the value, never a value: replace each one.",
       "One task per unit of work; task_id and file_name become the frozen tuple the bodies must preserve.",
+      "Write task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in the filename, without the extension.",
       "depends_on and blocks are empty arrays when the task has no such relation; every entry present takes exactly the shape shown.",
       "Each depends_on entry declares a non-empty consumes list or ordering_only: true.",
       "The host overwrites acceptance_digest: send the placeholder shown.",
@@ -237,11 +238,16 @@ function bodyPolicy(subject, initialFeedback) {
       "The file must open with a fenced yaml block carrying exactly these keys:",
       BODY_SHAPE,
       "Values are yours except task_id and file_name, which must equal the frozen tuple above.",
+      "Write task_id as the unquoted canonical TASK-<AREA>-<NNN>; its value must equal the TASK-<AREA>-<NNN> id in this filename, without the extension.",
+      "Copy the frozen implements array exactly, preserving every value and its order.",
       `Read the project MCP configuration at ${args.projectRoot}/.mcp.json and match this task's PRD obligations to its exact permitted tool names.`,
       "Declare only task-specific invocation obligations: every declared tool must actually be called and reported in commands_run; use fully qualified mcp__server__tool names for MCP calls.",
       "An MCP deliverable cannot declare no MCP tools. List the exact MCP calls and inputs in Focused Tests; shell commands and recorded fixtures alone do not exercise MCP.",
+      "Every MCP tool called by a Focused Tests command must appear in required_tools, using its exact project-permitted name from .mcp.json.",
       "HTTP/service providers are not MCP tools. Declare required environment keys only when live execution requires them; preserve explicitly permitted no-credential/unavailable paths. Never copy the ambient project toolchain into every task.",
-      "Write implements as the single-line flow sequence shown; a block list leaves the file unreadable to the requirements trace.",
+      "For each claimed PRD obligation, decide whether it is necessarily true assuming every listed task passes its acceptance criteria and focused tests, including all allowances in its text. If it is not necessarily true, identify the weakest claiming task and quote its loophole verbatim; if it is necessarily true, leave the weakest task and quote empty.",
+      "Every test file run by Focused Tests must be declared by an owning task in Files Expected to Change, a shared-append target or a deliverable contract (a declared directory may cover it); declare a test file in the Files Expected to Change of the task that owns it.",
+      "Files Forbidden to Change entries must be literal paths, directories, basenames or globs, not prose descriptions.",
       "After the yaml block, use Markdown headings; include a `## Focused Tests` section whose entries are runnable commands.",
       "Preserve every frozen tuple field exactly.",
       "The yaml block is part of the file: close it with a ``` line of its own before the first Markdown heading.",
@@ -335,6 +341,7 @@ async function authorCandidate(w, policy) {
       if (!measuredReplies) progress.answered += 1;
       recordOperational(progress, call, routed.operational, advanced, round, "gate");
       lastFindings = [`host gate operational failure: ${routed.operational}`];
+      carried = authored.content;
       continue;
     }
     if (policy.author) {

@@ -329,15 +329,15 @@ fn an_operational_stall_after_a_resume_gets_a_fresh_window() {
 
 #[test]
 fn an_acceptance_entry_that_never_parses_pauses_the_run() {
-    // Every reply is prose: three provider replies without progress pause
-    // the run. Nested per-round retries must not multiply the window.
+    // Every reply is prose: its new malformed-reply class is progress once,
+    // then three repeated classes without progress pause the run.
     let out = run(
         "enforce",
         r#"{ answer: () => ({ status: "accepted", stopReason: "end_turn", content: "I could not produce an entry." }) }"#,
         "workflow(w)",
     );
     assert_paused(&out);
-    assert_eq!(out["calls"], 3, "{out}");
+    assert_eq!(out["calls"], 4, "{out}");
     assert_eq!(pause_ids(&out), ["pause-acceptance-1"], "{out}");
     assert_eq!(
         evidence(&out, 0)["reason"],
