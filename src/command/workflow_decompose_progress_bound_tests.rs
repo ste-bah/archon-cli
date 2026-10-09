@@ -285,6 +285,17 @@ fn a_gate_operational_error_pauses_the_author_loop_instead_of_failing() {
     assert_eq!(out["calls"], 3, "{out}");
     let evidence = evidence(&out, 0);
     assert_eq!(evidence["reason"], "operational_no_progress", "{evidence}");
+    assert_eq!(
+        evidence["progress_history"][0]["kind"], "operational",
+        "{evidence}"
+    );
+    assert!(
+        evidence["recovery"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("host gate"),
+        "{evidence}"
+    );
     assert!(
         evidence["last_findings"][0]
             .as_str()

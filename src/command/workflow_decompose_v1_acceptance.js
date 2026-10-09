@@ -245,11 +245,11 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
     else if (failure && failure.malformed) state.refusals.set(id, [failure.summary]);
     else if (!failure) state.refusals.delete(id);
   });
-  // A call that failed in transport is an outage of the round, whatever the
-  // first failure is (refused or unparseable replies hide no outage).
+  // Provider/context failures are operational outages. A validator refusal
+  // has findings and remains an author attempt instead.
   state.roundOutage = pending.some((_, index) => {
     const failure = settled[index]?.status === "fulfilled" ? settled[index].value.failure : null;
-    return Boolean(failure) && failure.malformed !== true;
+    return Boolean(failure) && failure.malformed !== true && !Array.isArray(failure.findings);
   });
   // A thrown call (a pause or cancel the host observed, or a host error)
   // outranks a failed reply at any index: returned as a failed value it would

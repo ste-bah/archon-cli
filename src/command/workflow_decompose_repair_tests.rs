@@ -106,6 +106,7 @@ fn run_js(driver: &str) -> String {
         "loopEvidence",
         "PAUSES",
         "pauseLoop",
+        "progressOperationalComponents",
         "pauseAuthorLoop",
         "PACKAGING_REFUSAL",
         "AUTHOR_CALLS",

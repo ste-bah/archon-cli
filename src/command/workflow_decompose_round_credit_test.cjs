@@ -196,21 +196,22 @@ async function noOutagePausesToo() {
   const out = await run({A:['ok', 1], B:['ok', 1]}, [refute(['A', 'B'])], {mode:'observe'});
   assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
   assert.equal(out.pauses.length, 1);
-  assert.equal(out.pauses[0].reason, 'no_progress');
+  assert.equal(out.pauses[0].reason, 'no_progress', JSON.stringify(out.pauses[0]));
   assert.notEqual(out.history[2].outage, true, JSON.stringify(out.history[2]));
 }
 
 // Observe: a window that ends on outages after a judged repeat pauses
 // (resumable); it never returns the commit the outages left unjudged.
-async function observeOutagePauses() {
+async function oneOperationalWindowDoesNotBorrowJudgedAttempts() {
   const out = await run({A:['ok']}, [refute(['A']), refute(['A']), outage, outage, clean], {mode:'observe'});
-  assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
-  assert.deepEqual(out.history.map(step => step.kind), ['judged', 'judged', 'operational', 'operational']);
+  assert.equal(out.error, undefined, `two operational rounds fit their own window: ${JSON.stringify(out.pauses)}`);
+  assert.deepEqual(out.pauses, []);
 }
-// One outage inside a judged window is enough: the window is not measured.
-async function observeOneOutagePauses() {
+// A successful gate resets operational attempts; author findings before it do not.
+async function successfulGateResetsOperationalWindow() {
   const out = await run({A:['ok']}, [refute(['A']), refute(['A']), outage, refute(['A']), clean], {mode:'observe'});
-  assert.equal(out.error, 'paused', `observe must pause, got ${JSON.stringify(out.result)}`);
+  assert.equal(out.error, undefined, `the refutation was judged successfully and reset the window: ${JSON.stringify(out.pauses)}`);
+  assert.deepEqual(out.pauses, []);
 }
 // Control: judged repeats alone pause observe too (Issue 288), with the
 // open refutation as evidence; the committed artifact is not returned.
@@ -235,16 +236,47 @@ async function newEntryBeforeOutages() {
 async function noNewEntryOutageIsNotProgress() {
   const out = await run({A:['ok']}, [refute(['A']), refute(['A']), outage, outage, outage, clean]);
   assert.equal(out.error, 'paused');
-  assert.deepEqual(out.history.map(step => step.kind), ['judged', 'judged', 'operational', 'operational']);
-  assert.deepEqual(out.flags, [true, false, false, false]);
+  assert.deepEqual(out.history.map(step => step.kind), ['judged', 'judged', 'operational', 'operational', 'operational']);
+  assert.deepEqual(out.flags, [true, false, false, false, false]);
 }
 // The added entry is credited at the first outage only; later outages stall.
 async function newEntryCreditedOnce() {
   const out = await run({A:['ok']}, [refute(['A']), owe('REQ-1'), outage, outage, outage, outage, clean]);
   assert.equal(out.error, 'paused', 'bounded: repeated outages after one credit pause');
   assert.deepEqual(out.history.map(step => step.kind),
-    ['judged', 'judged', 'operational', 'operational', 'operational', 'operational']);
-  assert.deepEqual(out.flags, [true, false, true, false, false, false]);
+    ['judged', 'judged', 'operational', 'operational', 'operational']);
+  assert.deepEqual(out.flags, [true, false, true, false, false]);
+}
+
+// Gate and provider failures use their own consecutive window. They remain
+// in progress_history as operational rounds and never spend author attempts.
+async function operationalRoundsUseOwnWindow() {
+  const out = await run({A:['ok']}, [outage, outage, outage]);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.pauses[0].reason, 'operational_no_progress');
+  assert.deepEqual(out.history.map(step => step.kind), ['operational', 'operational', 'operational']);
+  assert.match(out.pauses[0].recovery, /host gate/);
+}
+
+async function operationalRoundDoesNotSpendAuthorWindow() {
+  const out = await run({A:['down', 1, 1, 1, 1, 1]}, [clean]);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.pauses[0].reason, 'no_progress', JSON.stringify(out.pauses[0]));
+  assert.deepEqual(out.history.map(step => step.kind), ['operational', 'refused', 'refused', 'refused', 'refused']);
+}
+
+async function authorProgressDoesNotResetOperationalWindow() {
+  const out = await run({A:['down', 1, 'ok', 'ok']}, [outage, outage, outage]);
+  assert.equal(out.error, 'paused');
+  assert.equal(out.pauses[0].reason, 'operational_no_progress');
+  assert.deepEqual(out.history.map(step => step.kind), ['operational', 'refused', 'operational', 'operational']);
+  assert.deepEqual(out.flags, [false, true, true, false]);
+}
+
+async function twoAuthorRefusalsAfterProviderFailureDoNotPause() {
+  const out = await run({A:['down', 1, 1, 'ok']}, [clean]);
+  assert.equal(out.error, undefined, JSON.stringify(out.pauses));
+  assert.deepEqual(out.pauses, []);
 }
 
 const tests = [
@@ -266,12 +298,16 @@ const tests = [
   ['F3: an outage behind a refusal pauses observe', () => hiddenOutagePauses(1)],
   ['F3: an outage behind an unparseable reply pauses observe', () => hiddenOutagePauses('bad')],
   ['F3 control: the window without an outage pauses as a judged stall', noOutagePausesToo],
-  ['observe pauses on outages after a judged repeat', observeOutagePauses],
-  ['observe pauses on one outage inside a judged window', observeOneOutagePauses],
+  ['two operational rounds do not borrow judged attempts', oneOperationalWindowDoesNotBorrowJudgedAttempts],
+  ['a successful gate resets operational attempts', successfulGateResetsOperationalWindow],
   ['observe pauses on judged repeats (control)', observeJudgedRepeatsPause],
   ['N1 probe: a new entry in a clean round before two outages is progress', newEntryBeforeOutages],
   ['N1 edge: a round with no new entry before an outage is not progress', noNewEntryOutageIsNotProgress],
   ['N1 edge: a new entry before outages is credited once', newEntryCreditedOnce],
+  ['operational rounds fill their own window and identify the gate', operationalRoundsUseOwnWindow],
+  ['an operational round does not spend the author window', operationalRoundDoesNotSpendAuthorWindow],
+  ['author progress does not reset operational attempts before a successful gate', authorProgressDoesNotResetOperationalWindow],
+  ['one provider failure and two author refusals do not pause', twoAuthorRefusalsAfterProviderFailureDoNotPause],
 ];
 module.exports = tests;
 if (require.main === module) (async () => {

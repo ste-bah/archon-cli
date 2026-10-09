@@ -65,7 +65,7 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
         out.push_str("attempts:\n");
         for (subject, attempt) in state.attempts {
             out.push_str(&format!(
-                "- {subject} attempt={} limit=no_progress:{AUTHOR_STALL_ATTEMPTS} interrupted={} last_error={}\n",
+                "- {subject} attempt={} limits=author_no_progress:{AUTHOR_STALL_ATTEMPTS},operational_no_progress:{OPERATIONAL_STALL_ATTEMPTS} interrupted={} last_error={}\n",
                 attempt.logical_attempt,
                 attempt.interrupted,
                 attempt.last_error.as_deref().unwrap_or("none")
@@ -105,6 +105,8 @@ pub(crate) fn render(store: &WorkflowStore, run_id: &str) -> Result<Option<Strin
 /// `fixed_script_limits_match_the_mirror` fails if the script's constants ever
 /// diverge from these.
 pub(crate) const AUTHOR_STALL_ATTEMPTS: u32 = 3;
+/// Host provider and gate failures use an independent consecutive window.
+pub(crate) const OPERATIONAL_STALL_ATTEMPTS: u32 = 3;
 
 fn elapsed_secs(from: &str, to: Option<&str>) -> Option<i64> {
     let start = chrono::DateTime::parse_from_rfc3339(from).ok()?;
@@ -321,7 +323,7 @@ fn one_line(value: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::AUTHOR_STALL_ATTEMPTS;
+    use super::{AUTHOR_STALL_ATTEMPTS, OPERATIONAL_STALL_ATTEMPTS};
 
     /// Status reports the author loop's limits by mirroring constants the
     /// fixed script owns. A mirror that drifts silently reports wrong limits,
@@ -343,6 +345,10 @@ mod tests {
         assert_eq!(
             value, AUTHOR_STALL_ATTEMPTS,
             "STALL_ATTEMPTS drifted from the status mirror"
+        );
+        assert_eq!(
+            OPERATIONAL_STALL_ATTEMPTS, value,
+            "operational window must match the fixed script stall window"
         );
         for retired in [
             "ACCEPTANCE_ATTEMPTS",

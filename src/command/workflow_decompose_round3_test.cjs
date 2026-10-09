@@ -42,7 +42,7 @@ async function novelty() {
 async function partial(operational, replacing) {
   const ids = ['A', 'B', 'C', 'D'];
   const ctx = context(Object.fromEntries(ids.map(id => [id, id])));
-  let gates = 0;
+  let gates = 0, paused;
   const completed = [];
   const w = { agent: async (callId) => {
     const [, id, ordinal] = /^acceptance-author-(\w+)-(\d+)$/.exec(callId);
@@ -56,15 +56,18 @@ async function partial(operational, replacing) {
   }, hostCommand: async () => replacing && ++gates === 1
     ? { ...clean(), gateEnvelope: { policy_findings: ids.map(id => ({
         text: `check '${id}': needs repair`, subject: id, remediation_scope: 'candidate_artifact' })) } }
-    : clean(), pause: async (_, e) => {
-    throw new Error(`unexpected pause with retained work ${completed}: ${JSON.stringify(e)}`);
+  : clean(), pause: async (_, e) => {
+    paused = e;
+    throw new Error(replacing ? `unexpected pause with retained work ${completed}: ${JSON.stringify(e)}` : 'paused');
   } };
   if (replacing) {
     await assert.rejects(ctx.authorCandidate(w, policy(ctx)), /unexpected pause/);
     assert.ok(!completed.includes('D'), 'rewrites alone must not extend the progress window');
   } else {
-    await ctx.authorCandidate(w, policy(ctx));
-    assert.ok(completed.includes('D'));
+    await assert.rejects(ctx.authorCandidate(w, policy(ctx)), /paused/);
+    assert.ok(!completed.includes('D'), 'three provider failures pause despite retained author work');
+    assert.equal(paused.reason, 'operational_no_progress');
+    assert.match(paused.recovery, /host provider/);
   }
 }
 async function unchangedReplacement() {
@@ -83,15 +86,15 @@ async function mixed() {
   const w = { agent: async () => ++calls % 3 === 0 ? { status: 'failed', summary: 'transport' }
     : answer('malformed'), pause: async (_, e) => { paused = e; throw new Error('paused'); } };
   await assert.rejects(ctx.authorCandidate(w, policy(ctx)), /paused/);
-  assert.equal(calls, 3, `mixed failures exceeded the no-progress window: ${calls}`);
-  assert.equal(paused.author_calls, 3);
-  assert.equal(paused.answered_attempts, 2);
+  assert.equal(calls, 4, `mixed failures use independent no-progress windows: ${calls}`);
+  assert.equal(paused.author_calls, 4, JSON.stringify(paused));
+  assert.equal(paused.answered_attempts, 3);
 }
 (async () => {
   let failed = 0;
   for (const [name, test] of [ ['finding 1 novelty', novelty],
     ['finding 2A replacements', () => partial(false, true)],
-    ['finding 2B operational retained work', () => partial(true, false)],
+    ['finding 2B provider window retains author work', () => partial(true, false)],
     ['finding 2 unchanged replacement', unchangedReplacement],
     ['finding 3 mixed failures', mixed] ]) {
     try { await test(); console.log(`PASS ${name}`); }

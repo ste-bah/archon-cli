@@ -66,17 +66,20 @@ fn novelty_cannot_extend_the_window_until_a_distant_new_best() {
 // --- one count of consecutive attempts without progress ---------------------
 
 #[test]
-fn transport_failures_and_incomplete_replies_share_one_window() {
+fn transport_failures_and_incomplete_replies_use_separate_windows() {
     let out = body(
         r#"{ answer: (n) => n % 2 ? { status: "failed", summary: "transport" } : { status: "accepted", stopReason: "max_tokens", content: "cut" } }"#,
     );
     assert_paused(&out);
-    assert_eq!(out["calls"], 3, "{out}");
-    assert_eq!(progress_flags(evidence(&out, 0)), [false, false, false]);
+    assert_eq!(out["calls"], 5, "{out}");
+    assert_eq!(
+        progress_flags(evidence(&out, 0)),
+        [false, false, false, false, false]
+    );
     assert_eq!(
         evidence(&out, 0)["reason"],
-        "no_progress",
-        "not every attempt in the window was an outage"
+        "operational_no_progress",
+        "three transport failures close the operational window independently"
     );
 }
 

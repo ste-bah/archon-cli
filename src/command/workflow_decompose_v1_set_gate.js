@@ -141,7 +141,7 @@ async function runSetGateLoop(w, chain, bodies) {
     if (failed) {
       // A gate that could not run judged nothing: a round without progress.
       const summary = `${failed.capability}: ${failed.routed.operational}`;
-      recordOperational(progress, round, summary);
+      recordOperational(progress, round, summary, false, NO_ROUND, "gate");
       const stall = stallReason(progress);
       if (stall) await pauseAuthorLoop(w, "set-gates", progress, stall, [`host gate operational failure: ${summary}`], { rounds: round });
       continue;
@@ -313,7 +313,7 @@ async function verifyFrozenStage(w, capability) {
       return outcome;
     }
     progress.calls = attempt;
-    recordOperational(progress, attempt, routed.operational);
+    recordOperational(progress, attempt, routed.operational, false, NO_ROUND, "gate");
     const stall = stallReason(progress);
     if (stall) await pauseAuthorLoop(w, capability, progress, stall, [`host gate operational failure: ${routed.operational}`]);
   }

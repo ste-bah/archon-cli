@@ -314,7 +314,7 @@ async function authorCandidate(w, policy) {
         recordAnswered(progress, call, "entries", advanced, !measuredReplies, round);
         lastFindings = [authored.summary || "malformed replies"];
       } else {
-        recordOperational(progress, call, authored.summary, advanced, round);
+        recordOperational(progress, call, authored.summary, advanced, round, "provider");
         lastFindings = [`author call failed operationally: ${authored.summary || "no summary"}`];
       }
       continue;
@@ -333,7 +333,7 @@ async function authorCandidate(w, policy) {
       // The gate never judged the candidate; only the round that made it can
       // be progress: a pass in it, or a previously missing entry it added.
       if (!measuredReplies) progress.answered += 1;
-      recordOperational(progress, call, routed.operational, advanced, round);
+      recordOperational(progress, call, routed.operational, advanced, round, "gate");
       lastFindings = [`host gate operational failure: ${routed.operational}`];
       continue;
     }

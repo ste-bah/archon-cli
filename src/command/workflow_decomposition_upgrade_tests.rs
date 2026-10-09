@@ -71,6 +71,11 @@ async fn resume_upgraded(component: &str) {
         WorkflowBundleOrigin::GeneratedHarness,
     )
     .unwrap();
+    assert_eq!(
+        WorkflowBundle::verify(&store, &run_id).unwrap().origin,
+        WorkflowBundleOrigin::GeneratedHarness,
+        "the paused run keeps its old script bundle anchored while the new binary upgrades it"
+    );
     for _ in 0..2 {
         let resume = UpgradeBarrier {
             run_id: run_id.clone(),
@@ -93,6 +98,7 @@ async fn resume_upgraded(component: &str) {
             "{component}: {error:#}"
         );
         assert_eq!(resume.builds.load(Ordering::SeqCst), 1);
+        assert_eq!(store.load_state(&run_id).unwrap().status, RunStatus::Paused);
     }
     let events = std::fs::read_to_string(store.events_path(&run_id)).unwrap();
     let upgrades: Vec<serde_json::Value> = events
