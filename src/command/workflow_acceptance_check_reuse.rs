@@ -113,7 +113,12 @@ pub(crate) fn bounded_path(check: &str) -> Option<&str> {
             "-f" | "-e" | "-d" | "-s" | "-L" | "-r" | "-w" | "-x",
             path,
         ] if !path.starts_with('/')
-            && !path.split('/').any(|part| part == "..")
+            // `Path::components()` normalizes away `.` and repeated `/`, and
+            // drops a trailing `/`; those spellings can change shell `test`
+            // semantics (notably when the final object is not a directory).
+            // Keep only spellings whose component sequence preserves the
+            // literal bytes, so the snapshot and shell inspect the same path.
+            && path.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
             && !path.starts_with('-')
             && path.bytes().all(|byte| {
                 byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/')

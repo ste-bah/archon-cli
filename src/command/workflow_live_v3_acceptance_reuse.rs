@@ -133,7 +133,15 @@ pub(super) fn evaluate_snapshot(
         "-e" => object_kind(&snapshot.state) != "missing",
         "-f" => object_kind(&snapshot.state) == "file",
         "-d" => object_kind(&snapshot.state) == "directory",
-        "-s" => snapshot.state.get("size")?.as_u64()? > 0,
+        "-s" => {
+            let sized_state =
+                if snapshot.state.get("kind").and_then(|kind| kind.as_str()) == Some("symlink") {
+                    snapshot.state.get("resolved")?
+                } else {
+                    &snapshot.state
+                };
+            sized_state.get("size")?.as_u64()? > 0
+        }
         "-r" | "-w" | "-x" => snapshot
             .state
             .get("access")?

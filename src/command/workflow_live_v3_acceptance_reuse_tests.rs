@@ -190,6 +190,89 @@ fn acceptance_freeze_reuse_logic_literal_predicates_match_sh_test_for_same_snaps
 }
 
 #[test]
+fn acceptance_freeze_reuse_logic_non_normalized_spellings_are_volatile() {
+    for spelling in [
+        "regular/",
+        "./regular",
+        "nested/../regular",
+        "nested//regular",
+        "/regular",
+    ] {
+        let command = format!("test -f {spelling}");
+        assert!(
+            crate::command::workflow_task_set::workflow_acceptance_check_reuse::bounded_path(
+                &command
+            )
+            .is_none(),
+            "shell-significant spelling must be volatile: {spelling}"
+        );
+    }
+}
+
+#[test]
+fn acceptance_freeze_reuse_logic_snapshot_differential_matrix_matches_sh_or_is_volatile() {
+    let dir = clean_repo();
+    let repo = dir.path();
+    std::fs::write(repo.join("file"), "data").unwrap();
+    std::fs::write(repo.join("empty"), "").unwrap();
+    std::fs::create_dir(repo.join("directory")).unwrap();
+    std::fs::create_dir(repo.join("nested")).unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("file", repo.join("link-file")).unwrap();
+        std::os::unix::fs::symlink("directory", repo.join("link-directory")).unwrap();
+        std::os::unix::fs::symlink("absent-target", repo.join("dangling")).unwrap();
+    }
+
+    let mut states = vec!["missing", "file", "empty", "directory"];
+    #[cfg(unix)]
+    states.extend(["link-file", "link-directory", "dangling"]);
+    let operators = ["-e", "-f", "-d", "-s", "-L", "-r", "-w", "-x"];
+    let spellings = [
+        "{state}",
+        "{state}/",
+        "./{state}",
+        "nested/../{state}",
+        "nested//{state}",
+        "/{state}",
+    ];
+    for state in states {
+        for operator in operators {
+            for spelling in spellings {
+                let path = spelling.replace("{state}", state);
+                let command = format!("test {operator} {path}");
+                let shell = std::process::Command::new("sh")
+                    .args(["-c", &command])
+                    .current_dir(repo)
+                    .status()
+                    .unwrap();
+                let check = criterion_for(&command);
+                let host = super::reuse::snapshot(&context(repo), &check)
+                    .and_then(|snapshot| super::reuse::evaluate_snapshot(&snapshot, &check))
+                    .and_then(|result| result.exit_code);
+                assert!(
+                    host.is_none() || host == shell.code(),
+                    "host verdict {host:?} disagrees with sh {:?} for {command}",
+                    shell.code()
+                );
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn acceptance_freeze_reuse_logic_size_test_follows_symlink_target() {
+    let dir = clean_repo();
+    std::fs::write(dir.path().join("file"), "data").unwrap();
+    std::os::unix::fs::symlink("file", dir.path().join("link")).unwrap();
+    let check = criterion_for("test -s link");
+    let snapshot = super::reuse::snapshot(&context(dir.path()), &check).unwrap();
+    let result = super::reuse::evaluate_snapshot(&snapshot, &check).unwrap();
+    assert_eq!(result.exit_code, Some(0));
+}
+
+#[test]
 fn ignored_input_is_volatile_and_cannot_leave_a_verdict_after_deletion() {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), &["init", "-q"]);
