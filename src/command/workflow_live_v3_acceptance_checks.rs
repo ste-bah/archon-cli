@@ -14,6 +14,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 
 use archon_workflow::acceptance_scratch::{
     CheckResult, DIRECT_DEFAULT_OUTPUT_BYTES, DirectSite, evaluate_floor_direct, run_check_direct,
@@ -26,6 +28,31 @@ use archon_workflow::{WorkflowError, WorkflowResult, WorkflowStore, poll_v2_run_
 
 use super::{StageContext, command_reference, git_head, observe_in_scratch};
 use crate::command::acceptance_scratch_policy::NativeBinding;
+
+#[cfg(test)]
+fn test_execution_counts() -> &'static Mutex<BTreeMap<String, usize>> {
+    static COUNTS: OnceLock<Mutex<BTreeMap<String, usize>>> = OnceLock::new();
+    COUNTS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+#[cfg(test)]
+fn record_execution(digest: &str) {
+    *test_execution_counts()
+        .lock()
+        .expect("test execution counter")
+        .entry(digest.to_string())
+        .or_default() += 1;
+}
+
+#[cfg(test)]
+pub(crate) fn test_execution_count(digest: &str) -> usize {
+    test_execution_counts()
+        .lock()
+        .expect("test execution counter")
+        .get(digest)
+        .copied()
+        .unwrap_or_default()
+}
 
 fn direct_site(context: &StageContext) -> DirectSite {
     DirectSite {
@@ -275,6 +302,10 @@ async fn run_selected(
                         .unwrap_or_else(|error| {
                             operational(&reference.acceptance_id, error.to_string())
                         });
+                #[cfg(test)]
+                if result.operational_error.is_none() {
+                    record_execution(&reference.command_digest);
+                }
                 results.insert(reference.acceptance_id.clone(), result);
             }
         }

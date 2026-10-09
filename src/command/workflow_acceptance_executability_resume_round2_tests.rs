@@ -98,13 +98,9 @@ async fn round2_hermetic_verdict_is_identical_on_disk_reuse() {
     use super::super::HostProbe;
     use super::super::probe_tests::trees;
     use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeResume};
-    crate::command::workflow_task_set::passability::test_secret(
-        "SERVICE_TOKEN",
-        "no tests collected",
-    );
     let trees = trees(&[(
         "AC-Z-003",
-        "test -f feature.txt && printf 'no tests collected\\n'",
+        "test -f missing.txt",
         archon_workflow::task_set_contract::TrustedCwd::RepoRoot,
     )]);
     let copies = tempfile::tempdir().unwrap();

@@ -204,18 +204,17 @@ const VERIFY: &[&str] = &["src/command/workflow_decompose_frozen_chain.rs"];
 pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-acceptance",
-        // 3: check verdict reuse now binds check text, bounded repository
-        // tree, environment, this binary, and the logic digest.
-        version: 3,
+        // 4: check verdict reuse now also binds copied project data.
+        version: 4,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "41efa6d4e621bf54284bc887d67c80898157ef7ce5a8b496fca7400a794b12cb",
+        sources_digest: "89276a91a0990d4b5259745655090f5a129ebd50b4235c18adb02ece9b986119",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "41efa6d4e621bf54284bc887d67c80898157ef7ce5a8b496fca7400a794b12cb",
+        sources_digest: "89276a91a0990d4b5259745655090f5a129ebd50b4235c18adb02ece9b986119",
         build_bound: false,
     },
     CapabilityLogic {

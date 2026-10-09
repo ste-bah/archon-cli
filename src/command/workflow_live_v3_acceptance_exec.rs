@@ -28,6 +28,9 @@ use crate::command::acceptance_scratch_policy::NativeBinding;
 pub(super) mod checks;
 #[path = "workflow_live_v3_acceptance_reuse.rs"]
 pub(super) mod reuse;
+#[cfg(test)]
+#[path = "workflow_live_v3_acceptance_reuse_tests.rs"]
+mod reuse_tests;
 
 /// Everything the stage resolved about the run before touching a check.
 #[derive(Clone)]

@@ -27,7 +27,7 @@ fn cache() -> &'static Mutex<BTreeMap<String, Cached>> {
     CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-fn key(context: &StageContext, criterion: &AcceptanceCriterion) -> Option<String> {
+pub(super) fn key(context: &StageContext, criterion: &AcceptanceCriterion) -> Option<String> {
     let AcceptanceCheck::Command {
         command,
         cwd: TrustedCwd::RepoRoot,
@@ -41,7 +41,14 @@ fn key(context: &StageContext, criterion: &AcceptanceCriterion) -> Option<String
     let dirty = archon_shell::spawn::command("git")
         .arg("-C")
         .arg(&context.repository)
-        .args(["status", "--porcelain", "--untracked-files=all", "--", path])
+        .args([
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--ignored=matching",
+            "--",
+            path,
+        ])
         .output()
         .ok()?;
     if !dirty.status.success() || !dirty.stdout.is_empty() {
@@ -117,6 +124,9 @@ fn tree_closure(repository: &Path, path: &str) -> Option<String> {
     }
     let mut closure = Vec::from(path.as_bytes());
     for entry in entries.stdout.split(|byte| *byte == 0) {
+        if entry.is_empty() {
+            continue;
+        }
         let tab = entry.iter().position(|byte| *byte == b'\t')?;
         let mode = entry[..tab].split(|byte| *byte == b' ').next()?;
         let found = std::str::from_utf8(&entry[tab + 1..]).ok()?;

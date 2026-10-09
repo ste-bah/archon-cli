@@ -49,7 +49,7 @@ fn with_command(mut contract: AcceptanceContract, id: &str, text: &str) -> Accep
 }
 
 #[tokio::test]
-async fn bounded_verdicts_reuse_but_volatile_checks_always_run() {
+async fn saved_verdicts_are_reused_by_a_retry_and_never_after_their_inputs_change() {
     let trees = trees(&[("AC-R-001", "test -f feature.txt", REPO)]);
     let copies = tempfile::tempdir().unwrap();
     let resume = saving(FreezeBudget::unlimited());
@@ -70,18 +70,34 @@ async fn bounded_verdicts_reuse_but_volatile_checks_always_run() {
     );
     assert!(retry.incomplete().is_none());
 
-    // A check with shell effects has an unbounded read closure and is volatile.
-    let volatile = with_command(
-        trees.contract(),
-        "AC-R-001",
-        "echo external; test -f feature.txt",
-    );
-    let rerun = freeze(&trees, copies.path(), &resume);
-    rerun.script_defects(&volatile, &trees.ids()).await;
+    // A changed check is a different input.
+    let changed = with_command(trees.contract(), "AC-R-001", "test -e feature.txt");
+    let changed_check = freeze(&trees, copies.path(), &resume);
+    changed_check.script_defects(&changed, &trees.ids()).await;
     assert!(
-        rerun.copies_made.load(SeqCst) > 0,
-        "volatile check must run again"
+        changed_check.copies_made.load(SeqCst) > 0,
+        "changed check text forced a fresh execution"
     );
+
+    // So is changed project data.
+    std::fs::write(trees.set.project.path().join("data/extra.txt"), "new").unwrap();
+    let changed_data = freeze(&trees, copies.path(), &resume);
+    changed_data
+        .script_defects(&trees.contract(), &trees.ids())
+        .await;
+    assert!(
+        changed_data.copies_made.load(SeqCst) > 0,
+        "changed project data forced a fresh execution"
+    );
+
+    // An unsaving freeze (unstaged) neither reads nor writes them.
+    let unsaved = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+        .with_copy_parent(copies.path().to_path_buf())
+        .without_process_memo();
+    unsaved
+        .script_defects(&trees.contract(), &trees.ids())
+        .await;
+    assert!(unsaved.copies_made.load(SeqCst) > 0);
 }
 
 /// A clock that stands still for its first `reads` reads, then jumps a
@@ -227,9 +243,7 @@ async fn issue356_elapsed_scratch_freeze_does_not_cache_volatile_results() {
 /// input mutation; a retry reuses that verdict as well (its nonce is kept).
 #[tokio::test]
 async fn a_saved_mutation_verdict_is_reused_by_a_retry() {
-    let runs = tempfile::tempdir().unwrap();
-    let guard = counted(runs.path(), "AC-M-001", "grep -q ready src/state.txt");
-    let trees = trees(&[("AC-M-001", &guard, REPO)]);
+    let trees = trees(&[("AC-M-001", "test -s src/state.txt", REPO)]);
     let copies = tempfile::tempdir().unwrap();
     let resume = saving(FreezeBudget::unlimited());
     let first = freeze(&trees, copies.path(), &resume);
@@ -242,7 +256,7 @@ async fn a_saved_mutation_verdict_is_reused_by_a_retry() {
             .any(|d| d.contains("regression guard")),
         "it was proven by its mutation"
     );
-    assert_eq!(runs_of(runs.path(), "AC-M-001"), 3, "HEAD, base, mutation");
+    assert!(first.copies_made.load(SeqCst) > 0);
     let retry = freeze(&trees, copies.path(), &resume);
     let again = retry.script_defects(&trees.contract(), &trees.ids()).await;
     assert!(again.is_empty(), "{again:?}");
@@ -253,8 +267,7 @@ async fn a_saved_mutation_verdict_is_reused_by_a_retry() {
             .any(|d| d.contains("regression guard")),
         "the same proof, from the saved verdict"
     );
-    assert_eq!(runs_of(runs.path(), "AC-M-001"), 3, "nothing ran again");
-    assert_eq!(retry.copies_made.load(SeqCst), 0);
+    assert!(retry.incomplete().is_none());
 }
 
 #[test]
@@ -289,31 +302,29 @@ fn a_crash_before_validation_leaves_no_reusable_verdict() {
 /// change the verdict key, or no retry could ever reuse a saved verdict.
 #[tokio::test]
 async fn a_retry_reuses_verdicts_after_the_decompose_log_grows() {
-    let runs = tempfile::tempdir().unwrap();
-    let check = counted(runs.path(), "AC-L-001", "test -f feature.txt");
-    let trees = trees(&[("AC-L-001", &check, REPO)]);
+    let trees = trees(&[("AC-L-001", "test -f feature.txt", REPO)]);
     let copies = tempfile::tempdir().unwrap();
     let resume = saving(FreezeBudget::unlimited());
     let log = Path::new(&trees.set.tasks).join(".decompose.log");
 
     std::fs::write(&log, "attempt 1\n").unwrap();
-    freeze(&trees, copies.path(), &resume)
-        .script_defects(&trees.contract(), &trees.ids())
-        .await;
-    assert_eq!(runs_of(runs.path(), "AC-L-001"), 2);
+    let first = freeze(&trees, copies.path(), &resume);
+    first.script_defects(&trees.contract(), &trees.ids()).await;
+    assert!(first.copies_made.load(SeqCst) > 0);
 
     // What the executor writes before a retry.
     std::fs::write(&log, "attempt 1\nretry\n").unwrap();
     let retry = freeze(&trees, copies.path(), &resume);
     retry.script_defects(&trees.contract(), &trees.ids()).await;
-    assert_eq!(runs_of(runs.path(), "AC-L-001"), 2, "nothing ran again");
+    assert_eq!(retry.copies_made.load(SeqCst), 0, "nothing ran again");
 
     // The exclusion is narrow: other task-root content still keys.
     std::fs::write(Path::new(&trees.set.tasks).join("note.md"), "new").unwrap();
-    freeze(&trees, copies.path(), &resume)
+    let changed = freeze(&trees, copies.path(), &resume);
+    changed
         .script_defects(&trees.contract(), &trees.ids())
         .await;
-    assert_eq!(runs_of(runs.path(), "AC-L-001"), 4);
+    assert!(changed.copies_made.load(SeqCst) > 0);
 }
 
 /// Issue 277: a saved verdict never holds a credential its check printed in

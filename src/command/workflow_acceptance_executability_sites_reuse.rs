@@ -43,7 +43,7 @@ fn repository_tree_digest(repository: &Path, commit: &str, path: &str) -> Option
 pub(super) fn memo_key(
     probe: &HostProbe,
     tree: &Baseline,
-    _data: &[String],
+    data: &[String],
     contract: &AcceptanceContract,
     id: &str,
 ) -> Option<String> {
@@ -90,6 +90,7 @@ pub(super) fn memo_key(
         runtime_identity(probe),
         tree.repository,
         probe.project,
+        data,
         tree_digest,
         entry.id,
         entry.criterion.as_bytes(),
