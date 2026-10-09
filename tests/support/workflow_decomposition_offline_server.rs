@@ -294,28 +294,62 @@ fn scripted_answer(prompt: &str) -> (&'static str, String) {
         if id.starts_with("SUP-REQ-X-001") {
             return (
                 "acceptance",
-                format!(
-                    r#"{{"id":"{id}","criterion":"The first artifact contains the required line.","check":{{"kind":"command","command":"test -f src/alpha.txt && grep -qx 'alpha ready' src/alpha.txt","cwd":"repo_root"}},"gap_permitted":false,"covers":["REQ-X-001"],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
-                ),
+                serde_json::json!({
+                    "id": id,
+                    "criterion": "The first artifact contains the required line.",
+                    "check": {"kind": "command", "command": "test -f src/alpha.txt && grep -qx 'alpha ready' src/alpha.txt", "cwd": "repo_root"},
+                    "gap_permitted": false,
+                    "covers": ["REQ-X-001"],
+                    "judgment": {"verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": ""}
+                }).to_string(),
             );
         }
         if id.starts_with("SUP-REQ-X-002") {
             return (
                 "acceptance",
-                format!(
-                    r#"{{"id":"{id}","criterion":"The second artifact is ready JSON.","check":{{"kind":"command","command":"python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json","cwd":"repo_root"}},"gap_permitted":false,"covers":["REQ-X-002"],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
-                ),
+                serde_json::json!({
+                    "id": id,
+                    "criterion": "The second artifact is ready JSON.",
+                    "check": {"kind": "command", "command": "python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json", "cwd": "repo_root"},
+                    "gap_permitted": false,
+                    "covers": ["REQ-X-002"],
+                    "judgment": {"verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": ""}
+                }).to_string(),
             );
         }
         return (
             "acceptance",
-            format!(
-                r#"{{"id":"{id}","criterion":"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.","check":{{"kind":"command","command":"python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json","cwd":"repo_root"}},"gap_permitted":false,"covers":[],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
-            ),
+            serde_json::json!({
+                "id": id,
+                "criterion": "The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.",
+                "check": {"kind": "command", "command": "python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json", "cwd": "repo_root"},
+                "gap_permitted": false,
+                "covers": [],
+                "judgment": {"verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": ""}
+            }).to_string(),
         );
     }
     if prompt.contains("Author one complete task-skeleton JSON artifact") {
-        return ("skeleton", r#"{"schema_version":1,"acceptance_digest":"","tasks":[{"task_id":"TASK-X-010","file_name":"TASK-X-010.md","depends_on":[],"blocks":["TASK-X-020"],"implements":["REQ-X-001"],"deliverable_contracts":[{"kind":"alpha_text","artifact_path":"src/alpha.txt","artifact_format":"text","min_instances":1},{"kind":"generic_outcome","artifact_path":".archon/proof/outcome.json","artifact_format":"json","required_true_fields":["ready"],"min_instances":1}]},{"task_id":"TASK-X-020","file_name":"TASK-X-020.md","depends_on":[{"task_id":"TASK-X-010","consumes":[{"artifact_path":"src/alpha.txt"}],"ordering_only":false}],"blocks":[],"implements":["REQ-X-002"],"deliverable_contracts":[{"kind":"beta_json","artifact_path":"src/beta.json","artifact_format":"json","required_true_fields":["ready"],"min_instances":1}]}]}"#.into());
+        return (
+            "skeleton",
+            serde_json::json!({
+                "schema_version": 1,
+                "acceptance_digest": "",
+                "tasks": [
+                    {
+                        "task_id": "TASK-X-010", "file_name": "TASK-X-010.md", "depends_on": [], "blocks": ["TASK-X-020"], "implements": ["REQ-X-001"],
+                        "deliverable_contracts": [
+                            {"kind": "alpha_text", "artifact_path": "src/alpha.txt", "artifact_format": "text", "min_instances": 1},
+                            {"kind": "generic_outcome", "artifact_path": ".archon/proof/outcome.json", "artifact_format": "json", "required_true_fields": ["ready"], "min_instances": 1}
+                        ]
+                    },
+                    {
+                        "task_id": "TASK-X-020", "file_name": "TASK-X-020.md", "depends_on": [{"task_id": "TASK-X-010", "consumes": [{"artifact_path": "src/alpha.txt"}], "ordering_only": false}], "blocks": [], "implements": ["REQ-X-002"],
+                        "deliverable_contracts": [{"kind": "beta_json", "artifact_path": "src/beta.json", "artifact_format": "json", "required_true_fields": ["ready"], "min_instances": 1}]
+                    }
+                ]
+            }).to_string(),
+        );
     }
     if prompt.contains("Author the complete TASK body") {
         let second = prompt.contains("task_id TASK-X-020");

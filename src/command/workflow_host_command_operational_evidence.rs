@@ -1,4 +1,5 @@
 use super::OperationalAttempt;
+use crate::command::workflow_host_secrets::HostSecrets;
 
 impl OperationalAttempt {
     pub(crate) fn new(
@@ -29,8 +30,14 @@ impl OperationalAttempt {
 }
 
 /// Keep the final child diagnostics, where errors and remediation hints appear.
-pub(crate) fn stderr_tail(stderr: &[u8]) -> String {
+pub(crate) fn stderr_tail(stderr: &[u8], secrets: &HostSecrets) -> String {
     const MAX_BYTES: usize = 4096;
-    let start = stderr.len().saturating_sub(MAX_BYTES);
-    String::from_utf8_lossy(&stderr[start..]).into_owned()
+    let decoded = String::from_utf8_lossy(stderr);
+    let configured_redacted = secrets.text(&decoded);
+    let redacted = archon_observability::redaction::redact_secret_values(&configured_redacted);
+    let mut start = redacted.len().saturating_sub(MAX_BYTES);
+    while !redacted.is_char_boundary(start) {
+        start += 1;
+    }
+    redacted[start..].to_string()
 }

@@ -148,10 +148,9 @@ impl FixedHostCommandExecutor {
                 )
                 .with_child_evidence(
                     observed.output.exit_code,
-                    secrets.text(
-                        &crate::command::workflow_host_command_operational::stderr_tail(
-                            &observed.output.stderr,
-                        ),
+                    crate::command::workflow_host_command_operational::stderr_tail(
+                        &observed.output.stderr,
+                        secrets,
                     ),
                 ),
             );

@@ -319,7 +319,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
                     run_staging_root: store.run_dir(&run_id).join("host-command-staging"),
                     frozen_task_id: None,
                     frozen_task_file: None,
-                    freeze_provider_environment: freeze_provider_environment(env_vars, config),
+                    freeze_provider_environment: freeze_provider_environment(env_vars),
                     acceptance_environment_allowlist: config
                         .workflow
                         .acceptance_execution

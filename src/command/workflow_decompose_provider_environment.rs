@@ -1,12 +1,8 @@
 use std::collections::BTreeMap;
 
-use archon_core::config::ArchonConfig;
 use archon_core::env_vars::ArchonEnvVars;
 
-pub(crate) fn freeze_provider_environment(
-    env_vars: &ArchonEnvVars,
-    config: &ArchonConfig,
-) -> BTreeMap<String, String> {
+pub(crate) fn freeze_provider_environment(env_vars: &ArchonEnvVars) -> BTreeMap<String, String> {
     let mut environment = BTreeMap::new();
     for (name, value) in [
         ("ANTHROPIC_API_KEY", env_vars.anthropic_api_key.as_ref()),
@@ -24,13 +20,6 @@ pub(crate) fn freeze_provider_environment(
             "ARCHON_CONFIG_DIR".to_string(),
             path.to_string_lossy().into_owned(),
         );
-    }
-    // Host commands run as separate CLI processes. Preserve the provider URL
-    // resolved by the parent even when it came from config.toml rather than
-    // the caller's environment; otherwise a child can silently fall back to
-    // the public Anthropic endpoint.
-    if let Some(base_url) = &config.api.base_url {
-        environment.insert("ANTHROPIC_BASE_URL".to_string(), base_url.clone());
     }
     environment
 }
