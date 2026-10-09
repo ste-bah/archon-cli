@@ -157,7 +157,7 @@ fn acceptance_freeze_reuse_logic_literal_predicates_match_sh_test_for_same_snaps
     #[cfg(unix)]
     std::os::unix::fs::symlink("regular", repo.join("link")).unwrap();
 
-    let mut commands = vec![
+    let commands = vec![
         "test -e regular",
         "test -f regular",
         "test -d directory",
@@ -174,7 +174,11 @@ fn acceptance_freeze_reuse_logic_literal_predicates_match_sh_test_for_same_snaps
         "test -x missing",
     ];
     #[cfg(unix)]
-    commands.extend(["test -L link", "test -e link", "test -f link"]);
+    let commands = {
+        let mut commands = commands;
+        commands.extend(["test -L link", "test -e link", "test -f link"]);
+        commands
+    };
     for command in commands {
         let check = criterion_for(command);
         let snapshot = super::reuse::snapshot(&context(repo), &check)
@@ -185,6 +189,14 @@ fn acceptance_freeze_reuse_logic_literal_predicates_match_sh_test_for_same_snaps
             .current_dir(repo)
             .status()
             .unwrap();
+        #[cfg(not(unix))]
+        if ["-r", "-w", "-x"].contains(&command.split_whitespace().nth(1).unwrap()) {
+            assert_eq!(
+                host.exit_code, None,
+                "{command} must stay volatile off Unix"
+            );
+            continue;
+        }
         assert_eq!(host.exit_code, shell.code(), "{command}");
     }
 }
@@ -224,9 +236,13 @@ fn acceptance_freeze_reuse_logic_snapshot_differential_matrix_matches_sh_or_is_v
         std::os::unix::fs::symlink("absent-target", repo.join("dangling")).unwrap();
     }
 
-    let mut states = vec!["missing", "file", "empty", "directory"];
+    let states = vec!["missing", "file", "empty", "directory"];
     #[cfg(unix)]
-    states.extend(["link-file", "link-directory", "dangling"]);
+    let states = {
+        let mut states = states;
+        states.extend(["link-file", "link-directory", "dangling"]);
+        states
+    };
     let operators = ["-e", "-f", "-d", "-s", "-L", "-r", "-w", "-x"];
     let spellings = [
         "{state}",
@@ -250,6 +266,14 @@ fn acceptance_freeze_reuse_logic_snapshot_differential_matrix_matches_sh_or_is_v
                 let host = super::reuse::snapshot(&context(repo), &check)
                     .and_then(|snapshot| super::reuse::evaluate_snapshot(&snapshot, &check))
                     .and_then(|result| result.exit_code);
+                #[cfg(not(unix))]
+                if ["-r", "-w", "-x"].contains(&operator) {
+                    assert_eq!(
+                        host, None,
+                        "{operator} must stay volatile off Unix: {command}"
+                    );
+                    continue;
+                }
                 assert!(
                     host.is_none() || host == shell.code(),
                     "host verdict {host:?} disagrees with sh {:?} for {command}",

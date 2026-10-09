@@ -142,11 +142,22 @@ pub(super) fn evaluate_snapshot(
                 };
             sized_state.get("size")?.as_u64()? > 0
         }
-        "-r" | "-w" | "-x" => snapshot
-            .state
-            .get("access")?
-            .get(snapshot.operator.as_str())?
-            .as_bool()?,
+        "-r" | "-w" | "-x" => {
+            #[cfg(unix)]
+            {
+                snapshot
+                    .state
+                    .get("access")?
+                    .get(snapshot.operator.as_str())?
+                    .as_bool()?
+            }
+            #[cfg(not(unix))]
+            {
+                // Access predicates follow the shell's platform-specific
+                // semantics; the snapshot cannot prove them on this target.
+                return None;
+            }
+        }
         _ => return None,
     };
     Some(CheckResult {
