@@ -145,11 +145,7 @@ async fn a_read_only_call_cannot_regenerate_a_project_input_from_its_shell() {
         "{}",
         result.content
     );
-    assert!(
-        !result.content.contains(crate::tool::TOOL_REFUSAL_MARKER),
-        "{}",
-        result.content
-    );
+    assert!(!result.is_guard_refusal(), "{}", result.content);
     // Nor the checkout it stands in, the run's records or their artifacts.
     for command in [
         "printf x > src/lib.rs".to_string(),

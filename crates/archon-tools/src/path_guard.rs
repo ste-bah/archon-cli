@@ -4,14 +4,14 @@ use std::path::{Component, Path, PathBuf};
 use crate::filesystem::HostWriteTarget;
 use crate::tool::ToolContext;
 
-pub(crate) fn guard_refusal(reason: impl AsRef<str>) -> String {
-    format!("{} {}", crate::tool::TOOL_REFUSAL_MARKER, reason.as_ref())
+pub(crate) fn guard_refusal(reason: impl AsRef<str>) -> crate::path_guard_error::GuardError {
+    crate::path_guard_error::GuardError::refusal(reason.as_ref())
 }
 
 pub(crate) fn resolve_existing_file_path(
     requested_path: &str,
     ctx: &ToolContext,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, crate::path_guard_error::GuardError> {
     resolve_existing_path(requested_path, ctx)
 }
 
@@ -25,7 +25,7 @@ pub(crate) fn resolve_existing_file_path(
 pub(crate) fn resolve_existing_write_target(
     requested_path: &str,
     ctx: &ToolContext,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, crate::path_guard_error::GuardError> {
     if let Some(world) = world_path(requested_path, ctx) {
         let admitted = world?;
         ensure_world_write_allowed(&admitted, ctx)?;
@@ -39,7 +39,7 @@ pub(crate) fn resolve_existing_write_target(
 pub(crate) fn resolve_existing_path(
     requested_path: &str,
     ctx: &ToolContext,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, crate::path_guard_error::GuardError> {
     if let Some(world) = world_path(requested_path, ctx) {
         return world;
     }
@@ -56,7 +56,7 @@ pub(crate) fn resolve_existing_path(
 fn resolve_existing_host_path(
     requested_path: &str,
     ctx: &ToolContext,
-) -> Result<(PathBuf, PathBuf), String> {
+) -> Result<(PathBuf, PathBuf), crate::path_guard_error::GuardError> {
     let anchored = anchor_requested_path(requested_path, ctx)?;
     let normalized = normalize_lexically(&anchored)?;
     crate::read_boundary::check(&normalized, ctx)?;
@@ -79,7 +79,7 @@ fn resolve_existing_host_path(
 pub(crate) fn resolve_write_target_path(
     requested_path: &str,
     ctx: &ToolContext,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, crate::path_guard_error::GuardError> {
     if let Some(world) = world_path(requested_path, ctx) {
         let admitted = world?;
         ensure_world_write_allowed(&admitted, ctx)?;
@@ -109,7 +109,10 @@ pub(crate) fn resolve_write_target_path(
 /// keeps a path inside the *workspace*, and confinement keeps it inside the
 /// *declared roots*, which are usually narrower and sometimes elsewhere
 /// entirely.
-fn ensure_world_write_allowed(world_target: &Path, ctx: &ToolContext) -> Result<(), String> {
+fn ensure_world_write_allowed(
+    world_target: &Path,
+    ctx: &ToolContext,
+) -> Result<(), crate::path_guard_error::GuardError> {
     if ctx.write_roots.is_empty() && ctx.sealed_repositories.is_empty() {
         return Ok(());
     }
@@ -159,7 +162,7 @@ fn ensure_write_allowed(
     requested_path: &Path,
     resolved_path: &Path,
     ctx: &ToolContext,
-) -> Result<(), String> {
+) -> Result<(), crate::path_guard_error::GuardError> {
     crate::path_guard_sealed::ensure_not_sealed(requested_path, resolved_path, ctx)?;
     if ctx.write_roots.is_empty() {
         return Ok(());
@@ -173,7 +176,12 @@ fn ensure_write_allowed(
         // would quietly widen the confinement it exists to impose.
         let canonical = fs::canonicalize(root)
             .map(archon_shell::paths::plain)
-            .map_err(|e| format!("Failed to resolve write root '{}': {e}", root.display()))?;
+            .map_err(|e| {
+                crate::path_guard_error::GuardError::ordinary(format!(
+                    "Failed to resolve write root '{}': {e}",
+                    root.display()
+                ))
+            })?;
         roots.push(canonical);
     }
     if let Some(root) = roots
@@ -212,12 +220,19 @@ fn ensure_write_allowed(
 /// container path that would climb out of the mount is refused by the
 /// translation itself. Host paths still go through the host guard below, so
 /// nothing here widens what a tool may touch on this machine.
-fn world_path(requested_path: &str, ctx: &ToolContext) -> Option<Result<PathBuf, String>> {
+fn world_path(
+    requested_path: &str,
+    ctx: &ToolContext,
+) -> Option<Result<PathBuf, crate::path_guard_error::GuardError>> {
     let fs = ctx.fs.as_ref()?;
     let admitted = fs.admit_world_path(Path::new(requested_path))?;
     Some(
         admitted
-            .map_err(|error| format!("Failed to resolve file path '{requested_path}': {error}"))
+            .map_err(|error| {
+                crate::path_guard_error::GuardError::ordinary(format!(
+                    "Failed to resolve file path '{requested_path}': {error}"
+                ))
+            })
             .and_then(|path| {
                 crate::read_boundary::check(&path, ctx)?;
                 if !ctx.denied_directory_names.is_empty() {
@@ -237,7 +252,10 @@ fn world_path(requested_path: &str, ctx: &ToolContext) -> Option<Result<PathBuf,
     )
 }
 
-fn anchor_requested_path(requested_path: &str, ctx: &ToolContext) -> Result<PathBuf, String> {
+fn anchor_requested_path(
+    requested_path: &str,
+    ctx: &ToolContext,
+) -> Result<PathBuf, crate::path_guard_error::GuardError> {
     let path = Path::new(requested_path);
     if path.is_absolute() {
         return Ok(path.to_path_buf());
@@ -247,15 +265,17 @@ fn anchor_requested_path(requested_path: &str, ctx: &ToolContext) -> Result<Path
     Ok(working_dir.join(path))
 }
 
-fn working_dir_root(ctx: &ToolContext) -> Result<PathBuf, String> {
+fn working_dir_root(ctx: &ToolContext) -> Result<PathBuf, crate::path_guard_error::GuardError> {
     if ctx.working_dir.as_os_str().is_empty() {
-        std::env::current_dir().map_err(|e| format!("Failed to resolve current directory: {e}"))
+        std::env::current_dir()
+            .map_err(|e| format!("Failed to resolve current directory: {e}"))
+            .map_err(Into::into)
     } else {
         Ok(ctx.working_dir.clone())
     }
 }
 
-fn allowed_roots(ctx: &ToolContext) -> Result<Vec<PathBuf>, String> {
+fn allowed_roots(ctx: &ToolContext) -> Result<Vec<PathBuf>, crate::path_guard_error::GuardError> {
     let working_dir = fs::canonicalize(working_dir_root(ctx)?)
         .map(archon_shell::paths::plain)
         .map_err(|e| format!("Failed to resolve working_dir: {e}"))?;
@@ -281,7 +301,10 @@ fn allowed_roots(ctx: &ToolContext) -> Result<Vec<PathBuf>, String> {
     Ok(roots)
 }
 
-fn ensure_allowed(resolved_path: &Path, ctx: &ToolContext) -> Result<(), String> {
+fn ensure_allowed(
+    resolved_path: &Path,
+    ctx: &ToolContext,
+) -> Result<(), crate::path_guard_error::GuardError> {
     crate::read_boundary::check(resolved_path, ctx)?;
     let roots = allowed_roots(ctx)?;
     if roots
@@ -302,11 +325,16 @@ fn ensure_allowed(resolved_path: &Path, ctx: &ToolContext) -> Result<(), String>
     )))
 }
 
-fn canonicalize_write_target(path: &Path) -> Result<PathBuf, String> {
+fn canonicalize_write_target(path: &Path) -> Result<PathBuf, crate::path_guard_error::GuardError> {
     if path.exists() {
         return fs::canonicalize(path)
             .map(archon_shell::paths::plain)
-            .map_err(|e| format!("Failed to resolve file path '{}': {e}", path.display()));
+            .map_err(|e| {
+                crate::path_guard_error::GuardError::ordinary(format!(
+                    "Failed to resolve file path '{}': {e}",
+                    path.display()
+                ))
+            });
     }
 
     let mut missing_components = Vec::new();
@@ -342,7 +370,7 @@ fn canonicalize_write_target(path: &Path) -> Result<PathBuf, String> {
     Ok(resolved)
 }
 
-fn normalize_lexically(path: &Path) -> Result<PathBuf, String> {
+fn normalize_lexically(path: &Path) -> Result<PathBuf, crate::path_guard_error::GuardError> {
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {

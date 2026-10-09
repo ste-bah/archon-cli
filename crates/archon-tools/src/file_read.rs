@@ -56,7 +56,7 @@ impl Tool for ReadTool {
 
         let path = match resolve_existing_file_path(file_path, ctx) {
             Ok(path) => path,
-            Err(e) => return ToolResult::error(e),
+            Err(e) => return e.into_tool_result(),
         };
 
         // Check if file is likely binary

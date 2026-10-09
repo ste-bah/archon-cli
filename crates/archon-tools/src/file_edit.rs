@@ -79,7 +79,7 @@ impl Tool for EditTool {
 
         let path = match resolve_existing_write_target(file_path, ctx) {
             Ok(path) => path,
-            Err(e) => return ToolResult::error(e),
+            Err(e) => return e.into_tool_result(),
         };
         let fs = ctx.fs();
         let content = match fs.read_to_string(&path).await {

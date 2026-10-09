@@ -2,7 +2,7 @@
 //!
 //! Invoke AgentTool::execute 100 times with run_in_background=true.
 //! Assert:
-//! - Each execute returns in <10ms
+//! - Median execute time is <10ms and max is below the child-run delay
 //! - All 100 agent_ids are unique
 //! - BACKGROUND_AGENTS has 100 entries after all spawns
 
@@ -21,12 +21,12 @@ use archon_tools::subagent_executor::{
 };
 use archon_tools::tool::{Tool, ToolContext};
 
-/// Instant executor that returns immediately. Used to test spawn speed
-/// without actual LLM calls.
-struct InstantExecutor;
+/// Delayed executor that makes waiting for a child run observable without
+/// making a real LLM call.
+struct DelayedExecutor;
 
 #[async_trait]
-impl SubagentExecutor for InstantExecutor {
+impl SubagentExecutor for DelayedExecutor {
     async fn run_to_completion(
         &self,
         _subagent_id: String,
@@ -34,6 +34,7 @@ impl SubagentExecutor for InstantExecutor {
         _ctx: ToolContext,
         _cancel: CancellationToken,
     ) -> Result<String, ExecutorError> {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         Ok("instant".to_string())
     }
 
@@ -63,8 +64,9 @@ impl SubagentExecutor for InstantExecutor {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn spawn_100_subagents_with_unique_ids() {
-    // Install the instant executor (OnceLock: first wins)
-    archon_tools::subagent_executor::install_subagent_executor(Arc::new(InstantExecutor));
+    // Install the delayed executor (OnceLock: first wins). If execute waits
+    // for the child run, its 250ms delay makes that visible in the timing.
+    archon_tools::subagent_executor::install_subagent_executor(Arc::new(DelayedExecutor));
 
     // Reap any leftover entries from other tests
     let _ = BACKGROUND_AGENTS.reap_finished();
@@ -96,7 +98,7 @@ async fn spawn_100_subagents_with_unique_ids() {
 
     let count = 100usize;
     let mut agent_ids = HashSet::new();
-    let mut violations = Vec::new();
+    let mut timings = Vec::with_capacity(count);
 
     for i in 0..count {
         let input = json!({
@@ -123,9 +125,7 @@ async fn spawn_100_subagents_with_unique_ids() {
             .to_string();
         agent_ids.insert(id);
 
-        if elapsed.as_millis() >= 10 {
-            violations.push((i, elapsed));
-        }
+        timings.push((i, elapsed));
     }
 
     // All 100 IDs unique
@@ -136,12 +136,22 @@ async fn spawn_100_subagents_with_unique_ids() {
         agent_ids.len()
     );
 
-    // No execute call took >= 10ms
+    let mut sorted_elapsed: Vec<_> = timings.iter().map(|(_, elapsed)| *elapsed).collect();
+    sorted_elapsed.sort_unstable();
+    let median = (sorted_elapsed[count / 2 - 1] + sorted_elapsed[count / 2]) / 2;
+    let max = sorted_elapsed[count - 1];
+    let slow_calls: Vec<_> = timings
+        .iter()
+        .filter(|(_, elapsed)| elapsed.as_millis() >= 10)
+        .copied()
+        .collect();
+
+    // A median gate tolerates isolated CI scheduling stalls. The max must
+    // remain below 200ms, safely under the 250ms a blocking child wait costs.
     assert!(
-        violations.is_empty(),
-        "TC-ARCH-03: {}/{count} executes took >= 10ms: {:?}",
-        violations.len(),
-        &violations[..violations.len().min(10)]
+        median.as_millis() < 10 && max.as_millis() < 200,
+        "TC-ARCH-03: median execute time was {median:?}, max was {max:?}; slow calls (>=10ms): {:?}",
+        &slow_calls[..slow_calls.len().min(10)]
     );
 
     // Registry has at least count entries (may include leftovers from

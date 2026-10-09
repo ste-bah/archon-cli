@@ -85,7 +85,7 @@ impl Tool for NotebookEditTool {
         // this one does not is not a guard.
         let path = match resolve_existing_write_target(path_str, ctx) {
             Ok(path) => path,
-            Err(e) => return ToolResult::error(e),
+            Err(e) => return e.into_tool_result(),
         };
         let path = path.as_path();
 

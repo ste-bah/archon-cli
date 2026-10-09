@@ -12,7 +12,10 @@ pub async fn scope<T>(names: Vec<String>, work: impl std::future::Future<Output 
 pub fn sync_scope<T>(names: Vec<String>, work: impl FnOnce() -> T) -> T {
     DENIED.sync_scope(names, work)
 }
-pub(crate) fn check(path: &Path, ctx: &ToolContext) -> Result<(), String> {
+pub(crate) fn check(
+    path: &Path,
+    ctx: &ToolContext,
+) -> Result<(), crate::path_guard_error::GuardError> {
     if ctx.denied_directory_names.is_empty() {
         return Ok(());
     }

@@ -181,7 +181,7 @@ mod bridge_tests {
 
         assert!(result.is_error);
         assert!(result.content.contains("subagents cannot enter plan mode"));
-        assert!(result.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
+        assert!(result.is_guard_refusal());
         assert_eq!(ctx.mode, AgentMode::Normal);
     }
 
@@ -197,7 +197,7 @@ mod bridge_tests {
 
         assert!(result.is_error);
         assert!(result.content.contains("subagents cannot exit plan mode"));
-        assert!(result.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
+        assert!(result.is_guard_refusal());
         assert_eq!(ctx.mode, AgentMode::Plan);
     }
 
@@ -207,7 +207,7 @@ mod bridge_tests {
         let result = ExitPlanModeTool.execute(json!({}), &ctx).await;
         assert!(result.is_error);
         assert!(result.content.contains("Not in plan mode"));
-        assert!(result.content.contains(crate::tool::TOOL_REFUSAL_MARKER));
+        assert!(result.is_guard_refusal());
     }
 
     #[test]

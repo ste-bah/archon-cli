@@ -100,7 +100,7 @@ impl Tool for WriteTool {
 
         let path = match resolve_write_target_path(&file_path, ctx) {
             Ok(path) => path,
-            Err(e) => return ToolResult::error(e),
+            Err(e) => return e.into_tool_result(),
         };
 
         let fs = ctx.fs();

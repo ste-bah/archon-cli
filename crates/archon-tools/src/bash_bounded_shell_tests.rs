@@ -167,11 +167,7 @@ async fn a_write_branch_shell_cannot_leave_the_canonical_checkout_changed() {
         "{}",
         result.content
     );
-    assert!(
-        !result.content.contains(crate::tool::TOOL_REFUSAL_MARKER),
-        "{}",
-        result.content
-    );
+    assert!(!result.is_guard_refusal(), "{}", result.content);
     // Read the canonical checkout back: unchanged.
     assert_eq!(std::fs::read_to_string(&tracked).unwrap(), "original");
     assert!(!own.is_error, "{}", own.content);

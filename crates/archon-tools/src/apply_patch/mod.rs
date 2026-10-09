@@ -103,7 +103,7 @@ impl Tool for ApplyPatchTool {
         }
         let path = match resolve_write_target_path(path_str, ctx) {
             Ok(path) => path,
-            Err(e) => return ToolResult::error(e),
+            Err(e) => return e.into_tool_result(),
         };
 
         let fs = ctx.fs();

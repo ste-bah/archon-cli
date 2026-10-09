@@ -169,11 +169,7 @@ async fn an_isolated_branch_cannot_rewrite_project_data_from_its_shell() {
         "{}",
         result.content
     );
-    assert!(
-        !result.content.contains(crate::tool::TOOL_REFUSAL_MARKER),
-        "{}",
-        result.content
-    );
+    assert!(!result.is_guard_refusal(), "{}", result.content);
 
     // Relative climbs, `cd` out of the tree, links, renames of the file or
     // of an ancestor of the project, the run's records and the checkout.

@@ -146,15 +146,8 @@ async fn sandbox_denied_risky_tool_is_admitted_and_records_one_outcome() {
         .await;
 
     assert!(result.is_error);
-    assert_eq!(
-        result
-            .content
-            .matches(archon_tools::tool::TOOL_REFUSAL_MARKER)
-            .count(),
-        1,
-        "{}",
-        result.content
-    );
+    assert!(result.is_guard_refusal(), "{}", result.content);
+    assert!(result.content.starts_with("Error: "));
     assert_eq!(executions.load(Ordering::SeqCst), 0);
     assert_eq!(requests.lock().unwrap().len(), 1);
     let outcomes = outcomes.lock().unwrap();
@@ -382,13 +375,7 @@ async fn denying_the_declared_capability_refuses_the_call() {
         .await;
 
     assert!(result.is_error);
-    assert!(
-        result
-            .content
-            .contains(archon_tools::tool::TOOL_REFUSAL_MARKER),
-        "{}",
-        result.content
-    );
+    assert!(result.is_guard_refusal(), "{}", result.content);
     assert_eq!(
         executions.load(Ordering::SeqCst),
         0,

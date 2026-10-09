@@ -55,7 +55,7 @@ fn ctx(canonical: &Path, workspace: &Path) -> ToolContext {
 }
 
 fn check(path: &Path, ctx: &ToolContext) -> Result<(), String> {
-    ensure_not_sealed(path, path, ctx)
+    ensure_not_sealed(path, path, ctx).map_err(Into::into)
 }
 
 #[test]
