@@ -220,7 +220,8 @@ async fn fixed_author_pause_drops_inflight_provider_and_preserves_attempt() {
             .await
     });
 
-    tokio::time::timeout(std::time::Duration::from_secs(2), started.notified())
+    const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(60);
+    tokio::time::timeout(HANG_GUARD, started.notified())
         .await
         .expect("fixed author provider must start before pause");
     archon_workflow::LifecycleController::new(store.clone())

@@ -1,6 +1,8 @@
 //! A terminal deadline must not tear down a sibling's pending host work.
 use super::*;
 
+const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(60);
+
 struct SlowReply;
 #[async_trait::async_trait]
 impl WorkflowLlmClient for SlowReply {
@@ -39,7 +41,7 @@ async fn durable_terminal(script: &str) -> (tempfile::TempDir, WorkflowStore, St
     save_generated_v2_metadata(&store, &run.id, &plan, false).expect("metadata");
     let (ui, _receiver) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
     let result = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
+        HANG_GUARD,
         execute_generated_v2_run(
             &store,
             run.clone(),

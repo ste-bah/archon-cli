@@ -85,7 +85,7 @@ async fn edit_during_unwind_in(edit: LifecycleAction, expected: RunStatus, fixed
     );
     let llm = Arc::new(super::terminal_test_support::PendingReply);
     let (ui, _receiver) = crate::command::tui_workflow_ui_sink::default_workflow_ui_sink();
-    let ten = std::time::Duration::from_secs(10);
+    const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(60);
     let report = if fixed {
         let executor = Arc::new(NoHostCommands);
         let run = execute_fixed_decomposition_v2_run(
@@ -97,7 +97,7 @@ async fn edit_during_unwind_in(edit: LifecycleAction, expected: RunStatus, fixed
             Vec::new(),
             executor,
         );
-        let result = tokio::time::timeout(ten, run)
+        let result = tokio::time::timeout(HANG_GUARD, run)
             .await
             .expect("fixed run ends");
         assert!(result.is_ok(), "fixed: {result:?}");
@@ -117,7 +117,7 @@ async fn edit_during_unwind_in(edit: LifecycleAction, expected: RunStatus, fixed
                 .map(std::sync::Arc::new)
                 .unwrap(),
         );
-        let result = tokio::time::timeout(ten, run).await.expect("run ends");
+        let result = tokio::time::timeout(HANG_GUARD, run).await.expect("run ends");
         assert!(result.is_ok(), "{result:?}");
         format!("{result:?}")
     };

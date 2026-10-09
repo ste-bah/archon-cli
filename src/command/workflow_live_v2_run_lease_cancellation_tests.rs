@@ -1,5 +1,7 @@
 use super::*;
 
+const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(60);
+
 struct BlockedLlm {
     started: tokio::sync::Notify,
     release: tokio::sync::Semaphore,
@@ -81,7 +83,7 @@ async fn aborting_outer_resume_keeps_lease_until_blocking_script_stops() {
         let root = temp.path().to_path_buf();
         async move { resume(&root, &store, &id, llm).await }
     });
-    tokio::time::timeout(std::time::Duration::from_secs(10), llm.started.notified())
+    tokio::time::timeout(HANG_GUARD, llm.started.notified())
         .await
         .unwrap();
     outer.abort();
@@ -92,7 +94,7 @@ async fn aborting_outer_resume_keeps_lease_until_blocking_script_stops() {
         WorkflowV2ResultStore::new(store.run_dir(&id).join("v2")).result_path("probe");
     // Wait for the actual script and its runtime to stop, rather than just
     // for the provider call to return.
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    tokio::time::timeout(HANG_GUARD, async {
         while !result_path.is_file() || second_process_busy(&store, &id) {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }

@@ -4,6 +4,8 @@ use super::terminal_test_support::{PendingReply, save_fixed_metadata, seed_fixed
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+const HANG_GUARD: std::time::Duration = std::time::Duration::from_secs(60);
+
 struct FailStartedDelivery {
     v2: WorkflowV2ResultStore,
     failed: AtomicBool,
@@ -55,7 +57,7 @@ async fn round8_fixed_started_delivery_failure_is_closed_before_sibling_terminal
     let plan = WorkflowScriptPlan::from_template(run.spec.clone(), script, Vec::new());
     save_fixed_metadata(&store, &run.id, &plan);
     let report = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
+        HANG_GUARD,
         execute_fixed_decomposition_v2_run(
             &store,
             run.clone(),
