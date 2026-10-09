@@ -142,11 +142,46 @@ fn wrapped_requirement_text_stops_at_the_next_list_item() {
 }
 
 #[test]
+fn lazy_unindented_requirement_continuation_is_included() {
+    let prd = "- REQ-X-001: First line\ncontinues lazily\n- REQ-X-002: Next item\n";
+    assert_eq!(
+        obligation_texts(prd)["REQ-X-001"],
+        "First line continues lazily"
+    );
+}
+
+#[test]
+fn table_rows_fences_and_html_comments_stop_continuations() {
+    for blocker in [
+        "  | AC-X-001 | table row |",
+        "  ```rust",
+        "  <!-- hidden comment -->",
+    ] {
+        let prd = format!("- REQ-X-001: Parent\n{blocker}\n  swallowed text\n");
+        assert_eq!(obligation_texts(&prd)["REQ-X-001"], "Parent", "{blocker}");
+    }
+}
+
+#[test]
+fn nested_sub_bullet_prose_is_appended_but_identified_sub_bullets_are_separate() {
+    let prose = "- REQ-X-001: Parent work\n  - also preserve the audit trail\n  - emit a summary\n";
+    assert_eq!(
+        obligation_texts(prose)["REQ-X-001"],
+        "Parent work; also preserve the audit trail; emit a summary"
+    );
+
+    let identified = "- REQ-X-001: Parent work\n  - REQ-X-002: Separate work\n";
+    let texts = obligation_texts(identified);
+    assert_eq!(texts["REQ-X-001"], "Parent work");
+    assert_eq!(texts["REQ-X-002"], "Separate work");
+}
+
+#[test]
 fn requirement_text_excludes_nested_items_and_stops_at_blank_lines() {
     let prd = "## Requirements\n\n- REQ-X-001: Parent text\n  continuation\n  - REQ-X-002: Nested requirement\n  still nested\n\n  after blank\n- REQ-X-003: Before blank\n  included continuation\n\n  excluded continuation\n- REQ-X-004: Next requirement\n";
     let texts = obligation_texts(prd);
     assert_eq!(texts["REQ-X-001"], "Parent text continuation");
-    assert_eq!(texts["REQ-X-002"], "Nested requirement");
+    assert_eq!(texts["REQ-X-002"], "Nested requirement still nested");
     assert_eq!(texts["REQ-X-003"], "Before blank included continuation");
     assert_eq!(texts["REQ-X-004"], "Next requirement");
 }
@@ -173,10 +208,13 @@ fn a_markdown_heading_ends_requirement_continuations() {
 }
 
 #[test]
-fn wrapped_done_items_include_continuations_but_not_nested_lists() {
+fn wrapped_done_items_include_continuations_and_nested_sub_bullet_prose() {
     let prd = "## Done Definition\n\n1. First done statement\n   continues here\n   - nested detail\n     more detail\n2. Second done statement\n   finishes here\n";
     let texts = obligation_texts(prd);
-    assert_eq!(texts["DONE-1"], "First done statement continues here");
+    assert_eq!(
+        texts["DONE-1"],
+        "First done statement continues here; nested detail more detail"
+    );
     assert_eq!(texts["DONE-2"], "Second done statement finishes here");
 }
 
@@ -204,4 +242,65 @@ fn a_done_section_with_no_numbered_items_mints_nothing() {
     let prd = "## Done Definition\n\nProse only, no list.\n\n- a bullet is not a numbered item\n";
     assert!(obligation_ids(prd).is_empty());
     assert!(obligation_texts(prd).is_empty());
+}
+
+#[test]
+fn done_section_nested_numbered_items_keep_main_ids() {
+    let prd = "## Done Definition\n\n1. Parent\n   1. Nested numbered item\n2. Second parent\n";
+    assert_eq!(obligation_ids(prd), old_obligation_ids(prd));
+    assert_eq!(
+        obligation_ids(prd),
+        ["DONE-1", "DONE-2"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    );
+}
+
+/// Preserve the pre-change ID algorithm as a local oracle. The bullet and
+/// table extractors are unchanged; DONE numbering intentionally mirrors main's
+/// two-space indentation guard and section handling.
+fn old_obligation_ids(prd: &str) -> BTreeSet<String> {
+    let mut ids = bullet_requirement_ids(prd);
+    ids.extend(table_obligation_ids(prd));
+    let mut done_count = 0;
+    let mut section_level: Option<usize> = None;
+    for line in prd.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            let level = trimmed.chars().take_while(|ch| *ch == '#').count();
+            let inside = section_level.is_some_and(|open| level > open);
+            if !inside {
+                section_level = heading_states_done(trimmed).then_some(level);
+            }
+            continue;
+        }
+        if section_level.is_none() || line.len() - trimmed.len() >= 2 {
+            continue;
+        }
+        if numbered_item_text(trimmed).is_some() {
+            done_count += 1;
+            ids.insert(format!("{DONE_ITEM_PREFIX}{done_count}"));
+        }
+    }
+    ids
+}
+
+#[test]
+fn repository_prd_inputs_keep_the_same_ids_as_main() {
+    let inputs = [
+        PRD,
+        include_str!("../../../tests/fixtures/decomposition-synthetic/prd.md"),
+        include_str!("../../../tests/plan-reports/prd-trading-data-lake-ahdm-001.md"),
+        include_str!("../../../assets/templates/workflow-prd.md"),
+        include_str!("../../../assets/templates/workflow-prdtospec.md"),
+        include_str!("../../../assets/templates/prdtospec.md"),
+    ];
+    for (index, input) in inputs.iter().enumerate() {
+        assert_eq!(
+            obligation_ids(input),
+            old_obligation_ids(input),
+            "PRD input {index}"
+        );
+    }
 }

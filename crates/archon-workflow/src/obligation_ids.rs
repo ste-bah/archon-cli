@@ -21,6 +21,9 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+#[path = "obligation_continuations.rs"]
+mod continuations;
+
 const EXCLUDED_HEADINGS: [&str; 5] = [
     "non-goal",
     "out of scope",
@@ -212,8 +215,8 @@ fn bullet_requirement_entries(prd: &str) -> Vec<(String, String)> {
             .trim_start_matches([':', '—', '–', '-'])
             .trim();
         let mut text = vec![first.to_string()];
-        append_continuations(&lines, index + 1, indentation, &mut text);
-        entries.push((id.as_str().to_string(), text.join(" ").trim().to_string()));
+        continuations::append(&lines, index + 1, indentation, &mut text);
+        entries.push((id.as_str().to_string(), continuations::join(&text)));
     }
     entries
 }
@@ -246,44 +249,14 @@ fn done_items(prd: &str) -> Vec<(String, String)> {
         if let Some(text) = numbered_item_text(trimmed) {
             let indentation = line.len() - trimmed.len();
             let mut wrapped = vec![text];
-            append_continuations(&lines, index + 1, indentation, &mut wrapped);
+            continuations::append(&lines, index + 1, indentation, &mut wrapped);
             items.push((
                 format!("{DONE_ITEM_PREFIX}{}", items.len() + 1),
-                wrapped.join(" ").trim().to_string(),
+                continuations::join(&wrapped),
             ));
         }
     }
     items
-}
-
-/// Append indented prose belonging to a list item, stopping at blank lines,
-/// headings, and every list marker. A nested sub-list elaborates the item but
-/// remains separate from its text; REQ bullets in that sub-list retain their
-/// existing independent extraction behavior.
-fn append_continuations(
-    lines: &[&str],
-    start: usize,
-    item_indentation: usize,
-    text: &mut Vec<String>,
-) {
-    for (index, line) in lines.iter().enumerate().skip(start) {
-        if line.trim().is_empty() {
-            break;
-        }
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('#')
-            || lines
-                .get(index + 1)
-                .is_some_and(|underline| is_setext_underline(underline))
-        {
-            break;
-        }
-        let indentation = line.len() - trimmed.len();
-        if indentation <= item_indentation || is_list_item(trimmed) {
-            break;
-        }
-        text.push(trimmed.to_string());
-    }
 }
 
 fn is_setext_underline(line: &str) -> bool {
