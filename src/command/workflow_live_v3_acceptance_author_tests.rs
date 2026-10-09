@@ -68,6 +68,40 @@ fn a_placeholder_is_never_publishable_and_owed_checks_are_named_until_authored()
 }
 
 #[test]
+fn changed_requirement_text_makes_its_frozen_supplementary_entry_drift() {
+    let previous = placeholder(
+        "SUP-REQ-X-001",
+        "The dataset records provider and instrument.",
+        vec!["REQ-X-001".into()],
+    );
+    let contract = AcceptanceContract {
+        schema_version: 1,
+        prd: PrdIdentity {
+            path: "prd.md".into(),
+            digest: "before-change".into(),
+        },
+        gap_policy: GapPolicy {
+            permitted_acceptance_ids: BTreeSet::new(),
+            forbidden_phrases: Vec::new(),
+            required_fields: Vec::new(),
+        },
+        acceptance: Vec::new(),
+        supplementary: vec![previous],
+    };
+    let owed = super::super::author_drift::owed_by(
+        &contract,
+        "## Requirements\n\n- REQ-X-001: The dataset records provider, instrument, timeframe, and price basis.\n",
+        true,
+    );
+    assert_eq!(owed.len(), 1, "the frozen entry is re-authored in place");
+    assert_eq!(owed[0].id, "SUP-REQ-X-001");
+    assert_eq!(
+        owed[0].criterion,
+        "The dataset records provider, instrument, timeframe, and price basis."
+    );
+}
+
+#[test]
 fn r7_staged_feedback_keeps_every_closing_fence_within_the_cap() {
     let mut staged = Staged::default();
     let why = format!(

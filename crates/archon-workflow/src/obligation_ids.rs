@@ -21,6 +21,9 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+#[path = "obligation_continuations.rs"]
+mod continuations;
+
 const EXCLUDED_HEADINGS: [&str; 5] = [
     "non-goal",
     "out of scope",
@@ -194,22 +197,28 @@ fn bullet_requirement_ids(prd: &str) -> BTreeSet<String> {
 /// Each well-formed `REQ-` bullet with the text that follows its id on the
 /// same line, separator (`:`, `—`, `-`) stripped.
 fn bullet_requirement_entries(prd: &str) -> Vec<(String, String)> {
-    requirement_candidate_pattern()
-        .captures_iter(prd)
-        .filter_map(|capture| {
-            let id = capture.get(1)?;
-            if !exact_req_or_ac_pattern().is_match(id.as_str()) {
-                return None;
-            }
-            let rest = &prd[id.end()..];
-            let line = rest.split(['\n', '\r']).next().unwrap_or_default();
-            let text = line
-                .trim_start()
-                .trim_start_matches([':', '—', '–', '-'])
-                .trim();
-            Some((id.as_str().to_string(), text.to_string()))
-        })
-        .collect()
+    let lines: Vec<_> = prd.lines().collect();
+    let mut entries = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let Some(capture) = requirement_candidate_pattern().captures(line) else {
+            continue;
+        };
+        let Some(id) = capture.get(1) else {
+            continue;
+        };
+        if !exact_req_or_ac_pattern().is_match(id.as_str()) {
+            continue;
+        }
+        let indentation = line.len() - line.trim_start().len();
+        let first = line[id.end()..]
+            .trim_start()
+            .trim_start_matches([':', '—', '–', '-'])
+            .trim();
+        let mut text = vec![first.to_string()];
+        continuations::append(&lines, index + 1, indentation, &mut text);
+        entries.push((id.as_str().to_string(), continuations::join(&text)));
+    }
+    entries
 }
 
 /// The numbered items under a done heading, as `(DONE-<n>, text)`.
@@ -223,7 +232,8 @@ fn bullet_requirement_entries(prd: &str) -> Vec<(String, String)> {
 fn done_items(prd: &str) -> Vec<(String, String)> {
     let mut items = Vec::new();
     let mut section_level: Option<usize> = None;
-    for line in prd.lines() {
+    let lines: Vec<_> = prd.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
         if trimmed.starts_with('#') {
             let level = trimmed.chars().take_while(|ch| *ch == '#').count();
@@ -237,10 +247,40 @@ fn done_items(prd: &str) -> Vec<(String, String)> {
             continue;
         }
         if let Some(text) = numbered_item_text(trimmed) {
-            items.push((format!("{DONE_ITEM_PREFIX}{}", items.len() + 1), text));
+            let indentation = line.len() - trimmed.len();
+            let mut wrapped = vec![text];
+            continuations::append(&lines, index + 1, indentation, &mut wrapped);
+            items.push((
+                format!("{DONE_ITEM_PREFIX}{}", items.len() + 1),
+                continuations::join(&wrapped),
+            ));
         }
     }
     items
+}
+
+fn is_setext_underline(line: &str) -> bool {
+    let line = line.trim();
+    !line.is_empty() && (line.chars().all(|ch| ch == '=') || line.chars().all(|ch| ch == '-'))
+}
+
+fn is_list_item(line: &str) -> bool {
+    let Some(first) = line.chars().next() else {
+        return false;
+    };
+    if matches!(first, '-' | '*' | '+') {
+        return line.chars().nth(1).is_some_and(char::is_whitespace);
+    }
+    let digits = line.chars().take_while(char::is_ascii_digit).count();
+    digits > 0
+        && line[digits..]
+            .chars()
+            .next()
+            .is_some_and(|ch| matches!(ch, '.' | ')'))
+        && line[digits + 1..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
 }
 
 fn numbered_item_text(line: &str) -> Option<String> {
