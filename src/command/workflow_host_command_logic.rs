@@ -212,14 +212,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380 complete wrapped obligation text changes freeze verdicts.
         version: 4,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "7978c97dc19dc529d986b4ea3e59a83d5fb056f26d8dad3f50581639586d9941",
+        sources_digest: "6927c10d2c918fcbbf5f38a526308c73c399c507f6a54ea92425dbca8a6167dc",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 2,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "7978c97dc19dc529d986b4ea3e59a83d5fb056f26d8dad3f50581639586d9941",
+        sources_digest: "6927c10d2c918fcbbf5f38a526308c73c399c507f6a54ea92425dbca8a6167dc",
         build_bound: false,
     },
     CapabilityLogic {
@@ -230,7 +230,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380's obligation model changes the frozen contract verdict.
         version: 4,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "9688001ec3e04d89b37c578c40be826dc86b36d3e6451324fad9ccaaf5c815a0",
+        sources_digest: "9c08c12ac9286e6113d16d926d83c46d6e787b5a2f329a8b63ae96165f605ee0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -240,7 +240,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380's obligation model changes the frozen contract verdict.
         version: 4,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "9688001ec3e04d89b37c578c40be826dc86b36d3e6451324fad9ccaaf5c815a0",
+        sources_digest: "9c08c12ac9286e6113d16d926d83c46d6e787b5a2f329a8b63ae96165f605ee0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -254,14 +254,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         id: "verify-frozen-acceptance",
         version: 2,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "a9edd9046bafffa9440451aff7c386e7affae3afc17fe1ce62a6edbb49edb205",
+        sources_digest: "b82f84259b9b6b7e4321a0ca260e7e5e09c520c1dd5c37f50206b4a84060e149",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
         version: 2,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "a9edd9046bafffa9440451aff7c386e7affae3afc17fe1ce62a6edbb49edb205",
+        sources_digest: "b82f84259b9b6b7e4321a0ca260e7e5e09c520c1dd5c37f50206b4a84060e149",
         build_bound: true,
     },
 ];

@@ -68,7 +68,7 @@ fn a_placeholder_is_never_publishable_and_owed_checks_are_named_until_authored()
 }
 
 #[test]
-fn changed_requirement_text_makes_its_frozen_supplementary_entry_drift() {
+fn changed_requirement_text_makes_its_frozen_supplementary_entry_drift_without_digest_movement() {
     let previous = placeholder(
         "SUP-REQ-X-001",
         "The dataset records provider and instrument.",
@@ -91,7 +91,7 @@ fn changed_requirement_text_makes_its_frozen_supplementary_entry_drift() {
     let owed = super::super::author_drift::owed_by(
         &contract,
         "## Requirements\n\n- REQ-X-001: The dataset records provider, instrument, timeframe, and price basis.\n",
-        true,
+        false,
     );
     assert_eq!(owed.len(), 1, "the frozen entry is re-authored in place");
     assert_eq!(owed[0].id, "SUP-REQ-X-001");

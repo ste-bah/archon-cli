@@ -357,11 +357,8 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     })
 }
 
-/// The launch-bound script arguments. Resume rebuilds them from the same
-/// inputs and compares them to the persisted copy, so every key here is part
-/// of the run's identity; `frozen_chain` is the launch-time reading of the
-/// task root and is carried forward verbatim on resume rather than re-read,
-/// because the script's call sequence depends on it.
+/// Launch-bound script arguments; resume rebuilds and compares them to the
+/// persisted copy. The frozen chain is carried forward verbatim on resume.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fixed_script_arguments(
     project_root: &Path,
@@ -375,10 +372,8 @@ pub(crate) fn fixed_script_arguments(
 ) -> serde_json::Value {
     serde_json::json!({
         "projectRoot": path_text(project_root),
-        // The code repository (Issue-55): the only place the script's authors
-        // and critics verify source paths, test names, module layout and
-        // "exists / does not exist" claims. projectRoot keeps the PRD, the
-        // task root and .mcp.json and nothing else.
+        // Authors and critics use repositoryRoot for code; projectRoot holds
+        // the PRD, task root and .mcp.json (Issue-55).
         "repositoryRoot": path_text(repository_root),
         "prdPath": path_text(prd_path),
         "prdDigest": prd_digest,
@@ -386,11 +381,8 @@ pub(crate) fn fixed_script_arguments(
         "authorMaxParallelism": config.subagent.max_concurrent.max(1),
         "taskRoot": path_text(task_root),
         "gateMode": gate_mode_text(config.workflow.gate_mode),
-        // Directory NAMES the authors must not descend into, from the engine's own
-        // canonical list rather than a literal in a prompt string. One target
-        // project held 249,451 files, 230,606 of them under .archon; an author
-        // told to read "relevant repository files" walks all of it (a live
-        // acceptance author made 69 tool calls and no artifact in 7200s).
+        // Use the engine's canonical excluded directory list; broad reads of
+        // large .archon trees have stalled live acceptance authors.
         "excludedDirs": archon_leann::language::default_exclude_patterns(),
         "frozenChain": frozen_chain,
     })

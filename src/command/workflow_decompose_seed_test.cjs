@@ -11,16 +11,16 @@ const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js
   'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js', 'workflow_decompose_v1_seed.js']
   .map((name) => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 
-function context(criteria, phaseSeed) {
+function context(criteria, phaseSeed, prdRequirementTexts = {}) {
   // Issue 357's native entry validator; its rules are tested by shape_tests.
-  const ctx = { args: { acceptanceCriteria: criteria, gateMode: 'enforce', authorMaxParallelism: 2, phaseSeed },
+  const ctx = { args: { acceptanceCriteria: criteria, prdRequirementTexts, gateMode: 'enforce', authorMaxParallelism: 2, phaseSeed },
     __archonValidateAcceptanceEntry: () => '[]' };
   vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
   if (phaseSeed) ctx.applySeedOrdinals();
   return ctx;
 }
-const entry = (id, version = 0) => ({ id, criterion: `c ${id}`, check: { kind: 'command', command: `t ${id} ${version}`, cwd: 'project_root' },
+const entry = (id, version = 0) => ({ id, criterion: id.toLowerCase(), check: { kind: 'command', command: `t ${id} ${version}`, cwd: 'project_root' },
   gap_permitted: false, covers: [], judgment: { verdict: 'accepted', counterexample: '', reason: '', host_call_id: '' } });
 const finding = (text, subject = 'acceptance') => ({ text, subject, remediation_scope: 'candidate_artifact' });
 const owedText = (req) => `check 'SUP-${req}': PRD requirement ${req} is covered by no acceptance check; author supplementary check SUP-${req}: the ${req} text`;
@@ -43,8 +43,8 @@ function host() {
   } };
 }
 
-async function seeded(subjects, criteria, ordinals = { acceptance: 25 }) {
-  const ctx = context(criteria, { transition_index: 0, author_ordinals: ordinals, pause_ordinals: { acceptance: 2 }, subjects });
+async function seeded(subjects, criteria, ordinals = { acceptance: 25 }, requirementTexts = {}) {
+  const ctx = context(criteria, { transition_index: 0, author_ordinals: ordinals, pause_ordinals: { acceptance: 2 }, subjects }, requirementTexts);
   const { seen, w } = host();
   const outcome = await ctx.authorCandidate(w, acceptancePolicy(ctx));
   return { ctx, seen, outcome };
@@ -107,6 +107,18 @@ async function invalidEntryOnly() {
     invalid: { A: ["acceptance entry 'A' was refused: entry/criterion is missing"] },
     gates: [{ call_id: 'g', published: true, findings: [] }] } }, { A: 'a', B: 'b' });
   assert.deepEqual(seen.agents, ['acceptance-author-A-28']);
+}
+
+async function changedSupplementaryCriterionIsReauthored() {
+  const changed = { ...entry('SUP-REQ-1'), criterion: 'old requirement text', covers: ['REQ-1'] };
+  const unchanged = { ...entry('SUP-REQ-2'), criterion: 'unchanged requirement text', covers: ['REQ-2'] };
+  const candidate = JSON.stringify({ entries: [entry('A')], supplementary: [changed, unchanged] });
+  const ctx = context({ A: 'a' }, { transition_index: 0, author_ordinals: {}, pause_ordinals: {}, subjects: {} },
+    { 'REQ-1': 'current requirement text', 'REQ-2': 'unchanged requirement text' });
+  const state = { entries: new Map() };
+  ctx.seedEntries({ candidate, replies: [], invalid: {}, gates: [] },
+    { phase: 'acceptance', author: true, retryScopes: new Set(['candidate_artifact']) }, state);
+  assert.deepEqual([...state.retryIds], ['SUP-REQ-1'], 'changed host text is re-authored while unchanged text is carried');
 }
 
 // The last gate refused the whole candidate by a pointer into it: the entry
@@ -177,7 +189,8 @@ async function sample() {
 }
 
 (async () => {
-  for (const test of [refutedEntryOnly, unchangedReplyIsNoRepair, unattributableRefusalReauthorsAsTheLoopDoes, invalidEntryOnly, pointerRefusalRepairedSince, neverFrozen, artifactSeeds, pausesContinue, sample]) {
+  for (const test of [refutedEntryOnly, unchangedReplyIsNoRepair, unattributableRefusalReauthorsAsTheLoopDoes, invalidEntryOnly,
+    changedSupplementaryCriterionIsReauthored, pointerRefusalRepairedSince, neverFrozen, artifactSeeds, pausesContinue, sample]) {
     await test();
     console.log(`ok ${test.name}`);
   }

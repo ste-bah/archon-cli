@@ -256,17 +256,16 @@ pub(super) fn owed_by(
                 };
                 let covers = entry.covers.iter().any(|id| id.trim() == requirement);
                 (!covers
-                    || (prd_moved
-                        && (entry.criterion != *text
-                            || current_covers.len() != entry.covers.len())))
+                    || entry.criterion != *text
+                    || (prd_moved && current_covers.len() != entry.covers.len()))
                 .then(|| placeholder(&entry.id, text, vec![requirement.to_string()]))
             }
             None => {
                 let Some(text) = criteria.get(&entry.id) else {
                     continue;
                 };
-                (prd_moved
-                    && (entry.criterion != *text || current_covers.len() != entry.covers.len()))
+                (entry.criterion != *text
+                    || (prd_moved && current_covers.len() != entry.covers.len()))
                 .then(|| placeholder(&entry.id, text, current_covers))
             }
         };

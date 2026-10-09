@@ -213,13 +213,14 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             "fixed decomposition resume paused: identity.script_digest does not match workflow.js; restore the intact launch bundle before resume"
         ));
     }
-    let (_, prd_digest, acceptance_criteria) =
+    let (prd_bytes, prd_digest, acceptance_criteria) =
         super::super::workflow_task_set::validate_prd_input(&prd_path)?;
+    let prd_text = std::str::from_utf8(&prd_bytes)?;
+    let prd_requirement_texts =
+        archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);
     let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
-    // The frozen chain is the launch-time reading of the task root, bound
-    // into the run like every other argument: the script skipped stages on
-    // its word, so a resume replays against the same word, not a fresh read
-    // of a root the run has since written to.
+    // Replay the frozen chain captured at launch; its snapshot controls which
+    // stages the script skips, regardless of later task-root changes.
     let frozen_chain = arguments
         .get("frozenChain")
         .filter(|value| value.is_object())
@@ -234,9 +235,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         frozen_chain.clone(),
         "decomposition/arguments.json.frozenChain",
     )?;
-    // The repository the launch grounded the authors in is read back from the
-    // task root's record, never from a flag or config: a resume replays the
-    // launch's word, and the record is that word.
+    // Replay the launch's repository root from the task-root record.
     let repository_root = archon_workflow::repository_record::read_repository_record(&task_root)?
         .map(|record| PathBuf::from(record.repository_root))
         .ok_or_else(|| {
@@ -353,10 +352,11 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     let seed = crate::command::workflow_decompose_seed::current_seed(
         &store, run_id, &log_path, &criteria,
     )?;
-    let script_arguments = crate::command::workflow_decompose_seed::seeded_arguments(
+    let mut script_arguments = crate::command::workflow_decompose_seed::seeded_arguments(
         &expected_arguments,
         seed.as_ref(),
     );
+    script_arguments["prdRequirementTexts"] = serde_json::to_value(prd_requirement_texts)?;
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,
         Some(&script_arguments),

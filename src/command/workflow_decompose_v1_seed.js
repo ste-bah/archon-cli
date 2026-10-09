@@ -80,7 +80,16 @@ function seedEntries(seed, policy, state) {
     if (last) refuted = named;
   });
   const listed = candidate ? [...(candidate.entries || []), ...(candidate.supplementary || [])] : [];
-  for (const entry of listed) state.entries.set(entry.id, entry);
+  const staleCriteria = new Set();
+  const currentCriterion = (id) => {
+    const criteria = args.acceptanceCriteria || {};
+    if (Object.prototype.hasOwnProperty.call(criteria, id)) return criteria[id];
+    const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(id)?.[1];
+    return requirement ? (args.prdRequirementTexts || {})[requirement] : undefined;
+  };
+  for (const entry of listed) {
+    state.entries.set(entry.id, entry);
+  }
   // A reply authored after that gate is the entry's latest version, and a
   // repair only when it differs from what the gate judged: a gate asked the
   // same candidate again answers from its record, which keeps its old time.
@@ -101,12 +110,16 @@ function seedEntries(seed, policy, state) {
     if (!judged || kept(judged) !== acceptanceEntryKey(entry)) repaired.add(reply.id);
     state.entries.set(reply.id, entry);
   }
+  for (const entry of state.entries.values()) {
+    const current = currentCriterion(entry.id);
+    if (typeof current === "string" && entry.criterion !== current) staleCriteria.add(entry.id);
+  }
   const invalid = seed.invalid && typeof seed.invalid === "object" ? seed.invalid : {};
   // Refuted (every carried entry, for an unattributable refusal) and not
   // repaired since: that round's work is kept, the rest is authored again, so
   // the refused candidate is never submitted unchanged.
   const sentBack = refuted === null ? listed.map((entry) => entry.id) : [...refuted];
-  state.retryIds = new Set([...sentBack.filter((id) => !repaired.has(id)), ...Object.keys(invalid), ...unreadable]);
+  state.retryIds = new Set([...sentBack.filter((id) => !repaired.has(id)), ...Object.keys(invalid), ...unreadable, ...staleCriteria]);
   const last = gates[gates.length - 1];
   const feedback = [
     ...(last ? seedRepairFindings(last, policy).map((finding) => String(finding.text)) : []),
