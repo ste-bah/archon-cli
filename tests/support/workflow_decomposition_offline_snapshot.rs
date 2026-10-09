@@ -103,11 +103,28 @@ pub fn result_store_records(
         })
         .flatten()
         .collect::<Vec<_>>();
-    let replacements = [
-        (root.to_str().unwrap(), "<project-root>"),
+    let mut root_spellings = vec![root.to_path_buf()];
+    root_spellings.extend(fs::canonicalize(root));
+    let mut root_spellings = root_spellings
+        .into_iter()
+        .filter_map(|path| path.to_str().map(str::to_owned))
+        .flat_map(|spelling| {
+            let forward = spelling.replace('\\', "/");
+            let backward = spelling.replace('/', "\\");
+            [spelling, forward, backward]
+        })
+        .collect::<Vec<_>>();
+    root_spellings.sort_by_key(|spelling| std::cmp::Reverse(spelling.len()));
+    root_spellings.dedup();
+    let mut replacements = root_spellings
+        .iter()
+        .map(|spelling| (spelling.as_str(), "<project-root>"))
+        .collect::<Vec<_>>();
+    replacements.extend([
+        ("<project-root>\\", "<project-root>/"),
         (endpoint, "<provider-endpoint>"),
         (run_id, "<run-id>"),
-    ];
+    ]);
     // Receipts are read through their raw destination paths, so they are
     // normalised before the host call ids inside those paths are replaced.
     let (content_by_digest, compared_paths) =

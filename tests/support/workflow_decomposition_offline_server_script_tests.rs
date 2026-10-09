@@ -2,7 +2,7 @@ use super::{fidelity_answer, scripted_answer};
 
 #[test]
 fn routes_current_acceptance_author_prompt_and_extracts_its_id() {
-    let prompt = r#"{"task":"Author exactly one acceptance entry identified below. Author ONLY entry AC-X-001: The outcome is ready."}"#;
+    let prompt = r#"{"task":"Author exactly one acceptance entry identified below. Author ONLY entry AC-X-001: The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true."}"#;
     let (role, answer) = scripted_answer(prompt);
     assert_eq!(role, "acceptance");
     assert!(answer.contains(r#""id":"AC-X-001""#), "{answer}");
@@ -10,12 +10,22 @@ fn routes_current_acceptance_author_prompt_and_extracts_its_id() {
 
 #[test]
 fn supplementary_answer_covers_the_requirement_named_by_the_id() {
-    for (id, requirement, artifact) in [
-        ("SUP-REQ-X-001", "REQ-X-001", "src/alpha.txt"),
-        ("SUP-REQ-X-002", "REQ-X-002", "src/beta.json"),
+    for (id, criterion, requirement, artifact) in [
+        (
+            "SUP-REQ-X-001",
+            "The first artifact contains the required line.",
+            "REQ-X-001",
+            "src/alpha.txt",
+        ),
+        (
+            "SUP-REQ-X-002",
+            "The second artifact is ready JSON.",
+            "REQ-X-002",
+            "src/beta.json",
+        ),
     ] {
         let prompt = format!(
-            r#"{{"task":"Author exactly one acceptance entry identified below. Author ONLY entry {id}: Check {artifact}."}}"#
+            r#"{{"task":"Author exactly one acceptance entry identified below. Author ONLY entry {id}: {criterion}"}}"#
         );
         let (role, answer) = scripted_answer(&prompt);
         assert_eq!(role, "acceptance");
@@ -40,6 +50,10 @@ fn unknown_prompt_and_unknown_acceptance_id_fail_closed() {
     let (role, _) = scripted_answer("unrecognized real prompt");
     assert_eq!(role, "unknown");
     let prompt = "Author exactly one acceptance entry identified below. Author ONLY entry AC-X-999: criterion.";
+    let (role, _) = scripted_answer(prompt);
+    assert_eq!(role, "unknown");
+
+    let prompt = "Author exactly one acceptance entry identified below. Author ONLY entry AC-X-001: The outcome is ready.";
     let (role, _) = scripted_answer(prompt);
     assert_eq!(role, "unknown");
 }

@@ -51,6 +51,17 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
         else {
             return unknown_prompt();
         };
+        let criterion = match id {
+            "AC-X-001" => {
+                "The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true."
+            }
+            "SUP-REQ-X-001" => "The first artifact contains the required line.",
+            "SUP-REQ-X-002" => "The second artifact is ready JSON.",
+            _ => return unknown_prompt(),
+        };
+        if !text.contains(criterion) {
+            return unknown_prompt();
+        }
         if id == "SUP-REQ-X-001" {
             return (
                 "acceptance",
@@ -76,9 +87,6 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
                     "judgment": {"verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": ""}
                 }).to_string(),
             );
-        }
-        if id != "AC-X-001" {
-            return unknown_prompt();
         }
         return (
             "acceptance",
