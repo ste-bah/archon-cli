@@ -148,18 +148,42 @@ pub(in crate::command) async fn execute_checks(
     let mut results_by_id = BTreeMap::new();
     let mut pending = Vec::new();
     let mut reuse = BTreeMap::new();
+    // Issue 288: the host evaluates a literal test from its snapshot of the
+    // live roots only where the check's site is those roots (the direct
+    // site). A configured scratch runs every check hermetically at HEAD, a
+    // tree the live snapshot does not prove, so there the check runs in the
+    // site like any other and a site that cannot be built stays one
+    // round-level error.
+    let host_site = context.binding.is_none();
     for criterion in selected {
         let host_test = match &criterion.check {
             AcceptanceCheck::Command { command, .. } => super::reuse::is_literal_test(command),
             _ => false,
         };
-        if let Some(snapshot) = super::reuse::snapshot(context, criterion) {
+        if !host_site {
+            pending.push(*criterion);
+            reuse.insert(
+                criterion.id.clone(),
+                super::reuse::Decision {
+                    reused: false,
+                    why: "checks run in the configured scratch site, which no host snapshot proves"
+                        .into(),
+                    evidence: None,
+                },
+            );
+        } else if let Some(snapshot) = super::reuse::snapshot(context, criterion) {
             let (saved, decision, key) = super::reuse::take_snapshot(&snapshot);
             if let Some(saved) = saved {
                 results_by_id.insert(criterion.id.clone(), saved);
             } else if let (Some(key), Some(result)) =
                 (key, super::reuse::evaluate_snapshot(&snapshot, criterion))
             {
+                #[cfg(test)]
+                if let AcceptanceCheck::Command { command, .. } = &criterion.check {
+                    record_execution(&archon_workflow::task_set_contract::content_digest(
+                        command.as_bytes(),
+                    ));
+                }
                 let safe = criterion.id.replace(
                     |ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'),
                     "_",

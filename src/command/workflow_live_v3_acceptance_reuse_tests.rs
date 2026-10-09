@@ -273,7 +273,7 @@ fn acceptance_freeze_reuse_logic_size_test_follows_symlink_target() {
 }
 
 #[test]
-fn ignored_input_is_volatile_and_cannot_leave_a_verdict_after_deletion() {
+fn ignored_input_is_proven_by_its_snapshot_and_cannot_leave_a_verdict_after_deletion() {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), &["init", "-q"]);
     git(
@@ -296,17 +296,22 @@ fn ignored_input_is_volatile_and_cannot_leave_a_verdict_after_deletion() {
         launch_lineage: archon_workflow::task_set_lineage::LaunchLineage::Predates,
         run_id: "reuse-test".into(),
     };
-    assert!(
-        super::reuse::key(&context, &criterion()).is_none(),
-        "an ignored file is visible to the check but absent from HEAD"
-    );
+    // The ignored file is absent from HEAD but visible to the check: the
+    // filesystem snapshot, not the Git tree, is what proves it.
+    let snapshot = super::reuse::snapshot(&context, &criterion())
+        .expect("an ignored literal path is proven by its filesystem snapshot");
+    let present = snapshot.key().to_owned();
+    let verdict = super::reuse::evaluate_snapshot(&snapshot, &criterion()).unwrap();
+    assert_eq!(verdict.exit_code, Some(0));
+    super::reuse::save(present.clone(), &verdict, "ignored-file evidence".into());
 
     std::fs::remove_file(dir.path().join("data/ignored.txt")).unwrap();
     let (saved, decision, key) = super::reuse::take(&context, &criterion());
     assert!(
         saved.is_none(),
-        "the earlier ignored-file verdict was not saved"
+        "the verdict over the deleted ignored file is not reused"
     );
     assert!(!decision.reused);
-    assert!(key.is_some(), "the now-absent path has a closed read set");
+    let key = key.expect("the now-absent path has a closed read set");
+    assert_ne!(key, present, "deleting the ignored file changes the key");
 }
