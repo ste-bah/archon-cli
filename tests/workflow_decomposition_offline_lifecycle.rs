@@ -1,13 +1,18 @@
 #[path = "support/workflow_decomposition_offline_deadline.rs"]
 mod deadline;
+#[path = "support/workflow_decomposition_offline_diagnostics.rs"]
+mod diagnostics;
 #[path = "support/workflow_decomposition_offline_server.rs"]
 mod server;
+#[path = "support/workflow_decomposition_offline_snapshot.rs"]
+mod snapshot;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use deadline::{await_provider_boundary, progress, run, wait_for_child};
+use snapshot::{result_store_records, strip_timestamps};
 
 const FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -15,13 +20,26 @@ const FIXTURE: &str = concat!(
 );
 
 struct TestProject {
-    temp: tempfile::TempDir,
+    temp: Option<tempfile::TempDir>,
     provider: server::FakeProvider,
 }
 
 impl TestProject {
     fn path(&self) -> &Path {
-        self.temp.path()
+        self.temp.as_ref().unwrap().path()
+    }
+}
+
+impl Drop for TestProject {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
+        let root = self.path().to_path_buf();
+        diagnostics::print_failure(&root, &self.provider.requests);
+        if let Some(temp) = self.temp.take() {
+            let _ = temp.keep();
+        }
     }
 }
 
@@ -96,7 +114,10 @@ max_concurrent = 1
         ),
     )
     .unwrap();
-    TestProject { temp, provider }
+    TestProject {
+        temp: Some(temp),
+        provider,
+    }
 }
 
 fn copy_tree(from: &Path, to: &Path) {
@@ -191,87 +212,6 @@ fn one_run(root: &Path) -> PathBuf {
     run
 }
 
-fn strip_timestamps(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            map.retain(|key, _| {
-                !(key == "timestamp" || key.ends_with("_at") || key.ends_with("At"))
-            });
-            for nested in map.values_mut() {
-                strip_timestamps(nested);
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for nested in values {
-                strip_timestamps(nested);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn normalize_values(value: &mut serde_json::Value, replacements: &[(&str, &str)]) {
-    match value {
-        serde_json::Value::String(text) => {
-            for (from, to) in replacements {
-                *text = text.replace(from, to);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for nested in map.values_mut() {
-                normalize_values(nested, replacements);
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for nested in values {
-                normalize_values(nested, replacements);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn result_store_records(
-    run: &Path,
-    root: &Path,
-    endpoint: &str,
-    run_id: &str,
-) -> Vec<(String, serde_json::Value)> {
-    let results = run.join("v2/results");
-    let mut records = fs::read_dir(&results)
-        .unwrap_or_else(|error| {
-            panic!(
-                "reading result-store records at {}: {error}",
-                results.display()
-            )
-        })
-        .map(|entry| {
-            let path = entry.unwrap().path();
-            if !path.is_file()
-                || path.extension().and_then(|extension| extension.to_str()) != Some("json")
-            {
-                return None;
-            }
-            let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            let mut value: serde_json::Value =
-                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-            strip_timestamps(&mut value);
-            normalize_values(
-                &mut value,
-                &[
-                    (root.to_str().unwrap(), "<project-root>"),
-                    (endpoint, "<provider-endpoint>"),
-                    (run_id, "<run-id>"),
-                ],
-            );
-            Some((name, value))
-        })
-        .flatten()
-        .collect::<Vec<_>>();
-    records.sort_by(|left, right| left.0.cmp(&right.0));
-    records
-}
-
 #[derive(Debug, PartialEq)]
 struct FinalSnapshot {
     acceptance: serde_json::Value,
@@ -334,12 +274,26 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
     let output = run(root, &decompose_args());
     assert!(
         output.status.success(),
-        "stdout: {}\nstderr: {}",
+        "exit status: {}\nstdout: {}\nstderr: {}",
+        output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    let run_dir = one_run(root);
+    let state: serde_json::Value =
+        serde_json::from_slice(&fs::read(run_dir.join("state.json")).unwrap()).unwrap();
+    assert_eq!(
+        state["status"],
+        "completed",
+        "CLI output: {}\nstate: {state}",
+        String::from_utf8_lossy(&output.stdout)
+    );
     progress("golden", "CLI completed; checking artifacts and calls");
-    assert!(root.join("tasks/acceptance-contract.json").exists());
+    assert!(
+        root.join("tasks/acceptance-contract.json").exists(),
+        "CLI output: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
     assert!(root.join("tasks/task-skeleton.json").exists());
     assert!(root.join("tasks/TASK-X-010.md").exists());
     assert!(root.join("tasks/TASK-X-020.md").exists());

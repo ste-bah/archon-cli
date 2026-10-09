@@ -14,9 +14,19 @@ impl Counts {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct Requests(pub Arc<Mutex<Vec<(String, String, String)>>>);
+
+impl Requests {
+    pub fn snapshot(&self) -> Vec<(String, String, String)> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 pub struct FakeProvider {
     pub base_url: String,
     pub counts: Counts,
+    pub requests: Requests,
     blocked_role: Option<String>,
     release: Arc<(Mutex<bool>, std::sync::Condvar)>,
     entered: Arc<(Mutex<bool>, std::sync::Condvar)>,
@@ -39,6 +49,8 @@ impl FakeProvider {
         let address = listener.local_addr().unwrap();
         let counts = Counts::default();
         let request_counts = counts.clone();
+        let requests = Requests::default();
+        let request_log = requests.clone();
         let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         let entered = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         let thread_release = release.clone();
@@ -93,6 +105,11 @@ impl FakeProvider {
                     serde_json::from_slice(&request[body_start..]).unwrap_or_default();
                 let prompt = body.to_string();
                 let (role, answer) = scripted_answer(&prompt);
+                request_log.0.lock().unwrap().push((
+                    role.to_string(),
+                    prompt.clone(),
+                    answer.clone(),
+                ));
                 *request_counts
                     .0
                     .lock()
@@ -145,6 +162,7 @@ impl FakeProvider {
         Self {
             base_url: format!("http://{address}/v1/messages"),
             counts,
+            requests,
             blocked_role,
             release,
             entered,
@@ -218,31 +236,31 @@ fn scripted_answer(prompt: &str) -> (&'static str, String) {
             .nth(1)
             .and_then(|s| s.split(':').next())
             .unwrap_or("AC-001");
-        if id.starts_with("SUP-REQ-001") {
+        if id.starts_with("SUP-REQ-X-001") {
             return (
                 "acceptance",
                 format!(
-                    r#"{{"id":"{id}","criterion":"The first artifact contains the required line.","check":{{"kind":"command","command":"test -f src/alpha.txt && grep -qx 'alpha ready' src/alpha.txt","cwd":"repo_root"}},"gap_permitted":false,"covers":["REQ-001"],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
+                    r#"{{"id":"{id}","criterion":"The first artifact contains the required line.","check":{{"kind":"command","command":"test -f src/alpha.txt && grep -qx 'alpha ready' src/alpha.txt","cwd":"repo_root"}},"gap_permitted":false,"covers":["REQ-X-001"],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
                 ),
             );
         }
-        if id.starts_with("SUP-REQ-002") {
+        if id.starts_with("SUP-REQ-X-002") {
             return (
                 "acceptance",
                 format!(
-                    r#"{{"id":"{id}","criterion":"The second artifact is ready JSON.","check":{{"kind":"command","command":"test -f src/beta.json && grep -q '\"ready\":true' src/beta.json","cwd":"repo_root"}},"gap_permitted":false,"covers":["REQ-002"],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
+                    r#"{{"id":"{id}","criterion":"The second artifact is ready JSON.","check":{{"kind":"command","command":"test -f src/beta.json && grep -q '\"ready\":true' src/beta.json","cwd":"repo_root"}},"gap_permitted":false,"covers":["REQ-X-002"],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
                 ),
             );
         }
         return (
             "acceptance",
             format!(
-                r#"{{"id":"{id}","criterion":"The declared outcome artifact is ready.","check":{{"kind":"floor","contract":{{"kind":"generic_outcome","artifact_path":".archon/proof/outcome.json","artifact_format":"json","required_true_fields":["ready"]}}}},"gap_permitted":false,"covers":["REQ-001"],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
+                r#"{{"id":"{id}","criterion":"The declared outcome artifact is ready.","check":{{"kind":"floor","contract":{{"kind":"generic_outcome","artifact_path":".archon/proof/outcome.json","artifact_format":"json","required_true_fields":["ready"]}}}},"gap_permitted":false,"covers":[],"judgment":{{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}}}"#
             ),
         );
     }
     if prompt.contains("Author one complete task-skeleton JSON artifact") {
-        return ("skeleton", r#"{"schema_version":1,"acceptance_digest":"","tasks":[{"task_id":"TASK-X-010","file_name":"TASK-X-010.md","depends_on":[],"blocks":["TASK-X-020"],"implements":["REQ-001"],"deliverable_contracts":[{"kind":"alpha_text","artifact_path":"src/alpha.txt","artifact_format":"text","min_instances":1}]},{"task_id":"TASK-X-020","file_name":"TASK-X-020.md","depends_on":[{"task_id":"TASK-X-010","consumes":[{"artifact_path":"src/alpha.txt"}],"ordering_only":false}],"blocks":[],"implements":["REQ-002"],"deliverable_contracts":[{"kind":"beta_json","artifact_path":"src/beta.json","artifact_format":"json","required_true_fields":["ready"],"min_instances":1}]}]}"#.into());
+        return ("skeleton", r#"{"schema_version":1,"acceptance_digest":"","tasks":[{"task_id":"TASK-X-010","file_name":"TASK-X-010.md","depends_on":[],"blocks":["TASK-X-020"],"implements":["REQ-X-001"],"deliverable_contracts":[{"kind":"alpha_text","artifact_path":"src/alpha.txt","artifact_format":"text","min_instances":1}]},{"task_id":"TASK-X-020","file_name":"TASK-X-020.md","depends_on":[{"task_id":"TASK-X-010","consumes":[{"artifact_path":"src/alpha.txt"}],"ordering_only":false}],"blocks":[],"implements":["REQ-X-002"],"deliverable_contracts":[{"kind":"beta_json","artifact_path":"src/beta.json","artifact_format":"json","required_true_fields":["ready"],"min_instances":1}]}]}"#.into());
     }
     if prompt.contains("Author the complete TASK body") {
         let second = prompt.contains("task_id TASK-X-020");
@@ -252,7 +270,7 @@ fn scripted_answer(prompt: &str) -> (&'static str, String) {
                 "Create beta data",
                 "\n  - task_id: TASK-X-010\n    consumes:\n      - artifact_path: src/alpha.txt\n    ordering_only: false",
                 "[]",
-                "REQ-002",
+                "REQ-X-002",
                 "src/beta.json",
                 "Write a JSON object with ready set to true.",
                 "- kind: beta_json\n  artifact_path: src/beta.json\n  artifact_format: json\n  required_true_fields: [ready]\n  min_instances: 1",
@@ -263,7 +281,7 @@ fn scripted_answer(prompt: &str) -> (&'static str, String) {
                 "Create alpha data",
                 "[]",
                 "[TASK-X-020]",
-                "REQ-001",
+                "REQ-X-001",
                 "src/alpha.txt",
                 "Write the nonempty line alpha ready.",
                 "- kind: alpha_text\n  artifact_path: src/alpha.txt\n  artifact_format: text\n  min_instances: 1",
@@ -283,4 +301,35 @@ fn scripted_answer(prompt: &str) -> (&'static str, String) {
         "unexpected",
         r#"{"error":"unscripted fake provider request"}"#.into(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scripted_answer;
+
+    #[test]
+    fn routes_current_acceptance_author_prompt_and_extracts_its_id() {
+        let prompt = r#"{"task":"Author exactly one acceptance entry identified below. Author ONLY entry AC-X-001: The outcome is ready."}"#;
+        let (role, answer) = scripted_answer(prompt);
+        assert_eq!(role, "acceptance");
+        assert!(answer.contains(r#""id":"AC-X-001""#), "{answer}");
+    }
+
+    #[test]
+    fn supplementary_answer_covers_the_requirement_named_by_the_id() {
+        let prompt = r#"{"task":"Author exactly one acceptance entry identified below. Author ONLY entry SUP-REQ-X-001: The first artifact is ready."}"#;
+        let (role, answer) = scripted_answer(prompt);
+        assert_eq!(role, "acceptance");
+        assert!(answer.contains(r#""covers":["REQ-X-001"]"#), "{answer}");
+        assert!(answer.contains("src/alpha.txt"), "{answer}");
+    }
+
+    #[test]
+    fn skeleton_and_body_answers_use_the_fixture_requirement_ids() {
+        let (_, skeleton) = scripted_answer("Author one complete task-skeleton JSON artifact");
+        assert!(skeleton.contains("REQ-X-001"), "{skeleton}");
+        assert!(skeleton.contains("REQ-X-002"), "{skeleton}");
+        let (_, body) = scripted_answer("Author the complete TASK body");
+        assert!(body.contains("REQ-X-001"), "{body}");
+    }
 }
