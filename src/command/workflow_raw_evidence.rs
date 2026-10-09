@@ -107,11 +107,22 @@ pub(super) fn raw_outcome_result(
     result.data = json!({
         "content": outcome.content,
         "stopReason": stop_reason,
-        "tokensIn": outcome.tokens_in,
-        "tokensOut": outcome.tokens_out,
+        "tokensIn": token_count(outcome.tokens_in),
+        "tokensOut": token_count(outcome.tokens_out),
     });
     archon_workflow::v2::tool_trace::record_tool_trace(&mut result, &outcome.tool_uses);
     result
+}
+
+// WorkflowAgentOutcome predates provider usage availability. Its subagent
+// adapter uses zero when the provider supplied no usage, so do not publish
+// that sentinel as measured usage.
+fn token_count(count: u64) -> Value {
+    if count == 0 {
+        Value::Null
+    } else {
+        json!(count)
+    }
 }
 
 fn save(path: &Path, value: &Value) -> WorkflowResult<()> {
@@ -159,5 +170,30 @@ mod tests {
             std::fs::read_to_string(temp.path().join("run/agent-outputs/author-1.json")).unwrap();
         assert!(!raw.contains("sk-ant-"), "{raw}");
         assert!(!raw.contains("opaque-bearer-credential-123"), "{raw}");
+    }
+
+    #[test]
+    fn raw_outcome_omits_unreported_usage_and_keeps_reported_counts() {
+        let absent = raw_outcome_result(
+            WorkflowAgentOutcome {
+                tokens_in: 0,
+                tokens_out: 0,
+                ..Default::default()
+            },
+            "end_turn".into(),
+        );
+        assert!(absent.data["tokensIn"].is_null());
+        assert!(absent.data["tokensOut"].is_null());
+
+        let reported = raw_outcome_result(
+            WorkflowAgentOutcome {
+                tokens_in: 123,
+                tokens_out: 45,
+                ..Default::default()
+            },
+            "end_turn".into(),
+        );
+        assert_eq!(reported.data["tokensIn"], json!(123));
+        assert_eq!(reported.data["tokensOut"], json!(45));
     }
 }

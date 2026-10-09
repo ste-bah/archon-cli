@@ -348,6 +348,22 @@ fn completed_subagent_reports_a_typed_end_turn_stop_reason() {
 }
 
 #[test]
+fn completed_subagent_preserves_provider_usage() {
+    let response = llm_response_for_subagent_outcome(
+        SubagentOutcome::CompletedWithUsage {
+            content: "body".into(),
+            tokens_in: Some(321),
+            tokens_out: Some(54),
+        },
+        false,
+        None,
+    )
+    .unwrap();
+    assert_eq!(response.tokens_in, 321);
+    assert_eq!(response.tokens_out, 54);
+}
+
+#[test]
 fn abnormal_subagent_endings_stay_errors_rather_than_typed_turns() {
     for (outcome, timed_out, needle) in [
         (

@@ -403,6 +403,8 @@ fn record_message_start_usage(runner: &SubagentRunner, usage: &archon_llm::types
     {
         guard.cumulative_input_tokens += usage.input_tokens;
         guard.cumulative_output_tokens += usage.output_tokens;
+        guard.input_tokens_available |= usage.input_tokens_available;
+        guard.output_tokens_available |= usage.output_tokens_available;
         guard.cumulative_cache_creation_tokens += usage.cache_creation_input_tokens;
         guard.cumulative_cache_read_tokens += usage.cache_read_input_tokens;
         guard.last_update = chrono::Utc::now();
@@ -414,6 +416,7 @@ fn record_message_delta_usage(runner: &SubagentRunner, usage: &archon_llm::types
         && let Ok(mut guard) = tracker.lock()
     {
         guard.cumulative_output_tokens += usage.output_tokens;
+        guard.output_tokens_available |= usage.output_tokens_available;
         guard.last_update = chrono::Utc::now();
     }
 }

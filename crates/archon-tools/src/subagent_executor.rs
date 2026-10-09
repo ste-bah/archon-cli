@@ -81,6 +81,12 @@ pub enum SubagentOutcome {
     /// Runner finished successfully before the timer (or with no
     /// timer). Carries the final text to return to the caller.
     Completed(String),
+    /// A completed call with provider usage captured from the live run.
+    CompletedWithUsage {
+        content: String,
+        tokens_in: Option<u64>,
+        tokens_out: Option<u64>,
+    },
     /// Runner finished with an error before the timer (or with no
     /// timer). Carries the user-facing reason.
     Failed(String),
@@ -104,6 +110,9 @@ pub struct OutcomeSideEffects {
     /// `[Worktree: ... (branch: ...)]` note when the worktree had
     /// uncommitted changes and could not be auto-removed).
     pub text_suffix: Option<String>,
+    /// Provider usage, absent when the provider did not report that count.
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------

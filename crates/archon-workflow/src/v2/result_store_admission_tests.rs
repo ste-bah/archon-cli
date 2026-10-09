@@ -28,6 +28,14 @@ fn running(id: &str, attempt: u32, input_hash: &str) -> WorkflowV2CallRecord {
     )
 }
 
+#[test]
+fn call_record_separates_start_and_completion_timestamps() {
+    let record = running("call", 1, "input");
+    let started = chrono::DateTime::parse_from_rfc3339(&record.started_at).unwrap();
+    let finished = chrono::DateTime::parse_from_rfc3339(&record.finished_at).unwrap();
+    assert!(finished > started);
+}
+
 /// Admit `id` the way a dispatch does: next attempt, then the admission.
 fn admit(store: &WorkflowV2ResultStore, id: &str, input_hash: &str) -> WorkflowV2CallRecord {
     let attempt = store.next_dispatch_attempt(id, input_hash).unwrap();

@@ -67,6 +67,7 @@ impl AgentTool {
 fn board_outcome(outcome: &SubagentOutcome) -> Option<DelegatedOutcome> {
     match outcome {
         SubagentOutcome::Completed(_) => Some(DelegatedOutcome::Completed),
+        SubagentOutcome::CompletedWithUsage { .. } => Some(DelegatedOutcome::Completed),
         SubagentOutcome::Failed(_) => Some(DelegatedOutcome::Failed),
         SubagentOutcome::Cancelled => Some(DelegatedOutcome::Stopped),
         SubagentOutcome::AutoBackgrounded => None,
@@ -254,6 +255,9 @@ impl Tool for AgentTool {
                 .await;
                 let (final_status, payload) = match &outcome {
                     SubagentOutcome::Completed(text) => (AgentStatus::Finished, Ok(text.clone())),
+                    SubagentOutcome::CompletedWithUsage { content, .. } => {
+                        (AgentStatus::Finished, Ok(content.clone()))
+                    }
                     SubagentOutcome::Failed(err) => (AgentStatus::Failed, Err(err.clone())),
                     SubagentOutcome::AutoBackgrounded => {
                         // The runner is still executing — mark Running here
@@ -440,6 +444,17 @@ impl Tool for AgentTool {
                     Ok(()) => ToolResult::success(match &claim_warning {
                         Some(warning) => format!("{warning}\n\n{text}"),
                         None => text,
+                    }),
+                    Err(err) => {
+                        ToolResult::error(format!("[subagent_expected_mutation_missing] {err}"))
+                    }
+                }
+            }
+            SubagentOutcome::CompletedWithUsage { content, .. } => {
+                match verify_expected_mutations(ctx.fs().as_ref(), &expected_mutations).await {
+                    Ok(()) => ToolResult::success(match &claim_warning {
+                        Some(warning) => format!("{warning}\n\n{content}"),
+                        None => content,
                     }),
                     Err(err) => {
                         ToolResult::error(format!("[subagent_expected_mutation_missing] {err}"))

@@ -196,6 +196,10 @@ impl AgentSubagentExecutor {
         nested: bool,
     ) -> OutcomeSideEffects {
         let mut side_effects = OutcomeSideEffects::default();
+        if let Some((tokens_in, tokens_out)) = self.usage_cache.lock().await.remove(&subagent_id) {
+            side_effects.tokens_in = tokens_in;
+            side_effects.tokens_out = tokens_out;
+        }
 
         // Hook fires: collapsed from H3+H7 / H4+H8 / H5+H9 / H6+H10.
         match &result {

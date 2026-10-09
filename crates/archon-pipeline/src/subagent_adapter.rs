@@ -415,6 +415,17 @@ pub(crate) fn llm_response_for_subagent_outcome(
             tokens_out: 0,
             stop_reason: Some("end_turn".to_string()),
         }),
+        SubagentOutcome::CompletedWithUsage {
+            content,
+            tokens_in,
+            tokens_out,
+        } => Ok(LlmResponse {
+            content,
+            tool_uses: Vec::new(),
+            tokens_in: tokens_in.unwrap_or(0),
+            tokens_out: tokens_out.unwrap_or(0),
+            stop_reason: Some("end_turn".to_string()),
+        }),
         SubagentOutcome::Failed(error) => Err(anyhow!("subagent failed: {error}")),
         SubagentOutcome::Cancelled if timed_out => Err(anyhow!(
             "subagent timed out after {}s",

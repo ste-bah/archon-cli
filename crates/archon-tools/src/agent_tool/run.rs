@@ -370,7 +370,8 @@ async fn run_subagent_owned(
     // the runner eventually finishes) but NOT visible hooks or
     // worktree cleanup.
     match &outcome {
-        SubagentOutcome::Completed(text) => {
+        SubagentOutcome::Completed(text)
+        | SubagentOutcome::CompletedWithUsage { content: text, .. } => {
             let side_effects = exec
                 .on_visible_complete(subagent_id.clone(), Ok(text.clone()), nested)
                 .await;
@@ -379,8 +380,18 @@ async fn run_subagent_owned(
             // run_to_completion; we append the suffix here so the
             // caller (AgentTool::execute) receives the fully-composed
             // string with no awareness of worktree plumbing.
-            if let Some(suffix) = side_effects.text_suffix {
-                return SubagentOutcome::Completed(format!("{text}{suffix}"));
+            let content = side_effects
+                .text_suffix
+                .map_or_else(|| text.clone(), |suffix| format!("{text}{suffix}"));
+            if side_effects.tokens_in.is_some() || side_effects.tokens_out.is_some() {
+                return SubagentOutcome::CompletedWithUsage {
+                    content,
+                    tokens_in: side_effects.tokens_in,
+                    tokens_out: side_effects.tokens_out,
+                };
+            }
+            if content != *text {
+                return SubagentOutcome::Completed(content);
             }
         }
         SubagentOutcome::Failed(err) => {
