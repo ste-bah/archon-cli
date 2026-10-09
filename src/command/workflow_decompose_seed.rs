@@ -229,6 +229,7 @@ fn derive_seed(
 
 /// The run's seed for its current runtime, derived and recorded the first
 /// time a resume reaches it; `None` before any upgrade.
+#[cfg(test)]
 pub(crate) fn current_seed(
     store: &WorkflowStore,
     run_id: &str,

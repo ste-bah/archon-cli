@@ -197,6 +197,7 @@ fn ordered(records: &[WorkflowV2CallRecord]) -> Result<Vec<&WorkflowV2CallRecord
     Ok(keyed.into_iter().map(|(_, record)| record).collect())
 }
 
+#[cfg(test)]
 pub(crate) fn derive(
     records: &[WorkflowV2CallRecord],
     pause_ids: &[String],
