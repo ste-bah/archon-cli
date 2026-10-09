@@ -121,8 +121,9 @@ pub use generated_workflow::{
     WorkflowLearningEvent, WorkflowLearningEvidenceRef, workflow_scaffold_hash,
 };
 pub use learning::{
-    LEARNING_RECORDS_FILE, Verification, WorkflowLearningRecord, WorkflowLearningSink,
-    WorkflowRunLearningSummary, learning_records, learning_records_path, read_learning_records,
+    LEARNING_RECORDS_FILE, StageTelemetry, Verification, WorkflowLearningRecord,
+    WorkflowLearningSink, WorkflowRunLearningSummary, learning_records, learning_records_path,
+    read_learning_records,
 };
 pub use learning_lessons::{
     CuratedLesson, LEARNING_LESSONS_FILE, LessonEvidence, LessonRule, collect_curated_lessons,
