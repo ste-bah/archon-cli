@@ -24,8 +24,8 @@
 // of its episode; attempts before the episode still count, so a candidate
 // that keeps coming back refuted still pauses.
 
-// Consecutive attempts without progress that end a loop: every kind counts,
-// an outage, an incomplete reply and a judged repeat alike.
+// Independent consecutive windows: author attempts exclude operational
+// failures, which the author cannot repair.
 const STALL_ATTEMPTS = 3;
 // Bounds on what one pause event carries.
 const PAUSE_EVIDENCE_FINDINGS = 20;
@@ -135,7 +135,7 @@ function findingKey(finding) {
 function newProgress(_seed) {
   return {
     best: null,
-    repair: newRepairEpisode(0, 0),
+    repair: newRepairEpisode(0),
     history: [],
     stalled: 0,
     stalledOperational: 0,
@@ -144,28 +144,26 @@ function newProgress(_seed) {
   };
 }
 
-function newRepairEpisode(stalled, stalledOperational) {
-  return { bests: new Map(), stalled, stalledOperational };
+function newRepairEpisode(stalled) {
+  return { bests: new Map(), stalled };
 }
 
 // Opens the repair episode that follows a measured candidate.
 function openRepairEpisode(progress) {
-  progress.repair = newRepairEpisode(progress.stalled, progress.stalledOperational);
+  progress.repair = newRepairEpisode(progress.stalled);
 }
 
-function recordStep(progress, entry) {
+function recordStep(progress, entry, gateSucceeded = false) {
+  const operational = entry.kind === "operational" || entry.outage === true;
   if (entry.progress) {
     progress.stalled = 0;
-    progress.stalledOperational = 0;
     // Real progress empties the window, so no episode may restore it.
     progress.repair.stalled = 0;
-    progress.repair.stalledOperational = 0;
-  } else {
+  } else if (!operational) {
     progress.stalled += 1;
-    // A round with any outage is an outage of the window, whatever its first
-    // failure was (an author call failed in transport beside a refusal).
-    if (entry.kind === "operational" || entry.outage === true) progress.stalledOperational += 1;
   }
+  if (operational) progress.stalledOperational += 1;
+  else if (gateSucceeded) progress.stalledOperational = 0;
   progress.history.push(entry);
   return entry.progress;
 }
@@ -197,14 +195,16 @@ function recordAttempt(progress, call, findings, answered = true, round = NO_ROU
   const measure = attemptMeasure(findings);
   const better = isBetter(measure, progress.best);
   if (better) progress.best = measure;
-  return recordStep(progress, {
+  const entry = {
     call,
     kind: ["packaging", "refused", "judged"][measure.tier],
     stage: DEFECT_STAGES[measure.stage] || "passed",
     findings: measure.count,
     progress: better,
     ...(credited.length > 0 ? { entries: credited } : {})
-  });
+  };
+  if (round.outage) entry.outage = true;
+  return recordStep(progress, entry, true);
 }
 
 // The measure of an entry that passed the author step: better than any refusal.
@@ -232,18 +232,19 @@ function creditPassed(episode, passed) {
 // window to where the repair episode opened, never below it, so attempts
 // before the episode still count. Otherwise the round is one more attempt
 // without progress.
-function recordRound(progress, entry, better, advanced, outage) {
+function recordRound(progress, entry, better, advanced, outage, gateSucceeded = false) {
   entry.progress = better || Boolean(advanced);
   if (outage) entry.outage = true;
-  if (advanced || !better) return recordStep(progress, entry);
+  if (advanced || !better) return recordStep(progress, entry, gateSucceeded);
   restoreFloor(progress);
+  if (entry.kind === "operational" || entry.outage === true) progress.stalledOperational += 1;
+  else if (gateSucceeded) progress.stalledOperational = 0;
   progress.history.push(entry);
   return true;
 }
 
 function restoreFloor(progress) {
   progress.stalled = Math.min(progress.stalled, progress.repair.stalled);
-  progress.stalledOperational = Math.min(progress.stalledOperational, progress.repair.stalledOperational);
 }
 
 // Records one author round that refused entries for their shape. Each refused
@@ -304,15 +305,15 @@ function recordAnswered(progress, call, kind, advanced = false, answered = true,
 // pass in it, or a previously missing entry it added (`advanced`), is
 // progress whatever the gate does next: an outage measures nothing, a pass is
 // credited once per episode and an entry is added once, so this stays bounded.
-function recordOperational(progress, call, summary, advanced = false, round = NO_ROUND) {
-  return creditedRound(progress, { call, kind: "operational", findings: null, progress: false, summary: boundText(summary) }, round, advanced);
+function recordOperational(progress, call, summary, advanced = false, round = NO_ROUND, component = "provider") {
+  return creditedRound(progress, { call, kind: "operational", findings: null, progress: false,
+    summary: `${component}: ${boundText(summary)}` }, round, advanced);
 }
 
 // Why the loop must stop now, or null while it may make another attempt.
 function stallReason(progress) {
-  if (progress.stalled >= STALL_ATTEMPTS) {
-    return progress.stalledOperational >= progress.stalled ? "operational_no_progress" : "no_progress";
-  }
+  if (progress.stalledOperational >= STALL_ATTEMPTS) return "operational_no_progress";
+  if (progress.stalled >= STALL_ATTEMPTS) return "no_progress";
   return null;
 }
 
@@ -352,12 +353,31 @@ const PAUSES = new Map();
 async function pauseLoop(w, subject, evidence) {
   const ordinal = (PAUSES.get(subject) || 0) + 1;
   PAUSES.set(subject, ordinal);
+  const components = progressOperationalComponents(evidence.progress_history);
+  const recovery = evidence.reason === "operational_no_progress"
+    ? `The run is paused, not failed. Restore the host ${components.join(" and ") || "gate/provider"} component, then resume the run: the resumed loop reuses every recorded attempt and gets a fresh window of ${STALL_ATTEMPTS} attempts without progress.`
+    : `The run is paused, not failed. Repair what the last findings name (the PRD, a gate, the provider), then resume the run: the resumed loop reuses every recorded attempt and gets a fresh window of ${STALL_ATTEMPTS} attempts without progress.`;
   await w.pause(`pause-${subject}-${ordinal}`, {
     subject,
     ordinal,
     ...evidence,
-    recovery: `The run is paused, not failed. Repair what the last findings name (the PRD, a gate, the provider), then resume the run: the resumed loop reuses every recorded attempt and gets a fresh window of ${STALL_ATTEMPTS} attempts without progress.`
+    recovery
   });
+}
+
+function progressOperationalComponents(history) {
+  if (!Array.isArray(history)) return [];
+  const components = [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (entry.kind !== "operational" && entry.outage !== true) break;
+    if (entry.outage === true) components.push("provider");
+    if (entry.kind === "operational") {
+      const label = typeof entry.summary === "string" ? entry.summary.split(":", 1)[0] : "gate";
+      components.push(label === "gate" ? "gate" : "provider");
+    }
+  }
+  return [...new Set(components)];
 }
 
 // Pauses a loop that `stallReason` stopped, then opens its fresh window.
@@ -367,5 +387,4 @@ async function pauseAuthorLoop(w, subject, progress, reason, lastFindings, extra
   progress.stalledOperational = 0;
   // The fresh window is also the episode's floor; its per-entry bests stay.
   progress.repair.stalled = 0;
-  progress.repair.stalledOperational = 0;
 }

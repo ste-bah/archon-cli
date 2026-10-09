@@ -110,9 +110,10 @@ async function resume() {
 async function mixed() {
   const out = await run(n => n === 2 ? 'transport' : n === 3 ? 'incomplete' : defects(2));
   assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 4, 'transport and incomplete replies share the no-progress window');
-  assert.equal(out.pauses[0].answered_attempts, 3);
-  assert.deepEqual(Array.from(out.pauses[0].progress_history, step => step.progress), [true,false,false,false]);
+  assert.equal(out.calls, 5, 'provider transport uses its own window; incomplete and shape replies use the author window');
+  assert.equal(out.pauses[0].reason, 'no_progress');
+  assert.equal(out.pauses[0].answered_attempts, 4);
+  assert.deepEqual(Array.from(out.pauses[0].progress_history, step => step.progress), [true,false,false,false,false]);
 }
 
 // Round 3: a judged refutation opens a repair episode for each refuted entry.
@@ -194,7 +195,7 @@ const tests = [
   ['shape repairs continue across missing siblings',siblings],
   ...['same','reworded','duplicates'].map(kind => [`unchanged shape ${kind} pauses`,()=>unchanged(kind)]),
   ['shape oscillation preserves best',oscillating],['shape resume preserves best',resume],
-  ['shape and operational failures share a window',mixed],
+  ['shape and operational failures use separate windows',mixed],
   ['refuted entry shape repairs decrease 5 to 0',afterJudgeShrinks],
   ['two refuted entries each repair 5 to 0',afterJudgeTwoEntries],
   ['refuted entry unchanged shape pauses',()=>afterJudgeStalls(() => defects(2),

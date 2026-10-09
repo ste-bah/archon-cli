@@ -249,9 +249,9 @@ function seededFindingStays() {
 
 const CUT = "workflow v2 call 'acceptance-author-AC-002-1' failed: subagent inactivity timeout: no model output, tool call or tool result for 3600s (inactivity limit 3600s); the host ended the session inside its wall clock";
 
-// Round 1 keeps AC-001 and is cut on AC-002: the round kept new work, so the
-// cut consumes nothing. Three more cuts with nothing kept pause the loop; the
-// resumed loop finishes. Nothing fails.
+// Round 1 keeps AC-001 and is cut on AC-002: retained work does not reset the
+// operational window. Three cuts, including that mixed round, pause; resume
+// opens a fresh operational window and completes.
 async function inactivityCutWithProgressKeepsTheWindow() {
   const ctx = context({ acceptanceCriteria: { 'AC-001': 'one', 'AC-002': 'two' }, authorMaxParallelism: 1, gateMode: 'enforce' });
   let cuts = 0;
@@ -268,7 +268,7 @@ async function inactivityCutWithProgressKeepsTheWindow() {
   const outcome = await ctx.authorCandidate(w, { phase: 'acceptance', author: ctx.authorAcceptanceEntries, capability: 'freeze-acceptance', retryScopes: new Set(['candidate_artifact']), prompt: () => 'author' });
   assert.equal(outcome.publicationReceipt.call_id, 'freeze-acceptance');
   assert.equal(pauses.length, 1, JSON.stringify(pauses));
-  assert.equal(pauses[0].cuts, 4, 'the cut in the round that kept AC-001 consumed nothing: the pause follows three cuts after it');
+  assert.equal(pauses[0].cuts, 3, 'the mixed cut and two more fill the operational window');
   assert.equal(pauses[0].evidence.reason, 'operational_no_progress');
 }
 
