@@ -257,10 +257,12 @@ fn the_author_step_refuses_the_repository_the_freeze_probes_from_the_same_source
     let scratch = roots.project.join("scratch");
     std::fs::create_dir_all(&scratch).unwrap();
     std::fs::create_dir_all(roots.project.join(".archon")).unwrap();
+    // The host's own PATH syntax: a toolchain the policy can capture.
+    let toolchain = std::env::join_paths([&scratch]).unwrap();
     std::fs::write(
         roots.project.join(".archon/config.toml"),
         format!(
-            "[workflow.acceptance_execution]\nrepository={policy_repo:?}\nscratch_parent={scratch:?}\nproject_inputs=[\"data\"]\nproject_repository_view=\"separate\"\ntoolchain_path=\"/usr/bin:/bin:/usr/sbin:/sbin\"\ntimeout_secs=60\noutput_bytes=8192\nscratch_bytes=16777216\n"
+            "[workflow.acceptance_execution]\nrepository={policy_repo:?}\nscratch_parent={scratch:?}\nproject_inputs=[\"data\"]\nproject_repository_view=\"separate\"\ntoolchain_path={toolchain:?}\ntimeout_secs=60\noutput_bytes=8192\nscratch_bytes=16777216\n"
         ),
     )
     .unwrap();
@@ -312,23 +314,24 @@ fn roots_fault(roots: &Roots, roots_json: &str) -> String {
 #[test]
 fn task_set_roots_without_the_repository_or_the_project_are_a_binding_fault() {
     let roots = roots();
-    let (repository, project) = (roots.repository.display(), roots.project.display());
+    let (repository, project) = (&roots.repository, &roots.project);
+    // Built as JSON: a Windows path's `\` is escaped, as any caller's is.
     for roots_json in [
-        "{}".to_string(),
-        format!(r#"{{"tasks":"{project}/tasks"}}"#),
-        format!(r#"{{"repository":"{repository}"}}"#),
-        format!(r#"{{"repository":"","project":"{project}"}}"#),
-        format!(r#"{{"repository":"{repository}","project":"  "}}"#),
-        format!(r#"{{"repository":"{repository}","project":"{project}","tasks":""}}"#),
+        json!({}),
+        json!({"tasks": project.join("tasks")}),
+        json!({"repository": repository}),
+        json!({"repository": "", "project": project}),
+        json!({"repository": repository, "project": "  "}),
+        json!({"repository": repository, "project": project, "tasks": ""}),
     ] {
-        let message = roots_fault(&roots, &roots_json);
+        let message = roots_fault(&roots, &roots_json.to_string());
         assert!(
             message.contains("must name both the repository and the project"),
             "{roots_json}: refused, never shape-only: {message}"
         );
     }
-    let complete = format!(r#"{{"repository":"{repository}","project":"{project}"}}"#);
-    assert_eq!(roots_fault(&roots, &complete), "applied");
+    let complete = json!({"repository": repository, "project": project});
+    assert_eq!(roots_fault(&roots, &complete.to_string()), "applied");
 }
 
 /// Issue 366 N1: the author step reads the task set's roots from the same

@@ -16,6 +16,8 @@ fn forms_drop_trailing_separators_and_the_filesystem_root() {
         ]
     );
     assert!(root_forms([Path::new("/"), Path::new("")]).is_empty());
+    // A POSIX path has no prefix, so no verbatim spelling.
+    assert_eq!(verbatim(Path::new("/work/repo")), None);
 }
 
 #[test]
@@ -157,5 +159,85 @@ fn only_a_missing_lock_falls_back_to_the_project() {
                 "{case}: {why}"
             );
         }
+    }
+}
+
+/// The Windows spelling, modelled on any host: a root's text is matched
+/// without case, `/` reads as `\`, and `\`, `:` and `?` do not end a path.
+#[test]
+fn the_windows_spelling_matches_without_case_and_either_separator() {
+    let forms = [
+        PathBuf::from(r"\\?\C:\Users\Runner\Repo"),
+        PathBuf::from(r"C:\Users\Runner\Repo"),
+    ];
+    let windows = |text: &str| named_root_in(Spelling::Windows, text, &forms);
+    for (text, form) in [
+        (r"test -f \\?\C:\Users\Runner\Repo\out.json", &forms[0]),
+        (r"cd \\?\c:\users\runner\repo//. && true", &forms[0]),
+        (r"test -f C:\Users\Runner\Repo\out.json", &forms[1]),
+        ("test -f c:/users/RUNNER/repo/out.json", &forms[1]),
+        (r#"cat "C:\Users\Runner\Repo"/x"#, &forms[1]),
+        (r"x=C:\Users\Runner\Repo;y", &forms[1]),
+    ] {
+        assert_eq!(windows(text), Some(form), "{text}");
+    }
+    for text in [
+        r"test -f C:\Users\Runner\Repo-other\x",
+        r"test -f C:\Users\Runner\Repo.bak",
+        r"test -f D:\Users\Runner\Repo\x",
+        "test -f out/repo",
+    ] {
+        assert_eq!(windows(text), None, "{text}");
+    }
+    // The POSIX spelling keeps case and reads `\` as shell syntax.
+    let posix = |text: &str| named_root_in(Spelling::Posix, text, &forms);
+    assert_eq!(posix("test -f c:/users/runner/repo/x"), None);
+    assert_eq!(
+        Spelling::Windows.fold(r"C:/Users\X"),
+        r"c:\users\x".to_string()
+    );
+    assert!(Spelling::Posix.ends_token('\\') && Spelling::Posix.ends_token(':'));
+    assert!(!(['\\', ':', '?'].into_iter()).any(|c| Spelling::Windows.ends_token(c)));
+}
+
+/// On Windows a drive root, a verbatim drive root, a UNC share root and a
+/// drive-relative path have no form; a root has its plain and its verbatim
+/// spelling, and a path that leads back under it is named.
+#[cfg(windows)]
+#[test]
+fn windows_forms_drop_every_filesystem_root_and_keep_both_spellings() {
+    // No share is resolved: a UNC root is judged by its components alone.
+    for root in [
+        r"C:\",
+        r"\\?\C:\",
+        r"\\server\share\",
+        r"\\server\share",
+        "D:",
+        r"\\?\D:",
+    ] {
+        assert!(!below_a_filesystem_root(Path::new(root)), "{root}");
+    }
+    assert_eq!(
+        root_forms([r"C:\", r"\\?\C:\", "D:", "/"].map(Path::new)),
+        Vec::<PathBuf>::new()
+    );
+    assert_eq!(
+        verbatim(Path::new(r"\\server\share\x")),
+        Some(PathBuf::from(r"\\?\UNC\server\share\x"))
+    );
+    let forms = root_forms([Path::new(r"C:\Work\Repo\")]);
+    for form in [r"\\?\C:\Work\Repo", r"C:\Work\Repo"] {
+        assert!(
+            forms.iter().any(|f| f.as_os_str() == form),
+            "{form}: {forms:?}"
+        );
+    }
+    assert!(named_root(r"cd C:\Work\Repo-x\..\repo\src", &forms).is_some());
+    assert!(named_root(r"cat C:\Work\\Repo\x", &forms).is_some());
+    let live = tempfile::tempdir().unwrap();
+    let canonical = live.path().canonicalize().unwrap();
+    let forms = root_forms([live.path()]);
+    for form in [canonical.clone(), archon_shell::paths::plain(canonical)] {
+        assert!(forms.contains(&form), "{form:?}: {forms:?}");
     }
 }

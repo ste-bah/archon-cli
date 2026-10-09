@@ -21,8 +21,15 @@
 //! lexically (`//`, `/./` and `x/..` resolved), so a spelling of a root with
 //! redundant separators is still that root. Only absolute roots are matched:
 //! a relative root would match nearly any text.
+//!
+//! On Windows a root has two spellings: the plain one (`C:\x`,
+//! `\\server\share\x`) and the verbatim one that `canonicalize` gives
+//! (`\\?\C:\x`, `\\?\UNC\server\share\x`). Both are forms of it. There
+//! the text is compared without case and `/` is read as `\`, as Windows
+//! resolves a path ([`Spelling`]).
 
-use std::path::{Path, PathBuf};
+use std::ffi::OsString;
+use std::path::{Component, Path, PathBuf, Prefix};
 
 use crate::command::acceptance_scratch_policy::NativeBinding;
 
@@ -96,27 +103,64 @@ pub(crate) fn task_set_roots(project: &Path, tasks_root: &Path) -> Result<Vec<Pa
 }
 
 /// The forms of `roots` check text could name: each absolute root as given
-/// and its canonical form, without trailing separators. A relative root,
-/// the filesystem root and empty text have no form: none is a live root
-/// to match.
+/// and its canonical form, each in its plain and its verbatim spelling,
+/// without trailing separators. A relative root, a filesystem root (`/`,
+/// `C:\`, `\\?\C:\`, `\\server\share\`), a drive-relative path (`D:`)
+/// and empty text have no form: none is a live root to match.
 pub(crate) fn root_forms<'a>(roots: impl IntoIterator<Item = &'a Path>) -> Vec<PathBuf> {
-    let mut forms = Vec::new();
+    let mut spellings = Vec::new();
     for root in roots.into_iter().filter(|root| root.has_root()) {
-        forms.push(root.to_path_buf());
-        if let Ok(canonical) = root.canonicalize().map(archon_shell::paths::plain) {
-            forms.push(canonical);
+        spellings.push(root.to_path_buf());
+        if let Ok(canonical) = root.canonicalize() {
+            spellings.push(canonical);
         }
     }
-    let mut forms: Vec<PathBuf> = (forms.into_iter())
-        .map(|form| {
-            let text = form.to_string_lossy();
-            PathBuf::from(text.trim_end_matches(['/', '\\']))
+    let mut forms: Vec<PathBuf> = (spellings.into_iter())
+        .flat_map(|spelling| {
+            let plain = archon_shell::paths::plain(spelling.clone());
+            let verbatim = verbatim(&plain);
+            [Some(spelling), Some(plain), verbatim]
         })
-        .filter(|form| !form.as_os_str().is_empty())
+        .flatten()
+        // Rebuilt from its components: no trailing separator, one separator.
+        .map(|form| form.components().collect::<PathBuf>())
+        .filter(|form| below_a_filesystem_root(form))
         .collect();
     forms.sort();
     forms.dedup();
     forms
+}
+
+/// Whether `form` names a path under a filesystem root: it has a root and
+/// a component past its prefix and root directory. `D:` (drive-relative)
+/// has no root; `/`, `C:\` and `\\server\share\` are the root itself.
+fn below_a_filesystem_root(form: &Path) -> bool {
+    form.has_root()
+        && (form.components()).any(|c| !matches!(c, Component::Prefix(_) | Component::RootDir))
+}
+
+/// The verbatim spelling of a plain drive or UNC path (`C:\x` is
+/// `\\?\C:\x`, `\\server\share\x` is `\\?\UNC\server\share\x`); any
+/// other path (every POSIX path) has none.
+fn verbatim(plain: &Path) -> Option<PathBuf> {
+    let mut components = plain.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return None;
+    };
+    let mut text = OsString::from(r"\\?\");
+    match prefix.kind() {
+        Prefix::Disk(letter) => text.push(format!("{}:", char::from(letter))),
+        Prefix::UNC(server, share) => {
+            text.push(r"UNC\");
+            text.push(server);
+            text.push(r"\");
+            text.push(share);
+        }
+        _ => return None,
+    }
+    let mut path = PathBuf::from(text);
+    path.extend(components);
+    Some(path)
 }
 
 /// `roots` as absolute paths, or why one is not: the author-step validator
@@ -137,46 +181,89 @@ fn continues_name(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')
 }
 
-/// Whether `c` ends a path token: whitespace or shell syntax.
-fn ends_token(c: char) -> bool {
-    c.is_whitespace() || "'\"`;|&<>()$=:,{}[]*?!#%\\".contains(c)
+/// How check text spells a path on a host: POSIX compares it exactly;
+/// Windows compares it without case and reads `/` as `\`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Spelling {
+    Posix,
+    Windows,
 }
 
-/// `token` (an absolute path) with `//`, `/./` and `x/..` resolved.
-fn lexical(token: &str) -> Option<PathBuf> {
-    if !token.starts_with('/') {
-        return None;
-    }
-    let mut parts: Vec<&str> = Vec::new();
-    for part in token.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            part => parts.push(part),
+impl Spelling {
+    /// The spelling of the host this binary runs on.
+    const HOST: Spelling = if cfg!(windows) {
+        Spelling::Windows
+    } else {
+        Spelling::Posix
+    };
+
+    /// `text` as this spelling compares it.
+    fn fold(self, text: &str) -> String {
+        match self {
+            Spelling::Posix => text.to_string(),
+            Spelling::Windows => text.to_lowercase().replace('/', "\\"),
         }
     }
-    Some(PathBuf::from(format!("/{}", parts.join("/"))))
+
+    /// Whether `c` ends a path token: whitespace or shell syntax. On
+    /// Windows `\` separates components, `:` ends a drive letter and `?`
+    /// marks a verbatim prefix (`\\?\`): none of them ends a path there.
+    fn ends_token(self, c: char) -> bool {
+        let syntax = c.is_whitespace() || "'\"`;|&<>()$=:,{}[]*?!#%\\".contains(c);
+        syntax && !(self == Spelling::Windows && matches!(c, '\\' | ':' | '?'))
+    }
 }
 
-/// The first of `forms` (from [`root_forms`]) that `text` names.
+/// `token` (an absolute path) with repeated separators, `.` and `x/..`
+/// resolved: the path the host would reach. A `..` never climbs past the
+/// root.
+fn lexical(token: &str) -> Option<PathBuf> {
+    let path = Path::new(token);
+    if !path.has_root() {
+        return None;
+    }
+    let mut resolved = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(
+                    resolved.components().next_back(),
+                    Some(Component::Normal(_))
+                ) {
+                    resolved.pop();
+                }
+            }
+            component => resolved.push(component),
+        }
+    }
+    Some(resolved)
+}
+
+/// The first of `forms` (from [`root_forms`]) that `text` names, in the
+/// host's [`Spelling`].
 pub(crate) fn named_root<'a>(text: &str, forms: &'a [PathBuf]) -> Option<&'a PathBuf> {
-    let paths: Vec<PathBuf> = text.split(ends_token).filter_map(lexical).collect();
+    named_root_in(Spelling::HOST, text, forms)
+}
+
+/// The first of `forms` that `text` names, both compared in `spelling`.
+fn named_root_in<'a>(spelling: Spelling, text: &str, forms: &'a [PathBuf]) -> Option<&'a PathBuf> {
+    let text = spelling.fold(text);
+    let ends = |c: char| spelling.ends_token(c);
+    let paths: Vec<PathBuf> = text.split(ends).filter_map(lexical).collect();
     forms.iter().find(|form| {
-        let root = form.to_string_lossy();
+        let root = spelling.fold(&form.to_string_lossy());
+        let form = Path::new(&root);
         let named_at = |at: usize| match text[at + root.len()..].chars().next() {
             // A sibling name, unless its path leads back under the root.
             Some(next) if continues_name(next) => {
-                let token = text[at..].split(ends_token).next().unwrap_or_default();
+                let token = text[at..].split(ends).next().unwrap_or_default();
                 lexical(token).is_some_and(|path| path.starts_with(form))
             }
             _ => true,
         };
         !root.is_empty()
-            && (text
-                .match_indices(root.as_ref())
-                .any(|(at, _)| named_at(at))
+            && (text.match_indices(&root).any(|(at, _)| named_at(at))
                 || paths.iter().any(|path| path.starts_with(form)))
     })
 }
