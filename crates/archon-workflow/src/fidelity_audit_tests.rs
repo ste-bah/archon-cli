@@ -280,6 +280,53 @@ fn prompt_lists_the_exact_verdict_keys_and_parse_errors_name_their_path() {
     );
 }
 
+/// A false verdict must name its weakest task and quote it: a missing or
+/// empty `weakest_task_id` or `quoted_task_text` is refused with an error
+/// that names the key, never filled with a default. A true verdict has
+/// nothing to name or quote, so leaving the two keys out is still an answer.
+#[test]
+fn a_false_verdict_without_its_weakest_task_or_quote_is_refused_naming_the_key() {
+    let done = r#"{"obligation_id":"DONE-9","necessarily_true":true,"reason":"r"}"#;
+    let cases = [
+        (
+            r#"{"obligation_id":"AC-WS-003","necessarily_true":false,"reason":"r","quoted_task_text":"temporary"}"#,
+            "`weakest_task_id`",
+        ),
+        (
+            r#"{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"","reason":"r","quoted_task_text":"temporary"}"#,
+            "`weakest_task_id`",
+        ),
+        (
+            r#"{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005","reason":"r"}"#,
+            "`quoted_task_text`",
+        ),
+        (
+            r#"{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005","reason":"r","quoted_task_text":"  "}"#,
+            "`quoted_task_text`",
+        ),
+    ];
+    for (verdict, key) in cases {
+        let reply = format!(r#"{{"verdicts":[{verdict},{done}]}}"#);
+        let error = parse_fidelity_response(&reply, &obligations(), &tasks())
+            .expect_err("a false verdict needs both keys");
+        assert!(
+            error.contains(key) && error.contains("AC-WS-003"),
+            "{reply}\n-> {error}"
+        );
+    }
+}
+
+#[test]
+fn a_true_verdict_without_weakest_task_or_quote_is_an_answer() {
+    let reply = r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"reason":"r"},{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#;
+    let verdicts = parse_fidelity_response(reply, &obligations(), &tasks()).expect("answered");
+    for verdict in &verdicts {
+        assert!(verdict.necessarily_true);
+        assert_eq!(verdict.weakest_task_id, "");
+        assert_eq!(verdict.quoted_task_text, "");
+    }
+}
+
 /// Issue-42: a verbose critic is cut, not refused. Live, two true verdicts
 /// failed the gate operationally because one reason ran past 400 characters.
 #[test]

@@ -4,14 +4,13 @@
 //! answers; this file asks and bounds. Verdicts are remembered by
 //! `fidelity_store.rs`.
 
-use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use archon_workflow::fidelity_audit::{
-    ClaimedObligation, ClaimingTask, DOCUMENT_KEYS, FidelityVerdict, SkeletonSummary, VERDICT_KEYS,
-    fidelity_prompt, parse_fidelity_response,
+    ClaimedObligation, ClaimingTask, DOCUMENT_KEYS, FidelityVerdict, ReplyPosition,
+    SkeletonSummary, VERDICT_KEYS, fidelity_prompt, parse_fidelity_reply,
 };
 use archon_workflow::llm_client_port::{WorkflowAgentOutcome, WorkflowLlmClient};
 
@@ -22,13 +21,18 @@ use crate::command::workflow_freeze_budget::FreezeBudget;
 /// strongest tier the provider offers, whatever it resolves to.
 pub(super) const CRITIC_MODEL_ALIAS: &str = "opus";
 /// Rejected replies in a row that make no progress before the failure is
-/// operational. A reply makes no progress when it is byte-identical to an
-/// earlier reply, or is refused with the same error as an earlier reply:
-/// shown its error, the critic did not move. A reply refused for a new
-/// error is progress and resets the window, so the number of attempts has no
-/// fixed total — only this window bounds it. Observed live: one stray empty
-/// key in a complete document, re-sent unchanged at temperature 0.0, came
-/// back byte-identical and ended a fixed two-attempt loop.
+/// operational. Progress is parsing further: a refused reply makes progress
+/// only when its first error is at a later [`ReplyPosition`] than that of
+/// every earlier reply (a later byte offset in the JSON shape, then the id
+/// check, then a later verdict). An error at the same or an earlier
+/// position is no progress, even when its text is new, and a byte-identical
+/// reply always is. Positions are finite — offsets are bounded by the
+/// reply's length, which the provider's output limit bounds, and verdict
+/// indexes by the cluster size — so progress is bounded with no fixed
+/// total on attempts; only this window ends a run of no progress. Observed
+/// live: one stray empty key in a complete document, re-sent unchanged at
+/// temperature 0.0, came back byte-identical and ended a fixed two-attempt
+/// loop.
 pub(super) const FIDELITY_NO_PROGRESS_WINDOW: usize = 3;
 const CRITIC_TEMPERATURE: f64 = 0.0;
 const FIDELITY_CALL_TIMEOUT_SECS: u64 =
@@ -57,9 +61,10 @@ pub(super) enum Asked {
     Stopped,
 }
 
-/// Ask, and answer each rejected reply in the same conversation: the reply
-/// goes back as the critic's turn, then a turn that quotes the exact parse
-/// error and lists the allowed keys. Ask again while the replies make
+/// Ask, and answer a rejected reply: the next request is the original
+/// question, the last rejected reply as the critic's turn, and a turn that
+/// quotes its exact parse error and lists the allowed keys — never the whole
+/// history, so its size stays bounded. Ask again while the replies make
 /// progress; after [`FIDELITY_NO_PROGRESS_WINDOW`] replies in a row with no
 /// progress the failure is operational. Every rejected reply is kept under
 /// `rejected/` in the cache directory — the operator who is told "no usable
@@ -78,8 +83,7 @@ pub(super) async fn ask(
 ) -> Result<Asked> {
     let request = request(obligations, tasks, skeleton);
     let mut messages = request.messages.clone();
-    let mut replies = BTreeSet::new();
-    let mut errors = BTreeSet::new();
+    let mut furthest: Option<ReplyPosition> = None;
     let mut stalled = 0;
     let mut attempt = 0;
     let last = loop {
@@ -111,7 +115,7 @@ pub(super) async fn ask(
             outcome.content.trim().as_bytes(),
         );
         let document = String::from_utf8_lossy(&document);
-        match parse_fidelity_response(&document, obligations, tasks) {
+        match parse_fidelity_reply(&document, obligations, tasks) {
             Ok(verdicts) => return Ok(Asked::Answered(verdicts)),
             Err(error) => {
                 let rejected = cache.join("rejected");
@@ -120,10 +124,12 @@ pub(super) async fn ask(
                     .and_then(|()| std::fs::write(&path, &outcome.content))
                     .map(|()| path.display().to_string())
                     .unwrap_or_else(|error| format!("not kept: {error}"));
-                // Both sets are updated: `|` does not short-circuit.
-                let repeated = !replies.insert(outcome.content.clone())
-                    | !errors.insert(error_identity(&error));
-                stalled = if repeated { stalled + 1 } else { 0 };
+                if furthest.is_none_or(|furthest| error.position > furthest) {
+                    furthest = Some(error.position);
+                    stalled = 0;
+                } else {
+                    stalled += 1;
+                }
                 if stalled >= FIDELITY_NO_PROGRESS_WINDOW {
                     break format!("{error} (reply kept at {kept})");
                 }
@@ -133,8 +139,10 @@ pub(super) async fn ask(
                 } else {
                     outcome.content
                 };
+                messages = request.messages.clone();
                 messages.push(serde_json::json!({"role": "assistant", "content": said}));
-                messages.push(serde_json::json!({"role": "user", "content": reask(&error)}));
+                messages
+                    .push(serde_json::json!({"role": "user", "content": reask(&error.message)}));
             }
         }
     };
@@ -157,33 +165,6 @@ fn reask(error: &str) -> String {
     )
 }
 
-/// An error without its position in the reply (` at line N column M`): the
-/// same defect moved by a few bytes is the same error, not progress.
-fn error_identity(error: &str) -> String {
-    const AT_LINE: &str = " at line ";
-    let digits = |text: &str| {
-        text.find(|c: char| !c.is_ascii_digit())
-            .unwrap_or(text.len())
-    };
-    let mut identity = String::with_capacity(error.len());
-    let mut rest = error;
-    while let Some(at) = rest.find(AT_LINE) {
-        identity.push_str(&rest[..at]);
-        let tail = &rest[at + AT_LINE.len()..];
-        let line = digits(tail);
-        let column = tail[line..].strip_prefix(" column ").filter(|_| line > 0);
-        match column.map(|column| (column, digits(column))) {
-            Some((column, width)) if width > 0 => rest = &column[width..],
-            _ => {
-                identity.push_str(AT_LINE);
-                rest = tail;
-            }
-        }
-    }
-    identity.push_str(rest);
-    identity
-}
-
 fn require_complete(outcome: &WorkflowAgentOutcome) -> Result<()> {
     match outcome.stop_reason.as_deref() {
         Some("end_turn" | "stop" | "completed") => Ok(()),
@@ -196,6 +177,9 @@ fn require_complete(outcome: &WorkflowAgentOutcome) -> Result<()> {
     }
 }
 
+#[cfg(test)]
+#[path = "fidelity_provider_tests.rs"]
+mod provider_tests;
 #[cfg(test)]
 #[path = "fidelity_transport_tests.rs"]
 mod transport_tests;

@@ -161,29 +161,28 @@ impl SkeletonSummary {
     }
 }
 
-/// The typed answer for one obligation.
-///
-/// `weakest_task_id` and `quoted_task_text` default to empty when omitted: a
-/// true verdict has nothing to quote, and a critic that leaves the two fields
-/// out of a true verdict has still answered. A false verdict is checked for
-/// both by [`parse_fidelity_response`], so the default never softens the
-/// verdict that matters.
+/// The typed answer for one obligation, as checked and as stored: every
+/// field is present. A critic's reply is read as [`ReplyVerdict`] first, and
+/// [`checked_verdict`] decides what an omitted key means.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FidelityVerdict {
     pub obligation_id: String,
     pub necessarily_true: bool,
-    #[serde(default)]
     pub weakest_task_id: String,
     pub reason: String,
-    #[serde(default)]
     pub quoted_task_text: String,
 }
+
+#[path = "fidelity_audit_reply.rs"]
+mod reply;
+pub use reply::{FidelityRefusal, ReplyPosition};
+use reply::{ReplyVerdict, byte_offset, checked_verdict};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FidelityResponse {
-    verdicts: Vec<FidelityVerdict>,
+    verdicts: Vec<ReplyVerdict>,
 }
 
 /// An operator's recorded decision to freeze despite a false verdict.
@@ -238,39 +237,61 @@ pub fn parse_fidelity_response(
     obligations: &[ClaimedObligation],
     tasks: &[ClaimingTask],
 ) -> Result<Vec<FidelityVerdict>, String> {
-    let not_the_document = |error: &dyn std::fmt::Display| {
-        format!("fidelity reply is not the verdict document: {error}")
-    };
-    let mut deserializer = serde_json::Deserializer::from_str(document.trim());
+    parse_fidelity_reply(document, obligations, tasks).map_err(|refusal| refusal.message)
+}
+
+/// [`parse_fidelity_response`], with where a refused reply stopped parsing.
+pub fn parse_fidelity_reply(
+    document: &str,
+    obligations: &[ClaimedObligation],
+    tasks: &[ClaimingTask],
+) -> Result<Vec<FidelityVerdict>, FidelityRefusal> {
+    let document = document.trim();
+    let not_the_document =
+        |error: &dyn std::fmt::Display, json: &serde_json::Error| FidelityRefusal {
+            message: format!("fidelity reply is not the verdict document: {error}"),
+            position: ReplyPosition::Shape(byte_offset(document, json.line(), json.column())),
+        };
+    let mut deserializer = serde_json::Deserializer::from_str(document);
     let response: FidelityResponse = serde_path_to_error::deserialize(&mut deserializer)
-        .map_err(|error| not_the_document(&error))?;
+        .map_err(|error| not_the_document(&error, error.inner()))?;
     deserializer
         .end()
-        .map_err(|error| not_the_document(&error))?;
+        .map_err(|error| not_the_document(&error, &error))?;
+    let ids = |message: String| FidelityRefusal {
+        message,
+        position: ReplyPosition::Ids,
+    };
     let mut by_id = std::collections::BTreeMap::new();
     for verdict in response.verdicts {
         if by_id
             .insert(verdict.obligation_id.clone(), verdict)
             .is_some()
         {
-            return Err("fidelity reply repeats an obligation id".to_string());
+            return Err(ids("fidelity reply repeats an obligation id".to_string()));
         }
     }
     let expected: std::collections::BTreeSet<&str> =
         obligations.iter().map(|o| o.id.as_str()).collect();
     let actual: std::collections::BTreeSet<&str> = by_id.keys().map(String::as_str).collect();
     if expected != actual {
-        return Err(format!(
+        return Err(ids(format!(
             "fidelity reply verdict ids do not match the cluster: missing={:?}, extra={:?}",
             expected.difference(&actual).collect::<Vec<_>>(),
             actual.difference(&expected).collect::<Vec<_>>()
-        ));
+        )));
     }
     let mut verdicts = Vec::with_capacity(by_id.len());
-    for obligation in obligations {
-        let mut verdict = by_id.remove(&obligation.id).expect("id set checked");
-        check_verdict(&mut verdict, tasks)?;
-        verdicts.push(verdict);
+    for (index, obligation) in obligations.iter().enumerate() {
+        let reply = by_id.remove(&obligation.id).expect("id set checked");
+        let checked = checked_verdict(reply).and_then(|mut verdict| {
+            check_verdict(&mut verdict, tasks)?;
+            Ok(verdict)
+        });
+        verdicts.push(checked.map_err(|message| FidelityRefusal {
+            message,
+            position: ReplyPosition::Verdict(index),
+        })?);
     }
     Ok(verdicts)
 }

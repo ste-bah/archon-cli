@@ -1,9 +1,10 @@
-//! The re-ask conversation: a rejected reply goes back to the critic with
-//! the exact parse error and the allowed keys, and the critic is asked again
-//! while its replies make progress. A reply byte-identical to an earlier one,
-//! or one that fails with an error an earlier one had, is no progress; the
-//! audit is operational once [`FIDELITY_NO_PROGRESS_WINDOW`] of them come in
-//! a row. A verdict with a missing or unknown field is never accepted.
+//! The re-ask: the original question, then only the last rejected reply and
+//! its exact parse error with the allowed keys. The critic is asked again
+//! while its replies make progress — each one parses further than every
+//! earlier one. A reply whose first error is at the same or an earlier
+//! position is no progress, whatever its error text; the audit is
+//! operational once [`FIDELITY_NO_PROGRESS_WINDOW`] of them come in a row.
+//! A verdict with a missing or unknown field is never accepted.
 
 use super::*;
 
@@ -26,6 +27,18 @@ fn stray_key_reply(index: usize, name: &str, value: &str) -> String {
 /// A complete true-verdict document whose verdict `index` lacks `field`.
 fn missing_field_reply(index: usize, field: &str) -> String {
     let mut document: serde_json::Value = serde_json::from_str(&reply(&[])).unwrap();
+    document["verdicts"][index]
+        .as_object_mut()
+        .unwrap()
+        .remove(field);
+    document.to_string()
+}
+
+/// A complete document with one false verdict whose verdict `index` lacks
+/// `field`.
+fn false_without(index: usize, field: &str) -> String {
+    let ids = ["AC-WS-001", "G-WS-001"];
+    let mut document: serde_json::Value = serde_json::from_str(&reply(&[ids[index]])).unwrap();
     document["verdicts"][index]
         .as_object_mut()
         .unwrap()
@@ -135,8 +148,7 @@ async fn identical_bad_replies_are_operational_after_the_no_progress_window_not_
     );
 }
 
-/// Different bytes that fail with the same error are no progress: the
-/// location of the error inside the reply is not part of the error.
+/// Different bytes that fail at the same position are no progress.
 #[tokio::test]
 async fn the_same_error_from_different_bytes_is_no_progress() {
     let temp = corpus();
@@ -154,13 +166,14 @@ async fn the_same_error_from_different_bytes_is_no_progress() {
 #[tokio::test]
 async fn bad_replies_with_new_errors_are_progress_and_keep_the_conversation_going() {
     let temp = corpus();
+    // Each reply parses further than the one before it.
     let bad = vec![
         "not json".to_string(),
-        r#"{"verdicts":[]}"#.to_string(),
         stray_key_reply(0, "weakest_task_text", ""),
         stray_key_reply(1, "weakest_task_text", ""),
-        missing_field_reply(0, "reason"),
-        missing_field_reply(1, "necessarily_true"),
+        r#"{"verdicts":[]}"#.to_string(),
+        false_without(0, "quoted_task_text"),
+        false_without(1, "weakest_task_id"),
     ];
     assert!(bad.len() > 1 + FIDELITY_NO_PROGRESS_WINDOW);
     let mut replies: Vec<_> = bad.iter().cloned().map(Ok).collect();
@@ -174,11 +187,22 @@ async fn bad_replies_with_new_errors_are_progress_and_keep_the_conversation_goin
     );
     assert_eq!(critic.calls(), bad.len() + 1);
     let conversations = critic.conversations.lock().unwrap();
-    let last = conversations.last().unwrap();
-    assert_eq!(last.len(), 1 + 2 * bad.len(), "every rejected reply stays");
-    for (n, reply) in bad.iter().enumerate() {
-        assert_eq!(last[1 + 2 * n]["content"], reply.as_str());
+    for (n, conversation) in conversations.iter().enumerate().skip(1) {
+        assert_eq!(
+            conversation.len(),
+            3,
+            "the question, the last rejected reply and its error; no more"
+        );
+        assert_eq!(conversation[0], conversations[0][0]);
+        assert_eq!(conversation[1]["content"], bad[n - 1].as_str());
     }
+    let feedback = conversations.last().unwrap()[2]["content"]
+        .as_str()
+        .unwrap();
+    assert!(
+        feedback.contains("G-WS-001") && feedback.contains("`weakest_task_id`"),
+        "a false verdict's missing key is named for the critic to fix: {feedback}"
+    );
     assert_eq!(
         attempt_suffixes(&rejected_files(temp.path())),
         (1..=bad.len()).collect::<BTreeSet<_>>()
@@ -200,4 +224,23 @@ async fn a_verdict_missing_a_required_field_is_never_accepted() {
         );
         no_verdict_cached(temp.path());
     }
+}
+
+/// New error text at the same position is not progress: progress is
+/// parsing further, which a finite reply bounds.
+#[tokio::test]
+async fn new_errors_at_the_same_position_stop_after_the_window() {
+    let temp = corpus();
+    let replies = (0..10)
+        .map(|n| Ok(stray_key_reply(1, &format!("zz_stray_{n}"), "")))
+        .collect();
+    let critic = FakeCritic::new(replies);
+    let evaluation = evaluate(temp.path(), Ok(critic.clone())).await;
+    assert_eq!(critic.calls(), 1 + FIDELITY_NO_PROGRESS_WINDOW);
+    let error = evaluation.operational_error().expect("operational");
+    assert!(error.contains("unknown field `zz_stray_3`"), "{error}");
+    assert_eq!(
+        rejected_files(temp.path()).len(),
+        1 + FIDELITY_NO_PROGRESS_WINDOW
+    );
 }
