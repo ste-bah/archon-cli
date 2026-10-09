@@ -156,7 +156,7 @@ pub(in crate::command) async fn execute_checks(
         } else {
             pending.push(*criterion);
             if let Some(key) = key {
-                cache_keys.insert(criterion.id.clone(), key);
+                cache_keys.insert(criterion.id.clone(), (key, *criterion));
             }
         }
         reuse.insert(criterion.id.clone(), decision);
@@ -174,7 +174,14 @@ pub(in crate::command) async fn execute_checks(
     )
     .await?;
     for result in fresh {
-        if let Some(key) = cache_keys.remove(&result.acceptance_id) {
+        if let Some((key, criterion)) = cache_keys.remove(&result.acceptance_id) {
+            // The verdict is reusable only if its bounded read state stayed
+            // identical through execution. This post-check snapshot is the
+            // state recorded at verdict time.
+            if super::reuse::key(context, criterion).as_ref() != Some(&key) {
+                results_by_id.insert(result.acceptance_id.clone(), result);
+                continue;
+            }
             let safe = result.acceptance_id.replace(
                 |ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'),
                 "_",

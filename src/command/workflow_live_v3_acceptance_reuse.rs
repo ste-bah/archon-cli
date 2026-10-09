@@ -37,23 +37,8 @@ pub(super) fn key(context: &StageContext, criterion: &AcceptanceCriterion) -> Op
     };
     let path =
         crate::command::workflow_task_set::workflow_acceptance_check_reuse::bounded_path(command)?;
+    let filesystem = filesystem_closure(&context.repository, path)?;
     let tree = tree_closure(&context.repository, path)?;
-    let dirty = archon_shell::spawn::command("git")
-        .arg("-C")
-        .arg(&context.repository)
-        .args([
-            "status",
-            "--porcelain",
-            "--untracked-files=all",
-            "--ignored=matching",
-            "--",
-            path,
-        ])
-        .output()
-        .ok()?;
-    if !dirty.status.success() || !dirty.stdout.is_empty() {
-        return None;
-    }
     let (version, digest, build) =
         crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()?;
     let host = archon_workflow::acceptance_check_environment::host_environment();
@@ -87,6 +72,7 @@ pub(super) fn key(context: &StageContext, criterion: &AcceptanceCriterion) -> Op
         criterion.covers,
         command.as_bytes(),
         path,
+        filesystem,
         tree,
         version,
         digest,
@@ -102,8 +88,105 @@ pub(super) fn key(context: &StageContext, criterion: &AcceptanceCriterion) -> Op
     ))
 }
 
-/// The bounded path entries are exact in the tree object, including mode and
-/// blob digest. A symlink in the path makes the read closure volatile.
+/// Snapshot every component on the literal path and its immediate directory
+/// entries. This is the proof for reuse; the Git tree below is only an extra
+/// key input. Recursive predicates are not accepted by `bounded_path`.
+fn filesystem_closure(repository: &Path, path: &str) -> Option<String> {
+    let mut current = repository.to_path_buf();
+    let mut entries = Vec::new();
+    for component in Path::new(path).components() {
+        let std::path::Component::Normal(name) = component else {
+            return None;
+        };
+        let name = name.to_str()?;
+        current.push(name);
+        let state = filesystem_entry(&current)?;
+        let kind = state.get("kind")?.as_str()?.to_owned();
+        let traversal_kind = if kind == "symlink" {
+            state.get("resolved")?.get("kind")?.as_str()?.to_owned()
+        } else {
+            kind
+        };
+        entries.push((name, state));
+        if traversal_kind != "directory" {
+            // A missing or non-directory ancestor makes all remaining path
+            // components unreachable to this literal predicate.
+            break;
+        }
+    }
+    let encoded = serde_json::to_vec(&entries).ok()?;
+    Some(archon_workflow::task_set_contract::content_digest(&encoded))
+}
+
+/// Capture a path's lstat type, symlink target, followed file bytes, or
+/// one-level sorted directory listing. Failure to inspect any relevant state
+/// keeps this check volatile.
+fn filesystem_entry(path: &Path) -> Option<serde_json::Value> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Some(serde_json::json!({"kind": "missing"}));
+        }
+        Err(_) => return None,
+    };
+    if metadata.file_type().is_symlink() {
+        let target = std::fs::read_link(path).ok()?.to_str()?.to_owned();
+        let followed = std::fs::metadata(path).ok()?;
+        return Some(serde_json::json!({
+            "kind": "symlink",
+            "target": target,
+            "resolved": filesystem_object(path, &followed)?,
+        }));
+    }
+    filesystem_object(path, &metadata)
+}
+
+fn filesystem_object(path: &Path, metadata: &std::fs::Metadata) -> Option<serde_json::Value> {
+    if metadata.is_file() {
+        let bytes = std::fs::read(path).ok()?;
+        return Some(serde_json::json!({
+            "kind": "file",
+            "content": archon_workflow::task_set_contract::content_digest(&bytes),
+        }));
+    }
+    if metadata.is_dir() {
+        let mut children = Vec::new();
+        for entry in std::fs::read_dir(path).ok()? {
+            let entry = entry.ok()?;
+            let name = entry.file_name().to_str()?.to_owned();
+            let child = std::fs::symlink_metadata(entry.path()).ok()?;
+            let kind = if child.file_type().is_symlink() {
+                "symlink"
+            } else if child.is_file() {
+                "file"
+            } else if child.is_dir() {
+                "directory"
+            } else {
+                "other"
+            };
+            let target = child
+                .file_type()
+                .is_symlink()
+                .then(|| {
+                    std::fs::read_link(entry.path())
+                        .ok()?
+                        .to_str()
+                        .map(str::to_owned)
+                })
+                .flatten();
+            if child.file_type().is_symlink() && target.is_none() {
+                return None;
+            }
+            children.push((name, kind, target));
+        }
+        children.sort_by(|left, right| left.0.cmp(&right.0));
+        return Some(serde_json::json!({"kind": "directory", "entries": children}));
+    }
+    Some(serde_json::json!({"kind": "other"}))
+}
+
+/// Add the committed Git entries as a secondary key factor. Filesystem state
+/// above remains the proof for uncommitted and empty-directory inputs.
 fn tree_closure(repository: &Path, path: &str) -> Option<String> {
     let head = archon_shell::spawn::command("git")
         .arg("-C")
@@ -128,17 +211,6 @@ fn tree_closure(repository: &Path, path: &str) -> Option<String> {
     for entry in entries.stdout.split(|byte| *byte == 0) {
         if entry.is_empty() {
             continue;
-        }
-        let tab = entry.iter().position(|byte| *byte == b'\t')?;
-        let mode = entry[..tab].split(|byte| *byte == b' ').next()?;
-        let found = std::str::from_utf8(&entry[tab + 1..]).ok()?;
-        if mode == b"120000"
-            && (path == found
-                || path
-                    .strip_prefix(found)
-                    .is_some_and(|rest| rest.starts_with('/')))
-        {
-            return None;
         }
         closure.extend_from_slice(entry);
         closure.push(0);

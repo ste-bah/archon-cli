@@ -37,6 +37,94 @@ fn criterion() -> AcceptanceCriterion {
     }
 }
 
+fn criterion_for(command: &str) -> AcceptanceCriterion {
+    AcceptanceCriterion {
+        check: AcceptanceCheck::Command {
+            command: command.into(),
+            cwd: TrustedCwd::RepoRoot,
+        },
+        ..criterion()
+    }
+}
+
+fn context(repo: &std::path::Path) -> StageContext {
+    StageContext {
+        project: repo.to_path_buf(),
+        task_root: repo.to_path_buf(),
+        repository: repo.to_path_buf(),
+        binding: None,
+        launch: None,
+        launch_lineage: archon_workflow::task_set_lineage::LaunchLineage::Predates,
+        run_id: "reuse-test".into(),
+    }
+}
+
+fn clean_repo() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q"]);
+    git(
+        dir.path(),
+        &["config", "user.email", "test@example.invalid"],
+    );
+    git(dir.path(), &["config", "user.name", "test"]);
+    std::fs::write(dir.path().join("tracked"), "fixture").unwrap();
+    git(dir.path(), &["add", "tracked"]);
+    git(dir.path(), &["commit", "-qm", "fixture"]);
+    dir
+}
+
+#[test]
+fn acceptance_freeze_reuse_logic_empty_untracked_directory_creation_and_deletion_invalidate_reuse()
+{
+    let dir = clean_repo();
+    let context = context(dir.path());
+    let check = criterion_for("test -d generated");
+    let absent = super::reuse::key(&context, &check).expect("absent path is readable");
+    std::fs::create_dir(dir.path().join("generated")).unwrap();
+    let present = super::reuse::key(&context, &check).expect("empty directory is readable");
+    assert_ne!(
+        absent, present,
+        "the key must commit to a real directory state"
+    );
+    std::fs::remove_dir(dir.path().join("generated")).unwrap();
+    let deleted = super::reuse::key(&context, &check).expect("absent path is readable");
+    assert_eq!(absent, deleted, "returning to the original state is stable");
+}
+
+#[test]
+fn acceptance_freeze_reuse_logic_file_content_change_invalidates_reuse_and_unchanged_file_reuses() {
+    let dir = clean_repo();
+    let context = context(dir.path());
+    std::fs::write(dir.path().join("input"), "one").unwrap();
+    let check = criterion_for("test -f input");
+    let first = super::reuse::key(&context, &check).expect("file state is readable");
+    let same = super::reuse::key(&context, &check).expect("file state is readable");
+    assert_eq!(first, same, "unchanged inputs must retain their key");
+    let result = CheckResult {
+        acceptance_id: check.id.clone(),
+        exit_code: Some(0),
+        quota_walk_count: 0,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        environment_note: None,
+        operational_error: None,
+        classification: None,
+    };
+    super::reuse::save(first.clone(), &result, "evidence".into());
+    let (saved, decision, _) = super::reuse::take(&context, &check);
+    assert!(saved.is_some() && decision.reused, "unchanged state reuses");
+    std::fs::write(dir.path().join("input"), "two").unwrap();
+    let (saved, decision, _) = super::reuse::take(&context, &check);
+    assert!(saved.is_none() && !decision.reused, "changed bytes rerun");
+}
+
+#[test]
+fn acceptance_freeze_reuse_logic_glob_predicate_is_volatile() {
+    let dir = clean_repo();
+    let check = criterion_for("test -f *.txt");
+    assert!(super::reuse::key(&context(dir.path()), &check).is_none());
+}
+
 #[test]
 fn ignored_input_is_volatile_and_cannot_leave_a_verdict_after_deletion() {
     let dir = tempfile::tempdir().unwrap();
