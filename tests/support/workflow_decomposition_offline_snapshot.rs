@@ -5,7 +5,10 @@ pub fn strip_timestamps(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
             map.retain(|key, _| {
-                !(key == "timestamp" || key.ends_with("_at") || key.ends_with("At"))
+                !(key == "timestamp"
+                    || key == "evaluated_at"
+                    || key.ends_with("_at")
+                    || key.ends_with("At"))
             });
             for nested in map.values_mut() {
                 strip_timestamps(nested);
@@ -82,6 +85,7 @@ pub fn result_store_records(
     for (_, value) in &mut records {
         normalize_lifecycle_metadata(value);
         normalize_values(value, &replacements);
+        normalize_derived_hashes(value);
     }
     records.sort_by_key(|record| serde_json::to_string(&record.1).unwrap());
     records
@@ -143,13 +147,48 @@ pub fn normalize_publication_receipts(
                     .and_then(|digest| content_by_digest.get(digest))
                 {
                     map.insert("prior_content".into(), prior_content.clone());
-                    map.remove("prior_blake3");
                 }
-                map.remove("blake3");
                 map.remove("byte_len");
                 map.insert("content".into(), content);
             }
         }
+    }
+}
+
+fn normalize_derived_hashes(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, nested) in map.iter_mut() {
+                if matches!(
+                    key.as_str(),
+                    "input_hash" | "output_hash" | "blake3" | "prior_blake3"
+                ) {
+                    *nested = serde_json::Value::String(format!("<{key}>"));
+                } else {
+                    normalize_derived_hashes(nested);
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for nested in values {
+                normalize_derived_hashes(nested);
+            }
+        }
+        serde_json::Value::String(path) => {
+            const PIN_DIRECTORY: &str = ".archon/task-set-pins/";
+            if let Some(start) = path.find(PIN_DIRECTORY) {
+                let filename_start = start + PIN_DIRECTORY.len();
+                let filename_end = path[filename_start..]
+                    .find('/')
+                    .map(|offset| filename_start + offset)
+                    .unwrap_or(path.len());
+                let filename = &path[filename_start..filename_end];
+                if filename.ends_with(".json") {
+                    path.replace_range(filename_start..filename_end, "<pin>.json");
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -169,7 +208,54 @@ fn normalized_published_content(bytes: &[u8], replacements: &[(&str, &str)]) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::normalized_published_content;
+    use super::{normalize_derived_hashes, normalized_published_content, strip_timestamps};
+
+    fn normalized_record(mut record: serde_json::Value) -> serde_json::Value {
+        strip_timestamps(&mut record);
+        normalize_derived_hashes(&mut record);
+        record
+    }
+
+    #[test]
+    fn snapshot_records_ignore_timestamps_and_derived_hashes_but_keep_content() {
+        let first = serde_json::json!({
+            "evaluated_at": "2026-01-01T00:00:00Z",
+            "input_hash": "input-one",
+            "output_hash": "output-one",
+            "result": {"blake3": "digest-one", "prior_blake3": "prior-one"},
+            "verdict": "accepted",
+            "task_text": "Create the required file",
+            "findings": [{"message": "No finding"}]
+        });
+        let same_content = serde_json::json!({
+            "evaluated_at": "2026-02-02T00:00:00Z",
+            "input_hash": "input-two",
+            "output_hash": "output-two",
+            "result": {"blake3": "digest-two", "prior_blake3": "prior-two"},
+            "verdict": "accepted",
+            "task_text": "Create the required file",
+            "findings": [{"message": "No finding"}]
+        });
+        assert_eq!(
+            normalized_record(first.clone()),
+            normalized_record(same_content)
+        );
+
+        for changed in [
+            serde_json::json!({"verdict": "rejected"}),
+            serde_json::json!({"task_text": "Create a different file"}),
+            serde_json::json!({"findings": [{"message": "A different finding"}]}),
+        ] {
+            let mut changed_record = first.clone();
+            for (key, value) in changed.as_object().unwrap() {
+                changed_record[key] = value.clone();
+            }
+            assert_ne!(
+                normalized_record(first.clone()),
+                normalized_record(changed_record)
+            );
+        }
+    }
 
     #[test]
     fn published_envelopes_ignore_root_paths_but_keep_findings() {
