@@ -213,7 +213,7 @@ pub(crate) struct Packaged<'a> {
     pub(crate) wrapper: bool,
 }
 
-/// The one task file in `text` after leading packaging, or `None`.
+/// The task file in `text` after leading packaging, or `None`.
 ///
 /// The task file opens at the first ```` ```yaml ```` line whose block parses
 /// as a mapping with a `task_id`. When the last non-blank line before it is a
@@ -221,13 +221,14 @@ pub(crate) struct Packaged<'a> {
 /// the task file opens there instead, and the text from that wrapper on must
 /// be a pure outer fence, whose interior is the task file. Every line before
 /// the opener is packaging; nothing after the task file is touched except
-/// that wrapper's closer. The task file must hold exactly one such
-/// frontmatter block. Anything else is `None`, for the caller to refuse.
+/// that wrapper's closer. Chat that leaves a block open before the opener is
+/// `None`, for the caller to refuse. Whether the rest holds one task file is
+/// [`task_files`]'s question, asked of every candidate.
 pub(crate) fn strip_packaging(text: &str) -> Option<Packaged<'_>> {
     let spans: Vec<_> = line_spans(text).collect();
-    let opener = task_frontmatter_openers(text, &spans)
+    let opener = frontmatter_task_ids(text, &spans)
         .iter()
-        .position(|opens| *opens)?;
+        .position(Option::is_some)?;
     let wrapper = spans[..opener]
         .iter()
         .rposition(|(_, _, line)| !line.trim().is_empty())
@@ -236,26 +237,75 @@ pub(crate) fn strip_packaging(text: &str) -> Option<Packaged<'_>> {
         Some(index) => {
             let interior = unwrap_outer_fence(&text[spans[index].0..])?;
             let task_file = strip_leading_blank_lines(interior);
-            let start = task_file.as_ptr() as usize - text.as_ptr() as usize;
-            (&text[..start], task_file)
+            (&text[..offset_in(text, task_file)], task_file)
         }
         // Chat that leaves a block open would put the task file inside it.
         None if fenced_after(&spans[..opener]) => return None,
         None => text.split_at(spans[opener].0),
     };
-    (!leading.is_empty() && task_frontmatter_count(task_file) == 1).then_some(Packaged {
+    (!leading.is_empty()).then_some(Packaged {
         leading,
         task_file,
         wrapper: wrapper.is_some(),
     })
 }
 
-/// For each line of `text`, whether it opens a ```` ```yaml ```` block,
-/// closed as the task parser closes it (a bare ```` ``` ```` or `---`), that
-/// parses as a mapping with a `task_id`. One backward pass finds each line's
-/// closer, so the cost stays linear in the line count.
-fn task_frontmatter_openers(text: &str, spans: &[(usize, usize, &str)]) -> Vec<bool> {
-    let mut opens = vec![false; spans.len()];
+/// The byte offset of `part`, a slice of `text`, within it.
+pub(crate) fn offset_in(text: &str, part: &str) -> usize {
+    part.as_ptr() as usize - text.as_ptr() as usize
+}
+
+/// The task files in `task_file`, by `task_id`: its own frontmatter (the
+/// first top-level ```` ```yaml ```` block, `None` when it names no
+/// `task_id`), then every later top-level block that opens another whole
+/// task file. A later block counts only when the task parser accepts the
+/// text from it to the next such block as a task file under its own id, so
+/// a yaml example in the body, even one carrying a `task_id`, never does.
+pub(crate) fn task_files(task_file: &str) -> (Option<String>, Vec<String>) {
+    let spans: Vec<_> = line_spans(task_file).collect();
+    let ids = frontmatter_task_ids(task_file, &spans);
+    let mut fenced = false;
+    let mut openers = Vec::new();
+    for (index, (_, _, line)) in spans.iter().enumerate() {
+        if is_fence_line(line) {
+            if !fenced && is_frontmatter_opener(line) {
+                openers.push(index);
+            }
+            fenced = !fenced;
+        }
+    }
+    let Some((&first, later)) = openers.split_first() else {
+        return (None, Vec::new());
+    };
+    let named: Vec<usize> = later
+        .iter()
+        .copied()
+        .filter(|&i| ids[i].is_some())
+        .collect();
+    let others = named
+        .iter()
+        .enumerate()
+        .filter_map(|(slot, &index)| {
+            let id = ids[index].as_deref()?;
+            let end = named
+                .get(slot + 1)
+                .map_or(task_file.len(), |&next| spans[next].0);
+            let path = std::path::PathBuf::from(format!("{id}.md"));
+            let raw = &task_file[spans[index].0..end];
+            archon_workflow::task_universe::parsing::parse_task_file(&path, raw)
+                .is_ok()
+                .then(|| id.to_string())
+        })
+        .collect();
+    (ids[first].clone(), others)
+}
+
+/// For each line of `text`, the `task_id` of the ```` ```yaml ```` block it
+/// opens, closed as the task parser closes it (a bare ```` ``` ```` or
+/// `---`), when that block parses as a mapping with a string `task_id`. One
+/// backward pass finds each line's closer, so the cost stays linear.
+fn frontmatter_task_ids(text: &str, spans: &[(usize, usize, &str)]) -> Vec<Option<String>> {
+    let mut ids = vec![None; spans.len()];
     let mut closer = None;
     for index in (0..spans.len()).rev() {
         let (start, _, line) = spans[index];
@@ -263,14 +313,15 @@ fn task_frontmatter_openers(text: &str, spans: &[(usize, usize, &str)]) -> Vec<b
             && let Some(end) = closer
         {
             let body_start = spans.get(index + 1).map_or(text.len(), |span| span.0);
-            opens[index] = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text[body_start..end])
-                .is_ok_and(|value| value.get("task_id").is_some());
+            ids[index] = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text[body_start..end])
+                .ok()
+                .and_then(|value| value.get("task_id")?.as_str().map(str::to_string));
         }
         if matches!(line.trim(), "```" | "---") {
             closer = Some(start);
         }
     }
-    opens
+    ids
 }
 
 /// Whether a fenced block is still open after `spans`, under the shared
@@ -282,24 +333,6 @@ fn fenced_after(spans: &[(usize, usize, &str)]) -> bool {
         .count()
         % 2
         == 1
-}
-
-/// How many fenced blocks of `text`, under the shared toggle, are task
-/// frontmatter ([`task_frontmatter_openers`]).
-fn task_frontmatter_count(text: &str) -> usize {
-    let spans: Vec<_> = line_spans(text).collect();
-    let opens = task_frontmatter_openers(text, &spans);
-    let mut fenced = false;
-    let mut count = 0;
-    for (index, (_, _, line)) in spans.iter().enumerate() {
-        if is_fence_line(line) {
-            if !fenced && opens[index] {
-                count += 1;
-            }
-            fenced = !fenced;
-        }
-    }
-    count
 }
 
 #[cfg(test)]

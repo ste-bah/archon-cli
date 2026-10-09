@@ -14,11 +14,10 @@ fn valid_body() -> String {
 
 fn refusal(candidate: &str) -> String {
     match normalize_task_candidate(candidate.as_bytes().to_vec()) {
-        Ok(TaskCandidate {
-            bytes, unwrapped, ..
-        }) => panic!(
-            "landed ({unwrapped}): {:?}",
-            String::from_utf8_lossy(&bytes)
+        Ok(landed) => panic!(
+            "landed ({}): {:?}",
+            landed.unwrapped(),
+            String::from_utf8_lossy(&landed.bytes)
         ),
         Err(reason) => reason.to_string(),
     }
@@ -27,7 +26,7 @@ fn refusal(candidate: &str) -> String {
 fn landed(candidate: &[u8]) -> (Vec<u8>, bool) {
     let landed = landed_with_packaging(candidate);
     assert_eq!(landed.packaging, None, "no packaging expected");
-    (landed.bytes, landed.unwrapped)
+    (landed.bytes.clone(), landed.unwrapped())
 }
 
 fn landed_with_packaging(candidate: &[u8]) -> TaskCandidate {
@@ -58,11 +57,10 @@ fn leading_blank_lines_are_dropped_and_the_rest_lands_unchanged() {
     let body = valid_body();
     for prefix in ["\n\n", "\r\n\r\n", "  \n\t\n"] {
         let answer = format!("{prefix}{body}");
-        assert_eq!(
-            landed(answer.as_bytes()),
-            (body.clone().into_bytes(), false),
-            "{prefix:?}"
-        );
+        let landed = landed_with_packaging(answer.as_bytes());
+        assert_eq!(landed.bytes, body.as_bytes(), "{prefix:?}");
+        let packaging = landed.packaging.expect("recorded");
+        assert_eq!((packaging.lines, packaging.bytes), (2, prefix.len()));
     }
 }
 
@@ -70,7 +68,12 @@ fn leading_blank_lines_are_dropped_and_the_rest_lands_unchanged() {
 fn a_bom_and_crlf_body_lands_without_the_bom() {
     let crlf = valid_body().replace('\n', "\r\n");
     let answer = format!("\u{feff}\r\n{crlf}");
-    assert_eq!(landed(answer.as_bytes()), (crlf.into_bytes(), false));
+    let landed = landed_with_packaging(answer.as_bytes());
+    assert_eq!(
+        (landed.bytes.clone(), landed.unwrapped()),
+        (crlf.into_bytes(), false)
+    );
+    assert_eq!(landed.packaging.map(|p| p.bytes), Some(5));
 }
 
 #[test]
@@ -89,11 +92,13 @@ fn a_pure_markdown_wrapper_with_an_inner_plain_block_is_stripped() {
         format!("\n```md\n\n{inner}```"),
         format!("\u{feff}```markdown\n{inner}```\n\n"),
     ] {
+        let landed = landed_with_packaging(answer.as_bytes());
         assert_eq!(
-            landed(answer.as_bytes()),
+            (landed.bytes.clone(), landed.unwrapped()),
             (inner.clone().into_bytes(), true),
             "{answer:?}"
         );
+        assert!(landed.packaging.expect("recorded").wrapper);
     }
 }
 
@@ -120,7 +125,7 @@ fn a_wrapper_with_text_after_it_or_unpaired_fences_is_refused() {
 fn bytes_that_are_not_utf8_pass_through_for_the_lint_to_report() {
     let bytes = vec![0x60, 0x60, 0x60, 0x0a, 0xff, 0xfe];
     let passed = normalize_task_candidate(bytes.clone()).unwrap();
-    assert_eq!((passed.bytes, passed.unwrapped), (bytes, false));
+    assert_eq!((passed.bytes.clone(), passed.unwrapped()), (bytes, false));
     assert_eq!(passed.packaging, None);
 }
 

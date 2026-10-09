@@ -95,3 +95,46 @@ async fn a_body_naming_no_frozen_subject_keeps_the_binding_refusal() {
         );
     }
 }
+
+/// The subject is the one the frontmatter names: a `task_id:` line in chat
+/// before it is not the candidate's.
+#[tokio::test]
+async fn a_task_id_line_in_chat_does_not_name_the_subject() {
+    let finding = refusal(
+        "I mean this file:\ntask_id: TASK-X-010\n\n```yaml\ntask_id: TASK-X-999\ntitle: T\n",
+    )
+    .await;
+    assert_eq!(
+        finding.text,
+        "candidate TASK body binds 0 frozen subjects; return exactly one body preserving a frozen task_id and file_name"
+    );
+}
+
+/// Proof for the gate: binding reads only the first frontmatter, so an
+/// answer with two complete task files binds the first subject, and the
+/// body gate is what must refuse it.
+#[test]
+fn binding_alone_accepts_an_answer_with_two_task_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    let task_file = context.task_root.join("TASK-X-010.md");
+    seed_frozen_chain(&context, &task_file);
+    let frontmatter = |id: &str| {
+        format!(
+            "```yaml\ntask_id: {id}\ntitle: T\ncomplexity: small\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n# {id}\n"
+        )
+    };
+    let answer = format!(
+        "{}\n{}",
+        frontmatter("TASK-X-010"),
+        frontmatter("TASK-X-011")
+    );
+    let request = HostCommandRequest::new("land-task-body", Some(answer)).unwrap();
+    let bound = super::workflow_host_command_binding::context_for_request(
+        &context,
+        &temp.path().join("run"),
+        &request,
+    )
+    .expect("binds");
+    assert_eq!(bound.frozen_task_id.as_deref(), Some("TASK-X-010"));
+}

@@ -11,8 +11,9 @@ const CHAT: &str =
 
 fn discarded(answer: &str) -> (Vec<u8>, bool, Packaging) {
     let landed = landed_with_packaging(answer.as_bytes());
+    let unwrapped = landed.unwrapped();
     let packaging = landed.packaging.expect("packaging was discarded");
-    (landed.bytes, landed.unwrapped, packaging)
+    (landed.bytes, unwrapped, packaging)
 }
 
 /// Shape A: chat, a blank line, a `markdown` wrapper, the task file, and the
@@ -76,18 +77,6 @@ fn an_answer_without_packaging_lands_unchanged() {
 }
 
 #[test]
-fn two_task_files_after_chat_are_refused_with_the_existing_finding() {
-    let second = FRONTMATTER.replace("TASK-X-001", "TASK-X-002");
-    let answer = format!("{CHAT}\n\n{}\n{second}\n# TASK-X-002\n", valid_body());
-    assert_eq!(
-        refusal(&answer),
-        format!(
-            "the answer has text before the task file (first line: \"{CHAT}\"); return only the task file, starting with its ```yaml frontmatter block"
-        )
-    );
-}
-
-#[test]
 fn chat_with_no_task_file_is_refused_with_the_existing_finding() {
     let answer = format!("{CHAT}\n\n```yaml\nkey: value\n```\n\nNo task file follows.\n");
     assert!(
@@ -143,5 +132,59 @@ fn chat_that_leaves_a_block_open_before_the_task_file_is_refused() {
         refusal(&answer).contains("(first line: \"```markdown\")"),
         "{}",
         refusal(&answer)
+    );
+}
+
+/// A second complete task file after the first is refused on every path:
+/// no packaging, a pure wrapper, and chat before it.
+#[test]
+fn a_second_complete_task_file_is_refused_on_every_path() {
+    let second = format!(
+        "{}\n# TASK-X-002\n",
+        FRONTMATTER.replace("TASK-X-001", "TASK-X-002")
+    );
+    let two = format!("{}\n{second}", valid_body());
+    for answer in [
+        two.clone(),
+        format!("```markdown\n{two}```\n"),
+        format!("{CHAT}\n\n{two}"),
+    ] {
+        assert_eq!(
+            refusal(&answer),
+            "the answer holds 2 task files (TASK-X-001, TASK-X-002); return only one task file, starting with its ```yaml frontmatter block",
+            "{answer:?}"
+        );
+    }
+}
+
+/// A yaml example in the body that carries a `task_id` is not a task file:
+/// only a block the task parser accepts as a whole task file counts.
+#[test]
+fn a_yaml_example_with_a_task_id_in_the_body_is_not_a_second_task_file() {
+    let body = format!(
+        "{}\nAn example of a dependency entry:\n\n```yaml\ntask_id: TASK-X-002\nordering_only: true\n```\n",
+        valid_body()
+    );
+    let (bytes, _, _) = discarded(&format!("{CHAT}\n\n{body}"));
+    assert_eq!(bytes, body.as_bytes());
+    assert_eq!(landed(body.as_bytes()), (body.clone().into_bytes(), false));
+}
+
+/// Leading blank lines, a byte order mark and a pure wrapper are packaging
+/// too: the landed bytes differ from the answer, so the note says so.
+#[test]
+fn blank_lines_a_bom_and_a_pure_wrapper_are_recorded() {
+    let body = valid_body();
+    let (bytes, unwrapped, packaging) = discarded(&format!("\u{feff}\n\n{body}"));
+    assert_eq!((bytes, unwrapped), (body.clone().into_bytes(), false));
+    assert_eq!(
+        (packaging.lines, packaging.bytes, packaging.wrapper),
+        (2, 5, false)
+    );
+    let (bytes, unwrapped, packaging) = discarded(&format!("```markdown\n{body}```\n"));
+    assert_eq!((bytes, unwrapped), (body.into_bytes(), true));
+    assert_eq!(
+        (packaging.lines, packaging.bytes, packaging.wrapper),
+        (1, 12, true)
     );
 }

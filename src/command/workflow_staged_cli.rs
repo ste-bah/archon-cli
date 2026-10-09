@@ -207,7 +207,6 @@ pub(super) async fn handle_staged_task_file_lint(
     };
     let candidate::TaskCandidate {
         bytes: candidate,
-        unwrapped,
         packaging,
     } = normalized;
     let file_name = path
@@ -217,12 +216,9 @@ pub(super) async fn handle_staged_task_file_lint(
         .to_string();
     let mut evaluation =
         crate::command::topology_lint::evaluate_task_file_candidate(cwd, &path, &candidate, mode)?;
+    // Whatever the host removed is recorded, a wrapper pair included.
     if let Some(packaging) = &packaging {
         evaluation.report.push_str(&packaging.report());
-    } else if unwrapped {
-        evaluation.report.push_str(
-            "\n## candidate normalisation\n  the reply was wrapped in one outer code fence; the fence pair was removed before lint and the document inside it is the candidate\n",
-        );
     }
     // Inherited-predecessor notes ride on every body of a set whose earlier
     // freezes carried residuals, so they must not suppress the audit: only a
@@ -325,7 +321,7 @@ mod tests {
     fn the_body_gate_unwraps_an_outer_fence_before_lint_and_staging() {
         let wrapped = b"```markdown\n```yaml\ntask_id: TASK-WS-001\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n```\n".to_vec();
         let landed = candidate::normalize_task_candidate(wrapped).unwrap();
-        assert!(landed.unwrapped);
+        assert!(landed.unwrapped());
         assert_eq!(
             landed.bytes,
             b"```yaml\ntask_id: TASK-WS-001\n```\n\n## Focused Tests\n\n- `cargo test -p w`\n"
@@ -333,7 +329,7 @@ mod tests {
         );
         let plain = b"```yaml\ntask_id: TASK-WS-001\n```\n\n# TASK-WS-001\n".to_vec();
         let landed = candidate::normalize_task_candidate(plain.clone()).unwrap();
-        assert_eq!((landed.bytes, landed.unwrapped), (plain, false));
+        assert_eq!((landed.bytes.clone(), landed.unwrapped()), (plain, false));
         // A heading before the frontmatter is packaging the host discards,
         // recorded in the report; the task file after it lands unchanged.
         let headed = b"# TASK-WS-001\n\n```yaml\ntask_id: TASK-WS-001\n```\n".to_vec();
@@ -348,7 +344,10 @@ mod tests {
         assert!(candidate::normalize_task_candidate(headed).is_err());
         let not_utf8 = vec![0x60, 0x60, 0x60, 0x0a, 0xff, 0xfe];
         let landed = candidate::normalize_task_candidate(not_utf8.clone()).unwrap();
-        assert_eq!((landed.bytes, landed.unwrapped), (not_utf8, false));
+        assert_eq!(
+            (landed.bytes.clone(), landed.unwrapped()),
+            (not_utf8, false)
+        );
     }
 
     /// Issue-44: the body gate must refuse, not pass, when the critic cannot

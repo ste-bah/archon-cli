@@ -6,15 +6,16 @@
 //! blocks, so nothing after the frontmatter is inspected here). An answer
 //! wrapped whole in one outer fence (Issue-61) is unwrapped. Text before the
 //! task file (chat, optionally with an outer wrapper) is packaging the host
-//! discards exactly ([`strip_packaging`]) and records in the report. Any
-//! other answer is refused with one finding, instead of landing a file every
-//! lint then misreads.
+//! discards exactly ([`strip_packaging`]). Every removed byte, a BOM and
+//! blank lines included, is recorded in the report. An answer that holds a
+//! second task file, or any other shape, is refused with one finding,
+//! instead of landing a file every lint then misreads.
 
 use std::path::Path;
 
 use crate::command::topology_lint::{
-    first_nonblank_line, is_frontmatter_opener, strip_leading_blank_lines, strip_packaging,
-    unwrap_outer_fence,
+    first_nonblank_line, is_frontmatter_opener, offset_in, strip_leading_blank_lines,
+    strip_packaging, task_files, unwrap_outer_fence,
 };
 
 /// The task file the host lands from a body author's answer.
@@ -22,8 +23,6 @@ use crate::command::topology_lint::{
 pub(super) struct TaskCandidate {
     /// The task file's bytes, exactly as written inside any packaging.
     pub(super) bytes: Vec<u8>,
-    /// Whether an outer wrapper fence pair was removed.
-    pub(super) unwrapped: bool,
     /// What the host discarded before the task file, when it discarded any.
     pub(super) packaging: Option<Packaging>,
 }
@@ -39,6 +38,16 @@ pub(super) struct Packaging {
     pub(super) preview: String,
 }
 
+impl TaskCandidate {
+    /// Whether an outer wrapper fence pair was removed.
+    #[cfg(test)]
+    pub(super) fn unwrapped(&self) -> bool {
+        self.packaging
+            .as_ref()
+            .is_some_and(|packaging| packaging.wrapper)
+    }
+}
+
 impl Packaging {
     fn of(leading: &str, wrapper: bool) -> Self {
         // Redact first, so a cut never leaves part of a secret-shaped word.
@@ -49,7 +58,7 @@ impl Packaging {
             other => other.to_string(),
         };
         Self {
-            lines: leading.lines().count(),
+            lines: leading.matches('\n').count(),
             bytes: leading.len(),
             wrapper,
             preview: redacted.chars().take(200).collect(),
@@ -69,55 +78,72 @@ impl Packaging {
     }
 }
 
-impl TaskCandidate {
-    fn plain(bytes: Vec<u8>, unwrapped: bool) -> Self {
-        Self {
-            bytes,
-            unwrapped,
-            packaging: None,
-        }
-    }
-}
-
 /// The task file in `candidate`; or the one finding text that refuses it.
 /// Bytes that are not UTF-8 pass through untouched for the mechanical checks
-/// to report.
+/// to report. Whatever the host removes is recorded as [`Packaging`], and
+/// the rest must hold one task file whichever way it was found.
 pub(super) fn normalize_task_candidate(candidate: Vec<u8>) -> Result<TaskCandidate, String> {
     let Ok(text) = std::str::from_utf8(&candidate) else {
-        return Ok(TaskCandidate::plain(candidate, false));
+        return Ok(TaskCandidate {
+            bytes: candidate,
+            packaging: None,
+        });
     };
+    let (task_file, wrapper) = located_task_file(text)?;
+    let (first, others) = task_files(task_file);
+    if !others.is_empty() {
+        return Err(several_task_files(first, &others));
+    }
+    let leading = &text[..offset_in(text, task_file)];
+    let packaging = (!leading.is_empty()).then(|| Packaging::of(leading, wrapper));
+    if let Some(packaging) = &packaging {
+        tracing::info!(
+            lines = packaging.lines,
+            bytes = packaging.bytes,
+            wrapper = packaging.wrapper,
+            "land-task-body discarded packaging before the task file"
+        );
+    }
+    Ok(TaskCandidate {
+        bytes: task_file.as_bytes().to_vec(),
+        packaging,
+    })
+}
+
+/// The task file inside `text` and whether a wrapper pair was removed: the
+/// answer itself when it opens with the frontmatter (after a BOM and blank
+/// lines), the inside of one outer fence (Issue-61), or what follows chat
+/// before it ([`strip_packaging`]); else the refusal.
+fn located_task_file(text: &str) -> Result<(&str, bool), String> {
     let rest = strip_leading_blank_lines(text);
     if is_frontmatter_opener(first_nonblank_line(rest)) {
-        if rest.len() == text.len() {
-            return Ok(TaskCandidate::plain(candidate, false));
-        }
-        return Ok(TaskCandidate::plain(rest.as_bytes().to_vec(), false));
+        return Ok((rest, false));
     }
     if let Some(interior) = unwrap_outer_fence(rest) {
         let inner = strip_leading_blank_lines(interior);
         if is_frontmatter_opener(first_nonblank_line(inner)) {
-            return Ok(TaskCandidate::plain(inner.as_bytes().to_vec(), true));
+            return Ok((inner, true));
         }
         return Err(text_before_task_file(first_nonblank_line(inner)));
     }
     // Issue-367 follow-up: chat before the task file is packaging, removed
-    // here exactly and recorded, because an author that repeats it every
-    // attempt can never act on a refusal.
-    let Some(packaged) = strip_packaging(text) else {
-        return Err(text_before_task_file(first_nonblank_line(rest)));
-    };
-    let packaging = Packaging::of(packaged.leading, packaged.wrapper);
-    tracing::info!(
-        lines = packaging.lines,
-        bytes = packaging.bytes,
-        wrapper = packaging.wrapper,
-        "land-task-body discarded packaging before the task file"
-    );
-    Ok(TaskCandidate {
-        bytes: packaged.task_file.as_bytes().to_vec(),
-        unwrapped: packaged.wrapper,
-        packaging: Some(packaging),
-    })
+    // exactly and recorded, because an author that repeats it every attempt
+    // can never act on a refusal.
+    match strip_packaging(text) {
+        Some(packaged) => Ok((packaged.task_file, packaged.wrapper)),
+        None => Err(text_before_task_file(first_nonblank_line(rest))),
+    }
+}
+
+fn several_task_files(first: Option<String>, others: &[String]) -> String {
+    let ids: Vec<&str> = std::iter::once(first.as_deref().unwrap_or("one without a task_id"))
+        .chain(others.iter().map(String::as_str))
+        .collect();
+    format!(
+        "the answer holds {} task files ({}); return only one task file, starting with its ```yaml frontmatter block",
+        ids.len(),
+        ids.join(", ")
+    )
 }
 
 /// The landed-file shape check: a UTF-8 task file about to land opens with

@@ -134,18 +134,14 @@ impl UnparsedSubject {
     }
 }
 
-/// The subject `candidate` names by its first `task_id:` line, when it is a
-/// frozen one the candidate fails to parse as.
+/// The subject `candidate`'s frontmatter names, when it is a frozen one the
+/// candidate fails to parse as.
 fn named_subject_refusal(
     tasks: &[archon_workflow::task_skeleton::FrozenTask],
     task_root: &Path,
     candidate: &str,
 ) -> Option<UnparsedSubject> {
-    let named = candidate
-        .lines()
-        .find_map(|line| line.trim_start().strip_prefix("task_id:"))?
-        .trim()
-        .trim_matches(|ch| ch == '"' || ch == '\'');
+    let named = frontmatter_task_id(candidate)?;
     let frozen = tasks.iter().find(|frozen| frozen.task_id == named)?;
     let task_file = task_root.join(&frozen.file_name);
     let error =
@@ -160,6 +156,19 @@ fn named_subject_refusal(
         ),
         task_file,
     })
+}
+
+/// The top-level `task_id:` value inside the first ```` ```yaml ````
+/// frontmatter block, the block the task parser reads, read line by line so
+/// a block cut short still names its subject. A `task_id:` line anywhere
+/// else (chat, the body) names nothing.
+fn frontmatter_task_id(candidate: &str) -> Option<&str> {
+    let mut lines = candidate.lines();
+    lines.find(|line| matches!(line.trim(), "```yaml" | "```yml"))?;
+    lines
+        .take_while(|line| !matches!(line.trim(), "```" | "---"))
+        .find_map(|line| line.strip_prefix("task_id:"))
+        .map(|value| value.trim().trim_matches(|ch| ch == '"' || ch == '\''))
 }
 
 /// The cause for a candidate whose ```` ```yaml ```` frontmatter opens and
