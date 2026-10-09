@@ -17,7 +17,7 @@ use tokio::sync::mpsc::error::TrySendError;
 /// drain loop and for flushing queued input after `TurnComplete` (the only
 /// arm that writes to `input_tx`).
 #[allow(clippy::cognitive_complexity)]
-pub(super) async fn handle_tui_event(
+pub(crate) async fn handle_tui_event(
     app: &mut App,
     event: TuiEvent,
     input_tx: &tokio::sync::mpsc::Sender<String>,
@@ -60,6 +60,7 @@ pub(super) async fn handle_tui_event(
             flush_pending_input_after_turn(app, input_tx);
         }
         TuiEvent::Error(msg) => app.on_error(&msg),
+        TuiEvent::DiagnosticLine(msg) => app.on_diagnostic_line(&msg),
         TuiEvent::GenerationStarted => app.on_generation_started(),
         TuiEvent::SlashCommandComplete => app.on_slash_command_complete(),
         TuiEvent::ThinkingToggle(enabled) => {

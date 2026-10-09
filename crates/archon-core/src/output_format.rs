@@ -38,6 +38,15 @@ impl OutputFormat {
 
 /// Format a final result as a JSON string containing content, usage, and cost.
 pub fn format_json_result(content: &str, usage: &archon_llm::types::Usage, cost: f64) -> String {
+    format_json_result_with_diagnostics(content, usage, cost, None)
+}
+
+pub fn format_json_result_with_diagnostics(
+    content: &str,
+    usage: &archon_llm::types::Usage,
+    cost: f64,
+    diagnostics: Option<&crate::hooks::AsyncHookDiagnosticBatch>,
+) -> String {
     let result = serde_json::json!({
         "content": content,
         "usage": {
@@ -46,6 +55,15 @@ pub fn format_json_result(content: &str, usage: &archon_llm::types::Usage, cost:
         },
         "cost": cost,
     });
+    let mut result = result;
+    if let Some(batch) = diagnostics {
+        if !batch.diagnostics.is_empty() || batch.dropped > 0 {
+            result["async_hook_diagnostics"] = serde_json::json!(batch.diagnostics);
+            if batch.dropped > 0 {
+                result["async_hook_diagnostics_dropped"] = serde_json::json!(batch.dropped);
+            }
+        }
+    }
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
@@ -79,6 +97,10 @@ pub fn format_agent_event(event: &AgentEvent, format: &OutputFormat) -> Option<S
 fn format_agent_event_text(event: &AgentEvent) -> Option<String> {
     match event {
         AgentEvent::TextDelta(text) => Some(text.clone()),
+        AgentEvent::AsyncHookDiagnostic(diagnostic) => Some(format!(
+            "[async hook:{}:{}] {}",
+            diagnostic.event, diagnostic.outcome, diagnostic.message
+        )),
         _ => None,
     }
 }
@@ -89,6 +111,10 @@ fn format_agent_event_stream_json(event: &AgentEvent) -> Option<String> {
         AgentEvent::TextDelta(text) => Some(format_stream_event(
             "text",
             &serde_json::json!({"text": text}),
+        )),
+        AgentEvent::AsyncHookDiagnostic(diagnostic) => Some(format_stream_event(
+            "async_hook_diagnostic",
+            &serde_json::to_value(diagnostic).unwrap_or_default(),
         )),
 
         AgentEvent::ThinkingDelta(text) => Some(format_stream_event(

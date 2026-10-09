@@ -1,7 +1,8 @@
 use archon_core::agent::AgentEvent;
 use archon_core::input_format::InputFormat;
 use archon_core::output_format::{
-    OutputFormat, format_agent_event, format_json_result, format_stream_event,
+    OutputFormat, format_agent_event, format_json_result, format_json_result_with_diagnostics,
+    format_stream_event,
 };
 use archon_core::print_mode::{
     EXIT_BUDGET_EXCEEDED, EXIT_ERROR, EXIT_MAX_TURNS, EXIT_SUCCESS, PrintModeConfig,
@@ -86,6 +87,29 @@ fn format_json_result_empty_content() {
     let result = format_json_result("", &usage, 0.0);
     let parsed: serde_json::Value = serde_json::from_str(&result).expect("valid JSON");
     assert_eq!(parsed["content"], "");
+}
+
+#[test]
+fn json_result_includes_optional_async_hook_diagnostics() {
+    let usage = archon_llm::types::Usage::default();
+    let batch = archon_core::hooks::AsyncHookDiagnosticBatch {
+        diagnostics: vec![archon_core::hooks::AsyncHookDiagnostic {
+            event: "PostToolUse".into(),
+            source: Some("project".into()),
+            outcome: "failure".into(),
+            message: "exit status 1".into(),
+        }],
+        dropped: 2,
+    };
+    let parsed: serde_json::Value = serde_json::from_str(&format_json_result_with_diagnostics(
+        "done",
+        &usage,
+        0.0,
+        Some(&batch),
+    ))
+    .unwrap();
+    assert_eq!(parsed["async_hook_diagnostics"][0]["source"], "project");
+    assert_eq!(parsed["async_hook_diagnostics_dropped"], 2);
 }
 
 // ---------------------------------------------------------------------------

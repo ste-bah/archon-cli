@@ -84,6 +84,8 @@ pub enum AgentEvent {
         attributed_total: u64,
     },
     TextDelta(String),
+    /// Completed async hook outcome; observational and never a turn control.
+    AsyncHookDiagnostic(crate::hooks::AsyncHookDiagnostic),
     ThinkingDelta(String),
     /// Unapproved reasoning preview for interactive display only.
     TransientThinkingDelta(String),
@@ -142,6 +144,7 @@ impl AgentEvent {
             AgentEvent::ApiCallStarted { .. } => "ApiCallStarted",
             AgentEvent::ContextPressureUpdated { .. } => "ContextPressureUpdated",
             AgentEvent::TextDelta(_) => "TextDelta",
+            AgentEvent::AsyncHookDiagnostic(_) => "AsyncHookDiagnostic",
             AgentEvent::ThinkingDelta(_) => "ThinkingDelta",
             AgentEvent::TransientThinkingDelta(_) => "TransientThinkingDelta",
             AgentEvent::CommitThinkingPreview => "CommitThinkingPreview",

@@ -48,6 +48,7 @@ pub fn priority(ev: &AgentEvent) -> Priority {
         | AgentEvent::PermissionRequired { .. }
         | AgentEvent::PermissionGranted { .. }
         | AgentEvent::PermissionDenied { .. }
+        | AgentEvent::AsyncHookDiagnostic(_)
         | AgentEvent::TurnComplete { .. }
         | AgentEvent::Error(_)
         | AgentEvent::CompactionTriggered

@@ -19,6 +19,7 @@ impl TuiEvent {
             Self::ToolComplete { .. } => "ToolComplete",
             Self::TurnComplete { .. } => "TurnComplete",
             Self::Error(_) => "Error",
+            Self::DiagnosticLine(_) => "DiagnosticLine",
             Self::GenerationStarted => "GenerationStarted",
             Self::SlashCommandComplete => "SlashCommandComplete",
             Self::ThinkingToggle(_) => "ThinkingToggle",

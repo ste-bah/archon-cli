@@ -9,6 +9,7 @@ use super::context::HookContext;
 use super::executor;
 use super::types::{AggregatedHookResult, HookConfig, HookEvent, HookExecutionConfig, HookMatcher};
 
+mod async_diagnostics;
 mod budget;
 mod load;
 mod matching;
@@ -57,6 +58,7 @@ pub struct HookSummary {
 /// Loaded once at startup from `.archon/settings.json` and optionally
 /// extended at runtime by plugins via `register_matchers`.
 pub struct HookRegistry {
+    async_diagnostics: std::sync::Arc<super::async_diagnostics::AsyncHookDiagnosticStore>,
     entries: RwLock<HashMap<HookEvent, Vec<HookEntry>>>,
     /// Per-id enabled/disabled toggles persisted to
     /// `<project>/.archon/hooks.local.toml` `[overrides]`.
@@ -103,6 +105,9 @@ impl HookRegistry {
     /// Create an empty registry with no paths set (for tests).
     pub fn new() -> Self {
         Self {
+            async_diagnostics: std::sync::Arc::new(
+                super::async_diagnostics::AsyncHookDiagnosticStore::new(),
+            ),
             entries: RwLock::new(HashMap::new()),
             enabled_overrides: RwLock::new(HashMap::new()),
             once_fired: Mutex::new(HashSet::new()),
@@ -118,6 +123,9 @@ impl HookRegistry {
     /// Create an empty registry with custom execution configuration.
     pub fn with_config(config: HookExecutionConfig) -> Self {
         Self {
+            async_diagnostics: std::sync::Arc::new(
+                super::async_diagnostics::AsyncHookDiagnosticStore::new(),
+            ),
             entries: RwLock::new(HashMap::new()),
             enabled_overrides: RwLock::new(HashMap::new()),
             once_fired: Mutex::new(HashSet::new()),
@@ -143,12 +151,27 @@ impl HookRegistry {
         cwd: &Path,
         session_id: &str,
         event_name: &str,
+        source: Option<String>,
     ) -> executor::HookExecutionResult {
         if hook.hook_type == super::types::HookCommandType::Http {
             super::http::execute_http_hook_for_event(hook, input, &self.http_transport, event_name)
                 .await
         } else {
-            executor::execute_hook_with_metadata(hook, input, cwd, session_id, event_name).await
+            let diagnostics = hook.r#async.unwrap_or(false).then(|| {
+                (
+                    self.async_diagnostics.clone(),
+                    source.or_else(|| Some("runtime".to_owned())),
+                )
+            });
+            executor::execute_hook_with_metadata(
+                hook,
+                input,
+                cwd,
+                session_id,
+                event_name,
+                diagnostics,
+            )
+            .await
         }
     }
 
@@ -186,10 +209,8 @@ impl HookRegistry {
 
     /// Execute all hooks registered for `event` against `input`.
     /// Hooks run in registration order with no short-circuit on Block.
-    ///
-    /// Send-safety: snapshots all pending hooks into owned `Vec<PendingHook>`
-    /// BEFORE any `.await`, so `RwLockReadGuard` is dropped and the future
-    /// remains `Send`.
+    /// Snapshots owned hooks before awaiting, so registry guards do not cross
+    /// an await and the future remains `Send`.
     pub async fn execute_hooks(
         &self,
         event: HookEvent,
@@ -206,7 +227,6 @@ impl HookRegistry {
             return AggregatedHookResult::new();
         }
 
-        // Snapshot pending hooks AND overrides, then drop guards before .await.
         let pending: Vec<PendingHook> = {
             let entries = self.entries.read().unwrap_or_else(|p| p.into_inner());
             let overrides = self
@@ -219,8 +239,7 @@ impl HookRegistry {
             let mut out = Vec::new();
             for entry in bucket {
                 for hook in &entry.matcher.hooks {
-                    // Check enabled overrides — if this hook has a per-id
-                    // override, use it; otherwise use the hook's own flag.
+                    // A per-id override supersedes the hook's own enabled flag.
                     let hook_id = compute_hook_id(
                         &event,
                         &hook.hook_type,
@@ -245,33 +264,8 @@ impl HookRegistry {
         let mut aggregated = AggregatedHookResult::new();
 
         for pending_hook in &pending {
-            // Apply HookMatcher.matcher filter against tool_name in input.
-            // (Matcher already filtered at load time; this is a secondary check.)
-            // Actually the filter is per-hook in execute_hooks. The id computed
-            // already accounts for the matcher. The matcher match was done
-            // at the HookEntry level previously; now with snapshot it's per-hook.
-            // We keep the tool_name check here for correctness.
-            if let Some(ref matcher_str) = pending_hook.source.as_ref().map(|_s| "")
-            // placeholder — real matcher is on entry
-            {
-                // The matcher is no longer on PendingHook; we already filtered
-                // enabled hooks above. The original tool-name filter was on
-                // HookEntry.matcher.matcher, which we don't carry in PendingHook
-                // for simplicity — all hooks in a matcher share the same
-                // tool-name filter. We compute the check using the input.
-                let _ = matcher_str; // suppress unused
-            }
-
             let hook = &pending_hook.hook;
 
-            // Apply tool-name filter from the input.
-            // (The original code checked entry.matcher.matcher against
-            // tool_name in input — we need to carry this in PendingHook.)
-            // Since we simplified PendingHook, re-derive: hooks that share
-            // a matcher were expanded via the HookEntry. The matcher filter
-            // is per-HookEntry. For correctness, we need it.
-
-            // Non-matching and already-fired hooks remain ineligible.
             if let Some(ref cond) = hook.if_condition
                 && !condition::evaluate(cond, &input)
             {
@@ -292,7 +286,14 @@ impl HookRegistry {
 
             let configured_hook = with_fallback_timeout(hook, self.config.aggregate_timeout_ms);
             let execution = self
-                .execute_configured_hook(&configured_hook, &input, cwd, session_id, &event_name)
+                .execute_configured_hook(
+                    &configured_hook,
+                    &input,
+                    cwd,
+                    session_id,
+                    &event_name,
+                    pending_hook.source.clone(),
+                )
                 .await;
             let execution = name_no_progress_stop(execution, hook, &pending_hook.id, &event_name);
 
@@ -329,7 +330,14 @@ impl HookRegistry {
         for config in &session_hook_configs {
             let configured_hook = with_fallback_timeout(config, self.config.aggregate_timeout_ms);
             let execution = self
-                .execute_configured_hook(&configured_hook, &input, cwd, session_id, &event_name)
+                .execute_configured_hook(
+                    &configured_hook,
+                    &input,
+                    cwd,
+                    session_id,
+                    &event_name,
+                    Some("session".to_owned()),
+                )
                 .await;
             let id = compute_hook_id(&event, &config.hook_type, &config.command, None);
             let execution = name_no_progress_stop(execution, config, &id, &event_name);

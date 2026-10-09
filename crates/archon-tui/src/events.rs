@@ -131,6 +131,8 @@ pub enum TuiEvent {
         cache_read_tokens: u64,
     },
     Error(String),
+    /// Diagnostic-only line that does not mutate generation or turn state.
+    DiagnosticLine(String),
     /// Emitted by main.rs right before agent.process_message().
     GenerationStarted,
     /// Emitted by main.rs after a slash command completes.
@@ -292,6 +294,19 @@ pub enum TuiEvent {
     Done,
     /// Notification overlay with a duration in milliseconds (TUI-330).
     NotificationTimeout(u64),
+}
+
+impl TuiEvent {
+    /// Convert a completed async hook result to the observational UI event.
+    pub fn from_async_hook_diagnostic(diagnostic: archon_core::hooks::AsyncHookDiagnostic) -> Self {
+        Self::DiagnosticLine(format!(
+            "async hook {} [{}] source={} — {}",
+            diagnostic.event,
+            diagnostic.outcome,
+            diagnostic.source.as_deref().unwrap_or("unknown"),
+            diagnostic.message
+        ))
+    }
 }
 
 #[cfg(test)]
