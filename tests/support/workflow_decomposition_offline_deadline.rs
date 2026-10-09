@@ -19,12 +19,11 @@ pub fn progress(test: &str, step: &str) {
 pub fn run(root: &Path, args: &[&str]) -> Output {
     let stdout_path = root.join("cell.stdout");
     let stderr_path = root.join("cell.stderr");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_archon"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_archon"));
+    isolate_child(&mut command, root);
+    let mut child = command
         .current_dir(root)
         .args(args)
-        .env("ANTHROPIC_API_KEY", "offline-test-key")
-        .env_remove("ANTHROPIC_BASE_URL")
-        .env_remove("ARCHON_BUILD_FINGERPRINT")
         .stdout(fs::File::create(&stdout_path).unwrap())
         .stderr(fs::File::create(&stderr_path).unwrap())
         .spawn()
@@ -35,6 +34,32 @@ pub fn run(root: &Path, args: &[&str]) -> Output {
         stdout: fs::read(stdout_path).unwrap_or_default(),
         stderr: fs::read(stderr_path).unwrap_or_default(),
     }
+}
+
+pub fn isolate_child(command: &mut Command, root: &Path) {
+    let home = root.join(".test-home");
+    let config_home = home.join(".config");
+    let data_home = home.join(".local/share");
+    let cache_home = home.join(".cache");
+    for dir in [&home, &config_home, &data_home, &cache_home] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    let config: toml::Value =
+        toml::from_str(&fs::read_to_string(root.join("config.toml")).unwrap())
+            .expect("temporary project config parses");
+    let endpoint = config["api"]["base_url"]
+        .as_str()
+        .expect("temporary project config has provider endpoint");
+    command
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", config_home)
+        .env("XDG_DATA_HOME", data_home)
+        .env("XDG_CACHE_HOME", cache_home)
+        .env("ARCHON_CONFIG_DIR", root)
+        .env("ANTHROPIC_API_KEY", "offline-test-key")
+        .env("ANTHROPIC_BASE_URL", endpoint);
 }
 
 pub fn tail(path: &Path) -> String {

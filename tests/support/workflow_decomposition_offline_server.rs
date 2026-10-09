@@ -14,11 +14,22 @@ impl Counts {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct RequestRecord {
+    pub method: String,
+    pub path: String,
+    pub auth_present: bool,
+    pub known_path: bool,
+    pub role: String,
+    pub prompt: String,
+    pub answer: String,
+}
+
 #[derive(Clone, Debug, Default)]
-pub struct Requests(pub Arc<Mutex<Vec<(String, String, String)>>>);
+pub struct Requests(pub Arc<Mutex<Vec<RequestRecord>>>);
 
 impl Requests {
-    pub fn snapshot(&self) -> Vec<(String, String, String)> {
+    pub fn snapshot(&self) -> Vec<RequestRecord> {
         self.0.lock().unwrap().clone()
     }
 }
@@ -96,20 +107,45 @@ impl FakeProvider {
                         }
                     }
                 }
+                if request.is_empty() {
+                    continue;
+                }
                 let body_start = request
                     .windows(4)
                     .position(|w| w == b"\r\n\r\n")
                     .map(|i| i + 4)
                     .unwrap_or(request.len());
+                let head = String::from_utf8_lossy(&request[..body_start]);
+                let request_line = head.lines().next().unwrap_or_default();
+                let mut parts = request_line.split_whitespace();
+                let method = parts.next().unwrap_or_default().to_string();
+                let path = parts.next().unwrap_or_default().to_string();
+                let headers = head.lines().skip(1).filter_map(|line| line.split_once(':'));
+                let mut auth_present = false;
+                let mut auth_valid = false;
+                for (name, value) in headers {
+                    if name.eq_ignore_ascii_case("x-api-key") {
+                        auth_present = true;
+                        auth_valid = value.trim() == "offline-test-key";
+                    } else if name.eq_ignore_ascii_case("authorization") {
+                        auth_present = true;
+                        auth_valid = value.trim() == "Bearer offline-test-key";
+                    }
+                }
+                let known_path = method == "POST" && path == "/v1/messages";
                 let body: serde_json::Value =
                     serde_json::from_slice(&request[body_start..]).unwrap_or_default();
                 let prompt = body.to_string();
                 let (role, answer) = scripted_answer(&prompt);
-                request_log.0.lock().unwrap().push((
-                    role.to_string(),
-                    prompt.clone(),
-                    answer.clone(),
-                ));
+                request_log.0.lock().unwrap().push(RequestRecord {
+                    method,
+                    path,
+                    auth_present,
+                    known_path,
+                    role: role.to_string(),
+                    prompt: prompt.clone(),
+                    answer: answer.clone(),
+                });
                 *request_counts
                     .0
                     .lock()
@@ -125,8 +161,21 @@ impl FakeProvider {
                     }
                 }
                 let escaped = serde_json::to_string(&answer).unwrap();
-                let (content_type, response) = if body["stream"] == false {
+                let (status, content_type, response) = if !known_path {
                     (
+                        "404 Not Found",
+                        "application/json",
+                        "{\"error\":\"unknown path\"}".to_string(),
+                    )
+                } else if !auth_valid {
+                    (
+                        "401 Unauthorized",
+                        "application/json",
+                        "{\"error\":\"invalid test key\"}".to_string(),
+                    )
+                } else if body["stream"] == false {
+                    (
+                        "200 OK",
                         "application/json",
                         serde_json::json!({
                             "id": "msg-local",
@@ -142,6 +191,7 @@ impl FakeProvider {
                     )
                 } else {
                     (
+                        "200 OK",
                         "text/event-stream",
                         format!(
                             "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg-local\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"offline\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{{\"input_tokens\":1,\"output_tokens\":1}}}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\nevent: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":{escaped}}}}}\n\nevent: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":0}}\n\nevent: message_delta\ndata: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"end_turn\",\"stop_sequence\":null}},\"usage\":{{\"output_tokens\":1}}}}\n\nevent: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
@@ -151,7 +201,8 @@ impl FakeProvider {
                 use std::io::Write;
                 let _ = write!(
                     stream,
-                    "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nCache-Control: no-cache\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    "HTTP/1.1 {}\r\nContent-Type: {}\r\nCache-Control: no-cache\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    status,
                     content_type,
                     response.len(),
                     response
@@ -192,6 +243,10 @@ impl FakeProvider {
 
 impl Drop for FakeProvider {
     fn drop(&mut self) {
+        eprintln!(
+            "fake provider received {} requests",
+            self.requests.snapshot().len()
+        );
         self.release();
         self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = std::net::TcpStream::connect(

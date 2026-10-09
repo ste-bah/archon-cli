@@ -32,11 +32,17 @@ pub fn print_failure(root: &Path, requests: &Requests) {
             }
         }
     }
-    for (role, prompt, answer) in requests.snapshot() {
+    let snapshot = requests.snapshot();
+    for request in snapshot {
         eprintln!(
-            "provider role={role} prompt={} answer={}",
-            prompt.chars().take(200).collect::<String>(),
-            answer.chars().take(200).collect::<String>()
+            "provider method={} path={} auth_present={} known_path={} role={} prompt={} answer={}",
+            request.method,
+            request.path,
+            request.auth_present,
+            request.known_path,
+            request.role,
+            request.prompt.chars().take(200).collect::<String>(),
+            request.answer.chars().take(200).collect::<String>()
         );
     }
 }

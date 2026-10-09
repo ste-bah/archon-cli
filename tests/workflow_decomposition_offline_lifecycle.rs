@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use deadline::{await_provider_boundary, progress, run, wait_for_child};
+use deadline::{await_provider_boundary, isolate_child, progress, run, wait_for_child};
 use snapshot::{result_store_records, strip_timestamps};
 
 const FIXTURE: &str = concat!(
@@ -152,12 +152,11 @@ fn spawn_decompose(root: &Path) -> std::process::Child {
 }
 
 fn spawn_decompose_with_revision(root: &Path, revision: Option<&str>) -> std::process::Child {
-    Command::new(env!("CARGO_BIN_EXE_archon"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_archon"));
+    isolate_child(&mut command, root);
+    command
         .current_dir(root)
         .args(decompose_args())
-        .env("ANTHROPIC_API_KEY", "offline-test-key")
-        .env_remove("ANTHROPIC_BASE_URL")
-        .env_remove("ARCHON_BUILD_FINGERPRINT")
         .envs(
             revision
                 .map(|revision| [("ARCHON_GIT_HASH", revision)])
@@ -299,6 +298,20 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
     assert!(root.join("tasks/TASK-X-020.md").exists());
     let _golden = final_snapshot(&project);
     let counts = project.provider.counts.snapshot();
+    let requests = project.provider.requests.snapshot();
+    assert!(
+        requests.iter().all(|request| request.known_path),
+        "unknown fake-provider path: {requests:?}"
+    );
+    assert!(
+        requests.iter().all(|request| request.auth_present),
+        "a fake-provider request omitted authentication: {requests:?}"
+    );
+    assert!(
+        counts.get("acceptance").copied().unwrap_or_default() > 0,
+        "acceptance author must reach the configured local provider; requests: {:?}",
+        project.provider.requests.snapshot()
+    );
     for role in ["acceptance", "judge", "skeleton", "body", "audit"] {
         assert!(
             counts.get(role).copied().unwrap_or_default() > 0,
