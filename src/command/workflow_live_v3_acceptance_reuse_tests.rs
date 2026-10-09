@@ -126,6 +126,70 @@ fn acceptance_freeze_reuse_logic_glob_predicate_is_volatile() {
 }
 
 #[test]
+fn acceptance_freeze_reuse_logic_verdict_and_key_come_from_one_snapshot() {
+    let dir = clean_repo();
+    let context = context(dir.path());
+    let check = criterion_for("test -f appeared");
+    let snapshot = super::reuse::snapshot(&context, &check).expect("literal snapshot");
+    let key = snapshot.key().to_owned();
+    let result = super::reuse::evaluate_snapshot(&snapshot, &check).unwrap();
+    super::reuse::save(key.clone(), &result, "snapshot evidence".into());
+    std::fs::write(dir.path().join("appeared"), "now present").unwrap();
+
+    let (cached, decision, cached_key) = super::reuse::take_snapshot(&snapshot);
+    assert!(decision.reused);
+    assert_eq!(cached_key.as_deref(), Some(key.as_str()));
+    assert_eq!(cached.unwrap().exit_code, Some(1));
+    assert_eq!(snapshot.key(), key);
+    assert_eq!(
+        result.environment_note.as_deref(),
+        Some("host-evaluated from filesystem snapshot")
+    );
+}
+
+#[test]
+fn acceptance_freeze_reuse_logic_literal_predicates_match_sh_test_for_same_snapshot() {
+    let dir = clean_repo();
+    let repo = dir.path();
+    std::fs::write(repo.join("regular"), "data").unwrap();
+    std::fs::create_dir(repo.join("directory")).unwrap();
+    std::fs::write(repo.join("empty"), "").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("regular", repo.join("link")).unwrap();
+
+    let mut commands = vec![
+        "test -e regular",
+        "test -f regular",
+        "test -d directory",
+        "test -s regular",
+        "test -r regular",
+        "test -w regular",
+        "test -x regular",
+        "test -e missing",
+        "test -f missing",
+        "test -d missing",
+        "test -s empty",
+        "test -r missing",
+        "test -w missing",
+        "test -x missing",
+    ];
+    #[cfg(unix)]
+    commands.extend(["test -L link", "test -e link", "test -f link"]);
+    for command in commands {
+        let check = criterion_for(command);
+        let snapshot = super::reuse::snapshot(&context(repo), &check)
+            .unwrap_or_else(|| panic!("unsupported bounded command: {command}"));
+        let host = super::reuse::evaluate_snapshot(&snapshot, &check).unwrap();
+        let shell = std::process::Command::new("sh")
+            .args(["-c", command])
+            .current_dir(repo)
+            .status()
+            .unwrap();
+        assert_eq!(host.exit_code, shell.code(), "{command}");
+    }
+}
+
+#[test]
 fn ignored_input_is_volatile_and_cannot_leave_a_verdict_after_deletion() {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), &["init", "-q"]);

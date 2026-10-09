@@ -22,23 +22,42 @@ struct Cached {
     evidence: String,
 }
 
+pub(super) struct Snapshot {
+    key: String,
+    operator: String,
+    state: serde_json::Value,
+}
+
+impl Snapshot {
+    #[cfg(test)]
+    pub(super) fn key(&self) -> &str {
+        &self.key
+    }
+}
+
 fn cache() -> &'static Mutex<BTreeMap<String, Cached>> {
     static CACHE: OnceLock<Mutex<BTreeMap<String, Cached>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-pub(super) fn key(context: &StageContext, criterion: &AcceptanceCriterion) -> Option<String> {
-    let AcceptanceCheck::Command {
-        command,
-        cwd: TrustedCwd::RepoRoot,
-    } = &criterion.check
-    else {
+pub(super) fn snapshot(
+    context: &StageContext,
+    criterion: &AcceptanceCriterion,
+) -> Option<Snapshot> {
+    let AcceptanceCheck::Command { command, cwd } = &criterion.check else {
         return None;
     };
-    let path =
-        crate::command::workflow_task_set::workflow_acceptance_check_reuse::bounded_path(command)?;
-    let filesystem = filesystem_closure(&context.repository, path)?;
-    let tree = tree_closure(&context.repository, path)?;
+    let (root, cwd_name) = match cwd {
+        TrustedCwd::RepoRoot => (&context.repository, "repository"),
+        TrustedCwd::ProjectRoot => (&context.project, "project"),
+    };
+    let (operator, path) = literal_test(command)?;
+    let (filesystem, state) = filesystem_closure(root, path)?;
+    let tree = if *cwd == TrustedCwd::RepoRoot {
+        tree_closure(root, path)?
+    } else {
+        "project-root-filesystem-snapshot".to_string()
+    };
     let (version, digest, build) =
         crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()?;
     let host = archon_workflow::acceptance_check_environment::host_environment();
@@ -71,36 +90,103 @@ pub(super) fn key(context: &StageContext, criterion: &AcceptanceCriterion) -> Op
         criterion.criterion.as_bytes(),
         criterion.covers,
         command.as_bytes(),
+        cwd_name,
+        root.display().to_string(),
         path,
         filesystem,
         tree,
         version,
         digest,
         build,
-        crate::command::workflow_task_set::workflow_acceptance_check_reuse::shell_binary_digest(
-            environment.get("PATH").map(String::as_str),
-        )?,
         environment,
         policy,
     ]);
-    Some(archon_workflow::task_set_contract::content_digest(
-        input.to_string().as_bytes(),
-    ))
+    Some(Snapshot {
+        key: archon_workflow::task_set_contract::content_digest(input.to_string().as_bytes()),
+        operator: operator.to_owned(),
+        state,
+    })
+}
+
+#[cfg(test)]
+pub(super) fn key(context: &StageContext, criterion: &AcceptanceCriterion) -> Option<String> {
+    snapshot(context, criterion).map(|snapshot| snapshot.key)
+}
+
+fn literal_test(command: &str) -> Option<(&str, &str)> {
+    let path =
+        crate::command::workflow_task_set::workflow_acceptance_check_reuse::bounded_path(command)?;
+    let words: Vec<_> = command.split(' ').filter(|word| !word.is_empty()).collect();
+    Some((*words.get(1)?, path))
+}
+
+pub(super) fn is_literal_test(command: &str) -> bool {
+    literal_test(command).is_some()
+}
+
+pub(super) fn evaluate_snapshot(
+    snapshot: &Snapshot,
+    criterion: &AcceptanceCriterion,
+) -> Option<CheckResult> {
+    let passed = match snapshot.operator.as_str() {
+        "-L" => snapshot.state.get("kind")?.as_str()? == "symlink",
+        "-e" => object_kind(&snapshot.state) != "missing",
+        "-f" => object_kind(&snapshot.state) == "file",
+        "-d" => object_kind(&snapshot.state) == "directory",
+        "-s" => snapshot.state.get("size")?.as_u64()? > 0,
+        "-r" | "-w" | "-x" => snapshot
+            .state
+            .get("access")?
+            .get(snapshot.operator.as_str())?
+            .as_bool()?,
+        _ => return None,
+    };
+    Some(CheckResult {
+        acceptance_id: criterion.id.clone(),
+        exit_code: Some(if passed { 0 } else { 1 }),
+        quota_walk_count: 0,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        environment_note: Some("host-evaluated from filesystem snapshot".into()),
+        operational_error: None,
+        classification: None,
+    })
+}
+
+fn object_kind(state: &serde_json::Value) -> &str {
+    if state.get("kind").and_then(serde_json::Value::as_str) == Some("symlink") {
+        state
+            .get("resolved")
+            .and_then(|value| value.get("kind"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("missing")
+    } else {
+        state
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("missing")
+    }
 }
 
 /// Snapshot every component on the literal path and its immediate directory
 /// entries. This is the proof for reuse; the Git tree below is only an extra
 /// key input. Recursive predicates are not accepted by `bounded_path`.
-fn filesystem_closure(repository: &Path, path: &str) -> Option<String> {
+fn filesystem_closure(repository: &Path, path: &str) -> Option<(String, serde_json::Value)> {
     let mut current = repository.to_path_buf();
     let mut entries = Vec::new();
-    for component in Path::new(path).components() {
+    let mut final_state = serde_json::json!({"kind": "missing"});
+    let mut reached = true;
+    let components: Vec<_> = Path::new(path).components().collect();
+    for (index, component) in components.iter().enumerate() {
         let std::path::Component::Normal(name) = component else {
             return None;
         };
         let name = name.to_str()?;
         current.push(name);
         let state = filesystem_entry(&current)?;
+        if index + 1 == components.len() {
+            final_state = state.clone();
+        }
         let kind = state.get("kind")?.as_str()?.to_owned();
         let traversal_kind = if kind == "symlink" {
             state.get("resolved")?.get("kind")?.as_str()?.to_owned()
@@ -111,11 +197,20 @@ fn filesystem_closure(repository: &Path, path: &str) -> Option<String> {
         if traversal_kind != "directory" {
             // A missing or non-directory ancestor makes all remaining path
             // components unreachable to this literal predicate.
+            if index + 1 < components.len() {
+                reached = false;
+            }
             break;
         }
     }
     let encoded = serde_json::to_vec(&entries).ok()?;
-    Some(archon_workflow::task_set_contract::content_digest(&encoded))
+    if !reached {
+        final_state = serde_json::json!({"kind": "missing"});
+    }
+    Some((
+        archon_workflow::task_set_contract::content_digest(&encoded),
+        final_state,
+    ))
 }
 
 /// Capture a path's lstat type, symlink target, followed file bytes, or
@@ -125,20 +220,51 @@ fn filesystem_entry(path: &Path) -> Option<serde_json::Value> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Some(serde_json::json!({"kind": "missing"}));
+            return Some(
+                serde_json::json!({"kind": "missing", "size": 0, "access": {"-r": false, "-w": false, "-x": false}}),
+            );
         }
         Err(_) => return None,
     };
     if metadata.file_type().is_symlink() {
         let target = std::fs::read_link(path).ok()?.to_str()?.to_owned();
-        let followed = std::fs::metadata(path).ok()?;
+        let followed = match std::fs::metadata(path) {
+            Ok(metadata) => filesystem_object(path, &metadata)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                serde_json::json!({"kind": "missing", "size": 0})
+            }
+            Err(_) => return None,
+        };
         return Some(serde_json::json!({
             "kind": "symlink",
             "target": target,
-            "resolved": filesystem_object(path, &followed)?,
+            "resolved": followed,
+            "access": access_state(path),
         }));
     }
-    filesystem_object(path, &metadata)
+    let mut state = filesystem_object(path, &metadata)?;
+    if let Some(object) = state.as_object_mut() {
+        object.insert("access".into(), access_state(path));
+    }
+    Some(state)
+}
+
+fn access_state(path: &Path) -> serde_json::Value {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok();
+        let check = |mode| {
+            path.as_ref()
+                .is_some_and(|path| unsafe { libc::access(path.as_ptr(), mode) == 0 })
+        };
+        serde_json::json!({"-r": check(libc::R_OK), "-w": check(libc::W_OK), "-x": check(libc::X_OK)})
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        serde_json::json!({"-r": false, "-w": false, "-x": false})
+    }
 }
 
 fn filesystem_object(path: &Path, metadata: &std::fs::Metadata) -> Option<serde_json::Value> {
@@ -146,6 +272,7 @@ fn filesystem_object(path: &Path, metadata: &std::fs::Metadata) -> Option<serde_
         let bytes = std::fs::read(path).ok()?;
         return Some(serde_json::json!({
             "kind": "file",
+            "size": metadata.len(),
             "content": archon_workflow::task_set_contract::content_digest(&bytes),
         }));
     }
@@ -180,9 +307,11 @@ fn filesystem_object(path: &Path, metadata: &std::fs::Metadata) -> Option<serde_
             children.push((name, kind, target));
         }
         children.sort_by(|left, right| left.0.cmp(&right.0));
-        return Some(serde_json::json!({"kind": "directory", "entries": children}));
+        return Some(
+            serde_json::json!({"kind": "directory", "size": metadata.len(), "entries": children}),
+        );
     }
-    Some(serde_json::json!({"kind": "other"}))
+    Some(serde_json::json!({"kind": "other", "size": metadata.len()}))
 }
 
 /// Add the committed Git entries as a secondary key factor. Filesystem state
@@ -222,7 +351,7 @@ pub(super) fn take(
     context: &StageContext,
     criterion: &AcceptanceCriterion,
 ) -> (Option<CheckResult>, Decision, Option<String>) {
-    let Some(key) = key(context, criterion) else {
+    let Some(snapshot) = snapshot(context, criterion) else {
         return (
             None,
             Decision {
@@ -233,6 +362,13 @@ pub(super) fn take(
             None,
         );
     };
+    take_snapshot(&snapshot)
+}
+
+pub(super) fn take_snapshot(
+    snapshot: &Snapshot,
+) -> (Option<CheckResult>, Decision, Option<String>) {
+    let key = snapshot.key.clone();
     match cache().lock().ok().and_then(|cache| {
         cache
             .get(&key)

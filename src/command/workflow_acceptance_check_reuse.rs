@@ -108,14 +108,17 @@ pub(crate) fn bounded_path(check: &str) -> Option<&str> {
     }
     let words: Vec<&str> = check.split(' ').filter(|word| !word.is_empty()).collect();
     match words.as_slice() {
-        ["test", "-f" | "-e" | "-d" | "-s", path]
-            if !path.starts_with('/')
-                && !path.split('/').any(|part| part == "..")
-                && !path.starts_with('-')
-                && path.bytes().all(|byte| {
-                    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/')
-                })
-                && !path.is_empty() =>
+        [
+            "test",
+            "-f" | "-e" | "-d" | "-s" | "-L" | "-r" | "-w" | "-x",
+            path,
+        ] if !path.starts_with('/')
+            && !path.split('/').any(|part| part == "..")
+            && !path.starts_with('-')
+            && path.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/')
+            })
+            && !path.is_empty() =>
         {
             Some(path)
         }

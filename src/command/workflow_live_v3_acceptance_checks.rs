@@ -147,19 +147,63 @@ pub(in crate::command) async fn execute_checks(
     }
     let mut results_by_id = BTreeMap::new();
     let mut pending = Vec::new();
-    let mut cache_keys = BTreeMap::new();
     let mut reuse = BTreeMap::new();
     for criterion in selected {
-        let (saved, decision, key) = super::reuse::take(context, criterion);
-        if let Some(saved) = saved {
-            results_by_id.insert(criterion.id.clone(), saved);
-        } else {
-            pending.push(*criterion);
-            if let Some(key) = key {
-                cache_keys.insert(criterion.id.clone(), (key, *criterion));
+        let host_test = match &criterion.check {
+            AcceptanceCheck::Command { command, .. } => super::reuse::is_literal_test(command),
+            _ => false,
+        };
+        if let Some(snapshot) = super::reuse::snapshot(context, criterion) {
+            let (saved, decision, key) = super::reuse::take_snapshot(&snapshot);
+            if let Some(saved) = saved {
+                results_by_id.insert(criterion.id.clone(), saved);
+            } else if let (Some(key), Some(result)) =
+                (key, super::reuse::evaluate_snapshot(&snapshot, criterion))
+            {
+                let safe = criterion.id.replace(
+                    |ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'),
+                    "_",
+                );
+                super::reuse::save(
+                    key,
+                    &result,
+                    evidence_dir
+                        .join(format!("{safe}.stdout"))
+                        .display()
+                        .to_string(),
+                );
+                results_by_id.insert(criterion.id.clone(), result);
+            } else {
+                results_by_id.insert(
+                    criterion.id.clone(),
+                    operational(
+                        &criterion.id,
+                        "the host could not evaluate the literal test path snapshot; the shell was not run".into(),
+                    ),
+                );
             }
+            reuse.insert(criterion.id.clone(), decision);
+        } else if host_test {
+            results_by_id.insert(
+                criterion.id.clone(),
+                operational(
+                    &criterion.id,
+                    "the host could not capture the literal test path snapshot; the shell was not run".into(),
+                ),
+            );
+            reuse.insert(
+                criterion.id.clone(),
+                super::reuse::Decision {
+                    reused: false,
+                    why: "literal test snapshot was unavailable; no shell fallback was run".into(),
+                    evidence: None,
+                },
+            );
+        } else {
+            let (_, decision, _) = super::reuse::take(context, criterion);
+            pending.push(*criterion);
+            reuse.insert(criterion.id.clone(), decision);
         }
-        reuse.insert(criterion.id.clone(), decision);
     }
     let fresh = run_selected(
         store,
@@ -174,27 +218,6 @@ pub(in crate::command) async fn execute_checks(
     )
     .await?;
     for result in fresh {
-        if let Some((key, criterion)) = cache_keys.remove(&result.acceptance_id) {
-            // The verdict is reusable only if its bounded read state stayed
-            // identical through execution. This post-check snapshot is the
-            // state recorded at verdict time.
-            if super::reuse::key(context, criterion).as_ref() != Some(&key) {
-                results_by_id.insert(result.acceptance_id.clone(), result);
-                continue;
-            }
-            let safe = result.acceptance_id.replace(
-                |ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'),
-                "_",
-            );
-            super::reuse::save(
-                key,
-                &result,
-                evidence_dir
-                    .join(format!("{safe}.stdout"))
-                    .display()
-                    .to_string(),
-            );
-        }
         results_by_id.insert(result.acceptance_id.clone(), result);
     }
     let audit = super::reuse::audit_bytes(&reuse).map_err(|error| {
