@@ -31,7 +31,7 @@ async fn a_judge_reply_that_stays_truncated_is_incomplete_never_parsed() {
     .unwrap_err();
     // Not a JSON document even as a prefix: nothing to continue, so the
     // judge is asked afresh up to its no-progress bound, then incomplete.
-    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 4);
     assert!(
         judge::JudgeIncomplete::caused(&error).is_some(),
         "{error:#}"

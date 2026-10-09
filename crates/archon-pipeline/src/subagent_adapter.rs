@@ -137,14 +137,12 @@ impl SubagentPipelineClient {
         self
     }
 
-    /// `[workflow.generated] read_only_soft_call_ceiling` /
-    /// `read_only_hard_call_ceiling` (Issue-58): the inspection-call counts
-    /// at which a read-only workflow call is nudged, then refused further
-    /// reading. 0 disables either.
+    /// `[workflow.generated] read_only_soft_call_ceiling` (Issue-58): the
+    /// inspection-call count at which a read-only workflow call is nudged.
+    /// 0 disables the reminder; stalls are governed by the runner window.
     #[must_use]
-    pub fn with_read_only_call_ceilings(mut self, soft: u32, hard: u32) -> Self {
+    pub fn with_read_only_call_ceiling(mut self, soft: u32) -> Self {
         self.workflow_read_guard.read_only_soft_call_ceiling = soft;
-        self.workflow_read_guard.read_only_hard_call_ceiling = hard;
         self
     }
 

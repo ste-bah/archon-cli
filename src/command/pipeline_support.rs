@@ -131,10 +131,7 @@ pub(crate) async fn build_subagent_pipeline_adapter_with_policy(
             config.workflow.generated.allow_tree_wide_mutators,
         )
         .with_declared_target_enforcement(config.workflow.generated.enforce_declared_targets)
-        .with_read_only_call_ceilings(
-            config.workflow.generated.read_only_soft_call_ceiling,
-            config.workflow.generated.read_only_hard_call_ceiling,
-        )
+        .with_read_only_call_ceiling(config.workflow.generated.read_only_soft_call_ceiling)
         // `[subagent] inactivity_timeout_secs`, never below the stream idle
         // guard: a session that has stopped is cut long before its wall clock.
         .with_inactivity_timeout(config.subagent.effective_inactivity_timeout_secs()),

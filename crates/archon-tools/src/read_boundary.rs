@@ -36,7 +36,7 @@ pub(crate) fn check(path: &Path, ctx: &ToolContext) -> Result<(), String> {
         .min_by_key(|p| p.components().count());
     let relative = relative.unwrap_or_else(|| path.to_path_buf());
     if relative.components().any(|c| matches!(c, Component::Normal(n) if ctx.denied_directory_names.iter().any(|name| n == std::ffi::OsStr::new(name)))) {
-        return Err(format!("Path '{}' is in a host-excluded subtree; read current source outside excluded directories", path.display()));
+        return Err(crate::path_guard::guard_refusal(format!("Path '{}' is in a host-excluded subtree; read current source outside excluded directories", path.display())));
     }
     Ok(())
 }

@@ -132,6 +132,22 @@ fn judged_gate(record: &WorkflowV2CallRecord) -> Option<(&str, &str, GateSeed)> 
     let request = record.call.options.host_command.as_ref()?;
     let data = &record.result.data;
     let envelope = data.get("gateEnvelope").filter(|v| v.is_object())?;
+    // A gate envelope is evidence only for the logic that produced it. The
+    // current catalog is authoritative: stale verdicts cannot seed repairs.
+    let version = crate::command::workflow_host_command_logic::versions()
+        .get(&request.command_id)
+        .copied()?;
+    let build_bound = crate::command::workflow_host_command_logic::digests()
+        .get(&request.command_id)
+        .is_some_and(|(_, bound)| *bound);
+    if !crate::command::workflow_host_command_logic::outcome_logic_holds(
+        data,
+        version,
+        false,
+        build_bound.then_some(crate::command::workflow_host_command_logic::THIS_BUILD),
+    ) {
+        return None;
+    }
     let judged = matches!(
         record.status,
         WorkflowV2Status::Accepted | WorkflowV2Status::NeedsReview | WorkflowV2Status::Noop
@@ -321,15 +337,27 @@ struct Reply<'a> {
 /// candidate's. Only rounds that leave every entry as it was (a reply that
 /// repeats its entry byte for byte) share it, and which of them holds the
 /// gate changes nothing: the carried entries are the same.
-fn gate_round(candidate: &BTreeMap<String, Value>, replies: &[Reply<'_>]) -> u64 {
+fn gate_round(
+    candidate: &BTreeMap<String, Value>,
+    replies: &[Reply<'_>],
+    refuted: &std::collections::BTreeSet<String>,
+) -> u64 {
     let mut state: BTreeMap<&str, &Value> = BTreeMap::new();
+    let mut repaired_after_gate: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
     let mut round = 0;
     for (index, reply) in replies.iter().enumerate() {
+        if round > 0 && refuted.contains(&reply.id) {
+            // A post-gate author call for a refuted entry is always a repair,
+            // even if the author repeats byte-for-byte what the gate saw.
+            repaired_after_gate.insert(reply.id.clone());
+        }
         state.insert(&reply.id, &reply.entry);
         let round_ends = replies
             .get(index + 1)
             .is_none_or(|next| next.ordinal != reply.ordinal);
         if round_ends
+            && repaired_after_gate.is_empty()
             && state
                 .iter()
                 .all(|(id, entry)| candidate.get(*id) == Some(*entry))
@@ -378,11 +406,27 @@ fn acceptance(
         let entries = candidate_entries(stdin, &record.call.id)?;
         // Compared as the loop kept them: a candidate an older runtime
         // assembled may predate the host-owned stamp.
-        let by_id = entries
+        let by_id: BTreeMap<String, Value> = entries
             .iter()
             .map(|(id, entry, _)| (id.clone(), host.stamp(entry.clone(), id)))
             .collect();
-        judged.push((gate_round(&by_id, &replies_read), gate, entries));
+        // A gate may explicitly refute an entry whose bytes happen to match
+        // its candidate. That entry is still owed a repair in a later round;
+        // it cannot make an identical later reply part of the round the gate
+        // already holds.
+        let mut refuted = std::collections::BTreeSet::new();
+        for finding in &gate.3.findings {
+            let Some(text) = finding["text"].as_str() else {
+                continue;
+            };
+            if let Some(id) = text
+                .strip_prefix("check '")
+                .and_then(|rest| rest.split_once("' was refuted").map(|(id, _)| id))
+            {
+                refuted.insert(id.to_string());
+            }
+        }
+        judged.push((gate_round(&by_id, &replies_read, &refuted), gate, entries));
     }
     // A stable sort: gates of one round keep their start order.
     judged.sort_by_key(|(round, ..)| *round);

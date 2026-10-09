@@ -123,7 +123,7 @@ impl Tool for SkillTool {
                     SkillOutput::Text(s) | SkillOutput::Markdown(s) | SkillOutput::Prompt(s) => {
                         ToolResult::success(s)
                     }
-                    SkillOutput::WorkflowDecompose(_) => ToolResult::error(
+                    SkillOutput::WorkflowDecompose(_) => ToolResult::refusal(
                         "workflow-prd-spec is a host-only interactive action; invoke /workflow-prd-spec from the TUI",
                     ),
                     SkillOutput::Error(e) => ToolResult::error(e),
@@ -281,6 +281,27 @@ mod tests {
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn host_only_workflow_skill_refusal_is_classified_before_dispatch() {
+        let result = SkillTool
+            .execute(
+                json!({
+                    "action":"invoke",
+                    "name":"workflow-prd-spec",
+                    "args":["prds/PRD-EXAMPLE.md"]
+                }),
+                &ctx(),
+            )
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("host-only interactive action"));
+        assert!(
+            result
+                .content
+                .contains(archon_tools::tool::TOOL_REFUSAL_MARKER)
+        );
     }
 
     #[tokio::test]

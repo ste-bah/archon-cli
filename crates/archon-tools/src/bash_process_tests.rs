@@ -5,6 +5,28 @@ use super::*;
 use crate::tool::ToolContext;
 
 #[tokio::test]
+async fn workflow_build_restriction_is_a_typed_guard_refusal() {
+    let dir = tempfile::tempdir().unwrap();
+    let tool = BashTool::default().with_isolation_tier(crate::isolation::IsolationTier::Worktree);
+    let result = tool
+        .execute(
+            json!({"command": "cargo check"}),
+            &ToolContext {
+                working_dir: dir.path().to_path_buf(),
+                ..ToolContext::default()
+            },
+        )
+        .await;
+    assert!(result.is_error);
+    assert!(
+        result.content.contains(crate::tool::TOOL_REFUSAL_MARKER),
+        "{}",
+        result.content
+    );
+    assert!(result.content.contains("cargo check"), "{}", result.content);
+}
+
+#[tokio::test]
 #[cfg(unix)]
 async fn parent_exit_with_descendant_held_pipes_is_cleaned_before_result() {
     let dir = tempfile::tempdir().unwrap();

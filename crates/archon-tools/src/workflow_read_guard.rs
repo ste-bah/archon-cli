@@ -40,7 +40,6 @@ pub use focused::FocusedTestPlan;
 use focused::FocusedTests;
 pub use forbidden::{ForbiddenPathScope, scope_forbidden_paths};
 pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
-pub use read_only::READ_CEILING_MARKER;
 use records::{append_record, clip, first_line, record_head};
 pub use repeat::{IDENTICAL_FAILURES_BEFORE_REFUSAL, REPEATED_FAILURE_MARKER, masked_failure};
 pub use run_store::{AdmittedWrites, RunStoreScope, current_run_store, scope_run_store};
@@ -133,7 +132,7 @@ pub enum GuardMode {
     /// read budget and everything that hangs off it.
     WriteCapable,
     /// A call that can only inspect and run Bash: shell admission plus the
-    /// inspection ceilings (Issue-58). Every other entry point is a no-op.
+    /// soft inspection reminder (Issue-58). Every other entry point is a no-op.
     ReadOnly,
 }
 
@@ -166,7 +165,6 @@ pub struct WorkflowReadGuard {
     worktree_root: Option<PathBuf>,
     /// The read-only ceilings (Issue-58); 0 is off. Unread in write mode.
     read_only_soft_ceiling: u32,
-    read_only_hard_ceiling: u32,
     state: Mutex<State>,
 }
 
@@ -308,10 +306,10 @@ impl WorkflowReadGuard {
             return Some(refusal);
         }
         // A read-only call answers to the three shell admissions above and
-        // to its own inspection ceilings, never to the budget, the focused
+        // to its own progress reminder, never to the budget, the focused
         // submit nudge or the fallback below.
         if self.read_only() {
-            return read_only::admit(self, state, name, input);
+            return read_only::admit(state, name, input);
         }
         if let Some(refusal) = repeat::admit(state, name, input) {
             return Some(refusal);

@@ -40,6 +40,13 @@ async fn an_echoed_failing_status_is_counted_and_the_repeat_is_refused() {
     let refused = registry.dispatch("Bash", check, &ctx).await;
     assert!(refused.is_error, "{}", refused.content);
     assert!(
+        refused
+            .content
+            .contains(archon_tools::tool::TOOL_REFUSAL_MARKER),
+        "{}",
+        refused.content
+    );
+    assert!(
         refused.content.contains(REPEATED_FAILURE_MARKER),
         "{}",
         refused.content

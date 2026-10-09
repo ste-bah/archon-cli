@@ -162,6 +162,16 @@ async fn a_write_branch_shell_cannot_leave_the_canonical_checkout_changed() {
         "the checkout write must fail: {}",
         result.content
     );
+    assert!(
+        result.content.contains("[write boundary]"),
+        "{}",
+        result.content
+    );
+    assert!(
+        !result.content.contains(crate::tool::TOOL_REFUSAL_MARKER),
+        "{}",
+        result.content
+    );
     // Read the canonical checkout back: unchanged.
     assert_eq!(std::fs::read_to_string(&tracked).unwrap(), "original");
     assert!(!own.is_error, "{}", own.content);

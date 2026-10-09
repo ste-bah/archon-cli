@@ -133,12 +133,9 @@ pub(super) struct ShellBoundary {
     pub(super) applied: Applied,
 }
 
-/// The boundary for this command: `Ok(None)` when the call is neither an
-/// isolated write branch nor a read-only call with a host boundary, or is a
-/// write branch on a host that cannot bound it (logged); `Err` — the command
-/// is not run — when a read-only call cannot be bounded, or a boundary this
-/// host can apply could not be built. A private temp directory, when Landlock
-/// needs one, is written into `env`.
+/// Builds this command's boundary. Unbounded write branches are logged and run;
+/// unbounded read-only calls and boundary construction failures are refused.
+/// Landlock's private temp directory is written into `env`.
 pub(super) fn for_call(
     ctx: &ToolContext,
     env: &mut Vec<(String, String)>,
@@ -152,7 +149,7 @@ pub(super) fn for_call(
     };
     let fail_closed = |what: &str, reason: &str| {
         let text = refusal(what, reason);
-        ToolResult::error(format!(
+        ToolResult::refusal(format!(
             "Error: {text} Use the file tools, and report anything you could not check in \
              your envelope."
         ))
@@ -185,13 +182,8 @@ pub(super) fn for_call(
             }
             Applied::Landlock(sandbox)
         }
-        // Issue-234: no kernel boundary (Windows). Snapshot the sealed roots
-        // now, minus every re-opened writable path (the worktree, declared
-        // artifact siblings and their new parent dirs); `annotate` restores
-        // after the command and fails the call if anything under a sealed root
-        // moved. This covers read-only shells AND write-branch shells, so a
-        // write branch can no longer edit the canonical checkout on a
-        // no-sandbox host (Issue-213).
+        // Issue-234: on Windows, snapshot sealed roots and restore/fail if a
+        // command changes one; this also protects write branches (Issue-213).
         Mechanism::HostSnapshot => Applied::HostSnapshot(snapshot::capture(&boundary)),
     };
     Ok(Some(ShellBoundary { boundary, applied }))
@@ -250,14 +242,8 @@ pub(super) fn for_shell(
 }
 
 impl WriteBoundary {
-    /// The `sandbox-exec` profile: everything allowed, writes under the
-    /// protected roots denied, the writable directories allowed again.
-    ///
-    /// An empty clause matches EVERY path, so neither is ever written empty:
-    /// the protected list is non-empty by construction
-    /// (`WorkflowReadGuard::boundary_paths` answers `None` otherwise), and an
-    /// empty writable list — a worktree path that is not UTF-8 — leaves the
-    /// `allow` out, which only makes the profile stricter.
+    /// Allows writes generally, denies protected roots, then re-allows writable
+    /// paths. Empty clauses are omitted because an empty clause matches all.
     pub(super) fn profile(&self) -> String {
         let clause = |kind: &str, paths: &[PathBuf]| {
             paths
@@ -287,12 +273,19 @@ impl WriteBoundary {
         profile
     }
 
-    /// Tell the agent what may have refused its write, where it reads: on the
-    /// result of the command. The kernel's `EPERM` does not say which rule
-    /// refused it, so the note says when it applies rather than that it did.
-    fn annotate(&self, mut result: ToolResult) -> ToolResult {
+    /// Add boundary guidance when a failed command reports an OS denial.
+    pub(super) fn annotate(&self, mut result: ToolResult) -> ToolResult {
         // `sandbox-exec` refuses with EPERM, Landlock with EACCES (and EXDEV
         // for a link or rename across its rules).
+        // Output text alone is not an outcome: a successful command may print
+        // the same words while discussing a denial. Only annotate a completed
+        // Bash execution whose process status reports failure.
+        let Some(execution) = result.authoritative_bash_execution() else {
+            return result;
+        };
+        if execution.exit_code() == 0 {
+            return result;
+        }
         if !DENIALS.iter().any(|denial| result.content.contains(denial)) {
             return result;
         }
@@ -335,7 +328,9 @@ impl WriteBoundary {
     }
 }
 
-/// What the kernel says when a boundary refuses a write.
+/// Output phrases commonly produced when the OS denies a write. Since the OS
+/// gives us no authoritative per-call denial signal, these only trigger
+/// guidance on failed completed executions; they do not classify a refusal.
 const DENIALS: [&str; 3] = [
     "Operation not permitted",
     "Permission denied",
@@ -345,12 +340,11 @@ const DENIALS: [&str; 3] = [
 /// Settle a command's boundary and annotate its result.
 ///
 /// For a kernel boundary (`sandbox-exec`, Landlock) this is
-/// [`WriteBoundary::annotate`]: the write was already refused live, and the
-/// note tells the agent where. For the host-snapshot boundary (Issue-234,
-/// Windows) the writes were not refused, so this restores every change the
-/// command made under a sealed root and, if there was one, turns the result
-/// into an error naming it — the call fails exactly as a kernel `EPERM` would
-/// have made it fail.
+/// [`WriteBoundary::annotate`]: the command ran, and the note gives guidance
+/// when its failed output reports a possible denial. For the host-snapshot
+/// boundary (Issue-234, Windows) the writes were not refused, so this restores
+/// every change the command made under a sealed root and, if there was one,
+/// returns an ordinary tool error naming it.
 pub(super) fn annotate(boundary: Option<&ShellBoundary>, result: ToolResult) -> ToolResult {
     let Some(bounded) = boundary else {
         return result;
@@ -498,3 +492,7 @@ fn regex_escape(path: &str) -> String {
 fn sbpl_escape(path: &str) -> String {
     path.replace('\\', "\\\\").replace('"', "\\\"")
 }
+
+#[cfg(test)]
+#[path = "bash_write_sandbox_outcome_tests.rs"]
+mod outcome_tests;

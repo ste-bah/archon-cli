@@ -196,6 +196,7 @@ async fn replies_that_never_parse_end_incomplete_after_the_no_progress_bound() {
         Ok(("no json", Some("end_turn"))),
         Ok(("still none", Some("end_turn"))),
         Ok(("nothing", Some("end_turn"))),
+        Ok(("no JSON here either", Some("end_turn"))),
     ]);
 
     let error = judge_contract(&client, contract(), &expected())
@@ -203,7 +204,29 @@ async fn replies_that_never_parse_end_incomplete_after_the_no_progress_bound() {
         .expect_err("no usable verdict");
 
     assert!(JudgeIncomplete::caused(&error).is_some(), "{error:#}");
-    assert_eq!(client.calls().len(), JUDGE_ATTEMPTS);
+    assert_eq!(client.calls().len(), JUDGE_NO_PROGRESS_WINDOW + 1);
+}
+
+#[tokio::test]
+async fn a_rejected_judgment_is_reasked_with_the_reply_and_exact_error() {
+    let client = Scripted::new(vec![
+        Ok((r#"{"decisions":[]}"#, Some("end_turn"))),
+        Ok((ACCEPTED, Some("end_turn"))),
+    ]);
+    judge_contract(&client, contract(), &expected())
+        .await
+        .expect("the repaired reply is usable");
+    let calls = client.calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1][0], calls[0][0]);
+    assert_eq!(calls[1][1]["role"], "assistant");
+    assert_eq!(calls[1][1]["content"], r#"{"decisions":[]}"#);
+    assert_eq!(calls[1][2]["role"], "user");
+    let rejected = calls[1][2]["content"].as_str().unwrap();
+    assert_eq!(
+        rejected,
+        "Your reply was rejected: acceptance judge decision ids do not match the contract: missing=[\"AC-X-001\"], extra=[]; retry the full batch\nReply again with the complete JSON document required by the first message."
+    );
 }
 
 /// Round 2 (P1): a truncated reply that already holds a complete document is

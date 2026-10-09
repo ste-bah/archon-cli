@@ -188,7 +188,7 @@ async fn a_discarded_reply_keeps_no_progress_credit() {
     let store = JudgeStore::at_with_progress(dir.path().to_path_buf(), progress.clone());
     let wrong_id = r#"epted","counterexample":"none","reason":"ok"},{"id":"AC-OTHER","verdict":"accepted","counterexample":"n","reason":"r"}]}"#;
     let mut replies = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..4 {
         replies.push(Ok((HEAD, Some("max_tokens"))));
         replies.push(Ok((wrong_id, Some("end_turn"))));
     }
@@ -324,7 +324,7 @@ async fn orphan_completion_marker_is_not_progress() {
     let progress = Arc::new(FreezeProgress::default());
     let subset = contract("check");
     let expected = BTreeSet::from(["AC-X-001".to_string()]);
-    let client = Scripted::new(vec![Ok(("", Some("max_tokens"))); 3]);
+    let client = Scripted::new(vec![Ok(("", Some("max_tokens"))); 4]);
     let key = JudgeStore::key(&client, &subset, &expected).unwrap();
     let initial = JudgeStore::at_with_progress(temp.path().to_path_buf(), progress.clone());
     let first = Scripted::new(vec![

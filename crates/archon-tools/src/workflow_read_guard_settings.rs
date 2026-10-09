@@ -11,9 +11,9 @@ use super::mutators::{TreeWideMutator, default_tree_wide_mutators};
 /// (`workflow_read_guard_thrash`) is a constant, not a knob: it bounds a
 /// session that has stopped making progress, whatever budget it was given.
 ///
-/// The read-only ceilings (`workflow_read_guard_read_only`, Issue-58) bound
-/// a call that cannot write at all: its deliverable is its final message, so
-/// the only way to make it answer is to stop feeding it more to read.
+/// The read-only reminder (`workflow_read_guard_read_only`, Issue-58) nudges a
+/// call that cannot write toward its deliverable. The runner's no-progress
+/// window governs stalls.
 #[derive(Debug, Clone)]
 pub struct WorkflowReadGuardSettings {
     /// `workflow.generated.max_reads_before_first_write` (default 40).
@@ -40,10 +40,6 @@ pub struct WorkflowReadGuardSettings {
     /// call gets carries a one-line nudge to produce the deliverable. 0
     /// disables the nudge.
     pub read_only_soft_call_ceiling: u32,
-    /// `workflow.generated.read_only_hard_call_ceiling` (default 120): past
-    /// this many inspection calls a read-only call's further inspection is
-    /// refused; build and test commands still run. 0 disables the refusal.
-    pub read_only_hard_call_ceiling: u32,
 }
 
 impl Default for WorkflowReadGuardSettings {
@@ -57,7 +53,6 @@ impl Default for WorkflowReadGuardSettings {
             tree_wide_mutators: default_tree_wide_mutators(),
             enforce_declared_targets: true,
             read_only_soft_call_ceiling: 80,
-            read_only_hard_call_ceiling: 120,
         }
     }
 }

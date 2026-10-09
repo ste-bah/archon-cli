@@ -157,7 +157,6 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         Arc::clone(&fixture.llm),
     );
     let summary = run_full_lifecycle(fixture.runner).await;
-
     assert_eq!(
         summary.status,
         WorkflowV2Status::Accepted,

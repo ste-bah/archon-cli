@@ -86,7 +86,6 @@ fn a_heredoc_body_does_not_trip_the_shell_admissions() {
 fn read_only_guard_admits_unlimited_inspection_when_the_ceilings_are_off() {
     let guard = WorkflowReadGuard::shell_only(&WorkflowReadGuardSettings {
         read_only_soft_call_ceiling: 0,
-        read_only_hard_call_ceiling: 0,
         ..tight()
     });
     for call in 0..500 {

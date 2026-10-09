@@ -79,7 +79,7 @@ pub(super) fn document(reply: &str) -> Document {
 /// `Err` is [`JudgeIncomplete`] (no progress, a provider error, a timeout).
 pub(super) async fn complete_reply(
     client: &dyn WorkflowLlmClient,
-    task: &str,
+    messages: &[serde_json::Value],
     model: &str,
     partial: Option<&PartialReply<'_>>,
 ) -> Result<std::result::Result<String, String>> {
@@ -88,17 +88,17 @@ pub(super) async fn complete_reply(
         .unwrap_or_default();
     let mut continuing = !reply.is_empty();
     loop {
-        let mut messages = vec![serde_json::json!({ "role": "user", "content": task })];
+        let mut request = messages.to_vec();
         if continuing {
-            messages.push(serde_json::json!({ "role": "assistant", "content": reply.clone() }));
-            messages.push(serde_json::json!({ "role": "user", "content": CONTINUE_PROMPT }));
+            request.push(serde_json::json!({ "role": "assistant", "content": reply.clone() }));
+            request.push(serde_json::json!({ "role": "user", "content": CONTINUE_PROMPT }));
         }
         let progress = archon_shell::progress::Progress::new(true);
         let outcome = progress
             .bound(
                 Duration::from_secs(JUDGE_TIMEOUT_SECS),
                 client.send_message_with_progress(
-                    messages,
+                    request,
                     Vec::new(),
                     Vec::new(),
                     model,

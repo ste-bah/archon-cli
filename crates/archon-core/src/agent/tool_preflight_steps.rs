@@ -50,7 +50,7 @@ impl Agent {
         let filesystem_before = match self.observe_filesystem_before_mutation(filesystem_effect) {
             Ok(observation) => observation,
             Err(error) => {
-                let result = ToolResult::error(format!(
+                let result = ToolResult::refusal(format!(
                     "Tool '{}' was blocked because its filesystem baseline could not be observed: {error}",
                     tool.name
                 ));
@@ -92,7 +92,7 @@ impl Agent {
             let mut log = self.denial_log.lock().await;
             log.record(&tool.name, reason);
         }
-        let denied_result = ToolResult::error(format!(
+        let denied_result = ToolResult::refusal(format!(
             "Permission denied for tool '{}'. Current mode: {}. Reason: {}",
             tool.name, mode, reason
         ));
@@ -134,7 +134,7 @@ impl Agent {
             let reason = hook_agg
                 .block_reason()
                 .unwrap_or_else(|| "hook blocked".to_owned());
-            let result = ToolResult::error(format!("Hook blocked: {reason}"));
+            let result = ToolResult::refusal(format!("Hook blocked: {reason}"));
             self.send_event(AgentEvent::ToolCallComplete {
                 name: tool.name.clone(),
                 id: tool.id.clone(),

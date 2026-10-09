@@ -446,9 +446,11 @@ pub(crate) async fn supervise_process_group(
             group_guard.reaped();
             abort_stdin(stdin_task);
             let error = match event {
-                SupervisorEvent::OutputLimit { stream, limit } => {
-                    io::over_limit(&request, stream, limit)
-                }
+                SupervisorEvent::OutputLimit {
+                    stream,
+                    limit,
+                    observed,
+                } => io::over_limit(&request, stream, limit, observed),
                 SupervisorEvent::Failed(detail) => io::failed(&request, &detail),
                 SupervisorEvent::Checkpoint(detail) => WorkflowError::HostOperational(detail),
             };

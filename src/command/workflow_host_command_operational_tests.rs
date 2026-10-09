@@ -111,6 +111,7 @@ enum Scripted {
     Incomplete(u64),
     Exit(i32),
     Error(&'static str),
+    Operational(&'static str),
     Publish(Vec<u8>),
     /// The operator pauses while the attempt runs; it then times out.
     OperatorPauseThenTimeOut,
@@ -145,6 +146,7 @@ impl HostCommandProcessAdapter for ScriptedProcess {
             Scripted::Exit(code) => Ok(output(Some(code), false, "genuine failure")),
             Scripted::Stderr(code, stderr) => Ok(output(Some(code), false, &stderr)),
             Scripted::Error(text) => Err(WorkflowError::StageFailed(text.into())),
+            Scripted::Operational(text) => Err(WorkflowError::HostOperational(text.into())),
             Scripted::OperatorPauseThenTimeOut => {
                 archon_workflow::LifecycleController::new(self.run.0.clone())
                     .apply(&self.run.1, archon_workflow::LifecycleAction::Pause)
@@ -375,7 +377,7 @@ async fn genuine_failures_still_fail_once_without_retry_or_pause() {
     assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 1);
 
     let fixture_b = self::fixture(vec![Scripted::Error(
-        "host command 'task-set-lint' stdout output exceeded 2097152 bytes",
+        "host command 'task-set-lint' failed: permission denied",
     )]);
     let error = fixture_b
         .executor
@@ -473,14 +475,6 @@ async fn a_real_timeout_keeps_the_progress_the_child_reported_before_the_kill() 
     assert_eq!(reported_progress(&output.stderr), Some(9));
 }
 
-#[test]
-fn round3_growing_operational_progress_has_no_total_attempt_limit() {
-    let mut history: Vec<_> = (1..=130).map(|n| attempt(n, Some(u64::from(n)))).collect();
-    assert_eq!(next_step(&history), NextStep::Retry);
-    history.push(attempt(131, Some(130)));
-    assert_eq!(next_step(&history), NextStep::Pause("no_progress"));
-}
-
 #[cfg(unix)]
 #[path = "workflow_host_command_operational_stall_tests.rs"]
 mod stall;
@@ -495,3 +489,6 @@ mod registration_tests;
 #[cfg(unix)]
 #[path = "workflow_host_checkpoint_r3_tests.rs"]
 mod checkpoint_r3_tests;
+
+#[path = "workflow_host_command_operational_output_cap_tests.rs"]
+mod output_cap_tests;

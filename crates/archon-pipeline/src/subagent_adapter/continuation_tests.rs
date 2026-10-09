@@ -181,23 +181,15 @@ fn bash_only_verification_gets_the_shell_guard_without_the_read_budget() {
             .before_tool("Bash", &serde_json::json!({"command": "cargo fmt --all"}))
             .is_some()
     );
-    // Issue-58: not the coder's budget, but the read-only ceilings — 120
-    // inspection calls by default, then a refusal that asks for the answer.
-    for _ in 0..120 {
+    // Issue-58: a read-only author may inspect beyond the old 120-call cap;
+    // the runner's no-progress window governs stalls.
+    for _ in 0..150 {
         assert!(
             guard
                 .before_tool("Read", &serde_json::json!({"file_path": "src/lib.rs"}))
                 .is_none()
         );
     }
-    let ceiling = guard
-        .before_tool("Read", &serde_json::json!({"file_path": "src/lib.rs"}))
-        .expect("the hard ceiling refuses the 121st inspection call");
-    assert!(
-        ceiling.starts_with("read ceiling reached: 120 inspection calls;"),
-        "{ceiling}"
-    );
-    assert!(!ceiling.contains("read budget"), "{ceiling}");
     assert_eq!(
         guard.terminal_failure(),
         None,
@@ -228,7 +220,7 @@ fn guard_is_workflow_only_and_needs_a_shell_an_inspection_or_a_write_tool() {
         );
     }
     // Issue-58: a planner or critic with no shell still reads, so it gets the
-    // read-only guard for its inspection ceilings.
+    // read-only guard and its no-progress reminder.
     request.allowed_tools = vec!["Read".into(), "Grep".into(), "Glob".into()];
     let inspect_only = SessionLease::begin(&client, &request, false).unwrap();
     let guard = inspect_only
@@ -237,7 +229,10 @@ fn guard_is_workflow_only_and_needs_a_shell_an_inspection_or_a_write_tool() {
         .expect("an inspecting workflow call gets a guard");
     assert_eq!(guard.mode(), GuardMode::ReadOnly);
     assert!(
-        guard.preamble().unwrap().contains("past 120 such calls"),
+        guard
+            .preamble()
+            .unwrap()
+            .contains("From 80 inspection calls"),
         "{:?}",
         guard.preamble()
     );

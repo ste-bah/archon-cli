@@ -36,10 +36,9 @@ impl WorkflowLlmClient for JudgeClient {
     ) -> WorkflowResult<WorkflowAgentOutcome> {
         assert!(tools.is_empty());
         assert_eq!(model, "sonnet");
-        assert_eq!(
-            messages.len(),
-            1,
-            "judge needs one provider-valid user message"
+        assert!(
+            matches!(messages.len(), 1 | 3),
+            "judge uses an initial user turn or a complete user/assistant/user repair turn: {messages:?}"
         );
         assert_eq!(messages[0]["role"], "user");
         assert!(
@@ -47,6 +46,16 @@ impl WorkflowLlmClient for JudgeClient {
                 .as_str()
                 .is_some_and(|text| { text.contains("exactly one decision for every input id") })
         );
+        if messages.len() == 3 {
+            assert_eq!(messages[1]["role"], "assistant");
+            assert_eq!(messages[2]["role"], "user");
+            assert!(
+                messages[2]["content"]
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("Your reply was rejected:")),
+                "repair turn must preserve the rejection reason: {messages:?}"
+            );
+        }
         assert!(system.iter().all(|entry| {
             entry["text"]
                 .as_str()

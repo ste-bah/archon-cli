@@ -46,9 +46,8 @@ fn user_host_store_dirs() -> Vec<PathBuf> {
 
 impl WriteBoundary {
     /// The host-snapshot boundary found the command changed a sealed root. The
-    /// changes are already restored; this fails the call and tells the agent, so
-    /// a no-sandbox host refuses an out-of-bounds write just as a kernel
-    /// boundary does — only after the fact.
+    /// changes are already restored; this returns an ordinary tool error
+    /// because the command ran and the host detected the change afterwards.
     pub(super) fn snapshot_violation(
         &self,
         result: ToolResult,
@@ -59,10 +58,8 @@ impl WriteBoundary {
         } else {
             "This isolated write branch's shell"
         };
-        // The same contract a kernel boundary gives (`annotate`): the refused
-        // write reads "Permission denied" -- here truthfully, after the fact --
-        // and the note carries the marker, so an agent (and its prompt, which
-        // keys off both) recognises the boundary on every platform.
+        // Keep the boundary guidance note, but do not mark this as a guard
+        // refusal: the process ran and the host detected the change afterwards.
         let mut message = format!(
             "Error: Permission denied: {}.\n\n{WRITE_BOUNDARY_NOTE_MARKER} Only your worktree \
              (and the host's temp and cache directories) may be written; everything under {} \

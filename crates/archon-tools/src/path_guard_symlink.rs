@@ -76,13 +76,13 @@ pub(crate) fn reject_symlinked_descent(
     //    against the same `resolved`, and this is what keeps the guarantee true
     //    for a future caller that reorders them.
     if resolved != root && !resolved.starts_with(root) {
-        return Err(format!(
+        return Err(crate::path_guard::guard_refusal(format!(
             "Path '{}' resolves to '{}', which is outside the writable directory '{}'. \
              Name the file directly rather than reaching it through a link.",
             requested.display(),
             resolved.display(),
             root.display()
-        ));
+        )));
     }
 
     Ok(())
@@ -150,14 +150,14 @@ fn is_symlink(path: &Path) -> bool {
 }
 
 fn refusal(requested: &Path, offender: &Path) -> String {
-    format!(
+    crate::path_guard::guard_refusal(format!(
         "Path '{}' reaches its target through the symbolic link '{}'. \
          This agent's writes are confined to declared directories, and a link is a \
          name whose destination can change after it is checked, so it is refused \
          rather than followed. Write to the real path instead.",
         requested.display(),
         offender.display()
-    )
+    ))
 }
 
 #[cfg(test)]

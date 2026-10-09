@@ -120,23 +120,23 @@ fn judge(path: &Path, ctx: &ToolContext, named: Option<&Path>) -> Result<(), Str
     // the agent to write "the same path in its workspace" would send it
     // straight back through the link.
     if let Some(named) = named.filter(|named| sealed_checkout_of(named, ctx).is_none()) {
-        return Err(format!(
+        return Err(crate::path_guard::guard_refusal(format!(
             "Path '{}' is a link that leads into {}, a checkout this agent was isolated \
              from, and it cannot be written through. If the host shared it into your \
              workspace, it is shared to read; report what you needed to change there in \
              your envelope.",
             named.display(),
             checkout.display()
-        ));
+        )));
     }
-    Err(format!(
+    Err(crate::path_guard::guard_refusal(format!(
         "Path '{}' is in {}, a checkout this agent was isolated from: it may read it but \
          never write it. Make the change in your own workspace ({}) at the same relative \
          path.",
         path.display(),
         checkout.display(),
         ctx.working_dir.display()
-    ))
+    )))
 }
 
 fn sealed_checkout_of(path: &Path, ctx: &ToolContext) -> Option<PathBuf> {

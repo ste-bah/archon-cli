@@ -55,6 +55,7 @@ pub(crate) fn gate(
             "exitCode": 0, "stdout": "", "stderr": "", "stdoutBytes": 0, "stderrBytes": 0,
             "timedOut": false, "interrupted": false, "stdoutTruncated": false, "stderrTruncated": false,
             "gateEnvelope": {"schema_version": 1, "report": "judged", "policy_findings": findings},
+            "logicVersion": crate::command::workflow_host_command_logic::versions()[command],
             "publicationReceipt": if published { json!({"call_id": id}) } else { Value::Null },
             "postcondition": {"satisfied": published, "summary": "fixture"},
         }),
@@ -149,6 +150,45 @@ fn the_last_gate_candidate_is_carried_with_the_replies_authored_since() {
     assert!(invalid.is_empty(), "{invalid:?}");
     assert_eq!(carried, 2);
     assert_eq!(derived.author_ordinals["acceptance"], 7);
+}
+
+#[test]
+fn an_identical_reply_after_a_refutation_is_still_a_repair_seed() {
+    let candidate = json!({"entries": [entry("AC-1"), entry("AC-2")]}).to_string();
+    let records = vec![
+        reply(
+            "acceptance-author-AC-1-4",
+            "01:00:00",
+            &entry("AC-1").to_string(),
+        ),
+        reply(
+            "acceptance-author-AC-2-4",
+            "01:01:00",
+            &entry("AC-2").to_string(),
+        ),
+        gate(
+            "freeze-acceptance",
+            "02:00:00",
+            &candidate,
+            vec![finding(
+                "check 'AC-2' was refuted by the host judge; reason: weak",
+                "AC-2",
+            )],
+            false,
+        ),
+        // The author may repeat the same bytes; a finding still means the
+        // entry must be re-authored after this gate.
+        reply(
+            "acceptance-author-AC-2-7",
+            "03:00:00",
+            &entry("AC-2").to_string(),
+        ),
+    ];
+    let derived = derive(&records, &[], &criteria(&["AC-1", "AC-2"])).unwrap();
+    let (_, _, replies, _, _) = entries_seed(&derived);
+    assert_eq!(replies.len(), 1);
+    assert_eq!(replies[0].id, "AC-2");
+    assert_eq!(replies[0].call_id, "acceptance-author-AC-2-7");
 }
 
 /// Issue 357 stamps the host criterion before it keeps an entry, so the
@@ -391,6 +431,27 @@ fn an_operational_gate_judged_nothing() {
     let records = vec![
         reply("skeleton-author-1", "01:00:00", "skeleton one"),
         outage,
+    ];
+    let derived = derive(&records, &[], &criteria(&[])).unwrap();
+    assert!(matches!(
+        &derived.subjects["skeleton"],
+        SubjectSeed::Artifact { gate: None, .. }
+    ));
+}
+
+#[test]
+fn a_stale_logic_version_gate_is_not_used_as_a_judgment_or_seed() {
+    let mut stale = gate(
+        "freeze-skeleton",
+        "02:00:00",
+        "skeleton one",
+        vec![finding("stale finding", "skeleton")],
+        false,
+    );
+    stale.result.data["logicVersion"] = json!(1);
+    let records = vec![
+        reply("skeleton-author-1", "01:00:00", "skeleton one"),
+        stale,
     ];
     let derived = derive(&records, &[], &criteria(&[])).unwrap();
     assert!(matches!(
