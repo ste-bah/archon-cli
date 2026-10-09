@@ -1,13 +1,16 @@
 pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
     let text = user_prompt_text(prompt).unwrap_or_default();
     // Exact markers: acceptance src/command/workflow_decompose_v1_acceptance.js:24; skeleton/body src/command/workflow_decompose_v1.js:164/231;
-    // judge src/command/workflow_task_set_judge.rs:50; fidelity crates/archon-workflow/src/fidelity_audit.rs:200.
+    // judge src/command/workflow_task_set_judge.rs:50; passability judge
+    // src/command/workflow_acceptance_passability.rs:55; fidelity crates/archon-workflow/src/fidelity_audit.rs:200.
     if text.contains("You are auditing whether a task decomposition is faithful to its PRD.")
         && let Some(answer) = fidelity_answer(prompt)
     {
         return ("fidelity", answer);
     }
-    if text.contains("Adversarially judge every acceptance check below. The toolchain is fixed:") {
+    if text.contains("Adversarially judge every acceptance check below. The toolchain is fixed:")
+        || text.starts_with("Each acceptance check below already ran once on the repository tree BEFORE any implementation of its criterion")
+    {
         let Some(checks) = text
             .rsplit_once("Checks: ")
             .and_then(|(_, json)| serde_json::from_str::<Vec<serde_json::Value>>(json).ok())
