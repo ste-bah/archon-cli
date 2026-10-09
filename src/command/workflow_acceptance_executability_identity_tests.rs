@@ -26,29 +26,64 @@ fn changed_binary_environment_or_toolchain_never_reuses_a_verdict_key() {
 }
 
 #[test]
-fn same_size_project_rewrite_with_restored_mtime_changes_key() {
-    let trees = trees(&[("AC-I-002", "true", TrustedCwd::RepoRoot)]);
+fn changed_file_in_the_bounded_repository_closure_changes_key() {
+    let trees = trees(&[("AC-I-002", "test -f feature.txt", TrustedCwd::RepoRoot)]);
+    let commit = git_head(&trees.repo).unwrap();
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    let before = check_key(
+        &probe,
+        &Baseline {
+            repository: trees.repo.clone(),
+            commit,
+        },
+        &trees.contract(),
+        "AC-I-002",
+    )
+    .unwrap();
+
+    std::fs::write(trees.repo.join("feature.txt"), "changed content").unwrap();
+    let output = archon_shell::spawn::command("git")
+        .arg("-C")
+        .arg(&trees.repo)
+        .args(["add", "feature.txt"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let output = archon_shell::spawn::command("git")
+        .arg("-C")
+        .arg(&trees.repo)
+        .args([
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "changed fixture",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let after = check_key(
+        &probe,
+        &Baseline {
+            repository: trees.repo.clone(),
+            commit: git_head(&trees.repo).unwrap(),
+        },
+        &trees.contract(),
+        "AC-I-002",
+    )
+    .unwrap();
+    assert_ne!(before, after);
+}
+
+#[test]
+fn unbounded_checks_have_no_reuse_key() {
+    let trees = trees(&[("AC-I-003", "cargo test", TrustedCwd::RepoRoot)]);
     let tree = Baseline {
         repository: trees.repo.clone(),
         commit: git_head(&trees.repo).unwrap(),
     };
-    let path = trees.set.project.path().join("data/input.txt");
-    std::fs::write(&path, "one").unwrap();
-    let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
-    let key = || {
-        check_key(
-            &HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks),
-            &tree,
-            &trees.contract(),
-            "AC-I-002",
-        )
-        .unwrap()
-    };
-    let before = key();
-    std::fs::write(&path, "two").unwrap();
-    std::fs::File::open(&path)
-        .unwrap()
-        .set_modified(mtime)
-        .unwrap();
-    assert_ne!(before, key());
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks);
+    assert!(check_key(&probe, &tree, &trees.contract(), "AC-I-003").is_none());
 }

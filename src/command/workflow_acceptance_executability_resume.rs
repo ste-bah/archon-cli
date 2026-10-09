@@ -66,6 +66,10 @@ impl ResultStore {
             .then(|| self.dir.join(format!("{key}.json")))
     }
 
+    pub(super) fn evidence_ref(&self, key: &str) -> Option<String> {
+        self.path(key).map(|path| path.display().to_string())
+    }
+
     /// The verdict saved under `key`; anything unreadable is no verdict.
     pub(super) fn load(&self, key: &str) -> Option<CheckResult> {
         let _ = std::fs::remove_file(self.path(key)?.with_extension("provisional"));

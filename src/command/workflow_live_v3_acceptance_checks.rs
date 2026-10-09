@@ -118,18 +118,61 @@ pub(in crate::command) async fn execute_checks(
             )),
         }
     }
-    let results = run_selected(
+    let mut results_by_id = BTreeMap::new();
+    let mut pending = Vec::new();
+    let mut cache_keys = BTreeMap::new();
+    let mut reuse = BTreeMap::new();
+    for criterion in selected {
+        let (saved, decision, key) = super::reuse::take(context, criterion);
+        if let Some(saved) = saved {
+            results_by_id.insert(criterion.id.clone(), saved);
+        } else {
+            pending.push(*criterion);
+            if let Some(key) = key {
+                cache_keys.insert(criterion.id.clone(), key);
+            }
+        }
+        reuse.insert(criterion.id.clone(), decision);
+    }
+    let fresh = run_selected(
         store,
         run_id,
         call_id,
         context,
         contract,
         chain_digest,
-        selected,
+        &pending,
         evidence_dir,
         &mut site_errors,
     )
     .await?;
+    for result in fresh {
+        if let Some(key) = cache_keys.remove(&result.acceptance_id) {
+            let safe = result.acceptance_id.replace(
+                |ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'),
+                "_",
+            );
+            super::reuse::save(
+                key,
+                &result,
+                evidence_dir
+                    .join(format!("{safe}.stdout"))
+                    .display()
+                    .to_string(),
+            );
+        }
+        results_by_id.insert(result.acceptance_id.clone(), result);
+    }
+    let audit = super::reuse::audit_bytes(&reuse).map_err(|error| {
+        WorkflowError::StateCorrupt(format!(
+            "acceptance reuse audit could not be encoded: {error}"
+        ))
+    })?;
+    archon_workflow::stage_write::write_bytes(&evidence_dir.join("check-reuse.json"), &audit)?;
+    let results = selected
+        .iter()
+        .filter_map(|criterion| results_by_id.remove(&criterion.id))
+        .collect();
     if !host_repairs.is_empty() {
         archon_workflow::stage_write::write_bytes(
             &evidence_dir.join("host-input-repairs.json"),

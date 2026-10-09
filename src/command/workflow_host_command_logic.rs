@@ -204,32 +204,32 @@ const VERIFY: &[&str] = &["src/command/workflow_decompose_frozen_chain.rs"];
 pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-acceptance",
-        // 2: #366 live-root rule (sibling paths pass; a bad repository lock
-        // is an error) changes acceptance freeze verdicts.
-        version: 2,
+        // 3: check verdict reuse now binds check text, bounded repository
+        // tree, environment, this binary, and the logic digest.
+        version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "7817a7a49bffb18e6223e7ef85760e0695cfe310e2f9dc68c860666e4a906407",
+        sources_digest: "41efa6d4e621bf54284bc887d67c80898157ef7ce5a8b496fca7400a794b12cb",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "7817a7a49bffb18e6223e7ef85760e0695cfe310e2f9dc68c860666e4a906407",
+        sources_digest: "41efa6d4e621bf54284bc887d67c80898157ef7ce5a8b496fca7400a794b12cb",
         build_bound: false,
     },
     CapabilityLogic {
         id: "land-task-body",
         version: 2,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "d89a6737a8d470073b538e17a75c6d57b7ed5be661ae6127c3a57b163ad4d481",
+        sources_digest: "28956fd725b5ae41e215342221d1dee03ea1e42fa3316401af2a5e46250e5ebc",
         build_bound: false,
     },
     CapabilityLogic {
         id: "task-set-lint",
         version: 2,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "d89a6737a8d470073b538e17a75c6d57b7ed5be661ae6127c3a57b163ad4d481",
+        sources_digest: "28956fd725b5ae41e215342221d1dee03ea1e42fa3316401af2a5e46250e5ebc",
         build_bound: false,
     },
     CapabilityLogic {
@@ -243,14 +243,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         id: "verify-frozen-acceptance",
         version: 1,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "0856ef0e26bf5cf505ee4e2bc66ff964183f6e6f1ebf288062ff0da81ac4c812",
+        sources_digest: "b87c122bfeea232b328ea2f7b6a71a890fb656eed2d08b3d146fecc8f4865928",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "0856ef0e26bf5cf505ee4e2bc66ff964183f6e6f1ebf288062ff0da81ac4c812",
+        sources_digest: "b87c122bfeea232b328ea2f7b6a71a890fb656eed2d08b3d146fecc8f4865928",
         build_bound: true,
     },
 ];

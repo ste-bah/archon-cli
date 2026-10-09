@@ -130,17 +130,28 @@ pub(crate) struct Evidence {
     pub(crate) exit_code: Option<i32>,
     pub(crate) stderr: String,
     pub(crate) stdout: String,
+    pub(crate) reused: bool,
+    pub(crate) reuse_why: Option<String>,
+    pub(crate) evidence_reference: Option<String>,
 }
 
 impl Evidence {
     /// Redacted whole, then bounded (a credential cut by the bound would
     /// leak its head), then fenced.
-    pub(crate) fn of(commit: &str, result: &CheckResult, redactor: &Redactor) -> Self {
+    pub(crate) fn of(
+        commit: &str,
+        result: &CheckResult,
+        redactor: &Redactor,
+        reuse: Option<&super::super::executability::ReuseAudit>,
+    ) -> Self {
         Self {
             commit: commit.to_string(),
             exit_code: result.exit_code,
             stderr: program_output(&result.stderr, redactor, STDERR_BYTES),
             stdout: program_output(&result.stdout, redactor, STDOUT_BYTES),
+            reused: reuse.is_some_and(|audit| audit.reused),
+            reuse_why: reuse.map(|audit| audit.why.clone()),
+            evidence_reference: reuse.and_then(|audit| audit.evidence.clone()),
         }
     }
 }

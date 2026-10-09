@@ -41,6 +41,20 @@ pub(super) fn write_repairs(evidence_dir: &Path, repairs: &[String]) {
 }
 
 pub(super) fn write_output_files(dir: &Path, result: &CheckResult) {
+    let audit = dir.join("check-reuse.json");
+    if std::fs::read(audit)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| {
+            value
+                .get(&result.acceptance_id)
+                .and_then(|entry| entry.get("reused"))
+                .and_then(serde_json::Value::as_bool)
+        })
+        == Some(true)
+    {
+        return;
+    }
     let safe: String = result
         .acceptance_id
         .chars()

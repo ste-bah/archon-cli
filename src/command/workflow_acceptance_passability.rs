@@ -239,7 +239,12 @@ fn candidates(
     entries(contract)
         .filter(|entry| ids.contains(&entry.id))
         .filter_map(|entry| {
-            let evidence = Evidence::of(&runs.commit, runs.failures.get(&entry.id)?, redactor);
+            let evidence = Evidence::of(
+                &runs.commit,
+                runs.failures.get(&entry.id)?,
+                redactor,
+                runs.reuse.get(&entry.id),
+            );
             let shown = shown(entry, requirements, &evidence);
             let key = key(client, model, &shown, entry, requirements);
             Some(Candidate {
