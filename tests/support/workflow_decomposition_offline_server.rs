@@ -310,6 +310,12 @@ fn serve_connection(
                 "application/json",
                 "{\"error\":\"invalid test key\"}".to_string(),
             )
+        } else if role == "unknown" {
+            (
+                "500 Internal Server Error",
+                "application/json",
+                answer.clone(),
+            )
         } else if body["stream"] == false {
             (
                 "200 OK",

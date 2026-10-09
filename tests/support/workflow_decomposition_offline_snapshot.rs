@@ -1,5 +1,34 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+pub fn golden_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/offline_decomposition_golden.json")
+}
+
+pub fn assert_golden_snapshot(actual: &serde_json::Value) {
+    let path = golden_path();
+    if std::env::var_os("ARCHON_UPDATE_GOLDEN").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        fs::write(&path, serde_json::to_vec_pretty(actual).unwrap()).unwrap();
+        return;
+    }
+    assert_eq!(
+        actual,
+        &read_golden_snapshot(),
+        "fresh run differs from fixed golden snapshot"
+    );
+}
+
+pub fn read_golden_snapshot() -> serde_json::Value {
+    let path = golden_path();
+    serde_json::from_slice(&fs::read(&path).unwrap_or_else(|error| {
+        panic!(
+            "reading fixed lifecycle golden {}: {error}; generate it with ARCHON_UPDATE_GOLDEN=1",
+            path.display()
+        )
+    }))
+    .unwrap_or_else(|error| panic!("parsing fixed lifecycle golden {}: {error}", path.display()))
+}
 
 pub fn strip_timestamps(value: &mut serde_json::Value) {
     match value {
@@ -139,10 +168,8 @@ pub fn normalize_publication_receipts(
             if archon_workflow::task_set_contract::content_digest(&bytes) != digest {
                 continue;
             }
-            content_by_digest.insert(
-                digest.to_owned(),
-                normalized_published_content(&bytes, replacements),
-            );
+            let content = normalized_published_content(&bytes, replacements);
+            content_by_digest.insert(digest.to_owned(), content);
         }
     }
 
@@ -163,14 +190,21 @@ pub fn normalize_publication_receipts(
                 .unwrap_or_else(|error| panic!("reading published receipt file {path}: {error}"));
             let content = normalized_published_content(&bytes, replacements);
             if let Some(map) = entry.as_object_mut() {
-                if let Some(prior_content) = map
+                let prior_content = map
                     .get("prior_blake3")
                     .and_then(serde_json::Value::as_str)
-                    .and_then(|digest| content_by_digest.get(digest))
-                {
+                    .and_then(|digest| content_by_digest.get(digest).cloned());
+                if let Some(prior_content) = prior_content {
+                    // The prior digest is replaceable only because its earlier
+                    // published preimage is also present in this snapshot.
                     map.insert("prior_content".into(), prior_content.clone());
+                    map.insert(
+                        "prior_blake3".into(),
+                        digest_normalized(&prior_content).into(),
+                    );
                 }
                 map.remove("byte_len");
+                map.insert("blake3".into(), digest_normalized(&content).into());
                 map.insert("content".into(), content);
             }
         }
@@ -180,15 +214,35 @@ pub fn normalize_publication_receipts(
 fn normalize_derived_hashes(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
-            for (key, nested) in map.iter_mut() {
-                if matches!(
-                    key.as_str(),
-                    "input_hash" | "output_hash" | "blake3" | "prior_blake3"
-                ) {
-                    *nested = serde_json::Value::String(format!("<{key}>"));
-                } else {
-                    normalize_derived_hashes(nested);
-                }
+            // Call hashes are normalized only when their exact preimages are
+            // compared too: this record's call input and result are retained
+            // in the snapshot, so hash their normalized content rather than
+            // erasing the digest. Other digest-looking fields stay raw here.
+            let is_call_record = ["call", "attempt", "input_hash", "status", "result"]
+                .iter()
+                .all(|key| map.contains_key(*key));
+            let normalized_input = is_call_record
+                .then(|| map.get("call"))
+                .flatten()
+                .map(|call| digest_normalized(call.get("input").unwrap_or(call)));
+            let normalized_output = is_call_record
+                .then(|| map.get("result"))
+                .flatten()
+                .map(digest_normalized);
+            if is_call_record
+                && map.contains_key("input_hash")
+                && let Some(digest) = normalized_input
+            {
+                map.insert("input_hash".into(), digest.into());
+            }
+            if is_call_record
+                && map.contains_key("output_hash")
+                && let Some(digest) = normalized_output
+            {
+                map.insert("output_hash".into(), digest.into());
+            }
+            for nested in map.values_mut() {
+                normalize_derived_hashes(nested);
             }
         }
         serde_json::Value::Array(values) => {
@@ -214,9 +268,12 @@ fn normalize_derived_hashes(value: &mut serde_json::Value) {
     }
 }
 
-/// Timestamps and the digests derived from them differ between any two runs.
-/// Strip them here and inside JSON carried as a string (stdout, embedded
-/// receipts), so a content difference is the only difference left.
+fn digest_normalized(value: &serde_json::Value) -> String {
+    archon_workflow::task_set_contract::content_digest(&serde_json::to_vec(value).unwrap())
+}
+
+/// Strip timestamps in records and JSON carried as a string (stdout, embedded
+/// receipts); preserve every digest unless the compared preimage is in-snapshot.
 fn normalize_run_specific(value: &mut serde_json::Value) {
     strip_timestamps(value);
     normalize_derived_hashes(value);
@@ -251,74 +308,8 @@ fn normalized_published_content(bytes: &[u8], replacements: &[(&str, &str)]) -> 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{normalize_derived_hashes, normalized_published_content, strip_timestamps};
-
-    fn normalized_record(mut record: serde_json::Value) -> serde_json::Value {
-        strip_timestamps(&mut record);
-        normalize_derived_hashes(&mut record);
-        record
-    }
-
-    #[test]
-    fn snapshot_records_ignore_timestamps_and_derived_hashes_but_keep_content() {
-        let first = serde_json::json!({
-            "evaluated_at": "2026-01-01T00:00:00Z",
-            "input_hash": "input-one",
-            "output_hash": "output-one",
-            "result": {"blake3": "digest-one", "prior_blake3": "prior-one"},
-            "verdict": "accepted",
-            "task_text": "Create the required file",
-            "findings": [{"message": "No finding"}]
-        });
-        let same_content = serde_json::json!({
-            "evaluated_at": "2026-02-02T00:00:00Z",
-            "input_hash": "input-two",
-            "output_hash": "output-two",
-            "result": {"blake3": "digest-two", "prior_blake3": "prior-two"},
-            "verdict": "accepted",
-            "task_text": "Create the required file",
-            "findings": [{"message": "No finding"}]
-        });
-        assert_eq!(
-            normalized_record(first.clone()),
-            normalized_record(same_content)
-        );
-
-        for changed in [
-            serde_json::json!({"verdict": "rejected"}),
-            serde_json::json!({"task_text": "Create a different file"}),
-            serde_json::json!({"findings": [{"message": "A different finding"}]}),
-        ] {
-            let mut changed_record = first.clone();
-            for (key, value) in changed.as_object().unwrap() {
-                changed_record[key] = value.clone();
-            }
-            assert_ne!(
-                normalized_record(first.clone()),
-                normalized_record(changed_record)
-            );
-        }
-    }
-
-    #[test]
-    fn published_envelopes_ignore_root_paths_but_keep_findings() {
-        let first = br#"{"project_root":"/tmp/one","findings":[{"rule":"task-set-lint","message":"missing task"}]}"#;
-        let same_finding = br#"{"project_root":"/tmp/two","findings":[{"rule":"task-set-lint","message":"missing task"}]}"#;
-        let different_finding = br#"{"project_root":"/tmp/two","findings":[{"rule":"task-set-lint","message":"different"}]}"#;
-        let replacements_one = [("/tmp/one", "<project-root>")];
-        let replacements_two = [("/tmp/two", "<project-root>")];
-
-        assert_eq!(
-            normalized_published_content(first, &replacements_one),
-            normalized_published_content(same_finding, &replacements_two)
-        );
-        assert_ne!(
-            normalized_published_content(first, &replacements_one),
-            normalized_published_content(different_finding, &replacements_two)
-        );
-    }
-}
+#[path = "workflow_decomposition_offline_snapshot_tests.rs"]
+mod tests;
 
 fn normalize_lifecycle_metadata(value: &mut serde_json::Value) {
     let host_call_id = value

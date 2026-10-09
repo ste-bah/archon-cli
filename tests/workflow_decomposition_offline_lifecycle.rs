@@ -1,3 +1,6 @@
+//! Fixed lifecycle baseline. Set `ARCHON_UPDATE_GOLDEN=1` when running the
+//! fresh-run test to rewrite `tests/fixtures/offline_decomposition_golden.json`.
+//! Otherwise fresh, paused, and SIGKILL runs compare against that fixture.
 #[path = "support/workflow_decomposition_offline_deadline.rs"]
 mod deadline;
 #[path = "support/workflow_decomposition_offline_diagnostics.rs"]
@@ -228,7 +231,20 @@ fn one_run(root: &Path) -> PathBuf {
     run
 }
 
-#[derive(Debug, PartialEq)]
+fn assert_no_unknown_prompts(provider: &server::FakeProvider) {
+    let unknown = provider
+        .requests
+        .snapshot()
+        .into_iter()
+        .filter(|request| request.role == "unknown")
+        .collect::<Vec<_>>();
+    assert!(
+        unknown.is_empty(),
+        "unknown fake-provider prompts: {unknown:?}"
+    );
+}
+
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct FinalSnapshot {
     acceptance: serde_json::Value,
     skeleton: serde_json::Value,
@@ -315,7 +331,8 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
     assert!(root.join("tasks/PRD-X/task-skeleton.json").exists());
     assert!(root.join("tasks/PRD-X/TASK-X-010.md").exists());
     assert!(root.join("tasks/PRD-X/TASK-X-020.md").exists());
-    let _golden = final_snapshot(&project);
+    let actual = final_snapshot(&project);
+    snapshot::assert_golden_snapshot(&serde_json::to_value(&actual).unwrap());
     let counts = project.provider.counts.snapshot();
     let requests = project.provider.requests.snapshot();
     assert!(
@@ -337,11 +354,7 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
             "missing scripted {role} call: {counts:?}"
         );
     }
-    assert_eq!(
-        counts.get("unexpected"),
-        None,
-        "every model request must match an explicit script: {counts:?}"
-    );
+    assert_no_unknown_prompts(&project.provider);
 }
 
 #[test]
@@ -384,8 +397,9 @@ fn pause_at_provider_call_boundary_resumes_only_interrupted_author() {
         &accepted_call_counts(root),
         "skeleton-author-1",
     );
+    assert_no_unknown_prompts(&project.provider);
     let actual = final_snapshot(&project);
-    let golden = completed_golden_snapshot();
+    let golden = serde_json::from_value(snapshot::read_golden_snapshot()).unwrap();
     assert_eq!(
         actual, golden,
         "pause and resume must preserve the golden result-store records and artifacts"
@@ -422,9 +436,10 @@ fn sigkill_mid_provider_call_resumes_only_interrupted_author() {
         &accepted_call_counts(root),
         "skeleton-author-1",
     );
+    assert_no_unknown_prompts(&project.provider);
     assert_eq!(
         final_snapshot(&project),
-        completed_golden_snapshot(),
+        serde_json::from_value(snapshot::read_golden_snapshot()).unwrap(),
         "SIGKILL recovery must preserve golden records and artifacts"
     );
 }
@@ -465,16 +480,8 @@ fn resume_from_a_different_build_id_preserves_the_golden_result() {
         events.contains("binary_revision_drift"),
         "resume must observe the different starting build: {events}"
     );
-    assert_eq!(final_snapshot(&project), completed_golden_snapshot());
-}
-
-fn completed_golden_snapshot() -> FinalSnapshot {
-    let project = project();
-    let output = run(project.path(), &decompose_args());
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+    assert_eq!(
+        serde_json::to_value(final_snapshot(&project)).unwrap(),
+        snapshot::read_golden_snapshot()
     );
-    final_snapshot(&project)
 }
