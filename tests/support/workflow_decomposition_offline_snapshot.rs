@@ -82,10 +82,32 @@ pub fn result_store_records(
     // Receipts are read through their raw destination paths, so they are
     // normalised before the host call ids inside those paths are replaced.
     normalize_publication_receipts(&mut records, &replacements);
+    // A host call id is a digest of its inputs, so it differs per run; later
+    // records carry earlier ids in their inputs, receipts and stdout.
+    let host_call_ids: Vec<String> = records
+        .iter()
+        .filter(|(_, value)| {
+            value
+                .pointer("/call/method")
+                .and_then(serde_json::Value::as_str)
+                == Some("hostCommand")
+        })
+        .filter_map(|(_, value)| {
+            value
+                .pointer("/call/id")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    let host_call_replacements: Vec<(&str, &str)> = host_call_ids
+        .iter()
+        .map(|id| (id.as_str(), "<host-call-id>"))
+        .collect();
     for (_, value) in &mut records {
+        normalize_values(value, &host_call_replacements);
         normalize_lifecycle_metadata(value);
         normalize_values(value, &replacements);
-        normalize_derived_hashes(value);
+        normalize_run_specific(value);
     }
     records.sort_by_key(|record| serde_json::to_string(&record.1).unwrap());
     records
@@ -192,10 +214,32 @@ fn normalize_derived_hashes(value: &mut serde_json::Value) {
     }
 }
 
+/// Timestamps and the digests derived from them differ between any two runs.
+/// Strip them here and inside JSON carried as a string (stdout, embedded
+/// receipts), so a content difference is the only difference left.
+fn normalize_run_specific(value: &mut serde_json::Value) {
+    strip_timestamps(value);
+    normalize_derived_hashes(value);
+    match value {
+        serde_json::Value::String(text) => {
+            if let Ok(mut embedded @ (serde_json::Value::Object(_) | serde_json::Value::Array(_))) =
+                serde_json::from_str::<serde_json::Value>(text)
+            {
+                normalize_run_specific(&mut embedded);
+                *text = embedded.to_string();
+            }
+        }
+        serde_json::Value::Object(map) => map.values_mut().for_each(normalize_run_specific),
+        serde_json::Value::Array(values) => values.iter_mut().for_each(normalize_run_specific),
+        _ => {}
+    }
+}
+
 fn normalized_published_content(bytes: &[u8], replacements: &[(&str, &str)]) -> serde_json::Value {
     match serde_json::from_slice(bytes) {
         Ok(mut value) => {
             normalize_values(&mut value, replacements);
+            normalize_run_specific(&mut value);
             value
         }
         Err(_) => {
