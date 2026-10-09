@@ -30,7 +30,7 @@ pub(crate) fn candidate_extraction(candidate: &[u8]) -> CandidateExtraction<'_> 
     };
     if text.trim_start().starts_with(['{', '[']) {
         let (document, _) = first_json_document(candidate);
-        let discarded_text = non_whitespace_tail(&candidate[document.len()..]);
+        let discarded_text = &candidate[document.len()..];
         return CandidateExtraction {
             document,
             discarded_before: 0,
@@ -56,11 +56,8 @@ pub(crate) fn candidate_extraction(candidate: &[u8]) -> CandidateExtraction<'_> 
     match only {
         Some((body, trailing)) if body.trim_start().starts_with(['{', '[']) => {
             let (document, _) = first_json_document(body.as_bytes());
-            let discarded_body_tail = non_whitespace_tail(&body.as_bytes()[document.len()..]);
-            let discarded_fence_tail = trailing
-                .filter(|text| !text.trim().is_empty())
-                .unwrap_or_default()
-                .as_bytes();
+            let discarded_body_tail = &body.as_bytes()[document.len()..];
+            let discarded_fence_tail = trailing.unwrap_or_default().as_bytes();
             CandidateExtraction {
                 document,
                 discarded_before: before.len(),
@@ -71,14 +68,6 @@ pub(crate) fn candidate_extraction(candidate: &[u8]) -> CandidateExtraction<'_> 
             }
         }
         _ => whole_candidate(candidate),
-    }
-}
-
-fn non_whitespace_tail(bytes: &[u8]) -> &[u8] {
-    if bytes.iter().all(u8::is_ascii_whitespace) {
-        &[]
-    } else {
-        bytes
     }
 }
 
@@ -100,6 +89,12 @@ pub(crate) fn extraction_diagnostic(extraction: &CandidateExtraction<'_>) -> Opt
         return None;
     }
     let discarded = String::from_utf8_lossy(&extraction.discarded_text);
+    if discarded.chars().all(char::is_whitespace) {
+        return Some(format!(
+            "candidate extraction discarded whitespace only: discarded_before={} bytes, discarded_after={} bytes, unwrapped_fence={}",
+            extraction.discarded_before, extraction.discarded_after, extraction.unwrapped_fence
+        ));
+    }
     let redacted = archon_observability::redaction::redact_text(&discarded);
     let excerpt: String = redacted.chars().take(200).collect();
     Some(format!(

@@ -17,9 +17,11 @@ fn one_json_fence_is_marked_without_counting_packaging_as_discarded_text() {
     let extracted = candidate_extraction(raw);
     assert_eq!(extracted.document, b"\n{\"kind\":\"x\"}");
     assert_eq!(extracted.discarded_before, 0);
-    assert_eq!(extracted.discarded_after, 0);
+    assert_eq!(extracted.discarded_after, 1);
     assert!(extracted.unwrapped_fence);
-    assert_eq!(extraction_diagnostic(&extracted), None);
+    let diagnostic = extraction_diagnostic(&extracted).expect("whitespace discard note");
+    assert!(diagnostic.contains("whitespace only"), "{diagnostic}");
+    assert!(!diagnostic.contains("excerpt="), "{diagnostic}");
 }
 
 #[test]
@@ -55,6 +57,36 @@ fn commentary_after_the_first_complete_value_is_counted() {
     let extracted = candidate_extraction(raw);
     assert_eq!(extracted.document, b"{\"kind\":\"x\"}");
     assert_eq!(extracted.discarded_after, b"\nI could not verify Y.".len());
+}
+
+#[test]
+fn whitespace_after_a_complete_value_is_counted_and_described_without_preview() {
+    let raw = b"{\"kind\":\"x\"} \n\t";
+    let extracted = candidate_extraction(raw);
+    assert_eq!(extracted.document, b"{\"kind\":\"x\"}");
+    assert_eq!(extracted.discarded_after, b" \n\t".len());
+    let diagnostic = extraction_diagnostic(&extracted).expect("discard note");
+    assert!(
+        diagnostic.contains("discarded_after=3 bytes"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("whitespace only"), "{diagnostic}");
+    assert!(!diagnostic.contains("excerpt="), "{diagnostic}");
+}
+
+#[test]
+fn whitespace_after_a_fenced_value_is_counted_and_described_without_preview() {
+    let raw = b"```json\n{\"kind\":\"x\"} \n\t```";
+    let extracted = candidate_extraction(raw);
+    assert_eq!(extracted.document, b"\n{\"kind\":\"x\"}");
+    assert_eq!(extracted.discarded_after, b" \n\t".len());
+    let diagnostic = extraction_diagnostic(&extracted).expect("discard note");
+    assert!(
+        diagnostic.contains("discarded_after=3 bytes"),
+        "{diagnostic}"
+    );
+    assert!(diagnostic.contains("whitespace only"), "{diagnostic}");
+    assert!(!diagnostic.contains("excerpt="), "{diagnostic}");
 }
 
 #[test]
