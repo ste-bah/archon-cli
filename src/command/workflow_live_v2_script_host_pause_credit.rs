@@ -22,6 +22,7 @@
 //! they run again on resume, as any interrupted call does.
 
 use super::*;
+use archon_workflow::v2::script::history_replay::interrupted;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct CoveredAttempt {
@@ -68,16 +69,6 @@ pub(super) fn covered_attempts(records: &[WorkflowV2CallRecord]) -> Vec<CoveredA
             input_hash: record.input_hash.clone(),
         })
         .collect()
-}
-
-/// A record a pause or cancel stopped mid-flight carries the reason as text
-/// (`workflow_live_v2_script_host_interrupt.rs`). A host command's own
-/// `interrupted` field is a flag, `true` only when its process was stopped.
-fn interrupted(record: &WorkflowV2CallRecord) -> bool {
-    matches!(
-        record.result.data.get("interrupted"),
-        Some(serde_json::Value::String(_) | serde_json::Value::Bool(true))
-    )
 }
 
 /// Whether the slot record for `covered.call_id` is still that attempt.

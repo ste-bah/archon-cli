@@ -27,15 +27,27 @@ pub fn call_family(call_id: &str) -> (&str, Option<u64>) {
 }
 
 /// The recorded call is history and arrives with the input it was recorded
-/// with: replay it verbatim.
+/// with: replay it verbatim. An interrupted record is never history: it holds
+/// no answer, only the stop, so the call runs again (Issue 375).
 pub fn replayable_history(
     record: &WorkflowV2CallRecord,
     records: &[WorkflowV2CallRecord],
     input_hash: &str,
 ) -> bool {
     record.invalidated_by.is_none()
+        && !interrupted(record)
         && record.input_hash == input_hash
         && superseded(record, records)
+}
+
+/// A record a pause or cancel stopped mid-flight carries the reason as text;
+/// a host command's own `interrupted` field is a flag, `true` only when its
+/// process was stopped. Either way the call answered nothing.
+pub fn interrupted(record: &WorkflowV2CallRecord) -> bool {
+    matches!(
+        record.result.data.get("interrupted"),
+        Some(serde_json::Value::String(_) | serde_json::Value::Bool(true))
+    )
 }
 
 /// Whether a later, non-invalidated record of the same subject exists.

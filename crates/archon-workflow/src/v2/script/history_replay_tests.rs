@@ -235,3 +235,103 @@ fn a_refusal_never_supersedes_a_landed_freeze() {
         "a later landing does retire it"
     );
 }
+
+/// Issue 375: a call a pause or cancel stopped mid-flight answered nothing.
+/// Two sibling subjects' interrupted attempts both report no subject, so they
+/// key alike and the earlier looks superseded; neither is history, and each
+/// runs again on resume.
+#[test]
+fn an_interrupted_record_is_never_replayable_history() {
+    let mut first = record(
+        "h-1",
+        WorkflowV2HostMethod::HostCommand,
+        "2026-10-08T19:00:00Z",
+        Some("land"),
+        &[],
+    );
+    first.result.data["interrupted"] = serde_json::json!("paused");
+    let mut second = record(
+        "h-2",
+        WorkflowV2HostMethod::HostCommand,
+        "2026-10-08T19:10:00Z",
+        Some("land"),
+        &[],
+    );
+    second.result.data["interrupted"] = serde_json::json!(true);
+    let refused = record(
+        "h-3",
+        WorkflowV2HostMethod::HostCommand,
+        "2026-10-08T19:20:00Z",
+        Some("land"),
+        &[],
+    );
+    let all = vec![first.clone(), second.clone(), refused.clone()];
+    assert!(interrupted(&first) && interrupted(&second) && !interrupted(&refused));
+    assert!(
+        !replayable_history(&first, &all, "in"),
+        "the earlier interrupted attempt is not history"
+    );
+    assert!(
+        !replayable_history(&second, &all, "in"),
+        "the later interrupted attempt is not history"
+    );
+    let mut agent = record("author-1", WorkflowV2HostMethod::Agent, "t1", None, &[]);
+    agent.result.data["interrupted"] = serde_json::json!("cancelled");
+    let later = record("author-2", WorkflowV2HostMethod::Agent, "t2", None, &[]);
+    assert!(
+        !replayable_history(&agent, &[agent.clone(), later], "in"),
+        "an interrupted agent attempt is not history either"
+    );
+}
+
+/// A completed landing a later landing replaced is still history; a host
+/// command's own `interrupted: false` flag marks nothing.
+#[test]
+fn a_superseded_completed_landing_still_replays() {
+    let mut landed = record(
+        "h-1",
+        WorkflowV2HostMethod::HostCommand,
+        "2026-10-08T19:00:00Z",
+        Some("land"),
+        &["T-A"],
+    );
+    landed.status = WorkflowV2Status::Accepted;
+    landed.result.data["interrupted"] = serde_json::json!(false);
+    landed.result.data["publicationReceipt"] = serde_json::json!({"call_id": "h-1"});
+    let mut relanded = record(
+        "h-2",
+        WorkflowV2HostMethod::HostCommand,
+        "2026-10-08T19:10:00Z",
+        Some("land"),
+        &["T-A"],
+    );
+    relanded.result.data["publicationReceipt"] = serde_json::json!({"call_id": "h-2"});
+    let all = vec![landed.clone(), relanded.clone()];
+    assert!(!interrupted(&landed));
+    assert!(replayable_history(&landed, &all, "in"));
+    assert!(!replayable_history(&relanded, &all, "in"));
+}
+
+/// A refusal that ran to its verdict keeps today's behaviour: history once
+/// anything of its key follows it, an interrupted attempt included.
+#[test]
+fn a_superseded_refusal_still_replays() {
+    let refused = record(
+        "h-1",
+        WorkflowV2HostMethod::HostCommand,
+        "2026-10-08T19:00:00Z",
+        Some("land"),
+        &[],
+    );
+    let mut stopped = record(
+        "h-2",
+        WorkflowV2HostMethod::HostCommand,
+        "2026-10-08T19:10:00Z",
+        Some("land"),
+        &[],
+    );
+    stopped.result.data["interrupted"] = serde_json::json!("paused");
+    let all = vec![refused.clone(), stopped.clone()];
+    assert!(replayable_history(&refused, &all, "in"));
+    assert!(!replayable_history(&stopped, &all, "in"));
+}

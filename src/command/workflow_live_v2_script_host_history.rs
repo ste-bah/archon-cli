@@ -10,7 +10,8 @@ impl WorkflowScriptHost {
     /// refused or malformed attempt, or a freeze that carried findings, is
     /// history exactly as an accepted one is, and replaying it verbatim is
     /// what keeps the phase's budget and best artifact the same across a
-    /// pause. Agent calls and host commands alike; the live paths below never
+    /// pause. A record a pause or cancel interrupted is no answer and never
+    /// history. Agent calls and host commands alike; the live paths below never
     /// see a superseded record. A run seeded after an upgrade has no such
     /// history from before its seed (`predates_phase_seed`).
     pub(super) async fn replay_superseded_history(
