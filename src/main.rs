@@ -14,6 +14,9 @@ pub(crate) mod cli_args;
 mod command;
 mod gametheory_tool_executor;
 mod main_bootstrap;
+#[cfg(test)]
+#[path = "main_bootstrap_tests.rs"]
+mod main_bootstrap_tests;
 mod main_dispatch;
 mod main_modes;
 mod main_resume;

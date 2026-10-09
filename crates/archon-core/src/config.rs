@@ -26,6 +26,10 @@ mod tools;
 mod topology;
 mod validation;
 mod world_model;
+mod write_budget;
+#[cfg(test)]
+#[path = "config/write_budget_tests.rs"]
+mod write_budget_tests;
 
 pub use context_section::ContextConfig;
 pub use filesystem::{FilesystemConfig, ReadBeforeEdit};
@@ -47,6 +51,7 @@ pub use tools::*;
 pub use topology::*;
 pub use validation::*;
 pub use world_model::*;
+pub use write_budget::write_call_time_budget_warnings;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {

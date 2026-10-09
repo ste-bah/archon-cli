@@ -1451,6 +1451,8 @@ max_investigation_iterations = 6
 # host_call_timeout_secs = 7200
 # verification_branch_timeout_secs = 14400
 # 0 derives three host-call timeouts; it does NOT mean unlimited.
+# Prefer at least 2 × host_call_timeout_secs, leaving one full host-call timeout
+# for size re-asks and transport retries after a full call; the default is 3 ×.
 # write_call_time_budget_secs = 0
 # Once declared focused tests pass, allow this many further tool calls before
 # refusing inspections/builds/tests; Write and Edit remain available.

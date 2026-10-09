@@ -208,6 +208,9 @@ pub fn load_layered_config(
 
     config.workflow.repository_audit.sources = audit_sources;
     validate(&config)?;
+    for warning in crate::config::write_call_time_budget_warnings(&config) {
+        eprintln!("warning: {warning}");
+    }
     Ok(config)
 }
 
