@@ -33,6 +33,10 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
   const at = (id, version, task) => typeof script[id] === 'function' ? script[id](version, task)
     : !script[id] ? 'ok' : script[id][Math.min(version, script[id].length) - 1];
   const ctx = {args:{acceptanceCriteria:Object.fromEntries(ids.map(id => [id, id])), authorMaxParallelism:cap, gateMode:mode},
+    JSON: Object.assign(Object.create(JSON), {parse(text, ...args) {
+      if (text === 'opaque parser fixture') throw new SyntaxError('new provider parser wording');
+      return JSON.parse(text, ...args);
+    }}),
     __archonValidateAcceptanceEntry: (id, serialized) => {
       const value = decided.get(`${id}@${JSON.parse(serialized).version}`);
       return JSON.stringify(typeof value === 'number' ? fields.slice(0, value).map(field => shape(id, field)) : []);
@@ -51,7 +55,11 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
         decided.set(`${id}@${version}`, value);
         if (value === 'down') return {status:'failed', summary:'transport'};
         if (value === 'bad') return {status:'accepted', stopReason:'end_turn', content:'not json'};
-        return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id, version, criterion:''})};
+        if (value === 'badUnknown') return {status:'accepted', stopReason:'end_turn', content:'opaque parser fixture'};
+        if (value === 'stopUnknown') return {status:'accepted', stopReason:version % 2 ? 'provider_stop_a' : 'provider_stop_b', content:JSON.stringify({id, version})};
+        if (value === 'bad2') return {status:'accepted', stopReason:'end_turn', content:'{"id":'};
+        if (value === 'noend') return {status:'accepted', stopReason:'max_tokens', content:JSON.stringify({id, version, criterion:''})};
+        return {status:'accepted', stopReason:'end_turn', content:JSON.stringify({id:value === 'wrong' ? 'OTHER' : id, version, criterion:''})};
       },
       hostCommand: async () => {
         if (++gate > 40) throw new Error('gate exhausted');
@@ -92,17 +100,57 @@ async function creditStopsAtTheFloor() {
   assert.equal(out.calls, 10, 'two judged rounds, A+B twice, then 2 stalled rounds of B');
 }
 
-// A pass is terminal: an entry is credited once. A passes beside B's
-// unparseable reply (progress); B then stays unparseable and A, no longer
-// pending, is not credited again.
+// A pass is terminal: an entry is credited once. B's first malformed class
+// progresses once, and A passes beside it; neither is credited again later.
 async function passCreditedOnce() {
   const out = await run({A:['ok', 1, 'ok'], B:['ok', 1, 'bad']}, [refute(['A', 'B']), clean]);
   assert.equal(out.error, 'paused');
   assert.deepEqual(out.flags, [true, true, true, false, false, false]);
-  assert.deepEqual(credited(out.history[2]), [['B', false], ['A', true]]);
+  assert.deepEqual(credited(out.history[2]), [['B', true], ['A', true]]);
   for (const step of out.history.slice(3)) {
     assert.ok(!(step.entries || []).some(entry => entry.subject === 'A' && entry.progress), 'A is not credited again');
   }
+}
+
+// Malformed reply classes are entry-local progress once each; a repeated
+// class is no progress, and alternating known classes still spends the window.
+async function malformedClassesCreditOnceAndBoundAlternation() {
+  const out = await run({A:['ok', 'bad', 'bad', 'wrong', 'wrong', 'bad', 'wrong', 'bad']},
+    [refute(['A']), clean], {cap:1});
+  assert.equal(out.error, 'paused', 'the repeated A/B alternation exhausts the 3-attempt no-progress window');
+  assert.deepEqual(out.flags, [true, true, false, true, false, false, false]);
+  const malformed = out.history.slice(1);
+  assert.deepEqual(malformed.map(step => step.entries[0].malformed_class),
+    ['parse-error:unexpected-token', 'parse-error:unexpected-token', 'wrong-id', 'wrong-id',
+      'parse-error:unexpected-token', 'wrong-id']);
+  assert.deepEqual(malformed.map(step => step.entries[0].progress), [true, false, true, false, false, false]);
+}
+
+async function unknownClassesRepeatWithoutProgress() {
+  const out = await run({A:['badUnknown']}, [refute(['A']), clean], {cap:1});
+  assert.equal(out.error, 'paused');
+  assert.deepEqual(out.flags, [true, false, false, false]);
+  assert.deepEqual(out.history.map(step => step.entries[0].malformed_class),
+    ['parse-error:other', 'parse-error:other', 'parse-error:other', 'parse-error:other']);
+  assert.deepEqual(out.history.map(step => step.entries[0].progress), [true, false, false, false]);
+}
+
+async function unknownStopReasonsRepeatWithoutProgress() {
+  const out = await run({A:['stopUnknown']}, [refute(['A']), clean], {cap:1});
+  assert.equal(out.error, 'paused');
+  assert.deepEqual(out.flags, [true, false, false, false]);
+  assert.deepEqual(out.history.map(step => step.entries[0].malformed_class),
+    ['stop-other', 'stop-other', 'stop-other', 'stop-other']);
+  assert.deepEqual(out.history.map(step => step.entries[0].progress), [true, false, false, false]);
+}
+
+async function mixedMalformedAndValidatorRefusalsKeepBothProgress() {
+  const out = await run({A:['bad'], B:[1]}, [refute(['A', 'B']), clean], {cap:2});
+  assert.equal(out.error, 'paused');
+  const mixed = out.history[0];
+  assert.deepEqual(credited(mixed), [['A', true], ['B', true]]);
+  assert.equal(mixed.entries[0].malformed_class, 'parse-error:unexpected-token');
+  assert.equal(mixed.entries[1].findings, 1);
 }
 
 // Issue 261 kept: a rewrite of a judge-refuted entry that passes the author
@@ -290,6 +338,10 @@ const tests = [
   ['A passes while B is refused (control): progress', passBesideRefusal],
   ['a credited round restores the window to the episode floor', creditStopsAtTheFloor],
   ['a pass is credited once', passCreditedOnce],
+  ['malformed classes progress once and alternating repeats exhaust the window', malformedClassesCreditOnceAndBoundAlternation],
+  ['unknown parser classes repeat without progress', unknownClassesRepeatWithoutProgress],
+  ['unknown stop reasons repeat without progress', unknownStopReasonsRepeatWithoutProgress],
+  ['mixed malformed and validator refusals keep both progress kinds', mixedMalformedAndValidatorRefusalsKeepBothProgress],
   ['an unmeasured rewrite beside an unparseable reply is not credited', () => unmeasuredRewriteIsNotCredited('bad')],
   ['an unmeasured rewrite beside a transport failure is not credited', () => unmeasuredRewriteIsNotCredited('down')],
   ['an unparseable reply is noted for its own entry only', malformedNoteIsPerEntry],

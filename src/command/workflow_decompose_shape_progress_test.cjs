@@ -110,10 +110,10 @@ async function resume() {
 async function mixed() {
   const out = await run(n => n === 2 ? 'transport' : n === 3 ? 'incomplete' : defects(2));
   assert.equal(out.error, 'paused');
-  assert.equal(out.calls, 5, 'provider transport uses its own window; incomplete and shape replies use the author window');
+  assert.equal(out.calls, 6, 'the first malformed class progresses once; its repeat and shape stalls then use the author window');
   assert.equal(out.pauses[0].reason, 'no_progress');
-  assert.equal(out.pauses[0].answered_attempts, 4);
-  assert.deepEqual(Array.from(out.pauses[0].progress_history, step => step.progress), [true,false,false,false,false]);
+  assert.equal(out.pauses[0].answered_attempts, 5);
+  assert.deepEqual(Array.from(out.pauses[0].progress_history, step => step.progress), [true,false,true,false,false,false]);
 }
 
 // Round 3: a judged refutation opens a repair episode for each refuted entry.

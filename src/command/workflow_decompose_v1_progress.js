@@ -145,7 +145,7 @@ function newProgress(_seed) {
 }
 
 function newRepairEpisode(stalled) {
-  return { bests: new Map(), stalled };
+  return { bests: new Map(), malformedClasses: new Map(), stalled };
 }
 
 // Opens the repair episode that follows a measured candidate.
@@ -261,8 +261,20 @@ function recordRepairs(progress, call, refusals, round = NO_ROUND, answered = tr
   const episode = progress.repair;
   let better = false;
   const entries = [], measures = [];
-  for (const { entryId, findings } of refusals) {
+  let malformedCount = 0, validatorCount = 0;
+  for (const { entryId, findings, malformedClass } of refusals) {
     if (typeof entryId !== "string" || entryId.length === 0) throw new Error("an entry shape refusal names no entry");
+    if (typeof malformedClass === "string") {
+      let classes = episode.malformedClasses.get(entryId);
+      if (!classes) episode.malformedClasses.set(entryId, classes = new Set());
+      const improved = !classes.has(malformedClass);
+      classes.add(malformedClass);
+      better = better || improved;
+      malformedCount += 1;
+      entries.push({ subject: entryId, malformed_class: malformedClass,
+        findings: findings.filter(isDeterministic).length, progress: improved, worse: false });
+      continue;
+    }
     const measure = attemptMeasure(findings);
     const best = episode.bests.get(entryId);
     const improved = isBetter(measure, best);
@@ -270,19 +282,25 @@ function recordRepairs(progress, call, refusals, round = NO_ROUND, answered = tr
     if (improved) episode.bests.set(entryId, measure);
     better = better || improved;
     measures.push(measure);
+    validatorCount += 1;
     entries.push({ subject: entryId, findings: measure.count, progress: improved, worse: regressed });
   }
   const credited = creditPassed(episode, round.passed);
   entries.push(...credited);
-  const tier = Math.min(...measures.map(measure => measure.tier));
-  const stage = Math.min(...measures.map(measure => measure.stage));
+  const tier = measures.length ? Math.min(...measures.map(measure => measure.tier)) : 0;
+  const stage = measures.length ? Math.min(...measures.map(measure => measure.stage)) : 0;
   return recordRound(progress, {
-    call, kind: ["packaging", "refused", "judged"][tier], subject: refusals.map(refusal => refusal.entryId).join(", "),
-    stage: DEFECT_STAGES[stage] || "passed", findings: measures.reduce((sum, measure) => sum + measure.count, 0),
+    call, kind: malformedCount > 0 && validatorCount === 0 ? "malformed" : ["packaging", "refused", "judged"][tier], subject: refusals.map(refusal => refusal.entryId).join(", "),
+    stage: malformedCount > 0 && validatorCount === 0 ? "parse" : DEFECT_STAGES[stage] || "passed",
+    findings: measures.reduce((sum, measure) => sum + measure.count, 0)
+      + entries.filter(entry => entry.malformed_class).reduce((sum, entry) => sum + entry.findings, 0),
     progress: false, entries
   }, better || credited.length > 0, advanced, round.outage);
 }
 
+// Malformed replies have stable refusal classes (wrong id, missing end_turn,
+// parse-error kind). A new class is progress once per entry and episode;
+// repeating it is not. Offsets and diagnostic wording are never keys.
 // A round whose failures measured nothing (an unparseable reply, a call that
 // failed in transport) still credits the entries that passed in it.
 function creditedRound(progress, entry, round, advanced) {

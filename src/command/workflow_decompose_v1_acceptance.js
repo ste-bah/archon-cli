@@ -75,9 +75,27 @@ function unwrapEntry(parsed, id) {
   return parsed;
 }
 
-function malformedAcceptanceFailure(id, reason) {
+function malformedAcceptanceFailure(id, reason, malformedClass) {
   const finding = {text:`candidate artifact was refused: acceptance entry ${id}: ${reason}`, subject:id};
-  return {failure:{status:"failed",malformed:true,entryId:id,findings:[finding],summary:finding.text}};
+  return {failure:{status:"failed",malformed:true,malformedClass,entryId:id,findings:[finding],summary:finding.text}};
+}
+
+function parseErrorClass(error) {
+  // Match a finite set of parser kinds. The message itself is diagnostic
+  // text and must never become a progress key.
+  const message = String(error && error.message || error || "").toLowerCase();
+  if (/unterminated string/.test(message)) return "parse-error:unterminated-string";
+  if (/unexpected end|end of json|unexpected eof/.test(message)) return "parse-error:unexpected-end";
+  if (/expected property name|property name enclosed/.test(message)) return "parse-error:property-name";
+  if (/expected .*after property|expected colon/.test(message)) return "parse-error:property-separator";
+  if (/unexpected token|unexpected character/.test(message)) return "parse-error:unexpected-token";
+  return "parse-error:other";
+}
+
+function stopReasonClass(reason) {
+  const known = new Set(["max_tokens", "tool_use", "refusal", "pause_turn"]);
+  if (reason === undefined || reason === null || reason === "") return "stop-missing";
+  return known.has(reason) ? `stop-${reason.replace(/_/g, "-")}` : "stop-other";
 }
 
 function extractJsonObject(text) {
@@ -195,10 +213,11 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   if (result.dry_run === true) return {entry:setHostOwnedFields({id}, criteria)};
   if (result.status === "failed") return {failure:result};
   if (result.stopReason !== "end_turn") {
-    return malformedAcceptanceFailure(id, `expected stop reason end_turn, got ${result.stopReason || "missing"}`);
+    return malformedAcceptanceFailure(id, `expected stop reason end_turn, got ${result.stopReason || "missing"}`,
+      stopReasonClass(result.stopReason));
   }
   if (typeof result.content !== "string" || result.content.length === 0) {
-    return malformedAcceptanceFailure(id, "stop reason was end_turn but content was missing or empty");
+    return malformedAcceptanceFailure(id, "stop reason was end_turn but content was missing or empty", "missing-content");
   }
   {
     let entry;
@@ -206,7 +225,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
     try {
       entry = unwrapEntry(JSON.parse(json), id);
     } catch (error) {
-      return malformedAcceptanceFailure(id, acceptanceParseRefusal(id, json, error));
+      return malformedAcceptanceFailure(id, acceptanceParseRefusal(id, json, error), parseErrorClass(error));
     }
     if (entry && entry.id === id) {
       setHostOwnedFields(entry, criteria);
@@ -227,10 +246,10 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
       }
     }
     if (entry && Object.prototype.hasOwnProperty.call(entry, "id")) {
-      return malformedAcceptanceFailure(id, `expected id ${id}, got id ${JSON.stringify(entry.id)}`);
+      return malformedAcceptanceFailure(id, `expected id ${id}, got id ${JSON.stringify(entry.id)}`, "wrong-id");
     }
   }
-  return malformedAcceptanceFailure(id, `reply did not contain a complete entry with id ${id}`);
+  return malformedAcceptanceFailure(id, `reply did not contain a complete entry with id ${id}`, "missing-entry");
 }
 
 // Parsed JSON objects have no meaningful property order. Formatting changes
@@ -294,7 +313,8 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
   // Every refusal of the round is returned and measured, each against its own
   // entry's best, and each entry is shown only its own refusal next round.
   const refusals = settled.filter(result => result && result.status === "fulfilled" && result.value.failure?.findings)
-    .map(result => ({entryId:result.value.failure.entryId, findings:result.value.failure.findings}));
+    .map(result => ({entryId:result.value.failure.entryId, findings:result.value.failure.findings,
+      malformedClass:result.value.failure.malformedClass}));
   state.roundPassed = pending.filter((_, index) => succeeded(settled[index]));
   // Each entry's slot holds the note of its last answered reply: a shape
   // refusal, or the note of a reply that held no complete entry. A pass
