@@ -258,12 +258,7 @@ fn fold_locked(
     if hooks.is_empty() {
         return Ok(());
     }
-    let journal = store
-        .run_dir(run_id)
-        .join("learning/decomposition-records.jsonl");
-    let pending_journal = store
-        .run_dir(run_id)
-        .join("learning/decomposition-pending.jsonl");
+    let (journal, pending_journal) = journal_paths(&store.run_dir(run_id));
     std::fs::create_dir_all(journal.parent().expect("journal parent"))?;
     let candidates: Vec<_> = calls
         .into_iter()
@@ -314,23 +309,64 @@ pub(super) fn read_journal(path: &Path) -> anyhow::Result<Vec<WorkflowLearningRe
         .map_err(Into::into)
 }
 
+/// History is one 16-character key per distinct lesson, scoped to one run.
+pub(super) fn journal_paths(run_dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let learning = run_dir.join("learning");
+    (
+        learning.join("decomposition-records.jsonl"),
+        learning.join("decomposition-pending.jsonl"),
+    )
+}
+
+fn read_seen_keys(path: &Path) -> anyhow::Result<std::collections::BTreeSet<String>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(std::collections::BTreeSet::new());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    text.lines()
+        .map(|line| {
+            if line.len() == 16 && line.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Ok(line.to_string());
+            }
+            let record: WorkflowLearningRecord = serde_json::from_str(line).map_err(|error| {
+                anyhow::anyhow!("invalid decomposition lesson history: {error}")
+            })?;
+            // Upgrade the previous record-bearing journal in place on the next write.
+            Ok(digest(&record.stage_id))
+        })
+        .collect()
+}
+
+fn write_seen_keys(path: &Path, keys: &std::collections::BTreeSet<String>) -> anyhow::Result<()> {
+    use std::io::Write;
+    let temporary = path.with_extension("jsonl.tmp");
+    let mut file = std::fs::File::create(&temporary)?;
+    for key in keys {
+        writeln!(file, "{key}")?;
+    }
+    file.sync_all()?;
+    std::fs::rename(temporary, path)?;
+    Ok(())
+}
+
 pub(super) fn stage_journal(
     history_path: &Path,
     pending_path: &Path,
     candidates: Vec<WorkflowLearningRecord>,
 ) -> anyhow::Result<Vec<WorkflowLearningRecord>> {
-    let mut history = read_journal(history_path)?;
-    let mut known = history
-        .iter()
-        .map(|record| record.stage_id.clone())
+    let mut known = read_seen_keys(history_path)?;
+    let new_records: Vec<_> = candidates
+        .into_iter()
+        .filter(|record| known.insert(digest(&record.stage_id)))
         .collect();
-    let new_records = filter_new_records(candidates, &mut known);
     let pending = merge_records(read_journal(pending_path)?, new_records.clone());
     // The retry source is durable before the seen journal advances. A crash
     // between the writes can therefore replay a pending record, never lose it.
     write_journal(pending_path, &pending)?;
-    history.extend(new_records);
-    write_journal(history_path, &history)?;
+    write_seen_keys(history_path, &known)?;
     Ok(pending)
 }
 

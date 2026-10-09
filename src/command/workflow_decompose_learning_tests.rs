@@ -153,12 +153,90 @@ fn learning_decompose_failed_dispatch_keeps_durable_lesson_for_retry() {
     );
     finish_journal_dispatch(&pending_journal, true).unwrap();
     assert!(read_journal(&pending_journal).unwrap().is_empty());
-    assert_eq!(read_journal(&journal).unwrap().len(), 1);
+    let history = std::fs::read_to_string(&journal).unwrap();
+    assert_eq!(history.lines().count(), 1);
     assert!(
         stage_journal(&journal, &pending_journal, candidates)
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn learning_decompose_history_is_scoped_to_each_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let candidates = lesson_records(
+        "run",
+        "review",
+        "judge-call",
+        1,
+        &serde_json::json!({"judgment":{"verdict":"refuted","reason":"lesson prose","counterexample":"example"}}),
+        &[],
+    );
+    for index in 0..32 {
+        let run_dir = dir.path().join(format!("run-{index}"));
+        let (history, pending) = super::workflow_decompose_learning::journal_paths(&run_dir);
+        std::fs::create_dir_all(history.parent().unwrap()).unwrap();
+        stage_journal(&history, &pending, candidates.clone()).unwrap();
+        let history_text = std::fs::read_to_string(history).unwrap();
+        assert_eq!(history_text.lines().count(), 1);
+        assert_eq!(history_text.trim().len(), 16);
+        assert!(!history_text.contains("lesson prose"));
+        assert!(!history_text.contains("example"));
+    }
+    assert!(!dir.path().join("decomposition-records.jsonl").exists());
+}
+
+#[test]
+fn learning_decompose_history_stores_only_bounded_lesson_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = dir.path().join("decomposition-records.jsonl");
+    let pending_journal = dir.path().join("decomposition-pending.jsonl");
+    let candidates = lesson_records(
+        "run-1",
+        "review",
+        "judge-call",
+        1,
+        &serde_json::json!({"judgment":{"verdict":"refuted","reason":"private lesson prose","counterexample":"secret example"}}),
+        &[],
+    );
+
+    stage_journal(&journal, &pending_journal, candidates).unwrap();
+
+    let history = std::fs::read_to_string(&journal).unwrap();
+    assert!(!history.contains("private lesson prose"));
+    assert!(!history.contains("secret example"));
+    let keys: Vec<_> = history.lines().collect();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0].len(), 16, "one fixed-size digest per seen lesson");
+}
+
+#[test]
+fn learning_decompose_resume_migrates_legacy_history_without_redelivery() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = dir.path().join("decomposition-records.jsonl");
+    let pending_journal = dir.path().join("decomposition-pending.jsonl");
+    let candidates = lesson_records(
+        "run-1",
+        "review",
+        "judge-call",
+        1,
+        &serde_json::json!({"judgment":{"verdict":"refuted","reason":"legacy lesson prose","counterexample":"legacy example"}}),
+        &[],
+    );
+    write_journal(&journal, &candidates).unwrap();
+
+    assert!(
+        stage_journal(&journal, &pending_journal, candidates)
+            .unwrap()
+            .is_empty()
+    );
+
+    let history = std::fs::read_to_string(journal).unwrap();
+    assert!(!history.contains("legacy lesson prose"));
+    assert!(!history.contains("legacy example"));
+    assert_eq!(history.lines().count(), 1);
+    assert_eq!(history.trim().len(), 16);
 }
 
 #[test]
