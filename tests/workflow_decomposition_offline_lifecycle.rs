@@ -144,7 +144,7 @@ fn decompose_args() -> [&'static str; 9] {
         "--prd",
         "prd.md",
         "--tasks",
-        "tasks",
+        "tasks/PRD-X",
         "--repository",
         "repository",
         "--yes",
@@ -173,29 +173,40 @@ fn spawn_decompose_with_revision(root: &Path, revision: Option<&str>) -> std::pr
         .unwrap()
 }
 
-fn assert_only_role_repeated(
+fn accepted_call_counts(root: &Path) -> std::collections::BTreeMap<String, usize> {
+    let events = fs::read_to_string(one_run(root).join("events.jsonl")).unwrap();
+    let mut counts = std::collections::BTreeMap::new();
+    for line in events.lines() {
+        let event: serde_json::Value = serde_json::from_str(line).unwrap();
+        if event["kind"] == "author_attempt_completed"
+            && event["detail"]["status"] == "accepted"
+            && let Some(call_id) = event["detail"]["call_id"].as_str()
+        {
+            *counts.entry(call_id.to_string()).or_default() += 1;
+        }
+    }
+    counts
+}
+
+fn assert_only_call_id_accepted_again(
     before: &std::collections::BTreeMap<String, usize>,
     after: &std::collections::BTreeMap<String, usize>,
-    interrupted_role: &str,
+    interrupted_call_id: &str,
 ) {
-    let roles = before
-        .keys()
-        .chain(after.keys())
-        .collect::<std::collections::BTreeSet<_>>();
-    for role in roles {
-        let delta = after
-            .get(role)
-            .copied()
-            .unwrap_or_default()
-            .saturating_sub(before.get(role).copied().unwrap_or_default());
-        let expected = if role.as_str() == interrupted_role {
-            1
-        } else {
-            0
-        };
+    for (call_id, prior_count) in before {
+        let expected =
+            prior_count + usize::from(call_id == interrupted_call_id && *prior_count == 0);
+        let after_count = after.get(call_id).copied().unwrap_or_default();
         assert_eq!(
-            delta, expected,
-            "unexpected accepted call replay for {role}: before={before:?} after={after:?}"
+            after_count, expected,
+            "unexpected accepted call replay for {call_id}: before={before:?} after={after:?}"
+        );
+    }
+    if !before.contains_key(interrupted_call_id) {
+        assert_eq!(
+            after.get(interrupted_call_id).copied().unwrap_or_default(),
+            1,
+            "the interrupted call must be accepted once after resume: before={before:?} after={after:?}"
         );
     }
 }
@@ -229,9 +240,10 @@ fn final_snapshot(project: &TestProject) -> FinalSnapshot {
     let state: serde_json::Value =
         serde_json::from_slice(&fs::read(run.join("state.json")).unwrap()).unwrap();
     assert_eq!(state["status"], "completed", "final run state: {state}");
-    let mut acceptance: serde_json::Value =
-        serde_json::from_slice(&fs::read(root.join("tasks/acceptance-contract.json")).unwrap())
-            .unwrap();
+    let mut acceptance: serde_json::Value = serde_json::from_slice(
+        &fs::read(root.join("tasks/PRD-X/acceptance-contract.json")).unwrap(),
+    )
+    .unwrap();
     strip_timestamps(&mut acceptance);
     if let Some(prd) = acceptance
         .get_mut("prd")
@@ -240,14 +252,15 @@ fn final_snapshot(project: &TestProject) -> FinalSnapshot {
         prd.remove("path");
     }
     let mut skeleton: serde_json::Value =
-        serde_json::from_slice(&fs::read(root.join("tasks/task-skeleton.json")).unwrap()).unwrap();
+        serde_json::from_slice(&fs::read(root.join("tasks/PRD-X/task-skeleton.json")).unwrap())
+            .unwrap();
     strip_timestamps(&mut skeleton);
     let task_bodies = ["TASK-X-010.md", "TASK-X-020.md"]
         .into_iter()
         .map(|name| {
             (
                 name.into(),
-                fs::read_to_string(root.join("tasks").join(name)).unwrap(),
+                fs::read_to_string(root.join("tasks/PRD-X").join(name)).unwrap(),
             )
         })
         .collect();
@@ -293,13 +306,13 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
     );
     progress("golden", "CLI completed; checking artifacts and calls");
     assert!(
-        root.join("tasks/acceptance-contract.json").exists(),
+        root.join("tasks/PRD-X/acceptance-contract.json").exists(),
         "CLI output: {}",
         String::from_utf8_lossy(&output.stdout)
     );
-    assert!(root.join("tasks/task-skeleton.json").exists());
-    assert!(root.join("tasks/TASK-X-010.md").exists());
-    assert!(root.join("tasks/TASK-X-020.md").exists());
+    assert!(root.join("tasks/PRD-X/task-skeleton.json").exists());
+    assert!(root.join("tasks/PRD-X/TASK-X-010.md").exists());
+    assert!(root.join("tasks/PRD-X/TASK-X-020.md").exists());
     let _golden = final_snapshot(&project);
     let counts = project.provider.counts.snapshot();
     let requests = project.provider.requests.snapshot();
@@ -339,7 +352,6 @@ fn pause_at_provider_call_boundary_resumes_only_interrupted_author() {
     progress("pause-resume", "provider call reached pause boundary");
     let run_dir = one_run(root);
     let run_id = run_dir.file_name().unwrap().to_string_lossy().into_owned();
-    let before_resume = project.provider.counts.snapshot();
     let pause = run(root, &["workflow", "pause", &run_id]);
     assert!(
         pause.status.success(),
@@ -357,6 +369,7 @@ fn pause_at_provider_call_boundary_resumes_only_interrupted_author() {
         child_status.success(),
         "paused child should settle cleanly: {child_status}"
     );
+    let accepted_before_resume = accepted_call_counts(root);
     progress("pause-resume", "resuming interrupted author");
     let resumed = resume(root, &run_id);
     assert!(
@@ -364,10 +377,10 @@ fn pause_at_provider_call_boundary_resumes_only_interrupted_author() {
         "{}",
         String::from_utf8_lossy(&resumed.stderr)
     );
-    assert_only_role_repeated(
-        &before_resume,
-        &project.provider.counts.snapshot(),
-        "skeleton",
+    assert_only_call_id_accepted_again(
+        &accepted_before_resume,
+        &accepted_call_counts(root),
+        "skeleton-author-1",
     );
     let actual = final_snapshot(&project);
     let golden = completed_golden_snapshot();
@@ -387,7 +400,6 @@ fn sigkill_mid_provider_call_resumes_only_interrupted_author() {
     await_provider_boundary(&project.provider, root, &mut child, "sigkill-resume cell");
     let run_dir = one_run(root);
     let run_id = run_dir.file_name().unwrap().to_string_lossy().into_owned();
-    let before_resume = project.provider.counts.snapshot();
     child.kill().unwrap();
     let _ = wait_for_child(
         &mut child,
@@ -395,6 +407,7 @@ fn sigkill_mid_provider_call_resumes_only_interrupted_author() {
         &root.join("decompose.stderr"),
         "killed decomposition child",
     );
+    let accepted_before_resume = accepted_call_counts(root);
     project.provider.release();
     let resumed = resume(root, &run_id);
     assert!(
@@ -402,10 +415,10 @@ fn sigkill_mid_provider_call_resumes_only_interrupted_author() {
         "{}",
         String::from_utf8_lossy(&resumed.stderr)
     );
-    assert_only_role_repeated(
-        &before_resume,
-        &project.provider.counts.snapshot(),
-        "skeleton",
+    assert_only_call_id_accepted_again(
+        &accepted_before_resume,
+        &accepted_call_counts(root),
+        "skeleton-author-1",
     );
     assert_eq!(
         final_snapshot(&project),
