@@ -151,10 +151,22 @@ fn key(
         .iter()
         .map(|id| (id, requirements.get(id.trim())))
         .collect();
+    // Whether the baseline run itself came from its durable executability
+    // receipt is audit metadata, not evidence about the check. It changes on
+    // the first retry (fresh run -> reused run); including it here would make
+    // the passability verdict for identical output impossible to reuse.
+    let mut judgment = check.clone();
+    if let Some(baseline) = judgment.get_mut("baseline") {
+        if let Some(baseline) = baseline.as_object_mut() {
+            baseline.remove("reused");
+            baseline.remove("reuse_why");
+            baseline.remove("evidence_reference");
+        }
+    }
     let input = serde_json::json!([
         "acceptance-passability-v3",
         INSTRUCTION,
-        check,
+        judgment,
         full_requirements,
         client.resolve_model_alias(model),
         client.provider_id(),

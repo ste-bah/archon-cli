@@ -211,14 +211,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // their filesystem state, the shell, environment and this logic.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "1493de7029a9403d6c65b086d454ace36e73c42fb65c75f6799f7de912b5f11c",
+        sources_digest: "6ac9921e449c7aaf49c6616c26a5d48e118d0797b68d220d68254bf98e5b2cdb",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "1493de7029a9403d6c65b086d454ace36e73c42fb65c75f6799f7de912b5f11c",
+        sources_digest: "6ac9921e449c7aaf49c6616c26a5d48e118d0797b68d220d68254bf98e5b2cdb",
         build_bound: false,
     },
     CapabilityLogic {
