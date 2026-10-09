@@ -103,7 +103,7 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
                 "[]",
                 "REQ-X-002",
                 "src/beta.json",
-                "Write a JSON object with ready set to true.",
+                "Write a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.",
                 "- kind: beta_json\n    artifact_path: src/beta.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1",
             )
         } else {
@@ -114,7 +114,7 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
                 "[TASK-X-020]",
                 "REQ-X-001, AC-X-001",
                 "src/alpha.txt",
-                "Write the nonempty line alpha ready and create the JSON outcome artifact with ready set to true.",
+                "Write the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.",
                 "- kind: alpha_text\n    artifact_path: src/alpha.txt\n    artifact_format: text\n    min_instances: 1\n  - kind: generic_outcome\n    artifact_path: .archon/proof/outcome.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1",
             )
         };
@@ -135,7 +135,12 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
         return (
             "body",
             format!(
-                "```yaml\ntask_id: {id}\ntitle: {title}\ncomplexity: low\nstatus: ready\ndepends_on: {dep}\nblocks: {blocks}\nimplements: [{req}]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts:\n  {contracts}\n```\n\n## Objective\n{text}\n\n## Files Expected to Change\n{observations}\n\n## Focused Tests\n{focused_tests}\n"
+                "```yaml\ntask_id: {id}\ntitle: {title}\ncomplexity: low\nstatus: ready\ndepends_on: {dep}\nblocks: {blocks}\nimplements: [{req}]\nrequired_env_keys: []\nrequired_tools: {}\ndeliverable_contracts:\n  {contracts}\n```\n\n## Objective\n{text}\n\n## Files Expected to Change\n{observations}\n\n## Focused Tests\n{focused_tests}\n",
+                if second {
+                    "[python3]"
+                } else {
+                    "[test, python3]"
+                }
             ),
         );
     }
@@ -225,6 +230,47 @@ mod tests {
         let (_, body) = scripted_answer("Author the complete TASK body");
         assert!(body.contains("REQ-X-001"), "{body}");
         assert!(body.contains("AC-X-001"), "{body}");
+    }
+
+    #[test]
+    fn body_claim_sentences_name_the_artifact_and_verifier() {
+        for (task_id, claims) in [
+            (
+                "TASK-X-010",
+                &[
+                    ("REQ-X-001", "src/alpha.txt", "test -s src/alpha.txt"),
+                    ("AC-X-001", ".archon/proof/outcome.json", "python3 -c"),
+                ][..],
+            ),
+            (
+                "TASK-X-020",
+                &[("REQ-X-002", "src/beta.json", "python3 -c")][..],
+            ),
+        ] {
+            let prompt =
+                format!("Author the complete TASK body for host-frozen task_id {task_id}.");
+            let (_, body) = scripted_answer(&prompt);
+            let yaml = body
+                .split("```yaml\n")
+                .nth(1)
+                .unwrap()
+                .split("\n```")
+                .next()
+                .unwrap();
+            let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml).unwrap();
+            assert_eq!(parsed["task_id"], task_id, "{body}");
+            assert_eq!(parsed["task_id"].as_str(), Some(task_id), "{body}");
+            for (claim, path, command) in claims {
+                let matching_sentence = body.lines().find(|line| {
+                    line.contains(claim) && line.contains(path) && line.contains(command)
+                });
+                assert!(
+                    matching_sentence.is_some(),
+                    "{claim} lacks a sentence naming {path} and {command}: {body}"
+                );
+            }
+            assert!(yaml.contains("required_tools: ["), "{body}");
+        }
     }
 
     #[test]
