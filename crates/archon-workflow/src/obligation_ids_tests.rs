@@ -134,6 +134,53 @@ fn obligation_texts_carry_the_exact_statement_for_every_shape() {
 }
 
 #[test]
+fn wrapped_requirement_text_stops_at_the_next_list_item() {
+    let prd = "## Requirements\n\n- REQ-X-001: The first line\n  continues here\n- REQ-X-002: The sibling\n";
+    let texts = obligation_texts(prd);
+    assert_eq!(texts["REQ-X-001"], "The first line continues here");
+    assert_eq!(texts["REQ-X-002"], "The sibling");
+}
+
+#[test]
+fn requirement_text_excludes_nested_items_and_stops_at_blank_lines() {
+    let prd = "## Requirements\n\n- REQ-X-001: Parent text\n  continuation\n  - REQ-X-002: Nested requirement\n  still nested\n\n  after blank\n- REQ-X-003: Before blank\n  included continuation\n\n  excluded continuation\n- REQ-X-004: Next requirement\n";
+    let texts = obligation_texts(prd);
+    assert_eq!(texts["REQ-X-001"], "Parent text continuation");
+    assert_eq!(texts["REQ-X-002"], "Nested requirement");
+    assert_eq!(texts["REQ-X-003"], "Before blank included continuation");
+    assert_eq!(texts["REQ-X-004"], "Next requirement");
+}
+
+#[test]
+fn wrapped_requirement_is_crlf_safe_and_continuation_ids_are_not_obligations() {
+    let prd = "## Requirements\r\n\r\n- REQ-X-001: Dataset uses provider data\r\n  REQ-X-099 is an identifier mentioned in continuation prose\r\n  with a final clause.\r\n";
+    let texts = obligation_texts(prd);
+    assert_eq!(
+        texts["REQ-X-001"],
+        "Dataset uses provider data REQ-X-099 is an identifier mentioned in continuation prose with a final clause."
+    );
+    assert!(!texts.contains_key("REQ-X-099"));
+}
+
+#[test]
+fn a_markdown_heading_ends_requirement_continuations() {
+    let prd =
+        "- REQ-X-001: Before heading\n  included prose\n  Section title\n  ---\n  excluded prose\n";
+    assert_eq!(
+        obligation_texts(prd)["REQ-X-001"],
+        "Before heading included prose"
+    );
+}
+
+#[test]
+fn wrapped_done_items_include_continuations_but_not_nested_lists() {
+    let prd = "## Done Definition\n\n1. First done statement\n   continues here\n   - nested detail\n     more detail\n2. Second done statement\n   finishes here\n";
+    let texts = obligation_texts(prd);
+    assert_eq!(texts["DONE-1"], "First done statement continues here");
+    assert_eq!(texts["DONE-2"], "Second done statement finishes here");
+}
+
+#[test]
 fn done_headings_need_a_qualifier_and_respect_exclusions() {
     for heading in ["## Definition of Done", "## Done when", "## Done criteria"] {
         let prd = format!("{heading}\n\n1. first item\n");

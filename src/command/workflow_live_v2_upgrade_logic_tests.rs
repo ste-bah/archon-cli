@@ -72,7 +72,7 @@ impl Run {
             )
             // Both builds model the same task-set-lint version, so each bump
             // test sets its own versions.
-            .with_logic_version("task-set-lint", Some(1)),
+            .with_logic_version("task-set-lint", Some(2)),
             calls: AtomicUsize::new(0),
         }
     }
@@ -91,7 +91,7 @@ impl Run {
             self.store.run_dir(&self.run_id),
         )
         .with_launch_catalog(self.launch.clone())
-        .with_logic_version("task-set-lint", Some(1));
+        .with_logic_version("task-set-lint", Some(2));
         for (id, version) in bumps {
             keys = keys.with_logic_version(id, Some(*version));
         }
@@ -190,19 +190,19 @@ const SCRIPT: &str = r#"async function workflow(w) {
 async fn logic_361_a_logic_change_reruns_only_its_capability() {
     let run = Run::new();
     assert_eq!(run.run(Arc::new(run.launched()), SCRIPT).await, (4, 0));
-    assert_eq!(run.stamps("freeze-skeleton"), vec![Some(1)]);
-    let stricter = run.upgraded(&[("freeze-skeleton", 2)]);
+    assert_eq!(run.stamps("freeze-skeleton"), vec![Some(2)]);
+    let stricter = run.upgraded(&[("freeze-skeleton", 3)]);
     assert_eq!(run.run(stricter.clone(), SCRIPT).await, (1, 3));
     assert_eq!(stricter.calls.load(Ordering::SeqCst), 1);
     // The new verdict is keyed and stamped by the new logic, and holds.
-    assert!(run.stamps("freeze-skeleton").contains(&Some(2)));
+    assert!(run.stamps("freeze-skeleton").contains(&Some(3)));
     assert_eq!(
-        run.run(run.upgraded(&[("freeze-skeleton", 2)]), SCRIPT)
+        run.run(run.upgraded(&[("freeze-skeleton", 3)]), SCRIPT)
             .await,
         (0, 4)
     );
     // A stricter set lint re-runs the lint alone.
-    let lint = run.upgraded(&[("freeze-skeleton", 2), ("task-set-lint", 3)]);
+    let lint = run.upgraded(&[("freeze-skeleton", 3), ("task-set-lint", 3)]);
     assert_eq!(run.run(lint.clone(), SCRIPT).await, (1, 3));
     assert!(run.stamps("task-set-lint").contains(&Some(3)));
 }
@@ -217,8 +217,8 @@ async fn logic_361_an_upgrade_that_changes_no_logic_reuses_everything() {
     assert_eq!(upgraded.calls.load(Ordering::SeqCst), 0);
 }
 
-/// Records written before logic versions: the landing reuses, every check
-/// runs again once and is stamped, and then reuses too.
+/// Records written before the latest logic changes: affected commands run
+/// again once and are stamped, and then reuse.
 #[tokio::test]
 async fn logic_361_unversioned_checks_run_again_and_an_unversioned_landing_reuses() {
     let run = Run::new();
@@ -228,16 +228,25 @@ async fn logic_361_unversioned_checks_run_again_and_an_unversioned_landing_reuse
     );
     assert_eq!(run.stamps("verify-frozen-acceptance"), vec![None]);
     let upgraded = run.upgraded(&[]);
-    assert_eq!(run.run(upgraded.clone(), SCRIPT).await, (3, 1));
-    assert_eq!(upgraded.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(run.run(upgraded.clone(), SCRIPT).await, (4, 0));
+    assert_eq!(upgraded.calls.load(Ordering::SeqCst), 4);
     for check in [
         "verify-frozen-acceptance",
         "task-set-lint",
         "requirements-trace",
     ] {
-        assert_eq!(run.stamps(check), vec![Some(1)], "{check}");
+        let expected = match check {
+            "verify-frozen-acceptance" | "requirements-trace" => 2,
+            "task-set-lint" => 2,
+            _ => unreachable!(),
+        };
+        assert_eq!(run.stamps(check), vec![Some(expected)], "{check}");
     }
-    assert_eq!(run.stamps("freeze-skeleton"), vec![None], "landing reused");
+    assert_eq!(
+        run.stamps("freeze-skeleton"),
+        vec![Some(2)],
+        "landing reruns"
+    );
     assert_eq!(run.run(run.upgraded(&[]), SCRIPT).await, (0, 4));
 }
 

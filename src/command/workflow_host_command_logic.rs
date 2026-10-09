@@ -204,53 +204,53 @@ const VERIFY: &[&str] = &["src/command/workflow_decompose_frozen_chain.rs"];
 pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-acceptance",
-        // 2: #366 live-root rule (sibling paths pass; a bad repository lock
-        // is an error) changes acceptance freeze verdicts.
-        version: 2,
+        // 3: #380 complete wrapped obligation text changes freeze verdicts;
+        // #366's live-root rule remains part of this capability's history.
+        version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ca33eff54ffe190144e9c0ebbbb38d099ee6f9e80df0f21b7863cc6abb18e071",
+        sources_digest: "29d5f56273e69566baa11cabc0fe39031623106b95623d24c28a1daf823dfab0",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
-        version: 1,
+        version: 2,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ca33eff54ffe190144e9c0ebbbb38d099ee6f9e80df0f21b7863cc6abb18e071",
+        sources_digest: "29d5f56273e69566baa11cabc0fe39031623106b95623d24c28a1daf823dfab0",
         build_bound: false,
     },
     CapabilityLogic {
         id: "land-task-body",
-        version: 2,
+        version: 3,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "53b9027dd18cc047106d4cb6f13f4094a494af2528f70b57d89c4fb37bbed7e3",
+        sources_digest: "f00c0351681a6a214d6496711aa1e7c0cd80d2af901ffa2bb45fe2cf6283c99f",
         build_bound: false,
     },
     CapabilityLogic {
         id: "task-set-lint",
-        version: 2,
+        version: 3,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "53b9027dd18cc047106d4cb6f13f4094a494af2528f70b57d89c4fb37bbed7e3",
+        sources_digest: "f00c0351681a6a214d6496711aa1e7c0cd80d2af901ffa2bb45fe2cf6283c99f",
         build_bound: false,
     },
     CapabilityLogic {
         id: "requirements-trace",
-        version: 1,
+        version: 2,
         sources: &[GATE, CONTRACT, TRACE],
-        sources_digest: "ad204011e0a687e2c4ae8231c08fa8efcc364e7386ca9a69a828732c7c28f7f2",
+        sources_digest: "781ec3f53613835a775108f18178a123ec58de1cd88e6079a40d222440eb09f2",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-acceptance",
-        version: 1,
+        version: 2,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "af9193573c4729ea0df0745de595a282f96942642fcd5728abdcbed7a984451f",
+        sources_digest: "673e9fd1c6a05cc16ab4eac6b8218192fafb7ffcb1953f6e814a1ebf4e6f0080",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
-        version: 1,
+        version: 2,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "af9193573c4729ea0df0745de595a282f96942642fcd5728abdcbed7a984451f",
+        sources_digest: "673e9fd1c6a05cc16ab4eac6b8218192fafb7ffcb1953f6e814a1ebf4e6f0080",
         build_bound: true,
     },
 ];
