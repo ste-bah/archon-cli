@@ -204,52 +204,61 @@ const VERIFY: &[&str] = &["src/command/workflow_decompose_frozen_chain.rs"];
 pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-acceptance",
-        // 9: normalized paths only; `-s` follows symlink targets.
-        version: 9,
+        // 2: #366 live-root rule (sibling paths pass; a bad repository lock
+        // is an error) changes acceptance freeze verdicts.
+        // 3: #288 acceptance checks rerun only when their input closure
+        // changed; a reused check verdict binds normalized literal paths,
+        // their filesystem state, the shell, environment and this logic.
+        version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ca33eff54ffe190144e9c0ebbbb38d099ee6f9e80df0f21b7863cc6abb18e071",
+        sources_digest: "4b79cde7dd607249a65c375b02a19e37a1a15d39e5e1efa14c333235de686eeb",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ca33eff54ffe190144e9c0ebbbb38d099ee6f9e80df0f21b7863cc6abb18e071",
+        sources_digest: "4b79cde7dd607249a65c375b02a19e37a1a15d39e5e1efa14c333235de686eeb",
         build_bound: false,
     },
     CapabilityLogic {
         id: "land-task-body",
-        version: 2,
+        // 3: R8 body packaging strips chat around the one frozen subject's task
+        // file and binds by its task_id; the fidelity critic re-asks on an
+        // unparseable answer while it makes progress.
+        version: 3,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "53b9027dd18cc047106d4cb6f13f4094a494af2528f70b57d89c4fb37bbed7e3",
+        sources_digest: "10e821f489474a1be1d4bb22f6f4e667550ab7b5d644348ad2b5e74ee4ac279c",
         build_bound: false,
     },
     CapabilityLogic {
         id: "task-set-lint",
-        version: 2,
+        // 3: the fidelity critic re-asks on an unparseable answer while it
+        // makes progress (R8).
+        version: 3,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "53b9027dd18cc047106d4cb6f13f4094a494af2528f70b57d89c4fb37bbed7e3",
+        sources_digest: "10e821f489474a1be1d4bb22f6f4e667550ab7b5d644348ad2b5e74ee4ac279c",
         build_bound: false,
     },
     CapabilityLogic {
         id: "requirements-trace",
         version: 1,
         sources: &[GATE, CONTRACT, TRACE],
-        sources_digest: "ad204011e0a687e2c4ae8231c08fa8efcc364e7386ca9a69a828732c7c28f7f2",
+        sources_digest: "75ffbf3a71c3fe00af098abb093c5b944622b1868f187a699005242e51613648",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-acceptance",
         version: 1,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "af9193573c4729ea0df0745de595a282f96942642fcd5728abdcbed7a984451f",
+        sources_digest: "e0c5913c7635f5b982c99c14ebbce9cea91201564dcfa7f2cba1101586737bf8",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "af9193573c4729ea0df0745de595a282f96942642fcd5728abdcbed7a984451f",
+        sources_digest: "e0c5913c7635f5b982c99c14ebbce9cea91201564dcfa7f2cba1101586737bf8",
         build_bound: true,
     },
 ];
