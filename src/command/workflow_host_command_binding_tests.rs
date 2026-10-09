@@ -138,3 +138,37 @@ fn binding_alone_accepts_an_answer_with_two_task_files() {
     .expect("binds");
     assert_eq!(bound.frozen_task_id.as_deref(), Some("TASK-X-010"));
 }
+
+/// A yaml example in the chat before the task file is not the frontmatter:
+/// the subject is the one the task file's own frontmatter names, found by
+/// the same anchor the packaging strip uses.
+#[tokio::test]
+async fn a_yaml_example_in_chat_does_not_hide_the_subject() {
+    let answer =
+        "Shape I will use:\n```yaml\nkey: value\n```\n\n```yaml\ntask_id: TASK-X-010\ntitle: \"cut";
+    let finding = refusal(answer).await;
+    assert!(
+        finding
+            .text
+            .starts_with("candidate TASK body for TASK-X-010 does not parse: the ```yaml frontmatter block is not closed"),
+        "{}",
+        finding.text
+    );
+}
+
+#[test]
+fn a_yaml_example_in_chat_before_a_whole_task_file_still_binds() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    let task_file = context.task_root.join("TASK-X-010.md");
+    seed_frozen_chain(&context, &task_file);
+    let answer = "Shape I will use:\n```yaml\nkey: value\n```\n\n```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: small\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n# TASK-X-010\n";
+    let request = HostCommandRequest::new("land-task-body", Some(answer.into())).unwrap();
+    let bound = super::workflow_host_command_binding::context_for_request(
+        &context,
+        &temp.path().join("run"),
+        &request,
+    )
+    .expect("binds");
+    assert_eq!(bound.frozen_task_id.as_deref(), Some("TASK-X-010"));
+}

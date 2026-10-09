@@ -213,40 +213,73 @@ pub(crate) struct Packaged<'a> {
     pub(crate) wrapper: bool,
 }
 
+/// Where a task file opens in an answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskFileAnchor {
+    /// Byte offset of the frontmatter's ```` ```yaml ```` line.
+    pub(crate) opener: usize,
+    /// Byte offset of the wrapper fence line directly before it, if any.
+    pub(crate) wrapper: Option<usize>,
+    /// The `task_id` the frontmatter names.
+    pub(crate) task_id: String,
+}
+
+/// The one anchor the body gate and the host's binding share: the first
+/// top-level ```` ```yaml ```` block (outside every fenced block, under the
+/// lints' shared toggle) that names a `task_id`, or the first such block
+/// directly inside a top-level wrapper opener ([`unwrap_outer_fence`] rule
+/// 1) that is the last non-blank line before it. A yaml block in chat that
+/// names no `task_id`, or one nested in another fence (a ```` ```markdown ````
+/// example), is never the anchor.
+pub(crate) fn task_file_anchor(text: &str) -> Option<TaskFileAnchor> {
+    let spans: Vec<_> = line_spans(text).collect();
+    let ids = frontmatter_task_ids(text, &spans);
+    let mut fenced = false;
+    let mut last_nonblank = None;
+    for (index, (start, _, line)) in spans.iter().enumerate() {
+        if is_fence_line(line) {
+            if let Some(task_id) = &ids[index] {
+                let wrapper = last_nonblank.filter(|&previous: &usize| {
+                    is_outer_opener(spans[previous].2) && !fenced_after(&spans[..previous])
+                });
+                if !fenced || wrapper.is_some() {
+                    return Some(TaskFileAnchor {
+                        opener: *start,
+                        wrapper: wrapper.filter(|_| fenced).map(|previous| spans[previous].0),
+                        task_id: task_id.clone(),
+                    });
+                }
+            }
+            fenced = !fenced;
+        }
+        if !line.trim().is_empty() {
+            last_nonblank = Some(index);
+        }
+    }
+    None
+}
+
 /// The task file in `text` after leading packaging, or `None`.
 ///
-/// The task file opens at the first ```` ```yaml ```` line whose block parses
-/// as a mapping with a `task_id`. When the last non-blank line before it is a
-/// wrapper opener ([`unwrap_outer_fence`] rule 1) outside any fenced block,
-/// the task file opens there instead, and the text from that wrapper on must
-/// be a pure outer fence, whose interior is the task file. Every line before
-/// the opener is packaging; nothing after the task file is touched except
-/// that wrapper's closer. Chat that leaves a block open before the opener is
-/// `None`, for the caller to refuse. Whether the rest holds one task file is
-/// [`task_files`]'s question, asked of every candidate.
+/// The task file opens at [`task_file_anchor`]. With a wrapper, the text
+/// from that wrapper on must be a pure outer fence, whose interior is the
+/// task file. Every line before the opener is packaging; nothing after the
+/// task file is touched except that wrapper's closer. Whether the rest holds
+/// one task file is [`task_files`]'s question, asked of every candidate.
 pub(crate) fn strip_packaging(text: &str) -> Option<Packaged<'_>> {
-    let spans: Vec<_> = line_spans(text).collect();
-    let opener = frontmatter_task_ids(text, &spans)
-        .iter()
-        .position(Option::is_some)?;
-    let wrapper = spans[..opener]
-        .iter()
-        .rposition(|(_, _, line)| !line.trim().is_empty())
-        .filter(|&index| is_outer_opener(spans[index].2) && !fenced_after(&spans[..index]));
-    let (leading, task_file) = match wrapper {
-        Some(index) => {
-            let interior = unwrap_outer_fence(&text[spans[index].0..])?;
+    let anchor = task_file_anchor(text)?;
+    let (leading, task_file) = match anchor.wrapper {
+        Some(wrapper) => {
+            let interior = unwrap_outer_fence(&text[wrapper..])?;
             let task_file = strip_leading_blank_lines(interior);
             (&text[..offset_in(text, task_file)], task_file)
         }
-        // Chat that leaves a block open would put the task file inside it.
-        None if fenced_after(&spans[..opener]) => return None,
-        None => text.split_at(spans[opener].0),
+        None => text.split_at(anchor.opener),
     };
     (!leading.is_empty()).then_some(Packaged {
         leading,
         task_file,
-        wrapper: wrapper.is_some(),
+        wrapper: anchor.wrapper.is_some(),
     })
 }
 
@@ -301,21 +334,29 @@ pub(crate) fn task_files(task_file: &str) -> (Option<String>, Vec<String>) {
 }
 
 /// For each line of `text`, the `task_id` of the ```` ```yaml ```` block it
-/// opens, closed as the task parser closes it (a bare ```` ``` ```` or
-/// `---`), when that block parses as a mapping with a string `task_id`. One
+/// opens: closed as the task parser closes it (a bare ```` ``` ```` or
+/// `---`), when that block parses as a mapping with a string `task_id`; never
+/// closed (an answer cut short), from its top-level `task_id:` line. One
 /// backward pass finds each line's closer, so the cost stays linear.
 fn frontmatter_task_ids(text: &str, spans: &[(usize, usize, &str)]) -> Vec<Option<String>> {
     let mut ids = vec![None; spans.len()];
     let mut closer = None;
     for index in (0..spans.len()).rev() {
         let (start, _, line) = spans[index];
-        if is_frontmatter_opener(line)
-            && let Some(end) = closer
-        {
+        if is_frontmatter_opener(line) {
             let body_start = spans.get(index + 1).map_or(text.len(), |span| span.0);
-            ids[index] = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text[body_start..end])
-                .ok()
-                .and_then(|value| value.get("task_id")?.as_str().map(str::to_string));
+            ids[index] = match closer {
+                Some(end) => {
+                    serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text[body_start..end])
+                        .ok()
+                        .and_then(|value| value.get("task_id")?.as_str().map(str::to_string))
+                }
+                None => text[body_start..]
+                    .lines()
+                    .find_map(|line| line.strip_prefix("task_id:"))
+                    .map(|value| value.trim().trim_matches(['"', '\'']).to_string())
+                    .filter(|value| !value.is_empty()),
+            };
         }
         if matches!(line.trim(), "```" | "---") {
             closer = Some(start);

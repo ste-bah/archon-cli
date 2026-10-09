@@ -27,15 +27,21 @@ pub(super) struct TaskCandidate {
     pub(super) packaging: Option<Packaging>,
 }
 
-/// The packaging the host discarded before a task file: a diagnostic for the
+/// The packaging the host removed around a task file: a diagnostic for the
 /// envelope's report, never a verdict.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Packaging {
+    /// Lines removed before the task file.
     pub(super) lines: usize,
+    /// Bytes removed before the task file.
     pub(super) bytes: usize,
+    /// Bytes removed after it: a wrapper's closing fence and what followed.
+    pub(super) trailing_bytes: usize,
     pub(super) wrapper: bool,
-    /// The first 200 characters of the discarded text, redacted.
+    /// The first 200 characters of the text removed before, redacted.
     pub(super) preview: String,
+    /// The first 200 characters of the text removed after, redacted.
+    pub(super) trailing: String,
 }
 
 impl TaskCandidate {
@@ -49,33 +55,48 @@ impl TaskCandidate {
 }
 
 impl Packaging {
-    fn of(leading: &str, wrapper: bool) -> Self {
-        // Redact first, so a cut never leaves part of a secret-shaped word.
-        let redacted = match archon_workflow::events::sanitize_value(serde_json::Value::String(
-            leading.to_string(),
-        )) {
-            serde_json::Value::String(text) => text,
-            other => other.to_string(),
-        };
+    fn of(leading: &str, trailing: &str, wrapper: bool) -> Self {
         Self {
             lines: leading.matches('\n').count(),
             bytes: leading.len(),
+            trailing_bytes: trailing.len(),
             wrapper,
-            preview: redacted.chars().take(200).collect(),
+            preview: redacted_preview(leading),
+            trailing: redacted_preview(trailing),
         }
     }
 
-    /// The envelope report's note: what was discarded, so nothing the host
-    /// removed is silent.
+    /// The envelope report's note: every byte the host removed, before and
+    /// after the task file, so nothing it removed is silent.
     pub(super) fn report(&self) -> String {
+        let after = if self.trailing_bytes == 0 {
+            "nothing"
+        } else {
+            "the outer wrapper's closing fence and what followed it"
+        };
         format!(
-            "\n## candidate normalisation\n  the host discarded packaging before the task file: {} leading line(s), {} byte(s); outer wrapper fence pair removed: {}\n  discarded text (first 200 characters, redacted): {:?}\n",
+            "\n## candidate normalisation\n  the host removed {} byte(s) of packaging: {} leading line(s) ({} byte(s)) before the task file and {} trailing byte(s) after it ({after}); outer wrapper fence pair removed: {}\n  removed leading text (first 200 characters, redacted): {:?}\n  removed trailing text (redacted): {:?}\n",
+            self.bytes + self.trailing_bytes,
             self.lines,
             self.bytes,
+            self.trailing_bytes,
             if self.wrapper { "yes" } else { "no" },
-            self.preview
+            self.preview,
+            self.trailing
         )
     }
+}
+
+/// `text` redacted as stored records are, then cut to 200 characters (in
+/// that order, so a cut never leaves part of a secret-shaped word).
+fn redacted_preview(text: &str) -> String {
+    let redacted = match archon_workflow::events::sanitize_value(serde_json::Value::String(
+        text.to_string(),
+    )) {
+        serde_json::Value::String(text) => text,
+        other => other.to_string(),
+    };
+    redacted.chars().take(200).collect()
 }
 
 /// The task file in `candidate`; or the one finding text that refuses it.
@@ -94,12 +115,15 @@ pub(super) fn normalize_task_candidate(candidate: Vec<u8>) -> Result<TaskCandida
     if !others.is_empty() {
         return Err(several_task_files(first, &others));
     }
-    let leading = &text[..offset_in(text, task_file)];
-    let packaging = (!leading.is_empty()).then(|| Packaging::of(leading, wrapper));
+    let start = offset_in(text, task_file);
+    let (leading, trailing) = (&text[..start], &text[start + task_file.len()..]);
+    let packaging = (!leading.is_empty() || !trailing.is_empty())
+        .then(|| Packaging::of(leading, trailing, wrapper));
     if let Some(packaging) = &packaging {
         tracing::info!(
             lines = packaging.lines,
             bytes = packaging.bytes,
+            trailing_bytes = packaging.trailing_bytes,
             wrapper = packaging.wrapper,
             "land-task-body discarded packaging before the task file"
         );
@@ -135,14 +159,17 @@ fn located_task_file(text: &str) -> Result<(&str, bool), String> {
     }
 }
 
+/// A top-level second task file cannot be told apart from a second answer,
+/// so it is refused; the finding says how to keep an example instead.
 fn several_task_files(first: Option<String>, others: &[String]) -> String {
     let ids: Vec<&str> = std::iter::once(first.as_deref().unwrap_or("one without a task_id"))
         .chain(others.iter().map(String::as_str))
         .collect();
     format!(
-        "the answer holds {} task files ({}); return only one task file, starting with its ```yaml frontmatter block",
+        "the answer holds {} task files ({}); return only one task file, starting with its ```yaml frontmatter block; if {} is an example, put it inside a ```markdown fence",
         ids.len(),
-        ids.join(", ")
+        ids.join(", "),
+        others.join(", ")
     )
 }
 

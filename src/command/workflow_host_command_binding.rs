@@ -92,15 +92,23 @@ pub(crate) fn bind_request(
     let pin = read_acceptance_pin(&context)?;
     let skeleton = archon_workflow::task_skeleton::validate_full_chain(&context.task_root, &pin)
         .map_err(|error| WorkflowError::SpecInvalid(error.to_string()))?;
+    // The task file opens where the body gate's packaging strip says it does,
+    // so a yaml block in chat before it is never read as its frontmatter.
+    let anchor = crate::command::topology_lint::task_file_anchor(candidate);
+    let task_file = anchor
+        .as_ref()
+        .map_or(candidate, |anchor| &candidate[anchor.opener..]);
     let mut matches = Vec::new();
     for frozen in &skeleton.tasks {
         let path = context.task_root.join(&frozen.file_name);
-        if archon_workflow::task_universe::parsing::parse_task_file(&path, candidate).is_ok() {
+        if archon_workflow::task_universe::parsing::parse_task_file(&path, task_file).is_ok() {
             matches.push((frozen.task_id.clone(), path));
         }
     }
     if matches.is_empty()
-        && let Some(subject) = named_subject_refusal(&skeleton.tasks, &context.task_root, candidate)
+        && let Some(anchor) = &anchor
+        && let Some(subject) =
+            named_subject_refusal(&skeleton.tasks, &context.task_root, candidate, anchor)
     {
         return Ok(Err(Unbound::Unparsed(subject)));
     }
@@ -134,19 +142,23 @@ impl UnparsedSubject {
     }
 }
 
-/// The subject `candidate`'s frontmatter names, when it is a frozen one the
-/// candidate fails to parse as.
+/// The subject the task file's frontmatter names ([`task_file_anchor`]),
+/// when it is a frozen one the task file fails to parse as.
+///
+/// [`task_file_anchor`]: crate::command::topology_lint::task_file_anchor
 fn named_subject_refusal(
     tasks: &[archon_workflow::task_skeleton::FrozenTask],
     task_root: &Path,
     candidate: &str,
+    anchor: &crate::command::topology_lint::TaskFileAnchor,
 ) -> Option<UnparsedSubject> {
-    let named = frontmatter_task_id(candidate)?;
+    let named = anchor.task_id.as_str();
     let frozen = tasks.iter().find(|frozen| frozen.task_id == named)?;
     let task_file = task_root.join(&frozen.file_name);
+    let block = &candidate[anchor.opener..];
     let error =
-        archon_workflow::task_universe::parsing::parse_task_file(&task_file, candidate).err()?;
-    let cause = unclosed_frontmatter(candidate).unwrap_or_else(|| match error {
+        archon_workflow::task_universe::parsing::parse_task_file(&task_file, block).err()?;
+    let cause = unclosed_frontmatter(block, candidate).unwrap_or_else(|| match error {
         WorkflowError::SpecInvalid(text) => text,
         other => other.to_string(),
     });
@@ -158,26 +170,15 @@ fn named_subject_refusal(
     })
 }
 
-/// The top-level `task_id:` value inside the first ```` ```yaml ````
-/// frontmatter block, the block the task parser reads, read line by line so
-/// a block cut short still names its subject. A `task_id:` line anywhere
-/// else (chat, the body) names nothing.
-fn frontmatter_task_id(candidate: &str) -> Option<&str> {
-    let mut lines = candidate.lines();
-    lines.find(|line| matches!(line.trim(), "```yaml" | "```yml"))?;
-    lines
-        .take_while(|line| !matches!(line.trim(), "```" | "---"))
-        .find_map(|line| line.strip_prefix("task_id:"))
-        .map(|value| value.trim().trim_matches(|ch| ch == '"' || ch == '\''))
-}
-
-/// The cause for a candidate whose ```` ```yaml ```` frontmatter opens and
-/// never closes (the parser reads that as no block at all): where the answer
-/// ends, and its last 40 characters.
-fn unclosed_frontmatter(candidate: &str) -> Option<String> {
-    let mut lines = candidate.lines().map(str::trim);
-    lines.find(|line| matches!(*line, "```yaml" | "```yml"))?;
-    if lines.any(|line| line == "```" || line == "---") {
+/// The cause for a candidate whose frontmatter `block` (from its
+/// ```` ```yaml ```` line) never closes (the parser reads that as no block at
+/// all): where the answer ends, and its last 40 characters.
+fn unclosed_frontmatter(block: &str, candidate: &str) -> Option<String> {
+    if block
+        .lines()
+        .skip(1)
+        .any(|line| matches!(line.trim(), "```" | "---"))
+    {
         return None;
     }
     let ends = candidate.chars().count();

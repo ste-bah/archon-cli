@@ -151,7 +151,7 @@ fn a_second_complete_task_file_is_refused_on_every_path() {
     ] {
         assert_eq!(
             refusal(&answer),
-            "the answer holds 2 task files (TASK-X-001, TASK-X-002); return only one task file, starting with its ```yaml frontmatter block",
+            "the answer holds 2 task files (TASK-X-001, TASK-X-002); return only one task file, starting with its ```yaml frontmatter block; if TASK-X-002 is an example, put it inside a ```markdown fence",
             "{answer:?}"
         );
     }
@@ -186,5 +186,52 @@ fn blank_lines_a_bom_and_a_pure_wrapper_are_recorded() {
     assert_eq!(
         (packaging.lines, packaging.bytes, packaging.wrapper),
         (1, 12, true)
+    );
+}
+
+/// A whole task file quoted as an example inside a ```markdown fence is
+/// nested, so it is never a second task file.
+#[test]
+fn a_whole_task_file_example_nested_in_a_markdown_fence_lands() {
+    let example = format!(
+        "{}\n# TASK-X-002\n",
+        FRONTMATTER.replace("TASK-X-001", "TASK-X-002")
+    );
+    let body = format!(
+        "{}\nA whole example:\n\n```markdown\n{example}```\n\nEnd.\n",
+        valid_body()
+    );
+    assert_eq!(landed(body.as_bytes()), (body.clone().into_bytes(), false));
+    let (bytes, _, _) = discarded(&format!("{CHAT}\n\n{body}"));
+    assert_eq!(bytes, body.as_bytes());
+}
+
+/// Every byte the host removes is counted: the wrapper's closing fence and
+/// what follows it too, and the note says what was removed at the end.
+#[test]
+fn the_wrapper_closer_and_trailing_whitespace_are_counted() {
+    let body = valid_body();
+    let answer = format!("{CHAT}\n\n```markdown\n{body}```  \n\n");
+    let (bytes, _, packaging) = discarded(&answer);
+    assert_eq!(bytes, body.as_bytes());
+    let leading = CHAT.len() + 2 + "```markdown\n".len();
+    let report = packaging.report();
+    assert!(
+        report.contains(&format!("removed {} byte(s)", answer.len() - body.len())),
+        "{report}"
+    );
+    assert!(
+        report.contains(&format!("{leading} byte(s)) before the task file")),
+        "{report}"
+    );
+    assert!(
+        report.contains(
+            "7 trailing byte(s) after it (the outer wrapper's closing fence and what followed it)"
+        ),
+        "{report}"
+    );
+    assert!(
+        report.contains("removed trailing text (redacted): \"```  \\n\\n\""),
+        "{report}"
     );
 }
