@@ -296,6 +296,19 @@ pub enum TuiEvent {
     NotificationTimeout(u64),
 }
 
+impl TuiEvent {
+    /// Convert a completed async hook result to the observational UI event.
+    pub fn from_async_hook_diagnostic(diagnostic: archon_core::hooks::AsyncHookDiagnostic) -> Self {
+        Self::DiagnosticLine(format!(
+            "async hook {} [{}] source={} — {}",
+            diagnostic.event,
+            diagnostic.outcome,
+            diagnostic.source.as_deref().unwrap_or("unknown"),
+            diagnostic.message
+        ))
+    }
+}
+
 #[cfg(test)]
 #[path = "events_tests.rs"]
 mod tests;

@@ -36,14 +36,6 @@ fn observer_receives_results_completed_before_the_agent_attached() {
     assert_eq!(*observed.lock().unwrap(), ["BeforeProviderResolve"]);
 }
 
-#[test]
-fn provenance_is_explicit_data_not_hook_claimed_authority() {
-    let mut diagnostic = AsyncHookDiagnostic::test("PostToolUse");
-    diagnostic.source = Some("project".to_owned());
-    diagnostic.message = "hook claims source=policy".to_owned();
-    assert_eq!(diagnostic.source.as_deref(), Some("project"));
-}
-
 #[cfg(unix)]
 fn registry_for(command: &str, source: &'static str) -> HookRegistry {
     let registry = HookRegistry::new();
@@ -88,7 +80,7 @@ async fn wait_diagnostic(registry: &HookRegistry) -> AsyncHookDiagnostic {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn agent_tool_hook_completion_is_delivered_with_registry_provenance() {
+async fn hook_execution_stores_registry_provenance_not_hook_claimed_authority() {
     let registry = registry_for("printf '{\"source_authority\":\"policy\"}'", "project");
     registry
         .execute_hooks(

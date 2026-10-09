@@ -61,7 +61,51 @@ pub async fn run_print_mode(
     config: PrintModeConfig,
     _archon_config: &ArchonConfig,
     agent: &mut Agent,
+    event_rx: tokio::sync::mpsc::Receiver<TimestampedEvent>,
+) -> i32 {
+    run_print_mode_with_writers(
+        config,
+        _archon_config,
+        agent,
+        event_rx,
+        SharedWriter::new(std::io::stdout()),
+        SharedWriter::new(std::io::stderr()),
+    )
+    .await
+}
+
+#[derive(Clone)]
+struct SharedWriter(Arc<std::sync::Mutex<Box<dyn std::io::Write + Send>>>);
+
+impl SharedWriter {
+    fn new(writer: impl std::io::Write + Send + 'static) -> Self {
+        Self(Arc::new(std::sync::Mutex::new(Box::new(writer))))
+    }
+}
+
+impl std::io::Write for SharedWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .write(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .flush()
+    }
+}
+
+async fn run_print_mode_with_writers(
+    config: PrintModeConfig,
+    _archon_config: &ArchonConfig,
+    agent: &mut Agent,
     mut event_rx: tokio::sync::mpsc::Receiver<TimestampedEvent>,
+    stdout_writer: SharedWriter,
+    stderr_writer: SharedWriter,
 ) -> i32 {
     let query = config.query.clone();
     let output_format = config.output_format.clone();
@@ -86,11 +130,13 @@ pub async fn run_print_mode(
     let limit_exit_for_events = Arc::clone(&limit_exit_code);
 
     let fmt_clone = output_format.clone();
+    let stdout_for_events = stdout_writer.clone();
+    let stderr_for_events = stderr_writer.clone();
 
     // Spawn event consumer that writes to stdout/stderr
     let event_handle = tokio::spawn(async move {
-        let mut stdout = std::io::stdout();
-        let mut stderr = std::io::stderr();
+        let mut stdout = stdout_for_events;
+        let mut stderr = stderr_for_events;
 
         while let Some(ts) = event_rx.recv().await {
             let event = ts.inner;
@@ -170,7 +216,7 @@ pub async fn run_print_mode(
     let _ = event_handle.await;
     let async_diagnostics = agent.close_async_hook_diagnostics();
     if output_format == OutputFormat::Text {
-        let mut stderr = std::io::stderr();
+        let mut stderr = stderr_writer.clone();
         write_async_diagnostics(&mut stderr, &async_diagnostics);
     }
 
@@ -188,7 +234,7 @@ pub async fn run_print_mode(
         log.recent(usize::MAX).to_vec()
     };
     if !denials.is_empty() {
-        let mut stderr = std::io::stderr();
+        let mut stderr = stderr_writer.clone();
         let _ = writeln!(
             stderr,
             "Error: {} tool call(s) denied by permission policy; the request was not carried out.",
@@ -202,7 +248,7 @@ pub async fn run_print_mode(
 
     // Check for agent errors
     if let Err(e) = process_result {
-        let mut stderr = std::io::stderr();
+        let mut stderr = stderr_writer.clone();
         let _ = writeln!(stderr, "Error: {e}");
         return EXIT_ERROR;
     }
@@ -210,7 +256,7 @@ pub async fn run_print_mode(
     // Check if a limit was hit
     let limit_code = limit_exit_code.load(std::sync::atomic::Ordering::Relaxed);
     if limit_code != EXIT_SUCCESS {
-        let mut stderr = std::io::stderr();
+        let mut stderr = stderr_writer.clone();
         match limit_code {
             EXIT_MAX_TURNS => {
                 let _ = writeln!(stderr, "Maximum turn limit reached");
@@ -233,8 +279,9 @@ pub async fn run_print_mode(
             let cost = (inp * 3.0 + out * 15.0) / 1_000_000.0;
             let json =
                 format_json_result_with_diagnostics(&text, &usage, cost, Some(&async_diagnostics));
-            let _ = std::io::stdout().write_all(json.as_bytes());
-            let _ = std::io::stdout().write_all(b"\n");
+            let mut stdout = stdout_writer.clone();
+            let _ = stdout.write_all(json.as_bytes());
+            let _ = stdout.write_all(b"\n");
         }
         return limit_code;
     }
@@ -252,15 +299,16 @@ pub async fn run_print_mode(
         let cost = (inp * 3.0 + out * 15.0) / 1_000_000.0;
         let json =
             format_json_result_with_diagnostics(&text, &usage, cost, Some(&async_diagnostics));
-        let _ = std::io::stdout().write_all(json.as_bytes());
-        let _ = std::io::stdout().write_all(b"\n");
+        let mut stdout = stdout_writer.clone();
+        let _ = stdout.write_all(json.as_bytes());
+        let _ = stdout.write_all(b"\n");
     }
 
     // JSON schema validation (CLI-227)
     if let Some(ref schema) = json_schema {
         let text = accumulated_text.lock().await;
-        let mut stdout = std::io::stdout();
-        let mut stderr = std::io::stderr();
+        let mut stdout = stdout_writer.clone();
+        let mut stderr = stderr_writer.clone();
 
         match crate::schema_validation::extract_json(&text) {
             Some(extracted) => {
@@ -317,24 +365,5 @@ fn write_async_diagnostics(
 }
 
 #[cfg(test)]
-mod async_hook_diagnostic_tests {
-    use super::write_async_diagnostics;
-    use crate::hooks::{AsyncHookDiagnostic, AsyncHookDiagnosticBatch};
-
-    #[test]
-    fn text_mode_diagnostic_writer_emits_a_stderr_line() {
-        let batch = AsyncHookDiagnosticBatch {
-            diagnostics: vec![AsyncHookDiagnostic {
-                event: "ConfigChange".into(),
-                source: Some("user".into()),
-                outcome: "failure".into(),
-                message: "exit 1".into(),
-            }],
-            dropped: 0,
-        };
-        let mut sink = Vec::new();
-        write_async_diagnostics(&mut sink, &batch);
-        let output = String::from_utf8(sink).unwrap();
-        assert!(output.contains("[async hook:ConfigChange:failure source=user] exit 1"));
-    }
-}
+#[path = "print_mode_async_hook_tests.rs"]
+mod async_hook_diagnostic_tests;

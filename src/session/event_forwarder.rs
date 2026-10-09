@@ -75,13 +75,9 @@ pub(super) fn spawn_agent_event_forwarder(
                     TuiEvent::TextDelta(text)
                 }
                 AgentEvent::ThinkingDelta(text) => TuiEvent::ThinkingDelta(text),
-                AgentEvent::AsyncHookDiagnostic(diagnostic) => TuiEvent::DiagnosticLine(format!(
-                    "async hook {} [{}] source={} — {}",
-                    diagnostic.event,
-                    diagnostic.outcome,
-                    diagnostic.source.as_deref().unwrap_or("unknown"),
-                    diagnostic.message
-                )),
+                AgentEvent::AsyncHookDiagnostic(diagnostic) => {
+                    TuiEvent::from_async_hook_diagnostic(diagnostic)
+                }
                 AgentEvent::TransientThinkingDelta(text) => TuiEvent::TransientThinkingDelta(text),
                 AgentEvent::CommitThinkingPreview => TuiEvent::CommitThinkingPreview,
                 AgentEvent::DiscardThinkingPreview => TuiEvent::DiscardThinkingPreview,

@@ -39,7 +39,7 @@ mod picker_events;
 mod picker_input;
 mod task_overlay_input;
 pub(crate) mod thinking_archive;
-mod tui_events;
+pub(crate) mod tui_events;
 /// Token and cost arithmetic, split from `tui_events.rs` for the 500-line
 /// ceiling (#192).
 mod tui_events_accounting;
