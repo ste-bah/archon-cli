@@ -181,6 +181,7 @@ fn accepted_call_counts(root: &Path) -> std::collections::BTreeMap<String, usize
         let event: serde_json::Value = serde_json::from_str(line).unwrap();
         if event["kind"] == "author_attempt_completed"
             && event["detail"]["status"] == "accepted"
+            && event["detail"]["reused"] != true
             && let Some(call_id) = event["detail"]["call_id"].as_str()
         {
             *counts.entry(call_id.to_string()).or_default() += 1;

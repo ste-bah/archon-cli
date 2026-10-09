@@ -1,4 +1,7 @@
 pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
+    if let Some(answer) = fidelity_answer(prompt) {
+        return ("fidelity", answer);
+    }
     if prompt.contains("Adversarially judge every acceptance check") || prompt.contains("decisions")
     {
         // `prompt` is the serialized request body, so a quoted id inside the
@@ -145,9 +148,38 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
     )
 }
 
+fn fidelity_answer(serialized_request: &str) -> Option<String> {
+    let request: serde_json::Value = serde_json::from_str(serialized_request).ok()?;
+    let messages = request.get("messages")?.as_array()?;
+    let content = messages
+        .iter()
+        .filter_map(|message| message.get("content").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !content.contains("You are auditing whether a task decomposition is faithful to its PRD") {
+        return None;
+    }
+    let obligations_text = content.split_once("Obligations: ")?.1;
+    let obligations_json = obligations_text.split_once("\n\n")?.0;
+    let obligations: Vec<serde_json::Value> = serde_json::from_str(obligations_json).ok()?;
+    let verdicts = obligations
+        .iter()
+        .map(|obligation| {
+            serde_json::json!({
+                "obligation_id": obligation["id"],
+                "necessarily_true": true,
+                "weakest_task_id": "",
+                "reason": "The task requires the named deliverable in the project and its focused check verifies it.",
+                "quoted_task_text": ""
+            })
+        })
+        .collect::<Vec<_>>();
+    Some(serde_json::json!({"verdicts": verdicts}).to_string())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::scripted_answer;
+    use super::{fidelity_answer, scripted_answer};
 
     #[test]
     fn routes_current_acceptance_author_prompt_and_extracts_its_id() {
@@ -310,5 +342,73 @@ mod tests {
         assert_eq!(decisions["decisions"].as_array().unwrap().len(), 2);
         assert_eq!(decisions["decisions"][0]["id"], "AC-X-001");
         assert_eq!(decisions["decisions"][1]["id"], "SUP-REQ-X-002");
+    }
+
+    #[test]
+    fn fidelity_critic_answers_every_obligation_in_a_serialized_provider_body() {
+        use archon_workflow::fidelity_audit::{
+            ClaimedObligation, ClaimingTask, parse_fidelity_response,
+        };
+        let fidelity_prompt = concat!(
+            "You are auditing whether a task decomposition is faithful to its PRD.\n\n",
+            "Obligations: [{\"id\":\"AC-X-001\",\"text\":\"ready\"},{\"id\":\"REQ-X-001\",\"text\":\"alpha\"}]\n\n",
+            "FROZEN SKELETON (every task in the set, one JSON object per line):\n",
+            "{\"task_id\":\"TASK-X-010\"}\n",
+            "===== BEGIN TASK TASK-X-010 =====\nCreate the required outputs.\n===== END TASK TASK-X-010 ====="
+        );
+        let body = serde_json::json!({
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": fidelity_prompt}]
+        })
+        .to_string();
+        let answer = fidelity_answer(&body).expect("serialized fidelity prompt is recognized");
+        let document: serde_json::Value = serde_json::from_str(&answer).unwrap();
+        let verdicts = document["verdicts"].as_array().unwrap();
+        assert_eq!(verdicts.len(), 2, "{document}");
+        assert_eq!(verdicts[0]["obligation_id"], "AC-X-001");
+        assert_eq!(verdicts[1]["obligation_id"], "REQ-X-001");
+        for verdict in verdicts {
+            assert_eq!(verdict["necessarily_true"], true, "{verdict}");
+            assert_eq!(verdict["weakest_task_id"], "", "{verdict}");
+            assert_eq!(verdict["quoted_task_text"], "", "{verdict}");
+            assert!(!verdict["reason"].as_str().unwrap().is_empty(), "{verdict}");
+        }
+        let obligations = [
+            ClaimedObligation {
+                id: "AC-X-001".into(),
+                text: "ready".into(),
+            },
+            ClaimedObligation {
+                id: "REQ-X-001".into(),
+                text: "alpha".into(),
+            },
+        ];
+        let tasks = [ClaimingTask {
+            task_id: "TASK-X-010".into(),
+            text: "Create the required outputs.".into(),
+        }];
+        assert!(
+            parse_fidelity_response(&answer, &obligations, &tasks).is_ok(),
+            "fake provider reply must satisfy the real fidelity parser: {answer}"
+        );
+        let false_verdict = serde_json::json!({
+            "verdicts": [{
+                "obligation_id": "AC-X-001",
+                "necessarily_true": false,
+                "weakest_task_id": "TASK-X-010",
+                "reason": "The task permits the output to be absent.",
+                "quoted_task_text": "Create the required outputs."
+            }]
+        })
+        .to_string();
+        assert!(parse_fidelity_response(&false_verdict, &obligations[..1], &tasks).is_ok());
+        let mut bad_quote: serde_json::Value = serde_json::from_str(&false_verdict).unwrap();
+        bad_quote["verdicts"][0]["quoted_task_text"] = "paraphrased loophole".into();
+        assert!(
+            parse_fidelity_response(&bad_quote.to_string(), &obligations[..1], &tasks).is_err()
+        );
+        let (role, routed_answer) = scripted_answer(&body);
+        assert_eq!(role, "fidelity");
+        assert_eq!(routed_answer, answer);
     }
 }
