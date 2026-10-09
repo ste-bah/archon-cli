@@ -10,31 +10,111 @@
 /// author is told what to fix, which is safer than guessing which block was
 /// meant. Nothing here validates the document; that stays with the gate.
 pub(crate) fn candidate_document_bytes(candidate: &[u8]) -> &[u8] {
+    candidate_extraction(candidate).document
+}
+
+/// The extracted document plus byte counts for authored text omitted around it.
+/// Fence delimiters and a `json` label are packaging, not discarded text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CandidateExtraction<'a> {
+    pub(crate) document: &'a [u8],
+    pub(crate) discarded_before: usize,
+    pub(crate) discarded_after: usize,
+    pub(crate) unwrapped_fence: bool,
+    discarded_text: Vec<u8>,
+}
+
+pub(crate) fn candidate_extraction(candidate: &[u8]) -> CandidateExtraction<'_> {
     let Ok(text) = std::str::from_utf8(candidate) else {
-        return candidate;
+        return whole_candidate(candidate);
     };
     if text.trim_start().starts_with(['{', '[']) {
-        return first_json_document(candidate);
+        let (document, _) = first_json_document(candidate);
+        let discarded_text = &candidate[document.len()..];
+        return CandidateExtraction {
+            document,
+            discarded_before: 0,
+            discarded_after: discarded_text.len(),
+            unwrapped_fence: false,
+            discarded_text: discarded_text.to_vec(),
+        };
     }
     let mut blocks = text.split("```");
-    let _before = blocks.next();
-    let mut only: Option<&str> = None;
+    let before = blocks.next().unwrap_or_default();
+    let mut only: Option<(&str, Option<&str>)> = None;
     while let Some(block) = blocks.next() {
-        if blocks.next().is_none() && block.trim().is_empty() {
+        let trailing = blocks.next();
+        if trailing.is_none() && block.trim().is_empty() {
             break;
         }
         let body = block.strip_prefix("json").unwrap_or(block);
         if only.is_some() {
-            return candidate;
+            return whole_candidate(candidate);
         }
-        only = Some(body);
+        only = Some((body, trailing));
     }
     match only {
-        Some(body) if body.trim_start().starts_with(['{', '[']) => {
-            first_json_document(body.as_bytes())
+        Some((body, trailing)) if body.trim_start().starts_with(['{', '[']) => {
+            let (document, _) = first_json_document(body.as_bytes());
+            let discarded_body_tail = &body.as_bytes()[document.len()..];
+            let discarded_fence_tail = trailing.unwrap_or_default().as_bytes();
+            CandidateExtraction {
+                document,
+                discarded_before: before.len(),
+                discarded_after: discarded_body_tail.len() + discarded_fence_tail.len(),
+                unwrapped_fence: true,
+                discarded_text: [before.as_bytes(), discarded_body_tail, discarded_fence_tail]
+                    .concat(),
+            }
         }
-        _ => candidate,
+        _ => whole_candidate(candidate),
     }
+}
+
+fn whole_candidate(candidate: &[u8]) -> CandidateExtraction<'_> {
+    CandidateExtraction {
+        document: candidate,
+        discarded_before: 0,
+        discarded_after: 0,
+        unwrapped_fence: false,
+        discarded_text: Vec::new(),
+    }
+}
+
+/// Format a bounded note for the host-command result's existing stderr
+/// diagnostics channel. Removing only a fence is ordinary packaging and has
+/// no discarded authored text to report.
+pub(crate) fn extraction_diagnostic(extraction: &CandidateExtraction<'_>) -> Option<String> {
+    if extraction.discarded_before == 0 && extraction.discarded_after == 0 {
+        return None;
+    }
+    let discarded = String::from_utf8_lossy(&extraction.discarded_text);
+    if discarded.chars().all(char::is_whitespace) {
+        return Some(format!(
+            "candidate extraction discarded whitespace only: discarded_before={} bytes, discarded_after={} bytes, unwrapped_fence={}",
+            extraction.discarded_before, extraction.discarded_after, extraction.unwrapped_fence
+        ));
+    }
+    let redacted = archon_observability::redaction::redact_text(&discarded);
+    let excerpt: String = redacted.chars().take(200).collect();
+    Some(format!(
+        "candidate extraction discarded text: discarded_before={} bytes, discarded_after={} bytes, unwrapped_fence={}; excerpt={excerpt}",
+        extraction.discarded_before, extraction.discarded_after, extraction.unwrapped_fence
+    ))
+}
+
+/// Store the note on host-command stderr and emit the same redacted note at
+/// info level exactly once.
+pub(crate) fn record_candidate_extraction(
+    candidate: &[u8],
+    stderr: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    let extraction = candidate_extraction(candidate);
+    if let Some(diagnostic) = extraction_diagnostic(&extraction) {
+        tracing::info!(target: "archon::workflow::freeze_candidate", "{diagnostic}");
+        writeln!(stderr, "{diagnostic}")?;
+    }
+    Ok(())
 }
 
 /// The candidate document the command stages: [`candidate_document_bytes`],
@@ -60,11 +140,14 @@ pub(crate) fn candidate_document(candidate: &[u8]) -> std::borrow::Cow<'_, [u8]>
 /// end offset keeps that decision exact rather than heuristic — nothing is
 /// searched for, and a reply whose first value never closes is returned whole so
 /// the parse fails and the author is told.
-fn first_json_document(bytes: &[u8]) -> &[u8] {
+fn first_json_document(bytes: &[u8]) -> (&[u8], usize) {
     let mut stream = serde_json::Deserializer::from_slice(bytes).into_iter::<serde_json::Value>();
     match stream.next() {
-        Some(Ok(_)) => &bytes[..stream.byte_offset()],
-        _ => bytes,
+        Some(Ok(_)) => {
+            let end = stream.byte_offset();
+            (&bytes[..end], bytes.len() - end)
+        }
+        _ => (bytes, 0),
     }
 }
 
@@ -211,6 +294,10 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_freeze_candidate_extraction_tests.rs"]
+mod extraction_tests;
 
 #[cfg(test)]
 #[path = "workflow_freeze_candidate_redaction_tests.rs"]

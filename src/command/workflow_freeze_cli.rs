@@ -143,6 +143,10 @@ async fn stage_acceptance(
     }
     let resume = staged_freeze_resume(&mut std::io::stderr());
     let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
+    crate::command::workflow_freeze_candidate::record_candidate_extraction(
+        &candidate,
+        &mut std::io::stderr().lock(),
+    )?;
     let tasks_root = absolute(cwd, tasks);
     let prd_path = absolute(cwd, prd);
     let factory =
@@ -246,6 +250,10 @@ fn stage_skeleton(
         ));
     }
     let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
+    crate::command::workflow_freeze_candidate::record_candidate_extraction(
+        &candidate,
+        &mut std::io::stderr().lock(),
+    )?;
     let tasks_root = absolute(cwd, tasks);
     let prd_path = absolute(cwd, prd);
     let gate = (
