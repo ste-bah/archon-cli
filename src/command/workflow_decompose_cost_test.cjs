@@ -136,7 +136,7 @@ async function hostCriterion(value, envelope = false) {
  assert.equal(state.entries.get('A').criterion,'the host criterion');
 }
 async function supplementaryPointer() {
- const ctx={args:{acceptanceCriteria:{A:'a'},authorMaxParallelism:1},__archonValidateAcceptanceEntry:()=> '[]'};
+ const ctx={args:{acceptanceCriteria:{A:'a'},prdRequirementTexts:{'REQ-X':'x'},authorMaxParallelism:1},__archonValidateAcceptanceEntry:()=> '[]'};
  vm.createContext(withAuthorContext(ctx));vm.runInContext(scriptSource(),ctx);
  ctx.owedSupplementary().set('SUP-REQ-X',{requirement:'REQ-X',text:'x'});
  const candidate={entries:[{id:'A'}],supplementary:[{id:'SUP-REQ-X'}]};

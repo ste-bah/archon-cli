@@ -29,7 +29,10 @@ function context(validator) {
 // One author round for `ids`; returns each entry's task text and the
 // validator's calls.
 async function round(ctx, owed = []) {
-  for (const [id, requirement] of owed) ctx.owedSupplementary().set(id, {requirement, text:'owed text'});
+  for (const [id, requirement] of owed) {
+    ctx.args.prdRequirementTexts = {...ctx.args.prdRequirementTexts, [requirement]:'owed text'};
+    ctx.owedSupplementary().set(id, {requirement, text:'stale finding text'});
+  }
   const tasks = new Map();
   const w = {agent: async (_, options) => {
     const id = options.task.match(/Author ONLY entry ([^:]+):/)[1];

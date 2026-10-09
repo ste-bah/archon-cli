@@ -8,6 +8,19 @@ use archon_workflow::obligation_ids::{
 };
 use archon_workflow::task_set_contract::content_digest;
 
+/// Add current PRD requirement text to the in-memory script arguments. This
+/// field is runtime input only; callers keep the launch-bound arguments intact.
+pub(crate) fn script_arguments_with_prd_requirement_texts(
+    arguments: &serde_json::Value,
+    prd_text: &str,
+) -> serde_json::Value {
+    let mut script_arguments = arguments.clone();
+    script_arguments["prdRequirementTexts"] = serde_json::json!(
+        archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text)
+    );
+    script_arguments
+}
+
 pub(crate) fn validate_prd_input(
     prd_path: &Path,
 ) -> Result<(Vec<u8>, String, BTreeMap<String, String>)> {

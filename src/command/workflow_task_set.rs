@@ -93,7 +93,7 @@ mod staging;
 pub(crate) use crate::command::workflow_task_set_candidate::CandidateRejected;
 #[cfg(test)]
 pub(crate) use enforce::{freeze_acceptance, freeze_skeleton};
-pub(crate) use prd::validate_prd_input;
+pub(crate) use prd::{script_arguments_with_prd_requirement_texts, validate_prd_input};
 
 pub(crate) fn acceptance_pin_path(project_root: &Path, tasks_root: &Path) -> PathBuf {
     let canonical = tasks_root

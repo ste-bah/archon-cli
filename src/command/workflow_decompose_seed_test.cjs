@@ -23,6 +23,8 @@ function context(criteria, phaseSeed, prdRequirementTexts = {}) {
 const entry = (id, version = 0) => ({ id, criterion: id.toLowerCase(), check: { kind: 'command', command: `t ${id} ${version}`, cwd: 'project_root' },
   gap_permitted: false, covers: [], judgment: { verdict: 'accepted', counterexample: '', reason: '', host_call_id: '' } });
 const finding = (text, subject = 'acceptance') => ({ text, subject, remediation_scope: 'candidate_artifact' });
+const defectFinding = (text, code, subject) => ({ ...finding(text, subject),
+  deterministic_defect: { provenance: 'host_validator', code, subject, location: 'coverage', stage: 'contracts' } });
 const owedText = (req) => `check 'SUP-${req}': PRD requirement ${req} is covered by no acceptance check; author supplementary check SUP-${req}: the ${req} text`;
 const acceptancePolicy = (ctx) => ({ phase: 'acceptance', prompt: () => 'author', retryScopes: new Set(['candidate_artifact']),
   shadowScopes: new Set(), author: (w, prompt, round, state) => ctx.authorAcceptanceEntries(w, prompt, round, state) });
@@ -31,10 +33,11 @@ const clean = (call) => ({ publicationReceipt: { call_id: call }, postcondition:
 
 // Records every agent and gate call; every gate accepts.
 function host() {
-  const seen = { agents: [], gates: [] };
+  const seen = { agents: [], gates: [], prompts: [] };
   return { seen, w: {
     agent: async (id, options) => {
       seen.agents.push(id);
+      seen.prompts.push(options.task);
       const [, entryId] = /^acceptance-author-(.+)-\d+$/.exec(id) || [];
       return { status: 'accepted', stopReason: 'end_turn', content: entryId ? JSON.stringify(entry(entryId, 1)) : `artifact ${id}`, task: options.task };
     },
@@ -85,11 +88,11 @@ async function unattributableRefusalReauthorsAsTheLoopDoes() {
   assert.deepEqual(run.seen.agents, ['acceptance-author-A-28', 'acceptance-author-B-28', 'acceptance-author-C-28']);
   assert.notEqual(run.seen.gates[0].stdin, candidate, 'the refused candidate is never re-submitted unchanged');
   // A changed reply since is that round's work: kept, the others authored.
-  run = await seeded(subjects([{ call_id: 'acceptance-author-B-25', id: 'B', text: JSON.stringify(entry('B', 7)) }]), criteria);
+  run = await seeded(subjects([{ call_id: 'acceptance-author-B-25', id: 'B', text: JSON.stringify(entry('B', 7)), criterion: 'b' }]), criteria);
   assert.deepEqual(run.seen.agents, ['acceptance-author-A-28', 'acceptance-author-C-28']);
   assert.deepEqual(JSON.parse(run.seen.gates[0].stdin).entries.map((e) => e.check.command), ['t A 1', 't B 7', 't C 1']);
   // A reply that repeats the refused entry repairs nothing.
-  run = await seeded(subjects([{ call_id: 'acceptance-author-B-25', id: 'B', text: JSON.stringify(entry('B')) }]), criteria);
+  run = await seeded(subjects([{ call_id: 'acceptance-author-B-25', id: 'B', text: JSON.stringify(entry('B')), criterion: 'b' }]), criteria);
   assert.deepEqual(run.seen.agents, ['acceptance-author-A-28', 'acceptance-author-B-28', 'acceptance-author-C-28']);
   // Beside a finding that names one entry, the unattributable one still sends back all.
   run = await seeded(subjects([], [finding("check 'B' was refuted by the host judge; reason: weak", 'B'), whole]), criteria);
@@ -132,22 +135,133 @@ async function pointerRefusalRepairedSince() {
   const repaired = entry('SUP-REQ-1', 2);
   repaired.gap_permitted = true;
   const subjects = (replies) => ({ acceptance: { kind: 'entries', candidate, gates, replies, invalid: {}, carried: 2 } });
-  let run = await seeded(subjects([{ call_id: 'acceptance-author-SUP-REQ-1-25', id: 'SUP-REQ-1', text: JSON.stringify(repaired) }]), { A: 'a' });
+  let run = await seeded(subjects([{ call_id: 'acceptance-author-SUP-REQ-1-25', id: 'SUP-REQ-1', text: JSON.stringify(repaired), criterion: 'current requirement' }]), { A: 'a' }, { acceptance: 25 }, { 'REQ-1': 'current requirement' });
   assert.deepEqual(run.seen.agents, [], 'carried, repaired after the refusal');
   const submitted = JSON.parse(run.seen.gates[0].stdin);
   assert.equal(submitted.supplementary[0].check.command, 't SUP-REQ-1 2');
   assert.deepEqual(submitted.supplementary[0].covers, ['REQ-1'], 'host-owned fields set as the author step sets them');
   assert.equal(submitted.supplementary[0].gap_permitted, false);
   // Not repaired since: the pointer names the one entry to author again.
-  run = await seeded(subjects([]), { A: 'a' });
+  run = await seeded(subjects([]), { A: 'a' }, { acceptance: 25 }, { 'REQ-1': 'current requirement' });
   assert.deepEqual(run.seen.agents, ['acceptance-author-SUP-REQ-1-28']);
 }
 
 async function neverFrozen() {
   const { seen } = await seeded({ acceptance: { kind: 'entries', gates: [], replies: [
-    { call_id: 'acceptance-author-A-4', id: 'A', text: JSON.stringify(entry('A')) }], invalid: {}, carried: 1 } }, { A: 'a', B: 'b' }, { acceptance: 4 });
+    { call_id: 'acceptance-author-A-4', id: 'A', text: JSON.stringify(entry('A')), criterion: 'a' }], invalid: {}, carried: 1 } }, { A: 'a', B: 'b' }, { acceptance: 4 });
   assert.deepEqual(seen.agents, ['acceptance-author-B-7'], 'the missing entry alone');
   assert.equal(seen.gates.length, 1);
+}
+
+async function heldEntriesSurviveStaleAndOmittingGates() {
+  const a = entry('A');
+  const b = entry('B');
+  const carried = [a, b];
+  const stale = await seeded({ acceptance: { kind: 'entries', candidate: null, gates: [], replies: [],
+    carried_entries: carried, refuted_ids: [], invalid: {}, carried: 2 } }, { A: 'a', B: 'b' });
+  assert.deepEqual(stale.seen.agents, [], 'stale verdict and findings do not trigger author repairs');
+  assert.equal(stale.seen.gates.length, 1, 'the gate runs again');
+  assert.deepEqual(JSON.parse(stale.seen.gates[0].stdin).entries.map((item) => item.id), ['A', 'B']);
+
+  const current = await seeded({ acceptance: { kind: 'entries', candidate: JSON.stringify({ entries: [a] }),
+    gates: [{ call_id: 'g', published: false, findings: [defectFinding('uncovered requirement', 'uncovered_requirement', 'B')] }], replies: [],
+    carried_entries: carried, refuted_ids: [], invalid: {}, carried: 2 } }, { A: 'a', B: 'b' });
+  assert.deepEqual(current.seen.agents, [], 'omission from a current gate does not erase B');
+  assert.equal(current.seen.gates.length, 1, 'the candidate is submitted to the gate');
+  assert.deepEqual(JSON.parse(current.seen.gates[0].stdin).entries.map((item) => item.id), ['A', 'B']);
+
+  const refuted = await seeded({ acceptance: { kind: 'entries', candidate: JSON.stringify({ entries: [a] }),
+    gates: [{ call_id: 'g', published: false, findings: [finding("check 'B' was refuted by host")] }], replies: [],
+    carried_entries: carried, refuted_ids: ['B'], invalid: {}, carried: 2 } }, { A: 'a', B: 'b' });
+  assert.deepEqual(refuted.seen.agents, ['acceptance-author-B-28']);
+
+  const mixed = await seeded({ acceptance: { kind: 'entries', candidate: JSON.stringify({ entries: [a] }),
+    gates: [{ call_id: 'g', published: false, findings: [
+      finding('candidate artifact was refused: entries/0/check/command is invalid'),
+      defectFinding('uncovered requirement was mentioned, and an unrelated repair is required', 'check_not_proven', 'unrelated')
+    ] }], replies: [], carried_entries: carried, refuted_ids: ['B'], invalid: {}, carried: 2 } }, { A: 'a', B: 'b' });
+  assert.deepEqual(mixed.seen.agents, ['acceptance-author-A-28', 'acceptance-author-B-28'],
+    'ignore omission-only findings while preserving per-id repairs');
+}
+
+async function replyCriterionComesFromItsAuthorPrompt() {
+  const current = 'The complete current criterion.';
+  const cut = 'The complete';
+  const reply = entry('A');
+  const seedFor = (criterion) => ({ acceptance: { kind: 'entries', candidate: null, gates: [],
+    replies: [{ call_id: 'acceptance-author-A-25', id: 'A', text: JSON.stringify(reply), criterion }],
+    unreadable_replies: {}, carried_entries: [], refuted_ids: [], invalid: {}, carried: 0 } });
+  const stale = await seeded(seedFor(cut), { A: current }, { acceptance: 25 });
+  assert.deepEqual(stale.seen.agents, ['acceptance-author-A-28'], 'cut prompt criterion requires re-authoring');
+  assert.ok(stale.seen.prompts[0].includes(`Author ONLY entry A: ${current}`));
+  const currentPrompt = await seeded(seedFor(current), { A: current }, { acceptance: 25 });
+  assert.deepEqual(currentPrompt.seen.agents, [], 'reply authored against full current prompt is carried');
+}
+
+async function missingPromptCriterionReauthorsButCandidateFallbackCarries() {
+  const currentA = 'Current criterion for A.';
+  const currentB = 'Current criterion for B.';
+  const candidateA = { ...entry('A'), criterion: currentA };
+  const candidateB = { ...entry('B'), criterion: currentB };
+  const seed = { acceptance: { kind: 'entries', candidate: JSON.stringify({ entries: [candidateA, candidateB], supplementary: [] }),
+    gates: [{ call_id: 'gate', published: true, findings: [] }],
+    replies: [{ call_id: 'acceptance-author-A-25', id: 'A', text: JSON.stringify(candidateA) }],
+    carried_entries: [candidateA, candidateB], refuted_ids: [], invalid: {}, carried: 2 } };
+  const { seen } = await seeded(seed, { A: currentA, B: currentB }, { acceptance: 25 });
+  assert.deepEqual(seen.agents, ['acceptance-author-A-28'],
+    'a reply without prompt criterion is re-authored even when the candidate has current criterion text');
+  const submitted = JSON.parse(seen.gates[0].stdin);
+  assert.equal(submitted.entries.find((item) => item.id === 'B').check.command, candidateB.check.command,
+    'an entry with no later reply keeps its candidate fallback');
+}
+
+async function currentSupplementaryCriterionSurvivesTwoResumes() {
+  const full = 'The complete requirement text derived from the current PRD.';
+  const cut = 'The complete requirement text derived';
+  const oldEntry = { ...entry('SUP-REQ-1'), criterion: cut, covers: ['REQ-1'] };
+  const baseEntry = entry('A');
+  const candidate = JSON.stringify({ entries: [baseEntry], supplementary: [oldEntry] });
+  const oldGate = { call_id: 'old-gate', published: false, findings: [finding(owedText('REQ-1'), 'SUP-REQ-1')] };
+  const first = await seeded({ acceptance: { kind: 'entries', candidate, gates: [oldGate], replies: [],
+    carried_entries: [baseEntry, oldEntry], refuted_ids: [], invalid: {}, carried: 2 } }, { A: 'a' }, { acceptance: 8 }, { 'REQ-1': full });
+  assert.deepEqual(first.seen.agents, ['acceptance-author-SUP-REQ-1-13']);
+  assert.ok(first.seen.prompts[0].includes(full), 'prompt contains current derived PRD text');
+  const noCurrentFinding = await seeded({ acceptance: { kind: 'entries', candidate, gates: [], replies: [],
+    carried_entries: [baseEntry, oldEntry], refuted_ids: [], invalid: {}, carried: 2 } },
+  { A: 'a' }, { acceptance: 8 }, { 'REQ-1': full });
+  assert.deepEqual(noCurrentFinding.seen.agents, ['acceptance-author-SUP-REQ-1-13']);
+  assert.ok(noCurrentFinding.seen.prompts[0].includes(full), 'candidate-only supplementary text also comes from current PRD');
+  const repaired = JSON.parse(first.seen.gates[0].stdin).supplementary[0];
+  assert.equal(repaired.criterion, full);
+  const second = await seeded({ acceptance: { kind: 'entries', candidate: first.seen.gates[0].stdin,
+    gates: [oldGate, { call_id: 'new-gate', published: true, findings: [] }], replies: [],
+    carried_entries: [baseEntry, repaired], refuted_ids: [], invalid: {}, carried: 2 } }, { A: 'a' }, { acceptance: 10 }, { 'REQ-1': full });
+  assert.deepEqual(second.seen.agents, [], 'the full-text entry is carried on the next resume');
+}
+
+async function freshGateOwesSupplementaryAndPromptGetsCurrentPrdText() {
+  const full = 'The complete current requirement text from the fresh PRD.';
+  const ctx = context({ A: 'criterion A' }, null, { 'REQ-X': full });
+  const { seen, w } = host();
+  w.hostCommand = async (capability, request) => {
+    seen.gates.push({ capability, stdin: request.stdin });
+    if (seen.gates.length === 1) {
+      return { result: { data: { gateEnvelope: { policy_findings: [finding(owedText('REQ-X'))] } } },
+        gateEnvelope: { policy_findings: [finding(owedText('REQ-X'))] } };
+    }
+    return clean(`gate-${seen.gates.length}`);
+  };
+  const outcome = await ctx.authorCandidate(w, acceptancePolicy(ctx));
+  const prompt = seen.prompts.find((task) => task.includes('Author ONLY entry SUP-REQ-X:'));
+  assert.ok(prompt, `fresh gate finding caused the supplementary entry to be authored: ${JSON.stringify({seen, outcome})}`);
+  assert.ok(prompt.includes(full), `prompt contains current PRD text: ${JSON.stringify(seen.prompts)}`);
+}
+
+async function unreadableReplyIsRetried() {
+  const { seen } = await seeded({ acceptance: { kind: 'entries', candidate: null, gates: [], replies: [],
+    unreadable_replies: { A: 'accepted author reply could not be reconstructed' }, carried_entries: [],
+    refuted_ids: [], invalid: {}, carried: 0 } }, { A: 'a' });
+  assert.deepEqual(seen.agents, ['acceptance-author-A-28']);
 }
 
 async function artifactSeeds() {
@@ -190,7 +304,11 @@ async function sample() {
 
 (async () => {
   for (const test of [refutedEntryOnly, unchangedReplyIsNoRepair, unattributableRefusalReauthorsAsTheLoopDoes, invalidEntryOnly,
-    changedSupplementaryCriterionIsReauthored, pointerRefusalRepairedSince, neverFrozen, artifactSeeds, pausesContinue, sample]) {
+    changedSupplementaryCriterionIsReauthored, pointerRefusalRepairedSince, neverFrozen,
+    heldEntriesSurviveStaleAndOmittingGates, currentSupplementaryCriterionSurvivesTwoResumes,
+    freshGateOwesSupplementaryAndPromptGetsCurrentPrdText,
+    replyCriterionComesFromItsAuthorPrompt, missingPromptCriterionReauthorsButCandidateFallbackCarries,
+    unreadableReplyIsRetried, artifactSeeds, pausesContinue, sample]) {
     await test();
     console.log(`ok ${test.name}`);
   }

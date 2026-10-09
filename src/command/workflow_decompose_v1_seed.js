@@ -69,6 +69,13 @@ function seedEntries(seed, policy, state) {
   const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
   const candidate = typeof seed.candidate === "string" ? JSON.parse(seed.candidate) : null;
   const gates = Array.isArray(seed.gates) ? seed.gates : [];
+  const listed = Array.isArray(seed.carried_entries)
+    ? seed.carried_entries
+    : candidate ? [...(candidate.entries || []), ...(candidate.supplementary || [])] : [];
+  const candidateEntries = candidate ? [...(candidate.entries || []), ...(candidate.supplementary || [])] : [];
+  const omittedHeldIds = new Set(Array.isArray(seed.carried_entries) && candidate
+    ? listed.filter((entry) => !candidateEntries.some((held) => held.id === entry.id)).map((entry) => entry.id)
+    : []);
   // Every gate registers the supplementary checks it says are owed, in order,
   // as the loop did; the last one also names the entries it sent back.
   // `null` from the last gate: a finding no rule attributes to one entry, which
@@ -76,10 +83,15 @@ function seedEntries(seed, policy, state) {
   let refuted = new Set();
   gates.forEach((gate, index) => {
     const last = index === gates.length - 1;
-    const named = seedRepairIds(seedRepairFindings(gate, policy), ids, gate.published === true, last ? candidate : null);
+    const named = seedRepairIds(seedRepairFindings(gate, policy), ids, gate.published === true,
+      last ? candidate : null, last ? omittedHeldIds : new Set());
     if (last) refuted = named;
   });
-  const listed = candidate ? [...(candidate.entries || []), ...(candidate.supplementary || [])] : [];
+  // Current-logic refutations remain owed per id even when a later candidate
+  // omitted that id. Stale gates never enter this list.
+  if (refuted !== null) {
+    for (const id of Array.isArray(seed.refuted_ids) ? seed.refuted_ids : []) refuted.add(id);
+  }
   const staleCriteria = new Set();
   const currentCriterion = (id) => {
     const criteria = args.acceptanceCriteria || {};
@@ -87,7 +99,10 @@ function seedEntries(seed, policy, state) {
     const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(id)?.[1];
     return requirement ? (args.prdRequirementTexts || {})[requirement] : undefined;
   };
+  const owed = owedSupplementary();
   for (const entry of listed) {
+    const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(entry.id)?.[1];
+    if (requirement) owed.set(entry.id, { requirement, text: currentRequirementText(requirement) });
     state.entries.set(entry.id, entry);
   }
   // A reply authored after that gate is the entry's latest version, and a
@@ -100,12 +115,19 @@ function seedEntries(seed, policy, state) {
   const criteria = args.acceptanceCriteria || {};
   const kept = (entry) => acceptanceEntryKey(setHostOwnedFields(JSON.parse(JSON.stringify(entry)), criteria));
   const repaired = new Set();
-  const unreadable = [];
+  const unreadable = Object.keys(seed.unreadable_replies || {});
   for (const reply of Array.isArray(seed.replies) ? seed.replies : []) {
     let entry = null;
     try { entry = unwrapEntry(JSON.parse(reply.text), reply.id); } catch (_) { entry = null; }
     if (!entry || entry.id !== reply.id) { unreadable.push(reply.id); continue; }
     const judged = state.entries.get(reply.id);
+    // The candidate's host-stamped criterion cannot prove what the author
+    // saw. Missing prompt text is conservatively treated as criterion drift.
+    const authoredCriterion = typeof reply.criterion === "string" ? reply.criterion : undefined;
+    const current = currentCriterion(reply.id);
+    if (typeof reply.criterion !== "string" || (typeof current === "string" && authoredCriterion !== current)) {
+      staleCriteria.add(reply.id);
+    }
     setHostOwnedFields(entry, criteria);
     if (!judged || kept(judged) !== acceptanceEntryKey(entry)) repaired.add(reply.id);
     state.entries.set(reply.id, entry);
@@ -119,6 +141,7 @@ function seedEntries(seed, policy, state) {
   // repaired since: that round's work is kept, the rest is authored again, so
   // the refused candidate is never submitted unchanged.
   const sentBack = refuted === null ? listed.map((entry) => entry.id) : [...refuted];
+  for (const id of Array.isArray(seed.refuted_ids) ? seed.refuted_ids : []) sentBack.push(id);
   state.retryIds = new Set([...sentBack.filter((id) => !repaired.has(id)), ...Object.keys(invalid), ...unreadable, ...staleCriteria]);
   const last = gates[gates.length - 1];
   const feedback = [
@@ -135,20 +158,27 @@ function seedEntries(seed, policy, state) {
 // returns null, "every entry", exactly as the live loop reads it.
 const SEED_POINTER = /^(?:candidate artifact (?:was refused|rejected):\s*)?\/?(entries|supplementary)\/(0|[1-9]\d*)(?=[/\s]|$)/;
 
-function seedRepairIds(findings, ids, published, candidate) {
+function seedRepairIds(findings, ids, published, candidate, omittedHeldIds = new Set()) {
   const named = new Set();
-  const rest = [];
   for (const finding of findings) {
     const match = SEED_POINTER.exec(String(finding.text || ""));
     const list = match && candidate && Array.isArray(candidate[match[1]]) ? candidate[match[1]] : null;
     const entry = list ? list[Number(match[2])] : null;
     if (entry && typeof entry.id === "string") named.add(entry.id);
-    else rest.push(finding);
+    else {
+      const attributed = acceptanceRepairIds([finding], ids, published, candidate);
+      if (attributed === null) {
+        if (!omissionOnlyFinding(finding, omittedHeldIds)) return null;
+      } else for (const id of attributed) named.add(id);
+    }
   }
-  const attributed = acceptanceRepairIds(rest, ids, published, candidate);
-  if (attributed === null) return null;
-  for (const id of attributed) named.add(id);
   return named;
+}
+
+function omissionOnlyFinding(finding, omittedHeldIds) {
+  const defect = finding && finding.deterministic_defect;
+  return defect && defect.code === "uncovered_requirement"
+    && typeof defect.subject === "string" && omittedHeldIds.has(defect.subject);
 }
 
 function seedArtifact(seed, policy) {

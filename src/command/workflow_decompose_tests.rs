@@ -394,5 +394,66 @@ async fn fixed_launch_writes_identity_log_header_before_provider_construction() 
     assert!(first.contains(&state.identity.catalog_digest), "{log}");
 }
 
+#[tokio::test]
+async fn fresh_launch_script_arguments_include_requirement_texts_but_persisted_arguments_do_not() {
+    let project = fixture_project();
+    std::fs::write(
+        project.path().join("prds/PRD-X.md"),
+        "# PRD X\n\n## Requirements\n\n| ID | Requirement |\n|---|---|\n| REQ-X-001 | Prove the first fixture. |\n| REQ-X-002 | Prove the second fixture. |\n\n## Acceptance Criteria\n\n| ID | Criterion |\n|---|---|\n| AC-X-001 | The fixture is proven. |\n",
+    )
+    .unwrap();
+    let factory = BarrierFactory::launch(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
+    let _ = run_fixed_decomposition_with_factory(
+        project.path(),
+        Path::new("prds/PRD-X.md"),
+        Path::new("tasks/PRD-X"),
+        None,
+        true,
+        &launch_config(project.path()),
+        &empty_env(),
+        &factory,
+    )
+    .await;
+    let store = WorkflowStore::project(
+        project
+            .path()
+            .canonicalize()
+            .map(archon_shell::paths::plain)
+            .unwrap(),
+    );
+    let run = store.list_runs().unwrap().pop().unwrap();
+    let persisted: serde_json::Value =
+        read_json(&store.run_dir(&run.id).join(FIXED_ARGUMENTS_PATH));
+    let generated: serde_json::Value =
+        read_json(&store.run_dir(&run.id).join("v2/generated-metadata.json"));
+    let (_, _, criteria) =
+        super::workflow_task_set::validate_prd_input(&project.path().join("prds/PRD-X.md"))
+            .unwrap();
+    let requirement_texts = archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(
+        &std::fs::read_to_string(project.path().join("prds/PRD-X.md")).unwrap(),
+    );
+    assert_eq!(criteria.len(), 1);
+    assert_eq!(
+        requirement_texts.len(),
+        2,
+        "every PRD requirement is included"
+    );
+    assert_eq!(
+        generated["script_args"]["acceptanceCriteria"],
+        serde_json::json!(criteria)
+    );
+    assert_eq!(
+        generated["script_args"]["prdRequirementTexts"],
+        serde_json::json!(requirement_texts)
+    );
+    assert!(persisted.get("prdRequirementTexts").is_none());
+}
+
 #[path = "workflow_decomposition_upgrade_tests.rs"]
 mod workflow_decomposition_upgrade_tests;

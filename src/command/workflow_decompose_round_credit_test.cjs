@@ -32,7 +32,7 @@ async function run(script, gates, {cap = 2, mode = 'enforce'} = {}) {
   const decided = new Map();
   const at = (id, version, task) => typeof script[id] === 'function' ? script[id](version, task)
     : !script[id] ? 'ok' : script[id][Math.min(version, script[id].length) - 1];
-  const ctx = {args:{acceptanceCriteria:Object.fromEntries(ids.map(id => [id, id])), authorMaxParallelism:cap, gateMode:mode},
+  const ctx = {args:{acceptanceCriteria:Object.fromEntries(ids.map(id => [id, id])), prdRequirementTexts:{'REQ-1':'must hold REQ-1'}, authorMaxParallelism:cap, gateMode:mode},
     JSON: Object.assign(Object.create(JSON), {parse(text, ...args) {
       if (text === 'opaque parser fixture') throw new SyntaxError('new provider parser wording');
       return JSON.parse(text, ...args);

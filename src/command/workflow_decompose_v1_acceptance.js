@@ -175,7 +175,7 @@ function owedSupplementary() {
 function setHostOwnedFields(entry, criteria) {
   const sup = owedSupplementary().get(entry.id);
   if (Object.prototype.hasOwnProperty.call(criteria, entry.id)) entry.criterion = criteria[entry.id];
-  else if (sup) entry.criterion = sup.text;
+  else if (sup) entry.criterion = currentRequirementText(sup.requirement);
   if (sup) {
     const covers = Array.isArray(entry.covers) ? entry.covers.filter((c) => typeof c === "string") : [];
     entry.covers = [sup.requirement, ...covers.filter((c) => c !== sup.requirement)];
@@ -370,7 +370,7 @@ function acceptanceRepairIds(findings, knownIds, published, candidate) {
   for (const finding of findings) {
     const match = supFinding.exec(String(finding.text || ""));
     if (!match) continue;
-    owed.set(match[1], { requirement: match[2], text: match[3].trim() });
+    owed.set(match[1], { requirement: match[2], text: currentRequirementText(match[2]) });
     retry.add(match[1]);
   }
   const known = { has: (id) => knownIds.has(id) || owed.has(id) };
@@ -403,4 +403,10 @@ function acceptanceRepairIds(findings, knownIds, published, candidate) {
     for (const match of matches) retry.add(match[1]);
   }
   return retry;
+}
+
+function currentRequirementText(requirement) {
+  const text = (args.prdRequirementTexts || {})[requirement];
+  if (typeof text !== "string") throw new Error(`current PRD text is missing for supplementary requirement ${requirement}`);
+  return text;
 }

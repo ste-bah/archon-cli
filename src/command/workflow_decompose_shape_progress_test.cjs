@@ -20,7 +20,7 @@ const clean = () => ({publicationReceipt:{call_id:'freeze'}, postcondition:{sati
   gateEnvelope:{policy_findings:[]}});
 
 async function run(sequence, {supplementary = false, wrapper = false, resumed = false, siblings = false} = {}) {
-  const ctx = {args:{acceptanceCriteria:siblings ? {A:'a',B:'b'} : {A:'a'}, authorMaxParallelism:1, gateMode:'enforce'},
+  const ctx = {args:{acceptanceCriteria:siblings ? {A:'a',B:'b'} : {A:'a'}, prdRequirementTexts:{'REQ-X':'x'}, authorMaxParallelism:1, gateMode:'enforce'},
     __archonValidateAcceptanceEntry: (_, serialized) => {
       const entry = JSON.parse(serialized);
       return JSON.stringify(entry.id === 'A' && supplementary ? [] : sequence(entry.version));

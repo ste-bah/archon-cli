@@ -1,4 +1,5 @@
 //! Issue 360: what a phase seed carries, read from durable call records.
+use super::record::{extract_object, reply_entry};
 use super::*;
 use serde_json::json;
 
@@ -94,10 +95,14 @@ fn entries_seed(
             replies,
             invalid,
             carried,
+            ..
         } => (gates, candidate, replies, invalid, *carried),
         other => panic!("{other:?}"),
     }
 }
+
+#[path = "workflow_decompose_seed_derive_regression_tests.rs"]
+mod regression;
 
 #[test]
 fn the_last_gate_candidate_is_carried_with_the_replies_authored_since() {
@@ -191,35 +196,6 @@ fn an_identical_reply_after_a_refutation_is_still_a_repair_seed() {
     assert_eq!(replies[0].call_id, "acceptance-author-AC-2-7");
 }
 
-/// Issue 357 stamps the host criterion before it keeps an entry, so the
-/// gate's candidate holds the criterion text while the replies hold the
-/// author's. The gate still holds that round: no reply is "since" it.
-#[test]
-fn a_gate_holds_the_round_whose_replies_it_stamped() {
-    let raw = |id: &str| {
-        let mut entry = entry(id);
-        entry["criterion"] = json!("the author's own words");
-        entry.to_string()
-    };
-    let candidate = json!({"entries": [entry("AC-1"), entry("AC-2")]}).to_string();
-    let records = vec![
-        reply("acceptance-author-AC-1-4", "01:00:00", &raw("AC-1")),
-        reply("acceptance-author-AC-2-4", "01:01:00", &raw("AC-2")),
-        gate(
-            "freeze-acceptance",
-            "02:00:00",
-            &candidate,
-            Vec::new(),
-            false,
-        ),
-    ];
-    let derived = derive(&records, &[], &criteria(&["AC-1", "AC-2"])).unwrap();
-    let (_, _, replies, invalid, carried) = entries_seed(&derived);
-    assert!(replies.is_empty(), "{replies:?}");
-    assert!(invalid.is_empty(), "{invalid:?}");
-    assert_eq!(carried, 2);
-}
-
 #[test]
 fn a_carried_entry_this_build_refuses_is_named_invalid() {
     let mut bad = entry("SUP-REQ-1");
@@ -254,7 +230,11 @@ fn a_carried_entry_this_build_refuses_is_named_invalid() {
             false,
         ),
     ];
-    let derived = derive(&records, &[], &criteria(&["AC-1"])).unwrap();
+    let requirements = [("REQ-1".into(), "the current PRD requirement".into())]
+        .into_iter()
+        .collect();
+    let derived =
+        derive_with_requirement_texts(&records, &[], &criteria(&["AC-1"]), &requirements).unwrap();
     let (gates, _, _, invalid, carried) = entries_seed(&derived);
     assert_eq!(gates.len(), 2, "every gate, for the owed checks they name");
     assert_eq!(carried, 2);
@@ -338,7 +318,7 @@ fn a_phase_never_frozen_carries_its_replies_alone() {
 }
 
 #[test]
-fn a_supplementary_check_no_gate_owed_pauses_the_resume() {
+fn a_candidate_holds_its_supplementary_check_even_without_a_current_owed_finding() {
     let candidate = json!({"entries": [], "supplementary": [entry("SUP-REQ-9")]}).to_string();
     let records = vec![gate(
         "freeze-acceptance",
@@ -347,8 +327,11 @@ fn a_supplementary_check_no_gate_owed_pauses_the_resume() {
         Vec::new(),
         false,
     )];
-    let error = derive(&records, &[], &criteria(&[])).unwrap_err();
-    assert!(format!("{error:#}").contains("paused"), "{error:#}");
+    let derived = derive(&records, &[], &criteria(&[])).unwrap();
+    assert!(matches!(
+        derived.subjects["acceptance"],
+        SubjectSeed::Entries { carried: 1, .. }
+    ));
 }
 
 #[test]

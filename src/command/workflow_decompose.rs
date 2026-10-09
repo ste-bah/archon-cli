@@ -107,8 +107,9 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         repository,
         config,
     )?;
-    let (_, prd_digest, acceptance_criteria) =
+    let (prd_bytes, prd_digest, acceptance_criteria) =
         super::workflow_task_set::validate_prd_input(&prd_path)?;
+    let prd_text = std::str::from_utf8(&prd_bytes)?;
     let starting_binary_revision = env!("ARCHON_GIT_HASH").to_string();
     let catalog = fixed_decomposition_catalog(&starting_binary_revision)?;
     let script_digest = workflow_scaffold_hash(FIXED_SCRIPT_SOURCE);
@@ -133,6 +134,8 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         &repository.root,
         frozen_chain.to_argument(),
     );
+    let script_arguments =
+        super::workflow_task_set::script_arguments_with_prd_requirement_texts(&arguments, prd_text);
     let log_path = task_root.join(".decompose.log");
     let identity = FixedRunIdentityV1 {
         template_version: FIXED_DECOMPOSITION_TEMPLATE_VERSION.to_string(),
@@ -159,9 +162,11 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     let check_policy = super::acceptance_check_policy::from_config(config)?;
     let launch_digest =
         fixed_launch_digest(&state.identity, &arguments, &catalog, &route, &check_policy)?;
-    let calls =
-        archon_workflow::v2::script::dry_run_workflow_plan(FIXED_SCRIPT_SOURCE, Some(&arguments))
-            .await?;
+    let calls = archon_workflow::v2::script::dry_run_workflow_plan(
+        FIXED_SCRIPT_SOURCE,
+        Some(&script_arguments),
+    )
+    .await?;
     let target_repository_root = path_text(&repository.root);
     // What the spec's repository root adds to every author's readable
     // directories (Issue-56); the authors keep the project root as their
@@ -188,7 +193,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         spec,
         FIXED_SCRIPT_SOURCE,
         calls,
-        arguments.clone(),
+        script_arguments,
     );
     plan.check_policy = Some(check_policy);
 

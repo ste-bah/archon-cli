@@ -61,7 +61,7 @@ fn run(body: &str) -> Value {
         install_entry_validator(&ctx).unwrap();
         archon_workflow::v2::script::author_context::install_preview(&ctx).unwrap();
         let script = [
-            "const args = {repositoryRoot:'/archon-test-roots/repo',projectRoot:'/archon-test-roots/project',authorMaxParallelism:1, gateMode:'enforce'};",
+            "const args = {repositoryRoot:'/archon-test-roots/repo',projectRoot:'/archon-test-roots/project',authorMaxParallelism:1, gateMode:'enforce', prdRequirementTexts:{'REQ-X':'owed'}};",
             &source,
             PRELUDE,
             "(async () => {",

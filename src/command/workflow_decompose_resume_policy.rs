@@ -34,6 +34,26 @@ pub(crate) fn canonical_metadata(
     })
 }
 
+/// Accept both pre-fix launch metadata and the runtime-only PRD text added by
+/// current launches; digest admission still receives the durable arguments.
+pub(crate) fn canonical_resume_metadata(
+    identity: &FixedRunIdentityV1,
+    scaffold_hash: String,
+    arguments: &serde_json::Value,
+    prd_text: &str,
+    metadata: &serde_json::Value,
+) -> serde_json::Value {
+    let enriched = crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts(
+        arguments, prd_text,
+    );
+    let script_arguments = if metadata.get("script_args") == Some(arguments) {
+        arguments
+    } else {
+        &enriched
+    };
+    canonical_metadata(identity, scaffold_hash, script_arguments)
+}
+
 /// The launch's check policy, admitted against the verified bundle anchor.
 pub(crate) fn admit(
     metadata: &serde_json::Value,

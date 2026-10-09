@@ -196,10 +196,16 @@ fn derive_seed(
     run_id: &str,
     (index, runtime): (usize, FixedRunIdentityV1),
     criteria: &BTreeMap<String, String>,
+    requirement_texts: &BTreeMap<String, String>,
 ) -> Result<PhaseSeed> {
     let results = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
     let records = results.load_call_records()?;
-    let derived = derive::derive(&records, &taken_pauses(store, run_id)?, criteria)?;
+    let derived = derive::derive_with_requirement_texts(
+        &records,
+        &taken_pauses(store, run_id)?,
+        criteria,
+        requirement_texts,
+    )?;
     let generation = store.load_state(run_id)?.generation;
     // Archived attempts included: a slot may hold a restored older attempt.
     let mut history_attempts = BTreeMap::new();
@@ -229,13 +235,23 @@ pub(crate) fn current_seed(
     log_path: &Path,
     criteria: &BTreeMap<String, String>,
 ) -> Result<Option<PhaseSeed>> {
+    current_seed_with_requirement_texts(store, run_id, log_path, criteria, &BTreeMap::new())
+}
+
+pub(crate) fn current_seed_with_requirement_texts(
+    store: &WorkflowStore,
+    run_id: &str,
+    log_path: &Path,
+    criteria: &BTreeMap<String, String>,
+    requirement_texts: &BTreeMap<String, String>,
+) -> Result<Option<PhaseSeed>> {
     let Some((index, runtime)) = seeded_transition(store, run_id)? else {
         return Ok(None);
     };
     let mut seed = match read_seed(store, run_id, index, &runtime)? {
         Some(seed) => seed,
         None => {
-            let seed = derive_seed(store, run_id, (index, runtime), criteria)?;
+            let seed = derive_seed(store, run_id, (index, runtime), criteria, requirement_texts)?;
             write_seed(store, run_id, &seed)?;
             seed
         }

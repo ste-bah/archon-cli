@@ -18,7 +18,9 @@
 //! The call-id families are the fixed decomposition script's own:
 //! `acceptance-author-<entry id>-<n>` per acceptance entry, `<subject>-author-<n>`
 //! for a whole artifact (the skeleton, each body), `pause-<subject>-<n>` for a
-//! pause. No PRD, project or task name is known here.
+//! pause. No PRD, project or task name is known here; the host supplies only
+//! the current requirement IDs and text needed to stamp supplementary checks.
+
 use std::collections::BTreeMap;
 
 use anyhow::Result;
@@ -30,6 +32,8 @@ use super::seed_unmapped as unmapped;
 #[path = "workflow_decompose_seed_host_owned.rs"]
 mod host_owned;
 use host_owned::HostOwned;
+#[path = "workflow_decompose_seed_record.rs"]
+mod record;
 
 /// The acceptance gate. Its stdin is the candidate the script assembled.
 const ACCEPTANCE_GATE: &str = "freeze-acceptance";
@@ -51,6 +55,9 @@ pub(crate) struct ReplySeed {
     pub(crate) id: String,
     /// The JSON object the reply carried, as the script extracts it.
     pub(crate) text: String,
+    /// The host-owned criterion in this author call's prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) criterion: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +71,9 @@ pub(crate) enum SubjectSeed {
         candidate: Option<String>,
         /// The replies started after that gate, the latest per entry.
         replies: Vec<ReplySeed>,
+        unreadable_replies: BTreeMap<String, String>,
+        carried_entries: Vec<Value>,
+        refuted_ids: Vec<String>,
         /// Carried entries this build's entry validator refuses, with why.
         invalid: BTreeMap<String, Vec<String>>,
         /// How many entries the seed carries.
@@ -170,78 +180,6 @@ fn judged_gate(record: &WorkflowV2CallRecord) -> Option<(&str, &str, GateSeed)> 
     })
 }
 
-/// The JSON object a reply carries, as the script's `extractJsonObject`
-/// reads it: the first fenced block, else the text, cut to its outermost
-/// braces.
-fn extract_object(content: &str) -> &str {
-    let raw = content.trim();
-    let body = raw
-        .find("```")
-        .and_then(|open| {
-            let rest = &raw[open + 3..];
-            let rest = rest.strip_prefix("json").unwrap_or(rest).trim_start();
-            rest.find("```").map(|close| &rest[..close])
-        })
-        .unwrap_or(raw)
-        .trim();
-    match (body.find('{'), body.rfind('}')) {
-        (Some(first), Some(last)) if last > first => &body[first..=last],
-        _ => body,
-    }
-}
-
-/// The entry `id` a reply holds, as the script's `unwrapEntry` reads it.
-fn reply_entry(text: &str, id: &str) -> Option<Value> {
-    let parsed: Value = serde_json::from_str(text).ok()?;
-    if parsed["id"] == id {
-        return Some(parsed);
-    }
-    match parsed["acceptance"].as_array().map(Vec::as_slice) {
-        Some([only]) if only["id"] == id => Some(only.clone()),
-        _ => None,
-    }
-}
-
-/// This build's freeze shape refusals of one carried entry.
-fn entry_refusals(id: &str, entry: &Value) -> Result<Vec<String>> {
-    let candidate = serde_json::to_vec(&serde_json::json!({ "entries": [entry] }))?;
-    Ok(crate::command::workflow::element_shape_defects(
-        &candidate,
-        &crate::command::workflow::ENTRY_SHAPE,
-    )
-    .iter()
-    .map(|defect| {
-        format!(
-            "acceptance entry '{id}' was refused: {}",
-            defect.message.replacen("entries/0", "entry", 1)
-        )
-    })
-    .collect())
-}
-
-/// The entries of a recorded acceptance candidate, in its own order.
-fn candidate_entries(stdin: &str, gate: &str) -> Result<Vec<(String, Value, bool)>> {
-    let field = format!("v2/results/{gate}.call.options.host_command.stdin");
-    let document: Value =
-        serde_json::from_str(stdin).map_err(|e| unmapped(&field, &e.to_string()))?;
-    let mut out = Vec::new();
-    for (list, supplementary) in [("entries", false), ("supplementary", true)] {
-        let Some(items) = document.get(list) else {
-            if list == "entries" {
-                return Err(unmapped(&field, "the candidate has no entries list"));
-            }
-            continue;
-        };
-        for item in items.as_array().into_iter().flatten() {
-            let id = item["id"]
-                .as_str()
-                .ok_or_else(|| unmapped(&field, "a candidate entry has no string id"))?;
-            out.push((id.to_string(), item.clone(), supplementary));
-        }
-    }
-    Ok(out)
-}
-
 /// The run's author calls and host commands, oldest first: the only records
 /// a seed reads, and each must say when it started.
 fn ordered(records: &[WorkflowV2CallRecord]) -> Result<Vec<&WorkflowV2CallRecord>> {
@@ -263,6 +201,15 @@ pub(crate) fn derive(
     records: &[WorkflowV2CallRecord],
     pause_ids: &[String],
     criteria: &BTreeMap<String, String>,
+) -> Result<Derived> {
+    derive_with_requirement_texts(records, pause_ids, criteria, &BTreeMap::new())
+}
+
+pub(crate) fn derive_with_requirement_texts(
+    records: &[WorkflowV2CallRecord],
+    pause_ids: &[String],
+    criteria: &BTreeMap<String, String>,
+    requirement_texts: &BTreeMap<String, String>,
 ) -> Result<Derived> {
     let records = ordered(records)?;
     let mut derived = Derived::default();
@@ -313,7 +260,11 @@ pub(crate) fn derive(
             },
         );
     }
-    if let Some(seed) = acceptance(&records, &gates, &HostOwned::new(criteria, &gates))? {
+    if let Some(seed) = acceptance(
+        &records,
+        &gates,
+        &HostOwned::new(criteria, requirement_texts),
+    )? {
         derived.subjects.insert("acceptance".into(), seed);
     }
     Ok(derived)
@@ -374,8 +325,13 @@ fn acceptance(
     host: &HostOwned<'_>,
 ) -> Result<Option<SubjectSeed>> {
     let mut replies_read = Vec::new();
+    let mut candidates = Vec::new();
     let mut any_reply = false;
+    let mut reply_states: BTreeMap<String, (u64, bool)> = BTreeMap::new();
     for record in records {
+        if let Some(stdin) = record::acceptance_candidate(record) {
+            candidates.push((record.call.id.as_str(), stdin));
+        }
         let Some((_, Some(id), ordinal)) = author_call(&record.call.id) else {
             continue;
         };
@@ -383,38 +339,46 @@ fn acceptance(
             continue;
         };
         any_reply = true;
-        let text = extract_object(content);
-        if let Some(entry) = reply_entry(text, &id) {
-            let entry = host.stamp(entry, &id);
+        let text = record::extract_object(content);
+        let entry = record::reply_entry(text, &id);
+        if let Some(entry) = entry.as_ref() {
+            let entry = host.stamp(entry.clone(), &id);
             replies_read.push(Reply {
                 record,
-                id,
+                id: id.clone(),
                 ordinal,
                 text,
                 entry,
             });
         }
+        if reply_states
+            .get(&id)
+            .is_none_or(|(latest, _)| ordinal >= *latest)
+        {
+            reply_states.insert(id, (ordinal, entry.is_some()));
+        }
     }
     // Oldest first by ordinal; one round's replies keep their start order.
     replies_read.sort_by_key(|reply| reply.ordinal);
     let mut judged = Vec::new();
+    let mut refuted_ids = std::collections::BTreeSet::new();
     for gate in gates
         .iter()
         .filter(|(_, command, ..)| *command == ACCEPTANCE_GATE)
     {
         let (record, _, stdin, _) = gate;
-        let entries = candidate_entries(stdin, &record.call.id)?;
+        let entries = record::candidate_entries(stdin, &record.call.id)?;
         // Compared as the loop kept them: a candidate an older runtime
         // assembled may predate the host-owned stamp.
         let by_id: BTreeMap<String, Value> = entries
             .iter()
             .map(|(id, entry, _)| (id.clone(), host.stamp(entry.clone(), id)))
             .collect();
+        let mut refuted = std::collections::BTreeSet::new();
         // A gate may explicitly refute an entry whose bytes happen to match
         // its candidate. That entry is still owed a repair in a later round;
         // it cannot make an identical later reply part of the round the gate
         // already holds.
-        let mut refuted = std::collections::BTreeSet::new();
         for finding in &gate.3.findings {
             let Some(text) = finding["text"].as_str() else {
                 continue;
@@ -426,30 +390,26 @@ fn acceptance(
                 refuted.insert(id.to_string());
             }
         }
-        judged.push((gate_round(&by_id, &replies_read, &refuted), gate, entries));
+        for id in by_id.keys() {
+            if refuted.contains(id.as_str()) {
+                refuted_ids.insert(id.clone());
+            } else {
+                refuted_ids.remove(id.as_str());
+            }
+        }
+        let round = gate_round(&by_id, &replies_read, &refuted);
+        refuted_ids.extend(refuted);
+        judged.push((round, gate, entries));
     }
     // A stable sort: gates of one round keep their start order.
     judged.sort_by_key(|(round, ..)| *round);
     let last = judged.last();
     let mut entries: BTreeMap<String, Value> = BTreeMap::new();
-    if let Some((_, (record, ..), candidate)) = last {
-        for (id, entry, supplementary) in candidate.iter().cloned() {
-            // A supplementary check is carried only as the check a gate said
-            // is owed: the script authors it against that requirement text.
-            let prefix = format!("check '{id}': PRD requirement ");
-            if supplementary
-                && !judged.iter().any(|(_, (.., gate), _)| {
-                    gate.findings
-                        .iter()
-                        .any(|f| f["text"].as_str().is_some_and(|t| t.starts_with(&prefix)))
-                })
-            {
-                return Err(unmapped(
-                    &format!("v2/results/{}.supplementary.{id}", record.call.id),
-                    "no recorded gate names this supplementary check as owed",
-                ));
-            }
-            let entry = host.stamp(entry, &id);
+    for (call_id, stdin) in candidates {
+        for (id, entry, supplementary) in record::candidate_entries(stdin, call_id)? {
+            // Supplementary entries can be carried even without a current
+            // owed finding; their criterion is restamped from current PRD text.
+            let _ = supplementary;
             entries.insert(id, entry);
         }
     }
@@ -458,26 +418,47 @@ fn acceptance(
     let after = last.map_or(0, |(round, ..)| *round);
     let mut replies: BTreeMap<String, ReplySeed> = BTreeMap::new();
     for reply in replies_read.iter().filter(|reply| reply.ordinal > after) {
-        entries.insert(reply.id.clone(), reply.entry.clone());
         replies.insert(
             reply.id.clone(),
             ReplySeed {
                 call_id: reply.record.call.id.clone(),
                 id: reply.id.clone(),
                 text: reply.text.to_string(),
+                criterion: record::authored_criterion(reply.record, &reply.id),
             },
         );
     }
-    if last.is_none() && !any_reply {
+    for reply in &replies_read {
+        entries
+            .entry(reply.id.clone())
+            .or_insert_with(|| reply.entry.clone());
+    }
+    let unreadable_replies = reply_states
+        .into_iter()
+        .filter_map(|(id, (_, readable))| {
+            (!readable).then_some((
+                id,
+                "accepted author reply could not be reconstructed as an entry with its expected id"
+                    .into(),
+            ))
+        })
+        .collect();
+    let carried_entries: Vec<Value> = entries.values().cloned().collect();
+    let mut validation_entries = entries.clone();
+    for reply in &replies_read {
+        validation_entries.insert(reply.id.clone(), reply.entry.clone());
+    }
+    if last.is_none() && !any_reply && entries.is_empty() {
         return Ok(None);
     }
     let mut invalid = BTreeMap::new();
-    for (id, entry) in &entries {
-        let refusals = entry_refusals(id, entry)?;
+    for (id, entry) in &validation_entries {
+        let refusals = record::entry_refusals(id, &host.stamp(entry.clone(), id))?;
         if !refusals.is_empty() {
             invalid.insert(id.clone(), refusals);
         }
     }
+    let carried = entries.len();
     Ok(Some(SubjectSeed::Entries {
         gates: judged
             .iter()
@@ -485,8 +466,11 @@ fn acceptance(
             .collect(),
         candidate: last.map(|(_, (_, _, stdin, _), _)| stdin.to_string()),
         replies: replies.into_values().collect(),
+        unreadable_replies,
+        carried_entries,
+        refuted_ids: refuted_ids.into_iter().collect(),
         invalid,
-        carried: entries.len(),
+        carried,
     }))
 }
 

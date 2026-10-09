@@ -169,6 +169,7 @@ fn a_crash_between_the_seed_record_and_its_event_writes_the_event_once() {
         &run_id,
         (0, identity("new-script", "next-rev")),
         &criteria(),
+        &std::collections::BTreeMap::new(),
     )
     .unwrap();
     write_seed(&store, &run_id, &derived).unwrap();

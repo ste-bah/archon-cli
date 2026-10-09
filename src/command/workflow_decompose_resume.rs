@@ -1,26 +1,9 @@
 use super::*;
+use crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts;
 
-pub(crate) async fn resume_fixed_decomposition_with_factory(
-    cwd: &Path,
-    run_id: &str,
-    yes: bool,
-    config: &ArchonConfig,
-    env_vars: &ArchonEnvVars,
-    factory: &dyn WorkflowLlmClientFactory,
-) -> Result<String> {
-    resume_fixed_decomposition_with_factory_and_sink(
-        cwd,
-        run_id,
-        yes,
-        config,
-        env_vars,
-        factory,
-        crate::command::workflow_decompose_progress::DecompositionCliUiSink::shared(),
-        None,
-        None,
-    )
-    .await
-}
+#[path = "workflow_decompose_resume_entry.rs"]
+mod entry;
+pub(crate) use entry::resume_fixed_decomposition_with_factory;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
@@ -303,12 +286,14 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     // Issue 358: the persisted script digest stays the launch record; Issue
     // 349: the launch-bound check policy (or the older pre-binding form) is
     // admitted against the verified bundle anchor.
-    let expected_metadata = policy::canonical_metadata(
+    let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
+    let expected_metadata = policy::canonical_resume_metadata(
         &state.identity,
         state.identity.script_digest.clone(),
         &expected_arguments,
+        prd_text,
+        &metadata,
     );
-    let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
     let anchored_digest = compiled_spec
         .permissions
         .get(FIXED_LAUNCH_DIGEST_PERMISSION)
@@ -339,7 +324,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             .map_err(|error| anyhow!("reporting the runtime transition: {error}"))?;
     }
     // Issue 360: after an upgrade the script starts from the phase seed. The
-    // criteria texts are the host-owned criterion the script stamps (#357).
+    // acceptance criteria and requirement texts are the host-owned text the
+    // script stamps (#357).
     let criteria = expected_arguments["acceptanceCriteria"]
         .as_object()
         .map(|criteria| {
@@ -349,14 +335,18 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
                 .collect()
         })
         .unwrap_or_default();
-    let seed = crate::command::workflow_decompose_seed::current_seed(
-        &store, run_id, &log_path, &criteria,
+    let seed = crate::command::workflow_decompose_seed::current_seed_with_requirement_texts(
+        &store,
+        run_id,
+        &log_path,
+        &criteria,
+        &prd_requirement_texts,
     )?;
-    let mut script_arguments = crate::command::workflow_decompose_seed::seeded_arguments(
+    let seeded_arguments = crate::command::workflow_decompose_seed::seeded_arguments(
         &expected_arguments,
         seed.as_ref(),
     );
-    script_arguments["prdRequirementTexts"] = serde_json::to_value(prd_requirement_texts)?;
+    let script_arguments = script_arguments_with_prd_requirement_texts(&seeded_arguments, prd_text);
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,
         Some(&script_arguments),
@@ -386,7 +376,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             "fixed decomposition resume cancelled before provider construction"
         ));
     }
-
     let program = std::env::current_exe()
         .context("resolving the fixed decomposition binary")?
         .canonicalize()
