@@ -74,6 +74,13 @@ impl FakeProvider {
             while !thread_stop.load(std::sync::atomic::Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        // An accepted socket inherits the listener's
+                        // non-blocking mode on BSD/macOS; a reader would then
+                        // see WouldBlock between pooled requests and drop the
+                        // connection the client is about to reuse.
+                        if stream.set_nonblocking(false).is_err() {
+                            continue;
+                        }
                         let shutdown_stream = match stream.try_clone() {
                             Ok(stream) => stream,
                             Err(_) => continue,
@@ -425,7 +432,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires local socket access; run outside the restricted test sandbox"]
     fn pooled_client_sends_fifty_sequential_requests_without_errors() {
         let provider = FakeProvider::start();
         let client = reqwest::blocking::Client::builder()
