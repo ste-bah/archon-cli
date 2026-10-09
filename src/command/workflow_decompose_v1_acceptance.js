@@ -83,6 +83,52 @@ function extractJsonObject(text) {
   return first >= 0 && last > first ? body.slice(first, last + 1) : body;
 }
 
+// Keep malformed-reply refusals useful to the author without echoing the
+// whole reply. JSON.parse engines report positions in different forms; retain
+// their message and derive a nearby excerpt when a location is available.
+function acceptanceParseRefusal(id, source, error) {
+  const message = String(error && error.message || error || "invalid JSON")
+    .replace(/[\r\n\t]+/g, " ").slice(0, 240);
+  let offset = null;
+  let location = "";
+  const lineColumn = /line\s+(\d+)\s+column\s+(\d+)/i.exec(message);
+  const byteOffset = /byte(?:\s+offset)?\s+(\d+)/i.exec(message);
+  const position = /(?:position|at)\s+(\d+)/i.exec(message);
+  if (lineColumn) {
+    const lines = source.split("\n");
+    const line = Number(lineColumn[1]);
+    const column = Number(lineColumn[2]);
+    if (line > 0 && line <= lines.length && column > 0) {
+      offset = lines.slice(0, line - 1).reduce((sum, value) => sum + value.length + 1, 0)
+        + Math.min(column - 1, lines[line - 1].length);
+      location = ` at line ${line} column ${column}`;
+    }
+  } else if (byteOffset) {
+    const bytes = Number(byteOffset[1]);
+    let seen = 0;
+    offset = 0;
+    while (offset < source.length && seen < bytes) {
+      const code = source.codePointAt(offset);
+      seen += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+      offset += code > 0xffff ? 2 : 1;
+    }
+    location = ` at byte offset ${bytes}`;
+  } else if (position) {
+    offset = Math.min(Number(position[1]), source.length);
+    location = ` at offset ${offset}`;
+  }
+  let excerpt = "";
+  if (offset !== null) {
+    const start = Math.max(0, Math.min(source.length - 158, offset - 79));
+    const end = Math.min(source.length, start + 158);
+    excerpt = source.slice(start, end).replace(/[\r\n\t\x00-\x1f\x7f]/g, " ");
+    if (start > 0) excerpt = `…${excerpt}`;
+    if (end < source.length) excerpt = `${excerpt}…`;
+  }
+  const excerptText = excerpt ? `; excerpt: ${JSON.stringify(excerpt)}` : "";
+  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}. check.command is a JSON string value, so every double quote and backslash inside it is escaped.`;
+}
+
 // H4 (Batch O): every PRD requirement id is covered by some check. The host
 // freeze names each requirement no entry covers as the supplementary check it
 // is owed ("check 'SUP-<id>': PRD requirement <id> is covered by no
@@ -144,9 +190,12 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   if (result.status === "failed") return {failure:result};
   if (result.stopReason === "end_turn" && result.content) {
     let entry;
+    const json = extractJsonObject(result.content);
     try {
-      entry = unwrapEntry(JSON.parse(extractJsonObject(result.content)), id);
-    } catch (_) { /* This answered call made no progress. */ }
+      entry = unwrapEntry(JSON.parse(json), id);
+    } catch (error) {
+      return {failure:{status:"failed",malformed:true,summary:acceptanceParseRefusal(id, json, error)}};
+    }
     if (entry && entry.id === id) {
       setHostOwnedFields(entry, criteria);
       let serialized;
