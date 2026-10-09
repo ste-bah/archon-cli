@@ -158,8 +158,8 @@ async fn run_agent_attempts(
         let mut result = AgentResult {
             output: llm_response.content,
             tool_use_log: llm_response.tool_uses,
-            tokens_in: llm_response.tokens_in,
-            tokens_out: llm_response.tokens_out,
+            tokens_in: llm_response.tokens_in.unwrap_or_default(),
+            tokens_out: llm_response.tokens_out.unwrap_or_default(),
             cost_usd: 0.0,
             duration: agent_start.elapsed(),
             quality: None,

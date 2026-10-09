@@ -36,8 +36,8 @@ impl WorkflowLlmClient for InvalidItemsThenRepairAgentClient {
         Ok(WorkflowAgentOutcome {
             content,
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }
@@ -73,8 +73,8 @@ impl WorkflowLlmClient for BlockedInvalidItemsAgentClient {
         Ok(WorkflowAgentOutcome {
             content: "Context was restored. What would you like to do next?".to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }
@@ -110,8 +110,8 @@ impl WorkflowLlmClient for AlwaysInvalidItemsAgentClient {
         Ok(WorkflowAgentOutcome {
             content: "Context was restored. What would you like to do next?".to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }

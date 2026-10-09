@@ -229,7 +229,7 @@ async fn provider_adapter_collects_text_from_generic_provider() {
         .expect("fake provider response");
 
     assert_eq!(response.content, "pipeline-ok");
-    assert_eq!(response.tokens_in, 7);
+    assert_eq!(response.tokens_in, Some(7));
 }
 
 #[tokio::test]

@@ -107,22 +107,11 @@ pub(super) fn raw_outcome_result(
     result.data = json!({
         "content": outcome.content,
         "stopReason": stop_reason,
-        "tokensIn": token_count(outcome.tokens_in),
-        "tokensOut": token_count(outcome.tokens_out),
+        "tokensIn": outcome.tokens_in,
+        "tokensOut": outcome.tokens_out,
     });
     archon_workflow::v2::tool_trace::record_tool_trace(&mut result, &outcome.tool_uses);
     result
-}
-
-// WorkflowAgentOutcome predates provider usage availability. Its subagent
-// adapter uses zero when the provider supplied no usage, so do not publish
-// that sentinel as measured usage.
-fn token_count(count: u64) -> Value {
-    if count == 0 {
-        Value::Null
-    } else {
-        json!(count)
-    }
 }
 
 fn save(path: &Path, value: &Value) -> WorkflowResult<()> {
@@ -161,8 +150,8 @@ mod tests {
         let outcome = WorkflowAgentOutcome {
             content: "key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 and Authorization: Bearer opaque-bearer-credential-123".into(),
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: Some("end_turn".into()),
         };
         evidence.finish(&Ok(outcome)).unwrap();
@@ -176,8 +165,8 @@ mod tests {
     fn raw_outcome_omits_unreported_usage_and_keeps_reported_counts() {
         let absent = raw_outcome_result(
             WorkflowAgentOutcome {
-                tokens_in: 0,
-                tokens_out: 0,
+                tokens_in: None,
+                tokens_out: None,
                 ..Default::default()
             },
             "end_turn".into(),
@@ -187,13 +176,24 @@ mod tests {
 
         let reported = raw_outcome_result(
             WorkflowAgentOutcome {
-                tokens_in: 123,
-                tokens_out: 45,
+                tokens_in: Some(123),
+                tokens_out: Some(45),
                 ..Default::default()
             },
             "end_turn".into(),
         );
         assert_eq!(reported.data["tokensIn"], json!(123));
         assert_eq!(reported.data["tokensOut"], json!(45));
+
+        let reported_zero = raw_outcome_result(
+            WorkflowAgentOutcome {
+                tokens_in: Some(0),
+                tokens_out: Some(0),
+                ..Default::default()
+            },
+            "end_turn".into(),
+        );
+        assert_eq!(reported_zero.data["tokensIn"], json!(0));
+        assert_eq!(reported_zero.data["tokensOut"], json!(0));
     }
 }

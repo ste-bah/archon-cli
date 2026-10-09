@@ -381,8 +381,8 @@ impl WorkflowLlmClient for CompletionBlockedScriptLlm {
         Ok(WorkflowAgentOutcome {
             content: serde_json::to_string(&result).expect("result json"),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }
@@ -426,8 +426,8 @@ impl WorkflowLlmClient for RepairBlockedScriptLlm {
             return Ok(WorkflowAgentOutcome {
                 content: "malformed result".to_string(),
                 tool_uses: Vec::new(),
-                tokens_in: 1,
-                tokens_out: 1,
+                tokens_in: Some(1),
+                tokens_out: Some(1),
                 stop_reason: None,
             });
         }
@@ -436,8 +436,8 @@ impl WorkflowLlmClient for RepairBlockedScriptLlm {
         Ok(WorkflowAgentOutcome {
             content: "unused repair result".to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }

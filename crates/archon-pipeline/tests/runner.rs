@@ -157,8 +157,8 @@ impl LlmClient for DelayedLlmClient {
         Ok(LlmResponse {
             content: "wave output".into(),
             tool_uses: vec![],
-            tokens_in: 10,
-            tokens_out: 5,
+            tokens_in: Some(10),
+            tokens_out: Some(5),
             stop_reason: None,
         })
     }
@@ -178,8 +178,8 @@ impl LlmClient for SequencedLlmClient {
         Ok(LlmResponse {
             content: content.into(),
             tool_uses: vec![],
-            tokens_in: 10,
-            tokens_out: 5,
+            tokens_in: Some(10),
+            tokens_out: Some(5),
             stop_reason: None,
         })
     }
@@ -206,8 +206,8 @@ impl LlmClient for RecordingSequencedLlmClient {
         Ok(LlmResponse {
             content: content.into(),
             tool_uses: vec![],
-            tokens_in: 10,
-            tokens_out: 5,
+            tokens_in: Some(10),
+            tokens_out: Some(5),
             stop_reason: None,
         })
     }
@@ -233,8 +233,8 @@ impl LlmClient for AgentPathLlmClient {
         Ok(LlmResponse {
             content: "agent path output".into(),
             tool_uses: vec![],
-            tokens_in: 11,
-            tokens_out: 7,
+            tokens_in: Some(11),
+            tokens_out: Some(7),
             stop_reason: None,
         })
     }
@@ -262,8 +262,8 @@ impl LlmClient for FlakyAgentLlmClient {
         Ok(LlmResponse {
             content: "agent path output".into(),
             tool_uses: vec![],
-            tokens_in: 11,
-            tokens_out: 7,
+            tokens_in: Some(11),
+            tokens_out: Some(7),
             stop_reason: None,
         })
     }
@@ -311,8 +311,8 @@ impl LlmClient for MockLlmClient {
         Ok(LlmResponse {
             content: self.canned_response.clone(),
             tool_uses: vec![],
-            tokens_in: 100,
-            tokens_out: 50,
+            tokens_in: Some(100),
+            tokens_out: Some(50),
             stop_reason: None,
         })
     }

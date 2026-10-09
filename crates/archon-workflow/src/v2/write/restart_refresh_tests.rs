@@ -89,7 +89,7 @@ impl WorkflowAgentDispatch for EmptyThenRecord {
 }
 
 #[tokio::test]
-async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budget() {
+async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_no_progress_window() {
     let temp = tempfile::tempdir().unwrap();
     let ws = sealed_worktree(temp.path());
     let store = WorkflowV2ResultStore::new(temp.path().join("run/v2"));
@@ -165,13 +165,12 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
 
     let tasks = dispatch.tasks.lock().unwrap();
     assert_eq!(tasks.len(), 2, "one failed call and one re-ask");
-    // (A) both sessions are told the limit the host actually applies.
+    // (A) both sessions are told the no-progress window the host applies.
     assert!(
-        tasks[0].contains("this call has 120 minutes"),
+        tasks[0].contains("this dispatch ends after 120 minutes without new activity"),
         "{}",
         tasks[0]
     );
-    assert!(!tasks[0].contains("240 minutes"));
     assert!(
         !tasks[0].contains("uncommitted work"),
         "first session started clean"
@@ -188,7 +187,10 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
         !second.contains("A previous attempt at this task"),
         "{second}"
     );
-    assert!(second.contains("this call has 120 minutes"), "{second}");
+    assert!(
+        second.contains("this dispatch ends after 120 minutes without new activity"),
+        "{second}"
+    );
     assert!(second.ends_with(base), "{second}");
     // (C) ...and what the ended session was refused and last ran.
     assert!(

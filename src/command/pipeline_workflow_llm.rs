@@ -437,8 +437,8 @@ mod tests {
         let outcome = outcome_from_response(LlmResponse {
             content: "partial".into(),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 2,
+            tokens_in: Some(1),
+            tokens_out: Some(2),
             stop_reason: Some("max_tokens".into()),
         });
 

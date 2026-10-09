@@ -36,6 +36,35 @@ fn call_record_separates_start_and_completion_timestamps() {
     assert!(finished > started);
 }
 
+#[test]
+fn completion_uses_the_admission_start_and_replay_keeps_both_times() {
+    let (_temp, store) = store();
+    let started_at = chrono::Utc::now();
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    let record = WorkflowV2CallRecord::new_with_started_at(
+        started_at,
+        "run-1",
+        WorkflowV2HostCall {
+            id: "slow-call".into(),
+            method: WorkflowV2HostMethod::Agent,
+            write_mode: None,
+            options: Default::default(),
+        },
+        1,
+        "input".into(),
+        WorkflowV2Result::accepted("done"),
+        Vec::new(),
+    );
+    store.save_call_record(&record).unwrap();
+    let replayed = store.load_call_record("slow-call").unwrap().unwrap();
+
+    let started = chrono::DateTime::parse_from_rfc3339(&replayed.started_at).unwrap();
+    let finished = chrono::DateTime::parse_from_rfc3339(&replayed.finished_at).unwrap();
+    assert!(finished.signed_duration_since(started).num_milliseconds() >= 30);
+    assert_eq!(replayed.started_at, record.started_at);
+    assert_eq!(replayed.finished_at, record.finished_at);
+}
+
 /// Admit `id` the way a dispatch does: next attempt, then the admission.
 fn admit(store: &WorkflowV2ResultStore, id: &str, input_hash: &str) -> WorkflowV2CallRecord {
     let attempt = store.next_dispatch_attempt(id, input_hash).unwrap();

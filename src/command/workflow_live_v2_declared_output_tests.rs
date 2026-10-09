@@ -306,8 +306,8 @@ impl WorkflowLlmClient for ScriptedLlm {
         Ok(WorkflowAgentOutcome {
             content,
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }
@@ -403,8 +403,8 @@ async fn transport_evidence_survives_spawned_http_agent_and_repair() {
             Ok(WorkflowAgentOutcome {
                 content: String::new(),
                 tool_uses: vec![],
-                tokens_in: 0,
-                tokens_out: 0,
+                tokens_in: Some(0),
+                tokens_out: Some(0),
                 stop_reason: None,
             })
         }
@@ -483,8 +483,8 @@ async fn repository_audit_dispatch_uses_selected_timeout_and_read_only_tools() {
             Ok(WorkflowAgentOutcome {
                 content: accepted_with_items(),
                 tool_uses: vec![],
-                tokens_in: 0,
-                tokens_out: 0,
+                tokens_in: Some(0),
+                tokens_out: Some(0),
                 stop_reason: Some("end_turn".into()),
             })
         }
@@ -567,8 +567,8 @@ async fn repository_audit_direct_implementation_requires_sealed_dispatch() {
             Ok(WorkflowAgentOutcome {
                 content: blocked_without_items(),
                 tool_uses: vec![],
-                tokens_in: 0,
-                tokens_out: 0,
+                tokens_in: Some(0),
+                tokens_out: Some(0),
                 stop_reason: Some("end_turn".into()),
             })
         }

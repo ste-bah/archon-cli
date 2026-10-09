@@ -39,8 +39,8 @@ impl WorkflowLlmClient for StructuredLlm {
         Ok(WorkflowAgentOutcome {
             content: reply.to_string(),
             tool_uses: self.tool_uses.clone(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: Some("end_turn".to_string()),
         })
     }

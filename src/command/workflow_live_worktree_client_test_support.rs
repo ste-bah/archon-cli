@@ -28,8 +28,8 @@ export default async function workflow(w) {
 "#
             .to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }
@@ -118,8 +118,8 @@ export default async function workflow(w) {
         Ok(WorkflowAgentOutcome {
             content,
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }

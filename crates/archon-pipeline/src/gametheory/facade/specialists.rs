@@ -372,7 +372,11 @@ async fn execute_specialist_call(
             output: Some(response.content),
             error: None,
             audit: recalled.audit,
-            cost_usd: estimate_llm_cost_usd(model, response.tokens_in, response.tokens_out),
+            cost_usd: estimate_llm_cost_usd(
+                model,
+                response.tokens_in.unwrap_or_default(),
+                response.tokens_out.unwrap_or_default(),
+            ),
         },
         Err(e) => SpecialistCallOutput {
             agent_key: agent_key.to_string(),

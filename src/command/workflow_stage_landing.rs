@@ -180,8 +180,8 @@ mod tests {
             Ok(archon_workflow::WorkflowAgentOutcome {
                 content: json!({"status":"accepted","data":{"records_landed":1}}).to_string(),
                 tool_uses: vec![],
-                tokens_in: 0,
-                tokens_out: 0,
+                tokens_in: Some(0),
+                tokens_out: Some(0),
                 stop_reason: Some("end_turn".into()),
             })
         }

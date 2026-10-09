@@ -75,7 +75,10 @@ async fn timed_out_branch_with_partial_work_is_retried_in_run_and_lands() {
         "{retry}"
     );
     assert!(retry.contains("The declared focused tests are believed to pass; run them once and return the result envelope."), "{retry}");
-    assert!(retry.contains("this call has 30 minutes"), "{retry}");
+    assert!(
+        retry.contains("this dispatch ends after 30 minutes without new activity"),
+        "{retry}"
+    );
     assert!(
         retry.contains("Implement the item now.") && retry.contains("\nLanding policy ("),
         "{retry}"

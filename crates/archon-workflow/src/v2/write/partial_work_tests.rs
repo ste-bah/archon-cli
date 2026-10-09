@@ -241,7 +241,7 @@ fn a_partial_that_no_longer_applies_leaves_the_workspace_clean() {
 }
 
 #[test]
-fn the_host_preamble_states_the_budget_and_the_write_first_rule() {
+fn the_host_preamble_states_the_no_progress_window_and_the_write_first_rule() {
     let plain = with_host_preamble("do the task", None, None, &Default::default());
     assert_eq!(plain, "do the task");
     let budgeted = with_host_preamble(
@@ -250,7 +250,7 @@ fn the_host_preamble_states_the_budget_and_the_write_first_rule() {
         None,
         &Default::default(),
     );
-    assert!(budgeted.starts_with("Time budget: this call has 90 minutes"));
+    assert!(budgeted.starts_with("No-progress window: this dispatch ends after 90 minutes"));
     assert!(budgeted.contains("Write the deliverable files first"));
     assert!(budgeted.ends_with("\n\ndo the task"));
     let partial = PartialWork {
@@ -266,7 +266,7 @@ fn the_host_preamble_states_the_budget_and_the_write_first_rule() {
         Some(&partial),
         &Default::default(),
     );
-    assert!(both.starts_with("Time budget: this call has 2 minutes"));
+    assert!(both.starts_with("No-progress window: this dispatch ends after 2 minutes"));
     assert!(both.contains("has been applied to this workspace: a.rs"));
 }
 

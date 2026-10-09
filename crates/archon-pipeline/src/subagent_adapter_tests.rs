@@ -16,8 +16,8 @@ impl LlmClient for NoopClient {
         Ok(LlmResponse {
             content: String::new(),
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: None,
         })
     }
@@ -359,8 +359,37 @@ fn completed_subagent_preserves_provider_usage() {
         None,
     )
     .unwrap();
-    assert_eq!(response.tokens_in, 321);
-    assert_eq!(response.tokens_out, 54);
+    assert_eq!(response.tokens_in, Some(321));
+    assert_eq!(response.tokens_out, Some(54));
+}
+
+#[test]
+fn completed_subagent_preserves_missing_and_zero_usage() {
+    let missing = llm_response_for_subagent_outcome(
+        SubagentOutcome::CompletedWithUsage {
+            content: "body".into(),
+            tokens_in: None,
+            tokens_out: None,
+        },
+        false,
+        None,
+    )
+    .unwrap();
+    assert_eq!(missing.tokens_in, None);
+    assert_eq!(missing.tokens_out, None);
+
+    let zero = llm_response_for_subagent_outcome(
+        SubagentOutcome::CompletedWithUsage {
+            content: "body".into(),
+            tokens_in: Some(0),
+            tokens_out: Some(0),
+        },
+        false,
+        None,
+    )
+    .unwrap();
+    assert_eq!(zero.tokens_in, Some(0));
+    assert_eq!(zero.tokens_out, Some(0));
 }
 
 #[test]

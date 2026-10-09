@@ -213,8 +213,8 @@ impl WorkflowLlmClient for RawOutcomeLlm {
         Ok(WorkflowAgentOutcome {
             content: self.content.to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 3,
-            tokens_out: 5,
+            tokens_in: Some(3),
+            tokens_out: Some(5),
             stop_reason: Some(self.stop_reason.to_string()),
         })
     }

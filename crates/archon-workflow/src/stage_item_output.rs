@@ -58,10 +58,8 @@ where
     let mut tool_uses = first_response.tool_uses;
     tool_uses.extend(repaired.tool_uses);
     repaired.tool_uses = tool_uses;
-    repaired.tokens_in = repaired.tokens_in.saturating_add(first_response.tokens_in);
-    repaired.tokens_out = repaired
-        .tokens_out
-        .saturating_add(first_response.tokens_out);
+    repaired.tokens_in = add_usage(repaired.tokens_in, first_response.tokens_in);
+    repaired.tokens_out = add_usage(repaired.tokens_out, first_response.tokens_out);
     Ok(repaired)
 }
 
@@ -128,10 +126,8 @@ fn fallback_read_only_discovery_items(
     let mut tool_uses = first_response.tool_uses;
     tool_uses.extend(repaired.tool_uses);
     repaired.tool_uses = tool_uses;
-    repaired.tokens_in = repaired.tokens_in.saturating_add(first_response.tokens_in);
-    repaired.tokens_out = repaired
-        .tokens_out
-        .saturating_add(first_response.tokens_out);
+    repaired.tokens_in = add_usage(repaired.tokens_in, first_response.tokens_in);
+    repaired.tokens_out = add_usage(repaired.tokens_out, first_response.tokens_out);
     repaired.content = json!({
         "items": items,
         "runtime_recovery": {
@@ -143,6 +139,11 @@ fn fallback_read_only_discovery_items(
     })
     .to_string();
     Some(repaired)
+}
+
+fn add_usage(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    left.zip(right)
+        .map(|(left, right)| left.saturating_add(right))
 }
 
 fn discovery_path_items(request: &StageRunRequest) -> Vec<Value> {
