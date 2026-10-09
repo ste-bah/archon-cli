@@ -331,7 +331,7 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
         "acceptance author must reach the configured local provider; requests: {:?}",
         project.provider.requests.snapshot()
     );
-    for role in ["acceptance", "judge", "skeleton", "body", "audit"] {
+    for role in ["acceptance", "judge", "skeleton", "body", "fidelity"] {
         assert!(
             counts.get(role).copied().unwrap_or_default() > 0,
             "missing scripted {role} call: {counts:?}"

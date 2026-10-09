@@ -62,7 +62,6 @@ pub fn result_store_records(
             {
                 return None;
             }
-            let name = path.file_name().unwrap().to_string_lossy().into_owned();
             let mut value: serde_json::Value =
                 serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
             strip_timestamps(&mut value);
@@ -74,10 +73,79 @@ pub fn result_store_records(
                     (run_id, "<run-id>"),
                 ],
             );
-            Some((name, value))
+            normalize_lifecycle_metadata(&mut value);
+            // Result filenames are hashes of call and attempt data. Compare the
+            // retained records by their normalized contents, not those opaque IDs.
+            Some((String::new(), value))
         })
         .flatten()
         .collect::<Vec<_>>();
-    records.sort_by(|left, right| left.0.cmp(&right.0));
+    records.sort_by_key(|record| serde_json::to_string(&record.1).unwrap());
     records
+}
+
+fn normalize_lifecycle_metadata(value: &mut serde_json::Value) {
+    let host_call_id = value
+        .get("call")
+        .and_then(|call| {
+            (call.get("method").and_then(serde_json::Value::as_str) == Some("hostCommand"))
+                .then(|| call.get("id").and_then(serde_json::Value::as_str))
+                .flatten()
+        })
+        .map(str::to_owned);
+    if let Some(host_call_id) = host_call_id {
+        replace_string_values(value, &host_call_id, "<host-call-id>");
+        if let Some(call) = value
+            .get_mut("call")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            call.insert(
+                "id".into(),
+                serde_json::Value::String("<host-call-id>".into()),
+            );
+        }
+    }
+
+    match value {
+        serde_json::Value::Object(map) => {
+            // Resume adds an admission event and retries only the interrupted
+            // skeleton call, so these values describe this run's execution path.
+            map.remove("admission_sequence");
+            if map.get("call").and_then(|call| call.get("id"))
+                == Some(&serde_json::Value::String("skeleton-author-1".into()))
+            {
+                map.remove("attempt");
+            }
+            for (key, nested) in map.iter_mut() {
+                if key == "call_id" {
+                    *nested = serde_json::Value::String("<call-id>".into());
+                } else {
+                    normalize_lifecycle_metadata(nested);
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for nested in values {
+                normalize_lifecycle_metadata(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn replace_string_values(value: &mut serde_json::Value, from: &str, to: &str) {
+    match value {
+        serde_json::Value::String(text) => *text = text.replace(from, to),
+        serde_json::Value::Object(map) => {
+            for nested in map.values_mut() {
+                replace_string_values(nested, from, to);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for nested in values {
+                replace_string_values(nested, from, to);
+            }
+        }
+        _ => {}
+    }
 }
