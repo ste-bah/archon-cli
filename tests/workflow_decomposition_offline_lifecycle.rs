@@ -1,0 +1,475 @@
+#[path = "support/workflow_decomposition_offline_server.rs"]
+mod server;
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+const FIXTURE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/offline_decomposition"
+);
+
+struct TestProject {
+    temp: tempfile::TempDir,
+    provider: server::FakeProvider,
+}
+
+impl TestProject {
+    fn path(&self) -> &Path {
+        self.temp.path()
+    }
+}
+
+fn project() -> TestProject {
+    project_with_provider(None)
+}
+
+fn project_with_provider(blocked_role: Option<&str>) -> TestProject {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir_all(root.join("repository")).unwrap();
+    copy_tree(
+        &PathBuf::from(FIXTURE).join("repository"),
+        &root.join("repository"),
+    );
+    copy_tree(
+        &PathBuf::from(FIXTURE).join(".archon"),
+        &root.join(".archon"),
+    );
+    fs::copy(PathBuf::from(FIXTURE).join("prd.md"), root.join("prd.md")).unwrap();
+    let git = Command::new("git")
+        .current_dir(root.join("repository"))
+        .args(["init", "-q"])
+        .status()
+        .unwrap();
+    assert!(git.success());
+    let git = Command::new("git")
+        .current_dir(root.join("repository"))
+        .args(["add", "."])
+        .status()
+        .unwrap();
+    assert!(git.success());
+    let git = Command::new("git")
+        .current_dir(root.join("repository"))
+        .args([
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ])
+        .env("GIT_AUTHOR_DATE", "2000-01-01T00:00:00Z")
+        .env("GIT_COMMITTER_DATE", "2000-01-01T00:00:00Z")
+        .status()
+        .unwrap();
+    assert!(git.success());
+    let provider = blocked_role.map_or_else(
+        server::FakeProvider::start,
+        server::FakeProvider::start_blocked,
+    );
+    fs::write(
+        root.join("config.toml"),
+        format!(
+            r#"
+[api]
+default_model = "claude-sonnet-4-6"
+default_effort = "low"
+thinking_budget = 0
+base_url = "{}"
+auth = "required"
+[llm]
+provider = "anthropic"
+[workflow]
+gate_mode = "observe"
+repository_root = "repository"
+[subagent]
+max_concurrent = 1
+"#,
+            provider.base_url
+        ),
+    )
+    .unwrap();
+    TestProject { temp, provider }
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let destination = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &destination);
+        } else {
+            fs::copy(entry.path(), destination).unwrap();
+        }
+    }
+}
+
+fn run(root: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_archon"))
+        .current_dir(root)
+        .args(args)
+        .env("ANTHROPIC_API_KEY", "offline-test-key")
+        .env_remove("ANTHROPIC_BASE_URL")
+        .output()
+        .unwrap()
+}
+
+fn decompose_args() -> [&'static str; 9] {
+    [
+        "workflow",
+        "decompose",
+        "--prd",
+        "prd.md",
+        "--tasks",
+        "tasks",
+        "--repository",
+        "repository",
+        "--yes",
+    ]
+}
+
+fn spawn_decompose(root: &Path) -> std::process::Child {
+    spawn_decompose_with_revision(root, None)
+}
+
+fn spawn_decompose_with_revision(root: &Path, revision: Option<&str>) -> std::process::Child {
+    Command::new(env!("CARGO_BIN_EXE_archon"))
+        .current_dir(root)
+        .args(decompose_args())
+        .env("ANTHROPIC_API_KEY", "offline-test-key")
+        .env_remove("ANTHROPIC_BASE_URL")
+        .envs(
+            revision
+                .map(|revision| [("ARCHON_GIT_HASH", revision)])
+                .into_iter()
+                .flatten(),
+        )
+        .stdout(fs::File::create(root.join("decompose.stdout")).unwrap())
+        .stderr(fs::File::create(root.join("decompose.stderr")).unwrap())
+        .spawn()
+        .unwrap()
+}
+
+fn assert_only_role_repeated(
+    before: &std::collections::BTreeMap<String, usize>,
+    after: &std::collections::BTreeMap<String, usize>,
+    interrupted_role: &str,
+) {
+    let roles = before
+        .keys()
+        .chain(after.keys())
+        .collect::<std::collections::BTreeSet<_>>();
+    for role in roles {
+        let delta = after
+            .get(role)
+            .copied()
+            .unwrap_or_default()
+            .saturating_sub(before.get(role).copied().unwrap_or_default());
+        let expected = if role.as_str() == interrupted_role {
+            1
+        } else {
+            0
+        };
+        assert_eq!(
+            delta, expected,
+            "unexpected accepted call replay for {role}: before={before:?} after={after:?}"
+        );
+    }
+}
+
+fn resume(root: &Path, run_id: &str) -> Output {
+    run(root, &["workflow", "resume", "--live", "--yes", run_id])
+}
+
+fn one_run(root: &Path) -> PathBuf {
+    let runs = fs::read_dir(root.join(".archon/workflows")).unwrap();
+    let mut matches = runs
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.join("state.json").is_file());
+    let run = matches.next().expect("decomposition result-store run");
+    assert!(matches.next().is_none(), "fixture should create one run");
+    run
+}
+
+fn strip_timestamps(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.retain(|key, _| {
+                !(key == "timestamp" || key.ends_with("_at") || key.ends_with("At"))
+            });
+            for nested in map.values_mut() {
+                strip_timestamps(nested);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for nested in values {
+                strip_timestamps(nested);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn normalize_values(value: &mut serde_json::Value, replacements: &[(&str, &str)]) {
+    match value {
+        serde_json::Value::String(text) => {
+            for (from, to) in replacements {
+                *text = text.replace(from, to);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for nested in map.values_mut() {
+                normalize_values(nested, replacements);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for nested in values {
+                normalize_values(nested, replacements);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn result_store_records(
+    run: &Path,
+    root: &Path,
+    endpoint: &str,
+    run_id: &str,
+) -> Vec<(String, serde_json::Value)> {
+    let results = run.join("v2/results");
+    let mut records = fs::read_dir(&results)
+        .unwrap_or_else(|error| {
+            panic!(
+                "reading result-store records at {}: {error}",
+                results.display()
+            )
+        })
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            if !path.is_file()
+                || path.extension().and_then(|extension| extension.to_str()) != Some("json")
+            {
+                return None;
+            }
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            strip_timestamps(&mut value);
+            normalize_values(
+                &mut value,
+                &[
+                    (root.to_str().unwrap(), "<project-root>"),
+                    (endpoint, "<provider-endpoint>"),
+                    (run_id, "<run-id>"),
+                ],
+            );
+            Some((name, value))
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+    records.sort_by(|left, right| left.0.cmp(&right.0));
+    records
+}
+
+#[derive(Debug, PartialEq)]
+struct FinalSnapshot {
+    acceptance: serde_json::Value,
+    skeleton: serde_json::Value,
+    task_bodies: Vec<(String, String)>,
+    records: Vec<(String, serde_json::Value)>,
+}
+
+fn final_snapshot(project: &TestProject) -> FinalSnapshot {
+    let root = project.path();
+    let run = one_run(root);
+    let state: serde_json::Value =
+        serde_json::from_slice(&fs::read(run.join("state.json")).unwrap()).unwrap();
+    assert_eq!(state["status"], "completed", "final run state: {state}");
+    let mut acceptance: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("tasks/acceptance-contract.json")).unwrap())
+            .unwrap();
+    strip_timestamps(&mut acceptance);
+    if let Some(prd) = acceptance
+        .get_mut("prd")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        prd.remove("path");
+    }
+    let mut skeleton: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join("tasks/task-skeleton.json")).unwrap()).unwrap();
+    strip_timestamps(&mut skeleton);
+    let task_bodies = ["TASK-X-010.md", "TASK-X-020.md"]
+        .into_iter()
+        .map(|name| {
+            (
+                name.into(),
+                fs::read_to_string(root.join("tasks").join(name)).unwrap(),
+            )
+        })
+        .collect();
+    let records = result_store_records(
+        &run,
+        root,
+        &project.provider.base_url,
+        run.file_name().unwrap().to_str().unwrap(),
+    );
+    assert!(
+        !records.is_empty(),
+        "the result store must retain host-call records"
+    );
+    FinalSnapshot {
+        acceptance,
+        skeleton,
+        task_bodies,
+        records,
+    }
+}
+
+#[test]
+fn golden_live_decomposition_uses_real_binary_and_local_provider() {
+    let project = project();
+    let root = project.path();
+    let output = run(root, &decompose_args());
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(root.join("tasks/acceptance-contract.json").exists());
+    assert!(root.join("tasks/task-skeleton.json").exists());
+    assert!(root.join("tasks/TASK-X-010.md").exists());
+    assert!(root.join("tasks/TASK-X-020.md").exists());
+    let _golden = final_snapshot(&project);
+    let counts = project.provider.counts.snapshot();
+    for role in ["acceptance", "judge", "skeleton", "body", "audit"] {
+        assert!(
+            counts.get(role).copied().unwrap_or_default() > 0,
+            "missing scripted {role} call: {counts:?}"
+        );
+    }
+    assert_eq!(
+        counts.get("unexpected"),
+        None,
+        "every model request must match an explicit script: {counts:?}"
+    );
+}
+
+#[test]
+fn pause_at_provider_call_boundary_resumes_only_interrupted_author() {
+    let project = project_with_provider(Some("skeleton"));
+    let root = project.path();
+    let mut child = spawn_decompose(root);
+    project.provider.wait_until_blocked();
+    let run_dir = one_run(root);
+    let run_id = run_dir.file_name().unwrap().to_string_lossy().into_owned();
+    let before_resume = project.provider.counts.snapshot();
+    let pause = run(root, &["workflow", "pause", &run_id]);
+    assert!(
+        pause.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pause.stderr)
+    );
+    project.provider.release();
+    let child_status = child.wait().unwrap();
+    assert!(
+        child_status.success(),
+        "paused child should settle cleanly: {child_status}"
+    );
+    let resumed = resume(root, &run_id);
+    assert!(
+        resumed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    assert_only_role_repeated(
+        &before_resume,
+        &project.provider.counts.snapshot(),
+        "skeleton",
+    );
+    let actual = final_snapshot(&project);
+    let golden = completed_golden_snapshot();
+    assert_eq!(
+        actual, golden,
+        "pause and resume must preserve the golden result-store records and artifacts"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn sigkill_mid_provider_call_resumes_only_interrupted_author() {
+    let project = project_with_provider(Some("skeleton"));
+    let root = project.path();
+    let mut child = spawn_decompose(root);
+    project.provider.wait_until_blocked();
+    let run_dir = one_run(root);
+    let run_id = run_dir.file_name().unwrap().to_string_lossy().into_owned();
+    let before_resume = project.provider.counts.snapshot();
+    child.kill().unwrap();
+    let _ = child.wait().unwrap();
+    project.provider.release();
+    let resumed = resume(root, &run_id);
+    assert!(
+        resumed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    assert_only_role_repeated(
+        &before_resume,
+        &project.provider.counts.snapshot(),
+        "skeleton",
+    );
+    assert_eq!(
+        final_snapshot(&project),
+        completed_golden_snapshot(),
+        "SIGKILL recovery must preserve golden records and artifacts"
+    );
+}
+
+#[test]
+#[ignore = "defect: the real CLI has no process-level build-id override; ARCHON_GIT_HASH is compile-time only"]
+fn resume_from_a_different_build_id_preserves_the_golden_result() {
+    let project = project_with_provider(Some("skeleton"));
+    let root = project.path();
+    let mut child = spawn_decompose_with_revision(root, Some("previous-build"));
+    project.provider.wait_until_blocked();
+    let run_dir = one_run(root);
+    let run_id = run_dir.file_name().unwrap().to_string_lossy().into_owned();
+    let pause = run(root, &["workflow", "pause", &run_id]);
+    assert!(
+        pause.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pause.stderr)
+    );
+    project.provider.release();
+    assert!(child.wait().unwrap().success());
+    let resumed = resume(root, &run_id);
+    assert!(
+        resumed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    let events = fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+    assert!(
+        events.contains("binary_revision_drift"),
+        "resume must observe the different starting build: {events}"
+    );
+    assert_eq!(final_snapshot(&project), completed_golden_snapshot());
+}
+
+fn completed_golden_snapshot() -> FinalSnapshot {
+    let project = project();
+    let output = run(project.path(), &decompose_args());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    final_snapshot(&project)
+}
