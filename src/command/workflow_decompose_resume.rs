@@ -404,7 +404,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
                 run_staging_root: store.run_dir(run_id).join("host-command-staging"),
                 frozen_task_id: None,
                 frozen_task_file: None,
-                freeze_provider_environment: freeze_provider_environment(env_vars),
+                freeze_provider_environment: freeze_provider_environment(env_vars, config),
                 acceptance_environment_allowlist: config
                     .workflow
                     .acceptance_execution

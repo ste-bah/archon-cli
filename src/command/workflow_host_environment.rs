@@ -9,6 +9,7 @@ use archon_workflow::EnvironmentProfileId;
 const PROCESS_ENVIRONMENT: &[&str] = &[
     "PATH",
     "HOME",
+    "ARCHON_CONFIG_DIR",
     "TMPDIR",
     "TMP",
     "TEMP",

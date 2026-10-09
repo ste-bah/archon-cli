@@ -92,10 +92,8 @@ fn project_with_provider(blocked_role: Option<&str>) -> TestProject {
         server::FakeProvider::start,
         server::FakeProvider::start_blocked,
     );
-    fs::write(
-        root.join("config.toml"),
-        format!(
-            r#"
+    let config = format!(
+        r#"
 [api]
 default_model = "claude-sonnet-4-6"
 default_effort = "low"
@@ -104,16 +102,22 @@ base_url = "{}"
 auth = "required"
 [llm]
 provider = "anthropic"
+[llm.openai]
+base_url = "{}"
+[llm.local]
+base_url = "{}"
 [workflow]
 gate_mode = "observe"
 repository_root = "repository"
 [subagent]
 max_concurrent = 1
 "#,
-            provider.base_url
-        ),
-    )
-    .unwrap();
+        provider.base_url,
+        provider.base_url.trim_end_matches("/v1/messages"),
+        provider.base_url.trim_end_matches("/v1/messages")
+    );
+    fs::write(root.join("config.toml"), &config).unwrap();
+    fs::write(root.join(".archon/config.toml"), &config).unwrap();
     TestProject {
         temp: Some(temp),
         provider,

@@ -6,7 +6,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::server::FakeProvider;
 
-pub const NO_PROGRESS_LIMIT: Duration = Duration::from_secs(300);
+// Scripted local replies are immediate. A child pointed at any other provider
+// must fail within this bound instead of waiting through the production
+// provider transport timeout.
+pub const NO_PROGRESS_LIMIT: Duration = Duration::from_secs(30);
 
 pub fn progress(test: &str, step: &str) {
     let stamp = SystemTime::now()
@@ -59,7 +62,8 @@ pub fn isolate_child(command: &mut Command, root: &Path) {
         .env("XDG_CACHE_HOME", cache_home)
         .env("ARCHON_CONFIG_DIR", root)
         .env("ANTHROPIC_API_KEY", "offline-test-key")
-        .env("ANTHROPIC_BASE_URL", endpoint);
+        .env("ANTHROPIC_BASE_URL", endpoint)
+        .env("OPENAI_BASE_URL", endpoint.trim_end_matches("/v1/messages"));
 }
 
 pub fn tail(path: &Path) -> String {
