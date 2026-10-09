@@ -4,7 +4,6 @@
 //! remediation proceeds; the run is not paused at the branch.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 
 use super::*;
 use crate::{RunStatus, WorkflowStore, WorkflowV2HostMethod};
@@ -15,16 +14,12 @@ struct Shrinking {
     attempts: AtomicUsize,
     rejections: usize,
     stuck: bool,
-    budget: Option<Duration>,
 }
 
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for Shrinking {
     fn fanout_parallelism(&self, _: Option<usize>) -> usize {
         1
-    }
-    fn call_time_budget(&self) -> Option<Duration> {
-        self.budget
     }
     async fn run_call(
         &self,
@@ -47,12 +42,11 @@ impl WorkflowAgentDispatch for Shrinking {
     }
 }
 
-fn shrinking(rejections: usize, stuck: bool, budget: Option<Duration>) -> Shrinking {
+fn shrinking(rejections: usize, stuck: bool) -> Shrinking {
     Shrinking {
         attempts: AtomicUsize::new(0),
         rejections,
         stuck,
-        budget,
     }
 }
 
@@ -73,7 +67,6 @@ fn branch(root: &std::path::Path) -> WorktreeBranchExecution {
             depends_on: Vec::new(),
         },
         refresh: None,
-        time_budget: BranchTimeBudget::CallTimeBudget,
     }
 }
 
@@ -98,19 +91,20 @@ async fn run(
 async fn a_branch_keeps_re_asking_while_its_overshoot_shrinks() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
-    let dispatch = shrinking(20, false, None);
+    let dispatch = shrinking(20, false);
     let result = run(&dispatch, &branch(temp.path()), &store).await.unwrap();
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
     assert_eq!(dispatch.attempts.load(Ordering::SeqCst), 21);
 }
 
 #[tokio::test]
-async fn a_spent_total_time_budget_does_not_end_a_progressing_branch() {
+async fn progress_past_three_dispatch_lengths_keeps_the_branch_running() {
     let temp = tempfile::tempdir().unwrap();
     let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
-    let dispatch = shrinking(3, false, Some(Duration::ZERO));
+    let dispatch = shrinking(5, false);
     let result = run(&dispatch, &branch(temp.path()), &store).await.unwrap();
     assert_eq!(result.status, WorkflowV2Status::Accepted, "{result:#?}");
+    assert_eq!(dispatch.attempts.load(Ordering::SeqCst), 6);
 }
 
 fn running_run(project: &std::path::Path) -> (WorkflowStore, String, u64) {
@@ -142,7 +136,7 @@ async fn a_branch_that_stops_converging_reports_its_outcome_and_never_pauses() {
     let temp = tempfile::tempdir().unwrap();
     let (workflows, run_id, generation) = running_run(temp.path());
     let store = WorkflowV2ResultStore::new(workflows.run_dir(&run_id).join("v2"));
-    let dispatch = shrinking(usize::MAX, true, None);
+    let dispatch = shrinking(usize::MAX, true);
     // The branch's own outcome: a stamped result, or the rejection the
     // wave records as the branch's failure (capturing its work). Never a
     // control error that would unwind the wave.

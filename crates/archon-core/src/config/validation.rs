@@ -96,12 +96,6 @@ pub fn validate(config: &ArchonConfig) -> Result<(), ConfigError> {
             config.workflow.generated.verification_branch_timeout_secs
         )));
     }
-    let write_budget = config.workflow.generated.write_call_time_budget_secs;
-    if write_budget != 0 && !(300..=86_400).contains(&write_budget) {
-        return Err(ConfigError::ValidationError(format!(
-            "workflow.generated.write_call_time_budget_secs must be 0 or 300..=86400, got {write_budget}"
-        )));
-    }
     let retry_budget = config.workflow.generated.timeout_retry_budget_secs;
     if !(300..=86_400).contains(&retry_budget) {
         return Err(ConfigError::ValidationError(format!(

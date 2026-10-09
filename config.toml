@@ -1451,7 +1451,6 @@ max_investigation_iterations = 6
 # host_call_timeout_secs = 7200
 # verification_branch_timeout_secs = 14400
 # 0 derives three host-call timeouts; it does NOT mean unlimited.
-# write_call_time_budget_secs = 0
 # Once declared focused tests pass, allow this many further tool calls before
 # refusing inspections/builds/tests; Write and Edit remain available.
 # submit_grace_calls = 15

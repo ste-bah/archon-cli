@@ -32,8 +32,6 @@ use super::workflow_live_v2_host_dispatch::run_single_v2_agent_call_in_repositor
 /// parameter at every call site that threads it through the write layer.
 pub(super) struct LiveAgentDispatch {
     client: LiveV2AgentClient,
-    /// Operator-set total budget for one write call; `None` derives it.
-    call_time_budget_override: Option<std::time::Duration>,
     /// `workflow.generated.submit_grace_calls`, handed to each write session's
     /// read guard with the tests its task declares.
     submit_grace_calls: u32,
@@ -52,18 +50,11 @@ impl LiveAgentDispatch {
         let defaults = archon_core::config::GeneratedWorkflowConfig::default();
         Self {
             client,
-            call_time_budget_override: None,
             submit_grace_calls: defaults.submit_grace_calls,
             timeout_retry_budget: budget_override(defaults.timeout_retry_budget_secs),
             resume_memory_calls: defaults.resume_memory_calls as usize,
             verification_branch_timeout: budget_override(defaults.verification_branch_timeout_secs),
         }
-    }
-
-    /// `0` keeps the derived bound; anything else is the budget in seconds.
-    pub(super) fn with_call_time_budget_secs(mut self, secs: u32) -> Self {
-        self.call_time_budget_override = budget_override(secs);
-        self
     }
 
     pub(super) fn with_generated_config(
@@ -74,7 +65,7 @@ impl LiveAgentDispatch {
         self.timeout_retry_budget = budget_override(config.timeout_retry_budget_secs);
         self.resume_memory_calls = config.resume_memory_calls as usize;
         self.verification_branch_timeout = budget_override(config.verification_branch_timeout_secs);
-        self.with_call_time_budget_secs(config.write_call_time_budget_secs)
+        self
     }
 }
 
@@ -89,36 +80,14 @@ fn dispatch_timeout_override(execution: &WorkflowV2CallExecution) -> Option<u64>
         .filter(|secs| *secs > 0)
 }
 
-/// How much total wall clock a call gets, as a multiple of one dispatch's.
-///
-/// Expressed against the operator's own timeout rather than as a duration, so
-/// the bound moves with the setting instead of contradicting it. Three means a
-/// call may spend its attempt and two corrections' worth of time; a call still
-/// going after that is not converging, and the retry budgets above it — up to
-/// thirteen size re-asks, plus transport retries that deliberately do not
-/// consume that budget — would otherwise let it run for a day under a
-/// two-hour timeout.
-const CALL_TIME_BUDGET_DISPATCHES: u64 = 3;
-
 fn budget_override(secs: u32) -> Option<std::time::Duration> {
     (secs > 0).then(|| std::time::Duration::from_secs(u64::from(secs)))
-}
-
-fn derived_budget(timeout_secs: Option<u64>) -> Option<std::time::Duration> {
-    timeout_secs.map(|secs| {
-        std::time::Duration::from_secs(secs.saturating_mul(CALL_TIME_BUDGET_DISPATCHES))
-    })
 }
 
 #[async_trait]
 impl WorkflowAgentDispatch for LiveAgentDispatch {
     fn repository_audit(&self) -> Option<archon_workflow::repository_audit::runtime::AuditRuntime> {
         self.client.audit.clone()
-    }
-
-    fn call_time_budget(&self) -> Option<std::time::Duration> {
-        self.call_time_budget_override
-            .or_else(|| derived_budget(self.client.timeout_secs()))
     }
 
     /// The per-dispatch timeout the client puts on every agent call — the
@@ -424,15 +393,10 @@ mod budget_tests {
     use super::*;
 
     #[test]
-    fn operator_budget_overrides_the_derived_bound_and_zero_keeps_it() {
-        assert_eq!(
-            derived_budget(Some(100)),
-            Some(std::time::Duration::from_secs(300))
-        );
-        assert_eq!(derived_budget(None), None);
+    fn dispatch_timeout_remains_the_only_live_agent_time_limit() {
         assert_eq!(budget_override(0), None);
         assert_eq!(
-            budget_override(900).or_else(|| derived_budget(Some(100))),
+            budget_override(900),
             Some(std::time::Duration::from_secs(900))
         );
     }

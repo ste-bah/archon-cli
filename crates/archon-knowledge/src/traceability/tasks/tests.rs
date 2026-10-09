@@ -1,5 +1,7 @@
 use super::*;
 
+mod yaml_tests;
+
 const TASK: &str = concat!(
     "# TASK-TDL-080 — Coverage Matrix Command\n",
     "\n",
@@ -53,15 +55,6 @@ fn absent_implements_is_not_an_error() {
     let raw = "```yaml\ntask_id: TASK-X-001\nstatus: ready\n```\n";
     let b = parse_task_binding(raw, "x.md").expect("parses");
     assert!(b.implements.is_empty());
-}
-
-#[test]
-fn unreadable_implements_fails_closed_naming_the_file() {
-    let raw = "```yaml\ntask_id: TASK-X-001\nimplements:\n  - REQ-DL-001\n```\n";
-    let err = parse_task_binding(raw, "tests/broken.md").expect_err("block sequence refused");
-    let message = err.to_string();
-    assert!(message.contains("tests/broken.md"), "{message}");
-    assert!(message.contains("flow sequence"), "{message}");
 }
 
 #[test]
@@ -217,32 +210,7 @@ required_tools: [cargo]
     );
 }
 
-/// A malformed tool list must not fail the file: the requirement claims are the
-/// thing traceability exists to read, and losing them costs far more than a
-/// little classification precision.
-#[test]
-fn a_malformed_required_tools_list_does_not_fail_the_task() {
-    let raw = "\
-# TASK-W
-
-```yaml
-task_id: TASK-W-001
-implements: [REQ-4]
-required_tools:
-  - cargo
-  - lizard
-```
-
-## Focused Tests
-
-- `cargo test`
-";
-    let binding =
-        parse_task_binding(raw, "tasks/TASK-W-001.md").expect("a bad tool list is tolerated");
-    assert_eq!(binding.implements, vec!["REQ-4"]);
-    assert!(binding.required_tools.is_empty());
-}
-
+/// A YAML block sequence supplies the same hints as a flow sequence.
 /// Headings go wrong in both directions and both used to yield zero bullets.
 #[test]
 fn a_heading_longer_than_the_requested_one_still_matches() {

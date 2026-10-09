@@ -1,7 +1,7 @@
 //! Work a write branch produced but could not finish.
 //!
-//! A branch that runs out of its call budget returns no manifest, so the wave
-//! treats it as having contributed nothing and removes its worktree. Six hours
+//! A branch whose dispatch reaches its no-progress window returns no manifest,
+//! so the wave treats it as having contributed nothing and removes its worktree. Six hours
 //! of code disappeared that way on a live run, and the next attempt at the
 //! same task started from zero. Here the diff is captured beside the stage's
 //! patches, recorded on the branch outcome, and applied onto the next fresh
@@ -221,7 +221,7 @@ fn host_preamble(
     let mut parts = Vec::new();
     if let Some(budget) = budget {
         parts.push(format!(
-            "Time budget: this call has {} minutes of wall clock in total, including every tool call and test run. Write the deliverable files first and verify them after; do not spend the budget reading. Work left in the workspace when the budget ends is kept and handed to the next attempt at this task, so partial files are worth more than a complete investigation.",
+            "No-progress window: this dispatch ends after {} minutes without new activity; new tool calls or assistant text renew the window. Write the deliverable files first and verify them after. Work left in the workspace when a dispatch ends is kept and handed to the next attempt at this task, so partial files are worth more than a complete investigation.",
             budget.as_secs().div_ceil(60)
         ));
     }
@@ -240,27 +240,6 @@ fn host_preamble(
 #[cfg(test)]
 pub(crate) fn with_resume_preamble(task: &str, resumed: Option<&PartialWork>) -> String {
     with_host_preamble(task, None, resumed, &Default::default())
-}
-
-/// The wall clock the agent will actually run into on its next dispatch.
-///
-/// Two limits end a write call and neither knows about the other: the host
-/// cancels one dispatch at its per-dispatch timeout, and the branch loop stops
-/// re-dispatching once the total call budget is spent. The prompt used to
-/// render only the second, so it promised 240 minutes to a session the host
-/// ended at 120. The truthful number is the smaller of the per-dispatch limit
-/// and whatever the total has left after `elapsed`; `None` only when neither
-/// limit exists.
-pub(crate) fn effective_call_budget(
-    dispatch_timeout: Option<std::time::Duration>,
-    call_time_budget: Option<std::time::Duration>,
-    elapsed: std::time::Duration,
-) -> Option<std::time::Duration> {
-    let remaining = call_time_budget.map(|budget| budget.saturating_sub(elapsed));
-    match (dispatch_timeout, remaining) {
-        (Some(per_dispatch), Some(remaining)) => Some(per_dispatch.min(remaining)),
-        (per_dispatch, remaining) => per_dispatch.or(remaining),
-    }
 }
 
 /// What a write branch needs to re-render its task for a session started

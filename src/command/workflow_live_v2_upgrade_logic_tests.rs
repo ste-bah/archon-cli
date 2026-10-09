@@ -230,13 +230,10 @@ async fn logic_361_unversioned_checks_run_again_and_an_unversioned_landing_reuse
     let upgraded = run.upgraded(&[]);
     assert_eq!(run.run(upgraded.clone(), SCRIPT).await, (3, 1));
     assert_eq!(upgraded.calls.load(Ordering::SeqCst), 3);
-    for check in [
-        "verify-frozen-acceptance",
-        "task-set-lint",
-        "requirements-trace",
-    ] {
+    for check in ["verify-frozen-acceptance", "task-set-lint"] {
         assert_eq!(run.stamps(check), vec![Some(1)], "{check}");
     }
+    assert_eq!(run.stamps("requirements-trace"), vec![Some(2)]);
     assert_eq!(run.stamps("freeze-skeleton"), vec![None], "landing reused");
     assert_eq!(run.run(run.upgraded(&[]), SCRIPT).await, (0, 4));
 }

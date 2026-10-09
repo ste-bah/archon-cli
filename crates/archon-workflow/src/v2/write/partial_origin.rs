@@ -89,7 +89,6 @@ impl PartialOrigin {
             .iter()
             .any(|gap| gap.id.starts_with(INTERRUPTION_GAP_PREFIX))
             || summary.contains(INTERRUPTION_SUMMARY_MARKER)
-            || summary.contains(super::super::errors::CALL_TIME_BUDGET_EXHAUSTED)
     }
 
     /// The runner stopped the attempt for looping without progress.

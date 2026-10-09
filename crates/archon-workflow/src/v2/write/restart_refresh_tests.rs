@@ -58,9 +58,6 @@ struct EmptyThenRecord {
 
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for EmptyThenRecord {
-    fn call_time_budget(&self) -> Option<Duration> {
-        Some(Duration::from_secs(14_400))
-    }
     fn dispatch_timeout(&self) -> Option<Duration> {
         Some(Duration::from_secs(7_200))
     }
@@ -103,11 +100,7 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
     let base = "implement the module";
     let first_task = super::super::partial_work::with_host_preamble(
         base,
-        super::super::partial_work::effective_call_budget(
-            dispatch.dispatch_timeout(),
-            dispatch.call_time_budget(),
-            Duration::ZERO,
-        ),
+        dispatch.dispatch_timeout(),
         None,
         &Default::default(),
     );
@@ -137,7 +130,6 @@ async fn a_fresh_session_mid_attempt_is_told_its_own_partial_work_and_true_budge
             stage_id: "agents-2".into(),
             item_id: "agents-2-0".into(),
         }),
-        time_budget: BranchTimeBudget::CallTimeBudget,
     };
     // The agent wrote two files under its ownership before the session ended.
     std::fs::write(ws.join("src/lib.rs"), "fn a() {}\nfn b() {}\n").unwrap();
@@ -243,7 +235,6 @@ async fn a_branch_without_a_refresh_re_asks_unchanged() {
             depends_on: Vec::new(),
         },
         refresh: None,
-        time_budget: BranchTimeBudget::CallTimeBudget,
     };
     run_worktree_branch_agent(
         "verify",
@@ -269,9 +260,6 @@ struct AlwaysCut {
 
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for AlwaysCut {
-    fn call_time_budget(&self) -> Option<Duration> {
-        Some(Duration::from_secs(14_400))
-    }
     fn dispatch_timeout(&self) -> Option<Duration> {
         Some(Duration::from_secs(1_800))
     }
@@ -294,8 +282,8 @@ impl WorkflowAgentDispatch for AlwaysCut {
     }
 }
 
-/// Issue-10 at the loop: the host's own cut, with hours of call budget still
-/// unspent, is returned as the interrupted result after ONE dispatch. The
+/// Issue-10 at the loop: the host's own no-progress cut is returned as the
+/// interrupted result after ONE dispatch. The
 /// caller's retry-once / stall logic decides what happens next, not this loop.
 #[tokio::test]
 async fn a_host_cut_is_not_re_asked_by_the_loop() {
@@ -324,7 +312,6 @@ async fn a_host_cut_is_not_re_asked_by_the_loop() {
             depends_on: Vec::new(),
         },
         refresh: None,
-        time_budget: BranchTimeBudget::Fixed(Some(Duration::from_secs(1_800))),
     };
     let result = run_worktree_branch_agent(
         "implement",

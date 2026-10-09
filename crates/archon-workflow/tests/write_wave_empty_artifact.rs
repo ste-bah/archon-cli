@@ -50,9 +50,6 @@ struct Scripted {
 
 #[async_trait::async_trait]
 impl WorkflowAgentDispatch for Scripted {
-    fn call_time_budget(&self) -> Option<Duration> {
-        Some(Duration::from_secs(60))
-    }
     fn dispatch_timeout(&self) -> Option<Duration> {
         Some(Duration::from_secs(7_200))
     }

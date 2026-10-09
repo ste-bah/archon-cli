@@ -103,9 +103,6 @@ impl WorkflowAgentDispatch for Scripted {
     fn repository_audit(&self) -> Option<AuditRuntime> {
         self.audit.as_ref().map(|(runtime, _)| runtime.clone())
     }
-    fn call_time_budget(&self) -> Option<Duration> {
-        Some(Duration::from_secs(60))
-    }
     fn dispatch_timeout(&self) -> Option<Duration> {
         Some(Duration::from_secs(7_200))
     }
