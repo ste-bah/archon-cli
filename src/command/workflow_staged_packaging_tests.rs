@@ -135,20 +135,30 @@ fn chat_that_leaves_a_block_open_before_the_task_file_is_refused() {
     );
 }
 
-/// Two real top-level task files are refused, bare or in a pure wrapper.
-/// After chat, the first is indistinguishable from a whole example in the
-/// chat, so the last one lands (see the complete-example test).
+/// A complete example after the task file for a task that is not frozen is
+/// body content: the answer lands byte for byte, bare or in a pure wrapper.
+/// (A later file of a frozen subject is refused; the host's binding refuses
+/// two frozen subjects before staging, and staging refuses the bound
+/// subject's file twice.)
 #[test]
-fn a_second_complete_task_file_is_refused_on_every_path() {
-    let second = format!(
+fn a_later_complete_example_for_a_task_that_is_not_frozen_lands_in_the_body() {
+    let example = format!(
         "{}\n# TASK-X-002\n",
         FRONTMATTER.replace("TASK-X-001", "TASK-X-002")
     );
-    let two = format!("{}\n{second}", valid_body());
-    for answer in [two.clone(), format!("```markdown\n{two}```\n")] {
+    let body = format!("{}\n{example}", valid_body());
+    assert_eq!(landed(body.as_bytes()), (body.clone().into_bytes(), false));
+    let (bytes, unwrapped, _) = discarded(&format!("```markdown\n{body}```\n"));
+    assert_eq!((bytes, unwrapped), (body.into_bytes(), true));
+}
+
+#[test]
+fn the_bound_subjects_task_file_twice_is_refused() {
+    let twice = format!("{}\n{}", valid_body(), valid_body());
+    for answer in [twice.clone(), format!("{CHAT}\n\n{twice}")] {
         assert_eq!(
             refusal(&answer),
-            "the answer holds 2 task files (TASK-X-001, TASK-X-002); return only one task file, starting with its ```yaml frontmatter block; if TASK-X-002 is an example, put it inside a ```markdown fence",
+            "the answer holds 2 task files (TASK-X-001, TASK-X-001); return only one task file, starting with its ```yaml frontmatter block; if TASK-X-001 is an example, put it inside a ```markdown fence",
             "{answer:?}"
         );
     }

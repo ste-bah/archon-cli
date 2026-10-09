@@ -381,6 +381,30 @@ pub(crate) fn offset_in(text: &str, part: &str) -> usize {
 /// text from it to the next such block as a task file under its own id, so
 /// a yaml example in the body, even one carrying a `task_id`, never does.
 pub(crate) fn task_files(task_file: &str) -> (Option<String>, Vec<String>) {
+    task_files_where(task_file, |id, raw| {
+        let path = std::path::PathBuf::from(format!("{id}.md"));
+        archon_workflow::task_universe::parsing::parse_task_file(&path, raw).is_ok()
+    })
+}
+
+/// [`task_files`], counting a later block only when it is the task file of
+/// a frozen `subject`. A later whole task file for a task that is not frozen
+/// is body content, like any text after the task file, and is never cut.
+pub(crate) fn subject_task_files(
+    task_file: &str,
+    subjects: &[Subject<'_>],
+) -> (Option<String>, Vec<String>) {
+    task_files_where(task_file, |_, raw| {
+        subjects.iter().any(|(_, path)| {
+            archon_workflow::task_universe::parsing::parse_task_file(path, raw).is_ok()
+        })
+    })
+}
+
+fn task_files_where(
+    task_file: &str,
+    accepts: impl Fn(&str, &str) -> bool,
+) -> (Option<String>, Vec<String>) {
     let spans: Vec<_> = line_spans(task_file).collect();
     let ids = frontmatter_task_ids(task_file, &spans);
     let mut fenced = false;
@@ -409,11 +433,7 @@ pub(crate) fn task_files(task_file: &str) -> (Option<String>, Vec<String>) {
             let end = named
                 .get(slot + 1)
                 .map_or(task_file.len(), |&next| spans[next].0);
-            let path = std::path::PathBuf::from(format!("{id}.md"));
-            let raw = &task_file[spans[index].0..end];
-            archon_workflow::task_universe::parsing::parse_task_file(&path, raw)
-                .is_ok()
-                .then(|| id.to_string())
+            accepts(id, &task_file[spans[index].0..end]).then(|| id.to_string())
         })
         .collect();
     (ids[first].clone(), others)

@@ -15,7 +15,7 @@ use std::path::Path;
 
 use crate::command::topology_lint::{
     first_nonblank_line, is_frontmatter_opener, offset_in, several_task_files_finding,
-    strip_leading_blank_lines, strip_packaging, task_files, unwrap_outer_fence,
+    strip_leading_blank_lines, strip_packaging, subject_task_files, unwrap_outer_fence,
 };
 
 /// The task file the host lands from a body author's answer.
@@ -118,7 +118,10 @@ pub(super) fn normalize_task_candidate(
         });
     };
     let (task_file, wrapper) = located_task_file(text, subject)?;
-    let (first, others) = task_files(task_file);
+    // Only another file of the bound frozen subject makes the answer
+    // ambiguous here; the host's binding refused two frozen subjects before
+    // staging, and a later whole file for a task that is not frozen is body.
+    let (first, others) = subject_task_files(task_file, &[(subject_name(subject), subject)]);
     if !others.is_empty() {
         let first = first.as_deref().unwrap_or("one without a task_id");
         let ids: Vec<&str> = std::iter::once(first)
@@ -149,6 +152,15 @@ pub(super) fn normalize_task_candidate(
 /// answer itself when it opens with the frontmatter (after a BOM and blank
 /// lines), the inside of one outer fence (Issue-61), or what follows chat
 /// before it ([`strip_packaging`]); else the refusal.
+/// The bound subject's name for a finding: its file stem. It only names the
+/// subject when no block parses as its task file.
+fn subject_name(subject: &Path) -> &str {
+    subject
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or_default()
+}
+
 fn located_task_file<'a>(text: &'a str, subject: &Path) -> Result<(&'a str, bool), String> {
     let rest = strip_leading_blank_lines(text);
     if is_frontmatter_opener(first_nonblank_line(rest)) {
@@ -164,12 +176,7 @@ fn located_task_file<'a>(text: &'a str, subject: &Path) -> Result<(&'a str, bool
     // Issue-367 follow-up: chat before the task file is packaging, removed
     // exactly and recorded, because an author that repeats it every attempt
     // can never act on a refusal.
-    // The subject's task_id only names it if no block parses as it.
-    let named = subject
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or_default();
-    match strip_packaging(text, &[(named, subject)]) {
+    match strip_packaging(text, &[(subject_name(subject), subject)]) {
         Ok(Some(packaged)) => Ok((packaged.task_file, packaged.wrapper)),
         Ok(None) => Err(text_before_task_file(first_nonblank_line(rest))),
         Err(several) => {
