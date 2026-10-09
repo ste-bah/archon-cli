@@ -265,8 +265,11 @@ impl Drop for FakeProvider {
 fn scripted_answer(prompt: &str) -> (&'static str, String) {
     if prompt.contains("Adversarially judge every acceptance check") || prompt.contains("decisions")
     {
+        // `prompt` is the serialized request body, so a quoted id inside the
+        // message text reads `\"AC-X-001\"`: drop the escape before the quote.
         let ids = prompt
             .split('"')
+            .map(|part| part.trim_end_matches('\\'))
             .filter(|part| part.starts_with("AC-") || part.starts_with("SUP-"))
             .collect::<std::collections::BTreeSet<_>>();
         let decisions = ids
@@ -275,7 +278,7 @@ fn scripted_answer(prompt: &str) -> (&'static str, String) {
                 serde_json::json!({
                     "id": id,
                     "verdict": "accepted",
-                    "counterexample": "",
+                    "counterexample": "None found: a missing or false outcome makes the command exit non-zero.",
                     "reason": "The command directly checks the declared outcome and exits non-zero when it is false."
                 })
             })
@@ -491,6 +494,19 @@ mod tests {
         );
         let judge: serde_json::Value = serde_json::from_str(&judge).unwrap();
         assert_eq!(judge["decisions"][0]["verdict"], "accepted");
-        assert_eq!(judge["decisions"][0]["counterexample"], "");
+        assert!(
+            !judge["decisions"][0]["counterexample"]
+                .as_str()
+                .unwrap()
+                .trim()
+                .is_empty()
+        );
+
+        let body = serde_json::json!({"messages": [{"role": "user", "content":
+            "Adversarially judge every acceptance check below. {\"id\":\"AC-X-001\"}"}]});
+        let (_, judge) = scripted_answer(&body.to_string());
+        let judge: serde_json::Value = serde_json::from_str(&judge).unwrap();
+        assert_eq!(judge["decisions"].as_array().unwrap().len(), 1);
+        assert_eq!(judge["decisions"][0]["id"], "AC-X-001");
     }
 }
