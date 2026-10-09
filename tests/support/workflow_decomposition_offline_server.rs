@@ -153,12 +153,17 @@ impl FakeProvider {
         }
     }
 
-    pub fn wait_until_blocked(&self) {
+    pub fn wait_until_blocked(&self, wait_interval: Duration) -> bool {
         assert!(self.blocked_role.is_some(), "provider has no blocked role");
         let mut entered = self.entered.0.lock().unwrap();
         while !*entered {
-            entered = self.entered.1.wait(entered).unwrap();
+            let (next, timeout) = self.entered.1.wait_timeout(entered, wait_interval).unwrap();
+            entered = next;
+            if timeout.timed_out() && !*entered {
+                return false;
+            }
         }
+        true
     }
 
     pub fn release(&self) {

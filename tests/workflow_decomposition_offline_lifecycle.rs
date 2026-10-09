@@ -1,9 +1,13 @@
+#[path = "support/workflow_decomposition_offline_deadline.rs"]
+mod deadline;
 #[path = "support/workflow_decomposition_offline_server.rs"]
 mod server;
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+use deadline::{await_provider_boundary, progress, run, wait_for_child};
 
 const FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -108,16 +112,6 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-fn run(root: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_archon"))
-        .current_dir(root)
-        .args(args)
-        .env("ANTHROPIC_API_KEY", "offline-test-key")
-        .env_remove("ANTHROPIC_BASE_URL")
-        .output()
-        .unwrap()
-}
-
 fn decompose_args() -> [&'static str; 9] {
     [
         "workflow",
@@ -142,6 +136,7 @@ fn spawn_decompose_with_revision(root: &Path, revision: Option<&str>) -> std::pr
         .args(decompose_args())
         .env("ANTHROPIC_API_KEY", "offline-test-key")
         .env_remove("ANTHROPIC_BASE_URL")
+        .env_remove("ARCHON_BUILD_FINGERPRINT")
         .envs(
             revision
                 .map(|revision| [("ARCHON_GIT_HASH", revision)])
@@ -333,6 +328,7 @@ fn final_snapshot(project: &TestProject) -> FinalSnapshot {
 
 #[test]
 fn golden_live_decomposition_uses_real_binary_and_local_provider() {
+    progress("golden", "starting local provider and CLI");
     let project = project();
     let root = project.path();
     let output = run(root, &decompose_args());
@@ -342,6 +338,7 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    progress("golden", "CLI completed; checking artifacts and calls");
     assert!(root.join("tasks/acceptance-contract.json").exists());
     assert!(root.join("tasks/task-skeleton.json").exists());
     assert!(root.join("tasks/TASK-X-010.md").exists());
@@ -363,10 +360,12 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
 
 #[test]
 fn pause_at_provider_call_boundary_resumes_only_interrupted_author() {
+    progress("pause-resume", "starting blocked provider call");
     let project = project_with_provider(Some("skeleton"));
     let root = project.path();
     let mut child = spawn_decompose(root);
-    project.provider.wait_until_blocked();
+    await_provider_boundary(&project.provider, root, &mut child, "pause-resume cell");
+    progress("pause-resume", "provider call reached pause boundary");
     let run_dir = one_run(root);
     let run_id = run_dir.file_name().unwrap().to_string_lossy().into_owned();
     let before_resume = project.provider.counts.snapshot();
@@ -377,11 +376,17 @@ fn pause_at_provider_call_boundary_resumes_only_interrupted_author() {
         String::from_utf8_lossy(&pause.stderr)
     );
     project.provider.release();
-    let child_status = child.wait().unwrap();
+    let child_status = wait_for_child(
+        &mut child,
+        &root.join("decompose.stdout"),
+        &root.join("decompose.stderr"),
+        "paused decomposition child",
+    );
     assert!(
         child_status.success(),
         "paused child should settle cleanly: {child_status}"
     );
+    progress("pause-resume", "resuming interrupted author");
     let resumed = resume(root, &run_id);
     assert!(
         resumed.status.success(),
@@ -404,15 +409,21 @@ fn pause_at_provider_call_boundary_resumes_only_interrupted_author() {
 #[cfg(unix)]
 #[test]
 fn sigkill_mid_provider_call_resumes_only_interrupted_author() {
+    progress("sigkill-resume", "starting blocked provider call");
     let project = project_with_provider(Some("skeleton"));
     let root = project.path();
     let mut child = spawn_decompose(root);
-    project.provider.wait_until_blocked();
+    await_provider_boundary(&project.provider, root, &mut child, "sigkill-resume cell");
     let run_dir = one_run(root);
     let run_id = run_dir.file_name().unwrap().to_string_lossy().into_owned();
     let before_resume = project.provider.counts.snapshot();
     child.kill().unwrap();
-    let _ = child.wait().unwrap();
+    let _ = wait_for_child(
+        &mut child,
+        &root.join("decompose.stdout"),
+        &root.join("decompose.stderr"),
+        "killed decomposition child",
+    );
     project.provider.release();
     let resumed = resume(root, &run_id);
     assert!(
@@ -438,7 +449,7 @@ fn resume_from_a_different_build_id_preserves_the_golden_result() {
     let project = project_with_provider(Some("skeleton"));
     let root = project.path();
     let mut child = spawn_decompose_with_revision(root, Some("previous-build"));
-    project.provider.wait_until_blocked();
+    await_provider_boundary(&project.provider, root, &mut child, "different-build cell");
     let run_dir = one_run(root);
     let run_id = run_dir.file_name().unwrap().to_string_lossy().into_owned();
     let pause = run(root, &["workflow", "pause", &run_id]);
@@ -448,7 +459,15 @@ fn resume_from_a_different_build_id_preserves_the_golden_result() {
         String::from_utf8_lossy(&pause.stderr)
     );
     project.provider.release();
-    assert!(child.wait().unwrap().success());
+    assert!(
+        wait_for_child(
+            &mut child,
+            &root.join("decompose.stdout"),
+            &root.join("decompose.stderr"),
+            "different-build decomposition child",
+        )
+        .success()
+    );
     let resumed = resume(root, &run_id);
     assert!(
         resumed.status.success(),
