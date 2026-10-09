@@ -117,7 +117,9 @@ async fn edit_during_unwind_in(edit: LifecycleAction, expected: RunStatus, fixed
                 .map(std::sync::Arc::new)
                 .unwrap(),
         );
-        let result = tokio::time::timeout(HANG_GUARD, run).await.expect("run ends");
+        let result = tokio::time::timeout(HANG_GUARD, run)
+            .await
+            .expect("run ends");
         assert!(result.is_ok(), "{result:?}");
         format!("{result:?}")
     };
