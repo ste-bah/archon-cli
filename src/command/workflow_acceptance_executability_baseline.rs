@@ -168,10 +168,19 @@ pub(crate) fn recorded_commit(tasks_root: &Path) -> Option<String> {
     (!commit.is_empty()).then(|| commit.to_string())
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct ReuseAudit {
+    pub(crate) reused: bool,
+    pub(crate) why: String,
+    pub(crate) evidence: Option<String>,
+}
+
 /// How the checks that failed on a probe's pre-implementation tree failed
 /// there (Issue 275), and the environment they ran with.
 #[derive(Debug, Clone)]
 pub(crate) struct BaselineRuns {
+    /// Per-check cache decision and original evidence reference.
+    pub(crate) reuse: BTreeMap<String, ReuseAudit>,
     pub(crate) commit: String,
     pub(crate) failures: BTreeMap<String, CheckResult>,
     /// The environment the site gave each check: what its output could echo.
@@ -200,6 +209,7 @@ impl HostProbe {
         let (environment, forwarded) = super::sites::site_environment(self);
         Some(BaselineRuns {
             commit: self.baseline.as_ref()?.commit.clone(),
+            reuse: std::mem::take(&mut *self.reuse_audit.lock().expect("reuse audit lock")),
             failures,
             environment,
             forwarded,

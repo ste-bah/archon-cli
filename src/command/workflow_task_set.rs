@@ -310,6 +310,8 @@ mod publish;
 pub(crate) mod reauthor;
 #[path = "workflow_acceptance_republish.rs"]
 pub(crate) mod republish;
+#[path = "workflow_acceptance_check_reuse.rs"]
+pub(super) mod workflow_acceptance_check_reuse;
 pub(crate) use findings::{
     non_accepted_ids, prepare_acceptance_freeze_reauthoring, prepare_from_judged,
     unproven_incomplete,

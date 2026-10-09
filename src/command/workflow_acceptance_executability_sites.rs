@@ -87,46 +87,9 @@ fn data_state(probe: &HostProbe, tree: &Baseline) -> Vec<String> {
         .clone()
 }
 
-/// The memo key of `reference` on `tree` with project data in `data`: the
-/// project data is part of the tree a verdict is evidence of, so data that
-/// changed since makes an observed verdict no evidence at all.
-fn memo_key(
-    probe: &HostProbe,
-    tree: &Baseline,
-    data: &[String],
-    contract: &AcceptanceContract,
-    id: &str,
-) -> Option<String> {
-    let entry = (contract.acceptance.iter())
-        .chain(&contract.supplementary)
-        .find(|entry| entry.id == id)?;
-    let site = match &probe.site {
-        Site::Scratch(binding) => serde_json::to_string(&binding.policy).ok()?,
-        Site::Direct | Site::Hermetic | Site::Unavailable(_) => "hermetic".to_string(),
-    };
-    let key = serde_json::json!([
-        site,
-        runtime_identity(probe),
-        tree.repository,
-        probe.project,
-        tree.commit,
-        data,
-        entry.id,
-        entry.check,
-    ]);
-    Some(content_digest(key.to_string().as_bytes()))
-}
-
-/// The memo key of check `id` of `contract` on `tree`, with the project
-/// data as it is now.
-pub(super) fn check_key(
-    probe: &HostProbe,
-    tree: &Baseline,
-    contract: &AcceptanceContract,
-    id: &str,
-) -> Option<String> {
-    memo_key(probe, tree, &data_state(probe, tree), contract, id)
-}
+#[path = "workflow_acceptance_executability_sites_reuse.rs"]
+mod reuse;
+pub(super) use reuse::check_key;
 
 /// Run `refs` once on `tree`, hermetically: in the scratch observation at
 /// that commit (without the shared build cache when `cold`), else in the
@@ -150,7 +113,7 @@ pub(super) async fn run_at(
     let keys: Vec<Option<String>> = (refs.iter())
         .map(|reference| {
             (probe.memo)
-                .then(|| memo_key(probe, tree, &data, contract, &reference.acceptance_id))
+                .then(|| reuse::memo_key(probe, tree, &data, contract, &reference.acceptance_id))
                 .flatten()
         })
         .collect();
@@ -158,19 +121,62 @@ pub(super) async fn run_at(
     let seen: Vec<Option<CheckResult>> = (keys.iter())
         .map(|key| {
             let key = key.as_ref()?;
+            // A verdict is reusable only while its original evidence file
+            // still exists and validates. The process memo is merely a speed
+            // layer over that durable evidence, never evidence itself.
+            let store = store.as_ref()?;
+            let saved = store.load(key)?;
             let remembered = (probe.process_memo())
                 .then(|| memo().lock().ok()?.get(key).cloned())
                 .flatten();
-            remembered.or_else(|| {
-                let saved = store.as_ref()?.load(key)?;
-                probe.reused_from_disk();
-                if let Ok(mut memo) = memo().lock() {
-                    memo.insert(key.clone(), saved.clone());
-                }
-                Some(saved)
-            })
+            probe.reused_from_disk();
+            if let Ok(mut memo) = memo().lock() {
+                memo.insert(key.clone(), saved.clone());
+            }
+            Some(remembered.unwrap_or(saved))
         })
         .collect();
+    for ((reference, key), saved) in refs.iter().zip(&keys).zip(&seen) {
+        let entry = (contract.acceptance.iter())
+            .chain(&contract.supplementary)
+            .find(|entry| entry.id == reference.acceptance_id);
+        let why = if let Some(entry) = entry {
+            match &entry.check {
+                AcceptanceCheck::Command { command, .. } => {
+                    let assessment = crate::command::workflow_task_set::workflow_acceptance_check_reuse::assess(
+                        command,
+                        key.as_deref().unwrap_or(""),
+                        &crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()
+                            .map_or_else(|| String::new(), |(version, _, _)| version.to_string()),
+                        "site environment",
+                    );
+                    if saved.is_some() {
+                        "all inputs are host-proven identical"
+                    } else if key.is_none() {
+                        assessment.reason
+                    } else {
+                        "no matching prior verdict"
+                    }
+                }
+                _ => "check type has no bounded repository read closure",
+            }
+        } else {
+            "check is absent from the contract"
+        };
+        if let Ok(mut audit) = probe.reuse_audit.lock() {
+            audit.insert(
+                reference.acceptance_id.clone(),
+                super::ReuseAudit {
+                    reused: saved.is_some(),
+                    why: why.to_string(),
+                    evidence: saved.as_ref().and_then(|_| {
+                        key.as_ref()
+                            .and_then(|key| store.as_ref()?.evidence_ref(key))
+                    }),
+                },
+            );
+        }
+    }
     let pending: Vec<FrozenCommandRef> = (refs.iter().zip(&seen))
         .filter(|(_, seen)| seen.is_none())
         .map(|(reference, _)| reference.clone())

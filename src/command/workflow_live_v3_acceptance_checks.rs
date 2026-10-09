@@ -14,6 +14,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 
 use archon_workflow::acceptance_scratch::{
     CheckResult, DIRECT_DEFAULT_OUTPUT_BYTES, DirectSite, evaluate_floor_direct, run_check_direct,
@@ -26,6 +28,31 @@ use archon_workflow::{WorkflowError, WorkflowResult, WorkflowStore, poll_v2_run_
 
 use super::{StageContext, command_reference, git_head, observe_in_scratch};
 use crate::command::acceptance_scratch_policy::NativeBinding;
+
+#[cfg(test)]
+fn test_execution_counts() -> &'static Mutex<BTreeMap<String, usize>> {
+    static COUNTS: OnceLock<Mutex<BTreeMap<String, usize>>> = OnceLock::new();
+    COUNTS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+#[cfg(test)]
+fn record_execution(digest: &str) {
+    *test_execution_counts()
+        .lock()
+        .expect("test execution counter")
+        .entry(digest.to_string())
+        .or_default() += 1;
+}
+
+#[cfg(test)]
+pub(crate) fn test_execution_count(digest: &str) -> usize {
+    test_execution_counts()
+        .lock()
+        .expect("test execution counter")
+        .get(digest)
+        .copied()
+        .unwrap_or_default()
+}
 
 fn direct_site(context: &StageContext) -> DirectSite {
     DirectSite {
@@ -118,18 +145,91 @@ pub(in crate::command) async fn execute_checks(
             )),
         }
     }
-    let results = run_selected(
+    let mut results_by_id = BTreeMap::new();
+    let mut pending = Vec::new();
+    let mut reuse = BTreeMap::new();
+    for criterion in selected {
+        let host_test = match &criterion.check {
+            AcceptanceCheck::Command { command, .. } => super::reuse::is_literal_test(command),
+            _ => false,
+        };
+        if let Some(snapshot) = super::reuse::snapshot(context, criterion) {
+            let (saved, decision, key) = super::reuse::take_snapshot(&snapshot);
+            if let Some(saved) = saved {
+                results_by_id.insert(criterion.id.clone(), saved);
+            } else if let (Some(key), Some(result)) =
+                (key, super::reuse::evaluate_snapshot(&snapshot, criterion))
+            {
+                let safe = criterion.id.replace(
+                    |ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'),
+                    "_",
+                );
+                super::reuse::save(
+                    key,
+                    &result,
+                    evidence_dir
+                        .join(format!("{safe}.stdout"))
+                        .display()
+                        .to_string(),
+                );
+                results_by_id.insert(criterion.id.clone(), result);
+            } else {
+                results_by_id.insert(
+                    criterion.id.clone(),
+                    operational(
+                        &criterion.id,
+                        "the host could not evaluate the literal test path snapshot; the shell was not run".into(),
+                    ),
+                );
+            }
+            reuse.insert(criterion.id.clone(), decision);
+        } else if host_test {
+            results_by_id.insert(
+                criterion.id.clone(),
+                operational(
+                    &criterion.id,
+                    "the host could not capture the literal test path snapshot; the shell was not run".into(),
+                ),
+            );
+            reuse.insert(
+                criterion.id.clone(),
+                super::reuse::Decision {
+                    reused: false,
+                    why: "literal test snapshot was unavailable; no shell fallback was run".into(),
+                    evidence: None,
+                },
+            );
+        } else {
+            let (_, decision, _) = super::reuse::take(context, criterion);
+            pending.push(*criterion);
+            reuse.insert(criterion.id.clone(), decision);
+        }
+    }
+    let fresh = run_selected(
         store,
         run_id,
         call_id,
         context,
         contract,
         chain_digest,
-        selected,
+        &pending,
         evidence_dir,
         &mut site_errors,
     )
     .await?;
+    for result in fresh {
+        results_by_id.insert(result.acceptance_id.clone(), result);
+    }
+    let audit = super::reuse::audit_bytes(&reuse).map_err(|error| {
+        WorkflowError::StateCorrupt(format!(
+            "acceptance reuse audit could not be encoded: {error}"
+        ))
+    })?;
+    archon_workflow::stage_write::write_bytes(&evidence_dir.join("check-reuse.json"), &audit)?;
+    let results = selected
+        .iter()
+        .filter_map(|criterion| results_by_id.remove(&criterion.id))
+        .collect();
     if !host_repairs.is_empty() {
         archon_workflow::stage_write::write_bytes(
             &evidence_dir.join("host-input-repairs.json"),
@@ -232,6 +332,10 @@ async fn run_selected(
                         .unwrap_or_else(|error| {
                             operational(&reference.acceptance_id, error.to_string())
                         });
+                #[cfg(test)]
+                if result.operational_error.is_none() {
+                    record_execution(&reference.command_digest);
+                }
                 results.insert(reference.acceptance_id.clone(), result);
             }
         }

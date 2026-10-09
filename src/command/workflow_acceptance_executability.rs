@@ -189,6 +189,7 @@ pub(crate) struct HostProbe {
     baseline: Option<baseline::Baseline>,
     /// How each check that failed there failed (Issue 275).
     baseline_failures: Mutex<BTreeMap<String, CheckResult>>,
+    reuse_audit: Mutex<BTreeMap<String, ReuseAudit>>,
     /// The tree the checks being repaired ran on, and how each fared there.
     failed_tree: Mutex<Option<baseline::FailedTree>>,
     /// Where the probe's own hermetic copies are made.
@@ -222,7 +223,7 @@ pub(crate) use baseline::Original;
 #[cfg(test)]
 pub(crate) use baseline::is_placeholder;
 pub(crate) use baseline::{
-    Baseline, BaselineRuns, FailedTree, PLACEHOLDER_REASON, originals, recorded_commit,
+    Baseline, BaselineRuns, FailedTree, PLACEHOLDER_REASON, ReuseAudit, originals, recorded_commit,
 };
 use sites::git_head;
 #[path = "workflow_acceptance_executability_hermetic.rs"]
@@ -274,6 +275,7 @@ impl HostProbe {
             unproven: Mutex::new(BTreeMap::new()),
             baseline: None,
             baseline_failures: Mutex::new(BTreeMap::new()),
+            reuse_audit: Mutex::new(BTreeMap::new()),
             failed_tree: Mutex::new(None),
             copy_parent: std::env::temp_dir(),
             memo: false,

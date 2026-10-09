@@ -120,7 +120,22 @@ pub(crate) fn hashed_text(text: &str) -> String {
         let start = offset + (line.len() - line.trim_start().len());
         offset += line.len() + 1;
         if !comments.contains(&start) {
-            kept.push(line);
+            // The pin is the output of this digest. Hashing its current
+            // value would make every legitimate re-pin change the digest
+            // again, so keep the field and its shape while normalizing only
+            // the pinned bytes.
+            if line.trim_start().starts_with("sources_digest: ") {
+                if let (Some(open), Some(close)) = (line.find('"'), line.rfind('"')) {
+                    if close > open {
+                        let mut normalized = line[..=open].to_owned();
+                        normalized.push_str("<source-digest>");
+                        normalized.push_str(&line[close..]);
+                        kept.push(normalized);
+                        continue;
+                    }
+                }
+            }
+            kept.push(line.to_owned());
         }
     }
     let opener = |line: &str| {

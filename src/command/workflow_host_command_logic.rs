@@ -204,9 +204,8 @@ const VERIFY: &[&str] = &["src/command/workflow_decompose_frozen_chain.rs"];
 pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-acceptance",
-        // 2: #366 live-root rule (sibling paths pass; a bad repository lock
-        // is an error) changes acceptance freeze verdicts.
-        version: 2,
+        // 9: normalized paths only; `-s` follows symlink targets.
+        version: 9,
         sources: &[GATE, CONTRACT, FREEZE],
         sources_digest: "ca33eff54ffe190144e9c0ebbbb38d099ee6f9e80df0f21b7863cc6abb18e071",
         build_bound: false,

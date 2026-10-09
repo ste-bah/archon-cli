@@ -480,3 +480,7 @@ mod environment;
 // Batch O: nothing passes without a contract, and zero-work passes fail.
 #[path = "workflow_live_v3_acceptance_tests_o.rs"]
 mod batch_o;
+
+#[cfg(unix)]
+#[path = "workflow_live_v3_acceptance_reuse_behavior_tests.rs"]
+mod reuse_behavior;
