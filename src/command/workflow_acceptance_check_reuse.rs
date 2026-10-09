@@ -96,7 +96,17 @@ fn executable_mode(_metadata: &std::fs::Metadata) -> u32 {
 /// read set. Shell, command substitution, environment expansion, and arbitrary
 /// executables are volatile because their reads cannot be established here.
 pub(crate) fn bounded_path(check: &str) -> Option<&str> {
-    let words: Vec<&str> = check.split_whitespace().collect();
+    // The check is later interpreted by a shell. Lex only the tiny grammar
+    // below: ASCII words separated by ordinary spaces. In particular, do not
+    // let shell whitespace handling fold a newline into one apparent command.
+    if check.is_empty()
+        || !check.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'/' | b' ')
+        })
+    {
+        return None;
+    }
+    let words: Vec<&str> = check.split(' ').filter(|word| !word.is_empty()).collect();
     match words.as_slice() {
         ["test", "-f" | "-e" | "-d" | "-s", path]
             if !path.starts_with('/')

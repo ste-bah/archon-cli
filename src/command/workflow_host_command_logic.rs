@@ -204,17 +204,17 @@ const VERIFY: &[&str] = &["src/command/workflow_decompose_frozen_chain.rs"];
 pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-acceptance",
-        // 6: acceptance check reuse also binds each literal input's filesystem state.
-        version: 6,
+        // 7: acceptance reuse admits only a strict single-command grammar.
+        version: 7,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "3d9e7074177f7f65505b75d91c75f5d03bc09f4596c6d7c7e277ec55e36e309c",
+        sources_digest: "ae3e9a52948091ff627aa8df5e78aff1657cd459764954a4b4d2425eb1f96cfe",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 1,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "3d9e7074177f7f65505b75d91c75f5d03bc09f4596c6d7c7e277ec55e36e309c",
+        sources_digest: "ae3e9a52948091ff627aa8df5e78aff1657cd459764954a4b4d2425eb1f96cfe",
         build_bound: false,
     },
     CapabilityLogic {

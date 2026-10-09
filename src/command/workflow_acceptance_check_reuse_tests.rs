@@ -59,6 +59,21 @@ fn shell_globs_and_expansions_are_volatile() {
 }
 
 #[test]
+fn acceptance_freeze_reuse_logic_newline_command_is_volatile() {
+    assert!(!assess("test\n-f\nfoo", "tree", "logic-1", "env-1").reusable);
+}
+
+#[test]
+fn acceptance_freeze_reuse_logic_command_separator_is_volatile() {
+    assert!(!assess("test -f foo; foo", "tree", "logic-1", "env-1").reusable);
+}
+
+#[test]
+fn acceptance_freeze_reuse_logic_command_substitution_is_volatile() {
+    assert!(!assess("test -f $(foo)", "tree", "logic-1", "env-1").reusable);
+}
+
+#[test]
 fn acceptance_freeze_reuse_logic_selected_shell_identity_reruns() {
     let root = std::env::temp_dir().join(format!(
         "archon-shell-identity-{}-{}",
