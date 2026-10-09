@@ -51,6 +51,7 @@ fn project_with_provider(blocked_role: Option<&str>) -> TestProject {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     fs::create_dir_all(root.join("repository")).unwrap();
+    fs::create_dir_all(root.join("tasks")).unwrap();
     copy_tree(
         &PathBuf::from(FIXTURE).join("repository"),
         &root.join("repository"),
