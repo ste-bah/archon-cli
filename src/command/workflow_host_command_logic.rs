@@ -209,16 +209,17 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #288 acceptance checks rerun only when their input closure
         // changed; a reused check verdict binds normalized literal paths,
         // their filesystem state, the shell, environment and this logic.
-        version: 3,
+        // 4: #380 complete wrapped obligation text changes freeze verdicts.
+        version: 4,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "6ac9921e449c7aaf49c6616c26a5d48e118d0797b68d220d68254bf98e5b2cdb",
+        sources_digest: "7978c97dc19dc529d986b4ea3e59a83d5fb056f26d8dad3f50581639586d9941",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
-        version: 1,
+        version: 2,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "6ac9921e449c7aaf49c6616c26a5d48e118d0797b68d220d68254bf98e5b2cdb",
+        sources_digest: "7978c97dc19dc529d986b4ea3e59a83d5fb056f26d8dad3f50581639586d9941",
         build_bound: false,
     },
     CapabilityLogic {
@@ -226,39 +227,41 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: R8 body packaging strips chat around the one frozen subject's task
         // file and binds by its task_id; the fidelity critic re-asks on an
         // unparseable answer while it makes progress.
-        version: 3,
+        // 4: #380's obligation model changes the frozen contract verdict.
+        version: 4,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "10e821f489474a1be1d4bb22f6f4e667550ab7b5d644348ad2b5e74ee4ac279c",
+        sources_digest: "9688001ec3e04d89b37c578c40be826dc86b36d3e6451324fad9ccaaf5c815a0",
         build_bound: false,
     },
     CapabilityLogic {
         id: "task-set-lint",
         // 3: the fidelity critic re-asks on an unparseable answer while it
         // makes progress (R8).
-        version: 3,
+        // 4: #380's obligation model changes the frozen contract verdict.
+        version: 4,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "10e821f489474a1be1d4bb22f6f4e667550ab7b5d644348ad2b5e74ee4ac279c",
+        sources_digest: "9688001ec3e04d89b37c578c40be826dc86b36d3e6451324fad9ccaaf5c815a0",
         build_bound: false,
     },
     CapabilityLogic {
         id: "requirements-trace",
-        version: 1,
+        version: 2,
         sources: &[GATE, CONTRACT, TRACE],
-        sources_digest: "75ffbf3a71c3fe00af098abb093c5b944622b1868f187a699005242e51613648",
+        sources_digest: "fb35c15a1bd8551c398338d4aa4e43efdadf098f9968cd57be5cf8748bcc8bbc",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-acceptance",
-        version: 1,
+        version: 2,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "5ee895f908f99f91d792783f8da42570efc01f09c7febd101e0bf2e289a3c41a",
+        sources_digest: "a9edd9046bafffa9440451aff7c386e7affae3afc17fe1ce62a6edbb49edb205",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
-        version: 1,
+        version: 2,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "5ee895f908f99f91d792783f8da42570efc01f09c7febd101e0bf2e289a3c41a",
+        sources_digest: "a9edd9046bafffa9440451aff7c386e7affae3afc17fe1ce62a6edbb49edb205",
         build_bound: true,
     },
 ];

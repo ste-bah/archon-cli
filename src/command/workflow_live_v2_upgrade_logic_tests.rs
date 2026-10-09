@@ -72,7 +72,7 @@ impl Run {
             )
             // Both builds model the same task-set-lint version, so each bump
             // test sets its own versions.
-            .with_logic_version("task-set-lint", Some(2)),
+            .with_logic_version("task-set-lint", Some(4)),
             calls: AtomicUsize::new(0),
         }
     }
@@ -91,7 +91,7 @@ impl Run {
             self.store.run_dir(&self.run_id),
         )
         .with_launch_catalog(self.launch.clone())
-        .with_logic_version("task-set-lint", Some(2));
+        .with_logic_version("task-set-lint", Some(4));
         for (id, version) in bumps {
             keys = keys.with_logic_version(id, Some(*version));
         }
@@ -237,7 +237,7 @@ async fn logic_361_unversioned_checks_run_again_and_an_unversioned_landing_reuse
     ] {
         let expected = match check {
             "verify-frozen-acceptance" | "requirements-trace" => 2,
-            "task-set-lint" => 2,
+            "task-set-lint" => 4,
             _ => unreachable!(),
         };
         assert_eq!(run.stamps(check), vec![Some(expected)], "{check}");

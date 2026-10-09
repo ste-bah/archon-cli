@@ -236,7 +236,7 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     let baseline = executor(None);
     assert!(!holds(&baseline, "freeze-skeleton", &unstamped));
     assert!(!holds(&baseline, "land-task-body", &unstamped));
-    // freeze-acceptance is at version 3 (#366, #380): an unstamped record was
+    // freeze-acceptance is at version 4 (#366, #380): an unstamped record was
     // judged by older logic and runs again.
     assert!(!holds(&baseline, "freeze-acceptance", &unstamped));
     for command in [
