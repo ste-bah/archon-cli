@@ -55,17 +55,24 @@ pub(super) fn scripted_answer(prompt: &str) -> (&'static str, String) {
             "AC-X-001" => {
                 "The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true."
             }
-            // A supplementary prompt quotes the PRD requirement it covers
-            // (tests/fixtures/offline_decomposition/prd.md:9-10).
+            // A supplementary entry's authored text names the PRD requirement
+            // it covers (src/command/workflow_decompose_v1_acceptance.js:198;
+            // tests/fixtures/offline_decomposition/prd.md:9-10).
             "SUP-REQ-X-001" => {
-                "The first task creates `src/alpha.txt` with the nonempty line `alpha ready`."
+                "SUPPLEMENTARY check owed to PRD requirement REQ-X-001 (no other check covers it): The first task creates `src/alpha.txt` with the nonempty line `alpha ready`."
             }
             "SUP-REQ-X-002" => {
-                "The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true."
+                "SUPPLEMENTARY check owed to PRD requirement REQ-X-002 (no other check covers it): The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true."
             }
             _ => return unknown_prompt(),
         };
-        if !text.contains(criterion) {
+        // The criterion must be the text authored for this id, not a mention
+        // of it elsewhere in the prompt.
+        let authored = text
+            .split_once(&format!("Author ONLY entry {id}:"))
+            .map(|(_, rest)| rest.trim_start())
+            .unwrap_or_default();
+        if !authored.starts_with(criterion) {
             return unknown_prompt();
         }
         if id == "SUP-REQ-X-001" {

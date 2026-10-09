@@ -13,13 +13,13 @@ fn supplementary_answer_covers_the_requirement_named_by_the_id() {
     for (id, criterion, requirement, artifact) in [
         (
             "SUP-REQ-X-001",
-            "The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.",
+            "SUPPLEMENTARY check owed to PRD requirement REQ-X-001 (no other check covers it): The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.",
             "REQ-X-001",
             "src/alpha.txt",
         ),
         (
             "SUP-REQ-X-002",
-            "The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.",
+            "SUPPLEMENTARY check owed to PRD requirement REQ-X-002 (no other check covers it): The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.",
             "REQ-X-002",
             "src/beta.json",
         ),
@@ -291,4 +291,14 @@ fn fidelity_critic_answers_every_obligation_in_a_serialized_provider_body() {
     let (role, routed_answer) = scripted_answer(&body);
     assert_eq!(role, "fidelity");
     assert_eq!(routed_answer, answer);
+}
+
+#[test]
+fn acceptance_answer_requires_the_criterion_authored_for_the_id() {
+    let expected = "The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.";
+    let prompt = format!(
+        r#"{{"task":"Context: {expected} Author exactly one acceptance entry identified below. Author ONLY entry AC-X-001: Something unrelated."}}"#
+    );
+    let (role, _) = scripted_answer(&prompt);
+    assert_eq!(role, "unknown");
 }

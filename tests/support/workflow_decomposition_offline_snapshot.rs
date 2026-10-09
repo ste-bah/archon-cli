@@ -241,6 +241,11 @@ pub fn normalize_publication_receipts(
 fn normalize_derived_hashes(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
+            // The build's own commit is stamped into pins and gates; it changes
+            // with every commit of the code under test, not with the run.
+            if map.contains_key("binary_commit") {
+                map.insert("binary_commit".into(), "<binary-commit>".into());
+            }
             // The preimages are this record's own call input and result, which
             // the snapshot compares after normalisation, so these run-specific
             // hashes are represented by placeholders.
