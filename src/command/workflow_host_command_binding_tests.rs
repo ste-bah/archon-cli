@@ -172,3 +172,22 @@ fn a_yaml_example_in_chat_before_a_whole_task_file_still_binds() {
     .expect("binds");
     assert_eq!(bound.frozen_task_id.as_deref(), Some("TASK-X-010"));
 }
+
+/// An incomplete yaml example in chat that names another task does not stop
+/// the valid task file after it binding to its own subject.
+#[test]
+fn an_incomplete_named_example_in_chat_does_not_stop_the_valid_file_binding() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    let task_file = context.task_root.join("TASK-X-010.md");
+    seed_frozen_chain(&context, &task_file);
+    let answer = "Shape I will use:\n```yaml\ntask_id: TASK-X-999\nnote: shape only\n```\n\n```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: small\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n# TASK-X-010\n";
+    let request = HostCommandRequest::new("land-task-body", Some(answer.into())).unwrap();
+    let bound = super::workflow_host_command_binding::context_for_request(
+        &context,
+        &temp.path().join("run"),
+        &request,
+    )
+    .expect("binds");
+    assert_eq!(bound.frozen_task_id.as_deref(), Some("TASK-X-010"));
+}

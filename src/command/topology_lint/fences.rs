@@ -224,31 +224,58 @@ pub(crate) struct TaskFileAnchor {
     pub(crate) task_id: String,
 }
 
-/// The one anchor the body gate and the host's binding share: the first
-/// top-level ```` ```yaml ```` block (outside every fenced block, under the
-/// lints' shared toggle) that names a `task_id`, or the first such block
-/// directly inside a top-level wrapper opener ([`unwrap_outer_fence`] rule
-/// 1) that is the last non-blank line before it. A yaml block in chat that
-/// names no `task_id`, or one nested in another fence (a ```` ```markdown ````
-/// example), is never the anchor.
+/// The one anchor the body gate and the host's binding share.
+///
+/// A candidate block is a top-level ```` ```yaml ```` block (outside every
+/// fenced block, under the lints' shared toggle) that names a `task_id`, or
+/// such a block directly inside a top-level wrapper opener
+/// ([`unwrap_outer_fence`] rule 1) that is the last non-blank line before it.
+/// The anchor is the first candidate from which the task parser accepts the
+/// rest of the answer as one task file under its own `task_id`, so an
+/// incomplete yaml example in chat is never it. Only when no candidate
+/// parses is it the first candidate, which then names the subject whose
+/// parse error the author gets. A block nested in another fence (a
+/// ```` ```markdown ```` example) is never a candidate.
 pub(crate) fn task_file_anchor(text: &str) -> Option<TaskFileAnchor> {
+    let candidates = anchor_candidates(text);
+    let parses = |anchor: &&TaskFileAnchor| {
+        let path = std::path::PathBuf::from(format!("{}.md", anchor.task_id));
+        archon_workflow::task_universe::parsing::parse_task_file(&path, &text[anchor.opener..])
+            .is_ok()
+    };
+    candidates
+        .iter()
+        .find(parses)
+        .or_else(|| candidates.first())
+        .cloned()
+}
+
+/// Every anchor candidate of [`task_file_anchor`], in answer order.
+fn anchor_candidates(text: &str) -> Vec<TaskFileAnchor> {
     let spans: Vec<_> = line_spans(text).collect();
     let ids = frontmatter_task_ids(text, &spans);
+    let mut candidates = Vec::new();
     let mut fenced = false;
+    let mut opened_by = None;
     let mut last_nonblank = None;
     for (index, (start, _, line)) in spans.iter().enumerate() {
         if is_fence_line(line) {
             if let Some(task_id) = &ids[index] {
-                let wrapper = last_nonblank.filter(|&previous: &usize| {
-                    is_outer_opener(spans[previous].2) && !fenced_after(&spans[..previous])
-                });
+                // The fence open here was opened by the line just before,
+                // a top-level wrapper opener: this block is its interior.
+                let wrapper = opened_by
+                    .filter(|&opener| fenced && Some(opener) == last_nonblank)
+                    .filter(|&opener: &usize| is_outer_opener(spans[opener].2));
                 if !fenced || wrapper.is_some() {
-                    return Some(TaskFileAnchor {
+                    candidates.push(TaskFileAnchor {
                         opener: *start,
-                        wrapper: wrapper.filter(|_| fenced).map(|previous| spans[previous].0),
+                        wrapper: wrapper.map(|opener| spans[opener].0),
                         task_id: task_id.clone(),
                     });
                 }
+            }
+            if !fenced {
+                opened_by = Some(index);
             }
             fenced = !fenced;
         }
@@ -256,7 +283,7 @@ pub(crate) fn task_file_anchor(text: &str) -> Option<TaskFileAnchor> {
             last_nonblank = Some(index);
         }
     }
-    None
+    candidates
 }
 
 /// The task file in `text` after leading packaging, or `None`.
@@ -363,17 +390,6 @@ fn frontmatter_task_ids(text: &str, spans: &[(usize, usize, &str)]) -> Vec<Optio
         }
     }
     ids
-}
-
-/// Whether a fenced block is still open after `spans`, under the shared
-/// toggle.
-fn fenced_after(spans: &[(usize, usize, &str)]) -> bool {
-    spans
-        .iter()
-        .filter(|(_, _, line)| is_fence_line(line))
-        .count()
-        % 2
-        == 1
 }
 
 #[cfg(test)]

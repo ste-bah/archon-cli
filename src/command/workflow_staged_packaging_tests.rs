@@ -235,3 +235,15 @@ fn the_wrapper_closer_and_trailing_whitespace_are_counted() {
         "{report}"
     );
 }
+
+/// An incomplete yaml example in the chat names a `task_id` but is not a
+/// task file: the task file opens at the first block the task parser
+/// accepts, and the example is packaging.
+#[test]
+fn an_incomplete_yaml_example_in_chat_is_packaging_before_the_valid_file() {
+    let body = valid_body();
+    let chat = format!("{CHAT}\n```yaml\ntask_id: TASK-X-001\nnote: the shape only\n```\n\n");
+    let (bytes, unwrapped, packaging) = discarded(&format!("{chat}{body}"));
+    assert_eq!((bytes, unwrapped), (body.into_bytes(), false));
+    assert_eq!(packaging.bytes, chat.len());
+}
