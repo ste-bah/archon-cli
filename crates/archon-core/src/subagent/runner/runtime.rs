@@ -177,7 +177,7 @@ impl SubagentRunner {
             // If no tool calls, subagent is done — return accumulated text
             if stream.pending_tools.is_empty() {
                 window.observe_turn(turn.saturating_add(1), &stream.text_content, &[], &[]);
-                if crate::subagent::is_text_tool_call_only(&stream.text_content) {
+                if crate::subagent::starts_with_text_tool_call(&stream.text_content) {
                     tracing::warn!(
                         turn = turn.saturating_add(1),
                         "subagent wrote a tool call as text; requesting a tool-interface call or final answer"

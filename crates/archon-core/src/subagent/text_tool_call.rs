@@ -1,9 +1,8 @@
-/// Detects assistant output made entirely of GLM's text-form tool-call markup.
+/// Detects assistant output that starts with one or more complete GLM text-form tool calls.
 ///
-/// This deliberately recognizes the markup only as a complete response. Text
-/// that merely discusses the syntax, or embeds it in code or JSON, is ordinary
-/// assistant output and must not trigger a retry.
-pub(crate) fn is_text_tool_call_only(text: &str) -> bool {
+/// A final answer never opens with a complete tool call; text after it is the model imagining the tool result.
+/// Prose, code, or JSON before a call, and an incomplete opening call, do not trigger a retry.
+pub(crate) fn starts_with_text_tool_call(text: &str) -> bool {
     if serde_json::from_str::<serde_json::Value>(text.trim()).is_ok() {
         return false;
     }
@@ -12,7 +11,7 @@ pub(crate) fn is_text_tool_call_only(text: &str) -> bool {
     let mut calls = 0;
     while !remaining.is_empty() {
         let Some(after_call) = parse_call(remaining) else {
-            return false;
+            return calls > 0;
         };
         calls += 1;
         remaining = after_call.trim_start();
@@ -48,7 +47,7 @@ fn parse_call(text: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_text_tool_call_only;
+    use super::starts_with_text_tool_call;
 
     #[test]
     fn recognizes_tool_call_text_shapes() {
@@ -58,8 +57,15 @@ mod tests {
             "<tool_call>Read<arg_key>path</arg_key>\n<arg_value>/tmp/a</arg_value>\n</tool_call>\n",
             "<tool_call>Read<arg_key>path</arg_key><arg_value>a</arg_value></tool_call>\n<tool_call>Write</tool_call>",
         ] {
-            assert!(is_text_tool_call_only(text), "{text:?}");
+            assert!(starts_with_text_tool_call(text), "{text:?}");
         }
+
+        let live_shape = concat!(
+            "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/tmp/a</arg_value>",
+            "<arg_key>limit</arg_key><arg_value>50</arg_value></tool_call>",
+            "\n<archon-md>Imagined tool output and context...</archon-md>"
+        );
+        assert!(starts_with_text_tool_call(live_shape), "{live_shape:?}");
     }
 
     #[test]
@@ -68,10 +74,14 @@ mod tests {
             "I saw <tool_call>Read</tool_call> in the output.",
             "```xml\n<tool_call>Read</tool_call>\n```",
             r#"{"example":"<tool_call>Read</tool_call>"}"#,
-            "<tool_call>Read</tool_call> That is the tool I would use.",
+            "Here is the call: <tool_call>Read</tool_call>",
             "<tool_call>Read<arg_key>path</arg_key></tool_call>",
         ] {
-            assert!(!is_text_tool_call_only(text), "{text:?}");
+            assert!(!starts_with_text_tool_call(text), "{text:?}");
         }
+
+        assert!(starts_with_text_tool_call(
+            "<tool_call>Read</tool_call> That is the tool I would use."
+        ));
     }
 }
