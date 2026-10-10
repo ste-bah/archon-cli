@@ -255,8 +255,10 @@ pub fn install_sigwinch(_tx: crate::event_channel::TuiEventSender) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial(terminal_keyboard_state)]
     fn terminal_guard_enter_produces_valid_guard() {
         // This test only validates that TerminalGuard can be created.
         // Actual terminal operations require a real TTY.
@@ -285,6 +287,7 @@ mod tests {
     /// `restore_terminal` is reached from three unrelated places and must
     /// never leave a pop owed, however many times it runs.
     #[test]
+    #[serial(terminal_keyboard_state)]
     fn restore_terminal_leaves_no_enhancement_pop_outstanding() {
         restore_terminal();
         assert!(!keyboard::is_active());
