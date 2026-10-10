@@ -29,6 +29,14 @@ impl HostSecrets {
         pause: &StagingPause,
         command_id: &str,
     ) -> WorkflowResult<SealedProcessOutput> {
+        // Spills are durable call results too, so scrub them before any
+        // consumer parses or persists their full contents.
+        for path in [&output.stdout_path, &output.stderr_path]
+            .into_iter()
+            .flatten()
+        {
+            self.redact_spill(path)?;
+        }
         // Control facts are interpreted before scrubbing. Credentials can
         // collide with protocol markers without turning a stall into success.
         let kind = classify(&output);
@@ -49,15 +57,32 @@ impl HostSecrets {
         // The raw manifest is internal integrity evidence only. Verify its
         // staged identity before rebinding to the canonical sealed envelope.
         let mut prepared = if kind.is_none() && output.exit_code == Some(0) {
-            Some(self.parse_json::<PreparedPublicationV1>(
-                &output.stdout,
-                &format!("host command '{command_id}' returned malformed prepared manifest"),
-            )?)
+            // The JSON reader holds an 8 KiB input buffer; parsing does not
+            // allocate another copy of the full redacted spill. The resulting
+            // manifest is retained because publication validation needs it.
+            let context =
+                format!("host command '{command_id}' returned malformed prepared manifest");
+            let reader: Box<dyn std::io::Read> = match &output.stdout_path {
+                Some(path) => Box::new(std::io::BufReader::with_capacity(
+                    8 * 1024,
+                    std::fs::File::open(path).map_err(|source| WorkflowError::Io {
+                        path: path.clone(),
+                        source,
+                    })?,
+                )),
+                None => Box::new(std::io::Cursor::new(&output.stdout)),
+            };
+            Some(self.parse_json_reader::<PreparedPublicationV1>(reader, &context)?)
         } else {
             None
         };
         self.seal_staged_evidence(anchor, prepared.as_mut(), pause)?;
-        if let Some(manifest) = &prepared {
+        // The returned manifest describes the sealed staging tree, whose
+        // envelope bytes may have been canonicalized or redacted above.
+        // Return the updated identity rather than the child's stale manifest.
+        if let Some(manifest) = &prepared
+            && !output.stdout_truncated
+        {
             output.stdout = serde_json::to_vec(manifest)?;
         }
         output.stdout = self
@@ -170,5 +195,99 @@ impl HostSecrets {
             },
             error => WorkflowError::StageFailed(self.text(&error.to_string())),
         }
+    }
+}
+
+impl HostSecrets {
+    pub(crate) fn redact_spill(&self, path: &Path) -> WorkflowResult<()> {
+        let metadata = std::fs::symlink_metadata(path).map_err(|source| WorkflowError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        if !metadata.file_type().is_file() {
+            return Err(WorkflowError::StageFailed(format!(
+                "host-command spill is not a regular file: {}",
+                path.display()
+            )));
+        }
+        let mut input = std::fs::File::open(path).map_err(|source| WorkflowError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let mut temporary = path.as_os_str().to_os_string();
+        temporary.push(".redacting");
+        let temporary = std::path::PathBuf::from(temporary);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+        let mut output = options
+            .open(&temporary)
+            .map_err(|source| WorkflowError::Io {
+                path: temporary.clone(),
+                source,
+            })?;
+        // Keep at least the longest possible secret spelling between reads so
+        // a value spanning chunks is presented to the redactor as one string.
+        let overlap = self.redaction_overlap();
+        // Working memory is one 64 KiB read plus the longest secret spelling,
+        // independent of spill-file size.
+        let mut pending = Vec::with_capacity(64 * 1024 + overlap);
+        let mut chunk = [0u8; 64 * 1024];
+        let result = (|| {
+            loop {
+                let read = std::io::Read::read(&mut input, &mut chunk).map_err(|source| {
+                    WorkflowError::Io {
+                        path: path.to_path_buf(),
+                        source,
+                    }
+                })?;
+                if read == 0 {
+                    break;
+                }
+                pending.extend_from_slice(&chunk[..read]);
+                let safe =
+                    self.safe_redaction_prefix(&pending, pending.len().saturating_sub(overlap));
+                let safe = match std::str::from_utf8(&pending[..safe]) {
+                    Ok(_) => safe,
+                    Err(error) if error.error_len().is_some() => safe,
+                    Err(error) => error.valid_up_to(),
+                };
+                if safe > 0 {
+                    let clean =
+                        self.text(std::str::from_utf8(&pending[..safe]).expect("UTF-8 boundary"));
+                    std::io::Write::write_all(&mut output, clean.as_bytes()).map_err(|source| {
+                        WorkflowError::Io {
+                            path: temporary.clone(),
+                            source,
+                        }
+                    })?;
+                    pending.drain(..safe);
+                }
+            }
+            let clean = self.text(&String::from_utf8_lossy(&pending));
+            std::io::Write::write_all(&mut output, clean.as_bytes()).map_err(|source| {
+                WorkflowError::Io {
+                    path: temporary.clone(),
+                    source,
+                }
+            })?;
+            output.sync_all().map_err(|source| WorkflowError::Io {
+                path: temporary.clone(),
+                source,
+            })?;
+            std::fs::rename(&temporary, path).map_err(|source| WorkflowError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&temporary);
+        }
+        result
     }
 }

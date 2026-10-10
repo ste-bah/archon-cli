@@ -213,16 +213,18 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #385's re-ask improves recovery from an unusable provider reply;
         // it does not change the verdict for a usable reply. #392 changes
         // which authored reply shapes can supply an acceptance entry.
-        version: 6,
+        // 7: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 7,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "98adce78b380da89d6f66725e4ee8255e3eade92d7b6398ff442b0fa5aea28db",
+        sources_digest: "4ca9f96b7fff4bfdbd6ba9c5b408ede6f1bc37b5f87ae23f7c99fdc46724d86a",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
-        version: 2,
+        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "98adce78b380da89d6f66725e4ee8255e3eade92d7b6398ff442b0fa5aea28db",
+        sources_digest: "4ca9f96b7fff4bfdbd6ba9c5b408ede6f1bc37b5f87ae23f7c99fdc46724d86a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -231,9 +233,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // file and binds by its task_id; the fidelity critic re-asks on an
         // unparseable answer while it makes progress.
         // 4: #380's obligation model changes the frozen contract verdict.
-        version: 4,
+        // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 5,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "420c4be2e8ede50f920241be52b05e3587dcef70252df742511c8dc077f763ab",
+        sources_digest: "9b205db9a1a84ffd55212fcd56f5629026f73319e44bfcb721b4efbb471418b5",
         build_bound: false,
     },
     CapabilityLogic {
@@ -241,28 +244,32 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: the fidelity critic re-asks on an unparseable answer while it
         // makes progress (R8).
         // 4: #380's obligation model changes the frozen contract verdict.
-        version: 4,
+        // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 5,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "420c4be2e8ede50f920241be52b05e3587dcef70252df742511c8dc077f763ab",
+        sources_digest: "9b205db9a1a84ffd55212fcd56f5629026f73319e44bfcb721b4efbb471418b5",
         build_bound: false,
     },
     CapabilityLogic {
         id: "requirements-trace",
-        version: 2,
+        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 3,
         sources: &[GATE, CONTRACT, TRACE],
         sources_digest: "797e9534b739ac3112fbf764e4af2af7b1e5aa4d480a7952b71e1f94c71b9494",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-acceptance",
-        version: 2,
+        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
         sources_digest: "eb5ab4ddf4306adc9f71758835cd77681380cfaf53af6ba19fb25d102d46dc27",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
-        version: 2,
+        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
         sources_digest: "eb5ab4ddf4306adc9f71758835cd77681380cfaf53af6ba19fb25d102d46dc27",
         build_bound: true,

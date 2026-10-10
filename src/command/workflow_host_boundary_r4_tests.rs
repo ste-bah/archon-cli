@@ -63,8 +63,14 @@ impl HostCommandProcessAdapter for EvidenceProcess {
             timed_out: false,
             stdout_bytes: stdout.len() as u64,
             stderr_bytes: self.stderr.len() as u64,
+            stdout_retained_bytes: stdout.len() as u64,
+            stderr_retained_bytes: self.stderr.len() as u64,
+            stdout_truncated: false,
+            stderr_truncated: false,
             stdout,
             stderr: self.stderr.as_bytes().to_vec(),
+            stdout_path: None,
+            stderr_path: None,
         })
     }
 }

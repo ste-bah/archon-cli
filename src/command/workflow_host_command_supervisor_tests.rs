@@ -37,6 +37,13 @@ fn command(script: PathBuf) -> ResolvedHostCommand {
         max_stderr_bytes: 1024 * 1024,
         declared_write_set: Vec::new(),
         remediation_scopes: BTreeSet::from([RemediationScope::Operational]),
+        spill_dir: Some(
+            script
+                .parent()
+                .unwrap()
+                .join("host-command-results")
+                .join("call"),
+        ),
     }
 }
 
@@ -107,29 +114,21 @@ impl Descendant {
 }
 
 #[tokio::test]
-async fn stdout_overflow_terminates_group_and_prevents_late_mutation() {
+async fn huge_stdout_does_not_kill_child_and_is_spilled_in_full() {
     let temp = tempfile::tempdir().unwrap();
-    let descendant = Descendant::new(temp.path());
-    let body = format!(
-        "{}\nwhile :; do printf '0123456789abcdef'; done",
-        descendant.start("1")
-    );
-    let mut request = command(script(temp.path(), "overflow", &body));
+    let body = "head -c 6291456 /dev/zero | tr '\\000' x; exit 9";
+    let mut request = command(script(temp.path(), "large-stdout", body));
     request.max_stdout_bytes = 256;
     let (control, _handle) = HostCommandControl::new();
-    let error = supervise_process_group(request, control, None)
+    let output = supervise_process_group(request, control, None)
         .await
-        .expect_err("overflow must fail operationally");
-
-    assert!(
-        error.to_string().contains("stdout output cap exceeded")
-            && error.to_string().contains("cap=256 bytes")
-            && error.to_string().contains("observed="),
-        "{error}"
+        .expect("output size must not fail the call");
+    assert_eq!(output.exit_code, Some(9));
+    assert_eq!(
+        std::fs::read(output.stdout_path.unwrap()).unwrap(),
+        vec![b'x'; 6 * 1024 * 1024]
     );
-    descendant
-        .assert_killed(Duration::from_millis(1500), "output overflow")
-        .await;
+    assert!(String::from_utf8_lossy(&output.stdout).contains("output truncated:"));
 }
 
 #[tokio::test]

@@ -229,8 +229,14 @@ pub(super) fn stalled_output(
     timed_out: bool,
 ) -> SupervisedProcessOutput {
     let (stdout, mut stderr) = match pipes {
-        Some((out, err)) => ((out.bytes, out.total), (err.bytes, err.total)),
-        None => ((Vec::new(), 0), (Vec::new(), 0)),
+        Some((out, err)) => (
+            (out.bytes, out.total, out.retained, out.truncated, out.path),
+            (err.bytes, err.total, err.retained, err.truncated, err.path),
+        ),
+        None => (
+            (Vec::new(), 0, 0, false, None),
+            (Vec::new(), 0, 0, false, None),
+        ),
     };
     let note = format!("\nhost command teardown stalled: {evidence}\n");
     stderr.0.extend_from_slice(note.as_bytes());
@@ -243,5 +249,11 @@ pub(super) fn stalled_output(
         stderr: stderr.0,
         stdout_bytes: stdout.1,
         stderr_bytes: stderr.1,
+        stdout_retained_bytes: stdout.2,
+        stderr_retained_bytes: stderr.2.saturating_add(note.len() as u64),
+        stdout_truncated: stdout.3,
+        stderr_truncated: stderr.3,
+        stdout_path: stdout.4,
+        stderr_path: stderr.4,
     }
 }

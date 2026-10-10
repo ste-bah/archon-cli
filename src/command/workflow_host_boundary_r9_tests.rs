@@ -146,6 +146,7 @@ fn trapping_child(dir: &Path) -> ResolvedHostCommand {
         max_stderr_bytes: 4096,
         declared_write_set: vec![],
         remediation_scopes: Default::default(),
+        spill_dir: None,
     }
 }
 

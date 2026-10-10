@@ -131,8 +131,14 @@ impl HostCommandProcessAdapter for TamperProcess {
                 timed_out: false,
                 stdout_bytes: 0,
                 stderr_bytes: 0,
+                stdout_retained_bytes: 0,
+                stderr_retained_bytes: 0,
+                stdout_truncated: false,
+                stderr_truncated: false,
                 stdout: Vec::new(),
                 stderr: Vec::new(),
+                stdout_path: None,
+                stderr_path: None,
             });
         }
         let envelope = request

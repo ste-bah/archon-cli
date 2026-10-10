@@ -1,38 +1,25 @@
-//! Issue 277: a host-command child that prints a provider credential into its
-//! gate envelope leaves no clear copy of it anywhere under the run.
-
-use std::path::{Path, PathBuf};
-
-use archon_workflow::{HostCommandRequest, HostCommandResult, WorkflowResult};
-
+//! Issue 277: host-command credentials never remain clear in run evidence.
 use super::workflow_host_command_catalog::{ResolvedHostCommand, fixed_decomposition_catalog};
 use super::workflow_host_command_exec::{
     FixedHostCommandExecutor, HostCommandProcessAdapter, WorkflowHostCommandExecutor,
 };
 use super::workflow_host_command_exec_tests::{context, seed_frozen_chain};
 use super::workflow_host_command_supervisor::{HostCommandControl, SupervisedProcessOutput};
-
+use archon_workflow::{HostCommandRequest, HostCommandResult, WorkflowResult};
+use std::path::{Path, PathBuf};
 const CANARY: &str = "sk-ant-277-canary-5f1e9c";
-
 const CANDIDATE: &str = "# Candidate\n\n```yaml\ntask_id: TASK-X-010\ntitle: Candidate\n\
 complexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\n\
 required_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n\
 ## Focused Tests\n- `test -f TASK-X-010.md`\n";
-
 #[derive(Clone, Copy, PartialEq)]
 #[cfg_attr(not(unix), allow(dead_code))]
 enum Child {
-    /// A valid envelope whose report (and an unknown field) holds the value.
     Published,
-    /// The same envelope with no secret in it.
     Clean,
-    /// The value in the envelope's operational error text.
     Operational,
-    /// The envelope written, then a failing exit.
     Failed,
-    /// Bytes that are not an envelope at all.
     Malformed,
-    /// A manifest that misstates the envelope's bytes.
     Lying,
     SealedIdentity,
     CanonicalIdentity,
@@ -47,7 +34,6 @@ enum Child {
     ScalarOperational,
     ScalarFailed,
     ScalarVersion,
-    // Constructed only by the Unix link and permission cases (r5, r7).
     UnreadableStaging,
     UnreadableNestedStaging,
     UnreadableDeepStaging,
@@ -125,8 +111,14 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
                 timed_out: false,
                 stdout_bytes: output.stdout.len() as u64,
                 stderr_bytes: output.stderr.len() as u64,
+                stdout_retained_bytes: output.stdout.len() as u64,
+                stderr_retained_bytes: output.stderr.len() as u64,
+                stdout_truncated: false,
+                stderr_truncated: false,
                 stderr: output.stderr,
                 stdout: output.stdout,
+                stdout_path: None,
+                stderr_path: None,
             });
         }
         if matches!(
@@ -164,8 +156,14 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
                 timed_out: false,
                 stdout_bytes: 0,
                 stderr_bytes: 0,
+                stdout_retained_bytes: 0,
+                stderr_retained_bytes: 0,
+                stdout_truncated: false,
+                stderr_truncated: false,
                 stdout: Vec::new(),
                 stderr: Vec::new(),
+                stdout_path: None,
+                stderr_path: None,
             });
         }
         let mut entries = Vec::new();
@@ -236,8 +234,14 @@ impl HostCommandProcessAdapter for SecretPrintingProcess {
             timed_out: false,
             stdout_bytes: stdout.len() as u64,
             stderr_bytes: stderr.len() as u64,
+            stdout_retained_bytes: stdout.len() as u64,
+            stderr_retained_bytes: stderr.len() as u64,
+            stdout_truncated: false,
+            stderr_truncated: false,
             stdout,
             stderr,
+            stdout_path: None,
+            stderr_path: None,
         })
     }
 }
@@ -321,8 +325,6 @@ async fn run_secret(child: Child, secret: &str) -> Ran {
     }
 }
 
-/// Every file under `root` (the run directory, the staging tree, the
-/// published results, the project), searched byte for byte.
 fn clear_copies(root: &Path, needle: &[u8]) -> Vec<PathBuf> {
     let mut found = Vec::new();
     for entry in std::fs::read_dir(root).unwrap().flatten() {
@@ -422,8 +424,6 @@ async fn a_manifest_that_misstates_the_envelope_is_still_refused() {
         .as_ref()
         .expect_err("refused by audit")
         .to_string();
-    // The manifest named other bytes than the child wrote, so it is never
-    // rebound to the sealed ones: the audit refuses the staged envelope.
     assert!(
         error.contains("staged output gate-envelope.json") && error.contains("mismatch"),
         "{error}"

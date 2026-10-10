@@ -361,6 +361,8 @@ pub(crate) mod workflow_host_command_catalog;
 pub(crate) mod workflow_host_command_decision;
 pub(crate) mod workflow_host_command_exec;
 #[cfg(test)]
+mod workflow_host_command_exec_spill_tests;
+#[cfg(test)]
 mod workflow_host_command_exec_tests;
 pub(crate) mod workflow_host_command_groups;
 pub(crate) mod workflow_host_command_integrity;
