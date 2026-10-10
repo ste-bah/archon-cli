@@ -60,6 +60,7 @@ impl SubagentRunner {
         let mut reactive_rate_limit_retried = false;
         let mut pressure = PressureState::default();
         let mut incomplete_audit_replies = 0u8;
+        let mut inspection_tools_withdrawn = false;
 
         for turn in 0..self.max_turns {
             // Issue-213 C5: the turn an interrupted call's record names.
@@ -77,6 +78,22 @@ impl SubagentRunner {
                 .load(std::sync::atomic::Ordering::Relaxed)
             {
                 return Ok("[Agent shutdown requested]".to_string());
+            }
+
+            if !inspection_tools_withdrawn
+                && self
+                    .tool_context
+                    .workflow_read_guard
+                    .as_ref()
+                    .is_some_and(|guard| guard.read_only_ceiling_reached())
+            {
+                let message = serde_json::json!({
+                    "role": "user",
+                    "content": "Inspection tools are no longer available in this call; answer now with your deliverable from what you have read.",
+                });
+                self.record_transcript(&message);
+                messages.push(message);
+                inspection_tools_withdrawn = true;
             }
 
             if let Some(landing) = &self.tool_context.audit_landing
