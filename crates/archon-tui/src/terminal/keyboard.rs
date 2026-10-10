@@ -157,6 +157,7 @@ pub fn is_active() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     /// Guards the wire format the teardown harness asserts on. If crossterm
     /// ever changes these bytes the harness must change with it, and this is
@@ -174,6 +175,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(terminal_keyboard_state)]
     fn push_writes_nothing_when_the_terminal_does_not_support_it() {
         let mut sink: Vec<u8> = Vec::new();
         assert!(!push_into(&mut sink, false).expect("write to Vec cannot fail"));
@@ -182,6 +184,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(terminal_keyboard_state)]
     fn deactivate_is_a_noop_without_an_outstanding_push() {
         let mut sink: Vec<u8> = Vec::new();
         assert!(!deactivate_into(&mut sink).expect("write to Vec cannot fail"));
@@ -193,6 +196,7 @@ mod tests {
     /// push is suppressed (no double entry on the terminal's stack) and a
     /// second pop is suppressed (no popping an entry we never pushed).
     #[test]
+    #[serial(terminal_keyboard_state)]
     fn push_then_pop_is_balanced_and_idempotent_at_both_ends() {
         let mut sink: Vec<u8> = Vec::new();
         assert!(push_into(&mut sink, true).expect("write to Vec cannot fail"));
