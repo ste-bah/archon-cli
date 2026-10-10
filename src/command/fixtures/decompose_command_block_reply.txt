@@ -1,0 +1,5 @@
+````check SUP-REQ-X
+printf '%s' "quote \" slash \\ literal \\n"
+echo ```
+````
+{"id":"SUP-REQ-X","check":{"kind":"command","command_block":"SUP-REQ-X"}}

@@ -26,13 +26,13 @@ function acceptanceAuthorPrompt() {
     groundingRules(),
     "Use the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.",
     checkPathRule(),
-    "Return one JSON object with id, criterion, check, gap_permitted, judgment. The two examples below are ENTRIES showing the two check shapes; your reply is one such entry and nothing around it.",
+    "Return one JSON entry with id, criterion, check, gap_permitted, judgment. For any multi-line or quote-heavy command, prefer check.command_block with its script in a fenced block in this same reply; name it with the info string `check <name>`. Example entry fragment: {\"check\":{\"kind\":\"command\",\"command_block\":\"build-check\"}} plus a fenced `check build-check` block containing `make test`. Use a JSON `check.command` string only for short, simple commands, escaping every quote and backslash. The two examples below show entry shapes.",
     ENTRY_SHAPES,
     "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
     "Every check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.",
     "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
     "covers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.",
-    "Your entire reply must be the entry itself: the raw JSON object, starting with { and ending with }. Emit no prose, no explanation, no headings and no Markdown code fences before or after it.",
+    "Your reply must contain the raw JSON object and any referenced check blocks, with no prose or headings. The JSON may be in a fenced `json` block or be the first top-level object outside check blocks.",
     "Do not run commands or write files."
   ].join("\n");
 }
@@ -98,15 +98,6 @@ function stopReasonClass(reason) {
   return known.has(reason) ? `stop-${reason.replace(/_/g, "-")}` : "stop-other";
 }
 
-function extractJsonObject(text) {
-  const raw = String(text || "").trim();
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = (fenced ? fenced[1] : raw).trim();
-  const first = body.indexOf("{");
-  const last = body.lastIndexOf("}");
-  return first >= 0 && last > first ? body.slice(first, last + 1) : body;
-}
-
 // Keep malformed-reply refusals useful to the author without echoing the
 // whole reply. JSON.parse engines report positions in different forms; retain
 // their message and derive a nearby excerpt when a location is available.
@@ -150,7 +141,7 @@ function acceptanceParseRefusal(id, source, error) {
     if (end < source.length) excerpt = `${excerpt}…`;
   }
   const excerptText = excerpt ? `; excerpt: ${JSON.stringify(excerpt)}` : "";
-  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}. check.command is a JSON string value, so every double quote and backslash inside it is escaped.`;
+  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}. For inline check.command, escape every double quote and backslash; use a fenced check block for multi-line or quote-heavy commands.`;
 }
 
 // H4 (Batch O): every PRD requirement id is covered by some check. The host
@@ -227,6 +218,8 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
     } catch (error) {
       return malformedAcceptanceFailure(id, acceptanceParseRefusal(id, json, error), parseErrorClass(error));
     }
+    const blockRefusal = resolveCommandBlock(entry, result.content);
+    if (blockRefusal) return malformedAcceptanceFailure(id, blockRefusal, "command-block-refusal");
     if (entry && entry.id === id) {
       setHostOwnedFields(entry, criteria);
       let serialized;
