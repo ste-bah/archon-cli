@@ -160,6 +160,25 @@ impl SubagentRunner {
             // If no tool calls, subagent is done — return accumulated text
             if stream.pending_tools.is_empty() {
                 window.observe_turn(turn.saturating_add(1), &stream.text_content, &[], &[]);
+                if crate::subagent::is_text_tool_call_only(&stream.text_content) {
+                    tracing::warn!(
+                        turn = turn.saturating_add(1),
+                        "subagent wrote a tool call as text; requesting a tool-interface call or final answer"
+                    );
+                    let answer = serde_json::json!({
+                        "role": "assistant",
+                        "content": stream.text_content,
+                    });
+                    self.record_transcript(&answer);
+                    messages.push(answer);
+                    let feedback = serde_json::json!({
+                        "role": "user",
+                        "content": "Your last message wrote a tool call as text. Text tool calls are not run. Call the tool through the tool interface, or give your final answer.",
+                    });
+                    self.record_transcript(&feedback);
+                    messages.push(feedback);
+                    continue;
+                }
                 if let Some(landing) = &self.tool_context.audit_landing {
                     let parsed = serde_json::from_str::<serde_json::Value>(&stream.text_content);
                     let compact = parsed.as_ref().ok().and_then(|v| {
