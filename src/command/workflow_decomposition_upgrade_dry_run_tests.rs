@@ -68,21 +68,44 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
     let run_dir = store.run_dir(&run_id);
     let groups = run_dir.join(crate::command::workflow_host_command_groups::GROUP_RECORDS_DIR);
     std::fs::create_dir_all(&groups).unwrap();
+    // This mirrors the healed missing-job fixture: a known survivor identity
+    // and a reaped group prove the record ended on both Unix and Windows.
+    let mut ended = archon_shell::spawn::command(std::env::current_exe().unwrap())
+        .arg("--help")
+        .spawn()
+        .unwrap();
+    let ended_pid = ended.id();
+    #[cfg(unix)]
+    let ended_identity = (
+        ended_pid,
+        archon_shell::process_tree::identity_of(ended_pid)
+            .unwrap()
+            .unwrap(),
+    );
+    #[cfg(windows)]
+    let ended_identity = (
+        ended_pid,
+        archon_shell::job_object::identity_of(ended_pid)
+            .unwrap()
+            .unwrap(),
+    );
+    ended.wait().unwrap();
+    let missing_job = format!("Local\\archon-dry-run-healed-{}", uuid::Uuid::new_v4());
     std::fs::write(
-        groups.join("2000000000.json"),
+        groups.join(format!("{ended_pid}.json")),
         serde_json::to_vec(
             &crate::command::workflow_host_command_groups::HostCommandGroupRecord {
                 schema_version: 1,
-                pgid: 2_000_000_000,
-                pid: 2_000_000_000,
+                pgid: ended_pid,
+                pid: ended_pid,
                 session: None,
-                job: None,
-                survivors: vec![],
-                stalled: false,
+                job: Some(missing_job),
+                survivors: vec![ended_identity],
+                stalled: true,
                 survivors_unknown: false,
                 teardown_complete: false,
                 command_id: "healed-fixture".into(),
-                host_pid: 2_000_000_000,
+                host_pid: ended_pid,
                 host_start: None,
                 leader_start: None,
                 started_at: "2026-10-06T01:00:00+00:00".into(),
@@ -150,7 +173,7 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
     .await
     .unwrap();
     assert!(
-        output.contains("seed=would-record transition 3 (derived in memory)"),
+        output.contains("seed=would-record transition 2 (derived in memory)"),
         "{output}"
     );
     assert_eq!(

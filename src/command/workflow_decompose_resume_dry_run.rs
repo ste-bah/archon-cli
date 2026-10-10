@@ -206,7 +206,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
                 &criteria,
                 &requirement_texts,
             )?,
-            format!("would-record transition {} (derived in memory)", index + 1),
+            format!("would-record transition {index} (derived in memory)"),
         )
     } else {
         let seed = crate::command::workflow_decompose_seed::current_seed_read_only(
