@@ -139,12 +139,21 @@ impl FixedHostCommandExecutor {
             let Some(kind) = observed.kind else {
                 return Ok(observed);
             };
-            history.push(OperationalAttempt {
-                attempt,
-                reason: kind.label(),
-                elapsed_secs: started.elapsed().as_secs(),
-                progress: observed.progress,
-            });
+            history.push(
+                OperationalAttempt::new(
+                    attempt,
+                    kind.label(),
+                    started.elapsed().as_secs(),
+                    observed.progress,
+                )
+                .with_child_evidence(
+                    observed.output.exit_code,
+                    crate::command::workflow_host_command_operational::stderr_tail(
+                        &observed.output.stderr,
+                        secrets,
+                    ),
+                ),
+            );
             let report = OperationalReport {
                 run_id: &run_id,
                 call_id,

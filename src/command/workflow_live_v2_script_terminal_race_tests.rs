@@ -79,12 +79,7 @@ impl WorkflowHostCommandExecutor for SiblingAfterStop {
         let call_id = format!("host-command:{}:fixed", request.command_id);
         match self.mode {
             Sibling::OperationalPause => {
-                let attempts = [OperationalAttempt {
-                    attempt: 1,
-                    reason: "timeout",
-                    elapsed_secs: 1,
-                    progress: None,
-                }];
+                let attempts = [OperationalAttempt::new(1, "timeout", 1, None)];
                 let report = OperationalReport {
                     run_id: &self.run_id,
                     call_id: &call_id,

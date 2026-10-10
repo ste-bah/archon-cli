@@ -18,6 +18,10 @@ use archon_workflow::{
 
 use super::workflow_host_command_catalog::fixed_decomposition_catalog;
 
+#[path = "workflow_decompose_provider_environment.rs"]
+mod provider_environment;
+pub(crate) use provider_environment::freeze_provider_environment;
+
 /// The embedded script, one source: the main file first, then the helpers
 /// hoisted into its scope. Every `.js` beside it is part of the identity the
 /// script digest pins, so a change to any of them is a change to the runtime.
@@ -402,28 +406,6 @@ pub(crate) fn fixed_launch_digest(
 ) -> Result<String> {
     let bytes = serde_json::to_vec(&(identity, arguments, catalog, route, check_policy))?;
     Ok(archon_workflow::task_set_contract::content_digest(&bytes))
-}
-
-fn freeze_provider_environment(env_vars: &ArchonEnvVars) -> BTreeMap<String, String> {
-    let mut environment = BTreeMap::new();
-    for (name, value) in [
-        ("ANTHROPIC_API_KEY", env_vars.anthropic_api_key.as_ref()),
-        ("ARCHON_API_KEY", env_vars.archon_api_key.as_ref()),
-        ("ARCHON_OAUTH_TOKEN", env_vars.archon_oauth_token.as_ref()),
-        ("ARCHON_MODEL", env_vars.model.as_ref()),
-        ("ARCHON_EFFORT", env_vars.effort.as_ref()),
-    ] {
-        if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
-            environment.insert(name.to_string(), value.clone());
-        }
-    }
-    if let Some(path) = &env_vars.config_dir {
-        environment.insert(
-            "ARCHON_CONFIG_DIR".to_string(),
-            path.to_string_lossy().into_owned(),
-        );
-    }
-    environment
 }
 
 fn canonical_project_path(project_root: &Path, path: &Path, label: &str) -> Result<PathBuf> {

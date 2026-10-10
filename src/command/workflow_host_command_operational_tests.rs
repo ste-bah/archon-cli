@@ -19,12 +19,7 @@ use crate::command::workflow_host_command_exec_tests::{
 use crate::command::workflow_host_command_supervisor::HostCommandControl;
 
 fn attempt(n: u32, progress: Option<u64>) -> OperationalAttempt {
-    OperationalAttempt {
-        attempt: n,
-        reason: "timed_out",
-        elapsed_secs: 1,
-        progress,
-    }
+    OperationalAttempt::new(n, "timed_out", 1, progress)
 }
 
 fn output(exit_code: Option<i32>, timed_out: bool, stderr: &str) -> SupervisedProcessOutput {
@@ -492,3 +487,6 @@ mod checkpoint_r3_tests;
 
 #[path = "workflow_host_command_operational_output_cap_tests.rs"]
 mod output_cap_tests;
+
+#[path = "workflow_host_command_operational_evidence_tests.rs"]
+mod evidence_tests;

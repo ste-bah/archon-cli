@@ -210,18 +210,21 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // changed; a reused check verdict binds normalized literal paths,
         // their filesystem state, the shell, environment and this logic.
         // 4: #380 complete wrapped obligation text changes freeze verdicts.
-        // #385's re-ask improves recovery from an unusable provider reply;
-        // it does not change the verdict for a usable reply, so keep v4.
-        version: 4,
+        // #385's re-ask improves recovery from an unusable provider reply; it
+        // does not change the verdict for a usable reply.
+        // 5: #378 (merged after #366/#288/#380) validates supplementary-only
+        // acceptance prose before the incremental judge refuses it, changing
+        // freeze-acceptance verdicts.
+        version: 5,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "892a5d628c3e3fff66a9771b2c085a3028ced26f9ef78a983c05ae5e6827b452",
+        sources_digest: "c81c70227ccccd4076dd4867b91cc935df08ef185cc5fdd195e1fffff3c7bc26",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 2,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "892a5d628c3e3fff66a9771b2c085a3028ced26f9ef78a983c05ae5e6827b452",
+        sources_digest: "c81c70227ccccd4076dd4867b91cc935df08ef185cc5fdd195e1fffff3c7bc26",
         build_bound: false,
     },
     CapabilityLogic {
@@ -232,7 +235,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380's obligation model changes the frozen contract verdict.
         version: 4,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "98a657e7c1d83e3564c4287df8b5c93c8fb8f0af3a93c4a706e69dfb16b9cd41",
+        sources_digest: "2cacbfb1198bb6ed496ed3aab0474ab7fac03e73bf3911aec8db2b36f2a8d608",
         build_bound: false,
     },
     CapabilityLogic {
@@ -242,7 +245,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380's obligation model changes the frozen contract verdict.
         version: 4,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "98a657e7c1d83e3564c4287df8b5c93c8fb8f0af3a93c4a706e69dfb16b9cd41",
+        sources_digest: "2cacbfb1198bb6ed496ed3aab0474ab7fac03e73bf3911aec8db2b36f2a8d608",
         build_bound: false,
     },
     CapabilityLogic {
@@ -256,14 +259,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         id: "verify-frozen-acceptance",
         version: 2,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "21cc2bad1066ce4ad42357ddeeed5dcc5f7371c1fbfc6852eee6b6ee0ccef57d",
+        sources_digest: "8d583c835c9699eb40b58576ece631d80e32f959e42b1cd437f152098ebe5d48",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
         version: 2,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "21cc2bad1066ce4ad42357ddeeed5dcc5f7371c1fbfc6852eee6b6ee0ccef57d",
+        sources_digest: "8d583c835c9699eb40b58576ece631d80e32f959e42b1cd437f152098ebe5d48",
         build_bound: true,
     },
 ];

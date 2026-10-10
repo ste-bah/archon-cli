@@ -169,7 +169,13 @@ pub(crate) struct OperationalAttempt {
     pub(crate) reason: &'static str,
     pub(crate) elapsed_secs: u64,
     pub(crate) progress: Option<u64>,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) stderr_tail: String,
 }
+
+#[path = "workflow_host_command_operational_evidence.rs"]
+mod evidence;
+pub(crate) use evidence::stderr_tail;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NextStep {

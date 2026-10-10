@@ -347,12 +347,12 @@ async fn progress_grows_across_retries_until_the_lint_finishes() {
         let (stderr, _) = resumable_exit(&error).expect("resumable");
         let progress = reported_progress(stderr.as_bytes());
         assert_eq!(progress, Some(u64::from(attempt)));
-        history.push(OperationalAttempt {
+        history.push(OperationalAttempt::new(
             attempt,
-            reason: OperationalKind::IncompleteResumable.label(),
-            elapsed_secs: 0,
+            OperationalKind::IncompleteResumable.label(),
+            0,
             progress,
-        });
+        ));
         assert_eq!(next_step(&history), NextStep::Retry);
     }
     let last = Critic::new();
