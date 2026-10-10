@@ -26,7 +26,7 @@ function acceptanceAuthorPrompt() {
     groundingRules(),
     "Use the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.",
     checkPathRule(),
-    "Return one JSON entry with id, criterion, check, gap_permitted, judgment. For any multi-line or quote-heavy command, prefer check.command_block with its script in a fenced block in this same reply; name it with the info string `check <name>`. Example entry fragment: {\"check\":{\"kind\":\"command\",\"command_block\":\"build-check\"}} plus a fenced `check build-check` block containing `make test`. Use a JSON `check.command` string only for short, simple commands, escaping every quote and backslash. The two examples below show entry shapes.",
+    "Return exactly one complete reply with one entry and one check. Example: ```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n``` followed by ```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```. Never write an empty check block. Never name the block. Use inline check.command only for one short line without quotes or backslashes. The entry shapes below are examples only; return one entry.",
     ENTRY_SHAPES,
     "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
     "Every check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.",
@@ -141,7 +141,7 @@ function acceptanceParseRefusal(id, source, error) {
     if (end < source.length) excerpt = `${excerpt}…`;
   }
   const excerptText = excerpt ? `; excerpt: ${JSON.stringify(excerpt)}` : "";
-  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}. For inline check.command, escape every double quote and backslash; use a fenced check block for multi-line or quote-heavy commands.`;
+  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}. Use inline check.command only for one short line without quotes or backslashes; put a script in one unnamed check block with check.command_block true.`;
 }
 
 // H4 (Batch O): every PRD requirement id is covered by some check. The host
@@ -212,10 +212,17 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   }
   {
     let entry;
-    const json = extractJsonObject(result.content);
+    let json;
     try {
+      json = extractJsonObject(result.content);
       entry = unwrapEntry(JSON.parse(json), id);
     } catch (error) {
+      if (error && error.message === "reply contains more than one entry") {
+        return malformedAcceptanceFailure(id, error.message, "multiple-entries");
+      }
+      if (error && error.multipleJsonInvalid === true) {
+        return malformedAcceptanceFailure(id, error.message, parseErrorClass(error));
+      }
       return malformedAcceptanceFailure(id, acceptanceParseRefusal(id, json, error), parseErrorClass(error));
     }
     const blockRefusal = resolveCommandBlock(entry, result.content);

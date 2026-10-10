@@ -41,18 +41,52 @@ async function refusal(reply, stopReason = 'end_turn') {
     const candidate = {id:'A', check};
     return json.resolveCommandBlock(candidate, body);
   };
-  assert.equal(blockRefusal('```check X\nrun\n```', {kind:'command', command:'old', command_block:'X'}),
+  assert.equal(blockRefusal('{}'),
+    'acceptance entry A check.command_block must be boolean true');
+  assert.equal(blockRefusal('{}', {kind:'command', command_block:true}),
+    'acceptance entry A check.command_block is true but no check block is present');
+  assert.equal(blockRefusal('```check\na\n```\n```check\nb\n```', {kind:'command', command_block:true}),
+    'acceptance reply contains more than one check block');
+  assert.equal(json.resolveCommandBlock({id:'A', check:{kind:'command', command:'run'}}, '```check\nrun\n```'),
+    'check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block');
+  assert.equal(blockRefusal('```check\n```', {kind:'command', command_block:true}), 'acceptance entry A check block is empty');
+  assert.equal(blockRefusal('```check\nrun\n```', {kind:'command', command:'old', command_block:true}),
     'acceptance entry A returned both check.command and check.command_block');
-  assert.equal(blockRefusal('{}'), 'acceptance entry A command_block X has no matching check block');
-  assert.equal(blockRefusal('```check X\na\n```\n```check X\nb\n```'), 'acceptance reply contains duplicate check block name X');
-  assert.equal(blockRefusal('```check X\na\n```\n```check Y\nb\n```'), 'acceptance reply contains unreferenced check block Y');
-  assert.equal(blockRefusal('```check X\n```'), 'acceptance entry A check block X is empty');
-  assert.equal(json.resolveCommandBlock({id:'A', check:{kind:'command', command:'run'}}, '```check X\nrun\n```'),
-    'acceptance reply contains unreferenced check block X');
+  assert.equal(blockRefusal('```check X\nignored named fence\n```', {kind:'command', command:'run'}), null,
+    'named fences are not check blocks');
   assert.equal(json.resolveCommandBlock({id:'A', check:{kind:'command', command:'echo "ok"'}}, ''), null,
     'inline commands remain valid');
-  const resolved = await refusal('```check A\nprintf "%s" "quoted" \\\\ literal \\\\n\n```\n{"id":"A","check":{"kind":"command","command_block":"A"}}');
-  assert.equal(JSON.parse(resolved.content).entries[0].check.command, 'printf "%s" "quoted" \\\\ literal \\\\n');
+  assert.equal(json.resolveCommandBlock({id:'A', check:{kind:'command', command:'run', command_block:false}}, ''), null,
+    'false is an explicit absence of a command block');
+  const liveReplies = JSON.parse(fs.readFileSync(`${root}/fixtures/decompose_live_reply_outcomes.json`, 'utf8'));
+  assert.throws(() => json.extractJsonObject('{"id":"A"}\n```json\n{"id":"B"}\n```'), /reply contains more than one entry/);
+  assert.throws(() => json.extractJsonObject('```json\n[{"id":"A"},{"id":"B"}]\n```'), /reply contains more than one entry/);
+  assert.doesNotThrow(() => json.extractJsonObject('{"id":"A","check":{"command":"run","kind":"command"}}\n```json\n{"check":{"kind":"command","command":"run"},"id":"A"}\n```'));
+  const candidateFixtures = JSON.parse(fs.readFileSync(`${root}/fixtures/decompose_json_candidate_outcomes.json`, 'utf8'));
+  const mixedInvalid = candidateFixtures.find(fixture => fixture.id === 'mixed-invalid');
+  assert.throws(() => json.extractJsonObject(mixedInvalid.reply), /reply contains more than one JSON object and one is not valid JSON:.*position/i);
+  const identicalValid = candidateFixtures.find(fixture => fixture.id === 'identical-valid');
+  assert.doesNotThrow(() => json.extractJsonObject(identicalValid.reply));
+  const singleInvalid = candidateFixtures.find(fixture => fixture.id === 'single-invalid');
+  const singleRefusal = await refusal(singleInvalid.reply);
+  assert.match(singleRefusal.summary, /returned no complete entry: JSON parse error.*position/i);
+  assert.match(singleRefusal.summary, /excerpt:/);
+  for (const fixture of liveReplies) {
+    let outcome;
+    try {
+      const candidate = JSON.parse(json.extractJsonObject(fixture.reply));
+      const entry = Array.isArray(candidate) && candidate.length === 1 ? candidate[0] : candidate;
+      outcome = json.resolveCommandBlock(entry, fixture.reply) || 'accepted';
+    } catch (error) {
+      outcome = error.message === 'reply contains more than one entry' ? error.message : 'malformed inline JSON escape';
+    }
+    if (fixture.id === 'SUP-REQ-AHDM-020') assert.equal(outcome, 'malformed inline JSON escape');
+    if (fixture.id === 'SUP-REQ-AHDM-022') assert.equal(outcome, 'accepted', fixture.id);
+    if (fixture.id === 'SUP-REQ-AHDM-021') assert.equal(outcome, 'reply contains more than one entry');
+    if (fixture.id === 'SUP-REQ-BT-001') assert.equal(outcome, 'malformed inline JSON escape');
+  }
+  const resolved = await refusal('```check\nprintf ok\necho done\ntrue\n```\n{"id":"A","check":{"kind":"command","command_block":true}}');
+  assert.equal(JSON.parse(resolved.content).entries[0].check.command, 'printf ok\necho done\ntrue');
   const exact = async (reply, message) => {
     const result = await refusal(reply);
     assert.equal(result.summary, `candidate artifact was refused: acceptance entry A: ${message}`);
@@ -65,18 +99,14 @@ async function refusal(reply, stopReason = 'end_turn') {
       'candidate artifact was refused: acceptance entry A: reply did not contain a complete entry with id A', reply);
     assert.equal(result.malformedClass, 'missing-entry', reply);
   }
-  await exact('{"id":"A","check":{"kind":"command","command":"old","command_block":"X"}}',
-    'acceptance entry A returned both check.command and check.command_block');
-  await exact('{"id":"A","check":{"kind":"command","command_block":"X"}}',
-    'acceptance entry A command_block X has no matching check block');
-  await exact('```check X\na\n```\n```check X\nb\n```\n{"id":"A","check":{"kind":"command","command_block":"X"}}',
-    'acceptance reply contains duplicate check block name X');
-  await exact('```check X\na\n```\n```check Y\nb\n```\n{"id":"A","check":{"kind":"command","command_block":"X"}}',
-    'acceptance reply contains unreferenced check block Y');
-  await exact('```check X\n```\n{"id":"A","check":{"kind":"command","command_block":"X"}}',
-    'acceptance entry A check block X is empty');
-  await exact('```check X\nrun\n```\n{"id":"A","check":{"kind":"command","command":"run"}}',
-    'acceptance reply contains unreferenced check block X');
+  await exact('{"id":"A","check":{"kind":"command","command_block":true}}',
+    'acceptance entry A check.command_block is true but no check block is present');
+  await exact('```check\na\n```\n```check\nb\n```\n{"id":"A","check":{"kind":"command","command_block":true}}',
+    'acceptance reply contains more than one check block');
+  await exact('```check\nrun\n```\n{"id":"A","check":{"kind":"command","command":"run"}}',
+    'check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block');
+  await exact('```check\n```\n{"id":"A","check":{"kind":"command","command_block":true}}',
+    'acceptance entry A check block is empty');
   const malformed = `{"id":"A","check":{"kind":"command","command":"${'x'.repeat(190)}${'\\q'}${'y'.repeat(190)}"}}`;
   const first = await refusal(malformed);
   const repeated = await refusal(malformed);
@@ -88,7 +118,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.match(first.summary, /JSON parse error.*Invalid \\escape|JSON parse error.*escape/i);
   assert.match(first.summary, /(?:line\s+1\s+column\s+\d+|offset\s+\d+)/i);
   assert.match(first.summary, /excerpt:/);
-  assert.match(first.summary, /For inline check\.command, escape every double quote and backslash; use a fenced check block for multi-line or quote-heavy commands\./);
+  assert.match(first.summary, /Use inline check\.command only for one short line without quotes or backslashes/);
   assert.equal(first.summary, repeated.summary, 'identical malformed replies have identical refusal text');
   assert.equal(first.malformedClass, changed.malformedClass, 'a changed parse position is the same progress class');
   const excerpt = first.summary.match(/; excerpt: ("(?:\\.|[^"\\])*")/);

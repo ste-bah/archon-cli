@@ -1,0 +1,17 @@
+[
+  {
+    "id": "mixed-invalid",
+    "reply": "```json\n{\"id\":\"A\"}\n```\n{\"id\":\"A\",\"check\":{\"command\":\"\\q\"}}",
+    "expected": "refuse: reply contains more than one JSON object and one is not valid JSON"
+  },
+  {
+    "id": "identical-valid",
+    "reply": "```json\n{\"id\":\"A\",\"check\":{\"kind\":\"command\",\"command\":\"run\"}}\n```\n{\"check\":{\"command\":\"run\",\"kind\":\"command\"},\"id\":\"A\"}",
+    "expected": "accept: identical JSON values"
+  },
+  {
+    "id": "single-invalid",
+    "reply": "```json\n{\"id\":\"A\",\"check\":{\"command\":\"\\q\"}}\n```",
+    "expected": "refuse: existing JSON parse error with position and excerpt"
+  }
+]

@@ -54,7 +54,6 @@ pub(super) fn authored_criterion(record: &WorkflowV2CallRecord, id: &str) -> Opt
 struct ReplyBlock {
     info: String,
     content: String,
-    name: Option<String>,
     start: usize,
     end: usize,
 }
@@ -118,14 +117,9 @@ fn reply_blocks(content: &str) -> Vec<ReplyBlock> {
         } else if block_content.ends_with(['\n', '\r']) {
             block_content.pop();
         }
-        let name = info
-            .strip_prefix("check ")
-            .filter(|name| !name.is_empty() && !name.chars().any(char::is_whitespace))
-            .map(str::to_string);
         blocks.push(ReplyBlock {
             info,
             content: block_content,
-            name,
             start: lines[i].0,
             end: lines[close].1,
         });
@@ -138,43 +132,82 @@ fn reply_blocks(content: &str) -> Vec<ReplyBlock> {
 /// top-level object outside any check block.
 pub(super) fn extract_object(content: &str) -> String {
     let blocks = reply_blocks(content);
-    let body = if let Some(block) = blocks.iter().find(|block| block.info == "json") {
-        block.content.clone()
-    } else {
-        let mut bytes = content.as_bytes().to_vec();
-        for block in blocks.iter().filter(|block| block.name.is_some()) {
-            bytes[block.start..block.end].fill(b' ');
-        }
-        let source = String::from_utf8(bytes).expect("mask preserves UTF-8");
-        let mut depth = 0usize;
-        let mut first = None;
-        let mut quoted = false;
-        let mut escaped = false;
-        for (index, byte) in source.bytes().enumerate() {
-            if quoted {
-                if escaped {
-                    escaped = false;
-                } else if byte == b'\\' {
-                    escaped = true;
-                } else if byte == b'"' {
-                    quoted = false;
-                }
+    let json: Vec<String> = blocks
+        .iter()
+        .filter(|block| block.info == "json")
+        .map(|block| object_text(&block.content))
+        .collect();
+    let mut bytes = content.as_bytes().to_vec();
+    for block in &blocks {
+        bytes[block.start..block.end].fill(b' ');
+    }
+    let source = String::from_utf8(bytes).expect("mask preserves UTF-8");
+    let mut depth = 0usize;
+    let mut first = None;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut bare = Vec::new();
+    for (index, byte) in source.bytes().enumerate() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
             } else if byte == b'"' {
-                quoted = true;
-            } else if byte == b'{' {
-                if depth == 0 {
-                    first = Some(index);
-                }
-                depth += 1;
-            } else if byte == b'}' && depth > 0 {
-                depth -= 1;
-                if depth == 0 {
-                    return source[first.unwrap()..=index].to_string();
-                }
+                quoted = false;
+            }
+        } else if byte == b'"' {
+            quoted = true;
+        } else if byte == b'{' {
+            if depth == 0 {
+                first = Some(index);
+            }
+            depth += 1;
+        } else if byte == b'}' && depth > 0 {
+            depth -= 1;
+            if depth == 0 {
+                bare.push(source[first.unwrap()..=index].to_string());
             }
         }
-        return source[first.unwrap_or(0)..].trim().to_string();
-    };
+    }
+    let candidates: Vec<String> = json.into_iter().chain(bare).collect();
+    let parsed: Vec<_> = candidates
+        .iter()
+        .map(|candidate| serde_json::from_str::<Value>(candidate))
+        .collect();
+    if parsed.iter().any(Result::is_err) {
+        return if candidates.len() == 1 {
+            candidates[0].clone()
+        } else {
+            String::new()
+        };
+    }
+    let parsed: Vec<Value> = parsed.into_iter().map(Result::unwrap).collect();
+    if !parsed.is_empty() {
+        return if parsed
+            .first()
+            .is_some_and(|first| parsed.iter().all(|value| value == first))
+        {
+            candidates[0].clone()
+        } else {
+            String::new()
+        };
+    }
+    candidates.first().cloned().unwrap_or_default()
+}
+
+fn object_text(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.starts_with('[')
+        && let Ok(Value::Array(items)) = serde_json::from_str::<Value>(trimmed)
+    {
+        if items.len() > 1 {
+            return String::new();
+        }
+        if let Some(item) = items.first() {
+            return item.to_string();
+        }
+    }
     match (body.find('{'), body.rfind('}')) {
         (Some(first), Some(last)) if last > first => body[first..=last].to_string(),
         _ => body.trim().to_string(),
@@ -189,63 +222,44 @@ pub(super) fn resolve_command_block(entry: &mut Value, content: &str) -> Option<
         .unwrap_or_default()
         .to_string();
     let blocks = reply_blocks(content);
-    let named: Vec<_> = blocks.iter().filter(|block| block.name.is_some()).collect();
-    let Some(check) = entry.get_mut("check").and_then(Value::as_object_mut) else {
-        return named.first().map(|block| {
-            format!(
-                "acceptance reply contains unreferenced check block {}",
-                block.name.as_deref().unwrap()
-            )
-        });
-    };
-    if !check.contains_key("command_block") {
-        return named.first().map(|block| {
-            format!(
-                "acceptance reply contains unreferenced check block {}",
-                block.name.as_deref().unwrap()
-            )
-        });
+    // Only the exact info string `check` denotes the command block; `check <something>` is a different fence label.
+    let checks: Vec<_> = blocks
+        .iter()
+        .filter(|block| block.info == "check")
+        .collect();
+    if checks.len() > 1 {
+        return Some("acceptance reply contains more than one check block".into());
     }
-    let name = check
-        .get("command_block")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    if check.contains_key("command") {
+    let Some(check) = entry.get_mut("check").and_then(Value::as_object_mut) else {
+        return (!checks.is_empty()).then(|| "check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block".into());
+    };
+    let command_block = check.get("command_block");
+    if command_block == Some(&Value::Bool(true)) && check.contains_key("command") {
         return Some(format!(
             "acceptance entry {id} returned both check.command and check.command_block"
         ));
     }
-    let Some(name) = name.filter(|name| !name.is_empty()) else {
+    if command_block == Some(&Value::Bool(true)) && checks.is_empty() {
         return Some(format!(
-            "acceptance entry {id} check.command_block must name a check block"
-        ));
-    };
-    let matches: Vec<_> = named
-        .iter()
-        .filter(|block| block.name.as_deref() == Some(&name))
-        .collect();
-    if matches.is_empty() {
-        return Some(format!(
-            "acceptance entry {id} command_block {name} has no matching check block"
+            "acceptance entry {id} check.command_block is true but no check block is present"
         ));
     }
-    if matches.len() > 1 {
-        return Some(format!(
-            "acceptance reply contains duplicate check block name {name}"
-        ));
+    if !checks.is_empty() && command_block != Some(&Value::Bool(true)) {
+        return Some("check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block".into());
     }
-    if let Some(block) = named
-        .iter()
-        .find(|block| block.name.as_deref() != Some(&name))
+    if command_block.is_some()
+        && command_block != Some(&Value::Bool(true))
+        && command_block != Some(&Value::Bool(false))
     {
         return Some(format!(
-            "acceptance reply contains unreferenced check block {}",
-            block.name.as_deref().unwrap()
+            "acceptance entry {id} check.command_block must be boolean true"
         ));
     }
-    let block = matches[0];
+    let Some(block) = checks.first() else {
+        return None;
+    };
     if block.content.trim().is_empty() {
-        return Some(format!("acceptance entry {id} check block {name} is empty"));
+        return Some(format!("acceptance entry {id} check block is empty"));
     }
     check.insert("command".into(), Value::String(block.content.clone()));
     check.remove("command_block");
