@@ -113,8 +113,8 @@ impl archon_pipeline::runner::LlmClient for GatedClient {
         Ok(archon_pipeline::runner::LlmResponse {
             content: "1: SAME".to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: None,
         })
     }
@@ -245,8 +245,8 @@ impl archon_pipeline::runner::LlmClient for DecliningClient {
                 .collect::<Vec<_>>()
                 .join("\n"),
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: None,
         })
     }

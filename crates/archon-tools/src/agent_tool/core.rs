@@ -1,5 +1,7 @@
 mod coordination;
 mod descriptor;
+#[path = "outcomes.rs"]
+mod outcomes;
 
 use coordination::{claim_task_for_agent, declare_writes, settle_claimed_task};
 
@@ -16,10 +18,7 @@ use super::request::AgentToolError;
 use super::request::{expected_target_files, intended_writes, task_id, validate_and_build};
 use super::run::run_subagent_with_completion;
 use crate::agent_mutation_guard::{snapshot_expected_targets, verify_expected_mutations};
-use crate::background_agents::{
-    AgentStatus, BACKGROUND_AGENTS, BackgroundAgentHandle, RegistryError, new_result_slot,
-};
-use crate::board::DelegatedOutcome;
+use crate::background_agents::{AgentStatus, BackgroundAgentHandle, new_result_slot};
 use crate::subagent_executor::{SubagentClassification, SubagentOutcome, get_subagent_executor};
 use crate::subagent_request::SubagentRequest;
 use crate::tool::{
@@ -38,12 +37,7 @@ pub(crate) use descriptor::AGENT_DESCRIPTION_LIMIT_BYTES;
 /// `execute` gets here the runner may already have claimed the id. That is the
 /// same agent, so the only thing left to report is a registry that genuinely
 /// refused the write.
-fn register_once(handle: BackgroundAgentHandle) -> Result<(), RegistryError> {
-    match BACKGROUND_AGENTS.register(handle) {
-        Ok(()) | Err(RegistryError::Duplicate(_)) => Ok(()),
-        Err(e) => Err(e),
-    }
-}
+use outcomes::{board_outcome, register_once};
 
 pub struct AgentTool {
     /// Dynamic description including available agents. Built at registration time.
@@ -56,20 +50,6 @@ impl AgentTool {
         input: &serde_json::Value,
     ) -> Result<SubagentRequest, AgentToolError> {
         validate_and_build(input)
-    }
-}
-
-/// How a subagent outcome closes its mirrored board item, if it closes it.
-///
-/// `None` for `AutoBackgrounded`: the runner is still executing and the item is
-/// still genuinely claimed. The completion channel delivers the real outcome
-/// later, and that is what closes it.
-fn board_outcome(outcome: &SubagentOutcome) -> Option<DelegatedOutcome> {
-    match outcome {
-        SubagentOutcome::Completed(_) => Some(DelegatedOutcome::Completed),
-        SubagentOutcome::Failed(_) => Some(DelegatedOutcome::Failed),
-        SubagentOutcome::Cancelled => Some(DelegatedOutcome::Stopped),
-        SubagentOutcome::AutoBackgrounded => None,
     }
 }
 
@@ -254,6 +234,9 @@ impl Tool for AgentTool {
                 .await;
                 let (final_status, payload) = match &outcome {
                     SubagentOutcome::Completed(text) => (AgentStatus::Finished, Ok(text.clone())),
+                    SubagentOutcome::CompletedWithUsage { content, .. } => {
+                        (AgentStatus::Finished, Ok(content.clone()))
+                    }
                     SubagentOutcome::Failed(err) => (AgentStatus::Failed, Err(err.clone())),
                     SubagentOutcome::AutoBackgrounded => {
                         // The runner is still executing — mark Running here
@@ -440,6 +423,17 @@ impl Tool for AgentTool {
                     Ok(()) => ToolResult::success(match &claim_warning {
                         Some(warning) => format!("{warning}\n\n{text}"),
                         None => text,
+                    }),
+                    Err(err) => {
+                        ToolResult::error(format!("[subagent_expected_mutation_missing] {err}"))
+                    }
+                }
+            }
+            SubagentOutcome::CompletedWithUsage { content, .. } => {
+                match verify_expected_mutations(ctx.fs().as_ref(), &expected_mutations).await {
+                    Ok(()) => ToolResult::success(match &claim_warning {
+                        Some(warning) => format!("{warning}\n\n{content}"),
+                        None => content,
                     }),
                     Err(err) => {
                         ToolResult::error(format!("[subagent_expected_mutation_missing] {err}"))

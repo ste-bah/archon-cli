@@ -1,97 +1,10 @@
-//! The classification of a write branch's interruptions, and the call
-//! budget a dispatcher reports. Issue 263: the branch loop itself is bounded
-//! by no progress, never by a total count or total time
-//! (`branch_progress_tests`); the budget only shapes what a fresh session is
-//! told about its time.
-
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
-
-use crate::agent_dispatch_port::WorkflowAgentDispatch;
-use crate::task_universe::WorkflowV2TaskUniverse;
-use crate::{
-    WorkflowV2AgentAdapter, WorkflowV2CallExecution, WorkflowV2Result, WorkflowV2ResultStore,
-};
-
-/// Fails every dispatch with a size rejection, so the loop always wants another
-/// attempt, and reports a clock that has already run past any budget.
-struct AlwaysRetries {
-    attempts: AtomicUsize,
-    budget: Mutex<Option<Duration>>,
-}
-
-impl AlwaysRetries {
-    fn new(budget: Option<Duration>) -> Self {
-        Self {
-            attempts: AtomicUsize::new(0),
-            budget: Mutex::new(budget),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl WorkflowAgentDispatch for AlwaysRetries {
-    fn call_time_budget(&self) -> Option<Duration> {
-        *self.budget.lock().expect("budget")
-    }
-
-    fn fanout_parallelism(&self, requested: Option<usize>) -> usize {
-        requested.unwrap_or(1).max(1)
-    }
-
-    async fn run_call(
-        &self,
-        _task: &str,
-        _repository_root: Option<String>,
-        _execution: &WorkflowV2CallExecution,
-        _adapter: &WorkflowV2AgentAdapter,
-        _v2_store: Option<&WorkflowV2ResultStore>,
-        _task_universe: Option<&WorkflowV2TaskUniverse>,
-    ) -> crate::WorkflowResult<WorkflowV2Result> {
-        self.attempts.fetch_add(1, Ordering::SeqCst);
-        // The wholesale line-cap rejection, which the loop treats as
-        // correctable and re-asks against — and which reports a smaller
-        // overshoot each time, so the progress test never ends the loop either.
-        let seen = self.attempts.load(Ordering::SeqCst) as u32;
-        Err(crate::WorkflowError::port(format!(
-            "your patch would make source file 'src/a.rs' {} lines (currently 495, cap 500); \
-             the ENTIRE patch is rejected",
-            600 - seen
-        )))
-    }
-}
-
-/// And the live dispatcher derives its budget from the configured per-dispatch
-/// timeout rather than a constant, so the bound moves with the setting instead
-/// of contradicting it.
-#[test]
-fn a_dispatcher_reports_the_budget_the_loop_reads() {
-    let dispatch = AlwaysRetries::new(Some(Duration::from_secs(21_600)));
-    assert_eq!(
-        dispatch.call_time_budget(),
-        Some(Duration::from_secs(21_600))
-    );
-    assert!(AlwaysRetries::new(None).call_time_budget().is_none());
-}
-
-/// Exhaustion is recoverable, not fatal. A hard error would end the wave and
-/// discard whatever the branch had already established; the branch outcome is
-/// meant to carry that forward as remediation data.
-#[test]
-fn budget_exhaustion_is_treated_as_a_recoverable_timeout() {
-    let message = format!(
-        "write branch 'implement-1-0' {} of 7200s after 7300s across re-dispatches",
-        super::errors::CALL_TIME_BUDGET_EXHAUSTED
-    );
-    assert!(super::errors::is_recoverable_write_branch_interruption(
-        &message
-    ));
-}
+//! Classification of write-branch interruptions. Branch progress tests cover
+//! repeated dispatch behavior; these tests distinguish interruptions from
+//! implementation verdicts.
 
 /// And an unrelated failure is still not a timeout.
 #[test]
-fn other_failures_are_not_budget_exhaustion() {
+fn other_failures_are_not_recoverable_interruptions() {
     assert!(!super::errors::is_recoverable_write_branch_interruption(
         "changed files outside declared ownership"
     ));

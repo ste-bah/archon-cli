@@ -217,10 +217,10 @@ async fn logic_361_an_upgrade_that_changes_no_logic_reuses_everything() {
     assert_eq!(upgraded.calls.load(Ordering::SeqCst), 0);
 }
 
-/// Records written before the latest logic changes: affected commands run
-/// again once and are stamped, and then reuse.
+/// Records written before logic versions: checks and a landing with changed
+/// logic run again once, are stamped, and then reuse.
 #[tokio::test]
-async fn logic_361_unversioned_checks_run_again_and_an_unversioned_landing_reuses() {
+async fn logic_361_unversioned_checks_and_landing_run_again_then_reuse() {
     let run = Run::new();
     assert_eq!(
         run.run(Arc::new(Unversioned(run.launched())), SCRIPT).await,
@@ -236,7 +236,8 @@ async fn logic_361_unversioned_checks_run_again_and_an_unversioned_landing_reuse
         "requirements-trace",
     ] {
         let expected = match check {
-            "verify-frozen-acceptance" | "requirements-trace" => 2,
+            "verify-frozen-acceptance" => 2,
+            "requirements-trace" => 3,
             "task-set-lint" => 4,
             _ => unreachable!(),
         };

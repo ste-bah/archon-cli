@@ -62,6 +62,24 @@ impl AgentSubagentExecutor {
         let result = self
             .run_registered_subagent_to_completion(&ids, request, system, ctx, cancel, row)
             .await;
+        if let Some(progress) = self
+            .subagent_manager
+            .lock()
+            .await
+            .get_progress(&ids.manager_id)
+        {
+            self.usage_cache.lock().await.insert(
+                ids.cache_id.clone(),
+                (
+                    progress
+                        .input_tokens_available
+                        .then_some(progress.cumulative_input_tokens),
+                    progress
+                        .output_tokens_available
+                        .then_some(progress.cumulative_output_tokens),
+                ),
+            );
+        }
         self.on_inner_complete(ids.cache_id, result.clone().map_err(|err| err.to_string()))
             .await;
         // Last, not before: a completion interrupted part-way through has still

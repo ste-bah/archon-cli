@@ -136,7 +136,10 @@ pub(super) fn inactivity_failure(
     outcome: &SubagentOutcome,
     cut: Option<HostCut>,
 ) -> Option<anyhow::Error> {
-    if let SubagentOutcome::Completed(_) = outcome {
+    if matches!(
+        outcome,
+        SubagentOutcome::Completed(_) | SubagentOutcome::CompletedWithUsage { .. }
+    ) {
         return None;
     }
     match cut? {

@@ -86,12 +86,12 @@ async fn single_quote_escape_does_not_discard_completed_work() {
     assert_eq!(git(&f.repo, &["show", "HEAD:owned.txt"]), "implemented");
 }
 #[tokio::test]
-async fn budget_and_resumed_patch_reach_actual_rendered_prompt() {
+async fn no_progress_window_and_resumed_patch_reach_actual_rendered_prompt() {
     let f = Fixture::new();
     let (_, first) = f.wave("write-budget", Reply::Timeout).await;
     {
         let prompts = first.prompts.lock().unwrap();
-        assert!(prompts[0].contains("Time budget:"));
+        assert!(prompts[0].contains("No-progress window:"));
         assert!(prompts[0].contains("Write the deliverable files first"));
     }
     let (_, next) = f.wave("write-budget-resume", Reply::Accepted).await;

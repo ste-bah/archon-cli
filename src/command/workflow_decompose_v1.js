@@ -233,6 +233,7 @@ function bodyPolicy(subject, initialFeedback) {
       `The exact frozen file_name is ${subject.fileName}.`,
       `Read the PRD at ${args.prdPath}, the frozen chain under ${args.taskRoot}, and the repository source you need.`,
       groundingRules(),
+      "Every path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.",
       "Stop reading once you can name what your entries assert. The project MCP configuration named below sits at the project root itself, not inside any excluded directory, and must still be read.",
       observationRule(),
       "The file must open with a fenced yaml block carrying exactly these keys:",

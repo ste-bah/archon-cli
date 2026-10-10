@@ -354,3 +354,33 @@ fn acceptance_allowlist_accepts_provider_data_names() {
     .unwrap();
     validate(&cfg).expect("provider data names are allowed");
 }
+
+#[tracing_test::traced_test]
+#[test]
+fn obsolete_write_call_time_budget_is_ignored_with_one_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[workflow.generated]\nwrite_call_time_budget_secs = 120\n",
+    )
+    .unwrap();
+
+    let config = load_config_if_exists(path).expect("legacy config loads");
+    assert!(config.is_some());
+    logs_assert(|lines| {
+        let count = lines
+            .iter()
+            .filter(|line| {
+                line.contains(
+                    "obsolete config key is ignored because write branches have only a no-progress window",
+                )
+            })
+            .count();
+        if count == 1 {
+            Ok(())
+        } else {
+            Err(format!("expected one obsolete-key warning, found {count}"))
+        }
+    });
+}

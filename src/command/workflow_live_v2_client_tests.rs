@@ -32,8 +32,8 @@ impl WorkflowLlmClient for RecordingClient {
         Ok(WorkflowAgentOutcome {
             content: "fallback".to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: None,
         })
     }
@@ -50,8 +50,8 @@ impl WorkflowLlmClient for RecordingClient {
         Ok(WorkflowAgentOutcome {
             content: "recorded".to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: None,
         })
     }

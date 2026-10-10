@@ -212,19 +212,20 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380 complete wrapped obligation text changes freeze verdicts.
         // #385's re-ask improves recovery from an unusable provider reply; it
         // does not change the verdict for a usable reply.
+        // #376 changes requirements-trace only; it does not change freeze verdicts.
         // 5: #378 (merged after #366/#288/#380) validates supplementary-only
         // acceptance prose before the incremental judge refuses it, changing
         // freeze-acceptance verdicts.
         version: 5,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "c81c70227ccccd4076dd4867b91cc935df08ef185cc5fdd195e1fffff3c7bc26",
+        sources_digest: "44ab46d131a084a81fe40c3636eba2168dadbabc2a519e2757425d53be2faae3",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 2,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "c81c70227ccccd4076dd4867b91cc935df08ef185cc5fdd195e1fffff3c7bc26",
+        sources_digest: "44ab46d131a084a81fe40c3636eba2168dadbabc2a519e2757425d53be2faae3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -235,7 +236,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380's obligation model changes the frozen contract verdict.
         version: 4,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "2cacbfb1198bb6ed496ed3aab0474ab7fac03e73bf3911aec8db2b36f2a8d608",
+        sources_digest: "7fa330cf108f4e891b67959813abaf8128f9fb55c15d61c9741c6d4c22809601",
         build_bound: false,
     },
     CapabilityLogic {
@@ -245,28 +246,30 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380's obligation model changes the frozen contract verdict.
         version: 4,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "2cacbfb1198bb6ed496ed3aab0474ab7fac03e73bf3911aec8db2b36f2a8d608",
+        sources_digest: "7fa330cf108f4e891b67959813abaf8128f9fb55c15d61c9741c6d4c22809601",
         build_bound: false,
     },
     CapabilityLogic {
         id: "requirements-trace",
-        version: 2,
+        // 3: #376 parses requirements frontmatter as YAML, changing trace verdicts;
+        // #380 independently changes obligation text used by this trace.
+        version: 3,
         sources: &[GATE, CONTRACT, TRACE],
-        sources_digest: "fb35c15a1bd8551c398338d4aa4e43efdadf098f9968cd57be5cf8748bcc8bbc",
+        sources_digest: "f482ac0d2583c98b2d2276ff1600d708c7c0b89539bca147a44ef15a4df3f3ac",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-acceptance",
         version: 2,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "8d583c835c9699eb40b58576ece631d80e32f959e42b1cd437f152098ebe5d48",
+        sources_digest: "7caffce75168a072bbedef49c9e7c7ec718cb70e5429232f5722a5b83c92a86b",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
         version: 2,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "8d583c835c9699eb40b58576ece631d80e32f959e42b1cd437f152098ebe5d48",
+        sources_digest: "7caffce75168a072bbedef49c9e7c7ec718cb70e5429232f5722a5b83c92a86b",
         build_bound: true,
     },
 ];

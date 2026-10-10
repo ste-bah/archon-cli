@@ -153,7 +153,7 @@ fn malformed_task_binding_names_the_exact_yaml_edit() {
     let prd = write_prd(dir.path(), &["- REQ-X-001: claimed."]);
     let tasks = write_trace_task(
         dir.path(),
-        "```yaml\ntask_id: TASK-X-001\nimplements:\n  - REQ-X-001\n```\n",
+        "```yaml\ntask_id: TASK-X-001\nimplements: REQ-X-001\n```\n",
     );
     let verdict = run_trace(dir.path(), &TraceOptions::new(prd, tasks))
         .expect("malformed input must produce a rendered typed verdict");
@@ -256,7 +256,7 @@ fn malformed_binding_does_not_invent_secondary_coverage_findings() {
     let prd = write_prd(dir.path(), &["- REQ-X-001: claimed by malformed input."]);
     let tasks = write_trace_task(
         dir.path(),
-        "```yaml\ntask_id: TASK-X-001\nimplements:\n  - REQ-X-001\n```\n",
+        "```yaml\ntask_id: TASK-X-001\nimplements: REQ-X-001\n```\n",
     );
     let verdict = run_trace(dir.path(), &TraceOptions::new(prd, tasks)).expect("typed verdict");
     assert_eq!(verdict.blocking_findings.len(), 1, "{verdict:?}");
@@ -322,7 +322,7 @@ fn malformed_trace_population_preserves_report_but_is_operational_in_observe() {
     let prd = write_prd(dir.path(), &["- REQ-X-001: claimed."]);
     let tasks = write_trace_task(
         dir.path(),
-        "```yaml\ntask_id: TASK-X-001\nimplements:\n  - REQ-X-001\n```\n",
+        "```yaml\ntask_id: TASK-X-001\nimplements: REQ-X-001\n```\n",
     );
     let options = TraceOptions::new(prd, tasks);
     let disposition = crate::command::workflow_gate::run_sync_gate(
@@ -401,16 +401,14 @@ fn trace_gate_findings_retain_exact_backing_files() {
 }
 
 #[test]
-fn a_task_file_the_trace_cannot_read_is_the_authors_finding_not_a_host_failure() {
-    // In a fixed decomposition the trace's inputs are the bodies the run has
-    // just published. A live run reached set-gates and died there: the gate
-    // reported a block-style `implements:` as an operational error, which stops
-    // the run even in observe mode, with no finding naming the file to repair.
+fn a_malformed_task_file_is_the_authors_finding_not_a_host_failure() {
+    // A scalar `implements:` is invalid. The gate reports the authored input
+    // problem as a policy finding rather than an operational failure.
     let dir = tempfile::tempdir().expect("tempdir");
     let prd = write_prd(dir.path(), &["- REQ-X-001: claimed."]);
     let tasks = write_trace_task(
         dir.path(),
-        "```yaml\ntask_id: TASK-X-001\nimplements:\n  - REQ-X-001\n```\n",
+        "```yaml\ntask_id: TASK-X-001\nimplements: REQ-X-001\n```\n",
     );
     let envelope = dir.path().join("staging/gate-envelope.json");
     std::fs::create_dir_all(envelope.parent().unwrap()).unwrap();

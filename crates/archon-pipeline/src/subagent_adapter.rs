@@ -409,8 +409,19 @@ pub(crate) fn llm_response_for_subagent_outcome(
         SubagentOutcome::Completed(content) => Ok(LlmResponse {
             content,
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: None,
+            tokens_out: None,
+            stop_reason: Some("end_turn".to_string()),
+        }),
+        SubagentOutcome::CompletedWithUsage {
+            content,
+            tokens_in,
+            tokens_out,
+        } => Ok(LlmResponse {
+            content,
+            tool_uses: Vec::new(),
+            tokens_in,
+            tokens_out,
             stop_reason: Some("end_turn".to_string()),
         }),
         SubagentOutcome::Failed(error) => Err(anyhow!("subagent failed: {error}")),

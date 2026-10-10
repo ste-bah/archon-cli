@@ -26,8 +26,8 @@ impl RecordingAuthor {
         Ok(WorkflowAgentOutcome {
             content: content.to_string(),
             tool_uses: vec![],
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: Some("end_turn".into()),
         })
     }

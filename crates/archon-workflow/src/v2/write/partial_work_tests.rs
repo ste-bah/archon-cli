@@ -241,7 +241,7 @@ fn a_partial_that_no_longer_applies_leaves_the_workspace_clean() {
 }
 
 #[test]
-fn the_host_preamble_states_the_budget_and_the_write_first_rule() {
+fn the_host_preamble_states_the_no_progress_window_and_the_write_first_rule() {
     let plain = with_host_preamble("do the task", None, None, &Default::default());
     assert_eq!(plain, "do the task");
     let budgeted = with_host_preamble(
@@ -250,7 +250,7 @@ fn the_host_preamble_states_the_budget_and_the_write_first_rule() {
         None,
         &Default::default(),
     );
-    assert!(budgeted.starts_with("Time budget: this call has 90 minutes"));
+    assert!(budgeted.starts_with("No-progress window: this dispatch ends after 90 minutes"));
     assert!(budgeted.contains("Write the deliverable files first"));
     assert!(budgeted.ends_with("\n\ndo the task"));
     let partial = PartialWork {
@@ -266,7 +266,7 @@ fn the_host_preamble_states_the_budget_and_the_write_first_rule() {
         Some(&partial),
         &Default::default(),
     );
-    assert!(both.starts_with("Time budget: this call has 2 minutes"));
+    assert!(both.starts_with("No-progress window: this dispatch ends after 2 minutes"));
     assert!(both.contains("has been applied to this workspace: a.rs"));
 }
 
@@ -311,44 +311,17 @@ fn write_read_set_wave_collection_preserves_clean_worktree_reads_in_saved_outcom
     assert!(status.status.success() && status.stdout.is_empty());
 }
 
-/// The prompt says the number the host will enforce, not the larger total.
-///
-/// Live: a coder was told "240 minutes" from the call's total budget while
-/// `host_call_timeout_secs` ended its session at 7200 s.
+/// The prompt names the dispatch's renewable no-progress window.
 #[test]
-fn the_rendered_budget_is_the_smaller_of_the_host_cutoff_and_the_call_total() {
+fn the_rendered_budget_is_the_dispatch_no_progress_window() {
     use std::time::Duration;
     let host_call_timeout = Some(Duration::from_secs(7200));
-    let call_total = Some(Duration::from_secs(14_400));
-    let effective = effective_call_budget(host_call_timeout, call_total, Duration::ZERO);
-    assert_eq!(effective, host_call_timeout);
-    let text = with_host_preamble("do the task", effective, None, &Default::default());
+    let text = with_host_preamble("do the task", host_call_timeout, None, &Default::default());
     assert!(
-        text.starts_with("Time budget: this call has 120 minutes"),
+        text.starts_with("No-progress window: this dispatch ends after 120 minutes"),
         "{text}"
     );
     assert!(!text.contains("240 minutes"));
-    // Late in the call the total is what is left, and it wins once smaller.
-    assert_eq!(
-        effective_call_budget(host_call_timeout, call_total, Duration::from_secs(13_000)),
-        Some(Duration::from_secs(1400))
-    );
-    // Never negative; a spent total renders as zero, not as a fresh dispatch.
-    assert_eq!(
-        effective_call_budget(host_call_timeout, call_total, Duration::from_secs(20_000)),
-        Some(Duration::ZERO)
-    );
-    // A host with no per-dispatch timeout falls back to the total, and vice
-    // versa; neither means unbounded, as before.
-    assert_eq!(
-        effective_call_budget(None, call_total, Duration::ZERO),
-        call_total
-    );
-    assert_eq!(
-        effective_call_budget(host_call_timeout, None, Duration::ZERO),
-        host_call_timeout
-    );
-    assert_eq!(effective_call_budget(None, None, Duration::ZERO), None);
 }
 
 /// A mid-attempt restart names the work as the agent's own; a new attempt

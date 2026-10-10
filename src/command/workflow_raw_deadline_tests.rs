@@ -104,8 +104,8 @@ impl WorkflowLlmClient for QueuedClient {
         Ok(WorkflowAgentOutcome {
             content: "authored".into(),
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: Some("end_turn".into()),
         })
     }

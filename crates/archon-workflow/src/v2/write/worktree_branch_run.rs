@@ -143,15 +143,10 @@ pub(crate) async fn run_one_worktree_branch(
         &task_ids,
         ctx.dispatch.resume_memory_calls(),
     );
-    // The budget the agent is told is the one that will actually end its
-    // session: the host's per-dispatch timeout when that is the smaller.
+    // Tell the agent the host's renewable per-dispatch no-progress window.
     branch.execution.call.options.task = Some(super::partial_work::with_host_preamble(
         &rendered,
-        super::partial_work::effective_call_budget(
-            ctx.dispatch.dispatch_timeout(),
-            ctx.dispatch.call_time_budget(),
-            std::time::Duration::ZERO,
-        ),
+        ctx.dispatch.dispatch_timeout(),
         prepared.resumed_partial.as_ref(),
         &memory,
     ));

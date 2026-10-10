@@ -291,13 +291,6 @@ pub(super) fn failure_kind_from_write_result(
         })
 }
 
-/// Marker phrase shared by the branch loop and the predicate below.
-///
-/// Both sides name the same constant rather than one of them matching prose the
-/// other happens to write, because a message reworded on one side and matched on
-/// the other is a silent behaviour change: the branch would stop being
-/// recoverable and nobody would see it in the diff.
-pub(super) const CALL_TIME_BUDGET_EXHAUSTED: &str = "exhausted its total time budget";
 /// Marker of a branch whose provider connection kept dropping with its
 /// worktree unchanged (Issue 263): the no-progress end of the drop streak.
 /// Like a spent budget, the work is unjudged and is kept for remediation.
@@ -320,12 +313,6 @@ pub(super) fn is_recoverable_write_branch_interruption(error: &str) -> bool {
     crate::error::is_host_call_timeout_text(error)
         || lower.contains("subagent timed out")
         || lower.contains("timed out after")
-        // Running out of the budget for the WHOLE call is the same kind of
-        // event as one dispatch timing out: the work is unfinished, nothing is
-        // wrong with the branch itself, and the evidence gathered so far is
-        // worth keeping. Treated as a hard error it would take the wave with it
-        // and discard what the branch had learned.
-        || lower.contains(CALL_TIME_BUDGET_EXHAUSTED)
         || lower.contains(TRANSPORT_NO_PROGRESS)
         // The tool guard stopped a session that thrashed past the read wall
         // (Issue-54). The work is unjudged and whatever was written is worth

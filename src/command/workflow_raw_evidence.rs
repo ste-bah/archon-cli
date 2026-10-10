@@ -150,8 +150,8 @@ mod tests {
         let outcome = WorkflowAgentOutcome {
             content: "key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 and Authorization: Bearer opaque-bearer-credential-123".into(),
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: Some("end_turn".into()),
         };
         evidence.finish(&Ok(outcome)).unwrap();
@@ -159,5 +159,41 @@ mod tests {
             std::fs::read_to_string(temp.path().join("run/agent-outputs/author-1.json")).unwrap();
         assert!(!raw.contains("sk-ant-"), "{raw}");
         assert!(!raw.contains("opaque-bearer-credential-123"), "{raw}");
+    }
+
+    #[test]
+    fn raw_outcome_omits_unreported_usage_and_keeps_reported_counts() {
+        let absent = raw_outcome_result(
+            WorkflowAgentOutcome {
+                tokens_in: None,
+                tokens_out: None,
+                ..Default::default()
+            },
+            "end_turn".into(),
+        );
+        assert!(absent.data["tokensIn"].is_null());
+        assert!(absent.data["tokensOut"].is_null());
+
+        let reported = raw_outcome_result(
+            WorkflowAgentOutcome {
+                tokens_in: Some(123),
+                tokens_out: Some(45),
+                ..Default::default()
+            },
+            "end_turn".into(),
+        );
+        assert_eq!(reported.data["tokensIn"], json!(123));
+        assert_eq!(reported.data["tokensOut"], json!(45));
+
+        let reported_zero = raw_outcome_result(
+            WorkflowAgentOutcome {
+                tokens_in: Some(0),
+                tokens_out: Some(0),
+                ..Default::default()
+            },
+            "end_turn".into(),
+        );
+        assert_eq!(reported_zero.data["tokensIn"], json!(0));
+        assert_eq!(reported_zero.data["tokensOut"], json!(0));
     }
 }

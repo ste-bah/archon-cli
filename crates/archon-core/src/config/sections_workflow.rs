@@ -140,14 +140,6 @@ pub struct GeneratedWorkflowConfig {
     pub max_residual_passes: u32,
     pub verification_branch_timeout_secs: u32,
     pub host_call_timeout_secs: u32,
-    /// Total wall clock one write branch may spend across its re-dispatches.
-    ///
-    /// `0` — the default — keeps the derived bound of three host call timeouts.
-    /// Partial work survives the cut (it is captured and resumed by the next
-    /// attempt at the task), so a shorter budget costs nothing but turns a
-    /// six-hour silence into a visible checkpoint. Override per project with
-    /// workflow.generated.write_call_time_budget_secs.
-    pub write_call_time_budget_secs: u32,
     /// Tool calls a write agent may still make after the host has told it
     /// every declared focused test passed, before inspection and build/test
     /// calls are refused. Write and Edit are never refused. Inert for a task
@@ -222,7 +214,6 @@ impl Default for GeneratedWorkflowConfig {
             // workflow.generated.verification_branch_timeout_secs.
             verification_branch_timeout_secs: 14_400,
             host_call_timeout_secs: 7_200,
-            write_call_time_budget_secs: 0,
             submit_grace_calls: 15,
             timeout_retry_budget_secs: 1_800,
             resume_memory_calls: 12,

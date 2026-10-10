@@ -234,7 +234,6 @@ pub(super) fn boundary_driver(
         max_residual_passes: 6,
         verification_branch_timeout_secs: 30,
         host_call_timeout_secs: 30,
-        write_call_time_budget_secs: 0,
         submit_grace_calls: 15,
         timeout_retry_budget_secs: 1_800,
         resume_memory_calls: 12,

@@ -107,8 +107,8 @@ export default async function workflow(w) {
 "#
             .to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: None,
         })
     }
@@ -143,8 +143,8 @@ export default async function workflow(w) {
 "#
             .to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }
@@ -172,8 +172,8 @@ impl WorkflowLlmClient for PlannerRepairRetryClient {
             0 => Ok(WorkflowAgentOutcome {
                 content: "export default async function workflow(w) { invalid(); }".to_string(),
                 tool_uses: Vec::new(),
-                tokens_in: 1,
-                tokens_out: 1,
+                tokens_in: Some(1),
+                tokens_out: Some(1),
                 stop_reason: None,
             }),
             1 => {
@@ -189,8 +189,8 @@ impl WorkflowLlmClient for PlannerRepairRetryClient {
 }"#
                 .to_string(),
                 tool_uses: Vec::new(),
-                tokens_in: 1,
-                tokens_out: 1,
+                tokens_in: Some(1),
+                tokens_out: Some(1),
                 stop_reason: None,
             }),
         }
@@ -227,8 +227,8 @@ export default async function workflow(w) {
 "#
             .to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }
@@ -267,8 +267,8 @@ impl WorkflowLlmClient for FlakyAgentClient {
         Ok(WorkflowAgentOutcome {
             content: "status: completed".to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }
@@ -303,8 +303,8 @@ impl WorkflowLlmClient for CompletionBlockedAgentClient {
         Ok(WorkflowAgentOutcome {
             content: "status: completed".to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }
@@ -352,8 +352,8 @@ impl WorkflowLlmClient for SavedV2TemplateRunClient {
             })
             .to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }
