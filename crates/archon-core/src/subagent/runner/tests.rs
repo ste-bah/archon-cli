@@ -449,6 +449,8 @@ mod progress;
 #[path = "tests/read_ceiling.rs"]
 mod read_ceiling;
 mod stream_retry;
+#[path = "tests/text_tool_call.rs"]
+mod text_tool_call;
 mod workflow_system;
 mod world_schema;
 
