@@ -116,8 +116,12 @@ pub struct GeneratedWorkflowConfig {
     /// earn it more reading; the nudge is how it is told to stop. `0` turns
     /// the nudge off.
     pub read_only_soft_call_ceiling: u32,
-    /// Legacy compatibility field (`config.toml`); ignored because no total
-    /// inspection ceiling is enforced.
+    /// Inspection calls a read-only workflow call may make before further
+    /// inspection is refused with the instruction to answer from what it has
+    /// read. Build and test commands are not inspection and still run; the
+    /// session is not ended. `0` turns the refusal off. Live, an author made
+    /// 129 Read/Grep/Glob calls over 80 minutes with nothing to show, bounded
+    /// only by the host call timeout.
     pub read_only_hard_call_ceiling: u32,
     /// Inspection calls a read-only workflow call may make before further
     /// inspection is refused with the instruction to answer from what it has

@@ -181,15 +181,29 @@ fn bash_only_verification_gets_the_shell_guard_without_the_read_budget() {
             .before_tool("Bash", &serde_json::json!({"command": "cargo fmt --all"}))
             .is_some()
     );
-    // Issue-58: a read-only author may inspect beyond the old 120-call cap;
-    // the runner's no-progress window governs stalls.
-    for _ in 0..150 {
+    // Issue-58: inspection is admitted through call 120, then refused without
+    // ending the session; build and test commands remain available.
+    for _ in 0..120 {
         assert!(
             guard
                 .before_tool("Read", &serde_json::json!({"file_path": "src/lib.rs"}))
                 .is_none()
         );
     }
+    assert!(
+        guard
+            .before_tool("Read", &serde_json::json!({"file_path": "src/lib.rs"}))
+            .unwrap()
+            .starts_with("read ceiling reached: 120 inspection calls;")
+    );
+    assert!(
+        guard
+            .before_tool(
+                "Bash",
+                &serde_json::json!({"command": "cargo test -p check"})
+            )
+            .is_none()
+    );
     assert_eq!(
         guard.terminal_failure(),
         None,
@@ -220,7 +234,7 @@ fn guard_is_workflow_only_and_needs_a_shell_an_inspection_or_a_write_tool() {
         );
     }
     // Issue-58: a planner or critic with no shell still reads, so it gets the
-    // read-only guard and its no-progress reminder.
+    // read-only guard and its inspection ceilings.
     request.allowed_tools = vec!["Read".into(), "Grep".into(), "Glob".into()];
     let inspect_only = SessionLease::begin(&client, &request, false).unwrap();
     let guard = inspect_only
@@ -232,7 +246,7 @@ fn guard_is_workflow_only_and_needs_a_shell_an_inspection_or_a_write_tool() {
         guard
             .preamble()
             .unwrap()
-            .contains("From 80 inspection calls"),
+            .contains("from 80 inspection calls"),
         "{:?}",
         guard.preamble()
     );
