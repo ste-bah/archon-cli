@@ -32,5 +32,20 @@
     "id": "floor-command-block-fence",
     "reply": "```check\nverify floor\n```\n{\"id\":\"A\",\"check\":{\"kind\":\"floor\",\"command_block\":true}}",
     "expected": "refuse: acceptance entry A: check.command_block is only for kind command; a floor check puts its verifier in contract.typed_verifier_command"
+  },
+  {
+    "id": "live-prose-after-json-close",
+    "reply": "```json\n{\"id\":\"live-prose-after-json-close\",\"check\":{\"kind\":\"command\",\"command_block\":true}}\n``` plus the command block below.\n```check\nrun focused check\n```",
+    "expected": "refuse: acceptance entry live-prose-after-json-close check.command_block is true but no check block is present"
+  },
+  {
+    "id": "live-close-and-open-same-line",
+    "reply": "```json\n{\"id\":\"live-close-and-open-same-line\",\"check\":{\"kind\":\"command\",\"command_block\":true}}\n``` ```check\nrun focused check\n```",
+    "expected": "refuse: acceptance entry live-close-and-open-same-line check.command_block is true but no check block is present"
+  },
+  {
+    "id": "corrected-fence-layout",
+    "reply": "```json\n{\"id\":\"corrected-fence-layout\",\"check\":{\"kind\":\"command\",\"command_block\":true}}\n```\n```check\nrun focused check\n```",
+    "expected": "accepted"
   }
 ]

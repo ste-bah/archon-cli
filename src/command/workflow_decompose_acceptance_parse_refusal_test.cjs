@@ -84,6 +84,10 @@ async function refusal(reply, stopReason = 'end_turn') {
     if (fixture.id === 'SUP-REQ-AHDM-022') assert.equal(outcome, 'accepted', fixture.id);
     if (fixture.id === 'SUP-REQ-AHDM-021') assert.equal(outcome, 'reply contains more than one entry');
     if (fixture.id === 'SUP-REQ-BT-001') assert.equal(outcome, 'malformed inline JSON escape');
+    if (fixture.id === 'live-prose-after-json-close' || fixture.id === 'live-close-and-open-same-line') {
+      assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
+    }
+    if (fixture.id === 'corrected-fence-layout') assert.equal(outcome, 'accepted', fixture.id);
     if (fixture.id.startsWith('floor-command-block-')) {
       assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
     }

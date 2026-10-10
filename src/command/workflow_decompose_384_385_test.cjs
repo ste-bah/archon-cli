@@ -46,9 +46,18 @@ async function replyFormatIsTheLastTaskSection() {
   assert.ok(tasks[0].includes('"command_block":true'), 'the acceptance entry shape uses a check block');
   assert.ok(!tasks[0].includes('"command":"'), 'the acceptance entry shape has no inline command example');
   const format = ctx.acceptanceReplyFormat();
+  const formatLines = format.split('\n');
+  assert.ok(formatLines.includes('```json'), 'the reply example opens a JSON fence on its own line');
+  assert.ok(formatLines.includes('```check'), 'the reply example opens a check fence on its own line');
+  assert.ok(formatLines.filter(line => line === '```').length >= 2, 'the reply example closes both fences on their own lines');
+  assert.ok(format.includes('Every fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.'));
+  for (const line of formatLines) {
+    if (line.startsWith('```')) assert.ok(['```json','```check','```'].includes(line), `unexpected fence line: ${line}`);
+  }
   for (const task of tasks) {
     assert.ok(task.includes('Reply format: see the end of this task.'));
     assert.ok(task.endsWith(format), 'the complete reply-format block is the final task section');
+    assert.ok(!task.endsWith(`\n\`\`\`\n${format}`), 'the format is not wrapped in an outer fence');
   }
   assert.match(tasks[1], /The host refused this entry's last answered reply[\s\S]*JSON parse error/);
 }

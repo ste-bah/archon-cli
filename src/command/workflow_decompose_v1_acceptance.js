@@ -37,7 +37,23 @@ function acceptanceAuthorPrompt() {
 }
 
 function acceptanceReplyFormat() {
-  return "Return exactly one complete reply with one entry and one check. Example: ```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n``` followed by ```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```. Never write an empty check block. Open the script block with a line that is exactly ```check (the word check and nothing else after it) and close it with ```. Use inline check.command only for one short line without quotes or backslashes; never put a multi-line or quoted script in check.command. The entry shapes earlier in this task are examples only; return one entry.\nYour reply must contain the raw JSON object and any referenced check blocks, with no prose or headings. The JSON may be in a fenced `json` block or be the first top-level object outside check blocks.";
+  return [
+    "Return exactly one complete reply with one entry and one check.",
+    "A complete reply looks exactly like this (each fence line alone on its line):",
+    "```json",
+    "{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}",
+    "```",
+    "```check",
+    "set -eu",
+    "printf '%s\\n' 'run the focused check'",
+    "make test",
+    "```",
+    "",
+    "Every fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.",
+    "Never write an empty check block. Use inline check.command only for one short line without quotes or backslashes; never put a multi-line or quoted script in check.command.",
+    "The entry shapes earlier in this task are examples only; return one entry.",
+    "Your reply must contain the raw JSON object and any referenced check blocks, with no prose or headings. The JSON may be in a fenced `json` block or be the first top-level object outside check blocks."
+  ].join("\n");
 }
 
 // The live roots a check must not name, as the validator reads them: the

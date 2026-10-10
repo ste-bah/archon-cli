@@ -138,6 +138,18 @@ fn recorded_live_replies_use_the_shared_expected_outcomes() {
                     fixture.expected
                 );
             }
+            "live-prose-after-json-close" | "live-close-and-open-same-line" => {
+                assert!(reply_entry_with_blocks(&fixture.reply, &fixture.id).is_none());
+                assert!(
+                    fixture
+                        .expected
+                        .contains("check.command_block is true but no check block is present")
+                );
+            }
+            "corrected-fence-layout" => {
+                assert!(reply_entry_with_blocks(&fixture.reply, &fixture.id).is_some());
+                assert_eq!(fixture.expected, "accepted");
+            }
             "floor-command-block-flag" | "floor-command-block-fence" => {
                 let text = extract_object(&fixture.reply);
                 let mut entry = reply_entry(&text, "A").unwrap();
