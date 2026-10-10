@@ -177,6 +177,7 @@ async fn land_body(
         Arc::new(StopWhileRunning {
             inner: PreparedBodyProcess {
                 candidate: CANDIDATE.as_bytes().to_vec(),
+                overflow_stdout: false,
             },
             store: store.clone(),
             run_id: run.id.clone(),

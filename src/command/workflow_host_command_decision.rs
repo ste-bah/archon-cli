@@ -164,6 +164,7 @@ mod tests {
             max_stderr_bytes: 1,
             declared_write_set: outputs.iter().map(PathBuf::from).collect(),
             remediation_scopes: Default::default(),
+            spill_dir: None,
         }
     }
 

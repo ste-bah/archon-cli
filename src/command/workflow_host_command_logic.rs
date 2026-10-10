@@ -214,14 +214,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // it does not change the verdict for a usable reply, so keep v4.
         version: 4,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "892a5d628c3e3fff66a9771b2c085a3028ced26f9ef78a983c05ae5e6827b452",
+        sources_digest: "5d0c24138a7f9b47f0e28634fd50439297f7008cb9399dc86c5de8dc4d22f199",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         version: 2,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "892a5d628c3e3fff66a9771b2c085a3028ced26f9ef78a983c05ae5e6827b452",
+        sources_digest: "5d0c24138a7f9b47f0e28634fd50439297f7008cb9399dc86c5de8dc4d22f199",
         build_bound: false,
     },
     CapabilityLogic {
@@ -232,7 +232,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380's obligation model changes the frozen contract verdict.
         version: 4,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "98a657e7c1d83e3564c4287df8b5c93c8fb8f0af3a93c4a706e69dfb16b9cd41",
+        sources_digest: "db08d153056848aa280e445d7e4efb5b22b9f72088300e9b9e58223d8190ba57",
         build_bound: false,
     },
     CapabilityLogic {
@@ -242,7 +242,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380's obligation model changes the frozen contract verdict.
         version: 4,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "98a657e7c1d83e3564c4287df8b5c93c8fb8f0af3a93c4a706e69dfb16b9cd41",
+        sources_digest: "db08d153056848aa280e445d7e4efb5b22b9f72088300e9b9e58223d8190ba57",
         build_bound: false,
     },
     CapabilityLogic {

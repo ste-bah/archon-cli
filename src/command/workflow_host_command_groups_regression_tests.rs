@@ -284,6 +284,7 @@ async fn supervision_fixture() {
         cwd: root.clone(), environment: std::env::vars_os().filter_map(|(key, value)| key.into_string().ok().map(|key| (key, value))).collect(),
         stdin: None, timeout_secs: 30, max_stdout_bytes: 4096, max_stderr_bytes: 4096,
         declared_write_set: Vec::new(), remediation_scopes: Default::default(),
+        spill_dir: None,
     };
     let (control, _handle) = HostCommandControl::new();
     supervise_process_group(request, control, Some(&root.join(GROUP_RECORDS_DIR)))

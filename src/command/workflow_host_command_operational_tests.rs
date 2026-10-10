@@ -1,8 +1,8 @@
 //! Issue #255: an operational ending of a host command is retried while it
 //! makes progress and then pauses the run; it never fails the work.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use archon_workflow::{HostCommandRequest, RunStatus, StageStatus, WorkflowError, WorkflowStore};
 
@@ -35,6 +35,12 @@ fn output(exit_code: Option<i32>, timed_out: bool, stderr: &str) -> SupervisedPr
         stderr: stderr.as_bytes().to_vec(),
         stdout_bytes: 0,
         stderr_bytes: stderr.len() as u64,
+        stdout_retained_bytes: 0,
+        stderr_retained_bytes: stderr.len() as u64,
+        stdout_truncated: false,
+        stderr_truncated: false,
+        stdout_path: None,
+        stderr_path: None,
     }
 }
 
@@ -64,21 +70,18 @@ fn the_contract_classifies_only_timeouts_and_the_resumable_exit() {
 #[test]
 fn retries_need_growing_progress() {
     use NextStep::{Pause, Retry};
-    // No marker: exactly one retry.
+    // No marker retries once; growing progress keeps retrying.
     assert_eq!(next_step(&[attempt(1, None)]), Retry);
     assert_eq!(
         next_step(&[attempt(1, None), attempt(2, None)]),
         Pause("no_progress_evidence")
     );
-    // Growing progress: retried with no total work or time budget.
     assert_eq!(next_step(&[attempt(1, Some(1))]), Retry);
     let growing = |n: u32| -> Vec<OperationalAttempt> {
         (1..=n).map(|i| attempt(i, Some(u64::from(i)))).collect()
     };
     assert_eq!(next_step(&growing(10)), Retry);
     assert_eq!(next_step(&growing(130)), Retry);
-    // Progress that does not grow, or a marker that disappears.
-    // No baseline yet: a first marker, even 0, gets the no-marker retry.
     assert_eq!(next_step(&[attempt(1, Some(0))]), Retry);
     assert_eq!(
         next_step(&[attempt(1, Some(0)), attempt(2, Some(0))]),
@@ -98,9 +101,9 @@ fn retries_need_growing_progress() {
     );
 }
 
-/// One scripted process outcome per attempt; the last repeats.
 struct ScriptedProcess {
     calls: AtomicUsize,
+    spill_dirs: Mutex<Vec<std::path::PathBuf>>,
     outcomes: Vec<Scripted>,
     run: (WorkflowStore, String),
 }
@@ -111,11 +114,8 @@ enum Scripted {
     Incomplete(u64),
     Exit(i32),
     Error(&'static str),
-    Operational(&'static str),
     Publish(Vec<u8>),
-    /// The operator pauses while the attempt runs; it then times out.
     OperatorPauseThenTimeOut,
-    /// Exits with this status and stderr (Issue 338).
     Stderr(i32, String),
 }
 
@@ -126,10 +126,13 @@ impl HostCommandProcessAdapter for ScriptedProcess {
         request: ResolvedHostCommand,
         control: HostCommandControl,
     ) -> WorkflowResult<SupervisedProcessOutput> {
+        request
+            .spill_dir
+            .as_ref()
+            .map(|directory| self.spill_dirs.lock().unwrap().push(directory.clone()));
         let index = self.calls.fetch_add(1, Ordering::SeqCst);
         let scripted = self.outcomes[index.min(self.outcomes.len() - 1)].clone();
-        // A killed attempt leaves partial staging behind; the next attempt
-        // must not see it, or the audit refuses the extra file.
+        // A retry must clear partial staging before auditing.
         let stale = request.declared_write_set[0].with_file_name("partial-leftover");
         std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
         let marker = |p: Option<u64>| p.map(progress_line).unwrap_or_default();
@@ -146,7 +149,6 @@ impl HostCommandProcessAdapter for ScriptedProcess {
             Scripted::Exit(code) => Ok(output(Some(code), false, "genuine failure")),
             Scripted::Stderr(code, stderr) => Ok(output(Some(code), false, &stderr)),
             Scripted::Error(text) => Err(WorkflowError::StageFailed(text.into())),
-            Scripted::Operational(text) => Err(WorkflowError::HostOperational(text.into())),
             Scripted::OperatorPauseThenTimeOut => {
                 archon_workflow::LifecycleController::new(self.run.0.clone())
                     .apply(&self.run.1, archon_workflow::LifecycleAction::Pause)
@@ -154,9 +156,12 @@ impl HostCommandProcessAdapter for ScriptedProcess {
                 Ok(output(None, true, &marker(Some(1))))
             }
             Scripted::Publish(candidate) => {
-                PreparedBodyProcess { candidate }
-                    .execute(request, control)
-                    .await
+                PreparedBodyProcess {
+                    candidate,
+                    overflow_stdout: false,
+                }
+                .execute(request, control)
+                .await
             }
         }
     }
@@ -189,7 +194,6 @@ fn fixture(outcomes: Vec<Scripted>) -> Fixture {
             learning_hooks: Vec::new(),
         })
         .unwrap();
-    // The script host marks the call's stage running before dispatch.
     run.status = RunStatus::Running;
     let mut stage = archon_workflow::run::StageState::pending("host-call");
     stage.status = StageStatus::Running;
@@ -199,6 +203,7 @@ fn fixture(outcomes: Vec<Scripted>) -> Fixture {
     context.run_staging_root = run_root.join("host-command-staging");
     let process = Arc::new(ScriptedProcess {
         calls: AtomicUsize::new(0),
+        spill_dirs: Mutex::new(Vec::new()),
         outcomes,
         run: (store.clone(), run.id.clone()),
     });
@@ -248,6 +253,7 @@ async fn a_timed_out_call_is_retried_once_then_pauses_the_run() {
         .unwrap_err();
 
     assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 2);
+    spill_tests::assert_attempt_spill_dirs(&fixture.process);
     let WorkflowError::ControlPaused(message) = &error else {
         panic!("an operational limit pauses, never fails: {error:?}");
     };
@@ -408,7 +414,6 @@ async fn an_operator_pause_between_attempts_wins_over_the_retry() {
     assert_eq!(fixture.process.calls.load(Ordering::SeqCst), 1);
     let run = fixture.store.load_state(&fixture.run_id).unwrap();
     assert_eq!(run.status, RunStatus::Paused);
-    // Only the operator's transition: the executor did not pause it again.
     assert_eq!(run.generation, fixture.generation + 1);
     assert!(events_named(&events(&fixture), "host_command_operational_pause").is_empty());
 }
@@ -432,10 +437,7 @@ async fn a_first_zero_progress_marker_gets_the_same_single_retry_as_no_marker() 
 #[cfg(unix)]
 #[tokio::test]
 async fn a_real_timeout_keeps_the_progress_the_child_reported_before_the_kill() {
-    // `/bin/sh -c`, not a freshly written script: a new executable can wait
-    // seconds on the OS scan before it runs. The child writes the marker,
-    // then a readiness file; the test asserts readiness came well before the
-    // kill, so the capture never depends on timing luck.
+    // Use a shell and readiness file so startup scan time does not affect the capture.
     let temp = tempfile::tempdir().unwrap();
     let ready = temp.path().join("ready");
     let script = format!(
@@ -455,6 +457,7 @@ async fn a_real_timeout_keeps_the_progress_the_child_reported_before_the_kill() 
         max_stderr_bytes: 1024,
         declared_write_set: Vec::new(),
         remediation_scopes: Default::default(),
+        spill_dir: None,
     };
     let (control, _handle) = HostCommandControl::new();
     let supervised = tokio::spawn(
@@ -492,3 +495,6 @@ mod checkpoint_r3_tests;
 
 #[path = "workflow_host_command_operational_output_cap_tests.rs"]
 mod output_cap_tests;
+
+#[path = "workflow_host_command_operational_spill_tests.rs"]
+mod spill_tests;
