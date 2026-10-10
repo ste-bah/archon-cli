@@ -27,6 +27,10 @@
 use super::{State, WorkflowReadGuard, inspection_call};
 use serde_json::Value;
 
+/// Tool names whose calls are withdrawn once a read-only call reaches its
+/// hard inspection ceiling.
+pub const READ_ONLY_INSPECTION_TOOLS: &[&str] = &["Read", "Grep", "Glob", "read-own-evidence"];
+
 /// The prefix of the hard-ceiling refusal, pinned so a transcript reader or a
 /// session-memory consumer can tell it from the write path's budget refusal.
 pub const READ_CEILING_MARKER: &str = "read ceiling reached:";
@@ -77,6 +81,23 @@ pub(super) fn admit(
 }
 
 impl WorkflowReadGuard {
+    /// Whether this read-only call has exhausted its configured inspection
+    /// allowance. Write-capable guards and a disabled hard ceiling never
+    /// report reached.
+    pub fn read_only_ceiling_reached(&self) -> bool {
+        if !self.read_only() || self.read_only_hard_ceiling == 0 {
+            return false;
+        }
+        self.read_only_inspections() >= self.read_only_hard_ceiling
+    }
+
+    /// Tool names the hard ceiling refuses independent of input. Bash is
+    /// intentionally excluded because its inspection classification depends
+    /// on the command supplied for that call.
+    pub fn is_read_only_inspection_tool(name: &str) -> bool {
+        READ_ONLY_INSPECTION_TOOLS.contains(&name)
+    }
+
     /// Admitted inspection calls so far; a write-capable guard reports 0.
     pub fn read_only_inspections(&self) -> u32 {
         self.state
