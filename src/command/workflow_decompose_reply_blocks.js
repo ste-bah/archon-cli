@@ -102,6 +102,9 @@ function resolveCommandBlock(entry, text) {
   if (blocks.length > 1) return "acceptance reply contains more than one check block";
   const hasBlock = blocks.length === 1;
   const commandBlock = check && typeof check === "object" ? check.command_block : undefined;
+  if ((commandBlock === true || hasBlock) && (!check || typeof check !== "object" || check.kind !== "command")) {
+    return "acceptance entry " + id + ": check.command_block is only for kind command; a floor check puts its verifier in contract.typed_verifier_command";
+  }
   if (commandBlock === true && check && Object.prototype.hasOwnProperty.call(check, "command")) {
     return "acceptance entry " + id + " returned both check.command and check.command_block";
   }

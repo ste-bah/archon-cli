@@ -138,6 +138,13 @@ fn recorded_live_replies_use_the_shared_expected_outcomes() {
                     fixture.expected
                 );
             }
+            "floor-command-block-flag" | "floor-command-block-fence" => {
+                let text = extract_object(&fixture.reply);
+                let mut entry = reply_entry(&text, "A").unwrap();
+                let refusal = resolve_command_block(&mut entry, &fixture.reply).unwrap();
+                assert_eq!(fixture.expected, format!("refuse: {refusal}"));
+                assert!(reply_entry_with_blocks(&fixture.reply, "A").is_none());
+            }
             other => panic!("unexpected live fixture {other}"),
         }
     }

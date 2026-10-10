@@ -88,12 +88,22 @@ async function priorIsBoundedInAggregate() {
   assert(sizes[120] - sizes[1] <= 14336 + 1024, `prompt grew ${sizes[120] - sizes[1]} bytes from 1 to 120 entries`);
   assert(sizes[120] - sizes[100] <= 64, `prompt grew ${sizes[120] - sizes[100]} bytes from 100 to 120 entries`);
   assert(sizes[120] <= 48 * 1024, `prompt after 120 entries is ${sizes[120]} bytes`);
-  assert(!prompts[120].includes('host_call_id') && !prompts[120].includes('field_3 missing'), 'no judgment and no whole check is inlined');
+  assert(!prompts[120].includes('field_3 missing'), 'no whole check is inlined');
   // Every listed record names the sha256 of the entry's exact JSON, and the
   // file it names holds exactly those bytes.
   const at120 = prompts[120];
+  const priorSectionStart = at120.indexOf('Previously completed entries:');
+  const priorSectionEnd = at120.indexOf('\nReturn exactly one complete reply', priorSectionStart);
+  const priorSection = at120.slice(priorSectionStart, priorSectionEnd < 0 ? undefined : priorSectionEnd);
+  assert(!/\b(?:judgment|verdict|counterexample|reason|host_call_id)\b/.test(priorSection), 'no prior judgment is inlined');
   const listed = [...at120.matchAll(/\n- (AC-\d+) sha256:([0-9a-f]{64}) covers=/g)];
   assert(listed.length > 10 && listed.length < 120, `${listed.length} records shown`);
+  for (const [, id] of listed) {
+    const start = at120.indexOf(`\n- ${id} sha256:`) + 1;
+    const end = at120.indexOf('\n', start);
+    const line = at120.slice(start, end < 0 ? undefined : end);
+    assert(!/\b(?:judgment|verdict|counterexample|reason|host_call_id)\b/.test(line), `${id} has no inline judgment fields`);
+  }
   for (const [, id, sha] of listed) {
     const n = Number(id.slice(3)) - 1;
     assert.equal(files.get(`/run/author-context/${sha}.json`), JSON.stringify(entry(id, n)), `${id} resolves to its exact bytes`);

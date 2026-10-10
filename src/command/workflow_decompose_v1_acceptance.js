@@ -26,15 +26,18 @@ function acceptanceAuthorPrompt() {
     groundingRules(),
     "Use the repository only to verify real test names and paths; every path or test the entry names must be one you observed under the repository root.",
     checkPathRule(),
-    "Return exactly one complete reply with one entry and one check. Example: ```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n``` followed by ```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```. Never write an empty check block. Never name the block. Use inline check.command only for one short line without quotes or backslashes. The entry shapes below are examples only; return one entry.",
+    "Reply format: see the end of this task.",
     ENTRY_SHAPES,
     "A check must exercise the deliverable and fail when its criterion is false, not merely match usage text or assert that a file exists. The host judges every entry and validates the assembled contract together.",
     "Every check must fail on the pre-implementation baseline when its criterion is false; when the criterion already holds on that baseline, it must still be able to fail after the host moves aside every data file it names by a path relative to its working directory (never its own script, a program it runs, a directory it changes into or a build manifest), so make it read the files that decide that criterion by those paths.",
     "Use the exact supplied id. Criterion and judgment are host-owned placeholders. Set gap_permitted only if the PRD permits that criterion to remain a documented gap.",
     "covers lists every requirement id the PRD defines (REQ-*) whose violation, on the path this check drives, makes the check fail; list none the check would still pass under. Every PRD requirement must be covered by some check: the host names each one no check covers as a supplementary check SUP-<requirement id> it is owed, which you then author like an entry, covering exactly that requirement.",
-    "Your reply must contain the raw JSON object and any referenced check blocks, with no prose or headings. The JSON may be in a fenced `json` block or be the first top-level object outside check blocks.",
     "Do not run commands or write files."
   ].join("\n");
+}
+
+function acceptanceReplyFormat() {
+  return "Return exactly one complete reply with one entry and one check. Example: ```json\n{\"id\":\"<ID>\",\"criterion\":\"...\",\"check\":{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"},\"gap_permitted\":false,\"judgment\":{\"verdict\":\"accepted\",\"counterexample\":\"\",\"reason\":\"\",\"host_call_id\":\"\"}}\n``` followed by ```check\nset -eu\nprintf '%s\\n' 'run the focused check'\nmake test\n```. Never write an empty check block. Open the script block with a line that is exactly ```check (the word check and nothing else after it) and close it with ```. Use inline check.command only for one short line without quotes or backslashes; never put a multi-line or quoted script in check.command. The entry shapes earlier in this task are examples only; return one entry.\nYour reply must contain the raw JSON object and any referenced check blocks, with no prose or headings. The JSON may be in a fenced `json` block or be the first top-level object outside check blocks.";
 }
 
 // The live roots a check must not name, as the validator reads them: the
@@ -141,7 +144,7 @@ function acceptanceParseRefusal(id, source, error) {
     if (end < source.length) excerpt = `${excerpt}…`;
   }
   const excerptText = excerpt ? `; excerpt: ${JSON.stringify(excerpt)}` : "";
-  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}. Use inline check.command only for one short line without quotes or backslashes; put a script in one unnamed check block with check.command_block true.`;
+  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}. Use inline check.command only for one short line without quotes or backslashes; put the whole script in one block that opens with a line that is exactly \`\`\`check and set check.command_block true; never write a script inside a JSON string.`;
 }
 
 // H4 (Batch O): every PRD requirement id is covered by some check. The host
@@ -190,7 +193,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   // any provider call, never a prompt that names bytes that are not there.
   let task;
   try {
-    task = `${prompt}\nAuthor ONLY entry ${id}: ${text}${own}\n${catalogueText(criteria, id, state.order)}\n${priorText(prior, id, state.order)}`;
+    task = `${prompt}\nAuthor ONLY entry ${id}: ${text}${own}\n${catalogueText(criteria, id, state.order)}\n${priorText(prior, id, state.order)}\n${acceptanceReplyFormat()}`;
   } catch (error) {
     if (!error || error.authorContext !== true) throw error;
     return {failure:{status:"failed",summary:`acceptance entry ${id}: ${error.message}`}};

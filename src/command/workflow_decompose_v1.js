@@ -25,7 +25,8 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
       criterion: "",
       check: {
         kind: "command",
-        command: "<shell command that exercises the deliverable and exits non-zero when the criterion is false>",
+        // Live replies put long scripts in check blocks; inline scripts break JSON parsing.
+        command_block: true,
         cwd: "project_root"
       },
       gap_permitted: false,

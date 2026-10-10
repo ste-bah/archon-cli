@@ -234,6 +234,13 @@ pub(super) fn resolve_command_block(entry: &mut Value, content: &str) -> Option<
         return (!checks.is_empty()).then(|| "check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block".into());
     };
     let command_block = check.get("command_block");
+    if (command_block == Some(&Value::Bool(true)) || !checks.is_empty())
+        && check.get("kind").and_then(Value::as_str) != Some("command")
+    {
+        return Some(format!(
+            "acceptance entry {id}: check.command_block is only for kind command; a floor check puts its verifier in contract.typed_verifier_command"
+        ));
+    }
     if command_block == Some(&Value::Bool(true)) && check.contains_key("command") {
         return Some(format!(
             "acceptance entry {id} returned both check.command and check.command_block"

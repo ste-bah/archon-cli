@@ -31,6 +31,28 @@ function promptRules() {
   assert.ok(acceptance.includes('moves aside every data file it names by a path relative to its working directory'), 'acceptance prompt lacks already-true proof rule');
 }
 
+async function replyFormatIsTheLastTaskSection() {
+  const ctx = context();
+  const tasks = [];
+  const state = {entries:new Map(), retryIds:new Set(['A'])};
+  const w = {agent:async (_id, options) => {
+    tasks.push(options.task);
+    return {status:'accepted',stopReason:'end_turn',content:'{"id":'};
+  }};
+  await ctx.authorAcceptanceEntries(w, ctx.acceptanceAuthorPrompt(), 1, state);
+  state.retryIds = new Set(['A']);
+  await ctx.authorAcceptanceEntries(w, ctx.acceptanceAuthorPrompt(), 2, state);
+  assert.equal(tasks.length, 2);
+  assert.ok(tasks[0].includes('"command_block":true'), 'the acceptance entry shape uses a check block');
+  assert.ok(!tasks[0].includes('"command":"'), 'the acceptance entry shape has no inline command example');
+  const format = ctx.acceptanceReplyFormat();
+  for (const task of tasks) {
+    assert.ok(task.includes('Reply format: see the end of this task.'));
+    assert.ok(task.endsWith(format), 'the complete reply-format block is the final task section');
+  }
+  assert.match(tasks[1], /The host refused this entry's last answered reply[\s\S]*JSON parse error/);
+}
+
 async function gateOutageReusesCandidate() {
   const ctx = context();
   let authors = 0, gates = 0;
@@ -82,7 +104,7 @@ async function missingContentIsSpecific() {
 }
 
 (async () => {
-  for (const [name, test] of [['prompt rules',promptRules],['gate outage candidate reuse',gateOutageReusesCandidate],
+  for (const [name, test] of [['prompt rules',promptRules],['reply format last on first and repair attempts',replyFormatIsTheLastTaskSection],['gate outage candidate reuse',gateOutageReusesCandidate],
     ['wrong id measured refusal',wrongIdRefusalHasSpecificMeasuredProgress],['specific stop reason',wrongStopReasonIsSpecific],
     ['specific missing content',missingContentIsSpecific]]) {
     await test(); console.log(`PASS ${name}`);

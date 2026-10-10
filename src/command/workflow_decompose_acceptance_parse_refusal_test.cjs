@@ -84,6 +84,9 @@ async function refusal(reply, stopReason = 'end_turn') {
     if (fixture.id === 'SUP-REQ-AHDM-022') assert.equal(outcome, 'accepted', fixture.id);
     if (fixture.id === 'SUP-REQ-AHDM-021') assert.equal(outcome, 'reply contains more than one entry');
     if (fixture.id === 'SUP-REQ-BT-001') assert.equal(outcome, 'malformed inline JSON escape');
+    if (fixture.id.startsWith('floor-command-block-')) {
+      assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
+    }
   }
   const resolved = await refusal('```check\nprintf ok\necho done\ntrue\n```\n{"id":"A","check":{"kind":"command","command_block":true}}');
   assert.equal(JSON.parse(resolved.content).entries[0].check.command, 'printf ok\necho done\ntrue');
@@ -119,6 +122,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.match(first.summary, /(?:line\s+1\s+column\s+\d+|offset\s+\d+)/i);
   assert.match(first.summary, /excerpt:/);
   assert.match(first.summary, /Use inline check\.command only for one short line without quotes or backslashes/);
+  assert.ok(first.summary.includes('put the whole script in one block that opens with a line that is exactly ```check and set check.command_block true; never write a script inside a JSON string.'));
   assert.equal(first.summary, repeated.summary, 'identical malformed replies have identical refusal text');
   assert.equal(first.malformedClass, changed.malformedClass, 'a changed parse position is the same progress class');
   const excerpt = first.summary.match(/; excerpt: ("(?:\\.|[^"\\])*")/);
