@@ -445,6 +445,8 @@ mod basic;
 mod parallel;
 mod progress;
 mod stream_retry;
+#[path = "tests/text_tool_call.rs"]
+mod text_tool_call;
 mod workflow_system;
 mod world_schema;
 
