@@ -361,21 +361,37 @@ async function authorAcceptanceEntries(w, prompt, round, state = { entries: new 
 // Pre-judge validation can reject a candidate before any receipt exists. Its
 // check-local diagnostic still identifies which entries to repair; preserving
 // siblings here is not acceptance credit. The full gate runs again afterwards.
-function acceptanceRepairIds(findings, knownIds, published, candidate) {
+function acceptanceRepairIds(findings, knownIds, published, candidate, heldEntries) {
   const retry = new Set();
   // A supplementary check the host says is owed is known from then on.
   const supFinding = /^check '(SUP-(REQ-[A-Za-z0-9-]+))': PRD requirement \2 is covered by no acceptance check;[^:]*:\s*([\s\S]*)$/;
   if (!acceptanceRepairIds.owed) acceptanceRepairIds.owed = new Map();
   const owed = acceptanceRepairIds.owed;
+  const heldOmissions = new Set();
   for (const finding of findings) {
     const match = supFinding.exec(String(finding.text || ""));
-    if (!match) continue;
-    owed.set(match[1], { requirement: match[2], text: currentRequirementText(match[2]) });
-    retry.add(match[1]);
+    const defect = finding && finding.deterministic_defect;
+    const defectId = defect?.code === "uncovered_requirement" && typeof defect.subject === "string"
+      ? /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(defect.subject)
+      : null;
+    const omissionSubject = defect?.code === "uncovered_requirement"
+      && typeof defect.subject === "string" ? defect.subject : null;
+    const id = match?.[1] || omissionSubject;
+    const requirement = match?.[2] || (defectId ? defectId[1] : null);
+    if (id && requirement) owed.set(id, { requirement, text: currentRequirementText(requirement) });
+    if (id && heldEntries && typeof heldEntries.has === "function" && heldEntries.has(id)) {
+      heldOmissions.add(id);
+      continue;
+    }
+    if (!id || !requirement) continue;
+    retry.add(id);
   }
   const known = { has: (id) => knownIds.has(id) || owed.has(id) };
   for (const finding of findings) {
-    if (supFinding.test(String(finding.text || ""))) continue;
+    const defect = finding && finding.deterministic_defect;
+    if (defect?.code === "uncovered_requirement" && heldOmissions.has(defect.subject)) continue;
+    if (supFinding.test(String(finding.text || ""))
+      || (defect?.code === "uncovered_requirement" && /^SUP-REQ-[A-Za-z0-9-]+$/.test(defect.subject || ""))) continue;
     if (published && known.has(finding.subject)) {
       retry.add(finding.subject);
       continue;

@@ -76,9 +76,20 @@ pub(super) async fn handle(
             println!("{output}");
             Ok(true)
         }
-        WorkflowAction::Resume(WorkflowResumeArgs { live, yes, run_id })
-            if crate::command::workflow_decompose::is_fixed_decomposition_run(cwd, run_id)? =>
-        {
+        WorkflowAction::Resume(WorkflowResumeArgs {
+            live,
+            yes,
+            dry_run,
+            run_id,
+        }) if crate::command::workflow_decompose::is_fixed_decomposition_run(cwd, run_id)? => {
+            if *dry_run {
+                let output = crate::command::workflow_decompose::dry_run_fixed_decomposition(
+                    cwd, run_id, config,
+                )
+                .await?;
+                println!("{output}");
+                return Ok(true);
+            }
             if !(*live && *yes) {
                 return Err(anyhow!(
                     "fixed workflow resume requires --live --yes before the run can execute"
@@ -95,6 +106,9 @@ pub(super) async fn handle(
             println!("{output}");
             Ok(true)
         }
+        WorkflowAction::Resume(WorkflowResumeArgs { dry_run: true, .. }) => Err(anyhow!(
+            "--dry-run is supported only for fixed decomposition resumes"
+        )),
         _ => Ok(false),
     }
 }

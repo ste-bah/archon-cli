@@ -187,10 +187,8 @@ pub(super) fn record_upgrade(
         .transitions
         .last()
         .map_or_else(|| launch.clone(), |last| last.new.clone());
-    if !transitions::same_runtime(&previous, current) {
-        record
-            .transitions
-            .push(RuntimeTransition::new(previous, current.clone()));
+    if let Some(transition) = next_transition(&previous, current) {
+        record.transitions.push(transition);
         write_transitions(store, run_id, &record)?;
     }
     // The visible copies of every transition, each written once: normally
@@ -235,6 +233,36 @@ pub(super) fn record_upgrade(
         }
     }
     Ok(shown)
+}
+
+/// The seed transition a live resume would add, if it changes the harness.
+/// This is read-only and mirrors the transition selection in `record_upgrade`.
+pub(crate) fn would_record_seed_transition(
+    store: &WorkflowStore,
+    run_id: &str,
+    launch: &FixedRunIdentityV1,
+    current: &FixedRunIdentityV1,
+) -> Result<Option<(usize, FixedRunIdentityV1)>> {
+    let record = read_transitions(store, run_id)?.unwrap_or_default();
+    let previous = record
+        .transitions
+        .last()
+        .map_or_else(|| launch.clone(), |last| last.new.clone());
+    if next_transition(&previous, current)
+        .is_some_and(|transition| transitions::harness_changed(&transition.old, &transition.new))
+    {
+        Ok(Some((record.transitions.len(), current.clone())))
+    } else {
+        Ok(None)
+    }
+}
+
+fn next_transition(
+    previous: &FixedRunIdentityV1,
+    current: &FixedRunIdentityV1,
+) -> Option<RuntimeTransition> {
+    (!transitions::same_runtime(previous, current))
+        .then(|| RuntimeTransition::new(previous.clone(), current.clone()))
 }
 
 /// Marks the last transition started: every resume check passed and this

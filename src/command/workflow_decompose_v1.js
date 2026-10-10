@@ -348,7 +348,7 @@ async function authorCandidate(w, policy) {
       const ids = new Set(Object.keys(args.acceptanceCriteria || {}));
       const repair = (outcome.gateEnvelope?.policy_findings || [])
         .filter(finding => policy.retryScopes.has(finding.remediation_scope));
-      authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content));
+      authorState.retryIds = acceptanceRepairIds(repair, ids, Boolean(outcome.publicationReceipt), JSON.parse(authored.content), authorState.entries);
     }
     // A committed artifact is not the finished one: repairable findings are
     // still fed back below in either mode, and a loop that stalls on them

@@ -1,6 +1,10 @@
 use super::*;
 use crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts;
 
+#[path = "workflow_decompose_resume_dry_run.rs"]
+mod dry_run;
+pub(crate) use dry_run::dry_run_fixed_decomposition;
+
 #[path = "workflow_decompose_resume_entry.rs"]
 mod entry;
 pub(crate) use entry::resume_fixed_decomposition_with_factory;

@@ -81,6 +81,9 @@ pub struct WorkflowResumeArgs {
     /// Approve this resume for non-interactive live execution
     #[arg(long)]
     pub yes: bool,
+    /// Inspect the fixed resume plan without acquiring ownership or writing run files
+    #[arg(long)]
+    pub dry_run: bool,
     /// Workflow run ID
     pub run_id: String,
 }

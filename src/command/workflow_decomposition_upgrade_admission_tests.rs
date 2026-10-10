@@ -4,6 +4,9 @@
 use super::*;
 use crate::command::workflow_decompose_transitions::{RuntimeTransitions, TRANSITIONS_PATH};
 
+#[path = "workflow_decomposition_upgrade_dry_run_tests.rs"]
+mod dry_run_tests;
+
 /// Rewrites a paused run's launch record as if `catalog` and `source` had
 /// launched it, every digest and anchor consistent with them.
 fn rebind_launch(

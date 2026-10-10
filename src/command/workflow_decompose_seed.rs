@@ -249,19 +249,92 @@ pub(crate) fn current_seed_with_requirement_texts(
     let Some((index, runtime)) = seeded_transition(store, run_id)? else {
         return Ok(None);
     };
-    let mut seed = match read_seed(store, run_id, index, &runtime)? {
+    seed_for_transition(
+        store,
+        run_id,
+        index,
+        &runtime,
+        criteria,
+        requirement_texts,
+        Some(log_path),
+    )
+}
+
+/// The seed a resume would use, derived without recording it or emitting an event.
+pub(crate) fn current_seed_read_only(
+    store: &WorkflowStore,
+    run_id: &str,
+    criteria: &BTreeMap<String, String>,
+    requirement_texts: &BTreeMap<String, String>,
+) -> Result<Option<PhaseSeed>> {
+    let Some((index, runtime)) = seeded_transition(store, run_id)? else {
+        return Ok(None);
+    };
+    current_seed_read_only_for_transition(
+        store,
+        run_id,
+        index,
+        &runtime,
+        criteria,
+        requirement_texts,
+    )
+}
+
+/// Derive the seed for a transition the live resume would record, without
+/// persisting either the transition or its seed.
+pub(crate) fn current_seed_read_only_for_transition(
+    store: &WorkflowStore,
+    run_id: &str,
+    index: usize,
+    runtime: &FixedRunIdentityV1,
+    criteria: &BTreeMap<String, String>,
+    requirement_texts: &BTreeMap<String, String>,
+) -> Result<Option<PhaseSeed>> {
+    seed_for_transition(
+        store,
+        run_id,
+        index,
+        runtime,
+        criteria,
+        requirement_texts,
+        None,
+    )
+}
+
+/// Shared live and preview seed derivation. A log path enables the durable
+/// seed, event, and log writes; without one this only reads or derives in memory.
+fn seed_for_transition(
+    store: &WorkflowStore,
+    run_id: &str,
+    index: usize,
+    runtime: &FixedRunIdentityV1,
+    criteria: &BTreeMap<String, String>,
+    requirement_texts: &BTreeMap<String, String>,
+    log_path: Option<&Path>,
+) -> Result<Option<PhaseSeed>> {
+    let mut seed = match read_seed(store, run_id, index, runtime)? {
         Some(seed) => seed,
         None => {
-            let seed = derive_seed(store, run_id, (index, runtime), criteria, requirement_texts)?;
-            write_seed(store, run_id, &seed)?;
+            let seed = derive_seed(
+                store,
+                run_id,
+                (index, runtime.clone()),
+                criteria,
+                requirement_texts,
+            )?;
+            if log_path.is_some() {
+                write_seed(store, run_id, &seed)?;
+            }
             seed
         }
     };
-    if seed.event_id.is_none() {
-        seed.event_id = Some(emit_event(store, run_id, &seed)?);
-        write_seed(store, run_id, &seed)?;
+    if let Some(log_path) = log_path {
+        if seed.event_id.is_none() {
+            seed.event_id = Some(emit_event(store, run_id, &seed)?);
+            write_seed(store, run_id, &seed)?;
+        }
+        record_log_line(log_path, &seed)?;
     }
-    record_log_line(log_path, &seed)?;
     Ok(Some(seed))
 }
 

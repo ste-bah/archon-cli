@@ -72,9 +72,12 @@ function seedEntries(seed, policy, state) {
   const listed = Array.isArray(seed.carried_entries)
     ? seed.carried_entries
     : candidate ? [...(candidate.entries || []), ...(candidate.supplementary || [])] : [];
-  const candidateEntries = candidate ? [...(candidate.entries || []), ...(candidate.supplementary || [])] : [];
-  const omittedHeldIds = new Set(Array.isArray(seed.carried_entries) && candidate
-    ? listed.filter((entry) => !candidateEntries.some((held) => held.id === entry.id)).map((entry) => entry.id)
+  const invalid = seed.invalid && typeof seed.invalid === "object" ? seed.invalid : {};
+  const unreadableIds = new Set(Object.keys(seed.unreadable_replies || {}));
+  const heldOmissionIds = new Set(Array.isArray(seed.carried_entries)
+    ? listed.filter((entry) => !Object.prototype.hasOwnProperty.call(invalid, entry.id)
+      && !unreadableIds.has(entry.id))
+      .map((entry) => entry.id)
     : []);
   // Every gate registers the supplementary checks it says are owed, in order,
   // as the loop did; the last one also names the entries it sent back.
@@ -84,7 +87,7 @@ function seedEntries(seed, policy, state) {
   gates.forEach((gate, index) => {
     const last = index === gates.length - 1;
     const named = seedRepairIds(seedRepairFindings(gate, policy), ids, gate.published === true,
-      last ? candidate : null, last ? omittedHeldIds : new Set());
+      last ? candidate : null, last ? heldOmissionIds : new Set());
     if (last) refuted = named;
   });
   // Current-logic refutations remain owed per id even when a later candidate
@@ -136,7 +139,6 @@ function seedEntries(seed, policy, state) {
     const current = currentCriterion(entry.id);
     if (typeof current === "string" && entry.criterion !== current) staleCriteria.add(entry.id);
   }
-  const invalid = seed.invalid && typeof seed.invalid === "object" ? seed.invalid : {};
   // Refuted (every carried entry, for an unattributable refusal) and not
   // repaired since: that round's work is kept, the rest is authored again, so
   // the refused candidate is never submitted unchanged.
@@ -158,7 +160,7 @@ function seedEntries(seed, policy, state) {
 // returns null, "every entry", exactly as the live loop reads it.
 const SEED_POINTER = /^(?:candidate artifact (?:was refused|rejected):\s*)?\/?(entries|supplementary)\/(0|[1-9]\d*)(?=[/\s]|$)/;
 
-function seedRepairIds(findings, ids, published, candidate, omittedHeldIds = new Set()) {
+function seedRepairIds(findings, ids, published, candidate, heldOmissionIds = new Set()) {
   const named = new Set();
   for (const finding of findings) {
     const match = SEED_POINTER.exec(String(finding.text || ""));
@@ -166,19 +168,13 @@ function seedRepairIds(findings, ids, published, candidate, omittedHeldIds = new
     const entry = list ? list[Number(match[2])] : null;
     if (entry && typeof entry.id === "string") named.add(entry.id);
     else {
-      const attributed = acceptanceRepairIds([finding], ids, published, candidate);
+      const attributed = acceptanceRepairIds([finding], ids, published, candidate, heldOmissionIds);
       if (attributed === null) {
-        if (!omissionOnlyFinding(finding, omittedHeldIds)) return null;
+        return null;
       } else for (const id of attributed) named.add(id);
     }
   }
   return named;
-}
-
-function omissionOnlyFinding(finding, omittedHeldIds) {
-  const defect = finding && finding.deterministic_defect;
-  return defect && defect.code === "uncovered_requirement"
-    && typeof defect.subject === "string" && omittedHeldIds.has(defect.subject);
 }
 
 function seedArtifact(seed, policy) {

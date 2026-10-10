@@ -320,7 +320,9 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
         WorkflowAction::Status(WorkflowStatusArgs { run_id }) => CommandAction::Status {
             run_id: run_id.clone(),
         },
-        WorkflowAction::Resume(WorkflowResumeArgs { live, yes, run_id }) => {
+        WorkflowAction::Resume(WorkflowResumeArgs {
+            live, yes, run_id, ..
+        }) => {
             require_live_approval(*live, *yes, "workflow resume --live")?;
             return Ok((
                 CommandAction::Resume {

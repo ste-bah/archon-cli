@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const scriptRoot = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
-const scriptSource = () => ['workflow_decompose_v1.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_set_gate.js','workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js'].map(f=>fs.readFileSync(scriptRoot+'/'+f,'utf8')).join('\n');
+const scriptSource = () => ['workflow_decompose_v1.js','workflow_decompose_v1_acceptance.js','workflow_decompose_v1_seed.js','workflow_decompose_v1_set_gate.js','workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js'].map(f=>fs.readFileSync(scriptRoot+'/'+f,'utf8')).join('\n');
 async function run(globalFinding = false, structural = false, refusal = null) {
  const criteria = Object.fromEntries(Array.from({length:9},(_,i)=>[`AC-X-${i+1}`,`criterion ${i+1}`]));
  const context = {args:{projectRoot:'/p',repositoryRoot:'/r',prdPath:'/p/prd',prdDigest:'x',taskRoot:'/p/tasks',gateMode:'observe',acceptanceCriteria:criteria,authorMaxParallelism:4}, console};
@@ -156,6 +156,40 @@ async function supplementaryPointer() {
  }
  assert.equal(route(['supplementary/0/criterion invalid','gap_policy invalid']),null,'global defect still requires full retry');
 }
+async function heldSupplementaryOmission() {
+ const ctx={args:{acceptanceCriteria:{A:'a'},prdRequirementTexts:{'REQ-X':'x'}}};
+ vm.createContext(withAuthorContext(ctx));vm.runInContext(scriptSource(),ctx);
+ const finding={text:"check 'SUP-REQ-X': PRD requirement REQ-X is covered by no acceptance check; finding: add one",remediation_scope:'candidate_artifact',
+  deterministic_defect:{code:'uncovered_requirement',subject:'SUP-REQ-X'}};
+ const known=new Set(['A']);
+ const held=new Map([['SUP-REQ-X',{id:'SUP-REQ-X',criterion:'x'}]]);
+ assert.deepEqual([...ctx.acceptanceRepairIds([finding],known,false,{},held)],[]);
+ assert.deepEqual([...ctx.owedSupplementary().keys()],['SUP-REQ-X'],'the omitted requirement remains owed');
+ const fresh={args:{acceptanceCriteria:{A:'a'},prdRequirementTexts:{'REQ-X':'x'}}};
+ vm.createContext(withAuthorContext(fresh));vm.runInContext(scriptSource(),fresh);
+ assert.deepEqual([...fresh.acceptanceRepairIds([finding],known,false,{},new Map())],['SUP-REQ-X']);
+ assert.deepEqual([...fresh.owedSupplementary().keys()],['SUP-REQ-X'],'an unheld omission is owed and retried');
+ const structuredOnly={deterministic_defect:{code:'uncovered_requirement',subject:'SUP-REQ-X'}};
+ assert.deepEqual([...ctx.acceptanceRepairIds([structuredOnly],known,false,{},held)],[]);
+ assert.deepEqual([...fresh.acceptanceRepairIds([structuredOnly],known,false,{},new Map())],['SUP-REQ-X']);
+}
+async function seedHeldSupplementaryOmission() {
+ const finding={text:"check 'SUP-REQ-X': PRD requirement REQ-X is covered by no acceptance check; finding: add one",remediation_scope:'candidate_artifact',
+  deterministic_defect:{code:'uncovered_requirement',subject:'SUP-REQ-X'}};
+ const make=carried=>{
+  const ctx={args:{acceptanceCriteria:{A:'a'},prdRequirementTexts:{'REQ-X':'x'}}};
+  vm.createContext(withAuthorContext(ctx));vm.runInContext(scriptSource(),ctx);
+  vm.runInContext('globalThis.__testSeedEntries=seedEntries',ctx);
+  const entries=carried?[{id:'SUP-REQ-X',criterion:'x'}]:[];
+  const state={entries:new Map(),retryIds:null};
+  ctx.__testSeedEntries({candidate:JSON.stringify({entries:[],supplementary:[]}),carried_entries:entries,
+   gates:[{findings:[finding],published:false}]},{phase:'acceptance',author:true,
+   retryScopes:new Set(['candidate_artifact'])},state);
+  return state.retryIds;
+ };
+ assert.deepEqual([...make(true)],[],'a carried, readable held supplementary omission has no retry');
+ assert.deepEqual([...make(false)],['SUP-REQ-X'],'an uncarried supplementary omission remains owed');
+}
 const tests=[
  ['existing selective retry',()=>run()],['existing global retry',()=>run(true)],
  ['existing structural retry',()=>run(false,true)],['failed entry',failedEntry],['structural routing',structuralRouting],
@@ -167,6 +201,8 @@ const tests=[
  ['entries pointer retry and unlocated full retry',async()=>{await run(false,false,'candidate artifact was refused: entries/4/criterion is missing or has an invalid type or value');await run(true,false,'candidate artifact was refused: invalid document');}],
  ['nested entries pointer retry',()=>run(false,false,'candidate artifact was refused: /entries/4/check/cwd is invalid')],
  ['supplementary pointer retry',supplementaryPointer],
+ ['held supplementary omission',heldSupplementaryOmission],
+ ['seed held supplementary omission',seedHeldSupplementaryOmission],
  ...require('./workflow_decompose_shape_progress_test.cjs'),
 ];
 (async()=>{

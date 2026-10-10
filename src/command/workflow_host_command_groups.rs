@@ -261,6 +261,21 @@ pub(crate) fn record_running(record: &HostCommandGroupRecord) -> Option<bool> {
 pub(crate) fn left_groups(
     run_dir: &Path,
 ) -> anyhow::Result<(Vec<HostCommandGroupRecord>, Vec<HostCommandGroupRecord>)> {
+    left_groups_impl(run_dir, true)
+}
+
+/// Like [`left_groups`], but leaves settled records and pending markers in
+/// place. Used by planning paths that must inspect host state without healing it.
+pub(crate) fn left_groups_read_only(
+    run_dir: &Path,
+) -> anyhow::Result<(Vec<HostCommandGroupRecord>, Vec<HostCommandGroupRecord>)> {
+    left_groups_impl(run_dir, false)
+}
+
+fn left_groups_impl(
+    run_dir: &Path,
+    remove_healed_records: bool,
+) -> anyhow::Result<(Vec<HostCommandGroupRecord>, Vec<HostCommandGroupRecord>)> {
     let dir = run_dir.join(GROUP_RECORDS_DIR);
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
@@ -353,12 +368,14 @@ pub(crate) fn left_groups(
             record.survivors_unknown = true;
         }
         if probe == Some(false) {
-            // Remove the marker first: a failed removal retains both names,
-            // and the error says exactly which entry needs permission repair.
-            if marked {
-                remove_healed(&pending)?;
+            if remove_healed_records {
+                // Remove the marker first: a failed removal retains both names,
+                // and the error says exactly which entry needs permission repair.
+                if marked {
+                    remove_healed(&pending)?;
+                }
+                remove_healed(&path)?;
             }
-            remove_healed(&path)?;
             ended.push(record);
         } else {
             running.push(record);
@@ -408,35 +425,9 @@ fn remove_healed(path: &Path) -> anyhow::Result<()> {
     }
 }
 
-/// The kept records of stalled teardowns that still run (or whose survivors
-/// are unknown): while any exists, the run must pause and no operational
-/// retry may start (Issue 270 round 3).
-pub(crate) fn stalled_running(run_dir: &Path) -> anyhow::Result<Vec<HostCommandGroupRecord>> {
-    let (running, _) = left_groups(run_dir)?;
-    Ok(running
-        .into_iter()
-        .filter(|record| record.stalled || record.survivors_unknown)
-        .collect())
-}
-
-/// What a stalled record adds to a refusal: who may still run.
-pub(crate) fn stall_note(record: &HostCommandGroupRecord) -> String {
-    if record.survivors_unknown {
-        " (its teardown stalled and its survivors are unknown: verify that none of its processes runs)".to_string()
-    } else if record.stalled {
-        format!(
-            " (its teardown stalled; survivors: {})",
-            record
-                .survivors
-                .iter()
-                .map(|(pid, _)| pid.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    } else {
-        String::new()
-    }
-}
+#[path = "workflow_host_command_groups_stalled.rs"]
+mod stalled;
+pub(crate) use stalled::{stall_note, stalled_running};
 
 /// Refuses while a group (or a process of its session) that a dead executor
 /// left behind still runs.
@@ -446,6 +437,25 @@ pub(crate) fn require_no_running_groups(
     run_id: &str,
 ) -> anyhow::Result<Vec<HostCommandGroupRecord>> {
     let (running, ended) = left_groups(run_dir)?;
+    require_no_running_groups_from(run_dir, run_id, running, ended)
+}
+
+/// Read-only form for dry-run admission. The ended records are what a live
+/// resume would remove; this function never removes them or their markers.
+pub(crate) fn require_no_running_groups_read_only(
+    run_dir: &Path,
+    run_id: &str,
+) -> anyhow::Result<Vec<HostCommandGroupRecord>> {
+    let (running, ended) = left_groups_read_only(run_dir)?;
+    require_no_running_groups_from(run_dir, run_id, running, ended)
+}
+
+fn require_no_running_groups_from(
+    run_dir: &Path,
+    run_id: &str,
+    running: Vec<HostCommandGroupRecord>,
+    ended: Vec<HostCommandGroupRecord>,
+) -> anyhow::Result<Vec<HostCommandGroupRecord>> {
     let Some(first) = running.first() else {
         return Ok(ended);
     };
