@@ -34,7 +34,9 @@ fn missing_path_suggests_a_nearby_name_and_keeps_the_error_prefix() {
     assert!(
         error.contains(&format!(
             "Did you mean: {}?",
-            parent.canonicalize().unwrap().join(existing_name).display()
+            archon_shell::paths::plain(parent.canonicalize().unwrap())
+                .join(existing_name)
+                .display()
         )),
         "{error}"
     );
