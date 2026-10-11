@@ -182,6 +182,7 @@ pub(crate) const JUDGE_TIMEOUT_SECS: u64 = 7_200;
 /// Judge `contract` in one batch: a truncated reply is continued, a reply
 /// with no usable verdict is re-asked, and a judge that cannot complete is
 /// [`JudgeIncomplete`].
+#[cfg(test)]
 pub(super) async fn judge_contract(
     client: &dyn WorkflowLlmClient,
     contract: AcceptanceContract,
@@ -192,6 +193,7 @@ pub(super) async fn judge_contract(
 
 /// [`judge_contract`], continuing (and saving) the batch's partial reply in
 /// `partial` so a retry resumes it instead of asking again (Issue 260).
+#[cfg(test)]
 pub(super) async fn judge_contract_resumable(
     client: &dyn WorkflowLlmClient,
     contract: AcceptanceContract,

@@ -10,9 +10,10 @@
 //! reply that passed validation is saved; an unreadable or mismatched file
 //! is ignored.
 
+#[cfg(test)]
+use super::judge::judge_contract_resumable;
 use super::judge::{
-    PartialReply, batched_judge_prompt, judge_contract_resumable, judge_contract_subset_resumable,
-    require_judged_prose,
+    PartialReply, batched_judge_prompt, judge_contract_subset_resumable, require_judged_prose,
 };
 use super::*;
 use crate::command::workflow_freeze_budget::{FREEZE_CACHE_DIR, FreezeProgress};
@@ -108,6 +109,7 @@ impl JudgeStore {
 
     /// The judge, answered from a saved identical batch when one
     /// exists, and saved otherwise.
+    #[cfg(test)]
     pub(super) async fn judge(
         &self,
         client: &dyn WorkflowLlmClient,
