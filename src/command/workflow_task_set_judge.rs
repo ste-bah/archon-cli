@@ -213,6 +213,16 @@ pub(super) async fn judge_contract_resumable(
     .await
 }
 
+/// Judge an incremental batch. A partial subset cannot establish full
+/// contract structure, so validate its decisions and required prose only.
+pub(super) async fn judge_contract_subset_resumable(
+    client: &dyn WorkflowLlmClient,
+    subset: AcceptanceContract,
+    partial: Option<&PartialReply<'_>>,
+) -> Result<AcceptanceContract> {
+    judge_batch(client, subset, "sonnet", require_judged_prose, partial).await
+}
+
 /// Judge a subset of a contract's checks — the ones being re-authored — in
 /// one batch. The subset is not a contract on its own (it may hold no
 /// acceptance entry at all), so only each judged entry's recorded fields are

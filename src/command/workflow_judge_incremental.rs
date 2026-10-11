@@ -73,6 +73,7 @@ pub(super) async fn judge(
     let subset_ids: BTreeSet<_> = subset
         .acceptance
         .iter()
+        .chain(&subset.supplementary)
         .map(|entry| entry.id.clone())
         .collect();
     subset
@@ -81,23 +82,10 @@ pub(super) async fn judge(
         .retain(|id| subset_ids.contains(id));
     if !subset.acceptance.is_empty() || !subset.supplementary.is_empty() {
         let judged = match store {
-            Some(store) => store.judge(client, subset, &subset_ids).await?,
-            None => judge_contract(client, subset, &subset_ids).await?,
+            Some(store) => store.judge_subset(client, subset, &subset_ids).await?,
+            None => judge::judge_contract_subset_resumable(client, subset, None).await?,
         };
-        for entry in contract
-            .acceptance
-            .iter_mut()
-            .chain(&mut contract.supplementary)
-        {
-            if let Some(new) = judged
-                .acceptance
-                .iter()
-                .chain(&judged.supplementary)
-                .find(|new| new.id == entry.id)
-            {
-                entry.judgment = new.judgment.clone();
-            }
-        }
+        merge_judgments(&mut contract, &judged);
     }
     // Preserve existing best-of behavior, but only from the verified base.
     if let Some(base) = &base {
@@ -106,3 +94,24 @@ pub(super) async fn judge(
     validate_acceptance_structure(&contract, expected, true).map_err(anyhow::Error::new)?;
     Ok(contract)
 }
+
+fn merge_judgments(contract: &mut AcceptanceContract, judged: &AcceptanceContract) {
+    for entry in contract
+        .acceptance
+        .iter_mut()
+        .chain(&mut contract.supplementary)
+    {
+        if let Some(new) = judged
+            .acceptance
+            .iter()
+            .chain(&judged.supplementary)
+            .find(|new| new.id == entry.id)
+        {
+            entry.judgment = new.judgment.clone();
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "workflow_judge_incremental_tests.rs"]
+mod tests;
