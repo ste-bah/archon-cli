@@ -216,7 +216,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 7: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 7,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "4ca9f96b7fff4bfdbd6ba9c5b408ede6f1bc37b5f87ae23f7c99fdc46724d86a",
+        sources_digest: "70c8cb7ec3fca944aab1d546b5c35d30546d373937121eaff02792f0106c0130",
         build_bound: false,
     },
     CapabilityLogic {
@@ -224,7 +224,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "4ca9f96b7fff4bfdbd6ba9c5b408ede6f1bc37b5f87ae23f7c99fdc46724d86a",
+        sources_digest: "70c8cb7ec3fca944aab1d546b5c35d30546d373937121eaff02792f0106c0130",
         build_bound: false,
     },
     CapabilityLogic {
@@ -236,7 +236,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 5,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "9b205db9a1a84ffd55212fcd56f5629026f73319e44bfcb721b4efbb471418b5",
+        sources_digest: "fb6eef18dc9bed5a8b41cec17d94ff5008644a17fdf9843fb450f10f48fcd193",
         build_bound: false,
     },
     CapabilityLogic {
@@ -247,7 +247,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 5,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "9b205db9a1a84ffd55212fcd56f5629026f73319e44bfcb721b4efbb471418b5",
+        sources_digest: "fb6eef18dc9bed5a8b41cec17d94ff5008644a17fdf9843fb450f10f48fcd193",
         build_bound: false,
     },
     CapabilityLogic {
@@ -255,7 +255,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
-        sources_digest: "797e9534b739ac3112fbf764e4af2af7b1e5aa4d480a7952b71e1f94c71b9494",
+        sources_digest: "c512a615df73226cc5b967a1b7772abcb3e8c57e8e21dc4eb148a9e4aae6410c",
         build_bound: true,
     },
     CapabilityLogic {
@@ -263,7 +263,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "eb5ab4ddf4306adc9f71758835cd77681380cfaf53af6ba19fb25d102d46dc27",
+        sources_digest: "73ddeb34140e9869abaacf01cf233c0a30e2c9617c7126fcd293e2363938c962",
         build_bound: true,
     },
     CapabilityLogic {
@@ -271,7 +271,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "eb5ab4ddf4306adc9f71758835cd77681380cfaf53af6ba19fb25d102d46dc27",
+        sources_digest: "73ddeb34140e9869abaacf01cf233c0a30e2c9617c7126fcd293e2363938c962",
         build_bound: true,
     },
 ];
