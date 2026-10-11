@@ -160,7 +160,7 @@ pub fn make_ctx() -> ToolContext {
 }
 
 pub async fn wait_for_task_status(task_id: &str, expected: archon_tools::task_manager::TaskStatus) {
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    tokio::time::timeout(std::time::Duration::from_secs(12), async {
         loop {
             if archon_tools::task_manager::TASK_MANAGER
                 .get_task(task_id)

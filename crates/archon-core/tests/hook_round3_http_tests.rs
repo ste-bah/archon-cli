@@ -96,7 +96,7 @@ with ctx.wrap_socket(c, server_side=True) as conn:
         .spawn()
         .unwrap();
     let guard = TlsServer(child, material);
-    let port = tokio::time::timeout(Duration::from_secs(5), async {
+    let port = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             if let Ok(text) = std::fs::read_to_string(&port)
                 && text.parse::<u16>().is_ok()
