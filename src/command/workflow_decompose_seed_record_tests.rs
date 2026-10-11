@@ -81,6 +81,12 @@ fn check_block_refusals_and_inline_command_match_contract() {
         resolve_command_block(&mut json!({"id":"A","check":{"kind":"command","command":"run"}}), "```check\nrun\n```"),
         Some("check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block".into())
     );
+    let mut inferred = json!({"id":"A","check":{"kind":"command","cwd":"project_root"}});
+    assert_eq!(
+        resolve_command_block(&mut inferred, "```check\nrun\n```"),
+        None
+    );
+    assert_eq!(inferred["check"]["command"], "run");
     assert_eq!(
         resolve_command_block(
             &mut json!({"id":"A","check":{"kind":"command","command_block":true}}),
@@ -149,6 +155,22 @@ fn recorded_live_replies_use_the_shared_expected_outcomes() {
             "corrected-fence-layout" => {
                 assert!(reply_entry_with_blocks(&fixture.reply, &fixture.id).is_some());
                 assert_eq!(fixture.expected, "accepted");
+            }
+            "single-check-block-implicit-command-block" => {
+                let entry = reply_entry_with_blocks(&fixture.reply, &fixture.id).unwrap();
+                assert_eq!(entry["check"]["command"], "run focused check");
+                assert_eq!(fixture.expected, "accepted");
+            }
+            "false-command-block-with-check-fence"
+            | "command-and-command-block-with-check-fence"
+            | "multiple-check-fences"
+            | "empty-check-fence"
+            | "check-fence-on-floor-kind" => {
+                let text = extract_object(&fixture.reply);
+                let mut entry = reply_entry(&text, &fixture.id).unwrap();
+                let refusal = resolve_command_block(&mut entry, &fixture.reply).unwrap();
+                assert_eq!(fixture.expected, format!("refuse: {refusal}"));
+                assert!(reply_entry_with_blocks(&fixture.reply, &fixture.id).is_none());
             }
             "floor-command-block-flag" | "floor-command-block-fence" => {
                 let text = extract_object(&fixture.reply);

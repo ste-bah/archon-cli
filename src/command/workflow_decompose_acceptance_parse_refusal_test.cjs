@@ -49,6 +49,9 @@ async function refusal(reply, stopReason = 'end_turn') {
     'acceptance reply contains more than one check block');
   assert.equal(json.resolveCommandBlock({id:'A', check:{kind:'command', command:'run'}}, '```check\nrun\n```'),
     'check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block');
+  const inferred = {id:'A', check:{kind:'command', cwd:'project_root'}};
+  assert.equal(json.resolveCommandBlock(inferred, '```check\nrun\n```'), null);
+  assert.deepEqual(JSON.parse(JSON.stringify(inferred.check)), {kind:'command', cwd:'project_root', command:'run'});
   assert.equal(blockRefusal('```check\n```', {kind:'command', command_block:true}), 'acceptance entry A check block is empty');
   assert.equal(blockRefusal('```check\nrun\n```', {kind:'command', command:'old', command_block:true}),
     'acceptance entry A returned both check.command and check.command_block');
@@ -88,6 +91,11 @@ async function refusal(reply, stopReason = 'end_turn') {
       assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
     }
     if (fixture.id === 'corrected-fence-layout') assert.equal(outcome, 'accepted', fixture.id);
+    if (fixture.id === 'single-check-block-implicit-command-block') assert.equal(outcome, 'accepted', fixture.id);
+    if (fixture.id === 'false-command-block-with-check-fence' || fixture.id === 'command-and-command-block-with-check-fence' ||
+        fixture.id === 'multiple-check-fences' || fixture.id === 'empty-check-fence' || fixture.id === 'check-fence-on-floor-kind') {
+      assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
+    }
     if (fixture.id.startsWith('floor-command-block-')) {
       assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
     }
@@ -126,7 +134,7 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.match(first.summary, /(?:line\s+1\s+column\s+\d+|offset\s+\d+)/i);
   assert.match(first.summary, /excerpt:/);
   assert.match(first.summary, /Use inline check\.command only for one short line without quotes or backslashes/);
-  assert.ok(first.summary.includes('put the whole script in one block that opens with a line that is exactly ```check and set check.command_block true; never write a script inside a JSON string.'));
+  assert.ok(first.summary.includes('put the whole script in one block that opens with a line that is exactly ```check (set check.command_block true, or omit it when the command check has no command field); never write a script inside a JSON string.'));
   assert.equal(first.summary, repeated.summary, 'identical malformed replies have identical refusal text');
   assert.equal(first.malformedClass, changed.malformedClass, 'a changed parse position is the same progress class');
   const excerpt = first.summary.match(/; excerpt: ("(?:\\.|[^"\\])*")/);

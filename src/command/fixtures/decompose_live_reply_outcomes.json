@@ -47,5 +47,35 @@
     "id": "corrected-fence-layout",
     "reply": "```json\n{\"id\":\"corrected-fence-layout\",\"check\":{\"kind\":\"command\",\"command_block\":true}}\n```\n```check\nrun focused check\n```",
     "expected": "accepted"
+  },
+  {
+    "id": "single-check-block-implicit-command-block",
+    "reply": "```json\n{\"id\":\"single-check-block-implicit-command-block\",\"check\":{\"kind\":\"command\",\"cwd\":\"project_root\"}}\n```\n```check\nrun focused check\n```",
+    "expected": "accepted"
+  },
+  {
+    "id": "false-command-block-with-check-fence",
+    "reply": "```json\n{\"id\":\"false-command-block-with-check-fence\",\"check\":{\"kind\":\"command\",\"command_block\":false}}\n```\n```check\nrun focused check\n```",
+    "expected": "refuse: check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block"
+  },
+  {
+    "id": "command-and-command-block-with-check-fence",
+    "reply": "```json\n{\"id\":\"command-and-command-block-with-check-fence\",\"check\":{\"kind\":\"command\",\"command\":\"inline\",\"command_block\":true}}\n```\n```check\nrun focused check\n```",
+    "expected": "refuse: acceptance entry command-and-command-block-with-check-fence returned both check.command and check.command_block"
+  },
+  {
+    "id": "multiple-check-fences",
+    "reply": "```json\n{\"id\":\"multiple-check-fences\",\"check\":{\"kind\":\"command\"}}\n```\n```check\na\n```\n```check\nb\n```",
+    "expected": "refuse: acceptance reply contains more than one check block"
+  },
+  {
+    "id": "empty-check-fence",
+    "reply": "```json\n{\"id\":\"empty-check-fence\",\"check\":{\"kind\":\"command\",\"command_block\":true}}\n```\n```check\n```",
+    "expected": "refuse: acceptance entry empty-check-fence check block is empty"
+  },
+  {
+    "id": "check-fence-on-floor-kind",
+    "reply": "```json\n{\"id\":\"check-fence-on-floor-kind\",\"check\":{\"kind\":\"floor\"}}\n```\n```check\nverify floor\n```",
+    "expected": "refuse: acceptance entry check-fence-on-floor-kind: check.command_block is only for kind command; a floor check puts its verifier in contract.typed_verifier_command"
   }
 ]

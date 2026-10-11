@@ -160,7 +160,7 @@ function acceptanceParseRefusal(id, source, error) {
     if (end < source.length) excerpt = `${excerpt}…`;
   }
   const excerptText = excerpt ? `; excerpt: ${JSON.stringify(excerpt)}` : "";
-  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}. Use inline check.command only for one short line without quotes or backslashes; put the whole script in one block that opens with a line that is exactly \`\`\`check and set check.command_block true; never write a script inside a JSON string.`;
+  return `acceptance entry ${id} returned no complete entry: JSON parse error${location}: ${message}${excerptText}. Use inline check.command only for one short line without quotes or backslashes; put the whole script in one block that opens with a line that is exactly \`\`\`check (set check.command_block true, or omit it when the command check has no command field); never write a script inside a JSON string.`;
 }
 
 // H4 (Batch O): every PRD requirement id is covered by some check. The host

@@ -102,6 +102,8 @@ function resolveCommandBlock(entry, text) {
   if (blocks.length > 1) return "acceptance reply contains more than one check block";
   const hasBlock = blocks.length === 1;
   const commandBlock = check && typeof check === "object" ? check.command_block : undefined;
+  const inferredCommandBlock = hasBlock && check && typeof check === "object" && check.kind === "command" &&
+    !Object.prototype.hasOwnProperty.call(check, "command") && !Object.prototype.hasOwnProperty.call(check, "command_block");
   if ((commandBlock === true || hasBlock) && (!check || typeof check !== "object" || check.kind !== "command")) {
     return "acceptance entry " + id + ": check.command_block is only for kind command; a floor check puts its verifier in contract.typed_verifier_command";
   }
@@ -109,7 +111,7 @@ function resolveCommandBlock(entry, text) {
     return "acceptance entry " + id + " returned both check.command and check.command_block";
   }
   if (commandBlock === true && !hasBlock) return "acceptance entry " + id + " check.command_block is true but no check block is present";
-  if (hasBlock && commandBlock !== true) {
+  if (hasBlock && commandBlock !== true && !inferredCommandBlock) {
     return "check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block";
   }
   if (commandBlock !== undefined && commandBlock !== true && commandBlock !== false) return "acceptance entry " + id + " check.command_block must be boolean true";

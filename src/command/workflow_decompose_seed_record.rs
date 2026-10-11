@@ -234,6 +234,10 @@ pub(super) fn resolve_command_block(entry: &mut Value, content: &str) -> Option<
         return (!checks.is_empty()).then(|| "check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block".into());
     };
     let command_block = check.get("command_block");
+    let inferred_command_block = !checks.is_empty()
+        && check.get("kind").and_then(Value::as_str) == Some("command")
+        && !check.contains_key("command")
+        && command_block.is_none();
     if (command_block == Some(&Value::Bool(true)) || !checks.is_empty())
         && check.get("kind").and_then(Value::as_str) != Some("command")
     {
@@ -251,7 +255,7 @@ pub(super) fn resolve_command_block(entry: &mut Value, content: &str) -> Option<
             "acceptance entry {id} check.command_block is true but no check block is present"
         ));
     }
-    if !checks.is_empty() && command_block != Some(&Value::Bool(true)) {
+    if !checks.is_empty() && command_block != Some(&Value::Bool(true)) && !inferred_command_block {
         return Some("check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block".into());
     }
     if command_block.is_some()
