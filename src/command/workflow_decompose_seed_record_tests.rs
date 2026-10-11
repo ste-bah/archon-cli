@@ -63,6 +63,15 @@ fn check_fence_contract_and_identical_entry_duplicate_are_shared() {
 
 #[test]
 fn check_block_refusals_and_inline_command_match_contract() {
+    let unclosed = "```check\nrun\n{\"id\":\"A\"}";
+    assert_eq!(extract_object(unclosed), "");
+    assert_eq!(
+        resolve_command_block(
+            &mut json!({"id":"A","check":{"kind":"command","command_block":true}}),
+            unclosed
+        ),
+        Some("the ```check block opened at line 1 is never closed (the reply may have been cut off); close every block with a line that is exactly ```".into())
+    );
     assert_eq!(
         resolve_command_block(
             &mut json!({"id":"A","check":{"kind":"command","command_block":true}}),

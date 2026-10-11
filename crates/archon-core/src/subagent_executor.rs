@@ -67,6 +67,7 @@ mod delivery_tests;
 mod paths;
 mod run;
 mod run_isolation;
+mod run_metadata;
 mod run_prepare;
 mod run_registration;
 mod run_resume;
@@ -363,6 +364,23 @@ impl SubagentExecutor for AgentSubagentExecutor {
             .await
     }
 
+    async fn run_to_completion_with_metadata(
+        &self,
+        subagent_id: String,
+        request: SubagentRequest,
+        ctx: ToolContext,
+        cancel: CancellationToken,
+    ) -> Result<archon_tools::subagent_executor::SubagentCompletion, ExecutorError> {
+        self.run_subagent_to_completion_with_system_metadata(
+            subagent_id,
+            request,
+            Vec::new(),
+            ctx,
+            cancel,
+        )
+        .await
+    }
+
     async fn run_to_completion_with_system(
         &self,
         subagent_id: String,
@@ -373,6 +391,24 @@ impl SubagentExecutor for AgentSubagentExecutor {
     ) -> Result<String, ExecutorError> {
         self.run_subagent_to_completion_with_system(subagent_id, request, system, ctx, cancel)
             .await
+    }
+
+    async fn run_to_completion_with_system_metadata(
+        &self,
+        subagent_id: String,
+        request: SubagentRequest,
+        system: Vec<serde_json::Value>,
+        ctx: ToolContext,
+        cancel: CancellationToken,
+    ) -> Result<archon_tools::subagent_executor::SubagentCompletion, ExecutorError> {
+        self.run_subagent_to_completion_with_system_metadata(
+            subagent_id,
+            request,
+            system,
+            ctx,
+            cancel,
+        )
+        .await
     }
 
     async fn on_inner_complete(&self, subagent_id: String, result: Result<String, String>) {

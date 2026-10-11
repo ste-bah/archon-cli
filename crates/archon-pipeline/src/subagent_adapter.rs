@@ -414,12 +414,16 @@ pub(crate) fn llm_response_for_subagent_outcome(
     timeout_secs: Option<u64>,
 ) -> Result<LlmResponse> {
     match outcome {
-        SubagentOutcome::Completed(content) => Ok(LlmResponse {
-            content,
+        SubagentOutcome::Completed(completion) => Ok(LlmResponse {
+            content: completion.content,
             tool_uses: Vec::new(),
             tokens_in: 0,
             tokens_out: 0,
-            stop_reason: Some("end_turn".to_string()),
+            stop_reason: Some(
+                completion
+                    .stop_reason
+                    .unwrap_or_else(|| "end_turn".to_string()),
+            ),
         }),
         SubagentOutcome::Failed(error) => Err(anyhow!("subagent failed: {error}")),
         SubagentOutcome::Cancelled if timed_out => Err(anyhow!(

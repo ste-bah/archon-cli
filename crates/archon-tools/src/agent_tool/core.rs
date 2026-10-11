@@ -253,7 +253,9 @@ impl Tool for AgentTool {
                 )
                 .await;
                 let (final_status, payload) = match &outcome {
-                    SubagentOutcome::Completed(text) => (AgentStatus::Finished, Ok(text.clone())),
+                    SubagentOutcome::Completed(completion) => {
+                        (AgentStatus::Finished, Ok(completion.content.clone()))
+                    }
                     SubagentOutcome::Failed(err) => (AgentStatus::Failed, Err(err.clone())),
                     SubagentOutcome::AutoBackgrounded => {
                         // The runner is still executing — mark Running here
@@ -431,15 +433,15 @@ impl Tool for AgentTool {
         };
 
         match outcome {
-            SubagentOutcome::Completed(text) => {
+            SubagentOutcome::Completed(completion) => {
                 match verify_expected_mutations(ctx.fs().as_ref(), &expected_mutations).await {
                     // A foreground agent has already finished writing by the
                     // time this returns, so the warning is after the fact — but
                     // the caller is about to decide what to spawn next, and an
                     // overlap it never heard about is one it will repeat.
                     Ok(()) => ToolResult::success(match &claim_warning {
-                        Some(warning) => format!("{warning}\n\n{text}"),
-                        None => text,
+                        Some(warning) => format!("{warning}\n\n{}", completion.content),
+                        None => completion.content,
                     }),
                     Err(err) => {
                         ToolResult::error(format!("[subagent_expected_mutation_missing] {err}"))

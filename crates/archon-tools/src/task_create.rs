@@ -330,8 +330,8 @@ impl Tool for TaskCreateTool {
                     );
                 }
                 match outcome {
-                    SubagentOutcome::Completed(text) => {
-                        let response = json!({ "task_id": task_id, "result": text });
+                    SubagentOutcome::Completed(completion) => {
+                        let response = json!({ "task_id": task_id, "result": completion.content });
                         match serde_json::to_string_pretty(&response) {
                             Ok(s) => ToolResult::success(s),
                             Err(e) => {

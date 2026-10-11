@@ -20,7 +20,9 @@ function replyFenceBlocks(text) {
       const closing = /^( {0,3})(`+)[ \t]*$/.exec(lines[j].body);
       if (closing && closing[2].length >= open[2].length) { close = j; break; }
     }
-    if (close < 0) continue;
+    if (close < 0) {
+      throw new Error(`the \`\`\`${info} block opened at line ${i + 1} is never closed (the reply may have been cut off); close every block with a line that is exactly \`\`\``);
+    }
     let content = source.slice(lines[i].end, lines[close].start);
     content = content.replace(/(?:\r\n|\n|\r)$/, "");
     blocks.push({ info, content, start: lines[i].start, end: lines[close].end });

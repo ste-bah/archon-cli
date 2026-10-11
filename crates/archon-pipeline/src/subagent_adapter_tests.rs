@@ -339,12 +339,33 @@ fn exact_tool_policy_marker_is_not_exposed_in_agent_prompt() {
 
 #[test]
 fn completed_subagent_reports_a_typed_end_turn_stop_reason() {
-    let response =
-        llm_response_for_subagent_outcome(SubagentOutcome::Completed("body".into()), false, None)
-            .expect("a completed subagent is a successful turn");
+    let response = llm_response_for_subagent_outcome(
+        SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion {
+            content: "body".into(),
+            stop_reason: None,
+        }),
+        false,
+        None,
+    )
+    .expect("a completed subagent is a successful turn");
 
     assert_eq!(response.content, "body");
     assert_eq!(response.stop_reason.as_deref(), Some("end_turn"));
+}
+
+#[test]
+fn completed_subagent_preserves_provider_stop_reason() {
+    let response = llm_response_for_subagent_outcome(
+        SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion {
+            content: "partial body".into(),
+            stop_reason: Some("max_tokens".into()),
+        }),
+        false,
+        None,
+    )
+    .expect("a completed subagent is a successful turn");
+    assert_eq!(response.content, "partial body");
+    assert_eq!(response.stop_reason.as_deref(), Some("max_tokens"));
 }
 
 #[test]

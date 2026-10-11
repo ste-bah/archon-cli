@@ -1,5 +1,32 @@
 use super::*;
 
+#[tokio::test]
+async fn runner_preserves_provider_stop_reason_on_final_answer() {
+    let mut events = text_response("truncated answer");
+    events.insert(
+        events.len() - 1,
+        StreamEvent::MessageDelta {
+            stop_reason: Some("max_tokens".into()),
+            usage: None,
+        },
+    );
+    let provider = Arc::new(MockProvider::new(vec![events]));
+    let runner = make_runner(provider, 5);
+
+    let completion = runner.run_with_completion("respond").await.unwrap();
+    assert_eq!(completion.content, "truncated answer");
+    assert_eq!(completion.stop_reason.as_deref(), Some("max_tokens"));
+}
+
+#[tokio::test]
+async fn runner_preserves_missing_provider_stop_reason_as_none() {
+    let provider = Arc::new(MockProvider::new(vec![text_response("answer")]));
+    let runner = make_runner(provider, 5);
+
+    let completion = runner.run_with_completion("respond").await.unwrap();
+    assert_eq!(completion.stop_reason, None);
+}
+
 // -----------------------------------------------------------------
 // TASK-T3 (G4): SubagentRunner accumulates Usage from a streamed turn
 // -----------------------------------------------------------------

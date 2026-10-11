@@ -56,6 +56,8 @@ struct ReplyBlock {
     content: String,
     start: usize,
     end: usize,
+    opened_line: usize,
+    closed: bool,
 }
 
 fn reply_blocks(content: &str) -> Vec<ReplyBlock> {
@@ -108,8 +110,15 @@ fn reply_blocks(content: &str) -> Vec<ReplyBlock> {
             }
         }
         let Some(close) = close else {
-            i += 1;
-            continue;
+            blocks.push(ReplyBlock {
+                info,
+                content: String::new(),
+                start: lines[i].0,
+                end: content.len(),
+                opened_line: i + 1,
+                closed: false,
+            });
+            break;
         };
         let mut block_content = content[lines[i].1..lines[close].0].to_string();
         if block_content.ends_with("\r\n") {
@@ -122,6 +131,8 @@ fn reply_blocks(content: &str) -> Vec<ReplyBlock> {
             content: block_content,
             start: lines[i].0,
             end: lines[close].1,
+            opened_line: i + 1,
+            closed: true,
         });
         i = close + 1;
     }
@@ -132,6 +143,9 @@ fn reply_blocks(content: &str) -> Vec<ReplyBlock> {
 /// top-level object outside any check block.
 pub(super) fn extract_object(content: &str) -> String {
     let blocks = reply_blocks(content);
+    if blocks.iter().any(|block| !block.closed) {
+        return String::new();
+    }
     let json: Vec<String> = blocks
         .iter()
         .filter(|block| block.info == "json")
@@ -222,6 +236,12 @@ pub(super) fn resolve_command_block(entry: &mut Value, content: &str) -> Option<
         .unwrap_or_default()
         .to_string();
     let blocks = reply_blocks(content);
+    if let Some(block) = blocks.iter().find(|block| !block.closed) {
+        return Some(format!(
+            "the ```{} block opened at line {} is never closed (the reply may have been cut off); close every block with a line that is exactly ```",
+            block.info, block.opened_line
+        ));
+    }
     // Only the exact info string `check` denotes the command block; `check <something>` is a different fence label.
     let checks: Vec<_> = blocks
         .iter()

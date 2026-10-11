@@ -17,7 +17,7 @@ use crate::tool::ToolContext;
 const FOREGROUND_CANCEL_CLEANUP_SECS: u64 = 30;
 
 struct ExecutionResult {
-    result: Result<String, ExecutorError>,
+    result: Result<crate::subagent_executor::SubagentCompletion, ExecutorError>,
     cancelled: bool,
 }
 
@@ -27,7 +27,7 @@ impl ExecutionResult {
             SubagentOutcome::Cancelled
         } else {
             match &self.result {
-                Ok(text) => SubagentOutcome::Completed(text.clone()),
+                Ok(completion) => SubagentOutcome::Completed(completion.clone()),
                 Err(error) => SubagentOutcome::Failed(error.to_string()),
             }
         }
@@ -305,7 +305,7 @@ async fn run_subagent_owned(
                         activity,
                         crate::subagent_dispatch_clock::inherit(
                             clocks,
-                            exec.run_to_completion_with_system(
+                            exec.run_to_completion_with_system_metadata(
                                 sid,
                                 req,
                                 system,
@@ -370,9 +370,9 @@ async fn run_subagent_owned(
     // the runner eventually finishes) but NOT visible hooks or
     // worktree cleanup.
     match &outcome {
-        SubagentOutcome::Completed(text) => {
+        SubagentOutcome::Completed(completion) => {
             let side_effects = exec
-                .on_visible_complete(subagent_id.clone(), Ok(text.clone()), nested)
+                .on_visible_complete(subagent_id.clone(), Ok(completion.content.clone()), nested)
                 .await;
             // If there's a worktree-preserved note, splice it into the
             // returned text. The executor returned the base text via
@@ -380,7 +380,9 @@ async fn run_subagent_owned(
             // caller (AgentTool::execute) receives the fully-composed
             // string with no awareness of worktree plumbing.
             if let Some(suffix) = side_effects.text_suffix {
-                return SubagentOutcome::Completed(format!("{text}{suffix}"));
+                let mut completed = completion.clone();
+                completed.content.push_str(&suffix);
+                return SubagentOutcome::Completed(completed);
             }
         }
         SubagentOutcome::Failed(err) => {

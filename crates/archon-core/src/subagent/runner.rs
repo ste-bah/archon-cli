@@ -73,6 +73,13 @@ pub struct SubagentRunner {
     identity: std::sync::Arc<IdentityProvider>,
 }
 
+/// Final text and provider stop reason for the answer round.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentCompletion {
+    pub content: String,
+    pub stop_reason: Option<String>,
+}
+
 /// A single pending tool call collected from the stream.
 #[derive(Debug, Clone)]
 struct PendingTool {

@@ -29,6 +29,13 @@ impl SubagentRunner {
     /// Run the subagent loop with the given initial prompt.
     /// Returns the accumulated text output from the final turn.
     pub async fn run(&self, initial_prompt: &str) -> anyhow::Result<String> {
+        Ok(self.run_with_completion(initial_prompt).await?.content)
+    }
+
+    pub async fn run_with_completion(
+        &self,
+        initial_prompt: &str,
+    ) -> anyhow::Result<super::SubagentCompletion> {
         // The session has started: from here, and not while it was queued for
         // a subagent slot, silence counts against the host's inactivity bound.
         archon_tools::subagent_activity::note();
@@ -78,7 +85,10 @@ impl SubagentRunner {
                 .shutdown_flag
                 .load(std::sync::atomic::Ordering::Relaxed)
             {
-                return Ok("[Agent shutdown requested]".to_string());
+                return Ok(super::SubagentCompletion {
+                    content: "[Agent shutdown requested]".to_string(),
+                    stop_reason: None,
+                });
             }
 
             if !inspection_tools_withdrawn
@@ -243,7 +253,10 @@ impl SubagentRunner {
                     }));
                 }
                 self.emit_activity_stream("final", "subagent turn complete", None, false);
-                return Ok(stream.text_content);
+                return Ok(super::SubagentCompletion {
+                    content: stream.text_content,
+                    stop_reason: stream.stop_reason,
+                });
             }
 
             let round_cancel = self

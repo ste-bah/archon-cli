@@ -101,7 +101,7 @@ async function wrongStopReasonIsSpecific() {
   const out = await ctx.authorAcceptanceEntries({agent:async () => ({
     status:'accepted',stopReason:'max_tokens',content:'{"id":"A"}'
   })}, 'author', 1, {entries:new Map(),retryIds:new Set(['A'])});
-  assert.match(out.summary, /expected stop reason end_turn, got max_tokens/);
+  assert.match(out.summary, /cut off the reply at its output limit; make the check shorter/);
 }
 
 async function missingContentIsSpecific() {

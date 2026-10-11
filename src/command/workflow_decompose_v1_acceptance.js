@@ -223,6 +223,11 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
   if (result.dry_run === true) return {entry:setHostOwnedFields({id}, criteria)};
   if (result.status === "failed") return {failure:result};
   if (result.stopReason !== "end_turn") {
+    if (result.stopReason === "max_tokens") {
+      return malformedAcceptanceFailure(id,
+        "the provider cut off the reply at its output limit; make the check shorter and return one complete artifact",
+        "stop-max-tokens");
+    }
     return malformedAcceptanceFailure(id, `expected stop reason end_turn, got ${result.stopReason || "missing"}`,
       stopReasonClass(result.stopReason));
   }
@@ -236,6 +241,9 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
       json = extractJsonObject(result.content);
       entry = unwrapEntry(JSON.parse(json), id);
     } catch (error) {
+      if (error && / is never closed \(the reply may have been cut off\)/.test(error.message)) {
+        return malformedAcceptanceFailure(id, error.message, "unclosed-fence");
+      }
       if (error && error.message === "reply contains more than one entry") {
         return malformedAcceptanceFailure(id, error.message, "multiple-entries");
       }

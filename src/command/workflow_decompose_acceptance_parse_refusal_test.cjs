@@ -81,11 +81,12 @@ async function refusal(reply, stopReason = 'end_turn') {
       const entry = Array.isArray(candidate) && candidate.length === 1 ? candidate[0] : candidate;
       outcome = json.resolveCommandBlock(entry, fixture.reply) || 'accepted';
     } catch (error) {
-      outcome = error.message === 'reply contains more than one entry' ? error.message : 'malformed inline JSON escape';
+      outcome = error.message === 'reply contains more than one entry' || / is never closed /.test(error.message)
+        ? error.message : 'malformed inline JSON escape';
     }
     if (fixture.id === 'SUP-REQ-AHDM-020') assert.equal(outcome, 'malformed inline JSON escape');
     if (fixture.id === 'SUP-REQ-AHDM-022') assert.equal(outcome, 'accepted', fixture.id);
-    if (fixture.id === 'SUP-REQ-AHDM-021') assert.equal(outcome, 'reply contains more than one entry');
+    if (fixture.id === 'SUP-REQ-AHDM-021') assert.match(outcome, /block opened at line 1 is never closed/);
     if (fixture.id === 'SUP-REQ-BT-001') assert.equal(outcome, 'malformed inline JSON escape');
     if (fixture.id === 'live-prose-after-json-close' || fixture.id === 'live-close-and-open-same-line') {
       assert.equal(outcome, fixture.expected.slice('refuse: '.length), fixture.id);
@@ -145,6 +146,19 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.equal(unknownParserRepeat.malformedClass, unknownParser.malformedClass);
   assert.equal(unknownStop.malformedClass, 'stop-other');
   assert.equal(unknownStopRepeat.malformedClass, unknownStop.malformedClass);
+  const unclosed = '```check\nrun\n{"id":"A"}';
+  const fenceMessage = 'the ```check block opened at line 1 is never closed (the reply may have been cut off); close every block with a line that is exactly ```';
+  assert.throws(() => json.extractJsonObject(unclosed), error => error.message === fenceMessage);
+  assert.throws(() => json.resolveCommandBlock({id:'A', check:{kind:'command', command_block:true}}, unclosed),
+    error => error.message === fenceMessage);
+  const fenceRefusal = await refusal(unclosed);
+  assert.equal(fenceRefusal.summary, `candidate artifact was refused: acceptance entry A: ${fenceMessage}`);
+  assert.equal(fenceRefusal.malformedClass, 'unclosed-fence');
+  const trimmedLive = JSON.parse(fs.readFileSync(`${root}/fixtures/acceptance_author_unclosed_check_reply.json`, 'utf8')).content;
+  assert.throws(() => json.extractJsonObject(trimmedLive), /the ```check block opened at line 2 is never closed/);
+  const maxTokenRefusal = await refusal('{"id":"A"}', 'max_tokens');
+  assert.match(maxTokenRefusal.summary, /cut off the reply at its output limit; make the check shorter/);
+  assert.equal(maxTokenRefusal.malformedClass, 'stop-max-tokens');
   console.log('PASS acceptance parse refusal');
 })().catch(error => { console.error(`FAIL acceptance parse refusal: ${error.stack}`); process.exitCode = 1; });
 
