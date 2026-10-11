@@ -121,8 +121,19 @@ function seedEntries(seed, policy, state) {
   const unreadable = Object.keys(seed.unreadable_replies || {});
   for (const reply of Array.isArray(seed.replies) ? seed.replies : []) {
     let entry = null;
-    try { entry = unwrapEntry(JSON.parse(reply.text), reply.id); } catch (_) { entry = null; }
+    try {
+      entry = unwrapEntry(JSON.parse(reply.text), reply.id);
+      if (entry && replyFenceBlocks(reply.text).some((block) => block.info === "check")) {
+        const refusal = resolveCommandBlock(entry, reply.text);
+        if (refusal) entry = null;
+      }
+    } catch (_) { entry = null; }
     if (!entry || entry.id !== reply.id) { unreadable.push(reply.id); continue; }
+    if (entry.check && entry.check.kind === "command" &&
+        (typeof entry.check.command !== "string" || !entry.check.command.trim())) {
+      unreadable.push(reply.id);
+      continue;
+    }
     const judged = state.entries.get(reply.id);
     // The candidate's host-stamped criterion cannot prove what the author
     // saw. Missing prompt text is conservatively treated as criterion drift.

@@ -264,6 +264,28 @@ async function unreadableReplyIsRetried() {
   assert.deepEqual(seen.agents, ['acceptance-author-A-28']);
 }
 
+async function commandRepliesRestoreSafely() {
+  const carried = entry('A');
+  const resolved = { ...entry('A'), check: { kind: 'command', cwd: 'project_root', command: 'echo resolved' } };
+  const makeContext = (reply, carriedEntries) => {
+    const ctx = context({ A: 'a' }, null);
+    const state = { entries: new Map() };
+    ctx.seedEntries({ candidate: null, replies: [reply], carried_entries: carriedEntries,
+      unreadable_replies: {}, invalid: {}, gates: [], refuted_ids: [] },
+    { phase: 'acceptance', author: true, retryScopes: new Set(['candidate_artifact']) }, state);
+    return { ctx, state };
+  };
+  const restored = makeContext({ id: 'A', criterion: 'a', text: JSON.stringify(resolved) }, []);
+  assert.equal(restored.state.entries.get('A').check.command, 'echo resolved');
+  assert.deepEqual([...restored.state.retryIds], [], 'a complete reply remains readable');
+
+  const scriptless = { id: 'A', criterion: 'old', check: { kind: 'command', cwd: 'project_root' } };
+  const protectedState = makeContext({ id: 'A', criterion: 'a', text: JSON.stringify(scriptless) }, [carried]);
+  assert.equal(protectedState.state.entries.get('A').check.command, carried.check.command,
+    'a script-less reply does not replace the carried entry');
+  assert.deepEqual([...protectedState.state.retryIds], ['A'], 'the entry is re-authored');
+}
+
 async function artifactSeeds() {
   const ctx = context({}, { transition_index: 0, author_ordinals: { skeleton: 3, 'body-T': 5 }, pause_ordinals: {}, subjects: {
     skeleton: { kind: 'artifact', candidate: 'kept skeleton', candidate_call: 'skeleton-author-3', gate: { call_id: 'g', published: true, findings: [] } },
@@ -308,7 +330,7 @@ async function sample() {
     heldEntriesSurviveStaleAndOmittingGates, currentSupplementaryCriterionSurvivesTwoResumes,
     freshGateOwesSupplementaryAndPromptGetsCurrentPrdText,
     replyCriterionComesFromItsAuthorPrompt, missingPromptCriterionReauthorsButCandidateFallbackCarries,
-    unreadableReplyIsRetried, artifactSeeds, pausesContinue, sample]) {
+    unreadableReplyIsRetried, commandRepliesRestoreSafely, artifactSeeds, pausesContinue, sample]) {
     await test();
     console.log(`ok ${test.name}`);
   }

@@ -340,14 +340,9 @@ fn acceptance(
             continue;
         };
         any_reply = true;
-        let text = record::extract_object(content);
         let entry = record::reply_entry_with_blocks(content, &id);
         if let Some(entry) = entry.as_ref() {
-            let text = if text.contains("command_block") {
-                serde_json::to_string(entry)?
-            } else {
-                text
-            };
+            let text = serde_json::to_string(entry)?;
             let entry = host.stamp(entry.clone(), &id);
             replies_read.push(Reply {
                 record,
