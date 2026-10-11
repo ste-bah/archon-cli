@@ -170,6 +170,15 @@ fn build_compaction_telemetry(
     }
 }
 
+/// Budget used by the request's ordinary history fit, for a read-ceiling
+/// flattening that must preserve its task and final instruction.
+pub(super) fn read_ceiling_fit_budget(runner: &SubagentRunner) -> Option<u64> {
+    let telemetry = build_compaction_telemetry(runner);
+    let reserve = runner.agent_config.response_reserve_tokens();
+    (telemetry.runtime_context_budget > reserve)
+        .then(|| telemetry.runtime_context_budget.saturating_sub(reserve))
+}
+
 async fn maybe_compact_for_context_window(
     runner: &SubagentRunner,
     messages: &mut MessageHistory,

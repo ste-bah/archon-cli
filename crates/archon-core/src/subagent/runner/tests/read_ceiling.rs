@@ -53,7 +53,10 @@ async fn ceiling_withdraws_inspection_tools_and_runner_returns_the_answer() {
         );
     }
     assert!(offered.contains(&"Bash"), "shell must remain offered");
+    assert_eq!(requests[1].messages.len(), 1);
+    assert_eq!(requests[1].messages[0]["role"], "user");
     let next_messages = serde_json::to_string(&requests[1].messages).unwrap();
+    assert!(next_messages.contains("inspect then answer"));
     assert!(next_messages.contains(
         "Inspection tools are no longer available in this call; answer now with your deliverable from what you have read."
     ));
@@ -75,11 +78,37 @@ async fn text_form_tool_call_after_ceiling_tells_agent_to_answer_now() {
 
     let requests = provider.requests();
     assert_eq!(requests.len(), 3);
+    assert_eq!(requests[1].messages.len(), 1);
+    assert_eq!(requests[1].messages[0]["role"], "user");
     let next_messages = serde_json::to_string(&requests[2].messages).unwrap();
     assert!(next_messages.contains(
         "Inspection tools are no longer available in this call and text tool calls are not run; answer now with your deliverable from what you have read."
     ));
     assert!(!next_messages.contains("Otherwise call the tool through the tool interface."));
+}
+
+#[tokio::test]
+async fn build_test_tools_remain_available_after_flattening() {
+    let provider = Arc::new(MockProvider::new(vec![
+        tool_use_response("read-1", "Read", r#"{"file_path":"Cargo.toml"}"#),
+        tool_use_response("test-1", "Bash", r#"{"command":"cargo test --version"}"#),
+        text_response("answer after test tool"),
+    ]));
+    let runner = ceiling_runner(provider.clone());
+
+    assert_eq!(
+        runner
+            .run("inspect, run the test command, then answer")
+            .await
+            .unwrap(),
+        "answer after test tool"
+    );
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(names(&requests[1]).contains(&"Bash"));
+    let flattened = serde_json::to_string(&requests[1].messages).unwrap();
+    assert!(!flattened.contains("tool_use") && !flattened.contains("tool_result"));
+    assert!(flattened.contains("Inspection tools are no longer available"));
 }
 
 #[tokio::test]

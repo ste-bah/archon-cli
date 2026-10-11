@@ -4,6 +4,7 @@ mod cargo_credit;
 mod context_fit;
 #[cfg(test)]
 mod context_fit_tests;
+mod flatten_history;
 mod message_history;
 mod progress_stop;
 mod progress_window;
@@ -87,12 +88,15 @@ impl SubagentRunner {
                     .as_ref()
                     .is_some_and(|guard| guard.read_only_ceiling_reached())
             {
-                let message = serde_json::json!({
-                    "role": "user",
-                    "content": "Inspection tools are no longer available in this call; answer now with your deliverable from what you have read.",
-                });
+                let note = "Inspection tools are no longer available in this call; answer now with your deliverable from what you have read.";
+                let message = flatten_history::flatten_history(
+                    messages.as_slice(),
+                    initial_prompt,
+                    note,
+                    request_round::read_ceiling_fit_budget(self),
+                );
                 self.record_transcript(&message);
-                messages.push(message);
+                messages.replace(vec![message]);
                 inspection_tools_withdrawn = true;
             }
 
