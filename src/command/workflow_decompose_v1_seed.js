@@ -79,6 +79,12 @@ function seedEntries(seed, policy, state) {
       && !unreadableIds.has(entry.id))
       .map((entry) => entry.id)
     : []);
+  const owed = owedSupplementary();
+  for (const entry of listed) {
+    const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(entry.id)?.[1];
+    if (requirement) owed.set(entry.id, { requirement, text: currentRequirementText(requirement) });
+    state.entries.set(entry.id, entry);
+  }
   // Every gate registers the supplementary checks it says are owed, in order,
   // as the loop did; the last one also names the entries it sent back.
   // `null` from the last gate: a finding no rule attributes to one entry, which
@@ -102,12 +108,6 @@ function seedEntries(seed, policy, state) {
     const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(id)?.[1];
     return requirement ? (args.prdRequirementTexts || {})[requirement] : undefined;
   };
-  const owed = owedSupplementary();
-  for (const entry of listed) {
-    const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(entry.id)?.[1];
-    if (requirement) owed.set(entry.id, { requirement, text: currentRequirementText(requirement) });
-    state.entries.set(entry.id, entry);
-  }
   // A reply authored after that gate is the entry's latest version, and a
   // repair only when it differs from what the gate judged: a gate asked the
   // same candidate again answers from its record, which keeps its old time.

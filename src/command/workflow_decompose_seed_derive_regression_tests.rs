@@ -205,7 +205,15 @@ fn explicit_current_refutation_of_an_omitted_held_entry_is_seeded() {
         "freeze-acceptance",
         "02:00:00",
         &candidate,
-        vec![finding("check 'AC-2' was refuted by the judge", "AC-2")],
+        vec![json!({
+            "text": "check 'AC-2': proves nothing about its criterion",
+            "subject": "AC-2",
+            "remediation_scope": "candidate_artifact",
+            "deterministic_defect": {
+                "code": "check_not_proven",
+                "subject": "AC-2"
+            }
+        })],
         false,
     )];
     let derived = super::super::derive(&records, &[], &criteria(&["AC-1", "AC-2"])).unwrap();
