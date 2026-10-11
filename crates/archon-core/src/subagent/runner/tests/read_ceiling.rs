@@ -60,6 +60,29 @@ async fn ceiling_withdraws_inspection_tools_and_runner_returns_the_answer() {
 }
 
 #[tokio::test]
+async fn text_form_tool_call_after_ceiling_tells_agent_to_answer_now() {
+    let provider = Arc::new(MockProvider::new(vec![
+        tool_use_response("read-1", "Read", r#"{"file_path":"Cargo.toml"}"#),
+        text_response("<tool_call>Read</tool_call>"),
+        text_response("deliverable from the inspected file"),
+    ]));
+    let runner = ceiling_runner(provider.clone());
+
+    assert_eq!(
+        runner.run("inspect then answer").await.unwrap(),
+        "deliverable from the inspected file"
+    );
+
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 3);
+    let next_messages = serde_json::to_string(&requests[2].messages).unwrap();
+    assert!(next_messages.contains(
+        "Inspection tools are no longer available in this call and text tool calls are not run; answer now with your deliverable from what you have read."
+    ));
+    assert!(!next_messages.contains("Otherwise call the tool through the tool interface."));
+}
+
+#[tokio::test]
 async fn calls_without_the_read_only_guard_keep_the_same_tools() {
     let provider = Arc::new(MockProvider::new(vec![
         tool_use_response("read-1", "Read", r#"{"file_path":"Cargo.toml"}"#),

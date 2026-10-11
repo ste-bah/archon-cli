@@ -20,7 +20,7 @@ async fn text_form_tool_call_is_retried_through_tool_interface() {
     let second_history = serde_json::to_string(&requests[1].messages).unwrap();
     assert!(second_history.contains(malformed));
     assert!(second_history.contains(
-        "Your last message wrote a tool call as text. Text tool calls are not run. Call the tool through the tool interface, or give your final answer."
+        "Your last message began with a tool call written as text; it was not run. If that message also contained your final answer, repeat the final answer now without the tool-call text. Otherwise call the tool through the tool interface."
     ));
 }
 

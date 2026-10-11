@@ -176,8 +176,10 @@ impl SubagentRunner {
 
             // If no tool calls, subagent is done — return accumulated text
             if stream.pending_tools.is_empty() {
-                window.observe_turn(turn.saturating_add(1), &stream.text_content, &[], &[]);
                 if crate::subagent::starts_with_text_tool_call(&stream.text_content) {
+                    // Text-form tool calls are rejected and re-asked below;
+                    // changing their arguments does not count as progress.
+                    window.observe_turn(turn.saturating_add(1), "", &[], &[]);
                     tracing::warn!(
                         turn = turn.saturating_add(1),
                         "subagent wrote a tool call as text; requesting a tool-interface call or final answer"
@@ -190,12 +192,17 @@ impl SubagentRunner {
                     messages.push(answer);
                     let feedback = serde_json::json!({
                         "role": "user",
-                        "content": "Your last message wrote a tool call as text. Text tool calls are not run. Call the tool through the tool interface, or give your final answer.",
+                        "content": if inspection_tools_withdrawn {
+                            "Inspection tools are no longer available in this call and text tool calls are not run; answer now with your deliverable from what you have read."
+                        } else {
+                            "Your last message began with a tool call written as text; it was not run. If that message also contained your final answer, repeat the final answer now without the tool-call text. Otherwise call the tool through the tool interface."
+                        },
                     });
                     self.record_transcript(&feedback);
                     messages.push(feedback);
                     continue;
                 }
+                window.observe_turn(turn.saturating_add(1), &stream.text_content, &[], &[]);
                 if let Some(landing) = &self.tool_context.audit_landing {
                     let parsed = serde_json::from_str::<serde_json::Value>(&stream.text_content);
                     let compact = parsed.as_ref().ok().and_then(|v| {

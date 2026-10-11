@@ -288,6 +288,37 @@ async fn repeating_the_same_read_and_text_stops_at_the_window() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn different_text_form_tool_calls_do_not_renew_the_window() {
+    let turns = [
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/0.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/1.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/2.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/3.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/4.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/5.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/6.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/7.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/8.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/9.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/10.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/11.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/12.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/13.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/14.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/15.rs</arg_value></tool_call>",
+    ];
+    let (result, elapsed, _) = run(
+        turns.into_iter().map(|text| (Some(text), None)).collect(),
+        "pw-text-tool-call",
+    )
+    .await;
+    let error = stall_text(result);
+
+    assert_eq!(elapsed, WINDOW, "{error}");
+    assert!(!error.contains("max turns"), "{error}");
+}
+
+#[tokio::test(start_paused = true)]
 async fn refused_reads_do_not_renew_and_end_as_resumable_no_progress() {
     let mut turns = vec![(
         Some(r#"Read {"file_path":"/src/refused_0.rs"}"#),
