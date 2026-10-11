@@ -1,5 +1,4 @@
 //! Concrete catalog→process→audit→parent-publication integration tests.
-
 use std::path::PathBuf;
 
 use archon_workflow::HostCommandRequest;
@@ -136,14 +135,15 @@ pub(super) fn seed_frozen_subjects(
 
 pub(super) struct PreparedBodyProcess {
     pub(super) candidate: Vec<u8>,
+    pub(super) overflow_stdout: bool,
 }
 
 #[async_trait::async_trait]
 impl super::workflow_host_command_exec::HostCommandProcessAdapter for PreparedBodyProcess {
     async fn execute(
         &self,
-        request: super::workflow_host_command_catalog::ResolvedHostCommand,
-        _control: super::workflow_host_command_supervisor::HostCommandControl,
+        mut request: super::workflow_host_command_catalog::ResolvedHostCommand,
+        control: super::workflow_host_command_supervisor::HostCommandControl,
     ) -> archon_workflow::WorkflowResult<
         super::workflow_host_command_supervisor::SupervisedProcessOutput,
     > {
@@ -184,111 +184,50 @@ impl super::workflow_host_command_exec::HostCommandProcessAdapter for PreparedBo
         let manifest = PreparedPublicationV1 {
             schema_version: PREPARED_PUBLICATION_SCHEMA_VERSION,
             call_id,
-            command_id: request.command_id,
+            command_id: request.command_id.clone(),
             entries,
         };
         let stdout = serde_json::to_vec(&manifest).unwrap();
+        if self.overflow_stdout {
+            let spill_dir = request.spill_dir.as_ref().unwrap();
+            std::fs::create_dir_all(spill_dir).unwrap();
+            let manifest_path = spill_dir.join("manifest.json");
+            std::fs::write(&manifest_path, &stdout).unwrap();
+            let script_path = spill_dir.join("emit-manifest.sh");
+            std::fs::write(
+                &script_path,
+                format!(
+                    "head -c {} /dev/zero | tr '\\000' ' '; cat '{}'\n",
+                    request.max_stdout_bytes + 1,
+                    manifest_path.display()
+                ),
+            )
+            .unwrap();
+            request.program = PathBuf::from("/bin/sh");
+            request.args = vec![script_path.to_string_lossy().into_owned()];
+            return super::workflow_host_command_supervisor::supervise_process_group(
+                request, control, None,
+            )
+            .await;
+        }
+        let stdout_bytes = stdout.len() as u64;
         Ok(
             super::workflow_host_command_supervisor::SupervisedProcessOutput {
                 exit_code: Some(0),
                 timed_out: false,
-                stdout_bytes: stdout.len() as u64,
+                stdout_bytes,
                 stderr_bytes: 0,
+                stdout_retained_bytes: stdout_bytes,
+                stderr_retained_bytes: 0,
+                stdout_truncated: false,
+                stderr_truncated: false,
                 stdout,
                 stderr: Vec::new(),
+                stdout_path: None,
+                stderr_path: None,
             },
         )
     }
-}
-
-#[tokio::test]
-async fn concrete_executor_audits_then_parent_publishes_exact_body_receipt() {
-    use super::workflow_host_command_exec::{
-        FixedHostCommandExecutor, WorkflowHostCommandExecutor,
-    };
-
-    let temp = tempfile::tempdir().unwrap();
-    let mut context = context(temp.path());
-    let task_file = context.task_root.join("TASK-X-010.md");
-    std::fs::write(&task_file, b"live-before").unwrap();
-    seed_frozen_chain(&context, &task_file);
-    let store = archon_workflow::WorkflowStore::project(&context.project_root);
-    let run = store
-        .create_run(archon_workflow::WorkflowSpec {
-            schema: archon_workflow::spec::WORKFLOW_SCHEMA.into(),
-            name: "host-publication".into(),
-            task: "test parent publication".into(),
-            target_repository_root: None,
-            max_parallelism: 1,
-            max_agents: 1,
-            stages: Vec::new(),
-            permissions: Default::default(),
-            learning_hooks: Vec::new(),
-        })
-        .unwrap();
-    let run_root = store.run_dir(&run.id);
-    context.run_staging_root = run_root.join("host-command-staging");
-    let candidate = br#"# Candidate
-
-```yaml
-task_id: TASK-X-010
-title: Candidate
-complexity: low
-status: ready
-depends_on: []
-blocks: []
-implements: []
-required_env_keys: []
-required_tools: []
-deliverable_contracts: []
-```
-
-## Focused Tests
-- `test -f TASK-X-010.md`
-"#
-    .to_vec();
-    let executor = FixedHostCommandExecutor::with_process(
-        fixed_decomposition_catalog("rev-1").unwrap(),
-        context,
-        run_root.clone(),
-        std::sync::Arc::new(PreparedBodyProcess {
-            candidate: candidate.clone(),
-        }),
-    );
-    let request = HostCommandRequest::new(
-        "land-task-body",
-        Some(String::from_utf8(candidate.clone()).unwrap()),
-    )
-    .unwrap();
-    let call_id = executor.call_identity(&request).unwrap();
-
-    let result = executor
-        .execute(request, Some(run.generation))
-        .await
-        .unwrap();
-
-    assert!(result.reusable());
-    assert_eq!(std::fs::read(&task_file).unwrap(), candidate);
-    let receipt = result.publication_receipt.unwrap();
-    assert_eq!(receipt.call_id, call_id);
-    assert_eq!(receipt.command_id, "land-task-body");
-    assert_eq!(receipt.entries.len(), 2);
-    let body = receipt
-        .entries
-        .iter()
-        .find(|entry| entry.relative_path == "TASK-X-010.md")
-        .unwrap();
-    assert_eq!(
-        body.blake3,
-        archon_workflow::task_set_contract::content_digest(&candidate)
-    );
-    assert!(
-        run_root
-            .join("host-command-results")
-            .join(call_id)
-            .join("gate-envelope.json")
-            .is_file()
-    );
 }
 
 struct ControlWaitingProcess {

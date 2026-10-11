@@ -58,6 +58,56 @@ fn allowlisted_and_credential_values_are_redacted_but_essentials_are_not() {
 }
 
 #[test]
+fn spilled_child_output_is_redacted_before_it_is_read_as_a_result() {
+    let context = context(&["DATA_PROVIDER_KEY"], &[]);
+    let secrets = HostSecrets::of(
+        &context,
+        &BTreeMap::from([(
+            "DATA_PROVIDER_KEY".into(),
+            OsString::from("allowlisted-secret"),
+        )]),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let spill = temp.path().join("stdout.bin");
+    std::fs::write(&spill, b"prefix allowlisted-secret suffix").unwrap();
+
+    secrets.redact_spill(&spill).unwrap();
+
+    let stored = std::fs::read_to_string(spill).unwrap();
+    assert!(!stored.contains("allowlisted-secret"), "{stored}");
+    assert!(stored.contains(REDACTED), "{stored}");
+}
+
+#[test]
+fn streamed_spill_redaction_catches_a_secret_crossing_a_chunk_boundary() {
+    let context = context(&["DATA_PROVIDER_KEY"], &[]);
+    let secrets = HostSecrets::of(
+        &context,
+        &BTreeMap::from([(
+            "DATA_PROVIDER_KEY".into(),
+            OsString::from("allowlisted-secret"),
+        )]),
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let spill = temp.path().join("stdout.bin");
+    let mut bytes = vec![b'x'; 64 * 1024 - 8];
+    bytes.push(b' ');
+    bytes.extend_from_slice(b"allowlisted-secret");
+    bytes.extend_from_slice(b" tail");
+    std::fs::write(&spill, bytes).unwrap();
+
+    secrets.redact_spill(&spill).unwrap();
+
+    let stored = std::fs::read_to_string(spill).unwrap();
+    assert!(
+        !stored.contains("allowlisted-secret"),
+        "secret crossed the read boundary: {stored}"
+    );
+    assert!(stored.contains(REDACTED), "{stored}");
+    assert!(stored.ends_with(" tail"), "{stored}");
+}
+
+#[test]
 fn envelope_strings_are_redacted_and_its_structure_kept() {
     let context = context(&["DATA_PROVIDER_KEY"], &[]);
     let environment = BTreeMap::from([(
@@ -175,9 +225,15 @@ impl super::super::workflow_host_command_exec::HostCommandProcessAdapter
                 exit_code: Some(0),
                 stdout_bytes: stdout.len() as u64,
                 stderr_bytes: 0,
+                stdout_retained_bytes: stdout.len() as u64,
+                stderr_retained_bytes: 0,
+                stdout_truncated: false,
+                stderr_truncated: false,
                 stdout,
                 stderr: Vec::new(),
                 timed_out: false,
+                stdout_path: None,
+                stderr_path: None,
             },
         )
     }
@@ -264,9 +320,15 @@ impl super::super::workflow_host_command_exec::HostCommandProcessAdapter for Ech
                 exit_code: Some(1),
                 stdout_bytes: stdout.len() as u64,
                 stderr_bytes: stderr.len() as u64,
+                stdout_retained_bytes: stdout.len() as u64,
+                stderr_retained_bytes: stderr.len() as u64,
+                stdout_truncated: false,
+                stderr_truncated: false,
                 stdout,
                 stderr,
                 timed_out: false,
+                stdout_path: None,
+                stderr_path: None,
             },
         )
     }

@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 mod text_tool_call;
-pub(crate) use text_tool_call::is_text_tool_call_only;
+pub(crate) use text_tool_call::starts_with_text_tool_call;
 
 // ---------------------------------------------------------------------------
 // Auto-background configuration (AGT-025)

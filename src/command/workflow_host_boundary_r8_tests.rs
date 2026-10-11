@@ -46,8 +46,14 @@ impl HostCommandProcessAdapter for TornDownLater {
                 timed_out: false,
                 stdout_bytes: 0,
                 stderr_bytes: 0,
+                stdout_retained_bytes: 0,
+                stderr_retained_bytes: 0,
+                stdout_truncated: false,
+                stderr_truncated: false,
                 stdout: Vec::new(),
                 stderr: Vec::new(),
+                stdout_path: None,
+                stderr_path: None,
             });
         }
         *self.token.lock().unwrap() = Some(control.track_teardown());
@@ -207,6 +213,7 @@ async fn a_dropped_supervisor_reports_its_teardown_only_once_the_tree_is_gone() 
         max_stderr_bytes: 4096,
         declared_write_set: vec![],
         remediation_scopes: Default::default(),
+        spill_dir: None,
     };
     let latch = TeardownLatch::default();
     let (control, _handle) = HostCommandControl::tracked(latch.clone());

@@ -113,6 +113,7 @@ async fn no_unrecorded_execution(mode: &str) {
         cwd: run.path().into(), environment: std::env::vars_os().filter_map(|(key, value)| key.into_string().ok().map(|key| (key, value))).collect(),
         stdin: None, timeout_secs: 30, max_stdout_bytes: 4096, max_stderr_bytes: 4096,
         declared_write_set: Vec::new(), remediation_scopes: Default::default(),
+        spill_dir: None,
     };
     let (control, _handle) = HostCommandControl::new();
     REGISTER_DELAY.with(|delay| delay.set(true));

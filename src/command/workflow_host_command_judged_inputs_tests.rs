@@ -59,6 +59,7 @@ fn fixture() -> Fixture {
         store.run_dir(&run_id),
         Arc::new(PreparedBodyProcess {
             candidate: CANDIDATE.as_bytes().to_vec(),
+            overflow_stdout: false,
         }),
     );
     Fixture {

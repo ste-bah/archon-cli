@@ -63,6 +63,33 @@ impl HostSecrets {
         }
     }
 
+    pub(crate) fn redaction_overlap(&self) -> usize {
+        self.0
+            .iter()
+            .map(|value| {
+                let escaped = serde_json::to_string(value).unwrap_or_default();
+                value.len().max(escaped.len().saturating_sub(2))
+            })
+            .max()
+            .unwrap_or(0)
+            .saturating_add(4)
+    }
+
+    pub(crate) fn safe_redaction_prefix(&self, bytes: &[u8], proposed: usize) -> usize {
+        let mut safe = proposed;
+        for secret in self.0.iter() {
+            let secret = secret.as_bytes();
+            let first = proposed.saturating_sub(secret.len().saturating_sub(1));
+            for start in first..proposed {
+                let end = start.saturating_add(secret.len());
+                if end > proposed && end <= bytes.len() && bytes[start..end] == *secret {
+                    safe = safe.min(start);
+                }
+            }
+        }
+        safe
+    }
+
     /// Whether `bytes` hold any secret value in clear.
     pub(crate) fn holds_secret(&self, bytes: &[u8]) -> bool {
         self.0.iter().any(|value| {
@@ -93,6 +120,15 @@ impl HostSecrets {
         context: &str,
     ) -> WorkflowResult<T> {
         serde_json::from_slice(bytes)
+            .map_err(|error| WorkflowError::StageFailed(self.text(&format!("{context}: {error}"))))
+    }
+
+    pub(crate) fn parse_json_reader<T: serde::de::DeserializeOwned>(
+        &self,
+        reader: impl std::io::Read,
+        context: &str,
+    ) -> WorkflowResult<T> {
+        serde_json::from_reader(reader)
             .map_err(|error| WorkflowError::StageFailed(self.text(&format!("{context}: {error}"))))
     }
 

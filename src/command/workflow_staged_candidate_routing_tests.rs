@@ -54,8 +54,14 @@ impl HostCommandProcessAdapter for ShapeRefusingChild {
             timed_out: false,
             stdout_bytes: stdout.len() as u64,
             stderr_bytes: 0,
+            stdout_retained_bytes: stdout.len() as u64,
+            stderr_retained_bytes: 0,
+            stdout_truncated: false,
+            stderr_truncated: false,
             stdout,
             stderr: Vec::new(),
+            stdout_path: None,
+            stderr_path: None,
         })
     }
 }
