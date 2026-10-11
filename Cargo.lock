@@ -855,6 +855,7 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "fs2",
  "hdrhistogram",
  "once_cell",
  "opentelemetry",
