@@ -63,6 +63,7 @@ blake3 = "1"
 hex = "0.4"
 oauth2 = "5"
 fd-lock = "4"
+fs2 = "0.4"
 open = "5"
 tiny_http = "0.12"
 cozo = { package = "cozo-ce", version = "0.7.13-alpha.3", default-features = false, features = ["storage-sqlite", "storage-sqlite-src", "storage-new-rocksdb", "rayon"] }

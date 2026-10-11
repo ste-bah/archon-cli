@@ -31,7 +31,10 @@ async fn transport_evidence_records_http_and_terminal_reason() {
             while rx.recv().await.is_some() {}
         })
         .await;
-    let raw = std::fs::read_to_string(root.path().join("transport.jsonl")).unwrap();
+    let raw = archon_observability::transport::read_transport_evidence(
+        &root.path().join("transport.jsonl"),
+    )
+    .unwrap();
     let records: Vec<serde_json::Value> = raw
         .lines()
         .map(|s| serde_json::from_str(s).unwrap())
@@ -62,7 +65,10 @@ async fn transport_evidence_empty_http_body_is_protocol_error() {
         assert!(matches!(rx.recv().await, Some(crate::streaming::StreamEvent::Error { error_type, .. }) if error_type == "protocol"));
         assert!(rx.recv().await.is_none());
     }).await;
-    let raw = std::fs::read_to_string(root.path().join("transport.jsonl")).unwrap();
+    let raw = archon_observability::transport::read_transport_evidence(
+        &root.path().join("transport.jsonl"),
+    )
+    .unwrap();
     let last: serde_json::Value = serde_json::from_str(raw.lines().last().unwrap()).unwrap();
     assert_eq!(last["http_status"], 200);
     assert_eq!(last["body_bytes"], 0);
@@ -105,7 +111,10 @@ async fn transport_evidence_carries_rejected_and_malformed_response_bodies() {
                 }
             })
             .await;
-        let raw = std::fs::read_to_string(root.path().join("transport.jsonl")).unwrap();
+        let raw = archon_observability::transport::read_transport_evidence(
+            &root.path().join("transport.jsonl"),
+        )
+        .unwrap();
         let last: serde_json::Value = serde_json::from_str(raw.lines().last().unwrap()).unwrap();
         assert_eq!(last["http_status"], status);
         assert_eq!(last["body_bytes"], body.len());
