@@ -106,6 +106,7 @@ async fn concrete_executor_audits_then_parent_publishes_exact_body_receipt() {
     executor_publishes_prepared_body(false).await;
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn executor_parses_prepared_manifest_from_full_spilled_stdout() {
     executor_publishes_prepared_body(true).await;
