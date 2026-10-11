@@ -85,7 +85,9 @@ jobs:
   build-and-test:
     name: build + test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Per-OS timeout (#237). Linux + macOS use 45 min, Windows 60.
+    # Per-OS timeout (#237). Linux 90 min, macOS 135, Windows 180 (set per
+    # matrix entry below). All raised 50% for slow runners: run 38139774216
+    # cancelled Windows at 120 min with 17777/18193 tests done.
     #
     # #244 Windows CI, re-enabled. The BASH_FUNC_* env-var bug on the windows
     # runner image causes bash's CVE-2014-6271 Shellshock self-defense to abort
@@ -116,7 +118,8 @@ jobs:
             # ~120s; #243). Hung tests are already killed by nextest after
             # 4 x 60s (.config/nextest.toml), so this is only a backstop for
             # a stuck step and must clear the cold-cache time.
-            timeout-override: 60
+            # 60 -> 90: slow runners (Windows cancelled at 120 min, run 38139774216).
+            timeout-override: 90
           - os: macos-latest
             # macOS runners are noticeably slower than ubuntu for this
             # workspace: no mold linker, slower disk, and `cargo nextest
@@ -141,10 +144,11 @@ jobs:
             # "finished" in 33-40 min having never reached the end of the
             # suite. Fixing it is what first ran all 11246 tests here.
             #
-            # 90 for the same reason Windows is on 120 — enough for one cold
+            # 90 for the same reason Windows was on 120 — enough for one cold
             # cache to get through the whole phase. Tune down once a few warm
             # runs establish the real figure.
-            timeout-override: 90
+            # 90 -> 135: slow runners (Windows cancelled at 120 min, run 38139774216).
+            timeout-override: 135
           - os: windows-latest
             # Windows has no mold and links with MSVC link.exe, which dominates
             # a workspace producing ~200 test binaries. (Vendored OpenSSL is
@@ -158,7 +162,9 @@ jobs:
             # 60m07s, with macOS finishing the same job in 30m36s. Raised to
             # 120 so a cold cache can get through the test phase at least once;
             # tune back down once a warm-cache run shows the real figure.
-            timeout-override: 120
+            # 120 -> 180: run 38139774216 was cancelled at 120 min with
+            # 17777/18193 tests done on a slow runner (last green: ~70 min).
+            timeout-override: 180
     steps:
       - uses: actions/checkout@v4
 
