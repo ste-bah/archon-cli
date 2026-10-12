@@ -68,21 +68,20 @@ const SKELETON_SHAPE = JSON.stringify({
   ]
 });
 
-// Frozen fields are copied, not re-decided. Showing them empty taught bodies to
-// emit `[]` against a skeleton that declared real values, which the frozen-field
-// comparison then reports as the body having changed them.
+// Frozen fields are host-stamped at landing; the body author supplies the
+// sections below them and does not need to reproduce the frozen values.
 const BODY_SHAPE = [
   "```yaml",
   "task_id: <frozen task id>",
   "title: <short title>",
   "complexity: low|medium|high",
   "status: ready",
-  "depends_on: <copy this task's frozen depends_on exactly>",
-  "blocks: <copy this task's frozen blocks exactly>",
-  "implements: <copy this task's frozen implements exactly>",
+  "depends_on: <host stamps frozen value>",
+  "blocks: <host stamps frozen value>",
+  "implements: <host stamps frozen value>",
   "required_env_keys: []",
   "required_tools: <exact tools this task must exercise; [] only when no tool invocation is required>",
-  "deliverable_contracts: <copy this task's frozen deliverable_contracts exactly>",
+  "deliverable_contracts: <host stamps frozen value>",
   "```"
 ].join("\n");
 

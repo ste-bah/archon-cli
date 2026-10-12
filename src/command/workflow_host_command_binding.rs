@@ -128,7 +128,12 @@ pub(crate) fn bind_request(
     let mut matches = Vec::new();
     for frozen in &skeleton.tasks {
         let path = context.task_root.join(&frozen.file_name);
-        if archon_workflow::task_universe::parsing::parse_task_file(&path, task_file).is_ok() {
+        let parses_stamped =
+            stamp_frozen_frontmatter(task_file, frozen).and_then(|(stamped, _)| {
+                archon_workflow::task_universe::parsing::parse_task_file(&path, &stamped)
+                    .map(|_| stamped)
+            });
+        if parses_stamped.is_ok() {
             matches.push((frozen.task_id.clone(), path));
         }
     }
@@ -149,6 +154,86 @@ pub(crate) fn bind_request(
     context.frozen_task_id = Some(task_id);
     context.frozen_task_file = Some(task_file);
     Ok(Ok(context))
+}
+
+/// Stamp the skeleton-owned frontmatter into a bound body before it reaches
+/// the landing command. The note names only fields, never authored values.
+pub(crate) fn stamp_frozen_frontmatter(
+    candidate: &str,
+    frozen: &archon_workflow::task_skeleton::FrozenTask,
+) -> WorkflowResult<(String, Vec<String>)> {
+    let opener = candidate.find("```yaml").ok_or_else(|| {
+        WorkflowError::SpecInvalid("bound task body has no YAML frontmatter block".into())
+    })?;
+    let body_start = opener + "```yaml".len();
+    let close_rel = candidate[body_start..].find("```").ok_or_else(|| {
+        WorkflowError::SpecInvalid("bound task body YAML frontmatter block is not closed".into())
+    })?;
+    let close = body_start + close_rel;
+    let yaml = &candidate[body_start..close];
+    let mut metadata: serde_json::Value = serde_yaml_ng::from_str(yaml).map_err(|error| {
+        WorkflowError::SpecInvalid(format!(
+            "bound task body YAML frontmatter is invalid: {error}"
+        ))
+    })?;
+    let map = metadata.as_object_mut().ok_or_else(|| {
+        WorkflowError::SpecInvalid("bound task body YAML frontmatter is not a mapping".into())
+    })?;
+    const KNOWN_FIELDS: &[&str] = &[
+        "task_id",
+        "title",
+        "complexity",
+        "status",
+        "depends_on",
+        "blocks",
+        "implements",
+        "required_env_keys",
+        "required_tools",
+        "deliverable_contracts",
+        "prd",
+        "domain",
+        "workstream",
+        "source_sections",
+        "shared_append_target_files",
+        "artifact_requirements",
+    ];
+    if let Some(field) = map
+        .keys()
+        .find(|field| !KNOWN_FIELDS.contains(&field.as_str()))
+    {
+        return Err(WorkflowError::SpecInvalid(format!(
+            "task frontmatter contains unknown field '{field}'"
+        )));
+    }
+    let frozen_fields = [
+        ("depends_on", serde_json::to_value(&frozen.depends_on)?),
+        ("blocks", serde_json::to_value(&frozen.blocks)?),
+        ("implements", serde_json::to_value(&frozen.implements)?),
+        (
+            "deliverable_contracts",
+            serde_json::to_value(&frozen.deliverable_contracts)?,
+        ),
+    ];
+    let mut notes = Vec::new();
+    for (field, expected) in frozen_fields {
+        if map.get(field) != Some(&expected) {
+            notes.push(field.to_string());
+        }
+        map.insert(field.to_string(), expected);
+    }
+    let stamped_yaml = serde_yaml_ng::to_string(&metadata).map_err(|error| {
+        WorkflowError::SpecInvalid(format!(
+            "could not serialize stamped task frontmatter: {error}"
+        ))
+    })?;
+    let stamped_yaml = stamped_yaml.strip_prefix("---\n").unwrap_or(&stamped_yaml);
+    let mut result = String::with_capacity(candidate.len() + stamped_yaml.len());
+    result.push_str(&candidate[..body_start]);
+    result.push('\n');
+    result.push_str(stamped_yaml.trim_end_matches('\n'));
+    result.push('\n');
+    result.push_str(&candidate[close..]);
+    Ok((result, notes))
 }
 
 /// A candidate that binds no frozen subject but names one by its `task_id`
