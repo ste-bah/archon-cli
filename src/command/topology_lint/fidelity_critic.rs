@@ -105,10 +105,12 @@ impl Refused {
 /// [`parse_fidelity_verdicts`]). Every verdict that passes every check is
 /// handed to `accept` (with its index in `obligations`) at once, before the
 /// next call, and is final: a later reply's verdict for that obligation is
-/// never taken in its place. A later verdict of the other meaning that
-/// passes every check is handed to `accept` too, once: the store keeps both
-/// as a contradiction, which blocks, so a flip inside one conversation is
-/// recorded rather than dropped. A document refused as a whole
+/// never taken in its place, merged with it, or recorded beside it. A re-ask
+/// still sends the whole batch's question, so the critic often answers the
+/// kept obligations again, and may flip one in the new context; recording
+/// that as a contradiction would block an obligation that has converged
+/// until its text changes (#434). A flip is logged, naming the obligation
+/// and both meanings, and nothing else. A document refused as a whole
 /// gives no verdict. Ask again, for the obligations still without a verdict,
 /// while the replies make progress; after [`FIDELITY_NO_PROGRESS_WINDOW`]
 /// replies in a row with no progress the failure is operational and names
@@ -133,7 +135,6 @@ pub(super) async fn ask(
     let mut messages = request.messages.clone();
     // The meaning of each obligation's verdict, once it has one.
     let mut answered: Vec<Option<bool>> = vec![None; obligations.len()];
-    let mut contradicted = vec![false; obligations.len()];
     let open = |answered: &[Option<bool>]| -> Vec<String> {
         obligations
             .iter()
@@ -179,21 +180,19 @@ pub(super) async fn ask(
         match parse_fidelity_verdicts(&document, obligations, tasks) {
             Ok(read) => {
                 for (index, result) in read.into_iter().enumerate() {
-                    // Answered by an earlier reply: final, never replaced;
-                    // a checked verdict of the other meaning is recorded
-                    // beside it, once.
-                    if let Some(truth) = answered[index] {
+                    // Answered by an earlier reply: final, never replaced
+                    // and never recorded beside; a flip is only logged.
+                    if let Some(kept) = answered[index] {
                         if let Ok(verdict) = result
-                            && verdict.necessarily_true != truth
-                            && !contradicted[index]
+                            && verdict.necessarily_true != kept
                         {
                             tracing::warn!(
                                 obligation_id = %verdict.obligation_id,
+                                kept_necessarily_true = kept,
+                                reanswered_necessarily_true = verdict.necessarily_true,
                                 "fidelity critic answered a kept verdict again with the other \
-                                 meaning; both are recorded as a contradiction"
+                                 meaning; the kept verdict stands and nothing is recorded"
                             );
-                            accept(index, &verdict)?;
-                            contradicted[index] = true;
                         }
                         continue;
                     }

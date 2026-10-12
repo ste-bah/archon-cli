@@ -204,11 +204,11 @@ async fn fidelity_a_verdict_that_never_quotes_verbatim_ends_alone_and_the_rest_a
 }
 
 /// A re-ask reply that answers a kept obligation again with the other
-/// meaning, and passes every check, is not dropped: both verdicts are
-/// recorded as a contradiction, which blocks; the kept verdict is never
-/// replaced by the later one.
+/// meaning is logged and nothing more: the kept verdict stands, no
+/// contradiction is reported and its record holds one entry.
+#[tracing_test::traced_test]
 #[tokio::test]
-async fn fidelity_a_kept_verdict_answered_again_with_the_other_meaning_is_a_contradiction() {
+async fn fidelity_a_kept_verdict_answered_again_with_the_other_meaning_is_only_logged() {
     let temp = corpus();
     let ids = ["AC-WS-001".to_string(), "G-WS-001".to_string()];
     let critic = FakeCritic::new(vec![
@@ -223,22 +223,25 @@ async fn fidelity_a_kept_verdict_answered_again_with_the_other_meaning_is_a_cont
     );
     assert_eq!(critic.calls(), 2);
     assert_eq!(still_asked(&reask_turn(&critic, 1)), "G-WS-001");
-    let contradiction = evaluation
-        .findings
-        .iter()
-        .find(|finding| finding.text.starts_with("obligation AC-WS-001"))
-        .expect("a blocking finding for the flipped obligation");
+    assert!(logs_contain(
+        "answered a kept verdict again with the other meaning"
+    ));
+    assert!(logs_contain("obligation_id=AC-WS-001"));
+    assert!(logs_contain("kept_necessarily_true=true"));
+    assert!(logs_contain("reanswered_necessarily_true=false"));
     assert!(
-        contradiction.text.contains("contradict each other"),
-        "{}",
-        contradiction.text
+        evaluation
+            .findings
+            .iter()
+            .all(|finding| !finding.text.contains("contradict")),
+        "no contradiction is recorded"
     );
     assert!(
         !evaluation
             .findings
             .iter()
-            .any(|finding| finding.text.starts_with("obligation G-WS-001")),
-        "G-WS-001's only verdict is true"
+            .any(|finding| finding.text.starts_with("obligation AC-WS-001")),
+        "the kept true verdict stands"
     );
     let record = record_files(temp.path())
         .into_iter()
@@ -246,5 +249,7 @@ async fn fidelity_a_kept_verdict_answered_again_with_the_other_meaning_is_a_cont
         .find(|text| text.contains("\"id\": \"AC-WS-001\""))
         .expect("AC-WS-001's record");
     let record: serde_json::Value = serde_json::from_str(&record).unwrap();
-    assert_eq!(record["entries"].as_array().unwrap().len(), 2, "both kept");
+    let entries = record["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1, "no second entry");
+    assert_eq!(entries[0]["verdict"]["necessarily_true"], true);
 }

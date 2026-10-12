@@ -266,8 +266,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
-        // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is recorded as a contradiction. Verdict meaning is unchanged.
-        sources_digest: "0dda881e52c8591adcb749e02afaf3aa384256bd54fe32acc7de0d3cc6f8ca57",
+        // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
+        sources_digest: "771d5f0e009ff4d4fffb9cc6421a1fac4c2cf6434b541af698e9f22cd367fe39",
         build_bound: false,
     },
     CapabilityLogic {
@@ -284,8 +284,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
-        // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is recorded as a contradiction. Verdict meaning is unchanged.
-        sources_digest: "0dda881e52c8591adcb749e02afaf3aa384256bd54fe32acc7de0d3cc6f8ca57",
+        // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
+        sources_digest: "771d5f0e009ff4d4fffb9cc6421a1fac4c2cf6434b541af698e9f22cd367fe39",
         build_bound: false,
     },
     CapabilityLogic {

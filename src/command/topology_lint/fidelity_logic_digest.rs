@@ -47,11 +47,10 @@ pub const CRITIC_LOGIC_VERSION: u32 = 1;
 ///   them. No check is weakened and the question is unchanged, so a stored
 ///   verdict means what it meant.
 /// - Re-pinned, version unchanged, for the #434d review: a kept verdict
-///   answered again in the same conversation with the other meaning, and
-///   passing every check, is recorded beside it as a contradiction instead
-///   of being dropped. That is the store's existing rule for two standing
-///   verdicts that disagree; no verdict is accepted that was refused before.
-pub const SOURCES_DIGEST: &str = "6608fca72fd0d66c6d4d0e97d5485c799e240b62f33f2ffe3a89f7aea476bf59";
+///   answered again in the same conversation with the other meaning is
+///   logged, naming both meanings, and nothing is recorded; the kept
+///   verdict stays final. No acceptance rule changed.
+pub const SOURCES_DIGEST: &str = "8558044b0a09b9665085f65be84237450894456539afbc40b6ef34ad23d6bee4";
 
 /// Hashed, sorted: the critic call, its prompt rendering, its reply reader
 /// and checks (the `#[path]` modules of `fidelity_audit.rs`).
