@@ -61,6 +61,9 @@ use regex::Regex;
 
 use super::verdict_shell::{Simple, expands, simple_commands};
 
+#[path = "workflow_acceptance_executability_verdict_shell_setup.rs"]
+mod shell_setup;
+
 #[path = "workflow_acceptance_executability_verdict_subcommand.rs"]
 mod subcommand;
 #[path = "workflow_acceptance_executability_verdict_which.rs"]
@@ -199,6 +202,9 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
         );
     };
     let commands = simple_commands(command);
+    if let Some(reason) = shell_setup::refusal(code, command, &commands, &output(result)) {
+        return Some(reason);
+    }
     if matches!(code, 126 | 127)
         && let Some(name) = missing_program(&commands, &output(result), at)
     {

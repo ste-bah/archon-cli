@@ -5,9 +5,12 @@ function replyFenceBlocks(text) {
   const lines = [];
   let offset = 0;
   while (offset < source.length) {
-    const end = source.indexOf("\n", offset);
-    const next = end < 0 ? source.length : end + 1;
-    lines.push({ start: offset, end: next, body: source.slice(offset, end < 0 ? source.length : end + 1).replace(/\r?\n$/, "") });
+    let end = offset;
+    while (end < source.length && source[end] !== "\r" && source[end] !== "\n") end++;
+    let next = end;
+    if (source[end] === "\r" && source[end + 1] === "\n") next += 2;
+    else if (end < source.length) next++;
+    lines.push({ start: offset, end: next, body: source.slice(offset, end) });
     offset = next;
   }
   const blocks = [];
@@ -119,7 +122,7 @@ function resolveCommandBlock(entry, text) {
   if (commandBlock !== undefined && commandBlock !== true && commandBlock !== false) return "acceptance entry " + id + " check.command_block must be boolean true";
   if (!hasBlock) return null;
   if (!blocks[0].content.trim()) return "acceptance entry " + id + " check block is empty";
-  check.command = blocks[0].content;
+  check.command = blocks[0].content.replace(/\r\n|\r/g, "\n");
   delete check.command_block;
   return null;
 }

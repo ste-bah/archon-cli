@@ -77,6 +77,75 @@ fn a_missing_tool_on_the_search_path_gives_no_verdict_whatever_stderr_says() {
     assert!(no_verdict("sleep 9", &run(None, "", ""), &host()).is_some());
 }
 
+#[test]
+fn a_first_shell_setup_option_error_is_not_a_preimplementation_verdict() {
+    for stderr in [
+        "set: -: invalid option\n",
+        "set: Illegal option -\n",
+        "/bin/sh: set: -: invalid option\n",
+    ] {
+        let result = run(Some(2), "", stderr);
+        assert_eq!(
+            no_verdict("set -\ntest -f deliverable", &result, &host()).as_deref(),
+            Some(
+                "the shell rejected an option in the check's first command before any criterion could run"
+            )
+        );
+    }
+    let assertion = run(Some(1), "", "");
+    assert_eq!(
+        no_verdict("set -e\ntest -f deliverable", &assertion, &host()),
+        None
+    );
+}
+
+#[test]
+fn a_real_shell_cr_option_error_before_the_criterion_is_not_proof() {
+    let command = "set -\r\nprintf criterion";
+    let output = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(command)
+        .output()
+        .expect("the system shell must run this check");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid option"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("criterion"));
+    let result = run(
+        output.status.code(),
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        no_verdict(command, &result, &host())
+            .unwrap()
+            .contains("before any criterion could run")
+    );
+}
+
+#[test]
+fn a_real_shell_invocation_option_error_is_not_a_preimplementation_verdict() {
+    let command = "sh -z -c 'printf criterion'";
+    let output = std::process::Command::new("/bin/sh")
+        .arg("-z")
+        .arg("-c")
+        .arg("printf criterion")
+        .output()
+        .expect("the system shell must run this check");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid option"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("criterion"));
+    let result = run(
+        output.status.code(),
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        no_verdict(command, &result, &host())
+            .unwrap()
+            .contains("before reading the check body")
+    );
+}
+
 /// (a): the deliverable not there yet is the verdict a base must give.
 #[test]
 fn a_program_or_script_of_the_tree_that_is_not_there_yet_is_a_verdict() {

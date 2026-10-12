@@ -220,7 +220,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 10: #374 resolves filesystem aliases without refusing unrelated paths on the same volume.
         // 11: #417 #418 #419 freeze-owned outputs leave check inputs; passability and judge verdicts reuse by scoped input keys.
         // #421 changes when a recorded freeze is reused (a later publication extends its pin), not how it is judged.
-        version: 11,
+        // 12: #423 check blocks normalize CR/CRLF to LF; a shell setup error is refused as a pre-implementation proof.
+        version: 12,
         sources: &[GATE, CONTRACT, FREEZE],
         sources_digest: "5c5df7fcb1d980cbf4c25e98811aa6b1d13bd2d9b07942fcc9cb3270497353fd",
         build_bound: false,
