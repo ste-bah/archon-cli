@@ -1,6 +1,144 @@
-//! Reuse only unchanged accepted judgments from a verified previous freeze.
+//! Reuse only unchanged accepted judgments saved for their exact inputs.
 use super::*;
-use archon_workflow::task_set_contract::JudgeDecision;
+use archon_workflow::task_set_contract::{AcceptanceCriterion, JudgeDecision};
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct EntryVerdict {
+    key: String,
+    judgment: archon_workflow::task_set_contract::JudgeVerdict,
+}
+
+pub(super) fn entry_key(
+    client: &dyn WorkflowLlmClient,
+    tasks_root: &Path,
+    prd_digest: &str,
+    entry: &AcceptanceCriterion,
+) -> Option<String> {
+    let (version, digest, _) =
+        crate::command::workflow_task_set::workflow_acceptance_check_reuse::logic_identity()?;
+    Some(content_digest(
+        serde_json::json!([
+            "acceptance-entry-judge-v1",
+            tasks_root,
+            prd_digest,
+            entry.criterion,
+            entry.check,
+            entry.covers,
+            entry.gap_permitted,
+            client.resolve_model_alias("sonnet"),
+            client.provider_id(),
+            version,
+            digest,
+        ])
+        .to_string()
+        .as_bytes(),
+    ))
+}
+
+fn sampling_matches(client: &dyn WorkflowLlmClient, entry: &AcceptanceCriterion) -> bool {
+    entry.judgment.sampling.as_ref().is_some_and(|sampling| {
+        sampling["model"] == serde_json::json!(client.resolve_model_alias("sonnet"))
+            && sampling["provider"] == serde_json::json!(client.provider_id())
+    })
+}
+
+pub(super) fn keep_pinned_entries(
+    contract: &mut AcceptanceContract,
+    base: &AcceptanceContract,
+    client: &dyn WorkflowLlmClient,
+) -> BTreeSet<String> {
+    if contract.prd.digest != base.prd.digest {
+        return BTreeSet::new();
+    }
+    let mut restored = BTreeSet::new();
+    for entry in contract
+        .acceptance
+        .iter_mut()
+        .chain(&mut contract.supplementary)
+    {
+        if entry.judgment.verdict == JudgeDecision::Accepted {
+            continue;
+        }
+        let Some(old) = base
+            .acceptance
+            .iter()
+            .chain(&base.supplementary)
+            .find(|old| old.id == entry.id)
+        else {
+            continue;
+        };
+        if old.judgment.verdict == JudgeDecision::Accepted
+            && old.criterion == entry.criterion
+            && old.gap_permitted == entry.gap_permitted
+            && sampling_matches(client, old)
+        {
+            *entry = old.clone();
+            restored.insert(entry.id.clone());
+        }
+    }
+    restored
+}
+
+pub(super) fn save_judged_entries(
+    project: &Path,
+    tasks_root: &Path,
+    prd_digest: &str,
+    client: &dyn WorkflowLlmClient,
+    contract: &AcceptanceContract,
+    judged_ids: &BTreeSet<String>,
+    pinned_ids: &BTreeSet<String>,
+) -> Result<()> {
+    for entry in contract.acceptance.iter().chain(&contract.supplementary) {
+        if judged_ids.contains(&entry.id)
+            && !pinned_ids.contains(&entry.id)
+            && entry.judgment.verdict == JudgeDecision::Accepted
+            && sampling_matches(client, entry)
+            && let Some(key) = entry_key(client, tasks_root, prd_digest, entry)
+        {
+            save_entry(project, &key, entry)?;
+        }
+    }
+    Ok(())
+}
+
+fn entry_cache(project: &Path, key: &str) -> PathBuf {
+    project
+        .join(crate::command::workflow_freeze_budget::FREEZE_CACHE_DIR)
+        .join("judge-entry")
+        .join(format!("{key}.json"))
+}
+
+pub(super) fn load_entry(
+    project: &Path,
+    key: &str,
+) -> Option<archon_workflow::task_set_contract::JudgeVerdict> {
+    let saved: EntryVerdict =
+        serde_json::from_slice(&std::fs::read(entry_cache(project, key)).ok()?).ok()?;
+    (saved.key == key).then_some(saved.judgment)
+}
+
+fn save_entry(project: &Path, key: &str, entry: &AcceptanceCriterion) -> Result<()> {
+    let path = entry_cache(project, key);
+    let parent = path.parent().context("judge entry cache has no parent")?;
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("could not create judge entry cache {}", parent.display()))?;
+    let saved = EntryVerdict {
+        key: key.to_string(),
+        judgment: entry.judgment.clone(),
+    };
+    let bytes = serde_json::to_vec(&saved).context("could not encode a saved judge entry")?;
+    let staging = path.with_extension(format!("{}.tmp", std::process::id()));
+    if let Err(error) = std::fs::write(&staging, bytes) {
+        return Err(error)
+            .with_context(|| format!("could not write judge entry cache {}", staging.display()));
+    }
+    if let Err(error) = std::fs::rename(&staging, &path) {
+        let _ = std::fs::remove_file(&staging);
+        return Err(error)
+            .with_context(|| format!("could not publish judge entry cache {}", path.display()));
+    }
+    Ok(())
+}
 
 pub(super) async fn judge(
     project: &Path,
@@ -10,6 +148,9 @@ pub(super) async fn judge(
     expected: &BTreeSet<String>,
     store: Option<&super::judge_store::JudgeStore>,
 ) -> Result<AcceptanceContract> {
+    let tasks_root = tasks
+        .canonicalize()
+        .with_context(|| format!("could not canonicalize task root {}", tasks.display()))?;
     // A candidate's own judgment fields never authorize reuse. Failed validation
     // of historical evidence means rejudge, not silently trust its contents.
     // Issue 294: pin and bundle are one version. A set that cannot be read
@@ -25,40 +166,18 @@ pub(super) async fn judge(
         .and_then(|pin| validate_acceptance_bundle(tasks, Some(&pin), expected).ok());
     drop(read);
     let mut reused = BTreeSet::new();
-    if let Some(base) = &base
-        && base.prd == contract.prd
-        && base.gap_policy == contract.gap_policy
+    for entry in contract
+        .acceptance
+        .iter_mut()
+        .chain(&mut contract.supplementary)
     {
-        let defective: BTreeSet<_> = acceptance_policy_findings(base)
-            .into_iter()
-            .map(|finding| finding.field.split('.').next().unwrap_or("").to_string())
-            .collect();
-        for entry in contract
-            .acceptance
-            .iter_mut()
-            .chain(&mut contract.supplementary)
-        {
-            let Some(old) = base
-                .acceptance
-                .iter()
-                .chain(&base.supplementary)
-                .find(|old| old.id == entry.id)
-            else {
-                continue;
-            };
-            let sampling_matches = old.judgment.sampling.as_ref().is_some_and(|sampling| {
-                sampling["model"] == serde_json::json!(client.resolve_model_alias("sonnet"))
-                    && sampling["provider"] == serde_json::json!(client.provider_id())
-            });
-            if old.judgment.verdict == JudgeDecision::Accepted
-                && !defective.contains(&old.id)
-                && old.criterion == entry.criterion
-                && old.check == entry.check
-                && old.gap_permitted == entry.gap_permitted
-                && old.covers == entry.covers
-                && sampling_matches
-            {
-                entry.judgment = old.judgment.clone();
+        let Some(key) = entry_key(client, &tasks_root, &contract.prd.digest, entry) else {
+            continue;
+        };
+        // The exact task root and PRD digest scope this verdict to its history.
+        if let Some(judgment) = load_entry(project, &key) {
+            if judgment.verdict == JudgeDecision::Accepted {
+                entry.judgment = judgment;
                 reused.insert(entry.id.clone());
             }
         }
@@ -80,17 +199,28 @@ pub(super) async fn judge(
         .gap_policy
         .permitted_acceptance_ids
         .retain(|id| subset_ids.contains(id));
+    let mut judged_ids = BTreeSet::new();
     if !subset.acceptance.is_empty() || !subset.supplementary.is_empty() {
+        judged_ids.extend(subset_ids.iter().cloned());
         let judged = match store {
             Some(store) => store.judge_subset(client, subset, &subset_ids).await?,
             None => judge::judge_contract_subset_resumable(client, subset, None).await?,
         };
         merge_judgments(&mut contract, &judged);
     }
-    // Preserve existing best-of behavior, but only from the verified base.
+    let mut pinned_ids = BTreeSet::new();
     if let Some(base) = &base {
-        merge::keep_previously_accepted(&mut contract, base);
+        pinned_ids = keep_pinned_entries(&mut contract, base, client);
     }
+    save_judged_entries(
+        project,
+        &tasks_root,
+        &contract.prd.digest,
+        client,
+        &contract,
+        &judged_ids,
+        &pinned_ids,
+    )?;
     validate_acceptance_structure(&contract, expected, true).map_err(anyhow::Error::new)?;
     Ok(contract)
 }

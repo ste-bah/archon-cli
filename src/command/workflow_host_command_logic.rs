@@ -216,10 +216,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #392 accepts a sole unnamed check block when command_block is omitted.
         // #399 fixes resume seed reconstruction; identical gate input keeps its verdict.
         // 9: #400 validates incremental subsets independently, allowing supplementary-only updates to pass.
-        // 7: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 9,
+        // 10: #417 #418 #419 freeze-owned outputs leave check inputs; passability and judge verdicts reuse by scoped input keys.
+        version: 10,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ee0ff2270e6857708098d1ab0be90fa567e919478c3ab45fb0b4bc6a150ca240",
+        sources_digest: "b36a267209f14bab4f69c5228ac68404c5a010133ca18f205456e65f1e8a0121",
         build_bound: false,
     },
     CapabilityLogic {
@@ -227,7 +227,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ee0ff2270e6857708098d1ab0be90fa567e919478c3ab45fb0b4bc6a150ca240",
+        sources_digest: "b36a267209f14bab4f69c5228ac68404c5a010133ca18f205456e65f1e8a0121",
         build_bound: false,
     },
     CapabilityLogic {
@@ -258,15 +258,17 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
-        sources_digest: "542fa5562fa425d5c4463cc4361b30617a63497d75032a96a85f85c69749a7d0",
+        sources_digest: "94cf8997b1bb0784d0d3a2de8fd1edd57a2dbc6d0400d583f22ffcdb63679c4d",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-acceptance",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 3,
+        // The canonical task-root scope fixes false cache misses without changing check verdicts.
+        // 4: #417 copied check inputs omit freeze-owned files, which can change a check verdict.
+        version: 4,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "9ae5e98673a413b40208d30cee593bc8e39fc74d0301195659dc6c5d28335786",
+        sources_digest: "ca19f45eb83d783dbb1fa3c810ad7232a8f27736012a8b37135e50ae69f291a5",
         build_bound: true,
     },
     CapabilityLogic {
@@ -274,7 +276,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "9ae5e98673a413b40208d30cee593bc8e39fc74d0301195659dc6c5d28335786",
+        sources_digest: "ca19f45eb83d783dbb1fa3c810ad7232a8f27736012a8b37135e50ae69f291a5",
         build_bound: true,
     },
 ];

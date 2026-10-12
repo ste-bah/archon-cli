@@ -173,5 +173,5 @@ pub(crate) fn check_key(
     contract: &AcceptanceContract,
     id: &str,
 ) -> Option<String> {
-    memo_key(probe, tree, &data_state(probe, tree), contract, id)
+    memo_key(probe, tree, &data_state(probe, tree).ok()?, contract, id)
 }

@@ -3,7 +3,8 @@ use super::*;
 use std::io::Read;
 
 pub(crate) fn excluded(path: &Path, excludes: &[PathBuf]) -> bool {
-    excludes.iter().any(|e| path.starts_with(e))
+    path.starts_with(Path::new(".archon").join(crate::task_set_lineage::PIN_STORE_NAMESPACE))
+        || excludes.iter().any(|e| path.starts_with(e))
         || matches!(
             path.to_str(),
             Some(
@@ -17,6 +18,24 @@ pub(crate) fn excluded(path: &Path, excludes: &[PathBuf]) -> bool {
         )
         || path.starts_with(".archon/workflows")
         || path.starts_with(".git")
+}
+
+pub(crate) fn freeze_owned(path: &Path) -> bool {
+    path.starts_with(Path::new(".archon").join(crate::task_set_lineage::PIN_STORE_NAMESPACE))
+}
+
+pub(super) fn project_excludes(policy: &ScratchPolicy) -> WorkflowResult<Vec<PathBuf>> {
+    let project = std::fs::canonicalize(&policy.project)
+        .map_err(|error| WorkflowError::io(&policy.project, error))?;
+    let tasks = std::fs::canonicalize(&policy.task_root)
+        .map_err(|error| WorkflowError::io(&policy.task_root, error))?;
+    let relative = tasks
+        .strip_prefix(&project)
+        .map_err(|_| invalid("task root must belong to declared project"))?;
+    let mut excludes = policy.project_input_excludes.clone();
+    excludes.push(relative.join(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE));
+    excludes.push(relative.join(crate::task_set_contract::ACCEPTANCE_LOCK_FILE));
+    Ok(excludes)
 }
 pub(super) fn copy_project(
     root: &Path,
@@ -160,10 +179,71 @@ fn audit_path(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[test]
+fn freeze_outputs_are_excluded_from_scratch_project_inputs() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let task_root = project.join("tasks/set");
+    std::fs::create_dir_all(&task_root).unwrap();
+    let policy = ScratchPolicy {
+        repository: temp.path().join("repository"),
+        project: project.clone(),
+        task_root,
+        scratch_parent: temp.path().join("scratch"),
+        project_inputs: Vec::new(),
+        project_input_excludes: Vec::new(),
+        combined: false,
+        toolchain_path: String::new(),
+        environment: BTreeMap::new(),
+        environment_allowlist: Vec::new(),
+        cargo_seed: None,
+        timeout_secs: 1,
+        output_bytes: 1,
+        scratch_bytes: 1,
+        build_cache: None,
+    };
+    let excludes = project_excludes(&policy).unwrap();
+    let task_contract =
+        Path::new("tasks/set").join(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+    assert!(excluded(&task_contract, &excludes));
+    assert!(!excluded(
+        Path::new(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
+        &excludes
+    ));
+    for path in [
+        Path::new("tasks/set").join(crate::task_set_contract::ACCEPTANCE_LOCK_FILE),
+        Path::new(".archon")
+            .join(crate::task_set_lineage::PIN_STORE_NAMESPACE)
+            .join("set.json"),
+    ] {
+        assert!(excluded(&path, &excludes), "{}", path.display());
+    }
+    assert!(!excluded(Path::new("tasks/set/input.json"), &excludes));
+}
+
+#[cfg(test)]
+#[test]
+fn same_named_nested_project_data_is_included_and_digested() {
+    let temp = tempfile::tempdir().unwrap();
+    let file = temp.path().join("config/acceptance-contract.json");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, b"project data").unwrap();
+    let relative = Path::new("config/acceptance-contract.json");
+    assert!(!excluded(relative, &[]));
+    let mut map = BTreeMap::new();
+    audit_path(temp.path(), relative, &[], &mut map).unwrap();
+    assert_eq!(
+        map.get("config/acceptance-contract.json"),
+        Some(&file_digest(&file).unwrap())
+    );
+}
 pub(super) fn live(
     policy: &ScratchPolicy,
     commit: &str,
 ) -> WorkflowResult<BTreeMap<String, BTreeMap<String, String>>> {
+    let project_excludes = project_excludes(policy)?;
     let mut source = BTreeMap::new();
     let files = git(
         &policy.repository,
@@ -185,15 +265,14 @@ pub(super) fn live(
     }
     let mut project = BTreeMap::new();
     for input in &policy.project_inputs {
-        audit_path(
-            &policy.project,
-            input,
-            &policy.project_input_excludes,
-            &mut project,
-        )?;
+        audit_path(&policy.project, input, &project_excludes, &mut project)?;
     }
     let mut tasks = BTreeMap::new();
-    audit_path(&policy.task_root, Path::new(""), &[], &mut tasks)?;
+    let task_outputs = [
+        PathBuf::from(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
+        PathBuf::from(crate::task_set_contract::ACCEPTANCE_LOCK_FILE),
+    ];
+    audit_path(&policy.task_root, Path::new(""), &task_outputs, &mut tasks)?;
     Ok(BTreeMap::from([
         (policy.repository.display().to_string(), source),
         (policy.project.display().to_string(), project),
