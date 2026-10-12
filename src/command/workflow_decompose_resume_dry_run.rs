@@ -94,12 +94,11 @@ pub(crate) async fn dry_run_fixed_decomposition(
         &store,
         run_id,
         run.generation,
-        &project_root,
-        &prd_path,
-        &task_root,
+        (&project_root, &prd_path, &task_root),
+        &catalog,
         true,
     )?;
-    let resume_frozen_chain = resume_chain.argument;
+    let resume_frozen_chain = resume_chain.argument.clone();
     let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
     let frozen_chain = arguments
         .get("frozenChain")
@@ -226,22 +225,18 @@ pub(crate) async fn dry_run_fixed_decomposition(
         );
         (seed, case)
     };
-    // The same ordinal floors the live resume carries into a skipped phase.
-    let script_seed = crate::command::workflow_decompose_seed::resume_script_seed(
-        &store,
-        run_id,
-        &current_identity,
-        &criteria,
-        &requirement_texts,
-        &resume_frozen_chain,
-        seed.as_ref(),
-    )?;
-    let mut seeded = crate::command::workflow_decompose_seed::seeded_arguments(
-        &expected_arguments,
-        script_seed.as_ref(),
-    );
-    seeded["frozenChain"] = resume_frozen_chain;
-    let script_arguments = script_arguments_with_prd_requirement_texts(&seeded, prd_text);
+    // The same seed and floors the live resume hands the script.
+    let (script_arguments, script_seed) =
+        crate::command::workflow_decompose_seed::resume_script_arguments(
+            &store,
+            run_id,
+            &current_identity,
+            (&criteria, &requirement_texts),
+            resume_frozen_chain,
+            seed.as_ref(),
+            (&expected_arguments, prd_text),
+            true,
+        )?;
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,
         Some(&script_arguments),
@@ -254,7 +249,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
         crate::command::workflow_test_seams::binary_revision(),
         healed_groups.len(),
     );
-    for line in &resume_chain.lines {
+    for line in resume_chain.lines.iter().chain([&script_seed.line]) {
         output.push_str(line);
         output.push('\n');
     }
@@ -284,6 +279,14 @@ pub(crate) async fn dry_run_fixed_decomposition(
             }
         }
     }
+    let probe = replay::ReplayProbe::new(
+        &store,
+        run_id,
+        catalog,
+        persisted_catalog,
+        (&project_root, &prd_path, &prd_digest, &task_root),
+        config,
+    )?;
     for (index, call) in calls.iter().enumerate() {
         let capability = call
             .options
@@ -297,9 +300,10 @@ pub(crate) async fn dry_run_fixed_decomposition(
             .and_then(|tail| tail.split(':').next())
             .unwrap_or("");
         output.push_str(&format!(
-            "call[{index}] id={}{}{}\n",
+            "call[{index}] id={}{}{}{}\n",
             call.id,
             capability.map_or_else(String::new, |name| format!(" capability={name}")),
+            probe.note(call)?,
             if entry.is_empty() {
                 String::new()
             } else {
@@ -317,3 +321,6 @@ pub(crate) async fn dry_run_fixed_decomposition(
     }
     Ok(output)
 }
+
+#[path = "workflow_decompose_resume_dry_run_replay.rs"]
+mod replay;

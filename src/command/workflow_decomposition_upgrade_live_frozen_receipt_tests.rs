@@ -5,15 +5,15 @@
 
 use super::*;
 
-struct Entry {
-    relative: &'static str,
+pub(super) struct Entry {
+    relative: String,
     path: PathBuf,
     prior: Option<String>,
 }
 
-fn entry(relative: &'static str, path: PathBuf, prior: Option<String>) -> Entry {
+pub(super) fn entry(relative: impl Into<String>, path: PathBuf, prior: Option<String>) -> Entry {
     Entry {
-        relative,
+        relative: relative.into(),
         path,
         prior,
     }
@@ -25,7 +25,7 @@ fn digest_of(path: &Path) -> String {
 
 /// A receipt for `entries` as they are on disk now, with the run-local gate
 /// envelope every staged freeze also publishes.
-fn receipt(
+pub(super) fn receipt(
     store: &WorkflowStore,
     run_id: &str,
     capability: &str,
@@ -74,12 +74,32 @@ fn save(
     findings: serde_json::Value,
     receipt: serde_json::Value,
 ) {
-    let (digest, _) = crate::command::workflow_host_command_logic::digests()
-        .remove(capability)
-        .unwrap();
-    let current = crate::command::workflow_host_command_logic::versions()[capability];
+    save_bound(
+        store,
+        run_id,
+        (capability, id, sequence, status),
+        version,
+        findings,
+        receipt,
+        serde_json::Value::Null,
+    );
+}
+
+/// [`save`] with the subjects a landing bound. Every record carries an
+/// earlier pinned digest and build: a freeze judged under the current
+/// version replays whatever its digest (Issue 361 never compares it), so
+/// only a version bump makes it stale.
+pub(super) fn save_bound(
+    store: &WorkflowStore,
+    run_id: &str,
+    (capability, id, sequence, status): (&str, &str, Option<u64>, &str),
+    version: u32,
+    findings: serde_json::Value,
+    receipt: serde_json::Value,
+    subjects: serde_json::Value,
+) {
     let interrupted = findings.is_null();
-    let data = serde_json::json!({
+    let mut data = serde_json::json!({
         "exitCode": if interrupted { serde_json::Value::Null } else { 0.into() },
         "stdout": "", "stderr": "", "stdoutBytes": 0, "stderrBytes": 0,
         "timedOut": false, "interrupted": interrupted,
@@ -92,13 +112,12 @@ fn save(
             serde_json::json!({"satisfied": receipt.is_object(), "summary": "fixture"})
         },
         "logicVersion": version,
-        "logicDigest": if version == current { digest } else { "earlier-logic-digest".into() },
-        "logicBuild": if version == current {
-            crate::command::workflow_host_command_logic::THIS_BUILD
-        } else {
-            "earlier-build"
-        }
+        "logicDigest": "earlier-logic-digest",
+        "logicBuild": "earlier-build"
     });
+    if !subjects.is_null() {
+        data["subjects"] = subjects;
+    }
     let mut record = serde_json::json!({
         "run_id": run_id,
         "call": {"id": id, "method": "hostCommand",
@@ -116,7 +135,7 @@ fn save(
 
 /// Acceptance, then skeleton, each frozen and recorded with its real receipt;
 /// `pin_link` overrides the skeleton receipt's prior pin digest.
-async fn chained_run(
+pub(super) async fn chained_run(
     versions_behind: u32,
     pin_link: Option<&str>,
 ) -> (tempfile::TempDir, WorkflowStore, String, String) {
@@ -177,7 +196,7 @@ async fn chained_run(
         project.path(),
         &task_root,
         &acceptance_digest,
-        &["TASK-X-010"],
+        &["TASK-X-010", "TASK-X-011"],
     );
     let link = pin_link.map_or(acceptance_pin, str::to_string);
     let skeleton = receipt(
@@ -217,7 +236,7 @@ async fn chained_run(
     (project, store, run_id, state.identity.prd_identity)
 }
 
-async fn dry_run(project: &tempfile::TempDir, run_id: &str) -> String {
+pub(super) async fn dry_run(project: &tempfile::TempDir, run_id: &str) -> String {
     crate::command::workflow_decompose::dry_run_fixed_decomposition(
         project.path(),
         run_id,
@@ -248,6 +267,7 @@ async fn pin_rewritten_by_the_skeleton_freeze_still_verifies_both_phases() {
     let capabilities: Vec<&str> = output
         .lines()
         .filter_map(|line| line.split(" capability=").nth(1))
+        .filter_map(|tail| tail.split(' ').next())
         .collect();
     assert_eq!(
         capabilities.first().copied(),
@@ -277,12 +297,15 @@ async fn pin_write_no_recorded_publication_explains_keeps_the_chain() {
 }
 
 #[tokio::test]
-async fn reusable_freeze_on_the_same_logic_keeps_the_chain() {
+async fn digest_only_repin_replays_the_recorded_freeze() {
     let (project, _store, run_id, _) = chained_run(0, None).await;
     let output = dry_run(&project, &run_id).await;
     assert!(
-        output.contains("frozen_chain_override acceptance=keep reason=judged attempt acceptance-judged is reusable by this build"),
+        output.contains("frozen_chain_override acceptance=keep reason=judged attempt acceptance-judged replays under this build's logic"),
         "{output}"
     );
     assert!(!output.contains("capability=verify-frozen"), "{output}");
 }
+
+#[path = "workflow_decomposition_upgrade_live_frozen_resume_tests.rs"]
+mod production_resume;

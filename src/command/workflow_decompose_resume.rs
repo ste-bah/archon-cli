@@ -1,5 +1,4 @@
 use super::*;
-use crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts;
 
 #[path = "workflow_decompose_resume_dry_run.rs"]
 mod dry_run;
@@ -312,9 +311,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &store,
         run_id,
         run.generation,
-        &project_root,
-        &prd_path,
-        &task_root,
+        (&project_root, &prd_path, &task_root),
+        &catalog,
         false,
     )?;
     let transitions = upgrade::record_upgrade(
@@ -324,8 +322,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &state.identity,
         &current_identity,
     )?;
-    let resume_frozen_chain = resume_chain.argument;
-    for line in (transitions.iter().flat_map(|t| t.summary())).chain(resume_chain.lines) {
+    for line in transitions.iter().flat_map(|t| t.summary()) {
         ui_sink
             .emit(WorkflowUiEvent::Text(line))
             .await
@@ -339,24 +336,25 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &log_path,
         &criteria,
         &prd_requirement_texts,
-        Some(&resume_frozen_chain),
+        Some(&resume_chain.argument),
     )?;
-    let script_seed = crate::command::workflow_decompose_seed::resume_script_seed(
-        &store,
-        run_id,
-        &current_identity,
-        &criteria,
-        &prd_requirement_texts,
-        &resume_frozen_chain,
-        seed.as_ref(),
-    )?;
-    let script_seed = script_seed.as_ref();
-    let mut seeded_arguments =
-        crate::command::workflow_decompose_seed::seeded_arguments(&expected_arguments, script_seed);
-    // This decision applies on every resume, even without a harness seed or
-    // when an older seed carries a stale frozen-chain value.
-    seeded_arguments["frozenChain"] = resume_frozen_chain;
-    let script_arguments = script_arguments_with_prd_requirement_texts(&seeded_arguments, prd_text);
+    let (script_arguments, script_seed) =
+        crate::command::workflow_decompose_seed::resume_script_arguments(
+            &store,
+            run_id,
+            &current_identity,
+            (&criteria, &prd_requirement_texts),
+            resume_chain.argument,
+            seed.as_ref(),
+            (&expected_arguments, prd_text),
+            false,
+        )?;
+    for line in resume_chain.lines.into_iter().chain([script_seed.line]) {
+        ui_sink
+            .emit(WorkflowUiEvent::Text(line))
+            .await
+            .map_err(|error| anyhow!("reporting the resume decision: {error}"))?;
+    }
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,
         Some(&script_arguments),

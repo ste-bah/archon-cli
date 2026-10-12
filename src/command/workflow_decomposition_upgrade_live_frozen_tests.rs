@@ -173,18 +173,6 @@ async fn interrupted_freeze_attempt_keeps_last_verdict_chain_on_production_resum
     .unwrap();
     assert_eq!(effective["acceptance"], true, "{effective}");
     assert_eq!(effective["skeleton"], true, "{effective}");
-    let floors = crate::command::workflow_decompose_seed::resume_script_seed(
-        &store,
-        &run_id,
-        &state.identity,
-        &std::collections::BTreeMap::new(),
-        &std::collections::BTreeMap::new(),
-        &effective,
-        None,
-    )
-    .unwrap()
-    .unwrap();
-    assert_eq!(floors.author_ordinals["acceptance"], 7);
 
     let before = [
         archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE,
@@ -218,6 +206,14 @@ async fn interrupted_freeze_attempt_keeps_last_verdict_chain_on_production_resum
         "{error:#}"
     );
     assert_eq!(resume.builds.load(Ordering::SeqCst), 1);
+    // What reached the script: the live chain and the ordinal floors.
+    let script = crate::command::workflow_decompose_seed::resume::capture::take().unwrap();
+    assert_eq!(script["frozenChain"]["acceptance"], true, "{script}");
+    assert_eq!(script["frozenChain"]["skeleton"], true, "{script}");
+    assert_eq!(
+        script["phaseSeed"]["author_ordinals"]["acceptance"], 7,
+        "{script}"
+    );
     assert_eq!(
         before,
         [

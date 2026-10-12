@@ -30,7 +30,9 @@ impl OverrideDecision {
     }
 }
 
-pub(super) fn host_command_records(
+/// This run's call records in attempt order: host commands, and the author
+/// replies a body landing is attributed through.
+pub(super) fn call_records(
     store: &archon_workflow::WorkflowStore,
     run_id: &str,
 ) -> Result<Vec<WorkflowV2CallRecord>> {
@@ -38,10 +40,74 @@ pub(super) fn host_command_records(
         archon_workflow::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"))
             .load_call_records()?
             .into_iter()
-            .filter(|record| record.call.method == WorkflowV2HostMethod::HostCommand)
+            .filter(|record| {
+                matches!(
+                    record.call.method,
+                    WorkflowV2HostMethod::HostCommand | WorkflowV2HostMethod::Agent
+                )
+            })
             .collect();
     records.sort_by(attempt_order);
     Ok(records)
+}
+
+/// Whether `record` is a `land-task-body` attempt for the frozen subject
+/// `subject`: it bound that subject, or its candidate is a reply of one of
+/// that subject's author calls (a refusal binds nothing, yet it judged them).
+pub(super) fn lands_body(
+    records: &[WorkflowV2CallRecord],
+    subject: &archon_workflow::HostCommandSubject,
+) -> impl Fn(&WorkflowV2CallRecord) -> bool {
+    let prefix = format!("body-{}-author-", subject.task_id);
+    let replies: std::collections::BTreeSet<String> = records
+        .iter()
+        .filter(|record| {
+            record.call.method == WorkflowV2HostMethod::Agent
+                && record
+                    .call
+                    .id
+                    .strip_prefix(&prefix)
+                    .is_some_and(|ordinal| ordinal.parse::<u64>().is_ok())
+        })
+        .filter_map(|record| record.result.data["content"].as_str())
+        .filter(|content| !content.is_empty())
+        .map(str::to_string)
+        .collect();
+    let file_name = subject.file_name.clone();
+    move |record| {
+        capability_of(record) == Some(LAND_TASK_BODY)
+            && (record.result.data["subjects"]
+                .as_array()
+                .is_some_and(|bound| {
+                    bound
+                        .iter()
+                        .any(|bound| bound["fileName"].as_str() == Some(file_name.as_str()))
+                })
+                || request_stdin(record).is_some_and(|stdin| replies.contains(stdin)))
+    }
+}
+
+const LAND_TASK_BODY: &str = "land-task-body";
+
+/// The candidate a host command was asked with; a repeat occurrence keeps
+/// its request beside the occurrence ordinal.
+fn request_stdin(record: &WorkflowV2CallRecord) -> Option<&str> {
+    let options = &record.call.options;
+    options
+        .host_command
+        .as_ref()
+        .and_then(|request| request.stdin.as_deref())
+        .or_else(|| {
+            options
+                .extra
+                .get("stdin")
+                .and_then(serde_json::Value::as_str)
+        })
+}
+
+/// Whether `record` is an attempt of host command `capability`.
+pub(super) fn runs(capability: &str) -> impl Fn(&WorkflowV2CallRecord) -> bool + '_ {
+    move |record| capability_of(record) == Some(capability)
 }
 
 fn capability_of(record: &WorkflowV2CallRecord) -> Option<&str> {
@@ -53,27 +119,40 @@ fn capability_of(record: &WorkflowV2CallRecord) -> Option<&str> {
         .map(|request| request.command_id.as_str())
 }
 
+/// A receipt names the call's content identity; a repeat occurrence's record
+/// carries that identity with its ordinal.
+fn receipt_bound_to(receipt: &PublicationReceiptV1, record: &WorkflowV2CallRecord) -> bool {
+    super::super::workflow_host_command_occurrence::record_identity_matches(
+        record,
+        &receipt.call_id,
+    )
+}
+
 fn committed_receipt(record: &WorkflowV2CallRecord) -> bool {
     record.result.data["publicationReceipt"].is_object()
 }
 
-/// A verdict-less interruption does not replace the last judged attempt.
-/// `records` are this run's host-command records in attempt order.
+/// Whether the subject whose attempts `belongs` selects may skip to its
+/// frozen path. A verdict-less interruption does not replace the last judged
+/// attempt. `records` are [`call_records`].
 pub(super) fn freeze_override_decision(
     records: &[WorkflowV2CallRecord],
-    capability: &str,
+    catalog: &archon_workflow::CommandCapabilityCatalog,
+    label: &str,
+    belongs: impl Fn(&WorkflowV2CallRecord) -> bool,
 ) -> Result<OverrideDecision> {
     let attempts: Vec<(usize, &WorkflowV2CallRecord)> = records
         .iter()
         .enumerate()
-        .filter(|(_, record)| capability_of(record) == Some(capability))
+        .filter(|(_, record)| belongs(record))
         .collect();
     let Some(judged) = attempts.iter().rposition(|(_, record)| has_verdict(record)) else {
         return Ok(OverrideDecision::keep(format!(
-            "no {capability} attempt with a gate verdict ({} attempt(s) recorded)",
+            "no {label} attempt with a gate verdict ({} attempt(s) recorded)",
             attempts.len()
         )));
     };
+    let capability = capability_of(attempts[judged].1).unwrap_or_default();
     let (position, record) = attempts[judged];
     let id = &record.call.id;
     if let Some((_, later)) = attempts[judged + 1..]
@@ -108,7 +187,7 @@ pub(super) fn freeze_override_decision(
     };
     let receipt: PublicationReceiptV1 = serde_json::from_value(receipt_value.clone())
         .context("parsing frozen-chain publication receipt")?;
-    if receipt.command_id != capability || receipt.call_id != record.call.id {
+    if receipt.command_id != capability || !receipt_bound_to(&receipt, record) {
         return Ok(OverrideDecision::keep(format!(
             "judged attempt {id} receipt names command {} call {}",
             receipt.command_id, receipt.call_id
@@ -125,7 +204,7 @@ pub(super) fn freeze_override_decision(
             serde_json::from_value(later.result.data["publicationReceipt"].clone())
                 .with_context(|| format!("parsing publication receipt of {}", later.call.id))?;
         if next.schema_version == archon_workflow::PUBLICATION_RECEIPT_SCHEMA_VERSION
-            && next.call_id == later.call.id
+            && receipt_bound_to(&next, later)
             && capability_of(later) == Some(next.command_id.as_str())
         {
             successors.push(next);
@@ -139,7 +218,7 @@ pub(super) fn freeze_override_decision(
             )));
         }
     };
-    let mut decision = freeze_outcome_decision(data, capability, id)?;
+    let mut decision = freeze_outcome_decision(record, catalog)?;
     if !carried.is_empty() {
         decision.reason.push_str(&format!(
             "; rewritten by later publications: {}",
@@ -230,12 +309,15 @@ pub(super) fn freeze_record_status_allows_override(
     !invalidated && matches!(status, WorkflowV2Status::Accepted)
 }
 
-/// A clean judged outcome flips only when this build cannot reuse it.
+/// A clean judged outcome flips only when this build's executor would not
+/// replay it: the executor's own logic test, so a re-pin without a version
+/// bump (or a build change for a capability not bound to its build) replays.
 pub(super) fn freeze_outcome_decision(
-    outcome: &serde_json::Value,
-    capability: &str,
-    id: &str,
+    record: &WorkflowV2CallRecord,
+    catalog: &archon_workflow::CommandCapabilityCatalog,
 ) -> Result<OverrideDecision> {
+    let id = &record.call.id;
+    let outcome = &record.result.data;
     let findings = outcome
         .get("gateEnvelope")
         .and_then(|envelope| envelope.get("policy_findings"))
@@ -254,37 +336,37 @@ pub(super) fn freeze_outcome_decision(
         }
         Some(_) => {}
     }
-    let current_version = super::super::workflow_host_command_logic::versions()
+    use super::super::workflow_host_command_logic as logic;
+    let capability = capability_of(record).unwrap_or_default();
+    let (versions, digests) = (logic::versions(), logic::digests());
+    let holds = super::super::workflow_host_command_exec::identity::recorded_logic_holds(
+        catalog,
+        &versions,
+        &digests,
+        logic::THIS_BUILD,
+        record,
+    )?;
+    let current = versions
         .get(capability)
         .copied()
         .ok_or_else(|| anyhow!("host command capability '{capability}' has no logic version"))?;
-    let (current_digest, build_bound) = super::super::workflow_host_command_logic::digests()
-        .remove(capability)
-        .ok_or_else(|| anyhow!("host command capability '{capability}' has no logic digest"))?;
-    let recorded_version = outcome
-        .get("logicVersion")
-        .and_then(serde_json::Value::as_u64);
-    let version_stale = recorded_version != Some(u64::from(current_version));
-    let digest_stale = outcome
-        .get("logicDigest")
-        .and_then(serde_json::Value::as_str)
-        .is_none_or(|digest| digest != current_digest);
-    let build_stale = build_bound
-        && outcome
-            .get("logicBuild")
-            .and_then(serde_json::Value::as_str)
-            .is_none_or(|build| build != super::super::workflow_host_command_logic::THIS_BUILD);
-    let versions = format!(
-        "logicVersion recorded={} current={current_version} digest_stale={digest_stale} build_stale={build_stale}",
-        recorded_version.map_or_else(|| "none".to_string(), |version| version.to_string())
+    let stamp = |key: &str| {
+        outcome
+            .get(key)
+            .map_or_else(|| "none".to_string(), |value| value.to_string())
+    };
+    let logic_text = format!(
+        "logicVersion recorded={} current={current} build_bound={}",
+        stamp(logic::LOGIC_VERSION_STAMP),
+        digests.get(capability).is_some_and(|(_, bound)| *bound)
     );
-    Ok(if version_stale || digest_stale || build_stale {
-        OverrideDecision::verify(format!(
-            "judged attempt {id} accepted with 0 findings, published, matches disk; not reusable by this build ({versions})"
+    Ok(if holds {
+        OverrideDecision::keep(format!(
+            "judged attempt {id} replays under this build's logic ({logic_text})"
         ))
     } else {
-        OverrideDecision::keep(format!(
-            "judged attempt {id} is reusable by this build ({versions})"
+        OverrideDecision::verify(format!(
+            "judged attempt {id} accepted with 0 findings, published, matches disk; this build's logic would not replay it ({logic_text})"
         ))
     })
 }

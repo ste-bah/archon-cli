@@ -14,48 +14,41 @@ use super::{FrozenChainSnapshot, FrozenStage, frozen_chain_snapshot, verify_froz
 #[test]
 fn frozen_override_requires_stale_logic_and_a_clean_landing() {
     let versions = super::super::workflow_host_command_logic::versions();
-    let digests = super::super::workflow_host_command_logic::digests();
     let version = versions["freeze-acceptance"];
-    let digest = &digests["freeze-acceptance"].0;
-    let clean = serde_json::json!({
+    let catalog =
+        super::super::workflow_host_command_catalog::fixed_decomposition_catalog("fixture")
+            .unwrap();
+    let decide = |data: serde_json::Value| {
+        let record: archon_workflow::WorkflowV2CallRecord =
+            serde_json::from_value(serde_json::json!({
+                "call": {"id": "call-1", "method": "hostCommand",
+                         "options": {"host_command": {"commandId": "freeze-acceptance"}}},
+                "attempt": 1, "input_hash": "fixture", "status": "accepted",
+                "result": {"status": "accepted", "summary": "fixture", "data": data}
+            }))
+            .unwrap();
+        super::freeze_outcome_decision(&record, &catalog).unwrap()
+    };
+    // The executor's own test: same version replays, whatever the digest.
+    let repinned = decide(serde_json::json!({
         "gateEnvelope": {"policy_findings": []},
         "logicVersion": version,
-        "logicDigest": digest,
-    });
-    assert!(
-        !super::freeze_outcome_decision(&clean, "freeze-acceptance", "call-1")
-            .unwrap()
-            .verify
-    );
-
-    let stale = serde_json::json!({
+        "logicDigest": "an-earlier-pin",
+    }));
+    assert!(!repinned.verify, "{}", repinned.reason);
+    assert!(repinned.reason.contains("replays under this build's logic"));
+    let stale = decide(serde_json::json!({
         "gateEnvelope": {"policy_findings": []},
         "logicVersion": version.saturating_sub(1),
-        "logicDigest": digest,
-    });
-    assert!(
-        super::freeze_outcome_decision(&stale, "freeze-acceptance", "call-1")
-            .unwrap()
-            .verify
-    );
-
-    let open = serde_json::json!({
+    }));
+    assert!(stale.verify, "{}", stale.reason);
+    let open = decide(serde_json::json!({
         "gateEnvelope": {"policy_findings": [{"text": "repair remains open"}]},
         "logicVersion": version.saturating_sub(1),
-        "logicDigest": digest,
-    });
-    assert!(
-        !super::freeze_outcome_decision(&open, "freeze-acceptance", "call-1")
-            .unwrap()
-            .verify
-    );
-
-    let no_findings_record = serde_json::json!({"logicVersion": version.saturating_sub(1)});
-    assert!(
-        !super::freeze_outcome_decision(&no_findings_record, "freeze-acceptance", "call-1")
-            .unwrap()
-            .verify
-    );
+    }));
+    assert!(!open.verify);
+    assert!(open.reason.contains("1 open finding(s)"));
+    assert!(!decide(serde_json::json!({"logicVersion": version.saturating_sub(1)})).verify);
     assert!(!super::freeze_record_status_allows_override(
         archon_workflow::WorkflowV2Status::NeedsReview,
         false,

@@ -42,13 +42,15 @@ pub(crate) fn resume_chain_argument(
     task_root: &Path,
     read_only: bool,
 ) -> Result<serde_json::Value> {
+    let catalog = crate::command::workflow_host_command_catalog::fixed_decomposition_catalog(
+        &crate::command::workflow_test_seams::binary_revision(),
+    )?;
     resume_chain_decision(
         store,
         run_id,
         generation,
-        project_root,
-        prd_path,
-        task_root,
+        (project_root, prd_path, task_root),
+        &catalog,
         read_only,
     )
     .map(|decision| decision.argument)
@@ -57,13 +59,13 @@ pub(crate) fn resume_chain_argument(
 /// The launch arguments remain identity-bound. This separate record pins the
 /// live snapshot for one executor generation, including runs with no seed;
 /// the override decision and its per-phase reasons are derived on each call.
+/// `catalog` is the one the run's executor judges reuse with.
 pub(crate) fn resume_chain_decision(
     store: &WorkflowStore,
     run_id: &str,
     generation: u64,
-    project_root: &Path,
-    prd_path: &Path,
-    task_root: &Path,
+    (project_root, prd_path, task_root): (&Path, &Path, &Path),
+    catalog: &archon_workflow::CommandCapabilityCatalog,
     read_only: bool,
 ) -> Result<ResumeChainDecision> {
     let relative = resume_chain_path(generation);
@@ -120,43 +122,80 @@ pub(crate) fn resume_chain_decision(
     // the freeze call itself cannot be replayed by this build. In particular,
     // never infer a new phase boundary from the task root alone: normal
     // same-build resumes must replay the exact repair loop they paused in.
-    let records = freeze_override::host_command_records(store, run_id)?;
+    let records = freeze_override::call_records(store, run_id)?;
     let decide = |frozen: bool, capability: &str| -> Result<OverrideDecision> {
         if frozen {
-            freeze_override_decision(&records, capability)
+            freeze_override_decision(
+                &records,
+                catalog,
+                capability,
+                freeze_override::runs(capability),
+            )
         } else {
             Ok(OverrideDecision::keep("not frozen on disk"))
         }
     };
     let acceptance = decide(snapshot.acceptance, "freeze-acceptance")?;
-    let mut skeleton = decide(snapshot.skeleton, "freeze-skeleton")?;
     // The launcher consumes a chain, so later frozen phases cannot survive a
     // missing earlier phase.
-    if skeleton.verify && !acceptance.verify {
-        skeleton = OverrideDecision::keep(format!(
-            "acceptance is kept and the chain is prefix-closed; own decision: {}",
-            skeleton.reason
+    let after = |earlier: &OverrideDecision, name: &str, own: OverrideDecision| {
+        if own.verify && !earlier.verify {
+            OverrideDecision::keep(format!(
+                "{name} is kept and the chain is prefix-closed; own decision: {}",
+                own.reason
+            ))
+        } else {
+            own
+        }
+    };
+    let skeleton = after(
+        &acceptance,
+        "acceptance",
+        decide(snapshot.skeleton, "freeze-skeleton")?,
+    );
+    let mut lines: Vec<String> = [("acceptance", &acceptance), ("skeleton", &skeleton)]
+        .into_iter()
+        .map(|(phase, decision)| override_line(phase, decision))
+        .collect();
+    // A body on disk is frozen only as its last judged landing left it: in
+    // observe mode a landing publishes with findings its loop still repairs.
+    let mut bodies = Vec::new();
+    for subject in &snapshot.subjects {
+        if !snapshot.bodies.contains(&subject.file_name) {
+            continue;
+        }
+        let own = freeze_override_decision(
+            &records,
+            catalog,
+            &format!("land-task-body for {}", subject.file_name),
+            freeze_override::lands_body(&records, subject),
+        )?;
+        let decision = after(&skeleton, "skeleton", own);
+        lines.push(override_line(
+            &format!("body:{}", subject.file_name),
+            &decision,
         ));
+        if decision.verify {
+            bodies.push(subject.file_name.clone());
+        }
     }
     let mut effective = snapshot;
     effective.acceptance = acceptance.verify;
     effective.skeleton = skeleton.verify;
+    effective.bodies = bodies;
     if !effective.skeleton {
         effective.subjects.clear();
-        effective.bodies.clear();
     }
-    let lines = [("acceptance", &acceptance), ("skeleton", &skeleton)]
-        .into_iter()
-        .map(|(phase, decision)| {
-            format!(
-                "frozen_chain_override {phase}={} reason={}",
-                if decision.verify { "verify" } else { "keep" },
-                decision.reason
-            )
-        })
-        .collect();
     Ok(ResumeChainDecision {
         argument: effective.to_argument(),
         lines,
     })
+}
+
+fn override_line(phase: &str, decision: &OverrideDecision) -> String {
+    format!(
+        "frozen_chain_override {phase}={} reason={}",
+        if decision.verify { "verify" } else { "keep" },
+        decision.reason
+    )
 }

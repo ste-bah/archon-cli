@@ -280,7 +280,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 4,
         sources: &[GATE, CONTRACT, VERIFY],
         // #439 re-pin only: resume phase selection does not change verification verdicts.
-        sources_digest: "a017c1a314c8b79a90f842ad4ee6e48925e35e46ecaaa6ac3e7288530f859ba2",
+        sources_digest: "a8eb20622766b9619aca5eddfea78130e6854c531f56e81a2684f7e7281a6d10",
         build_bound: true,
     },
     CapabilityLogic {
@@ -289,7 +289,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
         // #439 re-pin only: resume phase selection does not change verification verdicts.
-        sources_digest: "a017c1a314c8b79a90f842ad4ee6e48925e35e46ecaaa6ac3e7288530f859ba2",
+        sources_digest: "a8eb20622766b9619aca5eddfea78130e6854c531f56e81a2684f7e7281a6d10",
         build_bound: true,
     },
 ];
