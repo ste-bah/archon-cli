@@ -224,7 +224,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 re-pin only: the fidelity critic's store and reply schema are in this closure; freeze never asks the critic.
         version: 12,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "5c5df7fcb1d980cbf4c25e98811aa6b1d13bd2d9b07942fcc9cb3270497353fd",
+        sources_digest: "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -233,7 +233,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 re-pin only, as freeze-acceptance.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "5c5df7fcb1d980cbf4c25e98811aa6b1d13bd2d9b07942fcc9cb3270497353fd",
+        sources_digest: "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -248,7 +248,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 8: #434 a fidelity gap blocks only its weakest task's body; true verdicts quote a checked anchor and are reused per obligation.
         version: 8,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "6778a29afce5be9fde9fb0383911c7cf770949aaa90be81cb05090a1bf6f07be",
+        sources_digest: "c3a8394a67a331273866fb33cdcd6b1f172cebc054ec38d244e803fdea4080b5",
         build_bound: false,
     },
     CapabilityLogic {
@@ -261,7 +261,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 7: #434 true fidelity verdicts quote a checked anchor and are reused per obligation over byte-identical cluster texts.
         version: 7,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "6778a29afce5be9fde9fb0383911c7cf770949aaa90be81cb05090a1bf6f07be",
+        sources_digest: "c3a8394a67a331273866fb33cdcd6b1f172cebc054ec38d244e803fdea4080b5",
         build_bound: false,
     },
     CapabilityLogic {
@@ -270,7 +270,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
         // #434 re-pin only: trace never asks the fidelity critic.
-        sources_digest: "94cf8997b1bb0784d0d3a2de8fd1edd57a2dbc6d0400d583f22ffcdb63679c4d",
+        sources_digest: "13e87121d9ffc327be565674aff3d9ab43a8095de458bc579e9e34a533dff429",
         build_bound: true,
     },
     CapabilityLogic {
@@ -280,7 +280,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 4,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 re-pin only: verify never asks the fidelity critic.
-        sources_digest: "b93a354868cdee593ece3d2f804e6def4a8fe3251d3e36f82d7e30a7befe8fd2",
+        sources_digest: "60c64202dc0329025d8631e605de0e89bb09f02d9ca9a8a8513827b3d592f69d",
         build_bound: true,
     },
     CapabilityLogic {
@@ -289,7 +289,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 re-pin only: verify never asks the fidelity critic.
-        sources_digest: "b93a354868cdee593ece3d2f804e6def4a8fe3251d3e36f82d7e30a7befe8fd2",
+        sources_digest: "60c64202dc0329025d8631e605de0e89bb09f02d9ca9a8a8513827b3d592f69d",
         build_bound: true,
     },
 ];
