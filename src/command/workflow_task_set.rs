@@ -23,6 +23,9 @@ use archon_workflow::task_skeleton::{
 
 use crate::command::workflow_gate::{GateFinding, GateId};
 
+#[path = "workflow_acceptance_reply_blocks.rs"]
+pub(crate) mod acceptance_reply_blocks;
+
 #[path = "workflow_acceptance_coverage_gate.rs"]
 mod coverage_gate;
 #[path = "workflow_task_set_findings.rs"]

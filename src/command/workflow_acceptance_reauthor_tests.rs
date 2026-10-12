@@ -15,6 +15,80 @@ fn ids(list: &[&str]) -> BTreeSet<String> {
     list.iter().map(|id| id.to_string()).collect()
 }
 
+#[test]
+fn reauthor_accepts_shared_check_blocks_and_refuses_malformed_block_forms() {
+    let set = frozen_set(&[("AC-F-001", "jq -e '.a == true' out.json", false)]);
+    let contract = set.contract();
+    let frozen = &contract.acceptance[0];
+    let block_reply =
+        |check: &str, body: &str| format!("{{\"id\":\"AC-F-001\",\"check\":{check}}}{body}");
+    let block = block_reply(
+        r#"{"kind":"command","command_block":true,"cwd":"project_root"}"#,
+        "\n```check\njq -e '.a == true and .b == true' out.json\n```",
+    );
+    let inline = r#"{"id":"AC-F-001","check":{"kind":"command","command":"jq -e '.a == true and .b == true' out.json","cwd":"project_root"}}"#;
+    let from_block = candidate_entry(&block, frozen).expect("check block is resolved");
+    let from_inline = candidate_entry(inline, frozen).expect("inline command remains accepted");
+    assert_eq!(from_block.check, from_inline.check);
+    let unclosed_check_with_json = format!(
+        "```json\n{{\"id\":\"AC-F-001\",\"check\":{{\"kind\":\"command\",\"command_block\":true,\"cwd\":\"project_root\"}}}}\n```\n```check\nrun"
+    );
+    let expected_refusal = "the ```check block opened at line 4 is never closed (the reply may have been cut off); close every block with a line that is exactly ```";
+    assert_eq!(
+        candidate_entry(&unclosed_check_with_json, frozen).unwrap_err(),
+        expected_refusal
+    );
+    let fenced_json = block.replace(
+        "{\"id\":\"AC-F-001\",\"check\":",
+        "```json\n{\"id\":\"AC-F-001\",\"check\":",
+    );
+    let fenced_json = fenced_json.replace("}\n```check", "}\n```\n```check");
+    assert_eq!(
+        candidate_entry(&fenced_json, frozen)
+            .expect("fenced JSON and check block are resolved")
+            .check,
+        from_inline.check
+    );
+
+    let cases = [
+        (
+            block_reply(
+                r#"{"kind":"command","command_block":true,"cwd":"project_root"}"#,
+                "\n```check\nrun",
+            ),
+            "never closed",
+        ),
+        (
+            block_reply(
+                r#"{"kind":"command","command_block":true,"cwd":"project_root"}"#,
+                "\n```check\na\n```\n```check\nb\n```",
+            ),
+            "more than one check block",
+        ),
+        (
+            block_reply(
+                r#"{"kind":"command","command":"inline","command_block":true,"cwd":"project_root"}"#,
+                "\n```check\nrun\n```",
+            ),
+            "returned both check.command and check.command_block",
+        ),
+        (
+            block_reply(
+                r#"{"kind":"command","command_block":true,"cwd":"project_root"}"#,
+                "",
+            ),
+            "check.command_block is true but no check block is present",
+        ),
+    ];
+    for (reply, expected) in cases {
+        let error = candidate_entry(&reply, frozen).expect_err("malformed block is refused");
+        assert!(
+            error.contains(expected),
+            "expected {expected:?}, got {error:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_refuted_check_is_reauthored_and_rejudged_and_nothing_else_changes() {
     let set = frozen_set(&[
