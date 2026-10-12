@@ -124,6 +124,7 @@ async fn huge_stdout_does_not_kill_child_and_is_spilled_in_full() {
         .await
         .expect("output size must not fail the call");
     assert_eq!(output.exit_code, Some(9));
+    assert_eq!(output.stdout_bytes, 6 * 1024 * 1024);
     assert_eq!(
         std::fs::read(output.stdout_path.unwrap()).unwrap(),
         vec![b'x'; 6 * 1024 * 1024]

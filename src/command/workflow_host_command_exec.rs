@@ -463,7 +463,8 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             })?;
             // Through the anchor, after the lock: a failure is recorded.
             finish::remove_published(&staging, &receipt, &pause, &secrets);
-            let (stdout, stdout_bytes) = append_host_note(stdout, &stamped_fields);
+            let (stdout, stdout_bytes) =
+                append_host_note(stdout, &stamped_fields, observed.stdout_bytes);
             Ok(HostCommandResult {
                 exit_code: observed.exit_code,
                 stdout,

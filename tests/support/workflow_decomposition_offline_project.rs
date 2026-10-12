@@ -36,7 +36,9 @@ impl Drop for TestProject {
                 let _ = temp.keep();
             }
         }
-        let _ = fs::remove_dir_all(harness);
+        if !std::thread::panicking() {
+            let _ = fs::remove_dir_all(harness);
+        }
     }
 }
 

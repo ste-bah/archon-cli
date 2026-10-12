@@ -46,6 +46,7 @@ fn freeze_outputs_are_excluded_from_scratch_project_inputs() {
         assert!(excluded(&path, &excludes), "{}", path.display());
     }
     assert!(!excluded(Path::new("tasks/set/input.json"), &excludes));
+    assert!(excluded(Path::new("target/debug/build/output"), &excludes));
     assert!(excluded(
         Path::new("tasks/set/TASK-EXAMPLE-001.md"),
         &excludes
@@ -129,6 +130,78 @@ fn pipeline_task_root_outputs_do_not_change_input_digest() {
     assert_ne!(
         after_project_change,
         digest(&project, Path::new(""), &excludes)
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn project_input_copy_keeps_archon_data_and_omits_harness_and_pipeline_outputs() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let task_root = project.join("tasks/set");
+    let data = project.join(".archon/project/data/registry.json");
+    std::fs::create_dir_all(data.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(&task_root).unwrap();
+    std::fs::create_dir_all(project.join(".archon/logs")).unwrap();
+    std::fs::write(&data, b"project data").unwrap();
+    std::fs::write(
+        project.join(".archon/logs/workflow-gates-shadow.jsonl"),
+        b"harness log",
+    )
+    .unwrap();
+    std::fs::write(project.join(".archon/learning-state.db"), b"harness db").unwrap();
+    std::fs::write(task_root.join("user-notes.txt"), b"task input").unwrap();
+    std::fs::write(task_root.join("TASK-EXAMPLE-001.md"), b"pipeline body").unwrap();
+    std::fs::write(
+        task_root.join(crate::task_set_contract::TASK_SKELETON_FILE),
+        br#"{"schema_version":1,"acceptance_digest":"d","tasks":[{"task_id":"TASK-EXAMPLE-001","file_name":"TASK-EXAMPLE-001.md"}]}"#,
+    )
+    .unwrap();
+    let policy = ScratchPolicy {
+        repository: temp.path().join("repository"),
+        project: project.clone(),
+        task_root: task_root.clone(),
+        scratch_parent: temp.path().join("scratch"),
+        project_inputs: vec![PathBuf::from(".archon"), PathBuf::from("tasks/set")],
+        project_input_excludes: Vec::new(),
+        combined: false,
+        toolchain_path: String::new(),
+        environment: BTreeMap::new(),
+        environment_allowlist: Vec::new(),
+        cargo_seed: None,
+        timeout_secs: 1,
+        output_bytes: 1,
+        scratch_bytes: 1,
+        build_cache: None,
+    };
+    let excludes = project_excludes(&policy).unwrap();
+    let destination = temp.path().join("copy");
+    std::fs::create_dir_all(&destination).unwrap();
+    let mut remaining = u64::MAX;
+    for input in &policy.project_inputs {
+        copy_project(&project, input, &destination, &excludes, &mut remaining).unwrap();
+    }
+
+    assert_eq!(
+        std::fs::read(destination.join(".archon/project/data/registry.json")).unwrap(),
+        b"project data"
+    );
+    assert!(
+        !destination
+            .join(".archon/logs/workflow-gates-shadow.jsonl")
+            .exists()
+    );
+    assert!(!destination.join(".archon/learning-state.db").exists());
+    assert_eq!(
+        std::fs::read(destination.join("tasks/set/user-notes.txt")).unwrap(),
+        b"task input"
+    );
+    assert!(!destination.join("tasks/set/TASK-EXAMPLE-001.md").exists());
+    assert!(
+        !destination
+            .join("tasks/set")
+            .join(crate::task_set_contract::TASK_SKELETON_FILE)
+            .exists()
     );
 }
 

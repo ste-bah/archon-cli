@@ -3,6 +3,17 @@ use super::*;
 use std::io::Read;
 
 pub(crate) fn excluded(path: &Path, excludes: &[PathBuf]) -> bool {
+    acceptance_input_excluded(path, excludes, None)
+}
+
+/// One project-relative predicate for inputs copied, audited, or digested by
+/// acceptance checks. `task_root` is project-relative; pass an empty path when
+/// copying the task root itself.
+pub(crate) fn acceptance_input_excluded(
+    path: &Path,
+    excludes: &[PathBuf],
+    task_root: Option<&Path>,
+) -> bool {
     path.starts_with(Path::new(".archon").join(crate::task_set_lineage::PIN_STORE_NAMESPACE))
         || excludes.iter().any(|e| path.starts_with(e))
         || matches!(
@@ -14,11 +25,30 @@ pub(crate) fn excluded(path: &Path, excludes: &[PathBuf]) -> bool {
                     | "config.json"
                     | ".env"
                     | ".archon/config.toml"
+                    | "target"
             )
         )
         || path.starts_with(".archon/workflows")
         || acceptance_harness_run_state(path)
+        || task_root.is_some_and(|root| {
+            path.strip_prefix(root)
+                .ok()
+                .is_some_and(task_root_pipeline_output)
+        })
         || path.starts_with(".git")
+}
+
+fn task_root_pipeline_output(path: &Path) -> bool {
+    path == Path::new(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE)
+        || path == Path::new(crate::task_set_contract::ACCEPTANCE_LOCK_FILE)
+        || path == Path::new(crate::task_set_contract::TASK_SKELETON_FILE)
+        || path == Path::new(crate::task_set_contract::TASK_SKELETON_LOCK_FILE)
+        || path == Path::new(".decompose.log")
+        || (path.components().count() == 1
+            && path.file_name().is_some_and(|name| {
+                let name = name.to_string_lossy();
+                name.starts_with("TASK-") && name.ends_with(".md")
+            }))
 }
 
 /// Project-relative paths created or appended by the host while running checks.
@@ -339,14 +369,12 @@ pub(super) fn live(
         audit_path(&policy.project, input, &project_excludes, &mut project)?;
     }
     let mut tasks = BTreeMap::new();
-    let mut task_outputs = vec![
+    let task_outputs = vec![
         PathBuf::from(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
         PathBuf::from(crate::task_set_contract::ACCEPTANCE_LOCK_FILE),
     ];
-    task_outputs.extend(task_root_pipeline_outputs(
-        &policy.task_root,
-        Path::new(""),
-    )?);
+    // Keep pipeline outputs in the live tripwire so a file landing during an
+    // observation is detected; copying and digesting use the shared exclusion.
     audit_path(&policy.task_root, Path::new(""), &task_outputs, &mut tasks)?;
     Ok(BTreeMap::from([
         (policy.repository.display().to_string(), source),

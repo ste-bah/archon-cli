@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 use archon_workflow::acceptance_check_environment as check_env;
 use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, ObserveHooks, observe_commands_hooked};
 
-use super::hermetic::{Unrun, data_digest};
+use super::hermetic::{Unrun, data_digest, data_digest_scoped};
 use super::*;
 
 /// A freeze probe's site and the repository it proves checks against: the
@@ -76,21 +76,29 @@ fn data_state(probe: &HostProbe, tree: &Baseline) -> Result<Vec<String>, Unrun> 
     let state = match &probe.site {
         Site::Scratch(binding) => {
             let policy = &binding.policy;
+            let task_root_relative = policy
+                .task_root
+                .strip_prefix(&policy.project)
+                .map_err(|_| Unrun("scratch task root is outside the project root".into()))?;
             let mut state = policy
                 .project_inputs
                 .iter()
                 .map(|input| {
-                    data_digest(
-                        &policy.project.join(input),
+                    data_digest_scoped(
+                        &policy.project,
                         &policy.repository,
-                        Some(&policy.task_root),
+                        Some(task_root_relative),
+                        input,
+                        &policy.project_input_excludes,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            state.push(data_digest(
-                &policy.task_root,
+            state.push(data_digest_scoped(
+                &policy.project,
                 &policy.repository,
-                Some(&policy.task_root),
+                Some(task_root_relative),
+                task_root_relative,
+                &policy.project_input_excludes,
             )?);
             state
         }

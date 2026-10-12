@@ -66,20 +66,21 @@ fn legacy_body_call_without_target_keeps_its_replay_identity() {
 }
 
 #[test]
-fn host_note_stdout_byte_count_matches_the_returned_stdout() {
+fn host_note_byte_count_is_added_to_child_bytes_even_when_child_output_was_truncated() {
     let original = "process output".to_string();
     let (stdout, bytes) = super::workflow_host_command_exec::append_host_note(
         original.clone(),
         &["deliverable_contracts".into()],
+        100_000,
     );
     assert!(stdout.starts_with(&original));
     assert!(stdout.len() > original.len());
-    assert_eq!(bytes, stdout.as_bytes().len() as u64);
+    assert_eq!(bytes, 100_000 + (stdout.len() - original.len()) as u64);
 
     let (unchanged, bytes) =
-        super::workflow_host_command_exec::append_host_note(original.clone(), &[]);
+        super::workflow_host_command_exec::append_host_note(original.clone(), &[], 100_000);
     assert_eq!(unchanged, original);
-    assert_eq!(bytes, unchanged.as_bytes().len() as u64);
+    assert_eq!(bytes, 100_000);
 }
 
 pub(super) fn seed_frozen_chain(

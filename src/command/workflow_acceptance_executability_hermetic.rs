@@ -56,41 +56,8 @@ impl HostProbe {
     }
 }
 
-/// Project paths never copied, as the scratch observation never exports
-/// them (`acceptance_scratch_inputs::excluded`), plus the build output the
-/// scratch refuses to overlay.
-fn excluded(relative: &Path, path: &Path, task_root: Option<&Path>) -> bool {
-    matches!(
-        relative.to_str(),
-        Some(
-            "credentials"
-                | "credentials.toml"
-                | "config.toml"
-                | "config.json"
-                | ".env"
-                | ".archon/config.toml"
-                | "target"
-        )
-    ) || task_root.is_some_and(|root| {
-        path.strip_prefix(root)
-            .ok()
-            .is_some_and(|task_relative| {
-                task_relative
-                    == Path::new(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE)
-                    || task_relative
-                        == Path::new(archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE)
-            })
-    })
-        || archon_workflow::acceptance_scratch::freeze_owned_path(relative)
-        // Mirrors acceptance_scratch_inputs::excluded so the digest and
-        // scratch copy agree about harness-owned project run state.
-        || archon_workflow::acceptance_scratch::harness_run_state_path(relative)
-        || relative.starts_with(".archon/workflows")
-        // A decomposition log, wherever the task root sits: every retry
-        // appends to it, so digesting it would change the key each attempt.
-        || relative.file_name().is_some_and(|name| name == ".decompose.log")
-        || relative.starts_with(crate::command::workflow_freeze_budget::FREEZE_CACHE_DIR)
-        || relative.components().any(|part| part.as_os_str() == ".git")
+fn excluded(relative: &Path, task_root: Option<&Path>) -> bool {
+    archon_workflow::acceptance_scratch::acceptance_input_excluded(relative, &[], task_root)
 }
 
 /// The copy. [`HermeticCopy::remove`] removes it and says whether it could;
@@ -167,6 +134,16 @@ pub(super) fn data_digest(
     repository: &Path,
     task_root: Option<&Path>,
 ) -> Result<String, Unrun> {
+    data_digest_scoped(project, repository, task_root, Path::new(""), &[])
+}
+
+pub(super) fn data_digest_scoped(
+    project: &Path,
+    repository: &Path,
+    task_root: Option<&Path>,
+    scope: &Path,
+    excludes: &[PathBuf],
+) -> Result<String, Unrun> {
     let project = project.canonicalize().map_err(|error| {
         Unrun(format!(
             "could not canonicalize project root {}: {error}",
@@ -194,11 +171,19 @@ pub(super) fn data_digest(
             })
         })
         .transpose()?;
+    let task_root_relative = task_root
+        .as_deref()
+        .and_then(|root| root.strip_prefix(&project).ok());
     let mut lines = Vec::new();
-    let mut stack = vec![PathBuf::new()];
+    let mut stack = vec![scope.to_path_buf()];
     while let Some(relative) = stack.pop() {
         if !relative.as_os_str().is_empty()
-            && excluded(&relative, &project.join(&relative), task_root.as_deref())
+            && (excluded(&relative, task_root_relative)
+                || archon_workflow::acceptance_scratch::acceptance_input_excluded(
+                    &relative,
+                    excludes,
+                    task_root_relative,
+                ))
         {
             continue;
         }
@@ -284,6 +269,9 @@ impl HermeticCopy {
             Some(inside) => copy.project = inside,
             None => {
                 let task_root = task_root.map(canonical).transpose()?;
+                let task_root_relative = task_root
+                    .as_deref()
+                    .and_then(|root| root.strip_prefix(&live_project).ok());
                 let before = data_digest(&live_project, &source, task_root.as_deref())?;
                 let mut remaining = PROJECT_COPY_BYTES;
                 copy_data(
@@ -291,7 +279,7 @@ impl HermeticCopy {
                     Path::new(""),
                     &copy.project,
                     &source,
-                    task_root.as_deref(),
+                    task_root_relative,
                     &mut remaining,
                 )?;
                 if data_digest(&live_project, &source, task_root.as_deref())? != before {
@@ -318,7 +306,7 @@ fn copy_data(
 ) -> Result<(), Unrun> {
     let io = |path: &Path, error: std::io::Error| Unrun(format!("{}: {error}", path.display()));
     let source = root.join(relative);
-    if !relative.as_os_str().is_empty() && excluded(relative, &source, task_root) {
+    if !relative.as_os_str().is_empty() && excluded(relative, task_root) {
         return Ok(());
     }
     if source == repository {

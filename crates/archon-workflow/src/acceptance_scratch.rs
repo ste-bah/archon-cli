@@ -27,6 +27,13 @@ pub(crate) use paths::shell_arg;
 /// The project paths never copied out of the project (credentials, engine
 /// configuration, workflows, git), whatever the inputs name.
 pub(crate) use inputs::excluded as project_input_excluded;
+pub fn acceptance_input_excluded(
+    path: &Path,
+    excludes: &[PathBuf],
+    task_root: Option<&Path>,
+) -> bool {
+    inputs::acceptance_input_excluded(path, excludes, task_root)
+}
 
 /// Whether a project-relative path is host-owned run state excluded from
 /// acceptance inputs and their hermetic digest.
