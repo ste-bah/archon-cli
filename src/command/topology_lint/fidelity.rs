@@ -174,10 +174,11 @@ pub(crate) async fn evaluate_lint_with_fidelity_resumable(
 
 /// The body gate's fidelity section (Issue-44): the candidate body, not yet
 /// on disk, is judged for the obligations it claims, against the bodies
-/// already landed beside it. Each false verdict is a `Body` finding on the
-/// claiming task, worded exactly as the set gate words it, so the script's
-/// routing sends it back to the body author. A critic that cannot be built
-/// or cannot answer is an error the caller must record as operational.
+/// already landed beside it. A false verdict is a `Body` finding on the
+/// claiming task only when that task is also the weakest task. A verdict
+/// naming another weakest task is noted for the set gate, which routes it to
+/// that task. A critic that cannot be built or cannot answer is an error the
+/// caller must record as operational.
 pub(crate) async fn audit_task_file_candidate(
     cwd: &Path,
     path: &Path,
@@ -401,11 +402,23 @@ async fn audit_scoped(
                 ));
                 continue;
             }
-            report.push_str(&format!("  BLOCKING {text}\n"));
             let source_path = task_texts
                 .get(&verdict.weakest_task_id)
                 .map(|(_, path)| path.clone())
                 .unwrap_or_else(|| prd_path.clone());
+            if scope.only_claimed_by.is_some()
+                && !verdict.weakest_task_id.is_empty()
+                && scope
+                    .only_claimed_by
+                    .is_some_and(|tasks| !tasks.contains(&verdict.weakest_task_id))
+            {
+                report.push_str(&format!(
+                    "  NOTE obligation {} has a cross-task gap assigned to {}; the set gate will evaluate it\n",
+                    verdict.obligation_id, verdict.weakest_task_id
+                ));
+                continue;
+            }
+            report.push_str(&format!("  BLOCKING {text}\n"));
             findings.push(FidelityFinding {
                 text,
                 subject: verdict.obligation_id,

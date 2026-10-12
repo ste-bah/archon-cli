@@ -243,7 +243,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
         // 7: #428 the host stamps frozen skeleton frontmatter fields at landing.
-        version: 7,
+        // 8: #434 a cross-task fidelity gap blocks only its weakest task's body; the set gate routes the rest.
+        version: 8,
         sources: &[GATE, CONTRACT, LINT],
         sources_digest: "6778a29afce5be9fde9fb0383911c7cf770949aaa90be81cb05090a1bf6f07be",
         build_bound: false,
