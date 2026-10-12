@@ -27,6 +27,19 @@ pub(crate) use paths::shell_arg;
 /// The project paths never copied out of the project (credentials, engine
 /// configuration, workflows, git), whatever the inputs name.
 pub(crate) use inputs::excluded as project_input_excluded;
+pub fn acceptance_input_excluded(
+    path: &Path,
+    excludes: &[PathBuf],
+    task_root: Option<&Path>,
+) -> bool {
+    inputs::acceptance_input_excluded(path, excludes, task_root)
+}
+
+/// Whether a project-relative path is host-owned run state excluded from
+/// acceptance inputs and their hermetic digest.
+pub fn harness_run_state_path(path: &Path) -> bool {
+    inputs::acceptance_harness_run_state(path)
+}
 
 /// Whether a path is written by freezing and cannot be check input.
 pub fn freeze_owned_path(path: &Path) -> bool {
@@ -264,6 +277,9 @@ impl ScratchRoots {
                     .map_err(|e| WorkflowError::io(roots.project.join(".git"), e))?;
             }
             let project_excludes = inputs::project_excludes(policy)?;
+            let task_relative = tasks
+                .strip_prefix(&project)
+                .map_err(|_| invalid("task root must belong to declared project"))?;
             for input in &policy.project_inputs {
                 if matches!(
                     input.to_str(),
@@ -283,14 +299,19 @@ impl ScratchRoots {
                     input,
                     &roots.project,
                     &project_excludes,
+                    task_relative,
                     &mut remaining,
                 )
                 .map_err(|error| inputs::name_collision(error, policy, &project, input, commit))?;
             }
-            let task_relative = tasks
-                .strip_prefix(&project)
-                .map_err(|_| invalid("task root must belong to declared project"))?;
-            io::copy_task_root(&tasks, &roots.project.join(task_relative), &mut remaining)?;
+            io::copy_task_root(
+                &tasks,
+                &roots.project.join(task_relative),
+                task_relative,
+                task_relative,
+                &project_excludes,
+                &mut remaining,
+            )?;
             io::readonly(&roots.project.join(task_relative))?;
             if let Some(seed) = &policy.cargo_seed {
                 // Copy only standard content-addressed cache areas, not credentials/config.

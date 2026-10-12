@@ -222,18 +222,21 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #421 changes when a recorded freeze is reused (a later publication extends its pin), not how it is judged.
         // 12: #423 check blocks normalize CR/CRLF to LF; a shell setup error is refused as a pre-implementation proof.
         // #434 re-pin only: the fidelity critic's store and reply schema are in this closure; freeze never asks the critic.
-        version: 12,
+        // 14: #417 task-root exclusions and copies use the same project-relative input set as its digest.
+        // #417 re-pin only: direct copy calls now normalize roots like the production caller.
+        // 15: #417 Windows task-root paths normalize before containment checks, so probes can run and produce a different verdict.
+        version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
+        sources_digest: "8dfe5f82fb860fa9e8fb6a7201bc95912bac8f09c75387888a0db4a99c4d4900",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        // #434 re-pin only, as freeze-acceptance.
+        // #434 and #417 re-pin only: harness input paths, pipeline outputs, and copy API normalization do not alter this verdict.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
+        sources_digest: "8dfe5f82fb860fa9e8fb6a7201bc95912bac8f09c75387888a0db4a99c4d4900",
         build_bound: false,
     },
     CapabilityLogic {
@@ -269,18 +272,21 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
-        // #434 re-pin only: trace never asks the fidelity critic.
-        sources_digest: "13e87121d9ffc327be565674aff3d9ab43a8095de458bc579e9e34a533dff429",
+        // #434 and #417 re-pin only: trace never reads the newly excluded run state.
+        sources_digest: "32a5540804bc61f75556192dae105157919d9daee17febae6f2b441c5a40731e",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-acceptance",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 4: #417 copied check inputs omit freeze-owned files, which can change a check verdict.
-        version: 4,
+        // 5: #417 harness-written project run state leaves hermetic check inputs, which can change a check verdict.
+        // 6: #417 copied task-root inputs now match the digest exclusions, which can change a check verdict.
+        // #417 re-pin only: the direct copy API now shares the production caller's root normalization.
+        version: 6,
         sources: &[GATE, CONTRACT, VERIFY],
-        // #434 re-pin only: verify never asks the fidelity critic.
-        sources_digest: "60c64202dc0329025d8631e605de0e89bb09f02d9ca9a8a8513827b3d592f69d",
+        // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
+        sources_digest: "a5847d41acd62fa46c81a7a721b25445ee47b0b4a286d33c134464e00c180278",
         build_bound: true,
     },
     CapabilityLogic {
@@ -288,8 +294,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        // #434 re-pin only: verify never asks the fidelity critic.
-        sources_digest: "60c64202dc0329025d8631e605de0e89bb09f02d9ca9a8a8513827b3d592f69d",
+        // #434 and #417 re-pin only: verify never asks the fidelity critic or reads pipeline outputs.
+        sources_digest: "a5847d41acd62fa46c81a7a721b25445ee47b0b4a286d33c134464e00c180278",
         build_bound: true,
     },
 ];

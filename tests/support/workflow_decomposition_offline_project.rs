@@ -27,13 +27,17 @@ impl TestProject {
 
 impl Drop for TestProject {
     fn drop(&mut self) {
-        if !std::thread::panicking() {
-            return;
-        }
         let root = self.path().to_path_buf();
-        crate::diagnostics::print_failure(&root, &self.provider.requests);
-        if let Some(temp) = self.temp.take() {
-            let _ = temp.keep();
+        let name = root.file_name().unwrap().to_string_lossy();
+        let harness = root.parent().unwrap().join(format!("{name}-harness"));
+        if std::thread::panicking() {
+            crate::diagnostics::print_failure(&root, &self.provider.requests);
+            if let Some(temp) = self.temp.take() {
+                let _ = temp.keep();
+            }
+        }
+        if !std::thread::panicking() {
+            let _ = fs::remove_dir_all(harness);
         }
     }
 }
@@ -167,13 +171,14 @@ pub fn decompose_args() -> [&'static str; 9] {
 /// (`src/command/workflow_test_seams.rs`) on top of the isolated one.
 pub fn spawn_decompose(root: &Path, seams: &[(&str, String)]) -> std::process::Child {
     let mut command = Command::new(env!("CARGO_BIN_EXE_archon"));
-    isolate_child(&mut command, root);
+    let harness = crate::deadline::harness_root(root);
+    isolate_child(&mut command, root, &harness);
     command
         .current_dir(root)
         .args(decompose_args())
         .envs(seams.iter().map(|(name, value)| (*name, value.as_str())))
-        .stdout(fs::File::create(root.join("decompose.stdout")).unwrap())
-        .stderr(fs::File::create(root.join("decompose.stderr")).unwrap())
+        .stdout(fs::File::create(harness.join("decompose.stdout")).unwrap())
+        .stderr(fs::File::create(harness.join("decompose.stderr")).unwrap())
         .spawn()
         .unwrap()
 }

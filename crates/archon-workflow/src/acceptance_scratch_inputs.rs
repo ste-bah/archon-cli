@@ -3,21 +3,121 @@ use super::*;
 use std::io::Read;
 
 pub(crate) fn excluded(path: &Path, excludes: &[PathBuf]) -> bool {
+    acceptance_input_excluded(path, excludes, None)
+}
+
+/// One project-relative predicate for inputs copied, audited, or digested by
+/// acceptance checks. `task_root` is project-relative; pass an empty path when
+/// copying the task root itself.
+pub(crate) fn acceptance_input_excluded(
+    path: &Path,
+    excludes: &[PathBuf],
+    task_root: Option<&Path>,
+) -> bool {
+    const BUILT_IN_ROOTS: &[&str] = &[
+        "credentials",
+        "credentials.toml",
+        "config.toml",
+        "config.json",
+        ".env",
+        ".archon/config.toml",
+        "target",
+        ".git",
+    ];
     path.starts_with(Path::new(".archon").join(crate::task_set_lineage::PIN_STORE_NAMESPACE))
         || excludes.iter().any(|e| path.starts_with(e))
-        || matches!(
-            path.to_str(),
-            Some(
-                "credentials"
-                    | "credentials.toml"
-                    | "config.toml"
-                    | "config.json"
-                    | ".env"
-                    | ".archon/config.toml"
-            )
-        )
+        || BUILT_IN_ROOTS.iter().any(|root| path.starts_with(root))
         || path.starts_with(".archon/workflows")
+        || acceptance_harness_run_state(path)
+        || task_root.is_some_and(|root| {
+            path.strip_prefix(root)
+                .ok()
+                .is_some_and(task_root_pipeline_output)
+        })
         || path.starts_with(".git")
+}
+
+fn task_root_pipeline_output(path: &Path) -> bool {
+    path == Path::new(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE)
+        || path == Path::new(crate::task_set_contract::ACCEPTANCE_LOCK_FILE)
+        || path == Path::new(crate::task_set_contract::TASK_SKELETON_FILE)
+        || path == Path::new(crate::task_set_contract::TASK_SKELETON_LOCK_FILE)
+        || path == Path::new(".decompose.log")
+        || (path.components().count() == 1
+            && path.file_name().is_some_and(|name| {
+                let name = name.to_string_lossy();
+                name.starts_with("TASK-") && name.ends_with(".md")
+            }))
+}
+
+/// Project-relative paths created or appended by the host while running checks.
+/// Keep this shared by scratch export and the host's hermetic digest.
+pub(crate) fn acceptance_harness_run_state(path: &Path) -> bool {
+    const DIRECTORIES: &[(&str, &str)] = &[
+        // src/command/workflow_gate.rs:append_shadow_records
+        (
+            ".archon/logs",
+            "src/command/workflow_gate.rs:append_shadow_records",
+        ),
+        // src/command/topology_lint/fidelity_store.rs:store_path
+        (
+            ".archon/lint-cache",
+            "src/command/topology_lint/fidelity_store.rs:store_path",
+        ),
+        // src/session/cognitive_store.rs:open
+        (".archon/cognitive", "src/session/cognitive_store.rs:open"),
+        // crates/archon-core/src/spill.rs:spill_root
+        (
+            ".archon/spill",
+            "crates/archon-core/src/spill.rs:spill_root",
+        ),
+        // crates/archon-topology/src/trace/paths.rs:TopologyPaths::for_project
+        (
+            ".archon/topology",
+            "crates/archon-topology/src/trace/paths.rs:TopologyPaths::for_project",
+        ),
+        // src/command/topology_fold/schema.rs:topology_db_path
+        (
+            ".archon/topology.db",
+            "src/command/topology_fold/schema.rs:topology_db_path",
+        ),
+        // src/command/workflow_freeze_budget.rs:FREEZE_CACHE_DIR
+        (
+            ".archon/freeze-cache",
+            "src/command/workflow_freeze_budget.rs:FREEZE_CACHE_DIR",
+        ),
+        // crates/archon-workflow/src/store.rs:WorkflowStore::new
+        (
+            ".archon/workflows",
+            "crates/archon-workflow/src/store.rs:WorkflowStore::new",
+        ),
+        // crates/archon-workflow/src/task_set_lineage.rs:PIN_STORE_NAMESPACE
+        (
+            ".archon/task-set-pins",
+            "crates/archon-workflow/src/task_set_lineage.rs:PIN_STORE_NAMESPACE",
+        ),
+    ];
+    if DIRECTORIES
+        .iter()
+        .any(|(root, _writer)| path.starts_with(root))
+    {
+        return true;
+    }
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    // src/command/topology_fold/workflow_learning.rs:open_db uses Cozo;
+    // src/session/leann_startup.rs:open uses the same Cozo sidecars.
+    ["learning-state.db", "leann.db", "topology.db"]
+        .iter()
+        .any(|database| {
+            name == *database
+                || name.strip_prefix(database).is_some_and(|suffix| {
+                    matches!(suffix, "-wal" | "-journal" | ".archon-cozo-write.lock")
+                        || suffix == ".archon-cozo-write.lock.progress"
+                })
+        })
+        && path.parent() == Some(Path::new(".archon"))
 }
 
 pub(crate) fn freeze_owned(path: &Path) -> bool {
@@ -25,16 +125,18 @@ pub(crate) fn freeze_owned(path: &Path) -> bool {
 }
 
 pub(super) fn project_excludes(policy: &ScratchPolicy) -> WorkflowResult<Vec<PathBuf>> {
-    let project = std::fs::canonicalize(&policy.project)
+    let project = archon_shell::paths::canonicalize(&policy.project)
         .map_err(|error| WorkflowError::io(&policy.project, error))?;
-    let tasks = std::fs::canonicalize(&policy.task_root)
+    let tasks = archon_shell::paths::canonicalize(&policy.task_root)
         .map_err(|error| WorkflowError::io(&policy.task_root, error))?;
-    let relative = tasks
+    let task_relative = tasks
         .strip_prefix(&project)
         .map_err(|_| invalid("task root must belong to declared project"))?;
     let mut excludes = policy.project_input_excludes.clone();
-    excludes.push(relative.join(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE));
-    excludes.push(relative.join(crate::task_set_contract::ACCEPTANCE_LOCK_FILE));
+    excludes.extend([
+        task_relative.join(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
+        task_relative.join(crate::task_set_contract::ACCEPTANCE_LOCK_FILE),
+    ]);
     Ok(excludes)
 }
 pub(super) fn copy_project(
@@ -42,10 +144,11 @@ pub(super) fn copy_project(
     relative: &Path,
     dest: &Path,
     excludes: &[PathBuf],
+    task_root: &Path,
     remaining: &mut u64,
 ) -> WorkflowResult<()> {
     control::check()?;
-    if excluded(relative, excludes) {
+    if acceptance_input_excluded(relative, excludes, Some(task_root)) {
         return Ok(());
     }
     let source = root.join(relative);
@@ -61,6 +164,7 @@ pub(super) fn copy_project(
                 &relative.join(item.file_name()),
                 dest,
                 excludes,
+                task_root,
                 remaining,
             )?;
         }
@@ -149,10 +253,11 @@ fn audit_path(
     root: &Path,
     rel: &Path,
     excludes: &[PathBuf],
+    task_root: Option<&Path>,
     map: &mut BTreeMap<String, String>,
 ) -> WorkflowResult<()> {
     control::check()?;
-    if excluded(rel, excludes) {
+    if acceptance_input_excluded(rel, excludes, task_root) {
         return Ok(());
     }
     let path = root.join(rel);
@@ -173,6 +278,7 @@ fn audit_path(
                 root,
                 &rel.join(item.map_err(|e| WorkflowError::io(&path, e))?.file_name()),
                 excludes,
+                task_root,
                 map,
             )?;
         }
@@ -181,64 +287,9 @@ fn audit_path(
 }
 
 #[cfg(test)]
-#[test]
-fn freeze_outputs_are_excluded_from_scratch_project_inputs() {
-    let temp = tempfile::tempdir().unwrap();
-    let project = temp.path().join("project");
-    let task_root = project.join("tasks/set");
-    std::fs::create_dir_all(&task_root).unwrap();
-    let policy = ScratchPolicy {
-        repository: temp.path().join("repository"),
-        project: project.clone(),
-        task_root,
-        scratch_parent: temp.path().join("scratch"),
-        project_inputs: Vec::new(),
-        project_input_excludes: Vec::new(),
-        combined: false,
-        toolchain_path: String::new(),
-        environment: BTreeMap::new(),
-        environment_allowlist: Vec::new(),
-        cargo_seed: None,
-        timeout_secs: 1,
-        output_bytes: 1,
-        scratch_bytes: 1,
-        build_cache: None,
-    };
-    let excludes = project_excludes(&policy).unwrap();
-    let task_contract =
-        Path::new("tasks/set").join(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
-    assert!(excluded(&task_contract, &excludes));
-    assert!(!excluded(
-        Path::new(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
-        &excludes
-    ));
-    for path in [
-        Path::new("tasks/set").join(crate::task_set_contract::ACCEPTANCE_LOCK_FILE),
-        Path::new(".archon")
-            .join(crate::task_set_lineage::PIN_STORE_NAMESPACE)
-            .join("set.json"),
-    ] {
-        assert!(excluded(&path, &excludes), "{}", path.display());
-    }
-    assert!(!excluded(Path::new("tasks/set/input.json"), &excludes));
-}
+#[path = "acceptance_scratch_inputs_tests.rs"]
+mod tests;
 
-#[cfg(test)]
-#[test]
-fn same_named_nested_project_data_is_included_and_digested() {
-    let temp = tempfile::tempdir().unwrap();
-    let file = temp.path().join("config/acceptance-contract.json");
-    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    std::fs::write(&file, b"project data").unwrap();
-    let relative = Path::new("config/acceptance-contract.json");
-    assert!(!excluded(relative, &[]));
-    let mut map = BTreeMap::new();
-    audit_path(temp.path(), relative, &[], &mut map).unwrap();
-    assert_eq!(
-        map.get("config/acceptance-contract.json"),
-        Some(&file_digest(&file).unwrap())
-    );
-}
 pub(super) fn live(
     policy: &ScratchPolicy,
     commit: &str,
@@ -264,15 +315,32 @@ pub(super) fn live(
         source.insert(name.into(), value);
     }
     let mut project = BTreeMap::new();
+    let project_root = archon_shell::paths::canonicalize(&policy.project)
+        .map_err(|error| WorkflowError::io(&policy.project, error))?;
+    let task_root = archon_shell::paths::canonicalize(&policy.task_root)
+        .map_err(|error| WorkflowError::io(&policy.task_root, error))?;
+    let task_relative = task_root
+        .strip_prefix(&project_root)
+        .map_err(|_| invalid("task root must belong to declared project"))?;
     for input in &policy.project_inputs {
-        audit_path(&policy.project, input, &project_excludes, &mut project)?;
+        audit_path(
+            &policy.project,
+            input,
+            &project_excludes,
+            Some(task_relative),
+            &mut project,
+        )?;
     }
     let mut tasks = BTreeMap::new();
-    let task_outputs = [
-        PathBuf::from(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
-        PathBuf::from(crate::task_set_contract::ACCEPTANCE_LOCK_FILE),
-    ];
-    audit_path(&policy.task_root, Path::new(""), &task_outputs, &mut tasks)?;
+    // Audit the task tree in project-relative coordinates so the live
+    // tripwire applies the same exclusions as the scratch copy and digest.
+    audit_path(
+        &policy.project,
+        task_relative,
+        &project_excludes,
+        Some(task_relative),
+        &mut tasks,
+    )?;
     Ok(BTreeMap::from([
         (policy.repository.display().to_string(), source),
         (policy.project.display().to_string(), project),

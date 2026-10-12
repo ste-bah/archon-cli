@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 use archon_workflow::acceptance_check_environment as check_env;
 use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, ObserveHooks, observe_commands_hooked};
 
-use super::hermetic::{Unrun, data_digest};
+use super::hermetic::{Unrun, data_digest, data_digest_scoped};
 use super::*;
 
 /// A freeze probe's site and the repository it proves checks against: the
@@ -76,21 +76,41 @@ fn data_state(probe: &HostProbe, tree: &Baseline) -> Result<Vec<String>, Unrun> 
     let state = match &probe.site {
         Site::Scratch(binding) => {
             let policy = &binding.policy;
+            let project = archon_shell::paths::canonicalize(&policy.project).map_err(|error| {
+                Unrun(format!(
+                    "could not canonicalize project root {}: {error}",
+                    policy.project.display()
+                ))
+            })?;
+            let task_root =
+                archon_shell::paths::canonicalize(&policy.task_root).map_err(|error| {
+                    Unrun(format!(
+                        "could not canonicalize task root {}: {error}",
+                        policy.task_root.display()
+                    ))
+                })?;
+            let task_root_relative = task_root
+                .strip_prefix(&project)
+                .map_err(|_| Unrun("scratch task root is outside the project root".into()))?;
             let mut state = policy
                 .project_inputs
                 .iter()
                 .map(|input| {
-                    data_digest(
-                        &policy.project.join(input),
+                    data_digest_scoped(
+                        &policy.project,
                         &policy.repository,
-                        Some(&policy.task_root),
+                        Some(task_root_relative),
+                        input,
+                        &policy.project_input_excludes,
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            state.push(data_digest(
-                &policy.task_root,
+            state.push(data_digest_scoped(
+                &policy.project,
                 &policy.repository,
-                Some(&policy.task_root),
+                Some(task_root_relative),
+                task_root_relative,
+                &policy.project_input_excludes,
             )?);
             state
         }
@@ -304,11 +324,7 @@ pub(super) async fn observe(
     cancel: Arc<AtomicBool>,
     hooks: ObserveHooks,
 ) -> anyhow::Result<Vec<CheckResult>> {
-    let identity = binding
-        .policy
-        .repository
-        .canonicalize()
-        .map(archon_shell::paths::plain)?;
+    let identity = archon_shell::paths::canonicalize(&binding.policy.repository)?;
     let _lease = crate::command::acceptance_scratch_guardian::acquire_lease(
         &std::env::temp_dir().join("archon-native-observer-locks"),
         &identity.to_string_lossy(),
@@ -436,7 +452,7 @@ fn runtime_identity(probe: &HostProbe) -> &serde_json::Value {
                 });
                 let binary = executable.as_ref().and_then(|path| {
                     Some((
-                        path.canonicalize().ok()?,
+                        archon_shell::paths::canonicalize(path).ok()?,
                         content_digest(&std::fs::read(path).ok()?),
                     ))
                 });

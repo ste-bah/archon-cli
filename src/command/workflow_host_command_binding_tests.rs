@@ -46,16 +46,52 @@ fn frozen_frontmatter_omissions_are_stamped() {
         &frozen_with_owned_fields(),
     )
     .unwrap();
-    assert_eq!(
-        notes,
-        [
-            "depends_on",
-            "blocks",
-            "implements",
-            "deliverable_contracts"
-        ]
-    );
+    assert_eq!(notes, ["depends_on", "blocks", "implements"]);
     assert!(stamped.contains("TASK-X-001"));
+}
+
+#[test]
+fn authored_deliverable_contracts_compare_as_typed_values_with_defaults() {
+    let mut frozen = frozen_with_owned_fields();
+    frozen.depends_on.clear();
+    frozen.blocks.clear();
+    frozen.implements.clear();
+    frozen.deliverable_contracts = vec![
+        archon_workflow::task_universe::WorkflowV2DeliverableContract {
+            kind: "report".into(),
+            artifact_path: ".archon/project/data/report.json".into(),
+            registry_minimum_count: 0,
+            required_universe: false,
+            series_overlap_min_rows: 0,
+            ..Default::default()
+        },
+    ];
+    let serialized = serde_yaml_ng::to_string(&frozen.deliverable_contracts).unwrap();
+    let exact = format!(
+        "```yaml\ntask_id: TASK-X-010\ndeliverable_contracts:\n{}```\n",
+        serialized
+    );
+    let (_, notes) =
+        super::workflow_host_command_binding::stamp_frozen_frontmatter(&exact, &frozen).unwrap();
+    assert!(
+        notes.is_empty(),
+        "exact typed copy produced notes: {notes:?}"
+    );
+
+    let omitted_defaults = "```yaml\ntask_id: TASK-X-010\ndeliverable_contracts:\n  - kind: report\n    artifact_path: .archon/project/data/report.json\n```\n";
+    let (_, notes) =
+        super::workflow_host_command_binding::stamp_frozen_frontmatter(omitted_defaults, &frozen)
+            .unwrap();
+    assert!(
+        notes.is_empty(),
+        "default omissions produced notes: {notes:?}"
+    );
+
+    let differing = omitted_defaults.replace("kind: report", "kind: dataset");
+    let (_, notes) =
+        super::workflow_host_command_binding::stamp_frozen_frontmatter(&differing, &frozen)
+            .unwrap();
+    assert_eq!(notes, ["deliverable_contracts"]);
 }
 
 #[test]

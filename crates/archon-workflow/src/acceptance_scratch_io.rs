@@ -51,9 +51,81 @@ pub(super) fn copy_tree(
 pub(super) fn copy_task_root(
     source: &Path,
     dest: &Path,
+    project_relative: &Path,
+    task_root: &Path,
+    excludes: &[PathBuf],
     remaining: &mut u64,
 ) -> WorkflowResult<()> {
-    copy_tree_inner(source, dest, remaining, false, false, true, Path::new(""))
+    copy_task_root_inner(
+        source,
+        dest,
+        remaining,
+        project_relative,
+        task_root,
+        excludes,
+    )
+}
+
+fn copy_task_root_inner(
+    source: &Path,
+    dest: &Path,
+    remaining: &mut u64,
+    relative: &Path,
+    task_root: &Path,
+    excludes: &[PathBuf],
+) -> WorkflowResult<()> {
+    control::check()?;
+    if super::acceptance_input_excluded(relative, excludes, Some(task_root)) {
+        return Ok(());
+    }
+    let meta = std::fs::symlink_metadata(source).map_err(|e| WorkflowError::io(source, e))?;
+    if meta.is_dir() {
+        if let Ok(existing) = dest.symlink_metadata()
+            && (!existing.is_dir() || existing.file_type().is_symlink())
+        {
+            return Err(invalid("scratch input directory collision"));
+        }
+        std::fs::create_dir_all(dest).map_err(|e| WorkflowError::io(dest, e))?;
+        for item in std::fs::read_dir(source).map_err(|e| WorkflowError::io(source, e))? {
+            let item = item.map_err(|e| WorkflowError::io(source, e))?;
+            copy_task_root_inner(
+                &item.path(),
+                &dest.join(item.file_name()),
+                remaining,
+                &relative.join(item.file_name()),
+                task_root,
+                excludes,
+            )?;
+        }
+    } else if meta.is_file() {
+        if meta.len() > *remaining {
+            return Err(invalid("scratch copy exceeds configured size limit"));
+        }
+        let bytes = read(source)?;
+        if let Ok(existing) = dest.symlink_metadata() {
+            if !existing.is_file() || read(dest)? != bytes {
+                return Err(invalid(format!(
+                    "nonidentical scratch path collision: {} already holds a copy from an earlier overlay source and {} differs from it",
+                    dest.display(),
+                    source.display()
+                )));
+            }
+            return Ok(());
+        }
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| WorkflowError::io(parent, e))?;
+        }
+        std::fs::write(dest, &bytes).map_err(|e| WorkflowError::io(dest, e))?;
+        std::fs::set_permissions(dest, meta.permissions())
+            .map_err(|e| WorkflowError::io(dest, e))?;
+        *remaining -= bytes.len() as u64;
+    } else {
+        return Err(invalid(format!(
+            "nonregular or symlink snapshot input refused: {}",
+            source.display()
+        )));
+    }
+    Ok(())
 }
 /// The caller selects only registry/git cache subtrees, never Cargo home itself.
 pub(super) fn copy_cache(source: &Path, dest: &Path, remaining: &mut u64) -> WorkflowResult<()> {
@@ -97,10 +169,7 @@ fn copy_tree_inner(
                 continue;
             }
             if exclude_freeze_owned
-                && (super::freeze_owned_path(&child_relative)
-                    || child_relative
-                        == Path::new(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE)
-                    || child_relative == Path::new(crate::task_set_contract::ACCEPTANCE_LOCK_FILE))
+                && super::acceptance_input_excluded(&child_relative, &[], Some(Path::new("")))
             {
                 continue;
             }
@@ -299,12 +368,50 @@ fn task_root_copy_omits_freeze_owned_contract_and_lock() {
     std::fs::write(source.path().join(contract), b"contract").unwrap();
     std::fs::write(source.path().join(lock), b"lock").unwrap();
     std::fs::write(source.path().join("input.json"), b"input").unwrap();
+    std::fs::write(
+        source
+            .path()
+            .join(crate::task_set_contract::TASK_SKELETON_FILE),
+        b"skeleton",
+    )
+    .unwrap();
+    std::fs::write(
+        source
+            .path()
+            .join(crate::task_set_contract::TASK_SKELETON_LOCK_FILE),
+        b"skeleton lock",
+    )
+    .unwrap();
+    std::fs::write(source.path().join("TASK-EXAMPLE-001.md"), b"landed body").unwrap();
+    std::fs::write(source.path().join(".decompose.log"), b"pipeline log").unwrap();
 
     let mut remaining = u64::MAX;
-    copy_task_root(source.path(), destination.path(), &mut remaining).unwrap();
+    copy_task_root(
+        source.path(),
+        destination.path(),
+        Path::new(""),
+        Path::new(""),
+        &[],
+        &mut remaining,
+    )
+    .unwrap();
 
     assert!(!destination.path().join(contract).exists());
     assert!(!destination.path().join(lock).exists());
+    assert!(
+        !destination
+            .path()
+            .join(crate::task_set_contract::TASK_SKELETON_FILE)
+            .exists()
+    );
+    assert!(
+        !destination
+            .path()
+            .join(crate::task_set_contract::TASK_SKELETON_LOCK_FILE)
+            .exists()
+    );
+    assert!(!destination.path().join("TASK-EXAMPLE-001.md").exists());
+    assert!(!destination.path().join(".decompose.log").exists());
     assert!(std::fs::read(destination.path().join("acceptance-contract.json")).is_err());
     assert_eq!(
         std::fs::read(destination.path().join("input.json")).unwrap(),

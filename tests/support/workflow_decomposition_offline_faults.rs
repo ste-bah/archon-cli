@@ -333,8 +333,8 @@ fn interrupt(
 fn wait_decompose(root: &Path, child: &mut Child, name: &str) -> std::process::ExitStatus {
     wait_for_child(
         child,
-        &root.join("decompose.stdout"),
-        &root.join("decompose.stderr"),
+        &crate::deadline::harness_root(root).join("decompose.stdout"),
+        &crate::deadline::harness_root(root).join("decompose.stderr"),
         name,
     )
 }
@@ -349,7 +349,7 @@ fn await_hold(root: &Path, hold: &Path, child: &mut Child, name: &str) -> String
         if let Some(status) = child.try_wait().unwrap() {
             panic!(
                 "{name}: the run ended ({status}) before reaching the held call; stderr tail: {}",
-                tail(&root.join("decompose.stderr"))
+                tail(&crate::deadline::harness_root(root).join("decompose.stderr"))
             );
         }
         if started.elapsed() > NO_PROGRESS_LIMIT * 4 {
