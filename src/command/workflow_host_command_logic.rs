@@ -235,7 +235,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        sources_digest: "4ff795a2216dd86e9cb9b2cc9b68a0b6ef605d76cb6ebc544030aa757fe4095e",
+        sources_digest: "e3dfb00b17a57484a5d5836084ac22b99ea0cc461bc5a976dc48c17a365db911",
         build_bound: false,
     },
     CapabilityLogic {
@@ -249,7 +249,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        sources_digest: "4ff795a2216dd86e9cb9b2cc9b68a0b6ef605d76cb6ebc544030aa757fe4095e",
+        sources_digest: "e3dfb00b17a57484a5d5836084ac22b99ea0cc461bc5a976dc48c17a365db911",
         build_bound: false,
     },
     CapabilityLogic {
@@ -298,7 +298,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 and #417 re-pin only: trace never reads the newly excluded run state.
         // #434d re-pin only: trace never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "332c60f21cd537bc28b4db88d8dbd2484b2cf1bc34de461f0be9249203f1a16f",
+        sources_digest: "a1cf658cb5a70bbda38e6a83f7a0edebdb32917d9b0e61ba1c9aaec1e40bee53",
         build_bound: true,
     },
     CapabilityLogic {
@@ -316,7 +316,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: the repository claim parser changed; acceptance verification verdicts do not read claims.
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "c268b240ebeb778f2bd91ee97dc7c86416ff9ef41e381597892e68a524b99172",
+        sources_digest: "16a7023279eac8618cbdb8b2ee6ddc192542796d543f0e1132a6d99ddcbb529a",
         build_bound: true,
     },
     CapabilityLogic {
@@ -330,7 +330,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "c268b240ebeb778f2bd91ee97dc7c86416ff9ef41e381597892e68a524b99172",
+        sources_digest: "16a7023279eac8618cbdb8b2ee6ddc192542796d543f0e1132a6d99ddcbb529a",
         build_bound: true,
     },
 ];
