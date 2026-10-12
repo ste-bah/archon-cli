@@ -459,3 +459,6 @@ impl WorkflowLlmClientFactory for UpgradeBarrier {
 
 #[path = "workflow_decomposition_upgrade_admission_tests.rs"]
 mod admission;
+
+#[path = "workflow_decomposition_upgrade_live_frozen_tests.rs"]
+mod live_frozen;

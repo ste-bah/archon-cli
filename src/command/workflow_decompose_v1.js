@@ -280,7 +280,9 @@ async function authorCandidate(w, policy) {
   const progress = newProgress(feedback);
   const authorState = { entries: new Map(), retryIds: null };
   // Issue 360: after an upgrade, start from the latest durable candidate (workflow_decompose_v1_seed.js).
-  const seeded = args.phaseSeed ? seedAuthorLoop(policy, authorState) : null;
+  const seeded = args.phaseSeed && !seedWouldReplaceLiveFeedback(policy)
+    ? seedAuthorLoop(policy, authorState)
+    : null;
   if (seeded) [feedback, lastFindings] = [seeded.feedback.slice(), seeded.feedback.slice()];
   let carried = seeded ? seeded.carried : null;
   for (;;) {

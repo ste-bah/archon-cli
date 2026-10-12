@@ -271,7 +271,40 @@ async fn upgraded_resume_dry_run_plans_verification_for_the_live_frozen_chain() 
         )
         .unwrap();
 
+    // Match the pre-fix writer: the stored transition seed has no
+    // resume_frozen_chain member, even though the live root is now frozen.
+    let old_seed = crate::command::workflow_decompose_seed::current_seed(
+        &store,
+        &run_id,
+        Path::new(&state.log_path),
+        &std::collections::BTreeMap::new(),
+    )
+    .unwrap()
+    .expect("legacy transition seed");
+    assert_eq!(old_seed.transition_index, 0);
+    let old_seed_path = std::fs::read_dir(
+        store
+            .run_dir(&run_id)
+            .join(crate::command::workflow_decompose_seed::SEEDS_DIR),
+    )
+    .unwrap()
+    .map(|entry| entry.unwrap().path())
+    .find(|path| {
+        path.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("transition-0-")
+    })
+    .unwrap();
+    let old_seed_value: serde_json::Value = read_json(&old_seed_path);
+    assert!(old_seed_value.get("resume_frozen_chain").is_none());
+
     let before = snapshot_tree(&store.run_dir(&run_id));
+    let task_root_before = snapshot_tree(task_root);
+    let pin_path =
+        crate::command::workflow_task_set::acceptance_pin_path(project.path(), task_root);
+    let publish_lock = archon_workflow::task_set_publish_lock::lock_path(&pin_path);
+    let lock_existed_before = publish_lock.exists();
     let output = crate::command::workflow_decompose::dry_run_fixed_decomposition(
         project.path(),
         &run_id,
@@ -287,10 +320,67 @@ async fn upgraded_resume_dry_run_plans_verification_for_the_live_frozen_chain() 
         output.contains("capability=verify-frozen-skeleton"),
         "{output}"
     );
+    assert!(!output.contains("capability=freeze-acceptance"), "{output}");
+    assert!(!output.contains("capability=freeze-skeleton"), "{output}");
+    assert!(!output.contains("acceptance-author"), "{output}");
     assert_eq!(before, snapshot_tree(&store.run_dir(&run_id)));
+    assert_eq!(task_root_before, snapshot_tree(task_root));
+    assert_eq!(
+        lock_existed_before,
+        publish_lock.exists(),
+        "dry-run created a publish lock"
+    );
     assert_eq!(contract_before, std::fs::read(&contract_path).unwrap());
     assert_eq!(skeleton_before, std::fs::read(&skeleton_path).unwrap());
     let launch_arguments: serde_json::Value =
         read_json(&store.run_dir(&run_id).join(FIXED_ARGUMENTS_PATH));
     assert_eq!(launch_arguments["frozenChain"]["acceptance"], false);
+}
+
+#[tokio::test]
+async fn dry_run_without_transition_uses_live_frozen_chain_and_writes_nothing() {
+    let project = fixture_project();
+    let (store, run_id, _) =
+        super::super::workflow_decomposition_drift_tests::launch_and_pause(project.path()).await;
+    let state: FixedDecompositionStateV1 =
+        read_json(&store.run_dir(&run_id).join(FIXED_DECOMPOSITION_STATE_PATH));
+    let task_root = Path::new(&state.identity.task_root_identity);
+    crate::command::workflow_decompose_frozen_chain::test_support::freeze_chain(
+        project.path(),
+        Path::new(&state.identity.prd_identity),
+        task_root,
+        &["TASK-X-010"],
+    );
+
+    let run_before = snapshot_tree(&store.run_dir(&run_id));
+    let task_before = snapshot_tree(task_root);
+    let pin = crate::command::workflow_task_set::acceptance_pin_path(project.path(), task_root);
+    let lock = archon_workflow::task_set_publish_lock::lock_path(&pin);
+    let lock_before = lock.exists();
+    let output = crate::command::workflow_decompose::dry_run_fixed_decomposition(
+        project.path(),
+        &run_id,
+        &launch_config(project.path()),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        output.contains("seed=none (no harness transition)"),
+        "{output}"
+    );
+    assert!(
+        output.contains("capability=verify-frozen-acceptance"),
+        "{output}"
+    );
+    assert!(
+        output.contains("capability=verify-frozen-skeleton"),
+        "{output}"
+    );
+    assert!(!output.contains("capability=freeze-acceptance"), "{output}");
+    assert!(!output.contains("capability=freeze-skeleton"), "{output}");
+    assert!(!output.contains("acceptance-author"), "{output}");
+    assert_eq!(run_before, snapshot_tree(&store.run_dir(&run_id)));
+    assert_eq!(task_before, snapshot_tree(task_root));
+    assert_eq!(lock_before, lock.exists(), "dry-run created a publish lock");
 }

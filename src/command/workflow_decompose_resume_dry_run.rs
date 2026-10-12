@@ -91,12 +91,15 @@ pub(crate) async fn dry_run_fixed_decomposition(
     let requirement_texts =
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);
     let resume_frozen_chain =
-        crate::command::workflow_decompose_frozen_chain::frozen_chain_snapshot(
+        crate::command::workflow_decompose_frozen_chain::resume_chain_argument(
+            &store,
+            run_id,
+            run.generation,
             &project_root,
             &prd_path,
             &task_root,
-        )?
-        .to_argument();
+            true,
+        )?;
     let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
     let frozen_chain = arguments
         .get("frozenChain")
@@ -230,10 +233,11 @@ pub(crate) async fn dry_run_fixed_decomposition(
         );
         (seed, case)
     };
-    let seeded = crate::command::workflow_decompose_seed::seeded_arguments(
+    let mut seeded = crate::command::workflow_decompose_seed::seeded_arguments(
         &expected_arguments,
         seed.as_ref(),
     );
+    seeded["frozenChain"] = resume_frozen_chain;
     let script_arguments = script_arguments_with_prd_requirement_texts(&seeded, prd_text);
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,

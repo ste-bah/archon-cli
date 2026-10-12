@@ -18,6 +18,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::HostCommandSubject;
+use archon_workflow::WorkflowStore;
 use archon_workflow::obligation_ids::acceptance_ids;
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceContract, AcceptancePin,
@@ -25,10 +26,89 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_skeleton::validate_full_chain;
 
+const RESUME_CHAIN_DIR: &str = "decomposition/resume-frozen-chain";
+const RESUME_CHAIN_SCHEMA: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResumeFrozenChainRecord {
+    schema_version: u32,
+    generation: u64,
+    snapshot: FrozenChainSnapshot,
+}
+
+fn resume_chain_path(generation: u64) -> String {
+    format!("{RESUME_CHAIN_DIR}/generation-{generation}.json")
+}
+
+/// The launch arguments remain identity-bound. This separate record pins the
+/// live decision for one executor generation, including runs with no seed.
+pub(crate) fn resume_chain_argument(
+    store: &WorkflowStore,
+    run_id: &str,
+    generation: u64,
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+    read_only: bool,
+) -> Result<serde_json::Value> {
+    let relative = resume_chain_path(generation);
+    let path = store.run_dir(run_id).join(&relative);
+    let recorded = match std::fs::read(&path) {
+        Ok(bytes) => {
+            let record: ResumeFrozenChainRecord =
+                serde_json::from_slice(&bytes).with_context(|| {
+                    format!("parsing resume frozen-chain record {}", path.display())
+                })?;
+            if record.schema_version != RESUME_CHAIN_SCHEMA || record.generation != generation {
+                return Err(anyhow!(
+                    "resume frozen-chain record {} has schema {} and generation {}; expected schema {} and generation {}",
+                    path.display(),
+                    record.schema_version,
+                    record.generation,
+                    RESUME_CHAIN_SCHEMA,
+                    generation
+                ));
+            }
+            Some(record.snapshot)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
+    };
+    let snapshot = match recorded {
+        Some(snapshot) => snapshot,
+        None => {
+            let snapshot = if read_only {
+                frozen_chain_snapshot_read_only(project_root, prd_path, task_root)?
+            } else {
+                frozen_chain_snapshot(project_root, prd_path, task_root)?
+            };
+            if !read_only {
+                use crate::command::workflow_task_set::{create_dir_all_durably, sync_parent};
+                let directory = store.run_dir(run_id).join(RESUME_CHAIN_DIR);
+                create_dir_all_durably(&directory)?;
+                sync_parent(&directory)?;
+                store.write_run_json(
+                    run_id,
+                    &relative,
+                    &ResumeFrozenChainRecord {
+                        schema_version: RESUME_CHAIN_SCHEMA,
+                        generation,
+                        snapshot: snapshot.clone(),
+                    },
+                )?;
+                sync_parent(&path)?;
+            }
+            snapshot
+        }
+    };
+    Ok(snapshot.to_argument())
+}
+
 /// The frozen chain the launcher found and verified under a task root. Read
 /// strictly on resume: a new field follows the rule of
 /// `FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION`.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct FrozenChainSnapshot {
     pub(crate) acceptance: bool,
@@ -85,15 +165,42 @@ pub(crate) fn frozen_chain_snapshot(
     prd_path: &Path,
     task_root: &Path,
 ) -> Result<FrozenChainSnapshot> {
+    frozen_chain_snapshot_with_recovery(project_root, prd_path, task_root, true)
+}
+
+/// Read the live chain without settling a publish journal or creating a
+/// publish lock. A preview with an unsettled publish cannot claim a snapshot.
+pub(crate) fn frozen_chain_snapshot_read_only(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+) -> Result<FrozenChainSnapshot> {
+    frozen_chain_snapshot_with_recovery(project_root, prd_path, task_root, false)
+}
+
+fn frozen_chain_snapshot_with_recovery(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+    recover: bool,
+) -> Result<FrozenChainSnapshot> {
     let mut snapshot = FrozenChainSnapshot::default();
     if !task_root.is_dir() {
         return Ok(snapshot);
     }
     // Issue 271: a publish a crash interrupted is settled before it is read.
-    let (_publish_lock, _) = super::workflow_task_set::lock_and_recover(
-        &super::workflow_task_set::acceptance_pin_path(project_root, task_root),
-        task_root,
-    )?;
+    let pin_path = super::workflow_task_set::acceptance_pin_path(project_root, task_root);
+    if recover {
+        let (_publish_lock, _) = super::workflow_task_set::lock_and_recover(&pin_path, task_root)?;
+    } else {
+        let [journal, _] = archon_workflow::task_set_publish_lock::journal_paths(&pin_path);
+        if journal.exists() {
+            return Err(anyhow!(
+                "dry-run cannot inspect frozen task chain while publish recovery is pending at {}; run a live resume to settle it",
+                journal.display()
+            ));
+        }
+    }
     #[cfg(test)]
     super::workflow_task_set::reader_test_step("decomposition-read");
     let acceptance_lock = task_root.join(ACCEPTANCE_LOCK_FILE);

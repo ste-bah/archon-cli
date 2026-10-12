@@ -173,8 +173,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         Path::new(&state.identity.project_root_identity),
         "persisted project root",
     )?;
-    // Keep the launch revision as the call-key namespace. The capabilities
-    // come from this build; unchanged ones keep their legacy result keys.
     let catalog = fixed_decomposition_catalog(&state.identity.starting_binary_revision)?;
     let current_identity = FixedRunIdentityV1 {
         template_version: FIXED_DECOMPOSITION_TEMPLATE_VERSION.to_string(),
@@ -204,18 +202,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     let prd_text = std::str::from_utf8(&prd_bytes)?;
     let prd_requirement_texts =
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);
-    // Use the launcher's exact frozen-chain verifier against the live task
-    // root. The result is recorded in this runtime's phase seed below.
-    let resume_frozen_chain =
-        crate::command::workflow_decompose_frozen_chain::frozen_chain_snapshot(
-            &project_root,
-            &prd_path,
-            &task_root,
-        )?
-        .to_argument();
     let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
-    // Keep the launch snapshot for the launch-identity equality check. The
-    // live snapshot above enters only the runtime phase seed on a transition.
     let frozen_chain = arguments
         .get("frozenChain")
         .filter(|value| value.is_object())
@@ -294,9 +281,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         Path::new(&state.log_path),
         &state.identity,
     )?;
-    // Issue 358: the persisted script digest stays the launch record; Issue
-    // 349: the launch-bound check policy (or the older pre-binding form) is
-    // admitted against the verified bundle anchor.
     let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
     let expected_metadata = policy::canonical_resume_metadata(
         &state.identity,
@@ -321,6 +305,19 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     )?;
     // Verify readable execution state before any provider or lifecycle change.
     upgrade::validate_result_state(&store, run_id)?;
+    // Pin the live frozen-chain decision only after admission succeeds. The
+    // record is independent of transitions and phase seeds, so every resume
+    // generation gets the same deterministic decision on replay.
+    let resume_frozen_chain =
+        crate::command::workflow_decompose_frozen_chain::resume_chain_argument(
+            &store,
+            run_id,
+            run.generation,
+            &project_root,
+            &prd_path,
+            &task_root,
+            false,
+        )?;
     let transitions = upgrade::record_upgrade(
         &store,
         run_id,
@@ -334,9 +331,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             .await
             .map_err(|error| anyhow!("reporting the runtime transition: {error}"))?;
     }
-    // Issue 360: after an upgrade the script starts from the phase seed. The
-    // acceptance criteria and requirement texts are the host-owned text the
-    // script stamps (#357).
+    // Host-owned criteria and requirement text are stamped by the script.
     let criteria = expected_arguments["acceptanceCriteria"]
         .as_object()
         .map(|criteria| {
@@ -354,10 +349,13 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &prd_requirement_texts,
         Some(&resume_frozen_chain),
     )?;
-    let seeded_arguments = crate::command::workflow_decompose_seed::seeded_arguments(
+    let mut seeded_arguments = crate::command::workflow_decompose_seed::seeded_arguments(
         &expected_arguments,
         seed.as_ref(),
     );
+    // This decision applies on every resume, even without a harness seed or
+    // when an older seed carries a stale frozen-chain value.
+    seeded_arguments["frozenChain"] = resume_frozen_chain;
     let script_arguments = script_arguments_with_prd_requirement_texts(&seeded_arguments, prd_text);
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,

@@ -61,6 +61,18 @@ function seedAuthorLoop(policy, state) {
   throw new Error(`phase seed for ${policy.phase} is of kind ${subject.kind}, which its author loop does not take`);
 }
 
+// Set-gate findings and artifacts already frozen on disk are newer evidence
+// than a phase seed. Reopening one must start from the live feedback, never
+// resubmit the seed's older candidate unchanged.
+function seedWouldReplaceLiveFeedback(policy) {
+  if (Array.isArray(policy.initialFeedback) && policy.initialFeedback.length > 0) return true;
+  const frozen = args.frozenChain || {};
+  if (policy.phase === "acceptance" && frozen.acceptance === true) return true;
+  if (policy.phase === "skeleton" && frozen.skeleton === true) return true;
+  if (policy.target && Array.isArray(frozen.bodies) && frozen.bodies.includes(policy.target.fileName)) return true;
+  return false;
+}
+
 function seedRepairFindings(gate, policy) {
   return (Array.isArray(gate.findings) ? gate.findings : []).filter((finding) => policy.retryScopes.has(finding.remediation_scope));
 }
