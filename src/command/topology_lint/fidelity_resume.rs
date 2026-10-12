@@ -1,15 +1,16 @@
 //! The set gate's fidelity audit across attempts (Issue 259).
 //!
-//! Every critic call watches its own provider stream for no progress. A
-//! finished batch's verdicts are saved immediately, one record per
-//! obligation (#434), and each durable verdict reports progress to the host.
+//! Every critic call watches its own provider stream for no progress. Each
+//! verdict that passes is saved as soon as its reply is read, one record per
+//! obligation (#434, #434d), and each durable verdict reports progress to
+//! the host.
 //! A stalled call leaves every saved verdict intact and returns
 //! `LintIncomplete` (exit 75); retries reuse those verdicts. Neither the
 //! audit nor the host imposes a total deadline.
 
 use anyhow::Result;
 use archon_workflow::fidelity_audit::{
-    ClaimedObligation, ClaimingTask, SkeletonSummary, fidelity_cluster_digest,
+    ClaimedObligation, ClaimingTask, FidelityVerdict, SkeletonSummary, fidelity_cluster_digest,
 };
 use archon_workflow::llm_client_port::WorkflowLlmClient;
 use futures_util::{StreamExt, TryStreamExt};
@@ -194,6 +195,19 @@ pub(super) async fn resolve(
                 async move {
                     let tasks = &clusters[*cluster].1;
                     let budget = &resume.budget;
+                    // Each verdict the critic gives that passes every check
+                    // is saved as soon as its reply is read (#434d), so a
+                    // batch that ends without the rest keeps it.
+                    let mut standings: Vec<Option<Standing>> = vec![None; indexes.len()];
+                    let mut accept = |position: usize, verdict: &FidelityVerdict| -> Result<()> {
+                        let (standing, saved) =
+                            store.save(question(*cluster, indexes[position]), verdict)?;
+                        if saved {
+                            resume.progress.saved(false);
+                        }
+                        standings[position] = Some(standing);
+                        Ok(())
+                    };
                     let asked = ask(
                         client,
                         store.dir(),
@@ -202,40 +216,30 @@ pub(super) async fn resolve(
                         tasks,
                         skeleton,
                         budget,
+                        &mut accept,
                     )
                     .await?;
-                    let Asked::Answered(verdicts) = asked else {
-                        return Ok::<_, anyhow::Error>((index, None));
-                    };
-                    let mut standings = Vec::with_capacity(verdicts.len());
-                    for (obligation, verdict) in indexes.iter().zip(&verdicts) {
-                        let (standing, saved) =
-                            store.save(question(*cluster, *obligation), verdict)?;
-                        if saved {
-                            resume.progress.saved(false);
-                        }
-                        standings.push(standing);
-                    }
-                    Ok((index, Some(standings)))
+                    let stopped = matches!(asked, Asked::Stopped);
+                    Ok::<_, anyhow::Error>((index, stopped, standings))
                 }
             });
-    let answered: Vec<(usize, Option<Vec<Standing>>)> = futures_util::stream::iter(pending)
+    let answered: Vec<(usize, bool, Vec<Option<Standing>>)> = futures_util::stream::iter(pending)
         .buffer_unordered(FIDELITY_CONCURRENCY)
         .try_collect()
         .await?;
-    let name = |index: usize| {
-        let ids: Vec<&str> = batches[index].2.iter().map(|o| o.id.as_str()).collect();
-        ids.join("+")
-    };
     let mut stopped = Vec::new();
-    for (index, standings) in answered {
-        let Some(standings) = standings else {
-            stopped.push(index);
-            continue;
-        };
-        let (cluster, indexes, _, _) = &batches[index];
-        for (obligation, standing) in indexes.iter().zip(standings) {
-            resolved[*cluster][*obligation] = Some(standing);
+    for (index, halted, standings) in answered {
+        let (cluster, indexes, obligations, _) = &batches[index];
+        let mut open = Vec::new();
+        for ((obligation, standing), asked) in indexes.iter().zip(standings).zip(obligations) {
+            match standing {
+                Some(standing) => resolved[*cluster][*obligation] = Some(standing),
+                None => open.push(asked.id.as_str()),
+            }
+        }
+        if halted {
+            // Named by the obligations it left without a verdict.
+            stopped.push((index, open.join("+")));
         }
     }
     if !stopped.is_empty() {
@@ -243,7 +247,7 @@ pub(super) async fn resolve(
         return Err(LintIncomplete::new(
             &resume.budget,
             &resume.progress,
-            stopped.into_iter().map(name).collect(),
+            stopped.into_iter().map(|(_, name)| name).collect(),
         )
         .into());
     }

@@ -1,16 +1,16 @@
-//! The schema-4 migration (#434c): only under the critic logic schema 4 was
-//! written by, only for the very same question, every record for it merged
-//! so a flip between deploys is a recorded contradiction, and never a gate
-//! failure because of the scan.
+//! The migration of schema-4 and schema-5 records (#434c, #434d): only under
+//! the critic logic version they answer to, only for the very same question,
+//! every record for it merged so a flip between deploys is a recorded
+//! contradiction, and never a gate failure because of the scan.
 
-use super::super::legacy::{LEGACY_CRITIC_LOGIC, LEGACY_STORE_SCHEMA};
+use super::super::legacy::{LEGACY_CRITIC_LOGIC, LEGACY_STORE_SCHEMA, PREDECESSOR_VERSION};
 use super::*;
 
-/// The store of a build whose critic logic is the schema-4 logic.
+/// The store of a build whose critic logic version is the earlier schemas'.
 fn legacy_store(dir: &Path) -> VerdictStore {
     VerdictStore::new(
         dir.join("verdicts"),
-        identity().with_critic_logic(LEGACY_CRITIC_LOGIC),
+        identity().with_critic_logic_version(PREDECESSOR_VERSION),
     )
 }
 
@@ -100,7 +100,7 @@ fn a_legacy_record_is_reused_and_promoted_under_the_critic_logic_key() {
     assert_eq!(
         records(&store),
         2,
-        "legacy source and promoted schema-5 record"
+        "legacy source and promoted schema-6 record"
     );
     assert_eq!(
         store.load(asked.question()),
@@ -109,10 +109,10 @@ fn a_legacy_record_is_reused_and_promoted_under_the_critic_logic_key() {
     );
 }
 
-/// H1: once the critic logic differs from the logic schema 4 was written by,
-/// nothing tells what the old question looked like; the scan is skipped.
+/// H1: once the critic logic version is another, a stored verdict may mean
+/// something else; the scan is skipped and the obligation is asked.
 #[test]
-fn other_critic_logic_never_reads_legacy_records() {
+fn another_critic_logic_version_never_reads_legacy_records() {
     let temp = tempfile::tempdir().unwrap();
     let store = legacy_store(temp.path());
     let asked = asked();
@@ -126,7 +126,7 @@ fn other_critic_logic_never_reads_legacy_records() {
 
     let changed = VerdictStore::new(
         store.dir().into(),
-        identity().with_critic_logic("critic-logic-after-schema-four"),
+        identity().with_critic_logic_version(PREDECESSOR_VERSION + 1),
     );
     assert!(changed.legacy_records().is_empty(), "the scan is skipped");
     let all = legacy_store(temp.path()).legacy_records();
@@ -170,7 +170,7 @@ fn conflicting_legacy_records_promote_one_contradiction() {
 }
 
 /// M1: of several verdicts of one meaning, the latest by time stands, as in
-/// a schema-5 record, never the first one the directory lists.
+/// a schema-6 record, never the first one the directory lists.
 #[test]
 fn the_latest_legacy_verdict_of_a_meaning_stands() {
     let temp = tempfile::tempdir().unwrap();
@@ -215,7 +215,7 @@ fn legacy_request_and_model_mismatches_reask() {
 
     let changed_request = base.for_request(Some("different-request".into()));
     assert_eq!(migrate(&changed_request, &asked), None);
-    let mut changed_model = identity().with_critic_logic(LEGACY_CRITIC_LOGIC);
+    let mut changed_model = identity().with_critic_logic_version(PREDECESSOR_VERSION);
     changed_model.model = "different-model".into();
     let changed_model = VerdictStore::new(base.dir().into(), changed_model);
     assert_eq!(migrate(&changed_model, &asked), None);
@@ -378,11 +378,11 @@ fn an_unreadable_record_file_leaves_no_legacy_candidates() {
     }
 }
 
-/// A schema-5 record supersedes every schema-4 one: when it no longer
+/// A schema-6 record supersedes every earlier one: when it no longer
 /// stands, the obligation is asked; the legacy verdict is neither returned
 /// nor promoted over it.
 #[test]
-fn a_schema_five_record_that_no_longer_stands_is_asked_not_migrated() {
+fn a_current_record_that_no_longer_stands_is_asked_not_migrated() {
     let temp = tempfile::tempdir().unwrap();
     let store = legacy_store(temp.path());
     let asked = asked();
@@ -403,5 +403,8 @@ fn a_schema_five_record_that_no_longer_stands_is_asked_not_migrated() {
 
     assert_eq!(store.load(asked.question()), None);
     assert_eq!(migrate(&store, &asked), None);
-    assert_eq!(records(&store), 2, "the schema-5 record is left as it was");
+    assert_eq!(records(&store), 2, "the schema-6 record is left as it was");
 }
+
+#[path = "fidelity_store_schema_five_tests.rs"]
+mod schema_five;

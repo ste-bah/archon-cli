@@ -233,7 +233,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ba95d27a3347dc7a49177230e04fbb63da4541089c39af63f49ae695594c34ed",
+        // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
+        sources_digest: "4ff795a2216dd86e9cb9b2cc9b68a0b6ef605d76cb6ebc544030aa757fe4095e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -245,7 +246,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ba95d27a3347dc7a49177230e04fbb63da4541089c39af63f49ae695594c34ed",
+        // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
+        sources_digest: "4ff795a2216dd86e9cb9b2cc9b68a0b6ef605d76cb6ebc544030aa757fe4095e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -263,7 +265,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 9,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
-        sources_digest: "ca6074a4917505aee40fd5548d151afe00322b19c63d8586d0e7981942dbb400",
+        // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
+        sources_digest: "c3ea03b23f8530b5dc31735853b67b18fa6991bd1b37f5017b9a9b0fa7d7d6b4",
         build_bound: false,
     },
     CapabilityLogic {
@@ -279,7 +282,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 8,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
-        sources_digest: "ca6074a4917505aee40fd5548d151afe00322b19c63d8586d0e7981942dbb400",
+        // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
+        sources_digest: "c3ea03b23f8530b5dc31735853b67b18fa6991bd1b37f5017b9a9b0fa7d7d6b4",
         build_bound: false,
     },
     CapabilityLogic {
@@ -288,7 +292,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
         // #434 and #417 re-pin only: trace never reads the newly excluded run state.
-        sources_digest: "32a5540804bc61f75556192dae105157919d9daee17febae6f2b441c5a40731e",
+        // #434d re-pin only: trace never asks the fidelity critic or reads its store.
+        sources_digest: "332c60f21cd537bc28b4db88d8dbd2484b2cf1bc34de461f0be9249203f1a16f",
         build_bound: true,
     },
     CapabilityLogic {
@@ -304,7 +309,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
         // #425 re-pin only: the repository claim parser changed; acceptance verification verdicts do not read claims.
-        sources_digest: "34f8045de970dca5c0342f94f386e1c3750d25ae77d4ddf0cb22892be2388981",
+        // #434d re-pin only: verification never asks the fidelity critic or reads its store.
+        sources_digest: "c268b240ebeb778f2bd91ee97dc7c86416ff9ef41e381597892e68a524b99172",
         build_bound: true,
     },
     CapabilityLogic {
@@ -316,7 +322,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #439 re-pin only: resume phase selection does not change verification verdicts.
         // #425 re-pin only: the repository claim parser changed; skeleton verification verdicts do not read claims.
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
-        sources_digest: "34f8045de970dca5c0342f94f386e1c3750d25ae77d4ddf0cb22892be2388981",
+        // #434d re-pin only: verification never asks the fidelity critic or reads its store.
+        sources_digest: "c268b240ebeb778f2bd91ee97dc7c86416ff9ef41e381597892e68a524b99172",
         build_bound: true,
     },
 ];

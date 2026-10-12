@@ -95,3 +95,77 @@ fn validation_errors_map_to_their_verdict_and_kind() {
         (Some(0), RefusalKind::BlankRequired("reason"))
     );
 }
+
+/// #434d: read verdict by verdict, each verdict passes or fails alone, by
+/// exactly the checks a whole reply passes.
+fn per_verdict(
+    reply: &str,
+) -> Result<Vec<Result<FidelityVerdict, FidelityRefusal>>, FidelityRefusal> {
+    parse_fidelity_verdicts(reply, &obligations(), &tasks())
+}
+
+const PARAPHRASED: &str = r#"{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005","reason":"r","quoted_task_text":"tests run in a scratch root"}"#;
+const LOOPHOLE: &str = r#"{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005","reason":"r","quoted_task_text":"the shared project root is untouched."}"#;
+
+#[test]
+fn fidelity_per_verdict_keeps_the_verdicts_that_pass_alone() {
+    let read = per_verdict(&format!(r#"{{"verdicts":[{PARAPHRASED},{DONE}]}}"#)).expect("document");
+    let refusal = read[0].as_ref().expect_err("not verbatim");
+    assert_eq!(refusal.kind, RefusalKind::NotVerbatim("quoted_task_text"));
+    assert!(refusal.message.contains("AC-WS-003"), "{}", refusal.message);
+    // The verdict kept is the one the whole-reply parse gives once the other
+    // verdict passes too: the same checks, the same value.
+    let whole = parse_fidelity_reply(
+        &format!(r#"{{"verdicts":[{LOOPHOLE},{DONE}]}}"#),
+        &obligations(),
+        &tasks(),
+    )
+    .expect("whole reply");
+    assert_eq!(read[1].as_ref().expect("kept"), &whole[1]);
+    assert_eq!(
+        parse_fidelity_reply(
+            &format!(r#"{{"verdicts":[{PARAPHRASED},{DONE}]}}"#),
+            &obligations(),
+            &tasks()
+        )
+        .expect_err("a whole reply is still refused")
+        .kind,
+        RefusalKind::NotVerbatim("quoted_task_text")
+    );
+
+    // A verdict the reply lacks fails alone.
+    let read = per_verdict(&format!(r#"{{"verdicts":[{DONE}]}}"#)).expect("document");
+    assert_eq!(
+        read[0].as_ref().unwrap_err().kind,
+        RefusalKind::WrongObligationIds
+    );
+    assert_eq!(read[1].as_ref().expect("kept"), &whole[1]);
+}
+
+#[test]
+fn fidelity_per_verdict_takes_nothing_from_a_refused_document() {
+    let stray = format!(
+        r#"{{"verdicts":[{LOOPHOLE},{{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r","stray":""}}]}}"#
+    );
+    let extra = r#"{"obligation_id":"OTHER-1","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r"}"#;
+    for (reply, kind) in [
+        ("not json".to_string(), RefusalKind::Syntax),
+        (stray, RefusalKind::UnknownField),
+        (
+            format!(r#"{{"verdicts":[{LOOPHOLE},{DONE},{DONE}]}}"#),
+            RefusalKind::WrongObligationIds,
+        ),
+        (
+            format!(r#"{{"verdicts":[{LOOPHOLE},{DONE},{extra}]}}"#),
+            RefusalKind::WrongObligationIds,
+        ),
+    ] {
+        let refusal = per_verdict(&reply).expect_err("the document is refused");
+        assert_eq!(refusal.kind, kind, "{reply}");
+        assert_eq!(
+            parse_fidelity_reply(&reply, &obligations(), &tasks()).unwrap_err(),
+            refusal,
+            "the same refusal a whole reply gets"
+        );
+    }
+}

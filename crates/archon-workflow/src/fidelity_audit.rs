@@ -29,6 +29,8 @@
 //! no author could act on. The per-body audit runs before sibling bodies
 //! exist, so the skeleton is the only place those facts can be read from.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use serde::{Deserialize, Serialize};
 
 use crate::task_skeleton::TaskSkeleton;
@@ -275,6 +277,69 @@ pub fn parse_fidelity_reply(
     obligations: &[ClaimedObligation],
     tasks: &[ClaimingTask],
 ) -> Result<Vec<FidelityVerdict>, FidelityRefusal> {
+    let mut by_id = read_document(document, obligations)?;
+    let expected: BTreeSet<&str> = obligations.iter().map(|o| o.id.as_str()).collect();
+    let actual: BTreeSet<&str> = by_id.keys().map(String::as_str).collect();
+    if expected != actual {
+        return Err(id_mismatch(&expected, &actual));
+    }
+    // The ids match the cluster with none repeated, so every reply index is
+    // below the cluster size.
+    obligations
+        .iter()
+        .map(|obligation| {
+            let (index, reply) = by_id.remove(&obligation.id).expect("id set checked");
+            checked(reply, index, tasks)
+        })
+        .collect()
+}
+
+/// A reply read verdict by verdict (#434d): one result per obligation, in
+/// `obligations` order, or the refusal of the document as a whole.
+///
+/// The document is refused as a whole, and no verdict is taken from it, for
+/// everything [`parse_fidelity_reply`] refuses before it reads a verdict's
+/// meaning: a reply that is not JSON or not exactly the verdict document,
+/// any key, type or shape error in any verdict (serde reads the whole
+/// document at once), an obligation id that repeats, and an id outside
+/// `obligations`. What is left is one verdict per obligation id, read
+/// strictly; each then passes or fails on its own, by exactly the checks
+/// [`parse_fidelity_reply`] applies to it (what an omitted key means, the
+/// named task is in the cluster, its quote is verbatim, a true verdict's
+/// anchor). An obligation the reply has no verdict for fails alone, as
+/// [`RefusalKind::WrongObligationIds`]. So a verdict this accepts is one
+/// [`parse_fidelity_reply`] would accept in a reply whose other verdicts
+/// all passed.
+pub fn parse_fidelity_verdicts(
+    document: &str,
+    obligations: &[ClaimedObligation],
+    tasks: &[ClaimingTask],
+) -> Result<Vec<Result<FidelityVerdict, FidelityRefusal>>, FidelityRefusal> {
+    let mut by_id = read_document(document, obligations)?;
+    let expected: BTreeSet<&str> = obligations.iter().map(|o| o.id.as_str()).collect();
+    let actual: BTreeSet<&str> = by_id.keys().map(String::as_str).collect();
+    if !actual.is_subset(&expected) {
+        return Err(id_mismatch(&expected, &actual));
+    }
+    Ok(obligations
+        .iter()
+        .map(|obligation| match by_id.remove(&obligation.id) {
+            Some((index, reply)) => checked(reply, index, tasks),
+            None => Err(FidelityRefusal {
+                message: format!("fidelity reply has no verdict for {}", obligation.id),
+                verdict: None,
+                kind: RefusalKind::WrongObligationIds,
+            }),
+        })
+        .collect())
+}
+
+/// The verdict document read strictly, by obligation id with its index in
+/// the reply; refused when it does not deserialize or repeats an id.
+fn read_document(
+    document: &str,
+    obligations: &[ClaimedObligation],
+) -> Result<BTreeMap<String, (usize, ReplyVerdict)>, FidelityRefusal> {
     let document = document.trim();
     let not_the_document =
         |error: &dyn std::fmt::Display, class: (Option<usize>, RefusalKind)| FidelityRefusal {
@@ -288,46 +353,51 @@ pub fn parse_fidelity_reply(
     deserializer
         .end()
         .map_err(|error| not_the_document(&error, (None, json_kind(&error, None))))?;
-    let ids = |message: String| FidelityRefusal {
-        message,
-        verdict: None,
-        kind: RefusalKind::WrongObligationIds,
-    };
-    let mut by_id = std::collections::BTreeMap::new();
+    let mut by_id = BTreeMap::new();
     for (index, verdict) in response.verdicts.into_iter().enumerate() {
         if by_id
             .insert(verdict.obligation_id.clone(), (index, verdict))
             .is_some()
         {
-            return Err(ids("fidelity reply repeats an obligation id".to_string()));
+            return Err(FidelityRefusal {
+                message: "fidelity reply repeats an obligation id".to_string(),
+                verdict: None,
+                kind: RefusalKind::WrongObligationIds,
+            });
         }
     }
-    let expected: std::collections::BTreeSet<&str> =
-        obligations.iter().map(|o| o.id.as_str()).collect();
-    let actual: std::collections::BTreeSet<&str> = by_id.keys().map(String::as_str).collect();
-    if expected != actual {
-        return Err(ids(format!(
+    Ok(by_id)
+}
+
+fn id_mismatch(expected: &BTreeSet<&str>, actual: &BTreeSet<&str>) -> FidelityRefusal {
+    FidelityRefusal {
+        message: format!(
             "fidelity reply verdict ids do not match the cluster: missing={:?}, extra={:?}",
-            expected.difference(&actual).collect::<Vec<_>>(),
-            actual.difference(&expected).collect::<Vec<_>>()
-        )));
+            expected.difference(actual).collect::<Vec<_>>(),
+            actual.difference(expected).collect::<Vec<_>>()
+        ),
+        verdict: None,
+        kind: RefusalKind::WrongObligationIds,
     }
-    let mut verdicts = Vec::with_capacity(by_id.len());
-    // The ids match the cluster with none repeated, so every reply index is
-    // below the cluster size.
-    for obligation in obligations {
-        let (index, reply) = by_id.remove(&obligation.id).expect("id set checked");
-        let checked = checked_verdict(reply).and_then(|mut verdict| {
+}
+
+/// One verdict, the reply's `index`-th, through every check of its meaning
+/// and provenance.
+fn checked(
+    reply: ReplyVerdict,
+    index: usize,
+    tasks: &[ClaimingTask],
+) -> Result<FidelityVerdict, FidelityRefusal> {
+    checked_verdict(reply)
+        .and_then(|mut verdict| {
             check_verdict(&mut verdict, tasks)?;
             Ok(verdict)
-        });
-        verdicts.push(checked.map_err(|(kind, message)| FidelityRefusal {
+        })
+        .map_err(|(kind, message)| FidelityRefusal {
             message,
             verdict: Some(index),
             kind,
-        })?);
-    }
-    Ok(verdicts)
+        })
 }
 
 /// The blocking finding for a false verdict. Names every claiming task, so

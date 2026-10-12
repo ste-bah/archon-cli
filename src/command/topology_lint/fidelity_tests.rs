@@ -19,6 +19,8 @@ use crate::command::topology_lint::fidelity_waivers::{
 mod body;
 #[path = "fidelity_chain_tests.rs"]
 mod chain;
+#[path = "fidelity_partial_tests.rs"]
+mod partial;
 #[path = "fidelity_reask_tests.rs"]
 mod reask;
 #[path = "fidelity_reuse_tests.rs"]
