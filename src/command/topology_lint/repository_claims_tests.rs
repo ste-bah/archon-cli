@@ -16,7 +16,8 @@ fn git(repo: &Path, args: &[&str]) {
     );
 }
 
-/// A repository with `src/lib.rs` and `src/existing.rs` committed, and a
+/// A repository with `src/lib.rs` and `src/existing.rs` committed (plus a root
+/// `Cargo.toml` and a nested `crates/x/src/` for scope resolution), and a
 /// task root beside it that records the repository.
 fn grounded() -> (tempfile::TempDir, PathBuf, PathBuf, RepositoryTree) {
     let temp = tempfile::tempdir().unwrap();
@@ -24,10 +25,21 @@ fn grounded() -> (tempfile::TempDir, PathBuf, PathBuf, RepositoryTree) {
     std::fs::create_dir_all(repo.join("src")).unwrap();
     std::fs::create_dir_all(repo.join("crate/tests")).unwrap();
     std::fs::create_dir_all(repo.join("crate/tests/tests")).unwrap();
+    std::fs::create_dir_all(repo.join("docs/v1.2")).unwrap();
     std::fs::write(repo.join("src/lib.rs"), "pub mod existing;\n").unwrap();
     std::fs::write(repo.join("src/existing.rs"), "pub fn f() {}\n").unwrap();
     std::fs::write(repo.join("crate/tests/x.rs"), "// scoped alternate\n").unwrap();
+    std::fs::write(repo.join("crate/tests/only.rs"), "// one candidate\n").unwrap();
     std::fs::write(repo.join("crate/tests/tests/x.rs"), "// scoped candidate\n").unwrap();
+    std::fs::write(repo.join("docs/v1.2/foo.rs"), "// dotted scope\n").unwrap();
+    std::fs::create_dir_all(repo.join("crates/x/src/widgets")).unwrap();
+    std::fs::write(repo.join("Cargo.toml"), "[workspace]\n").unwrap();
+    std::fs::write(
+        repo.join("crates/x/src/strategy_spec.rs"),
+        "// nested file\n",
+    )
+    .unwrap();
+    std::fs::write(repo.join("crates/x/src/widgets/w.rs"), "// nested dir\n").unwrap();
     git(&repo, &["init", "-q"]);
     git(&repo, &["config", "user.email", "t@example.invalid"]);
     git(&repo, &["config", "user.name", "t"]);
@@ -57,6 +69,13 @@ fn claims(text: &str) -> Vec<(String, Claim)> {
     extract_claims(text)
         .into_iter()
         .map(|claim| (claim.path, claim.claim))
+        .collect()
+}
+
+fn scoped_claims(text: &str) -> Vec<(String, Claim, Option<String>)> {
+    extract_claims(text)
+        .into_iter()
+        .map(|claim| (claim.path, claim.claim, claim.scope))
         .collect()
 }
 
@@ -109,13 +128,26 @@ fn leading_negation_and_explicit_directory_scopes_are_resolved() {
             ("src/b.rs".to_string(), Claim::Absent),
         ]
     );
+    for text in [
+        "No `a.rs` or `b.rs` exists under `src/`.",
+        "Neither `a.rs` nor `b.rs` exist in `src/`.",
+    ] {
+        assert_eq!(
+            claims(text),
+            vec![
+                ("a.rs".to_string(), Claim::Absent),
+                ("b.rs".to_string(), Claim::Absent),
+            ],
+            "{text:?}"
+        );
+    }
     assert_eq!(
         claims("`a.rs` exists under `src/`."),
-        vec![("src/a.rs".to_string(), Claim::Exists)]
+        vec![("a.rs".to_string(), Claim::Exists)]
     );
     assert_eq!(
         claims("`a.rs` exists in `src/`."),
-        vec![("src/a.rs".to_string(), Claim::Exists)]
+        vec![("a.rs".to_string(), Claim::Exists)]
     );
     assert_eq!(
         claims("`src/lib.rs` exists and is wired in `src/main.rs`."),
@@ -127,7 +159,7 @@ fn leading_negation_and_explicit_directory_scopes_are_resolved() {
     );
     assert_eq!(
         claims("`a.rs` exists under `src/`."),
-        vec![("src/a.rs".to_string(), Claim::Exists)]
+        vec![("a.rs".to_string(), Claim::Exists)]
     );
     assert_eq!(
         claims(
@@ -142,6 +174,73 @@ fn leading_negation_and_explicit_directory_scopes_are_resolved() {
 }
 
 #[test]
+fn dotted_symbols_are_not_file_claims_and_only_direct_directory_scopes_join() {
+    assert!(claims(
+        "... — pinned by the existing `promotion_gates.live` assertion in `strategy_spec.rs`; no spec surface enables live trading."
+    )
+    .is_empty());
+    assert_eq!(
+        claims("`foo.rs` exists under `src/bar/`."),
+        vec![("foo.rs".to_string(), Claim::Exists)]
+    );
+    assert_eq!(
+        claims("`foo.rs` exists in `docs/v1.2`."),
+        vec![("foo.rs".to_string(), Claim::Exists)]
+    );
+    assert_eq!(
+        claims("`missing.rs` exists under `src`."),
+        vec![("missing.rs".to_string(), Claim::Exists)]
+    );
+    assert_eq!(
+        scoped_claims("`foo.rs` currently exists in `src/`."),
+        vec![(
+            "foo.rs".to_string(),
+            Claim::Exists,
+            Some("src/".to_string())
+        )]
+    );
+    assert_eq!(
+        claims("`spec_refs.rs` exists in `crates/x/src/`."),
+        vec![("spec_refs.rs".to_string(), Claim::Exists)]
+    );
+    assert!(claims("the `a.b` field in `config.json`").is_empty());
+    assert!(claims("`promotion_gates.live == \"out_of_scope\"`").is_empty());
+    // The parser keeps the scope; the tree decides `config.json` is no
+    // directory (scoped tests: `a_file_like_scope_absent_everywhere_is_no_claim`).
+    assert_eq!(
+        scoped_claims("`foo.rs` exists in `config.json`."),
+        vec![(
+            "foo.rs".to_string(),
+            Claim::Exists,
+            Some("config.json".to_string())
+        )]
+    );
+}
+
+#[test]
+fn dotted_symbols_do_not_block_but_a_real_missing_path_still_does() {
+    let (_temp, project, _tasks, tree) = grounded();
+    let false_positive = "... — pinned by the existing `promotion_gates.live` assertion in `strategy_spec.rs`; no spec surface enables live trading.";
+    assert!(
+        findings_against(&tree, &project, "TASK-X-425", false_positive).is_empty(),
+        "dotted symbol was treated as a path claim"
+    );
+
+    let missing = findings_against(&tree, &project, "TASK-X-425", "`src/missing.rs` exists.");
+    assert_eq!(missing.len(), 1, "{missing:?}");
+    assert!(
+        missing[0].contains("`src/missing.rs` exists"),
+        "{}",
+        missing[0]
+    );
+    assert!(
+        missing[0].contains("it is absent from repository"),
+        "{}",
+        missing[0]
+    );
+}
+
+#[test]
 fn scoped_slash_paths_are_only_checked_when_the_tree_resolves_one_candidate() {
     let (_temp, project, _tasks, tree) = grounded();
     let findings = findings_against(
@@ -152,6 +251,9 @@ fn scoped_slash_paths_are_only_checked_when_the_tree_resolves_one_candidate() {
     );
     assert!(findings.is_empty(), "{findings:?}");
 }
+
+#[path = "repository_claims_scoped_tests.rs"]
+mod scoped_tests;
 
 #[test]
 fn runtime_output_paths_are_not_repository_existence_claims() {

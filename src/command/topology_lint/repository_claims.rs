@@ -98,7 +98,7 @@ pub(crate) fn body_findings(
         observed.iter().map(|(p, _)| p.as_str()).collect();
     let claims = claim_findings(tree, project_root, task_id, text)
         .into_iter()
-        .filter(|(p, _)| !reported.contains(p.as_str()))
+        .filter(|(paths, _)| !paths.iter().any(|p| reported.contains(p.as_str())))
         .map(|(_, text)| text)
         .collect::<Vec<_>>();
     observed
@@ -125,83 +125,153 @@ pub(crate) fn findings_against(
         .collect()
 }
 
-/// Each refuted claim with the repository-relative path it is about.
+/// Each refuted claim with the repository-relative paths it is about. A
+/// claim with several candidate paths (a scope several directories end with)
+/// is refuted only when every candidate refutes it.
 fn claim_findings(
     tree: &RepositoryTree,
     project_root: &Path,
     task_id: &str,
     text: &str,
-) -> Vec<(String, String)> {
+) -> Vec<(Vec<String>, String)> {
     let mut findings = Vec::new();
     for claim in extract_claims(text) {
-        let Some(claim_path) = resolve_scoped_path(tree, &claim) else {
+        let Some(relatives) = resolve_scoped_paths(tree, &claim)
+            .iter()
+            .map(|path| tree.relative_to_root(path))
+            .collect::<Option<Vec<_>>>()
+        else {
             continue;
         };
-        let Some(relative) = tree.relative_to_root(&claim_path) else {
+        let refutes = |relative: &String| {
+            let truth = tree.truth(relative);
+            let in_project = !claim.path.starts_with('/') && project_root.join(relative).exists();
+            match claim.claim {
+                Claim::Absent => truth.certainly_exists(),
+                Claim::Exists => truth.certainly_absent() && !in_project,
+            }
+        };
+        if relatives.is_empty() || !relatives.iter().all(refutes) {
             continue;
-        };
-        let truth = tree.truth(&relative);
-        let in_project = !claim.path.starts_with('/') && project_root.join(&relative).exists();
-        let observed = match claim.claim {
-            Claim::Absent if truth.certainly_exists() => format!(
-                "it exists in repository {} at base commit {} and in the checkout",
-                tree.root().display(),
-                tree.base_commit()
+        }
+        let (said, observed) = match claim.claim {
+            Claim::Absent => (
+                "does not exist",
+                format!(
+                    "it exists in repository {} at base commit {} and in the checkout",
+                    tree.root().display(),
+                    tree.base_commit()
+                ),
             ),
-            Claim::Exists if truth.certainly_absent() && !in_project => format!(
-                "it is absent from repository {} at base commit {} and from the checkout",
-                tree.root().display(),
-                tree.base_commit()
+            Claim::Exists => (
+                "exists",
+                format!(
+                    "it is absent from repository {} at base commit {} and from the checkout",
+                    tree.root().display(),
+                    tree.base_commit()
+                ),
             ),
-            _ => continue,
-        };
-        let said = match claim.claim {
-            Claim::Absent => "does not exist",
-            Claim::Exists => "exists",
         };
         let finding = format!(
-            "{task_id}: the body says `{relative}` {said} (\"{}\") but {observed}; read the path under the repository root and rewrite the claim to what is there",
+            "{task_id}: the body says `{}` {said} (\"{}\") but {observed}; read the path under the repository root and rewrite the claim to what is there",
+            relatives.join("` or `"),
             excerpt(&claim.sentence)
         );
-        findings.push((relative, finding));
+        findings.push((relatives, finding));
     }
     findings
 }
 
-/// A path with components may already be repository-relative, or it may be
-/// relative to the explicitly named directory. Keep an existing root path;
-/// otherwise use the only scoped interpretation present in the tree.
-fn resolve_scoped_path(tree: &RepositoryTree, claim: &PathClaim) -> Option<String> {
-    let Some(scope) = &claim.scope else {
-        return Some(claim.path.clone());
+/// The paths a claim may be about. A path with components may already be
+/// repository-relative, or it may be relative to the explicitly named
+/// directory: keep an existing root path, otherwise use the only scoped
+/// interpretation present in the tree. A bare name is joined to every
+/// directory the scope may name. Empty when the claim names no path.
+fn resolve_scoped_paths(tree: &RepositoryTree, claim: &PathClaim) -> Vec<String> {
+    let Some(cited) = &claim.scope else {
+        return vec![claim.path.clone()];
     };
-    if claim.scoped_join {
-        return Some(claim.path.clone());
+    let scopes = scope_directories(tree, cited);
+    if claim.scoped_join || !claim.path.contains('/') {
+        return scopes
+            .iter()
+            .map(|scope| format!("{scope}/{}", claim.path))
+            .collect();
     }
-    if !claim.path.contains('/') {
-        return Some(claim.path.clone());
+    if scopes.is_empty() {
+        return Vec::new();
     }
-    let joined = format!("{}/{}", scope.trim_end_matches('/'), claim.path);
-    let root_path = tree.relative_to_root(&claim.path)?;
+    let Some(root_path) = tree.relative_to_root(&claim.path) else {
+        return Vec::new();
+    };
     if tree.truth(&root_path).certainly_exists() {
-        return Some(claim.path.clone());
+        return vec![claim.path.clone()];
     }
-    let joined_path = tree.relative_to_root(&joined)?;
-    let joined_exists = tree.truth(&joined_path).certainly_exists();
-    let mut scoped_candidates = vec![(joined, joined_exists)];
-    if let Some((scope_name, remainder)) = claim.path.split_once('/')
-        && scope.rsplit('/').next() == Some(scope_name)
-    {
-        let alternate = format!("{}/{}", scope.trim_end_matches('/'), remainder);
-        let alternate_path = tree.relative_to_root(&alternate)?;
-        scoped_candidates.push((alternate, tree.truth(&alternate_path).certainly_exists()));
+    // Each scope directory is one reading, judged on its own: it names a path
+    // only when exactly one of its candidates exists. A claim is checked
+    // only when every reading names one, so the readings must all agree.
+    let mut readings = std::collections::BTreeSet::new();
+    for scope in &scopes {
+        let mut candidates = vec![format!("{scope}/{}", claim.path)];
+        if let Some((scope_name, remainder)) = claim.path.split_once('/')
+            && scope.rsplit('/').next() == Some(scope_name)
+        {
+            candidates.push(format!("{scope}/{remainder}"));
+        }
+        let mut present = candidates
+            .into_iter()
+            .filter(|path| tree.truth(path).certainly_exists());
+        let (Some(only), None) = (present.next(), present.next()) else {
+            return Vec::new();
+        };
+        readings.insert(only);
     }
-    let mut present = scoped_candidates
-        .into_iter()
-        .filter(|(_, exists)| *exists)
-        .map(|(path, _)| path);
-    let only = present.next()?;
-    present.next().is_none().then_some(only)
+    readings.into_iter().collect()
+}
+
+/// The repository directories an explicit scope may name. Empty when the
+/// scope names a file (the token is then a symbol inside it, not a path).
+///
+/// - At the repository root the tree decides: a directory is the scope, a
+///   file is no scope.
+/// - Not at the root, the scope may be cited by base name or by a trailing
+///   suffix (`spec.rs` or `src/spec.rs` for `crates/x/src/spec.rs`). Without
+///   a trailing `/`, any base-commit file ending with it makes it a file.
+///   Otherwise every base-commit directory ending with it is a candidate.
+/// - Matching nothing at all: a scope spelled with a trailing `/`, or whose
+///   last component has no file extension, is a missing directory and is
+///   joined, so "`x.rs` exists under `docs/v1.3/`" is checked and refuted.
+///   A scope like `config.json` may be a file outside the repository (a
+///   project file, or one still to be written), so it is no scope.
+fn scope_directories(tree: &RepositoryTree, cited: &str) -> Vec<String> {
+    let slashed = cited.ends_with('/');
+    let Some(scope) = tree.relative_to_root(cited).filter(|s| !s.is_empty()) else {
+        return Vec::new();
+    };
+    if tree.is_dir_at_base(&scope) || tree.root().join(&scope).is_dir() {
+        return vec![scope];
+    }
+    if tree.exists_at_base(&scope) || tree.root().join(&scope).is_file() {
+        return Vec::new();
+    }
+    let suffix = format!("/{scope}");
+    let (dirs, files): (Vec<&String>, Vec<&String>) = tree
+        .paths_at_base()
+        .iter()
+        .filter(|path| path.ends_with(&suffix))
+        .partition(|path| tree.is_dir_at_base(path));
+    if !slashed && !files.is_empty() {
+        return Vec::new();
+    }
+    if !dirs.is_empty() {
+        return dirs.into_iter().cloned().collect();
+    }
+    let last = scope.rsplit('/').next().unwrap_or(&scope);
+    if slashed || !parser::has_file_extension(last) {
+        vec![scope]
+    } else {
+        Vec::new()
+    }
 }
 
 pub(super) fn excerpt(sentence: &str) -> String {
