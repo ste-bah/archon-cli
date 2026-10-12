@@ -70,6 +70,23 @@ pub fn isolate_child(command: &mut Command, root: &Path) {
         .env("ANTHROPIC_API_KEY", "offline-test-key")
         .env("ANTHROPIC_BASE_URL", endpoint)
         .env("OPENAI_BASE_URL", endpoint.trim_end_matches("/v1/messages"));
+    // A Windows process without these cannot start Winsock (no socket, so no
+    // provider request ever leaves the child) or resolve programs. They name
+    // the operating system, not the user, so isolation keeps them.
+    #[cfg(windows)]
+    for name in [
+        "SystemRoot",
+        "SystemDrive",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
+    ] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
 }
 
 pub fn tail(path: &Path) -> String {

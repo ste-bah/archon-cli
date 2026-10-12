@@ -394,11 +394,16 @@ fn normalize_receipt_hashes(
                             .any(|destination| Path::new(destination).ends_with(relative))
                     })
                     .unwrap_or(false);
+                // Whether `blake3` now names normalised content: the raw
+                // byte length then counts this machine's absolute root path
+                // spellings, which the normalised content replaced.
+                let mut content_normalized = false;
                 for key in ["blake3", "prior_blake3"] {
                     let Some(digest) = map.get(key).and_then(serde_json::Value::as_str) else {
                         continue;
                     };
                     if let Some(content) = content_by_digest.get(digest) {
+                        content_normalized |= key == "blake3";
                         map.insert(key.into(), digest_normalized(content).into());
                     } else if digest.starts_with('<')
                         || content_by_digest
@@ -406,6 +411,7 @@ fn normalize_receipt_hashes(
                             .any(|content| digest_normalized(content) == digest)
                     {
                         // Already normalised by an outer pass: keep it.
+                        content_normalized |= key == "blake3";
                     } else {
                         // The bytes behind this digest were overwritten later
                         // (a pin or lock rewritten by a later call) and embed
@@ -420,10 +426,11 @@ fn normalize_receipt_hashes(
                         map.insert(key.into(), label.into());
                     }
                 }
-                if map
-                    .get("blake3")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|d| d.starts_with('<'))
+                if content_normalized
+                    || map
+                        .get("blake3")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|d| d.starts_with('<'))
                 {
                     map.remove("byte_len");
                 }

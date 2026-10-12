@@ -123,8 +123,11 @@ max_concurrent = 1
 }
 
 fn git(root: &Path, args: &[&str]) {
+    // The fixture commit must not depend on the runner's git settings: a
+    // Windows runner's core.autocrlf would otherwise rewrite line ends.
     let status = Command::new("git")
         .current_dir(root.join("repository"))
+        .args(["-c", "core.autocrlf=false"])
         .args(args)
         .env("GIT_AUTHOR_DATE", "2000-01-01T00:00:00Z")
         .env("GIT_COMMITTER_DATE", "2000-01-01T00:00:00Z")

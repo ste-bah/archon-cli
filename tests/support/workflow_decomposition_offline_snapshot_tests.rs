@@ -190,3 +190,30 @@ fn only_interrupted_calls_lose_their_attempt_number() {
         2
     );
 }
+
+#[test]
+fn embedded_receipt_byte_len_of_normalized_content_is_dropped() {
+    // Two machines publish the same envelope from roots of different lengths:
+    // the raw byte lengths differ, the normalised content does not.
+    let content = serde_json::json!({"report": "<project-root>/tasks/PRD-X"});
+    let entry = |digest: &str, byte_len: u64| {
+        serde_json::json!({"stdout": format!(
+            r#"{{"entries":[{{"blake3":"{digest}","byte_len":{byte_len},"relative_path":"gate-envelope.json"}}]}}"#
+        )})
+    };
+    let (mut short_root, mut long_root) = (entry("short", 40), entry("long", 90));
+    normalize_embedded_receipt_for_test(
+        &mut short_root,
+        &[("short".to_owned(), content.clone())].into(),
+    );
+    normalize_embedded_receipt_for_test(&mut long_root, &[("long".to_owned(), content)].into());
+    assert_eq!(short_root, long_root);
+    assert!(!short_root["stdout"].as_str().unwrap().contains("byte_len"));
+    // The normalised digest still tells content apart.
+    let mut changed = entry("changed", 40);
+    normalize_embedded_receipt_for_test(
+        &mut changed,
+        &[("changed".to_owned(), serde_json::json!({"report": "other"}))].into(),
+    );
+    assert_ne!(short_root, changed);
+}

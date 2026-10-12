@@ -240,6 +240,7 @@ fn heredoc_verifier_script_in_a_check_block() {
 /// A candidate with 60 acceptance criteria (62 checks with the two owed
 /// supplementary ones) freezes, judges and lands with every call made once.
 #[test]
+#[ignore = "nightly: takes 70 s locally and 124-150 s on CI runners, over the 2-minute budget"]
 fn large_candidate_with_sixty_acceptance_checks() {
     const CRITERIA: usize = 60;
     let name = "large-candidate";
@@ -259,8 +260,10 @@ fn large_candidate_with_sixty_acceptance_checks() {
         ],
     );
     // The 62-check freeze prints nothing for longer than the default
-    // no-progress bound when the cells run in parallel.
-    decompose_within(&project, name, std::time::Duration::from_secs(300));
+    // no-progress bound when the cells run in parallel. The bound stays under
+    // nextest's 240 s terminate-after (.config/nextest.toml), so a stall is
+    // reported with this cell's own evidence instead of a bare TIMEOUT.
+    decompose_within(&project, name, std::time::Duration::from_secs(180));
     let actual = final_snapshot(&project, &[]);
     let entries = entries(&actual.acceptance);
     assert_eq!(entries.len(), CRITERIA + 2, "{name}: frozen entries");
