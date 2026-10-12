@@ -102,7 +102,87 @@ pub(crate) fn resume_chain_argument(
             snapshot
         }
     };
-    Ok(snapshot.to_argument())
+    // A live frozen artifact is only a reason to skip its authoring phase if
+    // the freeze call itself cannot be replayed by this build. In particular,
+    // never infer a new phase boundary from the task root alone: normal
+    // same-build resumes must replay the exact repair loop they paused in.
+    let mut effective = snapshot.clone();
+    let stale_acceptance = freeze_needs_rejudging(store, run_id, "freeze-acceptance")?;
+    let stale_skeleton = freeze_needs_rejudging(store, run_id, "freeze-skeleton")?;
+    effective.acceptance &= stale_acceptance;
+    effective.skeleton &= stale_skeleton;
+    if !effective.skeleton {
+        effective.subjects.clear();
+        effective.bodies.clear();
+    }
+    Ok(effective.to_argument())
+}
+
+fn freeze_needs_rejudging(store: &WorkflowStore, run_id: &str, capability: &str) -> Result<bool> {
+    use archon_workflow::{WorkflowV2HostMethod, WorkflowV2ResultStore};
+
+    let records =
+        WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2")).load_call_records()?;
+    let Some(record) = records.iter().rev().find(|record| {
+        record.call.method == WorkflowV2HostMethod::HostCommand
+            && record
+                .call
+                .options
+                .host_command
+                .as_ref()
+                .is_some_and(|request| request.command_id == capability)
+    }) else {
+        return Ok(false);
+    };
+    if !freeze_record_status_allows_override(record.status, record.invalidated_by.is_some()) {
+        return Ok(false);
+    }
+    freeze_outcome_requires_rejudging(&record.result.data, capability)
+}
+
+fn freeze_record_status_allows_override(
+    status: archon_workflow::WorkflowV2Status,
+    invalidated: bool,
+) -> bool {
+    !invalidated
+        && matches!(
+            status,
+            archon_workflow::WorkflowV2Status::Accepted | archon_workflow::WorkflowV2Status::Noop
+        )
+}
+
+fn freeze_outcome_requires_rejudging(
+    outcome: &serde_json::Value,
+    capability: &str,
+) -> Result<bool> {
+    let findings = outcome
+        .get("gateEnvelope")
+        .and_then(|envelope| envelope.get("policy_findings"))
+        .and_then(serde_json::Value::as_array);
+    if findings.is_none_or(|findings| !findings.is_empty()) {
+        return Ok(false);
+    }
+    let current_version = super::workflow_host_command_logic::versions()
+        .get(capability)
+        .copied()
+        .ok_or_else(|| anyhow!("host command capability '{capability}' has no logic version"))?;
+    let (current_digest, build_bound) = super::workflow_host_command_logic::digests()
+        .remove(capability)
+        .ok_or_else(|| anyhow!("host command capability '{capability}' has no logic digest"))?;
+    let version_stale = outcome
+        .get("logicVersion")
+        .and_then(serde_json::Value::as_u64)
+        .is_none_or(|version| version != u64::from(current_version));
+    let digest_stale = outcome
+        .get("logicDigest")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(|digest| digest != current_digest);
+    let build_stale = build_bound
+        && outcome
+            .get("logicBuild")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|build| build != super::workflow_host_command_logic::THIS_BUILD);
+    Ok(version_stale || digest_stale || build_stale)
 }
 
 /// The frozen chain the launcher found and verified under a task root. Read

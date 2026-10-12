@@ -279,8 +279,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #417 copied check inputs omit freeze-owned files, which can change a check verdict.
         version: 4,
         sources: &[GATE, CONTRACT, VERIFY],
-        // #434 re-pin only: verify never asks the fidelity critic.
-        sources_digest: "5072c083678486ff0688aab481037ee11efbcb372292c2dcca71da5c4d54781d",
+        // #439 re-pin only: resume phase selection does not change verification verdicts.
+        sources_digest: "8b28d4aa4870392c3c3cd1f58995354b967b9184e295e57f7304b39c76943876",
         build_bound: true,
     },
     CapabilityLogic {
@@ -288,8 +288,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        // #434 re-pin only: verify never asks the fidelity critic.
-        sources_digest: "5072c083678486ff0688aab481037ee11efbcb372292c2dcca71da5c4d54781d",
+        // #439 re-pin only: resume phase selection does not change verification verdicts.
+        sources_digest: "8b28d4aa4870392c3c3cd1f58995354b967b9184e295e57f7304b39c76943876",
         build_bound: true,
     },
 ];

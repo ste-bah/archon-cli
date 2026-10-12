@@ -218,6 +218,28 @@ fn derive_seed(
     })
 }
 
+/// Ordinal floors for a resume that enters verification without a harness
+/// transition. This seed is runtime input only; the next resume derives new
+/// floors from the durable call and pause records.
+pub(crate) fn resume_floor_seed(
+    store: &WorkflowStore,
+    run_id: &str,
+    runtime: &FixedRunIdentityV1,
+    criteria: &BTreeMap<String, String>,
+    requirement_texts: &BTreeMap<String, String>,
+    resume_frozen_chain: &serde_json::Value,
+) -> Result<PhaseSeed> {
+    let generation = store.load_state(run_id)?.generation;
+    derive_seed(
+        store,
+        run_id,
+        (generation as usize, runtime.clone()),
+        criteria,
+        requirement_texts,
+        Some(resume_frozen_chain),
+    )
+}
+
 /// The run's seed for its current runtime, derived and recorded the first
 /// time a resume reaches it; `None` before any upgrade.
 #[cfg(test)]

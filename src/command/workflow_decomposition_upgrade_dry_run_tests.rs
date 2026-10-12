@@ -233,7 +233,7 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
 }
 
 #[tokio::test]
-async fn upgraded_resume_dry_run_plans_verification_for_the_live_frozen_chain() {
+async fn upgraded_resume_dry_run_does_not_skip_an_unrecorded_freeze_landing() {
     let project = fixture_project();
     let (store, run_id, _) =
         super::super::workflow_decomposition_drift_tests::launch_and_pause(project.path()).await;
@@ -313,16 +313,16 @@ async fn upgraded_resume_dry_run_plans_verification_for_the_live_frozen_chain() 
     .await
     .unwrap();
     assert!(
-        output.contains("capability=verify-frozen-acceptance"),
+        !output.contains("capability=verify-frozen-acceptance"),
         "{output}"
     );
     assert!(
-        output.contains("capability=verify-frozen-skeleton"),
+        !output.contains("capability=verify-frozen-skeleton"),
         "{output}"
     );
-    assert!(!output.contains("capability=freeze-acceptance"), "{output}");
-    assert!(!output.contains("capability=freeze-skeleton"), "{output}");
-    assert!(!output.contains("acceptance-author"), "{output}");
+    assert!(output.contains("capability=freeze-acceptance"), "{output}");
+    assert!(output.contains("capability=freeze-skeleton"), "{output}");
+    assert!(output.contains("acceptance-author"), "{output}");
     assert_eq!(before, snapshot_tree(&store.run_dir(&run_id)));
     assert_eq!(task_root_before, snapshot_tree(task_root));
     assert_eq!(
@@ -338,7 +338,7 @@ async fn upgraded_resume_dry_run_plans_verification_for_the_live_frozen_chain() 
 }
 
 #[tokio::test]
-async fn dry_run_without_transition_uses_live_frozen_chain_and_writes_nothing() {
+async fn dry_run_without_transition_replays_unrecorded_freezes_and_writes_nothing() {
     let project = fixture_project();
     let (store, run_id, _) =
         super::super::workflow_decomposition_drift_tests::launch_and_pause(project.path()).await;
@@ -370,16 +370,16 @@ async fn dry_run_without_transition_uses_live_frozen_chain_and_writes_nothing() 
         "{output}"
     );
     assert!(
-        output.contains("capability=verify-frozen-acceptance"),
+        !output.contains("capability=verify-frozen-acceptance"),
         "{output}"
     );
     assert!(
-        output.contains("capability=verify-frozen-skeleton"),
+        !output.contains("capability=verify-frozen-skeleton"),
         "{output}"
     );
-    assert!(!output.contains("capability=freeze-acceptance"), "{output}");
-    assert!(!output.contains("capability=freeze-skeleton"), "{output}");
-    assert!(!output.contains("acceptance-author"), "{output}");
+    assert!(output.contains("capability=freeze-acceptance"), "{output}");
+    assert!(output.contains("capability=freeze-skeleton"), "{output}");
+    assert!(output.contains("acceptance-author"), "{output}");
     assert_eq!(run_before, snapshot_tree(&store.run_dir(&run_id)));
     assert_eq!(task_before, snapshot_tree(task_root));
     assert_eq!(lock_before, lock.exists(), "dry-run created a publish lock");

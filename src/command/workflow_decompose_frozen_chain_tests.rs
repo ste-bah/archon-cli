@@ -11,6 +11,48 @@ use archon_workflow::task_set_contract::{
 use super::test_support::contract_bytes;
 use super::{FrozenChainSnapshot, FrozenStage, frozen_chain_snapshot, verify_frozen_stage};
 
+#[test]
+fn frozen_override_requires_stale_logic_and_a_clean_landing() {
+    let versions = super::super::workflow_host_command_logic::versions();
+    let digests = super::super::workflow_host_command_logic::digests();
+    let version = versions["freeze-acceptance"];
+    let digest = &digests["freeze-acceptance"].0;
+    let clean = serde_json::json!({
+        "gateEnvelope": {"policy_findings": []},
+        "logicVersion": version,
+        "logicDigest": digest,
+    });
+    assert!(!super::freeze_outcome_requires_rejudging(&clean, "freeze-acceptance").unwrap());
+
+    let stale = serde_json::json!({
+        "gateEnvelope": {"policy_findings": []},
+        "logicVersion": version.saturating_sub(1),
+        "logicDigest": digest,
+    });
+    assert!(super::freeze_outcome_requires_rejudging(&stale, "freeze-acceptance").unwrap());
+
+    let open = serde_json::json!({
+        "gateEnvelope": {"policy_findings": [{"text": "repair remains open"}]},
+        "logicVersion": version.saturating_sub(1),
+        "logicDigest": digest,
+    });
+    assert!(!super::freeze_outcome_requires_rejudging(&open, "freeze-acceptance").unwrap());
+
+    let no_findings_record = serde_json::json!({"logicVersion": version.saturating_sub(1)});
+    assert!(
+        !super::freeze_outcome_requires_rejudging(&no_findings_record, "freeze-acceptance")
+            .unwrap()
+    );
+    assert!(!super::freeze_record_status_allows_override(
+        archon_workflow::WorkflowV2Status::NeedsReview,
+        false,
+    ));
+    assert!(!super::freeze_record_status_allows_override(
+        archon_workflow::WorkflowV2Status::Accepted,
+        true,
+    ));
+}
+
 const PRD: &str = "# PRD X\n\n## Requirements\n\n| ID | Requirement |\n|---|---|\n| REQ-X-001 | Prove the fixture. |\n\n## Acceptance Criteria\n\n| ID | Criterion |\n|---|---|\n| AC-X-001 | The fixture is proven. |\n";
 
 struct Fixture {
