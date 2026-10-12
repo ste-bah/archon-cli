@@ -225,18 +225,21 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 14: #417 task-root exclusions and copies use the same project-relative input set as its digest.
         // #417 re-pin only: direct copy calls now normalize roots like the production caller.
         // 15: #417 Windows task-root paths normalize before containment checks, so probes can run and produce a different verdict.
+        // #439 re-pin only: resume phase selection shares this closure; freeze verdicts are unchanged.
+        // #417 re-pin only: the landing destination allowlist names the topology stores; freeze verdicts are unchanged.
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "8dfe5f82fb860fa9e8fb6a7201bc95912bac8f09c75387888a0db4a99c4d4900",
+        sources_digest: "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // #434 and #417 re-pin only: harness input paths, pipeline outputs, and copy API normalization do not alter this verdict.
+        // #439 re-pin only, as freeze-acceptance.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "8dfe5f82fb860fa9e8fb6a7201bc95912bac8f09c75387888a0db4a99c4d4900",
+        sources_digest: "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
         build_bound: false,
     },
     CapabilityLogic {
@@ -287,7 +290,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
-        sources_digest: "a5847d41acd62fa46c81a7a721b25445ee47b0b4a286d33c134464e00c180278",
+        sources_digest: "e62cf9cdeed73a0c10b405e38b8ac6463c3ef09edd309d02020be7bbfe59ec73",
         build_bound: true,
     },
     CapabilityLogic {
@@ -297,7 +300,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: verify never asks the fidelity critic or reads pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
-        sources_digest: "a5847d41acd62fa46c81a7a721b25445ee47b0b4a286d33c134464e00c180278",
+        sources_digest: "e62cf9cdeed73a0c10b405e38b8ac6463c3ef09edd309d02020be7bbfe59ec73",
         build_bound: true,
     },
 ];
