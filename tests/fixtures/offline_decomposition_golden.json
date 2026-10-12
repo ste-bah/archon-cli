@@ -147,7 +147,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -205,7 +205,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -263,7 +263,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -321,7 +321,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -379,7 +379,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -439,7 +439,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -521,8 +521,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
-            "logicVersion": 12,
+            "logicDigest": "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
+            "logicVersion": 15,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -733,7 +733,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "needs_review"
       }
@@ -768,7 +768,7 @@
               "command": "hostCommand:freeze-acceptance",
               "exit_code": 0,
               "kind": "inspect",
-              "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 541 stderr bytes",
+              "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 497 stderr bytes",
               "status": "succeeded"
             }
           ],
@@ -788,8 +788,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
-            "logicVersion": 12,
+            "logicDigest": "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
+            "logicVersion": 15,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -954,8 +954,8 @@
               ],
               "schema_version": 1
             },
-            "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-progress: 4\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (0 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 5\narchon-host-progress: 6\narchon-host-progress: 7\n",
-            "stderrBytes": 541,
+            "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\n",
+            "stderrBytes": 497,
             "stderrTruncated": false,
             "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8a680cbb16842e231ed8e88a6a653d0ed395310b07da04231165bdccee11b3ac\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"df492cde15abbc438ef61cc9c25a5673ce89d5094f1a7b8b3ffb8d44f99cc8ac\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 676,
@@ -965,7 +965,7 @@
           "evidence": [
             {
               "kind": "implementation",
-              "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=676, stderr_bytes=541"
+              "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=676, stderr_bytes=497"
             }
           ],
           "files_changed": [],
@@ -976,7 +976,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1031,7 +1031,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
+            "logicDigest": "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
             "logicVersion": 3,
             "postcondition": {
               "satisfied": true,
@@ -1206,7 +1206,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1269,7 +1269,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "c3a8394a67a331273866fb33cdcd6b1f172cebc054ec38d244e803fdea4080b5",
+            "logicDigest": "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
             "logicVersion": 8,
             "postcondition": {
               "satisfied": true,
@@ -1301,7 +1301,7 @@
             "stderr": "archon-host-activity: child making progress\n",
             "stderrBytes": 44,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}\nHost note: replaced differing frozen frontmatter fields (authored values redacted): deliverable_contracts.",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 397,
             "stdoutTruncated": false,
             "subjects": [
@@ -1326,7 +1326,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1389,7 +1389,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "c3a8394a67a331273866fb33cdcd6b1f172cebc054ec38d244e803fdea4080b5",
+            "logicDigest": "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
             "logicVersion": 8,
             "postcondition": {
               "satisfied": true,
@@ -1421,7 +1421,7 @@
             "stderr": "archon-host-activity: child making progress\n",
             "stderrBytes": 44,
             "stderrTruncated": false,
-            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}\nHost note: replaced differing frozen frontmatter fields (authored values redacted): deliverable_contracts.",
+            "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
             "stdoutBytes": 396,
             "stdoutTruncated": false,
             "subjects": [
@@ -1446,7 +1446,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1500,7 +1500,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "13e87121d9ffc327be565674aff3d9ab43a8095de458bc579e9e34a533dff429",
+            "logicDigest": "32a5540804bc61f75556192dae105157919d9daee17febae6f2b441c5a40731e",
             "logicVersion": 3,
             "postcondition": {
               "satisfied": true,
@@ -1555,7 +1555,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1609,7 +1609,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "c3a8394a67a331273866fb33cdcd6b1f172cebc054ec38d244e803fdea4080b5",
+            "logicDigest": "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
             "logicVersion": 7,
             "postcondition": {
               "satisfied": true,
@@ -1664,7 +1664,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1695,8 +1695,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
-                  "logicVersion": 12,
+                  "logicDigest": "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
+                  "logicVersion": 15,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1738,7 +1738,7 @@
                         "command": "hostCommand:freeze-acceptance",
                         "exit_code": 0,
                         "kind": "inspect",
-                        "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 541 stderr bytes",
+                        "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 497 stderr bytes",
                         "status": "succeeded"
                       }
                     ],
@@ -1758,8 +1758,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
-                      "logicVersion": 12,
+                      "logicDigest": "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
+                      "logicVersion": 15,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1794,8 +1794,8 @@
                         ],
                         "schema_version": 1
                       },
-                      "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-progress: 4\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (0 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 5\narchon-host-progress: 6\narchon-host-progress: 7\n",
-                      "stderrBytes": 541,
+                      "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\n",
+                      "stderrBytes": 497,
                       "stderrTruncated": false,
                       "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8a680cbb16842e231ed8e88a6a653d0ed395310b07da04231165bdccee11b3ac\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"df492cde15abbc438ef61cc9c25a5673ce89d5094f1a7b8b3ffb8d44f99cc8ac\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 676,
@@ -1805,7 +1805,7 @@
                     "evidence": [
                       {
                         "kind": "implementation",
-                        "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=676, stderr_bytes=541"
+                        "summary": "trusted host command process completed: exit=Some(0), stdout_bytes=676, stderr_bytes=497"
                       }
                     ],
                     "files_changed": [],
@@ -1816,8 +1816,8 @@
                     "task_coverage": []
                   },
                   "status": "accepted",
-                  "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 2\narchon-host-progress: 3\narchon-host-progress: 4\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (0 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 5\narchon-host-progress: 6\narchon-host-progress: 7\n",
-                  "stderrBytes": 541,
+                  "stderr": "archon-host-progress: 0\narchon-host-activity: child making progress\narchon-host-progress: 1\narchon-host-progress: 2\narchon-host-activity: child making progress\narchon-host-activity: child making progress\narchon-host-progress: 3\narchon-host-progress: 4\narchon-host-progress: 5\nacceptance judge: 3 accepted check(s) failed on the pre-implementation tree; judging whether each can pass (1 verdict(s) reused)\narchon-host-activity: child making progress\narchon-host-progress: 6\narchon-host-progress: 7\n",
+                  "stderrBytes": 497,
                   "stderrTruncated": false,
                   "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"freeze-acceptance\",\"entries\":[{\"blake3\":\"8a680cbb16842e231ed8e88a6a653d0ed395310b07da04231165bdccee11b3ac\",\"relative_path\":\"acceptance-contract.json\"},{\"blake3\":\"df492cde15abbc438ef61cc9c25a5673ce89d5094f1a7b8b3ffb8d44f99cc8ac\",\"relative_path\":\"acceptance-contract.lock\"},{\"blake3\":\"<receipt-digest-of-overwritten-content>\",\"relative_path\":\"acceptance-pin.json\"},{\"blake3\":\"da6cef049248fa75e54a61b18dbfb1c599fc2b8e5b9d7ccc769cd79a4aa8b0ec\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 676,
@@ -1841,7 +1841,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
+                  "logicDigest": "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
                   "logicVersion": 3,
                   "postcondition": {
                     "satisfied": true,
@@ -1902,7 +1902,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
+                      "logicDigest": "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
                       "logicVersion": 3,
                       "postcondition": {
                         "satisfied": true,
@@ -2003,7 +2003,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "c3a8394a67a331273866fb33cdcd6b1f172cebc054ec38d244e803fdea4080b5",
+                  "logicDigest": "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
                   "logicVersion": 8,
                   "postcondition": {
                     "satisfied": true,
@@ -2053,7 +2053,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "c3a8394a67a331273866fb33cdcd6b1f172cebc054ec38d244e803fdea4080b5",
+                      "logicDigest": "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
                       "logicVersion": 8,
                       "postcondition": {
                         "satisfied": true,
@@ -2079,7 +2079,7 @@
                       "stderr": "archon-host-activity: child making progress\n",
                       "stderrBytes": 44,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}\nHost note: replaced differing frozen frontmatter fields (authored values redacted): deliverable_contracts.",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 397,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2107,7 +2107,7 @@
                   "stderr": "archon-host-activity: child making progress\n",
                   "stderrBytes": 44,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}\nHost note: replaced differing frozen frontmatter fields (authored values redacted): deliverable_contracts.",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"cc6208dafba4973b321679d9b657b5fca54be6fb66f42eb9ad33cafd9c62005d\",\"relative_path\":\"TASK-X-010.md\"},{\"blake3\":\"eadca3cce88c14fcfacfd7e5aba42b72de6e38d1f5bc0c09efff6ad7b9ed2d1e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 397,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2135,7 +2135,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "c3a8394a67a331273866fb33cdcd6b1f172cebc054ec38d244e803fdea4080b5",
+                  "logicDigest": "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
                   "logicVersion": 8,
                   "postcondition": {
                     "satisfied": true,
@@ -2185,7 +2185,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "c3a8394a67a331273866fb33cdcd6b1f172cebc054ec38d244e803fdea4080b5",
+                      "logicDigest": "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
                       "logicVersion": 8,
                       "postcondition": {
                         "satisfied": true,
@@ -2211,7 +2211,7 @@
                       "stderr": "archon-host-activity: child making progress\n",
                       "stderrBytes": 44,
                       "stderrTruncated": false,
-                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}\nHost note: replaced differing frozen frontmatter fields (authored values redacted): deliverable_contracts.",
+                      "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                       "stdoutBytes": 396,
                       "stdoutTruncated": false,
                       "subjects": [
@@ -2239,7 +2239,7 @@
                   "stderr": "archon-host-activity: child making progress\n",
                   "stderrBytes": 44,
                   "stderrTruncated": false,
-                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}\nHost note: replaced differing frozen frontmatter fields (authored values redacted): deliverable_contracts.",
+                  "stdout": "{\"call_id\":\"<host-call-id>\",\"command_id\":\"land-task-body\",\"entries\":[{\"blake3\":\"13b4924498e7a289e9815e7a1e13e3eef5f074e183308a6e7f5927b7d5f04c8a\",\"relative_path\":\"TASK-X-020.md\"},{\"blake3\":\"5279ef9f1fae09b92bcd7ff088d8d40cf00050cda4dff1af6621a49c71394c9e\",\"relative_path\":\"gate-envelope.json\"}],\"schema_version\":1}",
                   "stdoutBytes": 396,
                   "stdoutTruncated": false,
                   "subjects": [
@@ -2267,7 +2267,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "c3a8394a67a331273866fb33cdcd6b1f172cebc054ec38d244e803fdea4080b5",
+                  "logicDigest": "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
                   "logicVersion": 7,
                   "postcondition": {
                     "satisfied": true,
@@ -2312,7 +2312,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "c3a8394a67a331273866fb33cdcd6b1f172cebc054ec38d244e803fdea4080b5",
+                      "logicDigest": "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
                       "logicVersion": 7,
                       "postcondition": {
                         "satisfied": true,
@@ -2397,7 +2397,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "13e87121d9ffc327be565674aff3d9ab43a8095de458bc579e9e34a533dff429",
+                  "logicDigest": "32a5540804bc61f75556192dae105157919d9daee17febae6f2b441c5a40731e",
                   "logicVersion": 3,
                   "postcondition": {
                     "satisfied": true,
@@ -2442,7 +2442,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "13e87121d9ffc327be565674aff3d9ab43a8095de458bc579e9e34a533dff429",
+                      "logicDigest": "32a5540804bc61f75556192dae105157919d9daee17febae6f2b441c5a40731e",
                       "logicVersion": 3,
                       "postcondition": {
                         "satisfied": true,
@@ -2540,7 +2540,7 @@
                 "command": "hostCommand:freeze-acceptance",
                 "exit_code": 0,
                 "kind": "inspect",
-                "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 541 stderr bytes",
+                "output_summary": "trusted symbolic capability completed with 676 stdout bytes and 497 stderr bytes",
                 "status": "succeeded"
               },
               {
@@ -2611,7 +2611,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "c744f4a1d50351e427decf6bef89582db539da60c629ad2412927edcbba9eaf9",
+        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }

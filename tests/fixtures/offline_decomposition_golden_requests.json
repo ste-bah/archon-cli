@@ -10,6 +10,6 @@
   "judge:adversarial:AC-X-001": 1,
   "judge:adversarial:SUP-REQ-X-001,SUP-REQ-X-002": 1,
   "judge:passability:AC-X-001": 1,
-  "judge:passability:AC-X-001,SUP-REQ-X-001,SUP-REQ-X-002": 1,
+  "judge:passability:SUP-REQ-X-001,SUP-REQ-X-002": 1,
   "skeleton": 1
 }
