@@ -71,6 +71,37 @@ fn a_url_keeps_scheme_host_and_path_only() {
     assert!(!stripped.contains("hunter2") && !stripped.contains("u=a"));
 }
 
+#[test]
+fn scheme_less_password_userinfo_is_removed_without_rewriting_other_tokens() {
+    assert_eq!(strip_url("user:pw@host/path"), "host/path");
+    assert_eq!(strip_url("host/path?token=s"), "host/path");
+    assert_eq!(strip_url("host#frag"), "host");
+    assert_eq!(strip_url("git@host:repo?x=1"), "git@host:repo");
+    assert_eq!(strip_url("user:p?w@host?q=1"), "host");
+    for url in [
+        "user:p/w@host/path",
+        "user:p?w@host/path",
+        "user:p#w@host/path",
+        "user:p@w@host/path",
+    ] {
+        let stripped = strip_url(url);
+        assert_eq!(stripped, "host/path", "{url} -> {stripped}");
+    }
+    assert_eq!(strip_url("git@host:repo"), "git@host:repo");
+    assert_eq!(strip_url("ubuntu@sha256:abc"), "ubuntu@sha256:abc");
+    assert_eq!(strip_url("pkg@1.2.3"), "pkg@1.2.3");
+    assert_eq!(
+        redact_tool_text("git@host:repo ubuntu@sha256:abc pkg@1.2.3; contact a@b.com?x=1"),
+        "git@host:repo ubuntu@sha256:abc pkg@1.2.3; contact a@b.com?x=1"
+    );
+    assert_eq!(
+        redact_tool_text("fetch user:pw@one/path then user:p/w@two/other"),
+        "fetch one/path then two/other"
+    );
+    assert_eq!(strip_url(""), "");
+    assert_eq!(redact_tool_text(""), "");
+}
+
 /// Shell commands that carry a credential in forms no redaction rule can
 /// know, each holding `hunter2`.
 pub(crate) const LEAKY_COMMANDS: &[&str] = &[

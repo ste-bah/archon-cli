@@ -147,18 +147,27 @@ pub fn command_program(command: &str) -> String {
     }
 }
 
-/// `scheme://host/path` of `url`: no user info, query or fragment.
+/// The safe address part of `url`: no user info, query or fragment.
 ///
 /// User info is removed FIRST and greedily: when anything after
 /// `scheme://` holds an `@`, everything up to and including the LAST `@`
 /// goes, so no character of a password (`/`, `?`, `#` or `@` in it) can
 /// survive. Only then is the address cut at its first `?` or `#`. An `@` in
 /// a path or query also strips the host and path before it: a wrong host,
-/// never a kept secret. Text without a scheme is cut at its first `?` or
-/// `#`.
+/// never a kept secret. A scheme-less token is treated as an authority form
+/// only when it has a colon before its last `@` (userinfo with a password).
+/// SSH's `user@host:path` and other non-secret `@` forms are preserved.
 pub fn strip_url(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
-        return url.split(['?', '#']).next().unwrap_or_default().to_string();
+        let rest = url
+            .rsplit_once('@')
+            .and_then(|(userinfo, after_at)| userinfo.contains(':').then_some(after_at))
+            .unwrap_or(url);
+        return rest
+            .split(['?', '#'])
+            .next()
+            .unwrap_or_default()
+            .to_string();
     };
     let rest = rest.rsplit_once('@').map_or(rest, |(_, after)| after);
     let rest = rest.split(['?', '#']).next().unwrap_or_default();
@@ -166,7 +175,8 @@ pub fn strip_url(url: &str) -> String {
 }
 
 static URL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"[A-Za-z][A-Za-z0-9+.\-]*://[^\s'"<>`]+"#).expect("constant URL regex")
+    Regex::new(r#"[A-Za-z][A-Za-z0-9+.\-]*://[^\s'"<>`]+|[^\s'"<>`]*:[^\s'"<>`]*@[^\s'"<>`]+"#)
+        .expect("constant URL regex")
 });
 
 /// `KEY=VALUE`, `KEY: VALUE`, `"KEY": "VALUE"` and `--key=value`; the value
