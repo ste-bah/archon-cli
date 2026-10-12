@@ -313,6 +313,82 @@ fn decomposition_and_launch_hold_publish_lock_through_reads() {
     }
 }
 
+/// A resume's frozen-chain decision reads the snapshot and the receipts it
+/// compares with the disk under one hold of the publish lock; the dry run
+/// holds an existing lock file shared and creates none.
+#[test]
+fn resume_chain_decision_holds_publish_lock_through_its_reads() {
+    for read_only in [false, true] {
+        let s = Scenario::new();
+        let lock = archon_workflow::task_set_publish_lock::lock_path(&s.pin());
+        if read_only {
+            std::fs::write(&lock, b"").unwrap();
+        }
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let root = s.root().to_path_buf();
+        let tasks = s.tasks();
+        let reader = std::thread::spawn(move || {
+            journal::test_hooks::STEP.with(|h| {
+                *h.borrow_mut() = Some(Box::new(move |step| {
+                    if step == "resume-chain-read" {
+                        ready_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                    }
+                }))
+            });
+            let catalog =
+                crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("test")
+                    .unwrap();
+            crate::command::workflow_decompose_frozen_chain::resume_chain_decision(
+                &archon_workflow::WorkflowStore::project(&root),
+                "wf-lock-test",
+                1,
+                (&root, &root.join("prd.md"), &tasks),
+                &catalog,
+                read_only,
+            )
+            .unwrap();
+        });
+        ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let pin = s.pin();
+        let files = s.new_files();
+        let writer = std::thread::spawn(move || {
+            done_tx
+                .send(begin(&pin, &files).unwrap().commit().unwrap())
+                .unwrap();
+        });
+        let blocked = done_rx.recv_timeout(Duration::from_millis(200)).is_err();
+        release_tx.send(()).unwrap();
+        reader.join().unwrap();
+        writer.join().unwrap();
+        assert!(
+            blocked,
+            "publisher interleaved with resume read_only={read_only}"
+        );
+    }
+    let s = Scenario::new();
+    let lock = archon_workflow::task_set_publish_lock::lock_path(&s.pin());
+    let _ = std::fs::remove_file(&lock);
+    let catalog =
+        crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("test").unwrap();
+    crate::command::workflow_decompose_frozen_chain::resume_chain_decision(
+        &archon_workflow::WorkflowStore::project(s.root()),
+        "wf-lock-test",
+        1,
+        (s.root(), &s.root().join("prd.md"), &s.tasks()),
+        &catalog,
+        true,
+    )
+    .unwrap();
+    assert!(
+        !lock.exists(),
+        "a read-only resume decision created {}",
+        lock.display()
+    );
+}
+
 #[test]
 fn recovery_log_failure_keeps_the_durable_decision_for_retry() {
     let s = Scenario::new();

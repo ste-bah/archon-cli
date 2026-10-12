@@ -98,38 +98,59 @@ pub(crate) fn frozen_chain_snapshot(
     frozen_chain_snapshot_with_recovery(project_root, prd_path, task_root, true)
 }
 
-/// Read the live chain without settling a publish journal or creating a
-/// publish lock. A preview with an unsettled publish cannot claim a snapshot.
-pub(crate) fn frozen_chain_snapshot_read_only(
-    project_root: &Path,
-    prd_path: &Path,
-    task_root: &Path,
-) -> Result<FrozenChainSnapshot> {
-    frozen_chain_snapshot_with_recovery(project_root, prd_path, task_root, false)
-}
-
 fn frozen_chain_snapshot_with_recovery(
     project_root: &Path,
     prd_path: &Path,
     task_root: &Path,
     recover: bool,
 ) -> Result<FrozenChainSnapshot> {
+    with_chain_read(project_root, task_root, recover, || {
+        snapshot_locked(project_root, prd_path, task_root)
+    })
+}
+
+/// Run `read` holding the publish lock of the chain under `task_root`
+/// (Issue 294), so a publisher never interleaves with it. `recover` settles
+/// a publish a crash interrupted first (Issue 271), under the exclusive
+/// lock. A read-only caller holds an existing lock file shared, creates and
+/// settles nothing, and refuses a pending journal. An absent task root has
+/// no set to lock.
+pub(crate) fn with_chain_read<T>(
+    project_root: &Path,
+    task_root: &Path,
+    recover: bool,
+    read: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    if !task_root.is_dir() {
+        return read();
+    }
+    let pin_path = super::workflow_task_set::acceptance_pin_path(project_root, task_root);
+    if recover {
+        let _settled = super::workflow_task_set::lock_and_recover(&pin_path, task_root)?;
+        return read();
+    }
+    let _shared =
+        archon_workflow::task_set_publish_lock::PublishLockFile::hold_shared_existing(&pin_path)
+            .map_err(|error| anyhow!(error))?;
+    let [journal, _] = archon_workflow::task_set_publish_lock::journal_paths(&pin_path);
+    if journal.exists() {
+        return Err(anyhow!(
+            "dry-run cannot inspect frozen task chain while publish recovery is pending at {}; run a live resume to settle it",
+            journal.display()
+        ));
+    }
+    read()
+}
+
+/// The snapshot, read inside [`with_chain_read`].
+pub(crate) fn snapshot_locked(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+) -> Result<FrozenChainSnapshot> {
     let mut snapshot = FrozenChainSnapshot::default();
     if !task_root.is_dir() {
         return Ok(snapshot);
-    }
-    // Issue 271: a publish a crash interrupted is settled before it is read.
-    let pin_path = super::workflow_task_set::acceptance_pin_path(project_root, task_root);
-    if recover {
-        let (_publish_lock, _) = super::workflow_task_set::lock_and_recover(&pin_path, task_root)?;
-    } else {
-        let [journal, _] = archon_workflow::task_set_publish_lock::journal_paths(&pin_path);
-        if journal.exists() {
-            return Err(anyhow!(
-                "dry-run cannot inspect frozen task chain while publish recovery is pending at {}; run a live resume to settle it",
-                journal.display()
-            ));
-        }
     }
     #[cfg(test)]
     super::workflow_task_set::reader_test_step("decomposition-read");

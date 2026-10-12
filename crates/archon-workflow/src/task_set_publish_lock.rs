@@ -204,18 +204,30 @@ impl PublishLockFile {
     }
 
     fn acquire_as(path: &Path, mode: LockMode) -> Result<Self, String> {
+        let file = Self::open_unheld(path, || {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(path)
+        })?;
+        Self::lock_opened(file, path, mode)
+    }
+
+    fn open_unheld(
+        path: &Path,
+        open: impl FnOnce() -> std::io::Result<std::fs::File>,
+    ) -> Result<std::fs::File, String> {
         if held_here(path) {
             return Err(format!(
                 "this thread already holds the publish lock {}; a nested acquisition would wait on itself",
                 path.display()
             ));
         }
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(path)
-            .map_err(|error| format!("opening publish lock {}: {error}", path.display()))?;
+        open().map_err(|error| format!("opening publish lock {}: {error}", path.display()))
+    }
+
+    fn lock_opened(file: std::fs::File, path: &Path, mode: LockMode) -> Result<Self, String> {
         match mode {
             LockMode::Shared => file.lock_shared(),
             LockMode::Exclusive => file.lock(),
@@ -322,6 +334,23 @@ impl PublishLockFile {
             return Ok(None);
         }
         Self::acquire_shared(&path).map(Some)
+    }
+
+    /// [`Self::hold_shared`] for a reader that writes nothing at all, such as
+    /// a dry run: the lock file is opened read-only and never created, and no
+    /// journal is settled. `None` when this thread already holds the lock, or
+    /// when no publish has created its file yet; a first publish that creates
+    /// it while this read runs is not waited for.
+    pub fn hold_shared_existing(pin_path: &Path) -> Result<Option<Self>, String> {
+        let path = lock_path(pin_path);
+        if held_here(&path) {
+            return Ok(None);
+        }
+        match std::fs::OpenOptions::new().read(true).open(&path) {
+            Ok(file) => Self::lock_opened(file, &path, LockMode::Shared).map(Some),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!("opening publish lock {}: {error}", path.display())),
+        }
     }
 
     /// Hold the publish lock of the set pinned at `pin_path` shared for one
