@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 
 #[path = "workflow_decomposition_offline_snapshot_lifecycle.rs"]
 mod lifecycle;
+#[path = "workflow_decomposition_offline_snapshot_paths.rs"]
+mod paths;
 use lifecycle::normalize_lifecycle_metadata;
+use paths::root_paths_with_forward_slashes;
 
 pub fn golden_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -62,6 +65,7 @@ pub fn normalize_values(value: &mut serde_json::Value, replacements: &[(&str, &s
             for (from, to) in replacements {
                 *text = text.replace(from, to);
             }
+            *text = root_paths_with_forward_slashes(text);
         }
         serde_json::Value::Object(map) => {
             for nested in map.values_mut() {
@@ -109,7 +113,18 @@ pub fn result_store_records(
         .flatten()
         .collect::<Vec<_>>();
     let mut root_spellings = vec![root.to_path_buf()];
-    root_spellings.extend(fs::canonicalize(root));
+    if let Ok(canonical) = fs::canonicalize(root) {
+        // Windows canonicalises to the verbatim `\\?\C:\...` form with
+        // long names; the product records the plain `C:\...` form of that
+        // same path (and a temp dir may be handed out as an 8.3 short name).
+        if let Some(plain) = canonical
+            .to_str()
+            .and_then(|path| path.strip_prefix(r"\\?\"))
+        {
+            root_spellings.push(PathBuf::from(plain));
+        }
+        root_spellings.push(canonical);
+    }
     let mut root_spellings = root_spellings
         .into_iter()
         .filter_map(|path| path.to_str().map(str::to_owned))
