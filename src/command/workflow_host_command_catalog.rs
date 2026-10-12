@@ -54,8 +54,7 @@ pub(crate) struct ResolvedHostCommand {
 /// renewable no-progress windows rather than total clocks. It changes limits
 /// only (reuse meaning 1, `KNOWN_CATALOG_SCHEMAS`), so a schema-1 run resumes;
 /// an outcome a limit cut short replays only under its own limits stamp.
-/// The provider has its own shorter idle window so it can save/report a stall
-/// before the host tears down the child. Neither window limits active work.
+/// Provider idle time is shorter and saves stalls before teardown; neither window limits active work.
 const FREEZE_CAPABILITY_TIMEOUT_SECS: u64 = 7_800;
 
 pub(crate) fn fixed_decomposition_catalog(
@@ -66,6 +65,7 @@ pub(crate) fn fixed_decomposition_catalog(
         &mut capabilities,
         capability(
             "freeze-acceptance",
+            0,
             &[
                 "workflow",
                 "freeze-acceptance",
@@ -105,6 +105,7 @@ pub(crate) fn fixed_decomposition_catalog(
         &mut capabilities,
         capability(
             "freeze-skeleton",
+            1,
             &[
                 "workflow",
                 "freeze-skeleton",
@@ -126,6 +127,7 @@ pub(crate) fn fixed_decomposition_catalog(
             2 * MIB,
             2 * MIB,
             2 * MIB,
+            // Extends its predecessor's pin; the receipt binds that digest in prior_blake3.
             &[
                 "{COMMAND_STAGING}/task-skeleton.json",
                 "{COMMAND_STAGING}/task-skeleton.lock",
@@ -145,6 +147,7 @@ pub(crate) fn fixed_decomposition_catalog(
         &mut capabilities,
         capability(
             "land-task-body",
+            2,
             &[
                 "workflow",
                 "lint",
@@ -187,6 +190,7 @@ pub(crate) fn fixed_decomposition_catalog(
         &mut capabilities,
         capability(
             "task-set-lint",
+            3,
             &[
                 "workflow",
                 "lint",
@@ -225,6 +229,7 @@ pub(crate) fn fixed_decomposition_catalog(
         &mut capabilities,
         capability(
             "requirements-trace",
+            4,
             &[
                 "requirements",
                 "trace",
@@ -443,6 +448,7 @@ pub(crate) fn resolve_host_command(
 #[allow(clippy::too_many_arguments)]
 fn capability(
     id: &str,
+    pipeline_position: u32,
     argv_template: &[&str],
     stdin_delivery: StdinDelivery,
     environment_profile: EnvironmentProfileId,
@@ -455,6 +461,7 @@ fn capability(
 ) -> CommandCapability {
     CommandCapability {
         id: id.to_string(),
+        pipeline_position,
         argv_template: argv_template
             .iter()
             .map(|value| (*value).to_string())

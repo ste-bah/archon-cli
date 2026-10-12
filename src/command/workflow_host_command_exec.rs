@@ -23,7 +23,7 @@ use super::workflow_host_command_decision::{
     candidate_refused_before_staging, unpublished,
 };
 use super::workflow_host_command_postcondition::{
-    evaluate_postcondition, fixed_subject_is_terminal, receipt_matches_live,
+    evaluate_postcondition, fixed_subject_is_terminal,
 };
 use super::workflow_host_command_publish::{
     LiveMutationSentinels, audit_prepared_publication, publish_audited,
