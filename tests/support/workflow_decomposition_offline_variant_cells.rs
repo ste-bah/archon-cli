@@ -70,7 +70,7 @@ fn redaction_of_a_secret_in_an_author_reply() {
             .strip_prefix(&run)
             .unwrap()
             .to_string_lossy()
-            .into_owned();
+            .replace('\\', "/");
         let bytes = fs::read(&path).unwrap();
         let text = String::from_utf8_lossy(&bytes);
         if relative.starts_with("v2/") || relative.starts_with("agent-results/") {
