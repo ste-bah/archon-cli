@@ -357,15 +357,21 @@ fn normalize_run_specific_with_receipts(
     normalize_receipt_hashes(value, content_by_digest, compared_paths);
     match value {
         serde_json::Value::String(text) => {
-            if let Ok(mut embedded @ (serde_json::Value::Object(_) | serde_json::Value::Array(_))) =
-                serde_json::from_str::<serde_json::Value>(text)
+            // A JSON document may lead the text: land-task-body prints its
+            // manifest, then host notes (#428), on stdout.
+            let mut documents =
+                serde_json::Deserializer::from_str(text).into_iter::<serde_json::Value>();
+            if let Some(Ok(
+                mut embedded @ (serde_json::Value::Object(_) | serde_json::Value::Array(_)),
+            )) = documents.next()
             {
+                let rest = text[documents.byte_offset()..].to_string();
                 normalize_run_specific_with_receipts(
                     &mut embedded,
                     content_by_digest,
                     compared_paths,
                 );
-                *text = embedded.to_string();
+                *text = format!("{embedded}{rest}");
             }
         }
         serde_json::Value::Object(map) => map.values_mut().for_each(|nested| {

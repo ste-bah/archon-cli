@@ -217,3 +217,27 @@ fn embedded_receipt_byte_len_of_normalized_content_is_dropped() {
     );
     assert_ne!(short_root, changed);
 }
+
+#[test]
+fn a_manifest_followed_by_host_notes_is_still_normalised() {
+    // land-task-body prints its manifest and then host notes (#428).
+    let content = serde_json::json!({"report": "<project-root>/tasks/PRD-X"});
+    let entry = |digest: &str| {
+        serde_json::json!({"stdout": format!(
+            "{{\"entries\":[{{\"blake3\":\"{digest}\",\"byte_len\":40,\"relative_path\":\"gate-envelope.json\"}}]}}\nHost note: replaced fields."
+        )})
+    };
+    let (mut first, mut second) = (entry("first"), entry("second"));
+    normalize_embedded_receipt_for_test(
+        &mut first,
+        &[("first".to_owned(), content.clone())].into(),
+    );
+    normalize_embedded_receipt_for_test(&mut second, &[("second".to_owned(), content)].into());
+    assert_eq!(first, second);
+    let stdout = first["stdout"].as_str().unwrap();
+    assert!(
+        stdout.ends_with("\nHost note: replaced fields."),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("byte_len"), "{stdout}");
+}
