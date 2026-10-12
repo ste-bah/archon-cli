@@ -220,7 +220,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Supplementary prose validation changes freeze-acceptance verdicts.
         version: 9,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "fe9ffc8fe743e5b95a0e7026d92e71a5836ec9d5e1bce3620a6d6d309f0e986c",
+        // Digest only (#257): the debug-build test seams change no verdict.
+        sources_digest: "ad41dc66627c00600e92fcfeb7a4183cf7368a4cdd0193a236bb412b9ab5f0b6",
 
         build_bound: false,
     },
@@ -229,7 +230,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "fe9ffc8fe743e5b95a0e7026d92e71a5836ec9d5e1bce3620a6d6d309f0e986c",
+        // Digest only (#257): the debug-build test seams change no verdict.
+        sources_digest: "ad41dc66627c00600e92fcfeb7a4183cf7368a4cdd0193a236bb412b9ab5f0b6",
 
         build_bound: false,
     },
@@ -242,7 +244,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 5,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "2ea48aa6cbf3ad27a7e892764ab9470cfd525d84b2dba56a8fbb6d27057bdc6f",
+        // Digest only (#257): the debug-build test seams change no verdict.
+        sources_digest: "f2d37a9c9d48f1e2288638aab21ddc9af2e6c698803b2ab6e75e9a9add71a92c",
 
         build_bound: false,
     },
@@ -254,7 +257,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 5,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "2ea48aa6cbf3ad27a7e892764ab9470cfd525d84b2dba56a8fbb6d27057bdc6f",
+        // Digest only (#257): the debug-build test seams change no verdict.
+        sources_digest: "f2d37a9c9d48f1e2288638aab21ddc9af2e6c698803b2ab6e75e9a9add71a92c",
 
         build_bound: false,
     },
@@ -272,7 +276,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "0411746f5d76f3812ee984af9156ce2df0a6192ed291da3a00ddb8a2b109bfd8",
+        // Digest only (#257): the debug-build test seams change no verdict.
+        sources_digest: "c1e40a2d7c42b705b155f56685cab47a6967f17a5e27e4617664dc9d56640586",
 
         build_bound: true,
     },
@@ -281,7 +286,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "0411746f5d76f3812ee984af9156ce2df0a6192ed291da3a00ddb8a2b109bfd8",
+        // Digest only (#257): the debug-build test seams change no verdict.
+        sources_digest: "c1e40a2d7c42b705b155f56685cab47a6967f17a5e27e4617664dc9d56640586",
 
         build_bound: true,
     },

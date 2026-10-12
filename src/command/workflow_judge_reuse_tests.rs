@@ -238,12 +238,12 @@ async fn supplementary_only_reply_missing_its_judgment_is_refused() {
         format!("{error:#}").contains("missing=[\"SUP-REQ-X-001\"]"),
         "{error:#}"
     );
+    // #385: the same rejection class on every reply is no progress, so the
+    // judge is asked once and then re-asked for the whole no-progress window
+    // before the batch ends incomplete; each ask names only the new check.
     assert_eq!(
         judge.batches.lock().unwrap().as_slice(),
-        [
-            vec!["SUP-REQ-X-001".to_string()],
-            vec!["SUP-REQ-X-001".to_string()],
-            vec!["SUP-REQ-X-001".to_string()],
-        ]
+        // 1 + JUDGE_NO_PROGRESS_WINDOW (3) in workflow_task_set_judge.rs.
+        vec![vec!["SUP-REQ-X-001".to_string()]; 4]
     );
 }

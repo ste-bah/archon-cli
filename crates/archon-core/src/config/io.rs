@@ -59,27 +59,31 @@ pub fn load_config_if_exists(path: PathBuf) -> Result<Option<ArchonConfig>, Conf
     Ok(Some(config))
 }
 
-/// Warn when an older config still sets the removed write-call time budget.
+/// What a config that still sets the removed write-call time budget is told.
+pub const OBSOLETE_WRITE_CALL_TIME_BUDGET_WARNING: &str =
+    "obsolete config key is ignored because write branches have only a no-progress window";
+
+/// Whether a parsed config layer still sets the removed write-call time budget.
 ///
 /// The key remains tolerated by deserialization for forward-compatible config
 /// loading, but has no effect: write branches are bounded by a no-progress
-/// window instead.
+/// window instead (#213).
+pub fn sets_obsolete_write_call_time_budget(value: &toml::Value) -> bool {
+    value
+        .get("workflow")
+        .and_then(|workflow| workflow.get("generated"))
+        .and_then(|generated| generated.get("write_call_time_budget_secs"))
+        .is_some()
+}
+
 fn warn_obsolete_write_call_time_budget(content: &str, path: &std::path::Path) {
-    let has_obsolete_key = toml::from_str::<toml::Value>(content)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("workflow")
-                .and_then(|workflow| workflow.get("generated"))
-                .and_then(|generated| generated.get("write_call_time_budget_secs"))
-                .map(|_| ())
-        })
-        .is_some();
-    if has_obsolete_key {
+    if toml::from_str::<toml::Value>(content)
+        .is_ok_and(|value| sets_obsolete_write_call_time_budget(&value))
+    {
         tracing::warn!(
             config = %path.display(),
             key = "workflow.generated.write_call_time_budget_secs",
-            "obsolete config key is ignored because write branches have only a no-progress window"
+            "{OBSOLETE_WRITE_CALL_TIME_BUDGET_WARNING}"
         );
     }
 }

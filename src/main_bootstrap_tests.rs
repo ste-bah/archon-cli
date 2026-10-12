@@ -38,8 +38,13 @@ fn write_budget_warning_is_emitted_once_during_real_bootstrap() {
     let warning_count = stderr
         .lines()
         .filter(|line| {
+            // #213: the key no longer sets a budget, so the #264 comparison
+            // with host_call_timeout_secs is gone; the legacy key loads with
+            // one 'ignored' warning.
             line.contains("warning: workflow.generated.write_call_time_budget_secs")
-                && line.contains("workflow.generated.host_call_timeout_secs")
+                && line.contains(
+                    "obsolete config key is ignored because write branches have only a no-progress window",
+                )
         })
         .count();
     assert_eq!(warning_count, 1, "stderr was:\n{stderr}");
