@@ -257,8 +257,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 9: #425 dotted identifiers followed by a file citation are not repository-path claims; shared-scope negation and tree-aware dotted or single-word scope resolution now preserve claim polarity and identify the actual scoped path.
         version: 9,
         sources: &[GATE, CONTRACT, LINT],
-        // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes; same version bump as above.
-        sources_digest: "582f76ae47d740831ab38b7fa0b83e454f124a808e0188464480840b45d01ef7",
+        // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
+        sources_digest: "5ffdfe5298d33d820a7e19949ee14a5f6f55af8c969c7af1661317a519e12a42",
         build_bound: false,
     },
     CapabilityLogic {
@@ -272,8 +272,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 8: #425 dotted identifiers followed by a file citation are not repository-path claims; shared-scope negation and tree-aware dotted or single-word scope resolution now preserve claim polarity and identify the actual scoped path.
         version: 8,
         sources: &[GATE, CONTRACT, LINT],
-        // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes; same version bump as above.
-        sources_digest: "582f76ae47d740831ab38b7fa0b83e454f124a808e0188464480840b45d01ef7",
+        // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
+        sources_digest: "5ffdfe5298d33d820a7e19949ee14a5f6f55af8c969c7af1661317a519e12a42",
         build_bound: false,
     },
     CapabilityLogic {

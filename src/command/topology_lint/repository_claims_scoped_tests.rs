@@ -193,6 +193,14 @@ fn a_scope_keeps_its_case() {
     );
 }
 
+#[test]
+fn a_slashed_path_under_several_directories_is_judged_per_directory() {
+    // `crate/tests` reads it as `crate/tests/only.rs` (present);
+    // `crate/tests/tests` reads it as absent. The readings disagree.
+    let found = findings("`tests/only.rs` does not exist under `tests/`.");
+    assert!(found.is_empty(), "{found:?}");
+}
+
 // D1: a trailing `/` spells a directory, so a missing dotted directory is
 // still joined and checked. Without the `/` a dotted scope that matches
 // nothing stays no claim.

@@ -207,7 +207,10 @@ fn resolve_scoped_paths(tree: &RepositoryTree, claim: &PathClaim) -> Vec<String>
     if tree.truth(&root_path).certainly_exists() {
         return vec![claim.path.clone()];
     }
-    let mut present = std::collections::BTreeSet::new();
+    // Each scope directory is one reading, judged on its own: it names a path
+    // only when exactly one of its candidates exists. A claim is checked
+    // only when every reading names one, so the readings must all agree.
+    let mut readings = std::collections::BTreeSet::new();
     for scope in &scopes {
         let mut candidates = vec![format!("{scope}/{}", claim.path)];
         if let Some((scope_name, remainder)) = claim.path.split_once('/')
@@ -215,17 +218,15 @@ fn resolve_scoped_paths(tree: &RepositoryTree, claim: &PathClaim) -> Vec<String>
         {
             candidates.push(format!("{scope}/{remainder}"));
         }
-        present.extend(
-            candidates
-                .into_iter()
-                .filter(|path| tree.truth(path).certainly_exists()),
-        );
+        let mut present = candidates
+            .into_iter()
+            .filter(|path| tree.truth(path).certainly_exists());
+        let (Some(only), None) = (present.next(), present.next()) else {
+            return Vec::new();
+        };
+        readings.insert(only);
     }
-    if present.len() == 1 {
-        present.into_iter().collect()
-    } else {
-        Vec::new()
-    }
+    readings.into_iter().collect()
 }
 
 /// The repository directories an explicit scope may name. Empty when the
