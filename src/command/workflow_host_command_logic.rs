@@ -233,7 +233,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "793e9e890ac86e337cd493ab44b63aec2d55376601d8cb1c7bc27199524aade6",
+        sources_digest: "ba95d27a3347dc7a49177230e04fbb63da4541089c39af63f49ae695594c34ed",
         build_bound: false,
     },
     CapabilityLogic {
@@ -245,7 +245,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "793e9e890ac86e337cd493ab44b63aec2d55376601d8cb1c7bc27199524aade6",
+        sources_digest: "ba95d27a3347dc7a49177230e04fbb63da4541089c39af63f49ae695594c34ed",
         build_bound: false,
     },
     CapabilityLogic {
@@ -263,7 +263,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 9,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
-        sources_digest: "5ffdfe5298d33d820a7e19949ee14a5f6f55af8c969c7af1661317a519e12a42",
+        sources_digest: "ca6074a4917505aee40fd5548d151afe00322b19c63d8586d0e7981942dbb400",
         build_bound: false,
     },
     CapabilityLogic {
@@ -279,7 +279,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 8,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
-        sources_digest: "5ffdfe5298d33d820a7e19949ee14a5f6f55af8c969c7af1661317a519e12a42",
+        sources_digest: "ca6074a4917505aee40fd5548d151afe00322b19c63d8586d0e7981942dbb400",
         build_bound: false,
     },
     CapabilityLogic {
@@ -304,7 +304,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
         // #425 re-pin only: the repository claim parser changed; acceptance verification verdicts do not read claims.
-        sources_digest: "62d09347f7690c9fcabc9d1aba1a25eab288992c73c0bafdb6badf20444be157",
+        sources_digest: "34f8045de970dca5c0342f94f386e1c3750d25ae77d4ddf0cb22892be2388981",
         build_bound: true,
     },
     CapabilityLogic {
@@ -316,7 +316,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #439 re-pin only: resume phase selection does not change verification verdicts.
         // #425 re-pin only: the repository claim parser changed; skeleton verification verdicts do not read claims.
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
-        sources_digest: "62d09347f7690c9fcabc9d1aba1a25eab288992c73c0bafdb6badf20444be157",
+        sources_digest: "34f8045de970dca5c0342f94f386e1c3750d25ae77d4ddf0cb22892be2388981",
         build_bound: true,
     },
 ];
