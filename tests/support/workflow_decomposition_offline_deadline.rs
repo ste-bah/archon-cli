@@ -26,10 +26,11 @@ pub fn run(root: &Path, args: &[&str]) -> Output {
 /// `run` with its own no-progress bound, for a cell whose silent host
 /// commands (a large freeze) outlast the default under parallel load.
 pub fn run_within(root: &Path, args: &[&str], limit: Duration) -> Output {
-    let stdout_path = root.join("cell.stdout");
-    let stderr_path = root.join("cell.stderr");
+    let harness = harness_root(root);
+    let stdout_path = harness.join("cell.stdout");
+    let stderr_path = harness.join("cell.stderr");
     let mut command = Command::new(env!("CARGO_BIN_EXE_archon"));
-    isolate_child(&mut command, root);
+    isolate_child(&mut command, root, &harness);
     let mut child = command
         .current_dir(root)
         .args(args)
@@ -45,8 +46,21 @@ pub fn run_within(root: &Path, args: &[&str], limit: Duration) -> Output {
     }
 }
 
-pub fn isolate_child(command: &mut Command, root: &Path) {
-    let home = root.join(".test-home");
+pub fn harness_root(root: &Path) -> std::path::PathBuf {
+    let name = root
+        .file_name()
+        .expect("temporary project has a name")
+        .to_string_lossy();
+    let harness = root
+        .parent()
+        .expect("temporary project has a parent")
+        .join(format!("{name}-harness"));
+    fs::create_dir_all(&harness).unwrap();
+    harness
+}
+
+pub fn isolate_child(command: &mut Command, root: &Path, harness: &Path) {
+    let home = harness.join("home");
     let config_home = home.join(".config");
     let data_home = home.join(".local/share");
     let cache_home = home.join(".cache");
@@ -100,8 +114,8 @@ pub fn await_provider_boundary(
     child: &mut Child,
     label: &str,
 ) {
-    let stdout = root.join("decompose.stdout");
-    let stderr = root.join("decompose.stderr");
+    let stdout = harness_root(root).join("decompose.stdout");
+    let stderr = harness_root(root).join("decompose.stderr");
     let mut last_progress = Instant::now();
     let mut sizes = (0, 0);
     loop {

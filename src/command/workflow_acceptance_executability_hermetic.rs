@@ -13,7 +13,7 @@
 //!   track) a copy of the project's own data beside the clone: every regular
 //!   file except what the scratch observation never exports either
 //!   (credentials and engine configuration, run state under
-//!   `.archon/workflows`, git metadata), the build output directory
+//!   harness-owned run state, git metadata), the build output directory
 //!   `target`, and the repository itself when it is nested in the project.
 //!
 //! The copy is made off the async runtime (`spawn_blocking`). Its project
@@ -82,6 +82,9 @@ fn excluded(relative: &Path, path: &Path, task_root: Option<&Path>) -> bool {
             })
     })
         || archon_workflow::acceptance_scratch::freeze_owned_path(relative)
+        // Mirrors acceptance_scratch_inputs::excluded so the digest and
+        // scratch copy agree about harness-owned project run state.
+        || archon_workflow::acceptance_scratch::harness_run_state_path(relative)
         || relative.starts_with(".archon/workflows")
         // A decomposition log, wherever the task root sits: every retry
         // appends to it, so digesting it would change the key each attempt.

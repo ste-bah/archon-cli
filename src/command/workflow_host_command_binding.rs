@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::de::DeserializeOwned;
+
 use archon_workflow::{HostCommandRequest, HostCommandResult, WorkflowError, WorkflowResult};
 
 use super::workflow_host_command_catalog::HostCommandResolutionContext;
@@ -215,22 +217,21 @@ pub(crate) fn stamp_frozen_frontmatter(
             "task frontmatter contains unknown field '{field}'"
         )));
     }
-    let frozen_fields = [
-        ("depends_on", serde_json::to_value(&frozen.depends_on)?),
-        ("blocks", serde_json::to_value(&frozen.blocks)?),
-        ("implements", serde_json::to_value(&frozen.implements)?),
-        (
-            "deliverable_contracts",
-            serde_json::to_value(&frozen.deliverable_contracts)?,
-        ),
-    ];
     let mut notes = Vec::new();
-    for (field, expected) in frozen_fields {
-        if map.get(field) != Some(&expected) {
-            notes.push(field.to_string());
-        }
-        map.insert(field.to_string(), expected);
-    }
+    stamp_typed_field::<Vec<archon_workflow::task_skeleton::FrozenDependency>>(
+        map,
+        "depends_on",
+        &frozen.depends_on,
+        &mut notes,
+    )?;
+    stamp_typed_field::<Vec<String>>(map, "blocks", &frozen.blocks, &mut notes)?;
+    stamp_typed_field::<Vec<String>>(map, "implements", &frozen.implements, &mut notes)?;
+    stamp_typed_field::<Vec<archon_workflow::task_universe::WorkflowV2DeliverableContract>>(
+        map,
+        "deliverable_contracts",
+        &frozen.deliverable_contracts,
+        &mut notes,
+    )?;
     let stamped_yaml = serde_yaml_ng::to_string(&metadata).map_err(|error| {
         WorkflowError::SpecInvalid(format!(
             "could not serialize stamped task frontmatter: {error}"
@@ -244,6 +245,28 @@ pub(crate) fn stamp_frozen_frontmatter(
     result.push('\n');
     result.push_str(&candidate[close..]);
     Ok((result, notes))
+}
+
+fn stamp_typed_field<T>(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    expected: &T,
+    notes: &mut Vec<String>,
+) -> WorkflowResult<()>
+where
+    T: DeserializeOwned + serde::Serialize + Default + PartialEq,
+{
+    let matches = match map.get(field) {
+        Some(value) => serde_json::from_value::<T>(value.clone())
+            .map(|authored| authored == *expected)
+            .unwrap_or(false),
+        None => T::default() == *expected,
+    };
+    if !matches {
+        notes.push(field.to_string());
+    }
+    map.insert(field.to_string(), serde_json::to_value(expected)?);
+    Ok(())
 }
 
 /// A candidate that binds no frozen subject but names one by its `task_id`

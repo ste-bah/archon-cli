@@ -28,6 +28,12 @@ pub(crate) use paths::shell_arg;
 /// configuration, workflows, git), whatever the inputs name.
 pub(crate) use inputs::excluded as project_input_excluded;
 
+/// Whether a project-relative path is host-owned run state excluded from
+/// acceptance inputs and their hermetic digest.
+pub fn harness_run_state_path(path: &Path) -> bool {
+    inputs::acceptance_harness_run_state(path)
+}
+
 /// Whether a path is written by freezing and cannot be check input.
 pub fn freeze_owned_path(path: &Path) -> bool {
     inputs::freeze_owned(path)

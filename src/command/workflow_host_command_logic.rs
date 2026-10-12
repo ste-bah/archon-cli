@@ -222,18 +222,19 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #421 changes when a recorded freeze is reused (a later publication extends its pin), not how it is judged.
         // 12: #423 check blocks normalize CR/CRLF to LF; a shell setup error is refused as a pre-implementation proof.
         // #434 re-pin only: the fidelity critic's store and reply schema are in this closure; freeze never asks the critic.
-        version: 12,
+        // 13: #417 harness-written project run state leaves hermetic check inputs, which can change a check verdict.
+        version: 13,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
+        sources_digest: "6d6fc2cd1939b0ca0678f6b19df6d3da777bb0917ef91f29233a2358286913f8",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        // #434 re-pin only, as freeze-acceptance.
+        // #434 and #417 re-pin only: harness input paths do not alter this verdict.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "7168954e0a20f2e3a8bd58d8ca2264f2402991aafbe6b4b5433f93b9b2c70b7e",
+        sources_digest: "6d6fc2cd1939b0ca0678f6b19df6d3da777bb0917ef91f29233a2358286913f8",
         build_bound: false,
     },
     CapabilityLogic {
@@ -269,18 +270,19 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
-        // #434 re-pin only: trace never asks the fidelity critic.
-        sources_digest: "13e87121d9ffc327be565674aff3d9ab43a8095de458bc579e9e34a533dff429",
+        // #434 and #417 re-pin only: trace never reads the newly excluded run state.
+        sources_digest: "594c0bec9597c01479a3ef029f1b1eccb440eb4e043fc9468b92219e70d78cff",
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-acceptance",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 4: #417 copied check inputs omit freeze-owned files, which can change a check verdict.
-        version: 4,
+        // 5: #417 harness-written project run state leaves hermetic check inputs, which can change a check verdict.
+        version: 5,
         sources: &[GATE, CONTRACT, VERIFY],
-        // #434 re-pin only: verify never asks the fidelity critic.
-        sources_digest: "60c64202dc0329025d8631e605de0e89bb09f02d9ca9a8a8513827b3d592f69d",
+        // #434 and #417 re-pin only: skeleton verification never reads the newly excluded run state.
+        sources_digest: "44254c9c3261a4d5d303980f40470e7de80e345fc81f166f572ef2b333038afd",
         build_bound: true,
     },
     CapabilityLogic {
@@ -289,7 +291,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 re-pin only: verify never asks the fidelity critic.
-        sources_digest: "60c64202dc0329025d8631e605de0e89bb09f02d9ca9a8a8513827b3d592f69d",
+        sources_digest: "44254c9c3261a4d5d303980f40470e7de80e345fc81f166f572ef2b333038afd",
         build_bound: true,
     },
 ];

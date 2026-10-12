@@ -110,8 +110,8 @@ fn resume_from_a_different_build_id_preserves_the_golden_result() {
     assert!(
         wait_for_child(
             &mut child,
-            &root.join("decompose.stdout"),
-            &root.join("decompose.stderr"),
+            &deadline::harness_root(root).join("decompose.stdout"),
+            &deadline::harness_root(root).join("decompose.stderr"),
             "different-build decomposition child",
         )
         .success()

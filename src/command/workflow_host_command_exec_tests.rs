@@ -65,6 +65,23 @@ fn legacy_body_call_without_target_keeps_its_replay_identity() {
     );
 }
 
+#[test]
+fn host_note_stdout_byte_count_matches_the_returned_stdout() {
+    let original = "process output".to_string();
+    let (stdout, bytes) = super::workflow_host_command_exec::append_host_note(
+        original.clone(),
+        &["deliverable_contracts".into()],
+    );
+    assert!(stdout.starts_with(&original));
+    assert!(stdout.len() > original.len());
+    assert_eq!(bytes, stdout.as_bytes().len() as u64);
+
+    let (unchanged, bytes) =
+        super::workflow_host_command_exec::append_host_note(original.clone(), &[]);
+    assert_eq!(unchanged, original);
+    assert_eq!(bytes, unchanged.as_bytes().len() as u64);
+}
+
 pub(super) fn seed_frozen_chain(
     context: &HostCommandResolutionContext,
     task_file: &std::path::Path,

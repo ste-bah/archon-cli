@@ -17,7 +17,78 @@ pub(crate) fn excluded(path: &Path, excludes: &[PathBuf]) -> bool {
             )
         )
         || path.starts_with(".archon/workflows")
+        || acceptance_harness_run_state(path)
         || path.starts_with(".git")
+}
+
+/// Project-relative paths created or appended by the host while running checks.
+/// Keep this shared by scratch export and the host's hermetic digest.
+pub(crate) fn acceptance_harness_run_state(path: &Path) -> bool {
+    const DIRECTORIES: &[(&str, &str)] = &[
+        // src/command/workflow_gate.rs:append_shadow_records
+        (
+            ".archon/logs",
+            "src/command/workflow_gate.rs:append_shadow_records",
+        ),
+        // src/command/topology_lint/fidelity_store.rs:store_path
+        (
+            ".archon/lint-cache",
+            "src/command/topology_lint/fidelity_store.rs:store_path",
+        ),
+        // src/session/cognitive_store.rs:open
+        (".archon/cognitive", "src/session/cognitive_store.rs:open"),
+        // crates/archon-core/src/spill.rs:spill_root
+        (
+            ".archon/spill",
+            "crates/archon-core/src/spill.rs:spill_root",
+        ),
+        // crates/archon-topology/src/trace/paths.rs:TopologyPaths::for_project
+        (
+            ".archon/topology",
+            "crates/archon-topology/src/trace/paths.rs:TopologyPaths::for_project",
+        ),
+        // src/command/topology_fold/schema.rs:topology_db_path
+        (
+            ".archon/topology.db",
+            "src/command/topology_fold/schema.rs:topology_db_path",
+        ),
+        // src/command/workflow_freeze_budget.rs:FREEZE_CACHE_DIR
+        (
+            ".archon/freeze-cache",
+            "src/command/workflow_freeze_budget.rs:FREEZE_CACHE_DIR",
+        ),
+        // crates/archon-workflow/src/store.rs:WorkflowStore::new
+        (
+            ".archon/workflows",
+            "crates/archon-workflow/src/store.rs:WorkflowStore::new",
+        ),
+        // crates/archon-workflow/src/task_set_lineage.rs:PIN_STORE_NAMESPACE
+        (
+            ".archon/task-set-pins",
+            "crates/archon-workflow/src/task_set_lineage.rs:PIN_STORE_NAMESPACE",
+        ),
+    ];
+    if DIRECTORIES
+        .iter()
+        .any(|(root, _writer)| path.starts_with(root))
+    {
+        return true;
+    }
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    // src/command/topology_fold/workflow_learning.rs:open_db uses Cozo;
+    // src/session/leann_startup.rs:open uses the same Cozo sidecars.
+    ["learning-state.db", "leann.db", "topology.db"]
+        .iter()
+        .any(|database| {
+            name == *database
+                || name.strip_prefix(database).is_some_and(|suffix| {
+                    matches!(suffix, "-wal" | "-journal" | ".archon-cozo-write.lock")
+                        || suffix == ".archon-cozo-write.lock.progress"
+                })
+        })
+        && path.parent() == Some(Path::new(".archon"))
 }
 
 pub(crate) fn freeze_owned(path: &Path) -> bool {

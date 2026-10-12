@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Write;
 
 fn repository(source: &tempfile::TempDir) -> PathBuf {
     let path = source.path().join("repository");
@@ -72,6 +73,82 @@ fn changed_check_data_invalidates_the_digest() {
     std::fs::write(&input, b"first").unwrap();
     let before = data_digest(source.path(), &repository(&source), None).unwrap();
     std::fs::write(input, b"changed").unwrap();
+    assert_ne!(
+        before,
+        data_digest(source.path(), &repository(&source), None).unwrap()
+    );
+}
+
+#[test]
+fn harness_run_state_is_excluded_but_archon_project_data_is_copied_and_digested() {
+    let source = tempfile::tempdir().unwrap();
+    let destination = tempfile::tempdir().unwrap();
+    let data = source.path().join(".archon/project/data/registry.json");
+    std::fs::create_dir_all(data.parent().unwrap()).unwrap();
+    std::fs::write(&data, b"registry v1").unwrap();
+    let paths = [
+        ".archon/logs/workflow-gates-shadow.jsonl",
+        ".archon/lint-cache/fidelity/verdict.json",
+        ".archon/cognitive/cognitive-decisions.jsonl",
+        ".archon/spill/session/call.txt",
+        ".archon/topology/graph-a/trace.jsonl",
+        ".archon/topology.db",
+        ".archon/topology.db.archon-cozo-write.lock.progress",
+        ".archon/freeze-cache/probe-results/result.json",
+        ".archon/workflows/run/state.json",
+        ".archon/task-set-pins/set.json",
+        ".archon/learning-state.db",
+        ".archon/learning-state.db-wal",
+        ".archon/learning-state.db.archon-cozo-write.lock.progress",
+        ".archon/leann.db.archon-cozo-write.lock",
+    ];
+    for path in paths {
+        let file = source.path().join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, b"harness output").unwrap();
+    }
+    let before = data_digest(source.path(), &repository(&source), None).unwrap();
+    let mut remaining = u64::MAX;
+    copy_data(
+        &source.path().canonicalize().unwrap(),
+        Path::new(""),
+        destination.path(),
+        &repository(&source),
+        None,
+        &mut remaining,
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(
+            destination
+                .path()
+                .join(".archon/project/data/registry.json")
+        )
+        .unwrap(),
+        b"registry v1"
+    );
+    for path in paths {
+        assert!(
+            !destination.path().join(path).exists(),
+            "scratch copy included harness state {}",
+            path
+        );
+    }
+    let log = source.path().join(paths[0]);
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&log)
+        .unwrap()
+        .write_all(b"another freeze round\n")
+        .unwrap();
+    for path in &paths[1..] {
+        std::fs::write(source.path().join(path), b"changed harness output").unwrap();
+    }
+    assert_eq!(
+        before,
+        data_digest(source.path(), &repository(&source), None).unwrap()
+    );
+    std::fs::write(&data, b"registry v2").unwrap();
     assert_ne!(
         before,
         data_digest(source.path(), &repository(&source), None).unwrap()

@@ -35,6 +35,10 @@ use super::workflow_host_command_teardown_latch::TeardownLatch;
 use super::workflow_host_envelope_seal::{ENVELOPE_FILE, EnvelopeCleanup, owner_only};
 use super::workflow_host_secrets::{HostSecrets, utf8};
 
+#[path = "workflow_host_command_exec_note.rs"]
+mod note;
+pub(super) use note::append_host_note;
+
 #[path = "workflow_host_command_exec_trait.rs"]
 mod executor_trait;
 pub(crate) use executor_trait::WorkflowHostCommandExecutor;
@@ -459,17 +463,12 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             })?;
             // Through the anchor, after the lock: a failure is recorded.
             finish::remove_published(&staging, &receipt, &pause, &secrets);
-            let mut stdout = stdout;
-            if !stamped_fields.is_empty() {
-                stdout.push_str("\nHost note: replaced differing frozen frontmatter fields (authored values redacted): ");
-                stdout.push_str(&stamped_fields.join(", "));
-                stdout.push('.');
-            }
+            let (stdout, stdout_bytes) = append_host_note(stdout, &stamped_fields);
             Ok(HostCommandResult {
                 exit_code: observed.exit_code,
                 stdout,
                 stderr,
-                stdout_bytes: observed.stdout_bytes,
+                stdout_bytes,
                 stderr_bytes: observed.stderr_bytes,
                 timed_out: false,
                 interrupted: false,
