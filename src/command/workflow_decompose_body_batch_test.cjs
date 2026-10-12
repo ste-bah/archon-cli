@@ -33,7 +33,7 @@ function harness(cap, options = {}) {
    return {status:'accepted',stopReason:'end_turn',content:`body of ${taskId}`};
   },
   hostCommand:async(cap,opts)=>{
-   if(cap==='land-task-body') landed.push(opts.stdin);
+   if(cap==='land-task-body') landed.push({stdin:opts.stdin,target:opts.target});
    return {publicationReceipt:{call_id:cap},postcondition:{satisfied:true},result:{data:{publicationReceipt:{call_id:cap}}},gateEnvelope:{policy_findings:[]},subjects:SUBJECTS};
   },
   finalReport:async(_,report)=>report
@@ -50,6 +50,9 @@ async function boundedPool() {
  assert.equal(h.fourthBeforeFirstEnded(),true,'a freed slot starts the next body before the slowest one ends');
  assert.deepEqual(h.bodyCalls.map(c=>c.taskId),SUBJECTS.map(s=>s.taskId),'bodies start in skeleton order');
  assert.equal(h.landed.length,SUBJECTS.length);
+ assert.deepEqual(h.landed.map(call=>({taskId:call.target.taskId,fileName:call.target.fileName})).sort((a,b)=>a.taskId.localeCompare(b.taskId)),
+  SUBJECTS.map(({taskId,fileName})=>({taskId,fileName})).sort((a,b)=>a.taskId.localeCompare(b.taskId)),
+  'each body landing carries its frozen task id and file name');
  // Evidence keeps skeleton order: the body inputs follow acceptance and skeleton, one per subject in order.
  const bodyInputs=report.inputs.slice(2,2+SUBJECTS.length);
  assert.equal(bodyInputs.length,SUBJECTS.length,'one evidence entry per body');

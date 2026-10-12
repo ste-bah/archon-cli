@@ -14,6 +14,7 @@ fn record(
         options.host_command = Some(HostCommandRequest {
             command_id: command_id.to_string(),
             stdin: None,
+            target: None,
         });
     }
     let result = WorkflowV2Result {

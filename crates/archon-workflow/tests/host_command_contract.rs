@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use archon_workflow::v2::script::{
     ScriptHostRequest, dry_run_workflow_plan, parse_host_command_request,
 };
-use archon_workflow::{HostCommandRequest, WorkflowV2HostMethod, host_command_call_id};
+use archon_workflow::{
+    HostCommandRequest, HostCommandSubject, WorkflowV2HostMethod, host_command_call_id,
+};
 
 #[test]
 fn host_command_method_parse_and_as_str_round_trip() {
@@ -34,11 +36,36 @@ fn host_command_accepts_only_bounded_stdin() {
     let request = HostCommandRequest::new("task-set-lint", Some("candidate".into())).unwrap();
     assert_eq!(request.command_id, "task-set-lint");
     assert_eq!(request.stdin.as_deref(), Some("candidate"));
+    assert_eq!(request.target, None);
 
     let oversized = "x".repeat(HostCommandRequest::MAX_STDIN_BYTES + 1);
     let error = HostCommandRequest::new("task-set-lint", Some(oversized))
         .expect_err("oversized stdin must fail");
     assert!(error.to_string().contains("stdin exceeds"));
+}
+
+#[test]
+fn old_host_command_records_without_target_deserialize_for_replay() {
+    let old_record = serde_json::json!({"commandId":"land-task-body","stdin":"old body"});
+    let request: HostCommandRequest = serde_json::from_value(old_record).unwrap();
+    assert_eq!(request.target, None);
+    assert_eq!(request.stdin.as_deref(), Some("old body"));
+}
+
+#[test]
+fn host_command_target_rejects_missing_empty_and_extra_fields() {
+    for target in [
+        serde_json::json!({"taskId":"TASK-X-010"}),
+        serde_json::json!({"taskId":"", "fileName":"TASK-X-010.md"}),
+        serde_json::json!({"taskId":"TASK-X-010", "fileName":"TASK-X-010.md", "extra":true}),
+    ] {
+        let request = ScriptHostRequest {
+            id: "hostCommand#1".into(),
+            options: serde_json::json!({"commandId":"land-task-body", "stdin":"body", "target":target}),
+            source: None,
+        };
+        assert!(parse_host_command_request(&request).is_err(), "{target}");
+    }
 }
 
 #[test]
@@ -92,11 +119,42 @@ fn host_command_call_identity_is_domain_separated_and_length_framed() {
     );
 }
 
+#[test]
+fn host_command_target_changes_identity_while_legacy_identity_stays_stable() {
+    let tokens = BTreeMap::new();
+    let legacy = host_command_call_id("land-task-body", "catalog", "rev", &tokens, b"body");
+    let target = HostCommandSubject {
+        task_id: "TASK-X-010".into(),
+        file_name: "TASK-X-010.md".into(),
+    };
+    let mut targeted_tokens = tokens.clone();
+    targeted_tokens.insert("HOST_COMMAND_TARGET_TASK_ID".into(), target.task_id.clone());
+    targeted_tokens.insert(
+        "HOST_COMMAND_TARGET_FILE_NAME".into(),
+        target.file_name.clone(),
+    );
+    let targeted = host_command_call_id(
+        "land-task-body",
+        "catalog",
+        "rev",
+        &targeted_tokens,
+        b"body",
+    );
+    assert_ne!(legacy, targeted);
+    assert_eq!(
+        legacy,
+        host_command_call_id("land-task-body", "catalog", "rev", &tokens, b"body")
+    );
+}
+
 #[tokio::test]
 async fn raw_w_host_command_reaches_authoritative_host_bridge_without_prelude() {
     let script = r#"
 async function workflow(w) {
-  const result = await w.hostCommand("task-set-lint", { stdin: null });
+  const result = await w.hostCommand("task-set-lint", {
+    stdin: null,
+    target: { taskId: "TASK-X-010", fileName: "TASK-X-010.md" }
+  });
   const required = [
     "exitCode", "stdout", "stderr", "stdoutBytes", "stderrBytes",
     "timedOut", "interrupted", "stdoutTruncated", "stderrTruncated",
@@ -119,6 +177,13 @@ async function workflow(w) {
         .expect("typed host-command request");
     assert_eq!(request.command_id, "task-set-lint");
     assert_eq!(request.stdin, None);
+    assert_eq!(
+        request
+            .target
+            .as_ref()
+            .map(|target| target.task_id.as_str()),
+        Some("TASK-X-010")
+    );
 }
 
 #[tokio::test]

@@ -6,6 +6,7 @@ use archon_workflow::HostCommandRequest;
 use super::workflow_host_command_catalog::{
     HostCommandResolutionContext, fixed_decomposition_catalog,
 };
+use super::workflow_host_command_exec::{FixedHostCommandExecutor, WorkflowHostCommandExecutor};
 
 pub(super) fn context(root: &std::path::Path) -> HostCommandResolutionContext {
     let project_root = root.join("project");
@@ -29,6 +30,39 @@ pub(super) fn context(root: &std::path::Path) -> HostCommandResolutionContext {
         acceptance_environment_allowlist: Vec::new(),
         gate_mode: archon_core::config::GateMode::Observe,
     }
+}
+
+#[test]
+fn legacy_body_call_without_target_keeps_its_replay_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    seed_frozen_chain(&context, &context.task_root.join("TASK-X-010.md"));
+    let executor = FixedHostCommandExecutor::new(
+        fixed_decomposition_catalog("rev-1").unwrap(),
+        context,
+        temp.path().join("run"),
+    );
+    let legacy_record: HostCommandRequest = serde_json::from_value(serde_json::json!({
+        "commandId": "land-task-body",
+        "stdin": "previously authored body"
+    }))
+    .expect("old call record without target remains readable");
+    let same_call =
+        HostCommandRequest::new("land-task-body", Some("previously authored body".into())).unwrap();
+    assert_eq!(
+        executor.call_identity(&legacy_record).unwrap(),
+        executor.call_identity(&same_call).unwrap()
+    );
+    let mut targeted = same_call;
+    targeted.target = Some(archon_workflow::HostCommandSubject {
+        task_id: "TASK-X-010".into(),
+        file_name: "TASK-X-010.md".into(),
+    });
+    assert_ne!(
+        executor.call_identity(&legacy_record).unwrap(),
+        executor.call_identity(&targeted).unwrap(),
+        "a target-bearing body call must have a distinct replay identity"
+    );
 }
 
 pub(super) fn seed_frozen_chain(

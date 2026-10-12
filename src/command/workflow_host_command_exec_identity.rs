@@ -146,6 +146,16 @@ impl FixedHostCommandExecutor {
         if let Some(version) = logic::key_token(self.logic_version_for(&request.command_id)?) {
             tokens.insert(logic::LOGIC_VERSION_TOKEN.to_string(), version);
         }
+        if let Some(target) = &request.target {
+            tokens.insert(
+                "HOST_COMMAND_TARGET_TASK_ID".to_string(),
+                target.task_id.clone(),
+            );
+            tokens.insert(
+                "HOST_COMMAND_TARGET_FILE_NAME".to_string(),
+                target.file_name.clone(),
+            );
+        }
         Ok(host_command_call_id(
             &request.command_id,
             &digest,

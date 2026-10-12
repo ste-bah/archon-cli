@@ -18,6 +18,8 @@ pub struct HostCommandRequest {
     pub command_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stdin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<HostCommandSubject>,
 }
 
 impl HostCommandRequest {
@@ -40,7 +42,11 @@ impl HostCommandRequest {
                 Self::MAX_STDIN_BYTES
             )));
         }
-        Ok(Self { command_id, stdin })
+        Ok(Self {
+            command_id,
+            stdin,
+            target: None,
+        })
     }
 }
 
