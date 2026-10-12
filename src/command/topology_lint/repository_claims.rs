@@ -172,17 +172,11 @@ fn claim_findings(
 /// relative to the explicitly named directory. Keep an existing root path;
 /// otherwise use the only scoped interpretation present in the tree.
 fn resolve_scoped_path(tree: &RepositoryTree, claim: &PathClaim) -> Option<String> {
-    let Some(scope) = &claim.scope else {
+    let Some(cited) = &claim.scope else {
         return Some(claim.path.clone());
     };
-    let scope_path = tree.relative_to_root(scope)?;
-    let scope_is_dir = tree.is_dir_at_base(&scope_path) || tree.root().join(&scope_path).is_dir();
-    let scope_is_file = (tree.exists_at_base(&scope_path) && !tree.is_dir_at_base(&scope_path))
-        || tree.root().join(&scope_path).is_file();
-    if scope_is_file && !scope_is_dir {
-        return None;
-    }
-    let joined = format!("{}/{}", scope.trim_end_matches('/'), claim.path);
+    let scope = scope_directory(tree, cited)?;
+    let joined = format!("{scope}/{}", claim.path);
     if claim.scoped_join || !claim.path.contains('/') {
         return Some(joined);
     }
@@ -196,7 +190,7 @@ fn resolve_scoped_path(tree: &RepositoryTree, claim: &PathClaim) -> Option<Strin
     if let Some((scope_name, remainder)) = claim.path.split_once('/')
         && scope.rsplit('/').next() == Some(scope_name)
     {
-        let alternate = format!("{}/{}", scope.trim_end_matches('/'), remainder);
+        let alternate = format!("{scope}/{remainder}");
         let alternate_path = tree.relative_to_root(&alternate)?;
         scoped_candidates.push((alternate, tree.truth(&alternate_path).certainly_exists()));
     }
@@ -206,6 +200,51 @@ fn resolve_scoped_path(tree: &RepositoryTree, claim: &PathClaim) -> Option<Strin
         .map(|(path, _)| path);
     let only = present.next()?;
     present.next().is_none().then_some(only)
+}
+
+/// The repository directory an explicit scope names, or `None` when the scope
+/// names a file (the token is then a symbol inside it, not a path) or cannot
+/// be pinned to one directory.
+///
+/// - At the repository root the tree decides: a directory is the scope, a
+///   file is no scope.
+/// - Not at the root, the scope may be cited by base name or by a trailing
+///   suffix (`spec.rs` or `src/spec.rs` for `crates/x/src/spec.rs`). Any
+///   base-commit file ending with it makes it a file; exactly one directory
+///   ending with it is that directory; several directories are ambiguous.
+/// - Matching nothing at all: a scope whose last component has a file
+///   extension may be a file outside the repository (a project file, or one
+///   still to be written), so it is no scope. Any other scope is a missing
+///   directory and is joined, so "`x.rs` exists under `missing/`" is checked
+///   and refuted: the directory, and so the path, is absent.
+fn scope_directory(tree: &RepositoryTree, cited: &str) -> Option<String> {
+    let scope = tree.relative_to_root(cited)?;
+    if scope.is_empty() {
+        return None;
+    }
+    if tree.is_dir_at_base(&scope) || tree.root().join(&scope).is_dir() {
+        return Some(scope);
+    }
+    if tree.exists_at_base(&scope) || tree.root().join(&scope).is_file() {
+        return None;
+    }
+    let suffix = format!("/{scope}");
+    let matches: Vec<&String> = tree
+        .paths_at_base()
+        .iter()
+        .filter(|path| path.ends_with(&suffix))
+        .collect();
+    if matches.iter().any(|path| !tree.is_dir_at_base(path)) {
+        return None;
+    }
+    match matches.as_slice() {
+        [only] => Some((*only).clone()),
+        [] => {
+            let last = scope.rsplit('/').next().unwrap_or(&scope);
+            (!parser::has_file_extension(last)).then_some(scope)
+        }
+        _ => None,
+    }
 }
 
 pub(super) fn excerpt(sentence: &str) -> String {

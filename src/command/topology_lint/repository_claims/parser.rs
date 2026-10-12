@@ -198,7 +198,9 @@ fn claims_in_sentence(sentence: &str) -> Vec<PathClaim> {
 
 /// A sentence-leading `No` or `Neither` negates each path in its coordinated
 /// list. The list is accepted only when its final path has an existence
-/// predicate, so incomplete or ambiguous prose remains unclaimed.
+/// predicate, so incomplete or ambiguous prose remains unclaimed. A bare file
+/// name is a claim only under the explicit scope that follows the predicate:
+/// "No `Cargo.toml` is present in the new crate" names no repository path.
 fn leading_absence_claims(sentence: &str) -> Option<Vec<PathClaim>> {
     let trimmed = sentence.trim_start();
     let lowered = trimmed.to_ascii_lowercase();
@@ -215,8 +217,10 @@ fn leading_absence_claims(sentence: &str) -> Option<Vec<PathClaim>> {
         rest = rest.trim_start();
         let token = rest.strip_prefix('`')?;
         let close = token.find('`')?;
-        let path = repository_relative_token(&token[..close])
-            .or_else(|| bare_repository_file_token(&token[..close]))?;
+        let path = match repository_relative_token(&token[..close]) {
+            Some(path) => (path, false),
+            None => (bare_repository_file_token(&token[..close])?, true),
+        };
         paths.push(path);
         rest = &token[close + 1..];
         let lowered_rest = rest.to_ascii_lowercase();
@@ -229,7 +233,8 @@ fn leading_absence_claims(sentence: &str) -> Option<Vec<PathClaim>> {
             return Some(
                 paths
                     .into_iter()
-                    .map(|path| PathClaim {
+                    .filter(|(_, bare)| !bare || scope.is_some())
+                    .map(|(path, _)| PathClaim {
                         path,
                         claim: Claim::Absent,
                         scope: scope.clone(),
@@ -244,24 +249,51 @@ fn leading_absence_claims(sentence: &str) -> Option<Vec<PathClaim>> {
 }
 
 /// Return a directory scope only when it directly follows an existence
-/// predicate. Trailing prose elsewhere in the sentence cannot scope a path.
+/// predicate, after the same filler words `claim_after` skips ("`foo.rs`
+/// currently exists in `src/`"). Trailing prose elsewhere in the sentence
+/// cannot scope a path. The scope keeps its original spelling.
 fn explicit_scope(after: &str) -> Option<(String, Claim)> {
-    let lowered = after.trim_start().to_ascii_lowercase();
-    let tail = [(ABSENT_AFTER, Claim::Absent), (EXISTS_AFTER, Claim::Exists)]
+    let original = after.trim_start();
+    let lowered = original.to_ascii_lowercase();
+    let mut rest = lowered.as_str();
+    for _ in 0..4 {
+        if let Some((tail, claim)) = scoped_predicate_at_start(rest) {
+            // ASCII lowering keeps byte offsets, so the token is cut from the
+            // original text and its case survives.
+            let token = original[lowered.len() - tail.len()..].strip_prefix('`')?;
+            let end = token.find('`')?;
+            return repository_directory_token(&token[..end]).map(|scope| (scope, claim));
+        }
+        rest = skip_filler(rest)?;
+    }
+    None
+}
+
+/// The text after `<predicate> under ` or `<predicate> in ` at the start of
+/// `rest`, with the predicate's claim.
+fn scoped_predicate_at_start(rest: &str) -> Option<(&str, Claim)> {
+    [(ABSENT_AFTER, Claim::Absent), (EXISTS_AFTER, Claim::Exists)]
         .iter()
         .find_map(|(phrases, claim)| {
             phrases.iter().find_map(|phrase| {
-                let tail = lowered.strip_prefix(phrase)?.trim_start();
+                let tail = rest.strip_prefix(phrase)?.trim_start();
                 ["under ", "in "]
                     .iter()
                     .find_map(|scope| tail.strip_prefix(scope))
                     .map(|tail| (tail, *claim))
             })
-        })?;
-    let (tail, claim) = tail;
-    let token = tail.strip_prefix('`')?;
-    let end = token.find('`')?;
-    repository_directory_token(&token[..end]).map(|scope| (scope, claim))
+        })
+}
+
+/// `rest` (lowercase) without one leading filler word, or `None` when it does
+/// not start with one.
+fn skip_filler(rest: &str) -> Option<&str> {
+    FILLER.iter().find_map(|filler| {
+        let stripped = rest.strip_prefix(filler)?;
+        let boundary = filler.chars().last().is_some_and(|c| !c.is_alphanumeric())
+            || stripped.starts_with([' ', '(', ':', ',', '—', '-']);
+        boundary.then(|| stripped.trim_start())
+    })
 }
 
 /// A scope candidate is repository-relative syntax. The repository tree,
@@ -362,7 +394,7 @@ pub(crate) fn repository_relative_token(token: &str) -> Option<String> {
     has_file_extension(last).then_some(kept)
 }
 
-fn has_file_extension(component: &str) -> bool {
+pub(super) fn has_file_extension(component: &str) -> bool {
     let Some((stem, extension)) = component.rsplit_once('.') else {
         return false;
     };
@@ -379,21 +411,7 @@ fn claim_after(after: &str) -> Option<Claim> {
         if let Some(claim) = phrase_at_start(rest) {
             return Some(claim);
         }
-        let mut advanced = false;
-        for filler in FILLER {
-            if let Some(stripped) = rest.strip_prefix(filler) {
-                let boundary = filler.chars().last().is_some_and(|c| !c.is_alphanumeric())
-                    || stripped.starts_with([' ', '(', ':', ',', '—', '-']);
-                if boundary {
-                    rest = stripped.trim_start();
-                    advanced = true;
-                    break;
-                }
-            }
-        }
-        if !advanced {
-            return None;
-        }
+        rest = skip_filler(rest)?;
     }
     None
 }

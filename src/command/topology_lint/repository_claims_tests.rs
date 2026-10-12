@@ -16,7 +16,8 @@ fn git(repo: &Path, args: &[&str]) {
     );
 }
 
-/// A repository with `src/lib.rs` and `src/existing.rs` committed, and a
+/// A repository with `src/lib.rs` and `src/existing.rs` committed (plus a root
+/// `Cargo.toml` and a nested `crates/x/src/` for scope resolution), and a
 /// task root beside it that records the repository.
 fn grounded() -> (tempfile::TempDir, PathBuf, PathBuf, RepositoryTree) {
     let temp = tempfile::tempdir().unwrap();
@@ -30,6 +31,14 @@ fn grounded() -> (tempfile::TempDir, PathBuf, PathBuf, RepositoryTree) {
     std::fs::write(repo.join("crate/tests/x.rs"), "// scoped alternate\n").unwrap();
     std::fs::write(repo.join("crate/tests/tests/x.rs"), "// scoped candidate\n").unwrap();
     std::fs::write(repo.join("docs/v1.2/foo.rs"), "// dotted scope\n").unwrap();
+    std::fs::create_dir_all(repo.join("crates/x/src/widgets")).unwrap();
+    std::fs::write(repo.join("Cargo.toml"), "[workspace]\n").unwrap();
+    std::fs::write(
+        repo.join("crates/x/src/strategy_spec.rs"),
+        "// nested file\n",
+    )
+    .unwrap();
+    std::fs::write(repo.join("crates/x/src/widgets/w.rs"), "// nested dir\n").unwrap();
     git(&repo, &["init", "-q"]);
     git(&repo, &["config", "user.email", "t@example.invalid"]);
     git(&repo, &["config", "user.name", "t"]);
@@ -59,6 +68,13 @@ fn claims(text: &str) -> Vec<(String, Claim)> {
     extract_claims(text)
         .into_iter()
         .map(|claim| (claim.path, claim.claim))
+        .collect()
+}
+
+fn scoped_claims(text: &str) -> Vec<(String, Claim, Option<String>)> {
+    extract_claims(text)
+        .into_iter()
+        .map(|claim| (claim.path, claim.claim, claim.scope))
         .collect()
 }
 
@@ -174,16 +190,25 @@ fn dotted_symbols_are_not_file_claims_and_only_direct_directory_scopes_join() {
         claims("`missing.rs` exists under `src`."),
         vec![("missing.rs".to_string(), Claim::Exists)]
     );
-    assert!(claims("`foo.rs` currently exists in `src/`.").is_empty());
+    assert_eq!(
+        scoped_claims("`foo.rs` currently exists in `src/`."),
+        vec![("foo.rs".to_string(), Claim::Exists, Some("src".to_string()))]
+    );
     assert_eq!(
         claims("`spec_refs.rs` exists in `crates/x/src/`."),
         vec![("spec_refs.rs".to_string(), Claim::Exists)]
     );
     assert!(claims("the `a.b` field in `config.json`").is_empty());
     assert!(claims("`promotion_gates.live == \"out_of_scope\"`").is_empty());
+    // The parser keeps the scope; the tree decides `config.json` is no
+    // directory (scoped tests: `a_file_like_scope_absent_everywhere_is_no_claim`).
     assert_eq!(
-        claims("`foo.rs` exists in `config.json`."),
-        vec![("foo.rs".to_string(), Claim::Exists)]
+        scoped_claims("`foo.rs` exists in `config.json`."),
+        vec![(
+            "foo.rs".to_string(),
+            Claim::Exists,
+            Some("config.json".to_string())
+        )]
     );
 }
 
