@@ -217,7 +217,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
         )?;
         let case = seed.as_ref().map_or_else(
             || "none (no harness transition)".to_string(),
-            |seed| format!("existing transition {}", seed.transition_index + 1),
+            |seed| format!("existing transition {}", seed.transition_index),
         );
         (seed, case)
     };

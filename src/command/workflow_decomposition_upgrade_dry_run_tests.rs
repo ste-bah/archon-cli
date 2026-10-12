@@ -31,6 +31,19 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
         super::super::workflow_decomposition_drift_tests::launch_and_pause(project.path()).await;
     let state: FixedDecompositionStateV1 =
         read_json(&store.run_dir(&run_id).join(FIXED_DECOMPOSITION_STATE_PATH));
+
+    let output = crate::command::workflow_decompose::dry_run_fixed_decomposition(
+        project.path(),
+        &run_id,
+        &launch_config(project.path()),
+    )
+    .await
+    .unwrap();
+    assert!(
+        output.contains("seed=none (no harness transition)"),
+        "{output}"
+    );
+
     let mut old = state.identity.clone();
     old.script_digest = "previous-script-digest".into();
     let transitions = RuntimeTransitions {
@@ -65,6 +78,15 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
     archon_workflow::WorkflowV2ResultStore::new(store.run_dir(&run_id).join("v2"))
         .save_call_record(&reply_record)
         .unwrap();
+    let recorded_seed = crate::command::workflow_decompose_seed::current_seed(
+        &store,
+        &run_id,
+        Path::new(&state.log_path),
+        &std::collections::BTreeMap::new(),
+    )
+    .unwrap()
+    .expect("the changed harness records a seed");
+    assert_eq!(recorded_seed.transition_index, 0);
     let run_dir = store.run_dir(&run_id);
     let groups = run_dir.join(crate::command::workflow_host_command_groups::GROUP_RECORDS_DIR);
     std::fs::create_dir_all(&groups).unwrap();
@@ -128,7 +150,13 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
         output.contains("arguments.json=equal metadata=enriched launch_digest_anchor=equal"),
         "{output}"
     );
-    assert!(output.contains("seed=existing transition 1"), "{output}");
+    assert!(
+        output.contains(&format!(
+            "seed=existing transition {}",
+            recorded_seed.transition_index
+        )),
+        "{output}"
+    );
     assert!(output.contains("healed_groups_would_remove=1"), "{output}");
     assert!(output.contains("seed subject=acceptance"), "{output}");
     assert!(
@@ -156,7 +184,7 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
                 state.identity.clone(),
             ),
             crate::command::workflow_decompose_transitions::RuntimeTransition::new(
-                state.identity,
+                state.identity.clone(),
                 previous,
             ),
         ],
@@ -164,6 +192,19 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
     store
         .write_run_json(&run_id, TRANSITIONS_PATH, &transitions)
         .unwrap();
+    let would_record_index = transitions.transitions.len();
+    let would_record_seed =
+        crate::command::workflow_decompose_seed::current_seed_read_only_for_transition(
+            &store,
+            &run_id,
+            would_record_index,
+            &state.identity,
+            &std::collections::BTreeMap::new(),
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap()
+        .expect("the changed runtime derives an in-memory seed");
+    assert_eq!(would_record_seed.transition_index, would_record_index);
     let before = snapshot_tree(&run_dir);
     let output = crate::command::workflow_decompose::dry_run_fixed_decomposition(
         project.path(),
@@ -173,7 +214,10 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
     .await
     .unwrap();
     assert!(
-        output.contains("seed=would-record transition 2 (derived in memory)"),
+        output.contains(&format!(
+            "seed=would-record transition {} (derived in memory)",
+            would_record_seed.transition_index
+        )),
         "{output}"
     );
     assert_eq!(
