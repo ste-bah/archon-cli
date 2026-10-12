@@ -259,6 +259,7 @@ fn cache_key_binds_canonical_task_root_and_prd_digest() {
     std::fs::create_dir_all(&tasks_b).unwrap();
     let client = RecordingJudge {
         batches: Mutex::new(vec![]),
+        omit_supplementary: false,
     };
     let entry = cache_contract().acceptance[0].clone();
     let a = super::super::incremental::entry_key(
@@ -291,6 +292,7 @@ fn pinned_verdict_restoration_is_never_written_as_this_rounds_verdict() {
     let tasks = tasks.canonicalize().unwrap();
     let client = RecordingJudge {
         batches: Mutex::new(vec![]),
+        omit_supplementary: false,
     };
     let mut current = cache_contract();
     let mut pinned = current.clone();
@@ -328,6 +330,7 @@ fn pinned_verdict_restoration_is_never_written_as_this_rounds_verdict() {
 fn pin_reuse_covers_supplementary_checks_too() {
     let client = RecordingJudge {
         batches: Mutex::new(vec![]),
+        omit_supplementary: false,
     };
     let mut current = cache_contract();
     let mut pinned = current.clone();
