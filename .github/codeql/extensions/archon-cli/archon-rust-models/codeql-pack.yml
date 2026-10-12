@@ -1,0 +1,7 @@
+name: archon-cli/archon-rust-models
+version: 1.0.0
+library: true
+extensionTargets:
+  codeql/rust-all: ">= 0.2.0"
+dataExtensions:
+  - models/*.yml
