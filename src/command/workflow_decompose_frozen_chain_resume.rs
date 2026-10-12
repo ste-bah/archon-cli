@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow};
 use archon_workflow::WorkflowStore;
 
 use super::freeze_override::{self, OverrideDecision, freeze_override_decision};
-use super::{FrozenChainSnapshot, frozen_chain_snapshot, frozen_chain_snapshot_read_only};
+use super::{FrozenChainSnapshot, snapshot_locked, with_chain_read};
 
 const RESUME_CHAIN_DIR: &str = "decomposition/resume-frozen-chain";
 const RESUME_CHAIN_SCHEMA: u32 = 1;
@@ -68,6 +68,30 @@ pub(crate) fn resume_chain_decision(
     catalog: &archon_workflow::CommandCapabilityCatalog,
     read_only: bool,
 ) -> Result<ResumeChainDecision> {
+    // Issue 294: the snapshot and every receipt the decisions compare with
+    // the disk are read under one hold of the publish lock.
+    with_chain_read(project_root, task_root, !read_only, || {
+        #[cfg(test)]
+        crate::command::workflow_task_set::reader_test_step("resume-chain-read");
+        decide_locked(
+            store,
+            run_id,
+            generation,
+            (project_root, prd_path, task_root),
+            catalog,
+            read_only,
+        )
+    })
+}
+
+fn decide_locked(
+    store: &WorkflowStore,
+    run_id: &str,
+    generation: u64,
+    (project_root, prd_path, task_root): (&Path, &Path, &Path),
+    catalog: &archon_workflow::CommandCapabilityCatalog,
+    read_only: bool,
+) -> Result<ResumeChainDecision> {
     let relative = resume_chain_path(generation);
     let path = store.run_dir(run_id).join(&relative);
     let recorded = match std::fs::read(&path) {
@@ -94,11 +118,7 @@ pub(crate) fn resume_chain_decision(
     let snapshot = match recorded {
         Some(snapshot) => snapshot,
         None => {
-            let snapshot = if read_only {
-                frozen_chain_snapshot_read_only(project_root, prd_path, task_root)?
-            } else {
-                frozen_chain_snapshot(project_root, prd_path, task_root)?
-            };
+            let snapshot = snapshot_locked(project_root, prd_path, task_root)?;
             if !read_only {
                 use crate::command::workflow_task_set::{create_dir_all_durably, sync_parent};
                 let directory = store.run_dir(run_id).join(RESUME_CHAIN_DIR);

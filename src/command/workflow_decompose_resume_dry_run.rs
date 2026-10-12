@@ -287,6 +287,19 @@ pub(crate) async fn dry_run_fixed_decomposition(
         (&project_root, &prd_path, &prd_digest, &task_root),
         config,
     )?;
+    // Identities read the task set (a set gate's input manifest): under the
+    // read-only chain lock, as every other task-root read here.
+    let notes = crate::command::workflow_decompose_frozen_chain::with_chain_read(
+        &project_root,
+        &task_root,
+        false,
+        || {
+            calls
+                .iter()
+                .map(|call| probe.note(call))
+                .collect::<Result<Vec<_>>>()
+        },
+    )?;
     for (index, call) in calls.iter().enumerate() {
         let capability = call
             .options
@@ -303,7 +316,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
             "call[{index}] id={}{}{}{}\n",
             call.id,
             capability.map_or_else(String::new, |name| format!(" capability={name}")),
-            probe.note(call)?,
+            notes[index],
             if entry.is_empty() {
                 String::new()
             } else {

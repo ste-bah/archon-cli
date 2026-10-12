@@ -229,7 +229,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #417 re-pin only: the landing destination allowlist names the topology stores; freeze verdicts are unchanged.
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
+        sources_digest: "0e5c0b1bbd77d0befcb02223e20731109aff4ab45d29dd1819664d80fc3acbd8",
         build_bound: false,
     },
     CapabilityLogic {
@@ -239,7 +239,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #439 re-pin only, as freeze-acceptance.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
+        sources_digest: "0e5c0b1bbd77d0befcb02223e20731109aff4ab45d29dd1819664d80fc3acbd8",
         build_bound: false,
     },
     CapabilityLogic {
@@ -254,7 +254,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 8: #434 a fidelity gap blocks only its weakest task's body; true verdicts quote a checked anchor and are reused per obligation.
         version: 8,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
+        sources_digest: "eae3341dd2b36316211faf47e6db3bd210af2851682553e67dfc1171fb29be72",
         build_bound: false,
     },
     CapabilityLogic {
@@ -267,7 +267,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 7: #434 true fidelity verdicts quote a checked anchor and are reused per obligation over byte-identical cluster texts.
         version: 7,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
+        sources_digest: "eae3341dd2b36316211faf47e6db3bd210af2851682553e67dfc1171fb29be72",
         build_bound: false,
     },
     CapabilityLogic {
@@ -290,7 +290,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
-        sources_digest: "e62cf9cdeed73a0c10b405e38b8ac6463c3ef09edd309d02020be7bbfe59ec73",
+        sources_digest: "80d6d388c193809c86f1d314a4e5cfd5ba7e04a6ec261a20d84c692bf53f7ae9",
         build_bound: true,
     },
     CapabilityLogic {
@@ -300,7 +300,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: verify never asks the fidelity critic or reads pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
-        sources_digest: "e62cf9cdeed73a0c10b405e38b8ac6463c3ef09edd309d02020be7bbfe59ec73",
+        sources_digest: "80d6d388c193809c86f1d314a4e5cfd5ba7e04a6ec261a20d84c692bf53f7ae9",
         build_bound: true,
     },
 ];
