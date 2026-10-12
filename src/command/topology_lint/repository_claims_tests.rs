@@ -22,8 +22,12 @@ fn grounded() -> (tempfile::TempDir, PathBuf, PathBuf, RepositoryTree) {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     std::fs::create_dir_all(repo.join("src")).unwrap();
+    std::fs::create_dir_all(repo.join("crate/tests")).unwrap();
+    std::fs::create_dir_all(repo.join("crate/tests/tests")).unwrap();
     std::fs::write(repo.join("src/lib.rs"), "pub mod existing;\n").unwrap();
     std::fs::write(repo.join("src/existing.rs"), "pub fn f() {}\n").unwrap();
+    std::fs::write(repo.join("crate/tests/x.rs"), "// scoped alternate\n").unwrap();
+    std::fs::write(repo.join("crate/tests/tests/x.rs"), "// scoped candidate\n").unwrap();
     git(&repo, &["init", "-q"]);
     git(&repo, &["config", "user.email", "t@example.invalid"]);
     git(&repo, &["config", "user.name", "t"]);
@@ -90,6 +94,63 @@ fn unambiguous_existence_sentences_are_claims() {
         claims("`/abs/repo/src/lib.rs` exists (3 lines)"),
         vec![("/abs/repo/src/lib.rs".to_string(), Claim::Exists)]
     );
+}
+
+#[test]
+fn leading_negation_and_explicit_directory_scopes_are_resolved() {
+    assert_eq!(
+        claims("No `src/a.rs` exists."),
+        vec![("src/a.rs".to_string(), Claim::Absent)]
+    );
+    assert_eq!(
+        claims("Neither `src/a.rs` nor `src/b.rs` exist."),
+        vec![
+            ("src/a.rs".to_string(), Claim::Absent),
+            ("src/b.rs".to_string(), Claim::Absent),
+        ]
+    );
+    assert_eq!(
+        claims("`a.rs` exists under `src/`."),
+        vec![("src/a.rs".to_string(), Claim::Exists)]
+    );
+    assert_eq!(
+        claims("`a.rs` exists in `src/`."),
+        vec![("src/a.rs".to_string(), Claim::Exists)]
+    );
+    assert_eq!(
+        claims("`src/lib.rs` exists and is wired in `src/main.rs`."),
+        vec![("src/lib.rs".to_string(), Claim::Exists)]
+    );
+    assert_eq!(
+        claims("`src/lib.rs` exists within `src/`."),
+        vec![("src/lib.rs".to_string(), Claim::Exists)]
+    );
+    assert_eq!(
+        claims("`a.rs` exists under `src/`."),
+        vec![("src/a.rs".to_string(), Claim::Exists)]
+    );
+    assert_eq!(
+        claims(
+            "No `tests/artifact_tolerance.rs` or `tests/provider_capability.rs` exists under `crates/archon-trading/tests/` — the child test modules live in-crate."
+        ),
+        vec![
+            ("tests/artifact_tolerance.rs".to_string(), Claim::Absent),
+            ("tests/provider_capability.rs".to_string(), Claim::Absent),
+        ]
+    );
+    assert!(claims("The feature does not exist in `src/lib.rs`.").is_empty());
+}
+
+#[test]
+fn scoped_slash_paths_are_only_checked_when_the_tree_resolves_one_candidate() {
+    let (_temp, project, _tasks, tree) = grounded();
+    let findings = findings_against(
+        &tree,
+        &project,
+        "TASK-X-425",
+        "`tests/x.rs` exists under `crate/tests/`.",
+    );
+    assert!(findings.is_empty(), "{findings:?}");
 }
 
 #[test]

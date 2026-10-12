@@ -219,7 +219,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 7: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 9,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ee0ff2270e6857708098d1ab0be90fa567e919478c3ab45fb0b4bc6a150ca240",
+        sources_digest: "43c1beb53715628c9d413c878572e1caf6a0cd2379c07ba2c07d8e72ff5d0c5d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -227,7 +227,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ee0ff2270e6857708098d1ab0be90fa567e919478c3ab45fb0b4bc6a150ca240",
+        sources_digest: "43c1beb53715628c9d413c878572e1caf6a0cd2379c07ba2c07d8e72ff5d0c5d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -237,9 +237,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // unparseable answer while it makes progress.
         // 4: #380's obligation model changes the frozen contract verdict.
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 5,
+        // 6: #425 repository claims recognize leading negation and explicit directory scopes.
+        version: 6,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "32554326b5a719a52d6d4081adbf30793e94c6d6b120bc13891ed88d14ca8fd0",
+        sources_digest: "a5e191c96c2b9669f2128d8177d64b8e843b88b0dd5566cc905a8bac6bbbc8d3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -248,9 +249,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // makes progress (R8).
         // 4: #380's obligation model changes the frozen contract verdict.
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 5,
+        // 6: #425 repository claims recognize leading negation and explicit directory scopes.
+        version: 6,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "32554326b5a719a52d6d4081adbf30793e94c6d6b120bc13891ed88d14ca8fd0",
+        sources_digest: "a5e191c96c2b9669f2128d8177d64b8e843b88b0dd5566cc905a8bac6bbbc8d3",
         build_bound: false,
     },
     CapabilityLogic {

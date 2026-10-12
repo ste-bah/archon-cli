@@ -45,6 +45,8 @@ pub(crate) enum Claim {
 pub(crate) struct PathClaim {
     pub(crate) path: String,
     pub(crate) claim: Claim,
+    pub(crate) scope: Option<String>,
+    pub(crate) scoped_join: bool,
     pub(crate) sentence: String,
 }
 
@@ -132,7 +134,10 @@ fn claim_findings(
 ) -> Vec<(String, String)> {
     let mut findings = Vec::new();
     for claim in extract_claims(text) {
-        let Some(relative) = tree.relative_to_root(&claim.path) else {
+        let Some(claim_path) = resolve_scoped_path(tree, &claim) else {
+            continue;
+        };
+        let Some(relative) = tree.relative_to_root(&claim_path) else {
             continue;
         };
         let truth = tree.truth(&relative);
@@ -161,6 +166,42 @@ fn claim_findings(
         findings.push((relative, finding));
     }
     findings
+}
+
+/// A path with components may already be repository-relative, or it may be
+/// relative to the explicitly named directory. Keep an existing root path;
+/// otherwise use the only scoped interpretation present in the tree.
+fn resolve_scoped_path(tree: &RepositoryTree, claim: &PathClaim) -> Option<String> {
+    let Some(scope) = &claim.scope else {
+        return Some(claim.path.clone());
+    };
+    if claim.scoped_join {
+        return Some(claim.path.clone());
+    }
+    if !claim.path.contains('/') {
+        return Some(claim.path.clone());
+    }
+    let joined = format!("{}/{}", scope.trim_end_matches('/'), claim.path);
+    let root_path = tree.relative_to_root(&claim.path)?;
+    if tree.truth(&root_path).certainly_exists() {
+        return Some(claim.path.clone());
+    }
+    let joined_path = tree.relative_to_root(&joined)?;
+    let joined_exists = tree.truth(&joined_path).certainly_exists();
+    let mut scoped_candidates = vec![(joined, joined_exists)];
+    if let Some((scope_name, remainder)) = claim.path.split_once('/')
+        && scope.rsplit('/').next() == Some(scope_name)
+    {
+        let alternate = format!("{}/{}", scope.trim_end_matches('/'), remainder);
+        let alternate_path = tree.relative_to_root(&alternate)?;
+        scoped_candidates.push((alternate, tree.truth(&alternate_path).certainly_exists()));
+    }
+    let mut present = scoped_candidates
+        .into_iter()
+        .filter(|(_, exists)| *exists)
+        .map(|(path, _)| path);
+    let only = present.next()?;
+    present.next().is_none().then_some(only)
 }
 
 pub(super) fn excerpt(sentence: &str) -> String {
