@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 mod build_fingerprint;
+#[path = "src/command/topology_lint/fidelity_logic_digest.rs"]
+mod fidelity_logic_digest;
 
 fn main() {
     embed_git_hash();
@@ -26,25 +28,16 @@ fn main() {
     generate_known_env_vars();
 }
 
-/// Hash only the code that renders the fidelity question and judges a reply.
+/// Hash only the code that renders the fidelity question and judges a reply
+/// (the list and the reasons are in `fidelity_logic_digest.rs`).
 fn fidelity_logic_digest(root: &Path) -> String {
-    use sha2::{Digest, Sha256};
-
-    let files = [
-        "src/command/topology_lint/fidelity_critic.rs",
-        "crates/archon-workflow/src/fidelity_audit.rs",
-    ];
-    let mut hash = Sha256::new();
-    for file in files {
-        let name = file.as_bytes();
-        let contents = std::fs::read(root.join(file))
-            .unwrap_or_else(|error| panic!("reading fidelity logic source {file}: {error}"));
-        hash.update((name.len() as u64).to_le_bytes());
-        hash.update(name);
-        hash.update((contents.len() as u64).to_le_bytes());
-        hash.update(contents);
+    for file in fidelity_logic_digest::FILES {
+        println!("cargo:rerun-if-changed={file}");
     }
-    format!("{:x}", hash.finalize())
+    fidelity_logic_digest::digest(|file| {
+        std::fs::read(root.join(file))
+            .unwrap_or_else(|error| panic!("reading fidelity logic source {file}: {error}"))
+    })
 }
 
 fn embed_git_hash() {

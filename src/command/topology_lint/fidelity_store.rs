@@ -73,11 +73,12 @@ use sha2::{Digest, Sha256};
 
 use super::fidelity_critic::CRITIC_MODEL_ALIAS;
 
-/// Records of another layout are never read as this one. 5: per-obligation
-/// records bound to their tasks' texts (#434).
+/// Records of another layout are never read as this one. 4: per-obligation
+/// records bound to their tasks' texts (#434). 5: the critic identity names a
+/// digest of the critic's own logic instead of the whole build, so a rebuild
+/// that leaves that logic alone reuses every verdict; schema-4 records are
+/// migrated once by [`legacy`] (#434c).
 const STORE_SCHEMA: u32 = 5;
-const LEGACY_STORE_SCHEMA: u32 = 4;
-const MAX_LEGACY_RECORDS: usize = 10_000;
 
 /// Where the saved verdicts live: under the project, outside the host
 /// command's call staging directory, which the executor clears before every
@@ -170,49 +171,6 @@ struct Record {
     entries: Vec<Entry>,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LegacyIdentity {
-    binary: String,
-    model: String,
-    provider: Option<String>,
-    request: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct LegacyRecord {
-    schema: u32,
-    key: String,
-    obligation: ClaimedObligation,
-    skeleton: String,
-    identity: LegacyIdentity,
-    entries: Vec<Entry>,
-}
-
-impl LegacyRecord {
-    fn key(&self) -> String {
-        let material = serde_json::json!([
-            LEGACY_STORE_SCHEMA,
-            self.obligation,
-            self.skeleton,
-            {
-                "binary": self.identity.binary,
-                "model": self.identity.model,
-                "provider": self.identity.provider,
-                "request": self.identity.request,
-            }
-        ]);
-        hex::encode(Sha256::digest(material.to_string().as_bytes()))
-    }
-
-    fn matches_identity(&self, identity: &StoreIdentity) -> bool {
-        self.identity.model == identity.model
-            && self.identity.provider == identity.provider
-            && self.identity.request == identity.request
-    }
-}
-
 /// One record per obligation, under one identity.
 pub(super) struct VerdictStore {
     dir: PathBuf,
@@ -245,54 +203,6 @@ impl VerdictStore {
         hex::encode(Sha256::digest(material.to_string().as_bytes()))
     }
 
-    /// Read schema-4 candidates once per gate. The scan is bounded so a
-    /// malformed or unexpectedly large cache cannot turn a gate into an
-    /// unbounded directory walk.
-    pub(super) fn legacy_records(&self) -> Result<Vec<LegacyRecord>> {
-        let dir = match std::fs::read_dir(&self.dir) {
-            Ok(dir) => dir,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!("reading legacy fidelity store {}", self.dir.display())
-                });
-            }
-        };
-        let mut records = Vec::new();
-        let mut scanned = 0usize;
-        for item in dir {
-            let item = item.with_context(|| {
-                format!("reading legacy fidelity store entry {}", self.dir.display())
-            })?;
-            let path = item.path();
-            if path.extension().is_none_or(|extension| extension != "json") {
-                continue;
-            }
-            scanned += 1;
-            if scanned > MAX_LEGACY_RECORDS {
-                return Err(anyhow!(
-                    "legacy fidelity store {} exceeds the {MAX_LEGACY_RECORDS} record scan limit",
-                    self.dir.display()
-                ));
-            }
-            let Ok(bytes) = std::fs::read(&path) else {
-                continue;
-            };
-            let Ok(record) = serde_json::from_slice::<LegacyRecord>(&bytes) else {
-                continue;
-            };
-            if record.schema == LEGACY_STORE_SCHEMA
-                && record.key == record.key()
-                && path
-                    .file_stem()
-                    .is_some_and(|stem| stem == std::ffi::OsStr::new(&record.key))
-            {
-                records.push(record);
-            }
-        }
-        Ok(records)
-    }
-
     fn path(&self, key: &str) -> PathBuf {
         self.dir.join(format!("{key}.json"))
     }
@@ -317,46 +227,21 @@ impl VerdictStore {
         standing(&self.read(question)?, question)
     }
 
-    /// Find and promote a matching schema-4 record after the gate's single
-    /// bounded directory scan.
-    pub(super) fn load_legacy(
-        &self,
-        question: Question<'_>,
-        records: &[LegacyRecord],
-    ) -> Result<Option<Standing>> {
-        if self.identity.request.is_none() {
-            return Ok(None);
+    fn record(&self, question: Question<'_>, key: String, entries: Vec<Entry>) -> Record {
+        Record {
+            schema: STORE_SCHEMA,
+            key,
+            obligation: question.obligation.clone(),
+            skeleton: question.skeleton.to_string(),
+            identity: self.identity.clone(),
+            entries,
         }
-        if let Some(standing) = self.load(question) {
-            return Ok(Some(standing));
-        }
-        for record in records {
-            if record.obligation != *question.obligation
-                || record.skeleton != question.skeleton
-                || !record.matches_identity(&self.identity)
-            {
-                continue;
-            }
-            // Reject the whole candidate if any saved entry is foreign to
-            // this cluster or fails the current fresh-reply validation.
-            if record.entries.is_empty()
-                || record.entries.iter().any(|entry| !holds(entry, question))
-            {
-                continue;
-            }
-            let Some(standing) = standing(&record.entries, question) else {
-                continue;
-            };
-            self.promote_legacy(question, &record.entries)?;
-            return Ok(self.load(question).or(Some(standing)));
-        }
-        Ok(None)
     }
 
-    fn promote_legacy(&self, question: Question<'_>, entries: &[Entry]) -> Result<()> {
+    /// Run `under` holding the exclusive lock on `{key}.lock`.
+    fn locked<T>(&self, key: &str, under: impl FnOnce() -> Result<T>) -> Result<T> {
         std::fs::create_dir_all(&self.dir)
             .with_context(|| format!("creating fidelity store {}", self.dir.display()))?;
-        let key = self.key(question);
         let lock_path = self.dir.join(format!("{key}.lock"));
         let lock_file = std::fs::OpenOptions::new()
             .create(true)
@@ -369,27 +254,23 @@ impl VerdictStore {
         let _held = lock
             .write()
             .with_context(|| format!("locking fidelity record {}", lock_path.display()))?;
-        if self.read(question).is_some() {
-            return Ok(());
-        }
-        let record = Record {
-            schema: STORE_SCHEMA,
-            key: key.clone(),
-            obligation: question.obligation.clone(),
-            skeleton: question.skeleton.to_string(),
-            identity: self.identity.clone(),
-            entries: entries.to_vec(),
-        };
-        let path = self.path(&key);
-        let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
-        let result = serde_json::to_vec_pretty(&record)
+        under()
+    }
+
+    /// Stage `record` beside its path and rename it into place.
+    fn write(&self, record: &Record) -> Result<()> {
+        let path = self.path(&record.key);
+        let staging = self
+            .dir
+            .join(format!(".{}.{}.tmp", record.key, std::process::id()));
+        let written = serde_json::to_vec_pretty(record)
             .map_err(anyhow::Error::from)
             .and_then(|bytes| Ok(std::fs::write(&staging, bytes)?))
             .and_then(|()| Ok(std::fs::rename(&staging, &path)?));
-        if result.is_err() {
+        if written.is_err() {
             let _ = std::fs::remove_file(&staging);
         }
-        result.with_context(|| format!("promoting legacy fidelity record {}", path.display()))
+        written.with_context(|| format!("writing fidelity record {}", path.display()))
     }
 
     /// Save a fresh answer to `question`, atomically, and say what now
@@ -403,60 +284,33 @@ impl VerdictStore {
         if self.identity.request.is_none() {
             return Ok((Standing::Verdict(verdict.clone()), false));
         }
-        std::fs::create_dir_all(&self.dir)
-            .with_context(|| format!("creating fidelity store {}", self.dir.display()))?;
         let key = self.key(question);
         // Read, merge and rename under one exclusive lock: a verdict another
         // gate saved for this obligation a moment ago is merged, never lost.
-        let lock_path = self.dir.join(format!("{key}.lock"));
-        let lock_file = std::fs::OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)
-            .with_context(|| format!("opening fidelity lock {}", lock_path.display()))?;
-        let mut lock = fd_lock::RwLock::new(lock_file);
-        let _held = lock
-            .write()
-            .with_context(|| format!("locking fidelity record {}", lock_path.display()))?;
-        let mut entries: Vec<Entry> = self
-            .read(question)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|entry| {
-                entry.verdict.necessarily_true != verdict.necessarily_true && holds(entry, question)
-            })
-            .collect();
-        entries.push(Entry {
-            audited_at: chrono::Utc::now().to_rfc3339(),
-            tasks: question.texts.clone(),
-            verdict: verdict.clone(),
-        });
-        let standing = standing(&entries, question).ok_or_else(|| {
-            anyhow!(
-                "fidelity verdict for {} does not pass its own check against the texts it answered",
-                question.obligation.id
-            )
+        let standing = self.locked(&key, || {
+            let mut entries: Vec<Entry> = self
+                .read(question)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|entry| {
+                    entry.verdict.necessarily_true != verdict.necessarily_true
+                        && holds(entry, question)
+                })
+                .collect();
+            entries.push(Entry {
+                audited_at: chrono::Utc::now().to_rfc3339(),
+                tasks: question.texts.clone(),
+                verdict: verdict.clone(),
+            });
+            let standing = standing(&entries, question).ok_or_else(|| {
+                anyhow!(
+                    "fidelity verdict for {} does not pass its own check against the texts it answered",
+                    question.obligation.id
+                )
+            })?;
+            self.write(&self.record(question, key.clone(), entries))?;
+            Ok(standing)
         })?;
-        let record = Record {
-            schema: STORE_SCHEMA,
-            key: key.clone(),
-            obligation: question.obligation.clone(),
-            skeleton: question.skeleton.to_string(),
-            identity: self.identity.clone(),
-            entries,
-        };
-        let path = self.path(&key);
-        let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
-        let written = serde_json::to_vec_pretty(&record)
-            .map_err(anyhow::Error::from)
-            .and_then(|bytes| Ok(std::fs::write(&staging, bytes)?))
-            .and_then(|()| Ok(std::fs::rename(&staging, &path)?));
-        if written.is_err() {
-            let _ = std::fs::remove_file(&staging);
-        }
-        written.with_context(|| format!("writing fidelity record {}", path.display()))?;
         Ok((standing, true))
     }
 }
@@ -494,6 +348,15 @@ fn standing(entries: &[Entry], question: Question<'_>) -> Option<Standing> {
         (None, None) => None,
     }
 }
+
+#[path = "fidelity_store_legacy.rs"]
+mod legacy;
+#[cfg(test)]
+pub(super) use legacy::LEGACY_CRITIC_LOGIC;
+
+#[cfg(test)]
+#[path = "fidelity_logic_digest.rs"]
+mod logic_digest;
 
 #[cfg(test)]
 #[path = "fidelity_store_tests.rs"]

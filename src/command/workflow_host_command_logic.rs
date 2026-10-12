@@ -259,7 +259,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: identical critic logic and request identities reuse validated verdicts across binary rebuilds.
         version: 8,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "ac02186f87e8d3639861dcb688243405832936fd5668d919a2a8d7f347f7f237",
+        sources_digest: "12540f8973a605e970e4d68e2909265f36f7ca7874a0fc94920cce4b0df15bdc",
         build_bound: false,
     },
     CapabilityLogic {
@@ -273,7 +273,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: identical critic logic and request identities reuse validated verdicts across binary rebuilds.
         version: 7,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "ac02186f87e8d3639861dcb688243405832936fd5668d919a2a8d7f347f7f237",
+        sources_digest: "12540f8973a605e970e4d68e2909265f36f7ca7874a0fc94920cce4b0df15bdc",
         build_bound: false,
     },
     CapabilityLogic {
