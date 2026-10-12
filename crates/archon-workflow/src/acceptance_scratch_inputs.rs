@@ -106,7 +106,62 @@ pub(super) fn project_excludes(policy: &ScratchPolicy) -> WorkflowResult<Vec<Pat
     let mut excludes = policy.project_input_excludes.clone();
     excludes.push(relative.join(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE));
     excludes.push(relative.join(crate::task_set_contract::ACCEPTANCE_LOCK_FILE));
+    excludes.extend(task_root_pipeline_outputs(&policy.task_root, &relative)?);
     Ok(excludes)
+}
+
+/// Paths written by decomposition into the task root. These are generated
+/// before/during body landing and are not inputs to the earlier frozen checks.
+fn task_root_pipeline_outputs(
+    task_root: &Path,
+    relative_root: &Path,
+) -> WorkflowResult<Vec<PathBuf>> {
+    let mut outputs = vec![
+        // src/command/workflow_decompose.rs:run_fixed_decomposition_with_factory_and_sink
+        relative_root.join(".decompose.log"),
+        relative_root.join(crate::task_set_contract::TASK_SKELETON_FILE),
+        relative_root.join(crate::task_set_contract::TASK_SKELETON_LOCK_FILE),
+    ];
+    // src/command/workflow_acceptance_republish.rs:publish writes the skeleton;
+    // src/command/workflow_host_command_binding.rs:land_task_body writes each
+    // frozen task's file_name into this task root.
+    let skeleton_path = task_root.join(crate::task_set_contract::TASK_SKELETON_FILE);
+    match skeleton_path.symlink_metadata() {
+        Ok(metadata) if metadata.is_file() => {
+            let bytes = std::fs::read(&skeleton_path)
+                .map_err(|error| WorkflowError::io(&skeleton_path, error))?;
+            let skeleton: crate::task_skeleton::TaskSkeleton = serde_json::from_slice(&bytes)
+                .map_err(|error| {
+                    invalid(format!(
+                        "task skeleton {} is malformed while building acceptance inputs: {error}",
+                        skeleton_path.display()
+                    ))
+                })?;
+            for task in &skeleton.tasks {
+                let name = Path::new(&task.file_name);
+                if name.components().count() != 1
+                    || !task.file_name.starts_with("TASK-")
+                    || !task.file_name.ends_with(".md")
+                {
+                    return Err(invalid(format!(
+                        "task skeleton {} contains a non-direct task body filename {:?}",
+                        skeleton_path.display(),
+                        task.file_name
+                    )));
+                }
+                outputs.push(relative_root.join(name));
+            }
+        }
+        Ok(_) => {
+            return Err(invalid(format!(
+                "task skeleton {} is not a regular file while building acceptance inputs",
+                skeleton_path.display()
+            )));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(WorkflowError::io(&skeleton_path, error)),
+    }
+    Ok(outputs)
 }
 pub(super) fn copy_project(
     root: &Path,
@@ -252,64 +307,9 @@ fn audit_path(
 }
 
 #[cfg(test)]
-#[test]
-fn freeze_outputs_are_excluded_from_scratch_project_inputs() {
-    let temp = tempfile::tempdir().unwrap();
-    let project = temp.path().join("project");
-    let task_root = project.join("tasks/set");
-    std::fs::create_dir_all(&task_root).unwrap();
-    let policy = ScratchPolicy {
-        repository: temp.path().join("repository"),
-        project: project.clone(),
-        task_root,
-        scratch_parent: temp.path().join("scratch"),
-        project_inputs: Vec::new(),
-        project_input_excludes: Vec::new(),
-        combined: false,
-        toolchain_path: String::new(),
-        environment: BTreeMap::new(),
-        environment_allowlist: Vec::new(),
-        cargo_seed: None,
-        timeout_secs: 1,
-        output_bytes: 1,
-        scratch_bytes: 1,
-        build_cache: None,
-    };
-    let excludes = project_excludes(&policy).unwrap();
-    let task_contract =
-        Path::new("tasks/set").join(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
-    assert!(excluded(&task_contract, &excludes));
-    assert!(!excluded(
-        Path::new(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
-        &excludes
-    ));
-    for path in [
-        Path::new("tasks/set").join(crate::task_set_contract::ACCEPTANCE_LOCK_FILE),
-        Path::new(".archon")
-            .join(crate::task_set_lineage::PIN_STORE_NAMESPACE)
-            .join("set.json"),
-    ] {
-        assert!(excluded(&path, &excludes), "{}", path.display());
-    }
-    assert!(!excluded(Path::new("tasks/set/input.json"), &excludes));
-}
+#[path = "acceptance_scratch_inputs_tests.rs"]
+mod tests;
 
-#[cfg(test)]
-#[test]
-fn same_named_nested_project_data_is_included_and_digested() {
-    let temp = tempfile::tempdir().unwrap();
-    let file = temp.path().join("config/acceptance-contract.json");
-    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    std::fs::write(&file, b"project data").unwrap();
-    let relative = Path::new("config/acceptance-contract.json");
-    assert!(!excluded(relative, &[]));
-    let mut map = BTreeMap::new();
-    audit_path(temp.path(), relative, &[], &mut map).unwrap();
-    assert_eq!(
-        map.get("config/acceptance-contract.json"),
-        Some(&file_digest(&file).unwrap())
-    );
-}
 pub(super) fn live(
     policy: &ScratchPolicy,
     commit: &str,
@@ -339,10 +339,14 @@ pub(super) fn live(
         audit_path(&policy.project, input, &project_excludes, &mut project)?;
     }
     let mut tasks = BTreeMap::new();
-    let task_outputs = [
+    let mut task_outputs = vec![
         PathBuf::from(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
         PathBuf::from(crate::task_set_contract::ACCEPTANCE_LOCK_FILE),
     ];
+    task_outputs.extend(task_root_pipeline_outputs(
+        &policy.task_root,
+        Path::new(""),
+    )?);
     audit_path(&policy.task_root, Path::new(""), &task_outputs, &mut tasks)?;
     Ok(BTreeMap::from([
         (policy.repository.display().to_string(), source),
