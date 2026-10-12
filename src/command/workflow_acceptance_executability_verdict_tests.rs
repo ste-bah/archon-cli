@@ -99,16 +99,24 @@ fn a_first_shell_setup_option_error_is_not_a_preimplementation_verdict() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_real_shell_cr_option_error_before_the_criterion_is_not_proof() {
     let command = "set -\r\nprintf criterion";
+    if !std::path::Path::new("/bin/sh").is_file() {
+        eprintln!("skipping real-shell test: /bin/sh is absent");
+        return;
+    }
     let output = std::process::Command::new("/bin/sh")
         .arg("-c")
         .arg(command)
         .output()
         .expect("the system shell must run this check");
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid option"));
+    assert!(
+        !output.stderr.is_empty(),
+        "the shell must report its option error"
+    );
     assert!(!String::from_utf8_lossy(&output.stdout).contains("criterion"));
     let result = run(
         output.status.code(),
@@ -122,9 +130,14 @@ fn a_real_shell_cr_option_error_before_the_criterion_is_not_proof() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_real_shell_invocation_option_error_is_not_a_preimplementation_verdict() {
     let command = "sh -z -c 'printf criterion'";
+    if !std::path::Path::new("/bin/sh").is_file() {
+        eprintln!("skipping real-shell test: /bin/sh is absent");
+        return;
+    }
     let output = std::process::Command::new("/bin/sh")
         .arg("-z")
         .arg("-c")
@@ -132,7 +145,10 @@ fn a_real_shell_invocation_option_error_is_not_a_preimplementation_verdict() {
         .output()
         .expect("the system shell must run this check");
     assert_eq!(output.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid option"));
+    assert!(
+        !output.stderr.is_empty(),
+        "the shell must report its option error"
+    );
     assert!(!String::from_utf8_lossy(&output.stdout).contains("criterion"));
     let result = run(
         output.status.code(),
@@ -466,3 +482,6 @@ fn a_windows_sites_path_and_pathext_resolve_as_its_child_does() {
     let absent = run(Some(127), "", "sh: bash: command not found\n");
     assert!(no_verdict("bash scripts/three.sh", &absent, &at).is_some());
 }
+
+#[path = "workflow_acceptance_executability_verdict_shell_tests.rs"]
+mod shell_tests;

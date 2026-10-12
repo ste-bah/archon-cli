@@ -9,6 +9,17 @@ pub(super) fn refusal(
     commands: &[Simple],
     output: &str,
 ) -> Option<String> {
+    let has_option_refusal_wording = |line: &str| {
+        let line = line.to_ascii_lowercase();
+        [
+            "invalid option",
+            "illegal option",
+            "unknown option",
+            "bad option",
+        ]
+        .iter()
+        .any(|wording| line.contains(wording))
+    };
     if code != 2 {
         return None;
     }
@@ -18,7 +29,7 @@ pub(super) fn refusal(
         .is_some_and(|program| {
             matches!(
                 program.rsplit(['/', '\\']).next().unwrap_or(program),
-                "sh" | "bash" | "dash" | "ksh"
+                "sh" | "bash" | "dash" | "ash" | "ksh"
             )
         })
         && output.lines().any(|line| {
@@ -27,12 +38,8 @@ pub(super) fn refusal(
                 return false;
             };
             let speaker = speaker.rsplit(['/', '\\']).next().unwrap_or(speaker);
-            matches!(speaker, "sh" | "bash" | "dash" | "ksh")
-                && ((message.starts_with('-')
-                    && (message.contains("invalid option") || message.contains("Illegal option")))
-                    || (message.starts_with("0: ")
-                        && (message.contains("invalid option")
-                            || message.contains("Illegal option"))))
+            matches!(speaker, "sh" | "bash" | "dash" | "ash" | "ksh")
+                && has_option_refusal_wording(message)
         })
     {
         return Some(
@@ -46,7 +53,7 @@ pub(super) fn refusal(
         && output.lines().any(|line| {
             let line = line.trim_start();
             (line.starts_with("set:") || line.contains(": set:"))
-                && (line.contains("invalid option") || line.contains("Illegal option"))
+                && has_option_refusal_wording(line)
         })
     {
         return Some(
