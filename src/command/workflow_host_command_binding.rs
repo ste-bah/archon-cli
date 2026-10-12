@@ -97,10 +97,6 @@ pub(crate) fn bind_request(
     // so a yaml block in chat before it is never read as its frontmatter. The
     // anchor is the one frozen subject's task file in the answer; two or more
     // are ambiguous and refused, never picked.
-    //
-    // Limit: the request carries no target, so the host cannot check that
-    // the subject bound here is the one THIS call authors. Follow-up issue:
-    // "land-task-body cannot verify the call's target subject".
     let paths: Vec<_> = skeleton
         .tasks
         .iter()
@@ -146,6 +142,20 @@ pub(crate) fn bind_request(
         ))));
     }
     let (task_id, task_file) = matches.pop().expect("one candidate subject");
+    if let Some(target) = &request.target
+        && (task_id != target.task_id
+            || task_file.file_name().and_then(|name| name.to_str()) != Some(&target.file_name))
+    {
+        return Ok(Err(Unbound::Binding(format!(
+            "candidate TASK body binds {task_id} ({}) but this call targets {} ({})",
+            task_file
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("invalid file name"),
+            target.task_id,
+            target.file_name
+        ))));
+    }
     context.frozen_task_id = Some(task_id);
     context.frozen_task_file = Some(task_file);
     Ok(Ok(context))

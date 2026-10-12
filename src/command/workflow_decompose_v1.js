@@ -227,6 +227,7 @@ function bodyPolicy(subject, initialFeedback) {
   return {
     phase: `body-${subject.taskId}`,
     capability: "land-task-body",
+    target: { taskId: subject.taskId, fileName: subject.fileName },
     retryScopes: new Set(["candidate_artifact", "body"]),
     initialFeedback,
     prompt: () => [
@@ -336,7 +337,10 @@ async function authorCandidate(w, policy) {
       continue;
     }
 
-    const outcome = await w.hostCommand(policy.capability, { stdin: authored.content });
+    const outcome = await w.hostCommand(policy.capability, {
+      stdin: authored.content,
+      ...(policy.target ? { target: policy.target } : {})
+    });
     const routed = routeFindings(outcome, policy.retryScopes, policy.shadowScopes);
     if (routed.operational) {
       // The gate never judged the candidate; only the round that made it can

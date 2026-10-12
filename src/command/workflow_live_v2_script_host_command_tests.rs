@@ -135,7 +135,7 @@ async function workflow(w) {
 }
 
 #[tokio::test]
-async fn host_command_is_reused_without_second_execution() {
+async fn legacy_body_call_replays_without_a_target_on_resume() {
     let temp = tempfile::tempdir().expect("tempdir");
     let spec = test_spec();
     let workflow_store = WorkflowStore::new(temp.path().join("workflows"));
@@ -145,7 +145,8 @@ async fn host_command_is_reused_without_second_execution() {
     let executor = Arc::new(FakeHostCommandExecutor {
         calls: AtomicUsize::new(0),
     });
-    let script = r#"async function workflow(w) { return await w.hostCommand("task-set-lint", { stdin: null }); }"#;
+    // This is the body call shape recorded before target became an option.
+    let script = r#"async function workflow(w) { return await w.hostCommand("land-task-body", { stdin: "old body" }); }"#;
 
     for _ in 0..2 {
         let client = LiveV2AgentClient::new(
@@ -175,6 +176,20 @@ async fn host_command_is_reused_without_second_execution() {
     }
 
     assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
+    let record = v2_store
+        .load_call_record("host-command:land-task-body:fixed")
+        .expect("record lookup")
+        .expect("legacy body call record");
+    assert_eq!(
+        record
+            .call
+            .options
+            .host_command
+            .as_ref()
+            .and_then(|request| request.target.as_ref()),
+        None,
+        "the replayed legacy request has no target"
+    );
 }
 
 struct RawOutcomeLlm {

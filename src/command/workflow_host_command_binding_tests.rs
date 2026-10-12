@@ -2,7 +2,7 @@
 //! refused with that subject's parse cause, through the shape refusal, so the
 //! author gets a repair it can act on. A body that names no subject keeps the
 //! binding refusal.
-use archon_workflow::{HostCommandRequest, RemediationScope};
+use archon_workflow::{HostCommandRequest, HostCommandSubject, RemediationScope};
 
 use super::workflow_host_command_catalog::fixed_decomposition_catalog;
 use super::workflow_host_command_exec::{FixedHostCommandExecutor, WorkflowHostCommandExecutor};
@@ -269,6 +269,64 @@ async fn two_frozen_subjects_in_one_answer_are_refused_naming_both() {
         );
         assert_eq!(finding.remediation_scope, RemediationScope::Body);
     }
+}
+
+#[tokio::test]
+async fn target_mismatch_is_refused_and_names_candidate_and_target() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    seed_frozen_subjects(
+        &context,
+        &[
+            ("TASK-X-010", "TASK-X-010.md"),
+            ("TASK-X-011", "TASK-X-011.md"),
+        ],
+    );
+    let mut request = HostCommandRequest::new("land-task-body", Some(whole("TASK-X-011"))).unwrap();
+    request.target = Some(HostCommandSubject {
+        task_id: "TASK-X-010".into(),
+        file_name: "TASK-X-010.md".into(),
+    });
+    let executor = FixedHostCommandExecutor::new(
+        fixed_decomposition_catalog("rev-1").unwrap(),
+        context,
+        temp.path().join("run"),
+    );
+    let outcome = executor.execute(request, Some(1)).await.unwrap();
+    let findings = outcome
+        .gate_envelope
+        .expect("target mismatch finding")
+        .policy_findings;
+    assert_eq!(findings.len(), 1);
+    assert_eq!(
+        findings[0].text,
+        "candidate TASK body binds TASK-X-011 (TASK-X-011.md) but this call targets TASK-X-010 (TASK-X-010.md)"
+    );
+}
+
+#[test]
+fn target_match_binds_the_requested_frozen_subject() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = context(temp.path());
+    seed_frozen_subjects(
+        &context,
+        &[
+            ("TASK-X-010", "TASK-X-010.md"),
+            ("TASK-X-011", "TASK-X-011.md"),
+        ],
+    );
+    let mut request = HostCommandRequest::new("land-task-body", Some(whole("TASK-X-011"))).unwrap();
+    request.target = Some(HostCommandSubject {
+        task_id: "TASK-X-011".into(),
+        file_name: "TASK-X-011.md".into(),
+    });
+    let bound = super::workflow_host_command_binding::context_for_request(
+        &context,
+        &temp.path().join("run"),
+        &request,
+    )
+    .unwrap();
+    assert_eq!(bound.frozen_task_id.as_deref(), Some("TASK-X-011"));
 }
 
 /// A whole example for a task that is not frozen is packaging; the frozen
