@@ -221,7 +221,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 11: #417 #418 #419 freeze-owned outputs leave check inputs; passability and judge verdicts reuse by scoped input keys.
         version: 11,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "782ebf5427a739d24d4a792b77dcc02ec373ad361faa85cce5f547901a68828e",
+        sources_digest: "5c5df7fcb1d980cbf4c25e98811aa6b1d13bd2d9b07942fcc9cb3270497353fd",
         build_bound: false,
     },
     CapabilityLogic {
@@ -229,7 +229,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "782ebf5427a739d24d4a792b77dcc02ec373ad361faa85cce5f547901a68828e",
+        sources_digest: "5c5df7fcb1d980cbf4c25e98811aa6b1d13bd2d9b07942fcc9cb3270497353fd",
         build_bound: false,
     },
     CapabilityLogic {
@@ -243,7 +243,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 7: #428 the host stamps frozen skeleton frontmatter fields at landing.
         version: 7,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "92fb4ddcfe02bbe62d22a5c8f51da17f9356e0589e8fd31c02dc6b1afaf1bb59",
+        sources_digest: "6778a29afce5be9fde9fb0383911c7cf770949aaa90be81cb05090a1bf6f07be",
         build_bound: false,
     },
     CapabilityLogic {
@@ -255,7 +255,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
         version: 6,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "92fb4ddcfe02bbe62d22a5c8f51da17f9356e0589e8fd31c02dc6b1afaf1bb59",
+        sources_digest: "6778a29afce5be9fde9fb0383911c7cf770949aaa90be81cb05090a1bf6f07be",
         build_bound: false,
     },
     CapabilityLogic {
@@ -263,7 +263,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
-        sources_digest: "542fa5562fa425d5c4463cc4361b30617a63497d75032a96a85f85c69749a7d0",
+        sources_digest: "94cf8997b1bb0784d0d3a2de8fd1edd57a2dbc6d0400d583f22ffcdb63679c4d",
         build_bound: true,
     },
     CapabilityLogic {
@@ -272,7 +272,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #417 copied check inputs omit freeze-owned files, which can change a check verdict.
         version: 4,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "f34d32365f205ddadc4ef487c0d08cfcbdb7d53daa56c3b70a39dda8d84ac0ba",
+        sources_digest: "b93a354868cdee593ece3d2f804e6def4a8fe3251d3e36f82d7e30a7befe8fd2",
         build_bound: true,
     },
     CapabilityLogic {
@@ -280,7 +280,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "f34d32365f205ddadc4ef487c0d08cfcbdb7d53daa56c3b70a39dda8d84ac0ba",
+        sources_digest: "b93a354868cdee593ece3d2f804e6def4a8fe3251d3e36f82d7e30a7befe8fd2",
         build_bound: true,
     },
 ];
