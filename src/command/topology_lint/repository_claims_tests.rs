@@ -24,10 +24,12 @@ fn grounded() -> (tempfile::TempDir, PathBuf, PathBuf, RepositoryTree) {
     std::fs::create_dir_all(repo.join("src")).unwrap();
     std::fs::create_dir_all(repo.join("crate/tests")).unwrap();
     std::fs::create_dir_all(repo.join("crate/tests/tests")).unwrap();
+    std::fs::create_dir_all(repo.join("docs/v1.2")).unwrap();
     std::fs::write(repo.join("src/lib.rs"), "pub mod existing;\n").unwrap();
     std::fs::write(repo.join("src/existing.rs"), "pub fn f() {}\n").unwrap();
     std::fs::write(repo.join("crate/tests/x.rs"), "// scoped alternate\n").unwrap();
     std::fs::write(repo.join("crate/tests/tests/x.rs"), "// scoped candidate\n").unwrap();
+    std::fs::write(repo.join("docs/v1.2/foo.rs"), "// dotted scope\n").unwrap();
     git(&repo, &["init", "-q"]);
     git(&repo, &["config", "user.email", "t@example.invalid"]);
     git(&repo, &["config", "user.name", "t"]);
@@ -109,13 +111,26 @@ fn leading_negation_and_explicit_directory_scopes_are_resolved() {
             ("src/b.rs".to_string(), Claim::Absent),
         ]
     );
+    for text in [
+        "No `a.rs` or `b.rs` exists under `src/`.",
+        "Neither `a.rs` nor `b.rs` exist in `src/`.",
+    ] {
+        assert_eq!(
+            claims(text),
+            vec![
+                ("a.rs".to_string(), Claim::Absent),
+                ("b.rs".to_string(), Claim::Absent),
+            ],
+            "{text:?}"
+        );
+    }
     assert_eq!(
         claims("`a.rs` exists under `src/`."),
-        vec![("src/a.rs".to_string(), Claim::Exists)]
+        vec![("a.rs".to_string(), Claim::Exists)]
     );
     assert_eq!(
         claims("`a.rs` exists in `src/`."),
-        vec![("src/a.rs".to_string(), Claim::Exists)]
+        vec![("a.rs".to_string(), Claim::Exists)]
     );
     assert_eq!(
         claims("`src/lib.rs` exists and is wired in `src/main.rs`."),
@@ -127,7 +142,7 @@ fn leading_negation_and_explicit_directory_scopes_are_resolved() {
     );
     assert_eq!(
         claims("`a.rs` exists under `src/`."),
-        vec![("src/a.rs".to_string(), Claim::Exists)]
+        vec![("a.rs".to_string(), Claim::Exists)]
     );
     assert_eq!(
         claims(
@@ -149,15 +164,27 @@ fn dotted_symbols_are_not_file_claims_and_only_direct_directory_scopes_join() {
     .is_empty());
     assert_eq!(
         claims("`foo.rs` exists under `src/bar/`."),
-        vec![("src/bar/foo.rs".to_string(), Claim::Exists)]
+        vec![("foo.rs".to_string(), Claim::Exists)]
     );
     assert_eq!(
+        claims("`foo.rs` exists in `docs/v1.2`."),
+        vec![("foo.rs".to_string(), Claim::Exists)]
+    );
+    assert_eq!(
+        claims("`missing.rs` exists under `src`."),
+        vec![("missing.rs".to_string(), Claim::Exists)]
+    );
+    assert!(claims("`foo.rs` currently exists in `src/`.").is_empty());
+    assert_eq!(
         claims("`spec_refs.rs` exists in `crates/x/src/`."),
-        vec![("crates/x/src/spec_refs.rs".to_string(), Claim::Exists)]
+        vec![("spec_refs.rs".to_string(), Claim::Exists)]
     );
     assert!(claims("the `a.b` field in `config.json`").is_empty());
     assert!(claims("`promotion_gates.live == \"out_of_scope\"`").is_empty());
-    assert!(claims("`foo.rs` exists in `config.json`.").is_empty());
+    assert_eq!(
+        claims("`foo.rs` exists in `config.json`."),
+        vec![("foo.rs".to_string(), Claim::Exists)]
+    );
 }
 
 #[test]
@@ -194,6 +221,9 @@ fn scoped_slash_paths_are_only_checked_when_the_tree_resolves_one_candidate() {
     );
     assert!(findings.is_empty(), "{findings:?}");
 }
+
+#[path = "repository_claims_scoped_tests.rs"]
+mod scoped_tests;
 
 #[test]
 fn runtime_output_paths_are_not_repository_existence_claims() {

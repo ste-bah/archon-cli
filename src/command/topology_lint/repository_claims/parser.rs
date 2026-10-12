@@ -181,15 +181,12 @@ fn claims_in_sentence(sentence: &str) -> Vec<PathClaim> {
                 .or_else(|| explicit_scope(after).map(|(_, claim)| claim))
                 .or_else(|| claim_before(before));
             if let Some(claim) = claim {
-                let qualified = qualified_path(&path, after);
-                let scoped_join = qualified.is_some();
-                let path = qualified.unwrap_or(path);
                 let scope = explicit_scope(after).map(|(scope, _)| scope);
                 claims.push(PathClaim {
                     path,
                     claim,
                     scope,
-                    scoped_join,
+                    scoped_join: false,
                     sentence: sentence.trim().to_string(),
                 });
             }
@@ -218,7 +215,8 @@ fn leading_absence_claims(sentence: &str) -> Option<Vec<PathClaim>> {
         rest = rest.trim_start();
         let token = rest.strip_prefix('`')?;
         let close = token.find('`')?;
-        let path = repository_or_scoped_token(&token[..close], &token[close + 1..])?;
+        let path = repository_relative_token(&token[..close])
+            .or_else(|| bare_repository_file_token(&token[..close]))?;
         paths.push(path);
         rest = &token[close + 1..];
         let lowered_rest = rest.to_ascii_lowercase();
@@ -227,19 +225,16 @@ fn leading_absence_claims(sentence: &str) -> Option<Vec<PathClaim>> {
             continue;
         }
         if matches!(claim_after(rest), Some(Claim::Exists)) {
+            let scope = explicit_scope(rest).map(|(scope, _)| scope);
             return Some(
                 paths
                     .into_iter()
-                    .map(|path| {
-                        let qualified = qualified_path(&path, rest);
-                        let scoped_join = qualified.is_some();
-                        PathClaim {
-                            path: qualified.unwrap_or(path),
-                            claim: Claim::Absent,
-                            scope: explicit_scope(rest).map(|(scope, _)| scope),
-                            scoped_join,
-                            sentence: sentence.trim().to_string(),
-                        }
+                    .map(|path| PathClaim {
+                        path,
+                        claim: Claim::Absent,
+                        scope: scope.clone(),
+                        scoped_join: false,
+                        sentence: sentence.trim().to_string(),
                     })
                     .collect(),
             );
@@ -269,9 +264,8 @@ fn explicit_scope(after: &str) -> Option<(String, Claim)> {
     repository_directory_token(&token[..end]).map(|scope| (scope, claim))
 }
 
-/// A scope is a repository directory, including one written without a
-/// trailing slash. A final component with the same short extension shape as
-/// a repository file is not a directory scope.
+/// A scope candidate is repository-relative syntax. The repository tree,
+/// rather than its spelling, determines whether it names a file or directory.
 fn repository_directory_token(token: &str) -> Option<String> {
     let token = token.trim();
     if token.is_empty()
@@ -291,39 +285,29 @@ fn repository_directory_token(token: &str) -> Option<String> {
     if normalized.is_empty() {
         return None;
     }
-    if !token.ends_with('/') && has_file_extension(normalized.rsplit('/').next()?) {
-        return None;
-    }
     Some(normalized)
 }
 
 /// Bare file names may be joined to an explicit scope. A token that already
 /// has a path component remains root-relative; the tree-aware checker decides
 /// whether such a scoped claim is unambiguous.
-fn qualified_path(path: &str, after: &str) -> Option<String> {
-    if path.contains('/') {
-        return None;
-    }
-    let (directory, _) = explicit_scope(after)?;
-    let joined = format!("{}/{}", directory.trim_end_matches('/'), path);
-    Some(archon_workflow::repository_record::normalize_relative(
-        &joined,
-    ))
-}
-
 fn repository_or_scoped_token(token: &str, after: &str) -> Option<String> {
     repository_relative_token(token).or_else(|| {
         explicit_scope(after)?;
-        let file = token.trim();
-        let (stem, extension) = file.rsplit_once('.')?;
-        (!file.contains('/')
-            && !file.chars().any(char::is_whitespace)
-            && !stem.is_empty()
-            && !extension.is_empty()
-            && extension.len() <= 8
-            && extension.chars().all(|c| c.is_ascii_alphanumeric()))
-        .then(|| file.to_string())
+        bare_repository_file_token(token)
     })
+}
+
+fn bare_repository_file_token(token: &str) -> Option<String> {
+    let file = token.trim();
+    let (stem, extension) = file.rsplit_once('.')?;
+    (!file.contains('/')
+        && !file.chars().any(char::is_whitespace)
+        && !stem.is_empty()
+        && !extension.is_empty()
+        && extension.len() <= 8
+        && extension.chars().all(|c| c.is_ascii_alphanumeric()))
+    .then(|| file.to_string())
 }
 
 /// Do not treat a backticked component as a repository path when it is one

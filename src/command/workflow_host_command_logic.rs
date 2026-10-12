@@ -227,6 +227,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 15: #417 Windows task-root paths normalize before containment checks, so probes can run and produce a different verdict.
         // #439 re-pin only: resume phase selection shares this closure; freeze verdicts are unchanged.
         // #417 re-pin only: the landing destination allowlist names the topology stores; freeze verdicts are unchanged.
+        // #425 re-pin only: the repository claim parser changed; freeze verdicts do not read claims.
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
         sources_digest: "793e9e890ac86e337cd493ab44b63aec2d55376601d8cb1c7bc27199524aade6",
@@ -237,6 +238,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // #434 and #417 re-pin only: harness input paths, pipeline outputs, and copy API normalization do not alter this verdict.
         // #439 re-pin only, as freeze-acceptance.
+        // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
         sources_digest: "793e9e890ac86e337cd493ab44b63aec2d55376601d8cb1c7bc27199524aade6",
@@ -252,10 +254,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
         // 7: #428 the host stamps frozen skeleton frontmatter fields at landing.
         // 8: #434 a fidelity gap blocks only its weakest task's body; true verdicts quote a checked anchor and are reused per obligation.
-        // 9: #425 dotted identifiers followed by a file citation are not repository-path claims.
+        // 9: #425 dotted identifiers followed by a file citation are not repository-path claims; shared-scope negation and tree-aware dotted or single-word scope resolution now preserve claim polarity and identify the actual scoped path.
         version: 9,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "e4e235dd913590cc2882e91ecbd9f26f6f6302548cded5d66df3f63b8eee7f2e",
+        sources_digest: "65ac1e5f77d4b011d92e605da57e6d0f369bd03c1907970034910e962410f0c2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -266,10 +268,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
         // 7: #434 true fidelity verdicts quote a checked anchor and are reused per obligation over byte-identical cluster texts.
-        // 8: #425 dotted identifiers followed by a file citation are not repository-path claims.
+        // 8: #425 dotted identifiers followed by a file citation are not repository-path claims; shared-scope negation and tree-aware dotted or single-word scope resolution now preserve claim polarity and identify the actual scoped path.
         version: 8,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "e4e235dd913590cc2882e91ecbd9f26f6f6302548cded5d66df3f63b8eee7f2e",
+        sources_digest: "65ac1e5f77d4b011d92e605da57e6d0f369bd03c1907970034910e962410f0c2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -292,6 +294,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
+        // #425 re-pin only: the repository claim parser changed; acceptance verification verdicts do not read claims.
         sources_digest: "62d09347f7690c9fcabc9d1aba1a25eab288992c73c0bafdb6badf20444be157",
         build_bound: true,
     },
@@ -302,6 +305,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: verify never asks the fidelity critic or reads pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
+        // #425 re-pin only: the repository claim parser changed; skeleton verification verdicts do not read claims.
         sources_digest: "62d09347f7690c9fcabc9d1aba1a25eab288992c73c0bafdb6badf20444be157",
         build_bound: true,
     },

@@ -175,13 +175,17 @@ fn resolve_scoped_path(tree: &RepositoryTree, claim: &PathClaim) -> Option<Strin
     let Some(scope) = &claim.scope else {
         return Some(claim.path.clone());
     };
-    if claim.scoped_join {
-        return Some(claim.path.clone());
-    }
-    if !claim.path.contains('/') {
-        return Some(claim.path.clone());
+    let scope_path = tree.relative_to_root(scope)?;
+    let scope_is_dir = tree.is_dir_at_base(&scope_path) || tree.root().join(&scope_path).is_dir();
+    let scope_is_file = (tree.exists_at_base(&scope_path) && !tree.is_dir_at_base(&scope_path))
+        || tree.root().join(&scope_path).is_file();
+    if scope_is_file && !scope_is_dir {
+        return None;
     }
     let joined = format!("{}/{}", scope.trim_end_matches('/'), claim.path);
+    if claim.scoped_join || !claim.path.contains('/') {
+        return Some(joined);
+    }
     let root_path = tree.relative_to_root(&claim.path)?;
     if tree.truth(&root_path).certainly_exists() {
         return Some(claim.path.clone());
