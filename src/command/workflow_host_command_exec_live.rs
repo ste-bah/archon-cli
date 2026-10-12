@@ -25,6 +25,12 @@ fn pipeline_order(
         .capabilities
         .contains_key(command_id)
         .then_some(())?;
+    pipeline_stage(command_id)
+}
+
+/// A host command's position in the decomposition pipeline: a later stage
+/// may extend an earlier stage's shared output, never the reverse.
+pub(crate) fn pipeline_stage(command_id: &str) -> Option<usize> {
     PIPELINE_ORDER
         .iter()
         .find_map(|(id, position)| (*id == command_id).then_some(*position))

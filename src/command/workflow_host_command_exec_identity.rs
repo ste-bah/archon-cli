@@ -198,30 +198,17 @@ impl FixedHostCommandExecutor {
         &self,
         record: &WorkflowV2CallRecord,
     ) -> WorkflowResult<bool> {
-        if record.call.method != archon_workflow::WorkflowV2HostMethod::HostCommand {
-            return Ok(true);
-        }
-        let request = record.call.options.host_command.as_ref().ok_or_else(|| {
-            WorkflowError::StateCorrupt("persisted HostCommand record has no typed request".into())
-        })?;
-        let Some(capability) = self.catalog.capabilities.get(&request.command_id) else {
-            return Ok(false);
-        };
-        let bound = self
-            .logic_digests
-            .get(&request.command_id)
-            .is_some_and(|(_, bound)| *bound)
-            .then_some(self.build.as_str());
-        let holds = logic::outcome_logic_holds(
-            &record.result.data,
-            self.logic_version_for(&request.command_id)?,
-            logic::judges_only(capability),
-            bound,
-        );
+        let holds = recorded_logic_holds(
+            &self.catalog,
+            &self.logic,
+            &self.logic_digests,
+            &self.build,
+            record,
+        )?;
         if !holds {
             tracing::info!(
                 call_id = %record.call.id,
-                command_id = %request.command_id,
+                command_id = ?record.call.options.host_command.as_ref().map(|request| &request.command_id),
                 recorded = %record.result.data.get(logic::LOGIC_VERSION_STAMP).map_or_else(|| "none".to_string(), ToString::to_string),
                 recorded_build = %record.result.data.get(logic::LOGIC_BUILD_STAMP).map_or_else(|| "none".to_string(), ToString::to_string),
                 "host command outcome was judged by other logic; it runs again"
@@ -278,4 +265,42 @@ impl FixedHostCommandExecutor {
             },
         })
     }
+}
+
+/// Issue 361's logic test for a recorded host-command outcome under the
+/// logic `versions`, the pinned `digests` (whose flag binds reuse to the
+/// build) and `build`. The executor's reuse asks it, and so does a resume
+/// deciding whether a frozen phase's recorded freeze would replay, so the two
+/// answers cannot drift. A command `catalog` no longer declares runs no logic
+/// that could vouch for it.
+pub(crate) fn recorded_logic_holds(
+    catalog: &archon_workflow::CommandCapabilityCatalog,
+    versions: &BTreeMap<String, u32>,
+    digests: &BTreeMap<String, (String, bool)>,
+    build: &str,
+    record: &WorkflowV2CallRecord,
+) -> WorkflowResult<bool> {
+    if record.call.method != archon_workflow::WorkflowV2HostMethod::HostCommand {
+        return Ok(true);
+    }
+    let request = record.call.options.host_command.as_ref().ok_or_else(|| {
+        WorkflowError::StateCorrupt("persisted HostCommand record has no typed request".into())
+    })?;
+    let Some(capability) = catalog.capabilities.get(&request.command_id) else {
+        return Ok(false);
+    };
+    let version = versions
+        .get(&request.command_id)
+        .copied()
+        .ok_or_else(|| logic::undeclared(&request.command_id))?;
+    let bound = digests
+        .get(&request.command_id)
+        .is_some_and(|(_, bound)| *bound)
+        .then_some(build);
+    Ok(logic::outcome_logic_holds(
+        &record.result.data,
+        version,
+        logic::judges_only(capability),
+        bound,
+    ))
 }

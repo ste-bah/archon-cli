@@ -11,6 +11,54 @@ use archon_workflow::task_set_contract::{
 use super::test_support::contract_bytes;
 use super::{FrozenChainSnapshot, FrozenStage, frozen_chain_snapshot, verify_frozen_stage};
 
+#[test]
+fn frozen_override_requires_stale_logic_and_a_clean_landing() {
+    let versions = super::super::workflow_host_command_logic::versions();
+    let version = versions["freeze-acceptance"];
+    let catalog =
+        super::super::workflow_host_command_catalog::fixed_decomposition_catalog("fixture")
+            .unwrap();
+    let decide = |data: serde_json::Value| {
+        let record: archon_workflow::WorkflowV2CallRecord =
+            serde_json::from_value(serde_json::json!({
+                "call": {"id": "call-1", "method": "hostCommand",
+                         "options": {"host_command": {"commandId": "freeze-acceptance"}}},
+                "attempt": 1, "input_hash": "fixture", "status": "accepted",
+                "result": {"status": "accepted", "summary": "fixture", "data": data}
+            }))
+            .unwrap();
+        super::freeze_outcome_decision(&record, &catalog).unwrap()
+    };
+    // The executor's own test: same version replays, whatever the digest.
+    let repinned = decide(serde_json::json!({
+        "gateEnvelope": {"policy_findings": []},
+        "logicVersion": version,
+        "logicDigest": "an-earlier-pin",
+    }));
+    assert!(!repinned.verify, "{}", repinned.reason);
+    assert!(repinned.reason.contains("replays under this build's logic"));
+    let stale = decide(serde_json::json!({
+        "gateEnvelope": {"policy_findings": []},
+        "logicVersion": version.saturating_sub(1),
+    }));
+    assert!(stale.verify, "{}", stale.reason);
+    let open = decide(serde_json::json!({
+        "gateEnvelope": {"policy_findings": [{"text": "repair remains open"}]},
+        "logicVersion": version.saturating_sub(1),
+    }));
+    assert!(!open.verify);
+    assert!(open.reason.contains("1 open finding(s)"));
+    assert!(!decide(serde_json::json!({"logicVersion": version.saturating_sub(1)})).verify);
+    assert!(!super::freeze_record_status_allows_override(
+        archon_workflow::WorkflowV2Status::NeedsReview,
+        false,
+    ));
+    assert!(!super::freeze_record_status_allows_override(
+        archon_workflow::WorkflowV2Status::Accepted,
+        true,
+    ));
+}
+
 const PRD: &str = "# PRD X\n\n## Requirements\n\n| ID | Requirement |\n|---|---|\n| REQ-X-001 | Prove the fixture. |\n\n## Acceptance Criteria\n\n| ID | Criterion |\n|---|---|\n| AC-X-001 | The fixture is proven. |\n";
 
 struct Fixture {

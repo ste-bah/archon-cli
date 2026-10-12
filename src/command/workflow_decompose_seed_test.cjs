@@ -11,9 +11,9 @@ const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js'
   'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js', 'workflow_decompose_v1_seed.js']
   .map((name) => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 
-function context(criteria, phaseSeed, prdRequirementTexts = {}) {
+function context(criteria, phaseSeed, prdRequirementTexts = {}, frozenChain = {}) {
   // Issue 357's native entry validator; its rules are tested by shape_tests.
-  const ctx = { args: { acceptanceCriteria: criteria, prdRequirementTexts, gateMode: 'enforce', authorMaxParallelism: 2, phaseSeed },
+  const ctx = { args: { acceptanceCriteria: criteria, prdRequirementTexts, frozenChain, gateMode: 'enforce', authorMaxParallelism: 2, phaseSeed },
     __archonValidateAcceptanceEntry: () => '[]' };
   vm.createContext(withAuthorContext(ctx));
   vm.runInContext(source, ctx);
@@ -337,6 +337,20 @@ async function artifactSeeds() {
   assert.deepEqual(seen.agents, ['skeleton-author-4']);
 }
 
+async function setGateFeedbackBeatsFrozenBodySeed() {
+  const ctx = context({}, { transition_index: 0, author_ordinals: { 'body-T': 8 }, pause_ordinals: {}, subjects: {
+    'body-T': { kind: 'artifact', candidate: 'old body', candidate_call: 'body-T-author-8',
+      gate: { call_id: 'old-gate', published: true, findings: [] } }
+  } }, {}, { acceptance: true, skeleton: true, bodies: ['TASK-X-010.md'] });
+  const { seen, w } = host();
+  await ctx.authorCandidate(w, { phase: 'body-T', target: { fileName: 'TASK-X-010.md' },
+    initialFeedback: ['set-gate finding: the required observation is missing'],
+    prompt: () => 'repair the body', retryScopes: new Set(['candidate_artifact']) });
+  assert.deepEqual(seen.agents, ['body-T-author-9'], 'the stale seed is not carried');
+  assert.match(seen.prompts[0], /set-gate finding: the required observation is missing/);
+  assert.notEqual(seen.gates[0].stdin, 'old body');
+}
+
 async function pausesContinue() {
   const ctx = context({ A: 'a' }, { transition_index: 0, author_ordinals: {}, pause_ordinals: { acceptance: 2, 'set-gates': 1 }, subjects: {} });
   const ids = [];
@@ -361,7 +375,7 @@ async function sample() {
     supplementaryGateFindingsAreAttributedOnRestore,
     freshGateOwesSupplementaryAndPromptGetsCurrentPrdText,
     replyCriterionComesFromItsAuthorPrompt, missingPromptCriterionReauthorsButCandidateFallbackCarries,
-    unreadableReplyIsRetried, commandRepliesRestoreSafely, artifactSeeds, pausesContinue, sample]) {
+    unreadableReplyIsRetried, commandRepliesRestoreSafely, artifactSeeds, setGateFeedbackBeatsFrozenBodySeed, pausesContinue, sample]) {
     await test();
     console.log(`ok ${test.name}`);
   }

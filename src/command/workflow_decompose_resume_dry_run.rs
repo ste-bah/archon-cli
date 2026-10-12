@@ -90,6 +90,15 @@ pub(crate) async fn dry_run_fixed_decomposition(
     let prd_text = std::str::from_utf8(&prd_bytes)?;
     let requirement_texts =
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);
+    let resume_chain = crate::command::workflow_decompose_frozen_chain::resume_chain_decision(
+        &store,
+        run_id,
+        run.generation,
+        (&project_root, &prd_path, &task_root),
+        &catalog,
+        true,
+    )?;
+    let resume_frozen_chain = resume_chain.argument.clone();
     let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
     let frozen_chain = arguments
         .get("frozenChain")
@@ -186,14 +195,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
         "enriched"
     };
     upgrade::validate_result_state(&store, run_id)?;
-    let criteria = expected_arguments["acceptanceCriteria"]
-        .as_object()
-        .map(|map| {
-            map.iter()
-                .filter_map(|(id, text)| Some((id.clone(), text.as_str()?.to_string())))
-                .collect()
-        })
-        .unwrap_or_default();
+    let criteria = crate::command::workflow_decompose_seed::host_criteria(&expected_arguments);
     let would_record =
         upgrade::would_record_seed_transition(&store, run_id, &state.identity, &current_identity)?;
     let (seed, seed_case) = if let Some((index, runtime)) = would_record {
@@ -205,6 +207,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
                 &runtime,
                 &criteria,
                 &requirement_texts,
+                Some(&resume_frozen_chain),
             )?,
             format!("would-record transition {index} (derived in memory)"),
         )
@@ -214,6 +217,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
             run_id,
             &criteria,
             &requirement_texts,
+            Some(&resume_frozen_chain),
         )?;
         let case = seed.as_ref().map_or_else(
             || "none (no harness transition)".to_string(),
@@ -221,11 +225,18 @@ pub(crate) async fn dry_run_fixed_decomposition(
         );
         (seed, case)
     };
-    let seeded = crate::command::workflow_decompose_seed::seeded_arguments(
-        &expected_arguments,
-        seed.as_ref(),
-    );
-    let script_arguments = script_arguments_with_prd_requirement_texts(&seeded, prd_text);
+    // The same seed and floors the live resume hands the script.
+    let (script_arguments, script_seed) =
+        crate::command::workflow_decompose_seed::resume_script_arguments(
+            &store,
+            run_id,
+            &current_identity,
+            (&criteria, &requirement_texts),
+            resume_frozen_chain,
+            seed.as_ref(),
+            (&expected_arguments, prd_text),
+            true,
+        )?;
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,
         Some(&script_arguments),
@@ -238,6 +249,10 @@ pub(crate) async fn dry_run_fixed_decomposition(
         crate::command::workflow_test_seams::binary_revision(),
         healed_groups.len(),
     );
+    for line in resume_chain.lines.iter().chain([&script_seed.line]) {
+        output.push_str(line);
+        output.push('\n');
+    }
     if let Some(seed) = seed.as_ref() {
         for (subject, data) in &seed.subjects {
             match data {
@@ -264,7 +279,20 @@ pub(crate) async fn dry_run_fixed_decomposition(
             }
         }
     }
+    let probe = replay::ReplayProbe::new(
+        &store,
+        run_id,
+        catalog,
+        persisted_catalog,
+        (&project_root, &prd_path, &prd_digest, &task_root),
+        config,
+    )?;
     for (index, call) in calls.iter().enumerate() {
+        let capability = call
+            .options
+            .host_command
+            .as_ref()
+            .map(|request| request.command_id.as_str());
         let prompt = call.options.task.as_deref().unwrap_or("");
         let entry = prompt
             .split("Author ONLY entry ")
@@ -272,8 +300,10 @@ pub(crate) async fn dry_run_fixed_decomposition(
             .and_then(|tail| tail.split(':').next())
             .unwrap_or("");
         output.push_str(&format!(
-            "call[{index}] id={}{}\n",
+            "call[{index}] id={}{}{}{}\n",
             call.id,
+            capability.map_or_else(String::new, |name| format!(" capability={name}")),
+            probe.note(call)?,
             if entry.is_empty() {
                 String::new()
             } else {
@@ -291,3 +321,6 @@ pub(crate) async fn dry_run_fixed_decomposition(
     }
     Ok(output)
 }
+
+#[path = "workflow_decompose_resume_dry_run_replay.rs"]
+mod replay;

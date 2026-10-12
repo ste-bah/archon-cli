@@ -25,10 +25,20 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_skeleton::validate_full_chain;
 
+#[path = "workflow_decompose_frozen_chain_override.rs"]
+mod freeze_override;
+#[cfg(test)]
+use freeze_override::{freeze_outcome_decision, freeze_record_status_allows_override};
+#[path = "workflow_decompose_frozen_chain_resume.rs"]
+mod resume_chain;
+#[cfg(test)]
+pub(crate) use resume_chain::resume_chain_argument;
+pub(crate) use resume_chain::resume_chain_decision;
+
 /// The frozen chain the launcher found and verified under a task root. Read
 /// strictly on resume: a new field follows the rule of
 /// `FIXED_DECOMPOSITION_STATE_SCHEMA_VERSION`.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct FrozenChainSnapshot {
     pub(crate) acceptance: bool,
@@ -85,15 +95,42 @@ pub(crate) fn frozen_chain_snapshot(
     prd_path: &Path,
     task_root: &Path,
 ) -> Result<FrozenChainSnapshot> {
+    frozen_chain_snapshot_with_recovery(project_root, prd_path, task_root, true)
+}
+
+/// Read the live chain without settling a publish journal or creating a
+/// publish lock. A preview with an unsettled publish cannot claim a snapshot.
+pub(crate) fn frozen_chain_snapshot_read_only(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+) -> Result<FrozenChainSnapshot> {
+    frozen_chain_snapshot_with_recovery(project_root, prd_path, task_root, false)
+}
+
+fn frozen_chain_snapshot_with_recovery(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+    recover: bool,
+) -> Result<FrozenChainSnapshot> {
     let mut snapshot = FrozenChainSnapshot::default();
     if !task_root.is_dir() {
         return Ok(snapshot);
     }
     // Issue 271: a publish a crash interrupted is settled before it is read.
-    let (_publish_lock, _) = super::workflow_task_set::lock_and_recover(
-        &super::workflow_task_set::acceptance_pin_path(project_root, task_root),
-        task_root,
-    )?;
+    let pin_path = super::workflow_task_set::acceptance_pin_path(project_root, task_root);
+    if recover {
+        let (_publish_lock, _) = super::workflow_task_set::lock_and_recover(&pin_path, task_root)?;
+    } else {
+        let [journal, _] = archon_workflow::task_set_publish_lock::journal_paths(&pin_path);
+        if journal.exists() {
+            return Err(anyhow!(
+                "dry-run cannot inspect frozen task chain while publish recovery is pending at {}; run a live resume to settle it",
+                journal.display()
+            ));
+        }
+    }
     #[cfg(test)]
     super::workflow_task_set::reader_test_step("decomposition-read");
     let acceptance_lock = task_root.join(ACCEPTANCE_LOCK_FILE);

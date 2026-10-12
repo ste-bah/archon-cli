@@ -170,6 +170,7 @@ fn a_crash_between_the_seed_record_and_its_event_writes_the_event_once() {
         (0, identity("new-script", "next-rev")),
         &criteria(),
         &std::collections::BTreeMap::new(),
+        None,
     )
     .unwrap();
     write_seed(&store, &run_id, &derived).unwrap();
@@ -189,6 +190,41 @@ fn a_crash_between_the_seed_record_and_its_event_writes_the_event_once() {
         .unwrap();
     assert_eq!(again.event_id, seed.event_id);
     assert_eq!(seed_events(&store, &run_id).len(), 1);
+}
+
+#[test]
+fn resume_frozen_chain_is_durable_and_overrides_only_runtime_arguments() {
+    let (_temp, store, run_id, _log) = fixture();
+    record_transitions(&store, &run_id, &[("new-script", "next-rev")]);
+    let live_chain = json!({
+        "acceptance": true,
+        "skeleton": true,
+        "subjects": [{"taskId": "TASK-X-010", "fileName": "TASK-X-010.md"}],
+        "bodies": ["TASK-X-010.md"]
+    });
+    let seed = derive_seed(
+        &store,
+        &run_id,
+        (0, identity("new-script", "next-rev")),
+        &criteria(),
+        &std::collections::BTreeMap::new(),
+        Some(&live_chain),
+    )
+    .unwrap();
+    write_seed(&store, &run_id, &seed).unwrap();
+    let loaded = read_seed(&store, &run_id, 0, &seed.runtime)
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.resume_frozen_chain.as_ref(), Some(&live_chain));
+
+    let launch_args = json!({
+        "frozenChain": {"acceptance": false, "skeleton": false, "subjects": [], "bodies": []},
+        "prdPath": "p"
+    });
+    let runtime_args = seeded_arguments(&launch_args, Some(&loaded));
+    assert_eq!(runtime_args["frozenChain"], live_chain);
+    assert_eq!(launch_args["frozenChain"]["acceptance"], false);
+    assert_eq!(runtime_args["prdPath"], "p");
 }
 
 #[test]

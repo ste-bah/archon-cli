@@ -1,5 +1,4 @@
 use super::*;
-use crate::command::workflow_task_set::script_arguments_with_prd_requirement_texts;
 
 #[path = "workflow_decompose_resume_dry_run.rs"]
 mod dry_run;
@@ -36,8 +35,7 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
     .await
 }
 
-/// The resume proper, with the running build's revision as a parameter so a
-/// test can resume a run launched by this binary as if by an upgraded one.
+/// Resume with the running build's revision, overridable in tests.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     cwd: &Path,
@@ -174,8 +172,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         Path::new(&state.identity.project_root_identity),
         "persisted project root",
     )?;
-    // Keep the launch revision as the call-key namespace. The capabilities
-    // come from this build; unchanged ones keep their legacy result keys.
     let catalog = fixed_decomposition_catalog(&state.identity.starting_binary_revision)?;
     let current_identity = FixedRunIdentityV1 {
         template_version: FIXED_DECOMPOSITION_TEMPLATE_VERSION.to_string(),
@@ -206,8 +202,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     let prd_requirement_texts =
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);
     let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
-    // Replay the frozen chain captured at launch; its snapshot controls which
-    // stages the script skips, regardless of later task-root changes.
     let frozen_chain = arguments
         .get("frozenChain")
         .filter(|value| value.is_object())
@@ -249,7 +243,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     )?;
     let persisted_catalog: archon_workflow::CommandCapabilityCatalog =
         read_run_json(&store, run_id, FIXED_CATALOG_PATH)?;
-    // The schemas this build reads, from the build's own catalog schema.
     if !crate::command::workflow_host_command_exec::identity::catalog_schema_readable(
         persisted_catalog.schema_version,
         catalog.schema_version,
@@ -287,9 +280,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         Path::new(&state.log_path),
         &state.identity,
     )?;
-    // Issue 358: the persisted script digest stays the launch record; Issue
-    // 349: the launch-bound check policy (or the older pre-binding form) is
-    // admitted against the verified bundle anchor.
     let metadata: serde_json::Value = read_run_json(&store, run_id, FIXED_GENERATED_METADATA_PATH)?;
     let expected_metadata = policy::canonical_resume_metadata(
         &state.identity,
@@ -314,6 +304,17 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     )?;
     // Verify readable execution state before any provider or lifecycle change.
     upgrade::validate_result_state(&store, run_id)?;
+    // Pin the live frozen-chain decision only after admission succeeds. The
+    // record is independent of transitions and phase seeds, so every resume
+    // generation gets the same deterministic decision on replay.
+    let resume_chain = crate::command::workflow_decompose_frozen_chain::resume_chain_decision(
+        &store,
+        run_id,
+        run.generation,
+        (&project_root, &prd_path, &task_root),
+        &catalog,
+        false,
+    )?;
     let transitions = upgrade::record_upgrade(
         &store,
         run_id,
@@ -327,30 +328,33 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             .await
             .map_err(|error| anyhow!("reporting the runtime transition: {error}"))?;
     }
-    // Issue 360: after an upgrade the script starts from the phase seed. The
-    // acceptance criteria and requirement texts are the host-owned text the
-    // script stamps (#357).
-    let criteria = expected_arguments["acceptanceCriteria"]
-        .as_object()
-        .map(|criteria| {
-            criteria
-                .iter()
-                .filter_map(|(id, text)| Some((id.clone(), text.as_str()?.to_string())))
-                .collect()
-        })
-        .unwrap_or_default();
+    // Host-owned criteria and requirement text are stamped by the script.
+    let criteria = crate::command::workflow_decompose_seed::host_criteria(&expected_arguments);
     let seed = crate::command::workflow_decompose_seed::current_seed_with_requirement_texts(
         &store,
         run_id,
         &log_path,
         &criteria,
         &prd_requirement_texts,
+        Some(&resume_chain.argument),
     )?;
-    let seeded_arguments = crate::command::workflow_decompose_seed::seeded_arguments(
-        &expected_arguments,
-        seed.as_ref(),
-    );
-    let script_arguments = script_arguments_with_prd_requirement_texts(&seeded_arguments, prd_text);
+    let (script_arguments, script_seed) =
+        crate::command::workflow_decompose_seed::resume_script_arguments(
+            &store,
+            run_id,
+            &current_identity,
+            (&criteria, &prd_requirement_texts),
+            resume_chain.argument,
+            seed.as_ref(),
+            (&expected_arguments, prd_text),
+            false,
+        )?;
+    for line in resume_chain.lines.into_iter().chain([script_seed.line]) {
+        ui_sink
+            .emit(WorkflowUiEvent::Text(line))
+            .await
+            .map_err(|error| anyhow!("reporting the resume decision: {error}"))?;
+    }
     let calls = archon_workflow::v2::script::dry_run_workflow_plan(
         FIXED_SCRIPT_SOURCE,
         Some(&script_arguments),
