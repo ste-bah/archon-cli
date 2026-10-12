@@ -262,8 +262,8 @@ mod successor_reuse_tests {
         let successor_request =
             archon_workflow::HostCommandRequest::new(successor_command, Some("successor".into()))
                 .unwrap();
-        let identity = if catalog_order(&executor.catalog, successor_command)
-            > catalog_order(&executor.catalog, original_command)
+        let identity = if pipeline_order(&executor.catalog, successor_command)
+            > pipeline_order(&executor.catalog, original_command)
         {
             executor.call_identity(&successor_request).unwrap()
         } else {
@@ -400,11 +400,17 @@ mod successor_reuse_tests {
             crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("rev-1")
                 .unwrap();
         assert!(
-            catalog_order(&catalog, "freeze-skeleton") < catalog_order(&catalog, "land-task-body")
+            pipeline_order(&catalog, "freeze-skeleton")
+                < pipeline_order(&catalog, "land-task-body")
         );
         assert!(
-            catalog_order(&catalog, "task-set-lint")
-                < catalog_order(&catalog, "requirements-trace")
+            pipeline_order(&catalog, "task-set-lint")
+                < pipeline_order(&catalog, "requirements-trace")
         );
+        assert_eq!(
+            pipeline_order(&catalog, "verify-frozen-acceptance"),
+            Some(0)
+        );
+        assert_eq!(pipeline_order(&catalog, "verify-frozen-skeleton"), Some(1));
     }
 }

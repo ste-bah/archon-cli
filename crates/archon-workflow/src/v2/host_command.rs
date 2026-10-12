@@ -91,8 +91,6 @@ pub enum EnvironmentProfileId {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandCapability {
     pub id: String,
-    #[serde(default)]
-    pub pipeline_position: u32,
     pub argv_template: Vec<String>,
     pub stdin_delivery: StdinDelivery,
     pub environment_profile: EnvironmentProfileId,

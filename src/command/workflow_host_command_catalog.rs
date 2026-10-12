@@ -65,7 +65,6 @@ pub(crate) fn fixed_decomposition_catalog(
         &mut capabilities,
         capability(
             "freeze-acceptance",
-            0,
             &[
                 "workflow",
                 "freeze-acceptance",
@@ -105,7 +104,6 @@ pub(crate) fn fixed_decomposition_catalog(
         &mut capabilities,
         capability(
             "freeze-skeleton",
-            1,
             &[
                 "workflow",
                 "freeze-skeleton",
@@ -147,7 +145,6 @@ pub(crate) fn fixed_decomposition_catalog(
         &mut capabilities,
         capability(
             "land-task-body",
-            2,
             &[
                 "workflow",
                 "lint",
@@ -190,7 +187,6 @@ pub(crate) fn fixed_decomposition_catalog(
         &mut capabilities,
         capability(
             "task-set-lint",
-            3,
             &[
                 "workflow",
                 "lint",
@@ -229,7 +225,6 @@ pub(crate) fn fixed_decomposition_catalog(
         &mut capabilities,
         capability(
             "requirements-trace",
-            4,
             &[
                 "requirements",
                 "trace",
@@ -448,7 +443,6 @@ pub(crate) fn resolve_host_command(
 #[allow(clippy::too_many_arguments)]
 fn capability(
     id: &str,
-    pipeline_position: u32,
     argv_template: &[&str],
     stdin_delivery: StdinDelivery,
     environment_profile: EnvironmentProfileId,
@@ -461,7 +455,6 @@ fn capability(
 ) -> CommandCapability {
     CommandCapability {
         id: id.to_string(),
-        pipeline_position,
         argv_template: argv_template
             .iter()
             .map(|value| (*value).to_string())

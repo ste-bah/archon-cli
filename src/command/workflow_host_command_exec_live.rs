@@ -5,14 +5,29 @@
 //! judge gave findings to is not re-judged while its artifact is untouched.
 use super::*;
 
-fn catalog_order(
+const PIPELINE_ORDER: &[(&str, usize)] = &[
+    ("freeze-acceptance", 0),
+    ("freeze-skeleton", 1),
+    ("land-task-body", 2),
+    ("task-set-lint", 3),
+    ("requirements-trace", 4),
+    ("verify-frozen-acceptance", 0),
+    ("verify-frozen-skeleton", 1),
+];
+
+fn pipeline_order(
     catalog: &archon_workflow::CommandCapabilityCatalog,
     command_id: &str,
 ) -> Option<usize> {
+    // This execution order is runtime policy. Keeping it outside the serialized
+    // catalog preserves catalog shape and launch identity across binary upgrades.
     catalog
         .capabilities
-        .get(command_id)
-        .map(|capability| capability.pipeline_position as usize)
+        .contains_key(command_id)
+        .then_some(())?;
+    PIPELINE_ORDER
+        .iter()
+        .find_map(|(id, position)| (*id == command_id).then_some(*position))
 }
 
 fn record_status_allows_reuse(record: &WorkflowV2CallRecord, findings_allowed: bool) -> bool {
@@ -163,7 +178,7 @@ impl FixedHostCommandExecutor {
                         "persisted HostCommand record has no typed request".into(),
                     )
                 })?;
-            let Some(original_order) = catalog_order(&self.catalog, &original_request.command_id)
+            let Some(original_order) = pipeline_order(&self.catalog, &original_request.command_id)
             else {
                 return Ok(false);
             };
@@ -177,7 +192,7 @@ impl FixedHostCommandExecutor {
                     let Some(request) = candidate_record.call.options.host_command.as_ref() else {
                         continue;
                     };
-                    let Some(candidate_order) = catalog_order(&self.catalog, &request.command_id)
+                    let Some(candidate_order) = pipeline_order(&self.catalog, &request.command_id)
                     else {
                         continue;
                     };
