@@ -308,16 +308,15 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     // Pin the live frozen-chain decision only after admission succeeds. The
     // record is independent of transitions and phase seeds, so every resume
     // generation gets the same deterministic decision on replay.
-    let resume_frozen_chain =
-        crate::command::workflow_decompose_frozen_chain::resume_chain_argument(
-            &store,
-            run_id,
-            run.generation,
-            &project_root,
-            &prd_path,
-            &task_root,
-            false,
-        )?;
+    let resume_chain = crate::command::workflow_decompose_frozen_chain::resume_chain_decision(
+        &store,
+        run_id,
+        run.generation,
+        &project_root,
+        &prd_path,
+        &task_root,
+        false,
+    )?;
     let transitions = upgrade::record_upgrade(
         &store,
         run_id,
@@ -325,22 +324,15 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &state.identity,
         &current_identity,
     )?;
-    for line in transitions.iter().flat_map(|t| t.summary()) {
+    let resume_frozen_chain = resume_chain.argument;
+    for line in (transitions.iter().flat_map(|t| t.summary())).chain(resume_chain.lines) {
         ui_sink
             .emit(WorkflowUiEvent::Text(line))
             .await
             .map_err(|error| anyhow!("reporting the runtime transition: {error}"))?;
     }
     // Host-owned criteria and requirement text are stamped by the script.
-    let criteria = expected_arguments["acceptanceCriteria"]
-        .as_object()
-        .map(|criteria| {
-            criteria
-                .iter()
-                .filter_map(|(id, text)| Some((id.clone(), text.as_str()?.to_string())))
-                .collect()
-        })
-        .unwrap_or_default();
+    let criteria = crate::command::workflow_decompose_seed::host_criteria(&expected_arguments);
     let seed = crate::command::workflow_decompose_seed::current_seed_with_requirement_texts(
         &store,
         run_id,
@@ -349,33 +341,16 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &prd_requirement_texts,
         Some(&resume_frozen_chain),
     )?;
-    let resume_floor_seed =
-        if resume_frozen_chain["acceptance"] == true || resume_frozen_chain["skeleton"] == true {
-            Some(crate::command::workflow_decompose_seed::resume_floor_seed(
-                &store,
-                run_id,
-                &current_identity,
-                &criteria,
-                &prd_requirement_texts,
-                &resume_frozen_chain,
-            )?)
-        } else {
-            None
-        };
-    let refreshed_seed = match (seed.as_ref(), resume_floor_seed.as_ref()) {
-        (Some(seed), Some(floors)) => {
-            let mut refreshed = seed.clone();
-            refreshed.author_ordinals = floors.author_ordinals.clone();
-            refreshed.pause_ordinals = floors.pause_ordinals.clone();
-            refreshed.pause_generation_floor = floors.pause_generation_floor;
-            refreshed.history_attempts = floors.history_attempts.clone();
-            Some(refreshed)
-        }
-        (None, Some(floors)) => Some(floors.clone()),
-        (Some(seed), None) => Some(seed.clone()),
-        (None, None) => None,
-    };
-    let script_seed = refreshed_seed.as_ref();
+    let script_seed = crate::command::workflow_decompose_seed::resume_script_seed(
+        &store,
+        run_id,
+        &current_identity,
+        &criteria,
+        &prd_requirement_texts,
+        &resume_frozen_chain,
+        seed.as_ref(),
+    )?;
+    let script_seed = script_seed.as_ref();
     let mut seeded_arguments =
         crate::command::workflow_decompose_seed::seeded_arguments(&expected_arguments, script_seed);
     // This decision applies on every resume, even without a harness seed or

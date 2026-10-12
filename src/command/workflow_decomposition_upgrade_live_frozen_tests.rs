@@ -173,14 +173,16 @@ async fn interrupted_freeze_attempt_keeps_last_verdict_chain_on_production_resum
     .unwrap();
     assert_eq!(effective["acceptance"], true, "{effective}");
     assert_eq!(effective["skeleton"], true, "{effective}");
-    let floors = crate::command::workflow_decompose_seed::resume_floor_seed(
+    let floors = crate::command::workflow_decompose_seed::resume_script_seed(
         &store,
         &run_id,
         &state.identity,
         &std::collections::BTreeMap::new(),
         &std::collections::BTreeMap::new(),
         &effective,
+        None,
     )
+    .unwrap()
     .unwrap();
     assert_eq!(floors.author_ordinals["acceptance"], 7);
 
@@ -463,3 +465,6 @@ async fn revision_only_resume_persists_live_frozen_chain_without_a_phase_seed() 
             .map(|name| std::fs::read(task_root.join(name)).unwrap())
     );
 }
+
+#[path = "workflow_decomposition_upgrade_live_frozen_receipt_tests.rs"]
+mod receipt_chain;

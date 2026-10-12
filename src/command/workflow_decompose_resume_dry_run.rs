@@ -90,16 +90,16 @@ pub(crate) async fn dry_run_fixed_decomposition(
     let prd_text = std::str::from_utf8(&prd_bytes)?;
     let requirement_texts =
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);
-    let resume_frozen_chain =
-        crate::command::workflow_decompose_frozen_chain::resume_chain_argument(
-            &store,
-            run_id,
-            run.generation,
-            &project_root,
-            &prd_path,
-            &task_root,
-            true,
-        )?;
+    let resume_chain = crate::command::workflow_decompose_frozen_chain::resume_chain_decision(
+        &store,
+        run_id,
+        run.generation,
+        &project_root,
+        &prd_path,
+        &task_root,
+        true,
+    )?;
+    let resume_frozen_chain = resume_chain.argument;
     let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
     let frozen_chain = arguments
         .get("frozenChain")
@@ -196,14 +196,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
         "enriched"
     };
     upgrade::validate_result_state(&store, run_id)?;
-    let criteria = expected_arguments["acceptanceCriteria"]
-        .as_object()
-        .map(|map| {
-            map.iter()
-                .filter_map(|(id, text)| Some((id.clone(), text.as_str()?.to_string())))
-                .collect()
-        })
-        .unwrap_or_default();
+    let criteria = crate::command::workflow_decompose_seed::host_criteria(&expected_arguments);
     let would_record =
         upgrade::would_record_seed_transition(&store, run_id, &state.identity, &current_identity)?;
     let (seed, seed_case) = if let Some((index, runtime)) = would_record {
@@ -233,9 +226,19 @@ pub(crate) async fn dry_run_fixed_decomposition(
         );
         (seed, case)
     };
+    // The same ordinal floors the live resume carries into a skipped phase.
+    let script_seed = crate::command::workflow_decompose_seed::resume_script_seed(
+        &store,
+        run_id,
+        &current_identity,
+        &criteria,
+        &requirement_texts,
+        &resume_frozen_chain,
+        seed.as_ref(),
+    )?;
     let mut seeded = crate::command::workflow_decompose_seed::seeded_arguments(
         &expected_arguments,
-        seed.as_ref(),
+        script_seed.as_ref(),
     );
     seeded["frozenChain"] = resume_frozen_chain;
     let script_arguments = script_arguments_with_prd_requirement_texts(&seeded, prd_text);
@@ -251,6 +254,10 @@ pub(crate) async fn dry_run_fixed_decomposition(
         crate::command::workflow_test_seams::binary_revision(),
         healed_groups.len(),
     );
+    for line in &resume_chain.lines {
+        output.push_str(line);
+        output.push('\n');
+    }
     if let Some(seed) = seed.as_ref() {
         for (subject, data) in &seed.subjects {
             match data {

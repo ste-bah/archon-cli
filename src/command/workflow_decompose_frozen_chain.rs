@@ -18,7 +18,6 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::HostCommandSubject;
-use archon_workflow::WorkflowStore;
 use archon_workflow::obligation_ids::acceptance_ids;
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceContract, AcceptancePin,
@@ -26,144 +25,15 @@ use archon_workflow::task_set_contract::{
 };
 use archon_workflow::task_skeleton::validate_full_chain;
 
-const RESUME_CHAIN_DIR: &str = "decomposition/resume-frozen-chain";
-const RESUME_CHAIN_SCHEMA: u32 = 1;
-
 #[path = "workflow_decompose_frozen_chain_override.rs"]
 mod freeze_override;
-use freeze_override::freeze_needs_rejudging;
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ResumeFrozenChainRecord {
-    schema_version: u32,
-    generation: u64,
-    snapshot: FrozenChainSnapshot,
-}
-
-fn resume_chain_path(generation: u64) -> String {
-    format!("{RESUME_CHAIN_DIR}/generation-{generation}.json")
-}
-
-/// The launch arguments remain identity-bound. This separate record pins the
-/// live decision for one executor generation, including runs with no seed.
-pub(crate) fn resume_chain_argument(
-    store: &WorkflowStore,
-    run_id: &str,
-    generation: u64,
-    project_root: &Path,
-    prd_path: &Path,
-    task_root: &Path,
-    read_only: bool,
-) -> Result<serde_json::Value> {
-    let relative = resume_chain_path(generation);
-    let path = store.run_dir(run_id).join(&relative);
-    let recorded = match std::fs::read(&path) {
-        Ok(bytes) => {
-            let record: ResumeFrozenChainRecord =
-                serde_json::from_slice(&bytes).with_context(|| {
-                    format!("parsing resume frozen-chain record {}", path.display())
-                })?;
-            if record.schema_version != RESUME_CHAIN_SCHEMA || record.generation != generation {
-                return Err(anyhow!(
-                    "resume frozen-chain record {} has schema {} and generation {}; expected schema {} and generation {}",
-                    path.display(),
-                    record.schema_version,
-                    record.generation,
-                    RESUME_CHAIN_SCHEMA,
-                    generation
-                ));
-            }
-            Some(record.snapshot)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
-    };
-    let snapshot = match recorded {
-        Some(snapshot) => snapshot,
-        None => {
-            let snapshot = if read_only {
-                frozen_chain_snapshot_read_only(project_root, prd_path, task_root)?
-            } else {
-                frozen_chain_snapshot(project_root, prd_path, task_root)?
-            };
-            if !read_only {
-                use crate::command::workflow_task_set::{create_dir_all_durably, sync_parent};
-                let directory = store.run_dir(run_id).join(RESUME_CHAIN_DIR);
-                create_dir_all_durably(&directory)?;
-                sync_parent(&directory)?;
-                store.write_run_json(
-                    run_id,
-                    &relative,
-                    &ResumeFrozenChainRecord {
-                        schema_version: RESUME_CHAIN_SCHEMA,
-                        generation,
-                        snapshot: snapshot.clone(),
-                    },
-                )?;
-                sync_parent(&path)?;
-            }
-            snapshot
-        }
-    };
-    // A live frozen artifact is only a reason to skip its authoring phase if
-    // the freeze call itself cannot be replayed by this build. In particular,
-    // never infer a new phase boundary from the task root alone: normal
-    // same-build resumes must replay the exact repair loop they paused in.
-    let mut effective = snapshot.clone();
-    let stale_acceptance = freeze_needs_rejudging(store, run_id, "freeze-acceptance")?;
-    let stale_skeleton = freeze_needs_rejudging(store, run_id, "freeze-skeleton")?;
-    effective.acceptance &= stale_acceptance;
-    // The launcher consumes a chain, so later frozen phases cannot survive a
-    // missing earlier phase.
-    effective.skeleton &= effective.acceptance && stale_skeleton;
-    if !effective.skeleton {
-        effective.subjects.clear();
-        effective.bodies.clear();
-    }
-    Ok(effective.to_argument())
-}
-
-fn freeze_record_status_allows_override(
-    status: archon_workflow::WorkflowV2Status,
-    invalidated: bool,
-) -> bool {
-    !invalidated && matches!(status, archon_workflow::WorkflowV2Status::Accepted)
-}
-
-fn freeze_outcome_requires_rejudging(
-    outcome: &serde_json::Value,
-    capability: &str,
-) -> Result<bool> {
-    let findings = outcome
-        .get("gateEnvelope")
-        .and_then(|envelope| envelope.get("policy_findings"))
-        .and_then(serde_json::Value::as_array);
-    if findings.is_none_or(|findings| !findings.is_empty()) {
-        return Ok(false);
-    }
-    let current_version = super::workflow_host_command_logic::versions()
-        .get(capability)
-        .copied()
-        .ok_or_else(|| anyhow!("host command capability '{capability}' has no logic version"))?;
-    let (current_digest, build_bound) = super::workflow_host_command_logic::digests()
-        .remove(capability)
-        .ok_or_else(|| anyhow!("host command capability '{capability}' has no logic digest"))?;
-    let version_stale = outcome
-        .get("logicVersion")
-        .and_then(serde_json::Value::as_u64)
-        .is_none_or(|version| version != u64::from(current_version));
-    let digest_stale = outcome
-        .get("logicDigest")
-        .and_then(serde_json::Value::as_str)
-        .is_none_or(|digest| digest != current_digest);
-    let build_stale = build_bound
-        && outcome
-            .get("logicBuild")
-            .and_then(serde_json::Value::as_str)
-            .is_none_or(|build| build != super::workflow_host_command_logic::THIS_BUILD);
-    Ok(version_stale || digest_stale || build_stale)
-}
+#[cfg(test)]
+use freeze_override::{freeze_outcome_decision, freeze_record_status_allows_override};
+#[path = "workflow_decompose_frozen_chain_resume.rs"]
+mod resume_chain;
+#[cfg(test)]
+pub(crate) use resume_chain::resume_chain_argument;
+pub(crate) use resume_chain::resume_chain_decision;
 
 /// The frozen chain the launcher found and verified under a task root. Read
 /// strictly on resume: a new field follows the rule of

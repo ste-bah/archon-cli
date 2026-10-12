@@ -22,26 +22,39 @@ fn frozen_override_requires_stale_logic_and_a_clean_landing() {
         "logicVersion": version,
         "logicDigest": digest,
     });
-    assert!(!super::freeze_outcome_requires_rejudging(&clean, "freeze-acceptance").unwrap());
+    assert!(
+        !super::freeze_outcome_decision(&clean, "freeze-acceptance", "call-1")
+            .unwrap()
+            .verify
+    );
 
     let stale = serde_json::json!({
         "gateEnvelope": {"policy_findings": []},
         "logicVersion": version.saturating_sub(1),
         "logicDigest": digest,
     });
-    assert!(super::freeze_outcome_requires_rejudging(&stale, "freeze-acceptance").unwrap());
+    assert!(
+        super::freeze_outcome_decision(&stale, "freeze-acceptance", "call-1")
+            .unwrap()
+            .verify
+    );
 
     let open = serde_json::json!({
         "gateEnvelope": {"policy_findings": [{"text": "repair remains open"}]},
         "logicVersion": version.saturating_sub(1),
         "logicDigest": digest,
     });
-    assert!(!super::freeze_outcome_requires_rejudging(&open, "freeze-acceptance").unwrap());
+    assert!(
+        !super::freeze_outcome_decision(&open, "freeze-acceptance", "call-1")
+            .unwrap()
+            .verify
+    );
 
     let no_findings_record = serde_json::json!({"logicVersion": version.saturating_sub(1)});
     assert!(
-        !super::freeze_outcome_requires_rejudging(&no_findings_record, "freeze-acceptance")
+        !super::freeze_outcome_decision(&no_findings_record, "freeze-acceptance", "call-1")
             .unwrap()
+            .verify
     );
     assert!(!super::freeze_record_status_allows_override(
         archon_workflow::WorkflowV2Status::NeedsReview,

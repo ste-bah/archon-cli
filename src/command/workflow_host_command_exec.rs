@@ -153,6 +153,7 @@ mod destinations;
 pub(crate) mod finish;
 #[path = "workflow_host_command_exec_live.rs"]
 mod live;
+pub(crate) use live::pipeline_stage;
 #[path = "workflow_host_command_exec_retry.rs"]
 mod retry;
 #[path = "workflow_host_command_exec_stamp.rs"]
