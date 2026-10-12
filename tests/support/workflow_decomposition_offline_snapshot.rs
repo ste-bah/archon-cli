@@ -1,6 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[path = "workflow_decomposition_offline_snapshot_lifecycle.rs"]
+mod lifecycle;
+use lifecycle::normalize_lifecycle_metadata;
+
 pub fn golden_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/offline_decomposition_golden.json")
@@ -78,6 +82,7 @@ pub fn result_store_records(
     root: &Path,
     endpoint: &str,
     run_id: &str,
+    interrupted: &[&str],
 ) -> Vec<(String, serde_json::Value)> {
     let results = run.join("v2/results");
     let mut records = fs::read_dir(&results)
@@ -152,12 +157,21 @@ pub fn result_store_records(
         .collect();
     for (_, value) in &mut records {
         normalize_values(value, &host_call_replacements);
-        normalize_lifecycle_metadata(value);
+        normalize_lifecycle_metadata(value, interrupted);
         normalize_values(value, &replacements);
         normalize_run_specific_with_receipts(value, &content_by_digest, &compared_paths);
     }
     records.sort_by_key(|record| serde_json::to_string(&record.1).unwrap());
     records
+}
+
+/// Golden records as a fault cell compares them: the attempt numbers of the
+/// calls the cell interrupted are dropped (`lifecycle`), then re-sorted.
+pub fn golden_records_for(records: &mut [(String, serde_json::Value)], interrupted: &[&str]) {
+    for (_, value) in records.iter_mut() {
+        normalize_lifecycle_metadata(value, interrupted);
+    }
+    records.sort_by_key(|record| serde_json::to_string(&record.1).unwrap());
 }
 
 pub fn normalize_publication_receipts(
@@ -245,6 +259,12 @@ fn normalize_derived_hashes(value: &mut serde_json::Value) {
             // with every commit of the code under test, not with the run.
             if map.contains_key("binary_commit") {
                 map.insert("binary_commit".into(), "<binary-commit>".into());
+            }
+            // A host outcome's `logicBuild` is the build fingerprint
+            // (build.rs: any source, manifest or toolchain change). Only its
+            // `logicVersion` and pinned `logicDigest` are compared.
+            if map.contains_key("logicBuild") {
+                map.insert("logicBuild".into(), "<build-fingerprint>".into());
             }
             // The preimages are this record's own call input and result, which
             // the snapshot compares after normalisation, so these run-specific
@@ -437,69 +457,3 @@ fn normalized_published_content(bytes: &[u8], replacements: &[(&str, &str)]) -> 
 #[cfg(test)]
 #[path = "workflow_decomposition_offline_snapshot_tests.rs"]
 mod tests;
-
-fn normalize_lifecycle_metadata(value: &mut serde_json::Value) {
-    let host_call_id = value
-        .get("call")
-        .and_then(|call| {
-            (call.get("method").and_then(serde_json::Value::as_str) == Some("hostCommand"))
-                .then(|| call.get("id").and_then(serde_json::Value::as_str))
-                .flatten()
-        })
-        .map(str::to_owned);
-    if let Some(host_call_id) = host_call_id {
-        replace_string_values(value, &host_call_id, "<host-call-id>");
-        if let Some(call) = value
-            .get_mut("call")
-            .and_then(serde_json::Value::as_object_mut)
-        {
-            call.insert(
-                "id".into(),
-                serde_json::Value::String("<host-call-id>".into()),
-            );
-        }
-    }
-
-    match value {
-        serde_json::Value::Object(map) => {
-            // Resume adds an admission event and retries only the interrupted
-            // skeleton call, so these values describe this run's execution path.
-            map.remove("admission_sequence");
-            if map.get("call").and_then(|call| call.get("id"))
-                == Some(&serde_json::Value::String("skeleton-author-1".into()))
-            {
-                map.remove("attempt");
-            }
-            for (key, nested) in map.iter_mut() {
-                if key == "call_id" {
-                    *nested = serde_json::Value::String("<call-id>".into());
-                } else {
-                    normalize_lifecycle_metadata(nested);
-                }
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for nested in values {
-                normalize_lifecycle_metadata(nested);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn replace_string_values(value: &mut serde_json::Value, from: &str, to: &str) {
-    match value {
-        serde_json::Value::String(text) => *text = text.replace(from, to),
-        serde_json::Value::Object(map) => {
-            for nested in map.values_mut() {
-                replace_string_values(nested, from, to);
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for nested in values {
-                replace_string_values(nested, from, to);
-            }
-        }
-        _ => {}
-    }
-}

@@ -64,7 +64,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
     let catalog = fixed_decomposition_catalog(&state.identity.starting_binary_revision)?;
     let current_identity = FixedRunIdentityV1 {
         template_version: FIXED_DECOMPOSITION_TEMPLATE_VERSION.to_string(),
-        starting_binary_revision: env!("ARCHON_GIT_HASH").to_string(),
+        starting_binary_revision: crate::command::workflow_test_seams::binary_revision(),
         script_digest: workflow_scaffold_hash(FIXED_SCRIPT_SOURCE),
         catalog_digest: catalog.digest.clone(),
         project_root_identity: path_text(&canonical_persisted_project),
@@ -235,7 +235,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
     // are the script's emitted calls and prompts, not a Rust retry simulation.
     let mut output = format!(
         "binary_revision={}\nadmission=admitted arguments.json=equal metadata={metadata_form} launch_digest_anchor=equal\nseed={seed_case}\nhealed_groups_would_remove={}\n",
-        env!("ARCHON_GIT_HASH"),
+        crate::command::workflow_test_seams::binary_revision(),
         healed_groups.len(),
     );
     if let Some(seed) = seed.as_ref() {

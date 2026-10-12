@@ -31,7 +31,7 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
         ui_sink,
         interactive_owner,
         cancellation_requested,
-        env!("ARCHON_GIT_HASH"),
+        &crate::command::workflow_test_seams::binary_revision(),
     )
     .await
 }

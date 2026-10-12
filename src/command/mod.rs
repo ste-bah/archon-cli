@@ -434,3 +434,4 @@ pub(crate) mod workflow_host_staging_anchor;
 mod workflow_host_staging_anchor_unix;
 pub(crate) mod workflow_host_staging_pause;
 pub(crate) mod workflow_host_staging_residue;
+pub(crate) mod workflow_test_seams;

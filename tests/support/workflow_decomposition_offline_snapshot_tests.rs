@@ -155,3 +155,38 @@ fn embedded_stdout_receipts_use_normalized_content_and_keep_content_changes() {
     assert_eq!(first, same);
     assert_ne!(first, changed);
 }
+
+#[test]
+fn build_fingerprint_is_normalized_but_logic_version_and_digest_are_kept() {
+    let record = |build: &str| {
+        normalized_record(serde_json::json!({
+            "result": {"data": {"logicVersion": 9, "logicDigest": "pinned", "logicBuild": build}}
+        }))
+    };
+    assert_eq!(record("build-one"), record("build-two"));
+    let data = &record("build-one")["result"]["data"];
+    assert_eq!(data["logicVersion"], 9);
+    assert_eq!(data["logicDigest"], "pinned");
+}
+
+#[test]
+fn only_interrupted_calls_lose_their_attempt_number() {
+    let record = |id: &str, command: Option<&str>| {
+        let mut value = serde_json::json!({
+            "attempt": 2,
+            "call": {"id": id, "method": "agent", "options": {"extra": {"commandId": command}}}
+        });
+        super::normalize_lifecycle_metadata(&mut value, &["skeleton-author-1", "freeze-skeleton"]);
+        value
+    };
+    assert!(record("skeleton-author-1", None).get("attempt").is_none());
+    assert!(
+        record("other", Some("freeze-skeleton"))
+            .get("attempt")
+            .is_none()
+    );
+    assert_eq!(
+        record("body-author-1", Some("land-task-body"))["attempt"],
+        2
+    );
+}

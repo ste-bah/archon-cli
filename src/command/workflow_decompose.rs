@@ -116,7 +116,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     let (prd_bytes, prd_digest, acceptance_criteria) =
         super::workflow_task_set::validate_prd_input(&prd_path)?;
     let prd_text = std::str::from_utf8(&prd_bytes)?;
-    let starting_binary_revision = env!("ARCHON_GIT_HASH").to_string();
+    let starting_binary_revision = crate::command::workflow_test_seams::binary_revision();
     let catalog = fixed_decomposition_catalog(&starting_binary_revision)?;
     let script_digest = workflow_scaffold_hash(FIXED_SCRIPT_SOURCE);
     // What the task root already holds of the frozen chain, verified now. A

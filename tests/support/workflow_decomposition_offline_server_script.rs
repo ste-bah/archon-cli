@@ -205,7 +205,7 @@ fn unknown_prompt() -> (&'static str, String) {
     )
 }
 
-fn user_prompt_text(serialized_request: &str) -> Option<String> {
+pub(super) fn user_prompt_text(serialized_request: &str) -> Option<String> {
     let Ok(request) = serde_json::from_str::<serde_json::Value>(serialized_request) else {
         return Some(serialized_request.to_owned());
     };

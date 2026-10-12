@@ -6,6 +6,7 @@
 use std::process::Stdio;
 use std::time::Duration;
 
+use crate::command::workflow_test_seams::host_command_window;
 use archon_workflow::{WorkflowError, WorkflowResult};
 use tokio::sync::{mpsc, watch};
 
@@ -315,7 +316,7 @@ pub(crate) async fn supervise_process_group(
         let wait = leader_exit(child);
         tokio::pin!(wait);
         let timeout = progress.bound(
-            Duration::from_secs(request.timeout_secs),
+            host_command_window(&request.command_id, request.timeout_secs),
             std::future::pending::<()>(),
         );
         tokio::pin!(timeout);

@@ -21,6 +21,8 @@ pub struct RequestRecord {
     pub auth_present: bool,
     pub known_path: bool,
     pub role: String,
+    /// The call the request belongs to (`variants::request_key`).
+    pub key: String,
     pub prompt: String,
     pub answer: String,
 }
@@ -32,13 +34,30 @@ impl Requests {
     pub fn snapshot(&self) -> Vec<RequestRecord> {
         self.0.lock().unwrap().clone()
     }
+
+    /// How many requests each call made (`RequestRecord::key`).
+    pub fn per_call(&self) -> BTreeMap<String, usize> {
+        let mut counts = BTreeMap::new();
+        for request in self.0.lock().unwrap().iter() {
+            *counts.entry(request.key.clone()).or_default() += 1;
+        }
+        counts
+    }
+}
+
+/// How a fake provider answers: which reply variant, and which request (the
+/// `nth` of `role`, from 1) it holds until `release`.
+#[derive(Clone, Debug)]
+pub struct Plan {
+    pub variant: Variant,
+    pub block: Option<(String, usize)>,
 }
 
 pub struct FakeProvider {
     pub base_url: String,
     pub counts: Counts,
     pub requests: Requests,
-    blocked_role: Option<String>,
+    blocked: Option<(String, usize)>,
     release: Arc<(Mutex<bool>, std::sync::Condvar)>,
     entered: Arc<(Mutex<bool>, std::sync::Condvar)>,
     stop: Arc<std::sync::atomic::AtomicBool>,
@@ -47,14 +66,14 @@ pub struct FakeProvider {
 
 impl FakeProvider {
     pub fn start() -> Self {
-        Self::start_inner(None)
+        Self::start_with(Plan {
+            variant: Variant::Golden,
+            block: None,
+        })
     }
 
-    pub fn start_blocked(role: &str) -> Self {
-        Self::start_inner(Some(role.to_string()))
-    }
-
-    fn start_inner(blocked_role: Option<String>) -> Self {
+    pub fn start_with(plan: Plan) -> Self {
+        let Plan { variant, block } = plan;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
@@ -66,7 +85,7 @@ impl FakeProvider {
         let entered = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         let thread_release = release.clone();
         let thread_entered = entered.clone();
-        let thread_blocked_role = blocked_role.clone();
+        let thread_blocked = block.clone();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let thread_stop = stop.clone();
         let thread = thread::spawn(move || {
@@ -87,7 +106,7 @@ impl FakeProvider {
                         };
                         let counts = request_counts.clone();
                         let requests = request_log.clone();
-                        let blocked_role = thread_blocked_role.clone();
+                        let blocked = thread_blocked.clone();
                         let release = thread_release.clone();
                         let entered = thread_entered.clone();
                         let stop = thread_stop.clone();
@@ -97,7 +116,8 @@ impl FakeProvider {
                                     &mut stream,
                                     &counts,
                                     &requests,
-                                    &blocked_role,
+                                    &blocked,
+                                    variant,
                                     &release,
                                     &entered,
                                     &stop,
@@ -131,7 +151,7 @@ impl FakeProvider {
             base_url: format!("http://{address}/v1/messages"),
             counts,
             requests,
-            blocked_role,
+            blocked: block,
             release,
             entered,
             stop,
@@ -140,7 +160,7 @@ impl FakeProvider {
     }
 
     pub fn wait_until_blocked(&self, wait_interval: Duration) -> bool {
-        assert!(self.blocked_role.is_some(), "provider has no blocked role");
+        assert!(self.blocked.is_some(), "provider has no blocked request");
         let mut entered = self.entered.0.lock().unwrap();
         while !*entered {
             let (next, timeout) = self.entered.1.wait_timeout(entered, wait_interval).unwrap();
@@ -260,7 +280,8 @@ fn serve_connection(
     stream: &mut std::net::TcpStream,
     counts: &Counts,
     requests: &Requests,
-    blocked_role: &Option<String>,
+    blocked: &Option<(String, usize)>,
+    variant: Variant,
     release: &Arc<(Mutex<bool>, std::sync::Condvar)>,
     entered: &Arc<(Mutex<bool>, std::sync::Condvar)>,
     stop: &std::sync::atomic::AtomicBool,
@@ -290,23 +311,28 @@ fn serve_connection(
         let known_path = request.method == "POST" && request.path == "/v1/messages";
         let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap_or_default();
         let prompt = body.to_string();
-        let (role, answer) = scripted_answer(&prompt);
+        let (role, answer) = variants::answer(&prompt, variant);
+        let key = variants::request_key(role, &prompt);
         requests.0.lock().unwrap().push(RequestRecord {
             method: request.method,
             path: request.path,
             auth_present,
             known_path,
             role: role.to_string(),
+            key,
             prompt,
             answer: answer.clone(),
         });
-        *counts
-            .0
-            .lock()
-            .unwrap()
-            .entry(role.to_string())
-            .or_default() += 1;
-        if blocked_role.as_deref() == Some(role) {
+        let nth = {
+            let mut counts = counts.0.lock().unwrap();
+            let count = counts.entry(role.to_string()).or_default();
+            *count += 1;
+            *count
+        };
+        if blocked
+            .as_ref()
+            .is_some_and(|(blocked_role, blocked_nth)| blocked_role == role && *blocked_nth == nth)
+        {
             *entered.0.lock().unwrap() = true;
             entered.1.notify_all();
             let mut is_released = release.0.lock().unwrap();
@@ -393,7 +419,9 @@ impl Drop for FakeProvider {
 
 #[path = "workflow_decomposition_offline_server_script.rs"]
 mod script;
-use script::scripted_answer;
+#[path = "workflow_decomposition_offline_server_variants.rs"]
+pub mod variants;
+pub use variants::Variant;
 
 #[cfg(test)]
 mod tests {

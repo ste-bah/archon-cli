@@ -20,6 +20,12 @@ pub fn progress(test: &str, step: &str) {
 }
 
 pub fn run(root: &Path, args: &[&str]) -> Output {
+    run_within(root, args, NO_PROGRESS_LIMIT)
+}
+
+/// `run` with its own no-progress bound, for a cell whose silent host
+/// commands (a large freeze) outlast the default under parallel load.
+pub fn run_within(root: &Path, args: &[&str], limit: Duration) -> Output {
     let stdout_path = root.join("cell.stdout");
     let stderr_path = root.join("cell.stderr");
     let mut command = Command::new(env!("CARGO_BIN_EXE_archon"));
@@ -31,7 +37,7 @@ pub fn run(root: &Path, args: &[&str]) -> Output {
         .stderr(fs::File::create(&stderr_path).unwrap())
         .spawn()
         .unwrap();
-    let status = wait_for_child(&mut child, &stdout_path, &stderr_path, "CLI child");
+    let status = wait_for_child_within(&mut child, &stdout_path, &stderr_path, "CLI child", limit);
     Output {
         status,
         stdout: fs::read(stdout_path).unwrap_or_default(),
@@ -111,6 +117,16 @@ pub fn await_provider_boundary(
 }
 
 pub fn wait_for_child(child: &mut Child, stdout: &Path, stderr: &Path, label: &str) -> ExitStatus {
+    wait_for_child_within(child, stdout, stderr, label, NO_PROGRESS_LIMIT)
+}
+
+pub fn wait_for_child_within(
+    child: &mut Child,
+    stdout: &Path,
+    stderr: &Path,
+    label: &str,
+    limit: Duration,
+) -> ExitStatus {
     let mut last_progress = Instant::now();
     let mut sizes = (0, 0);
     loop {
@@ -135,12 +151,12 @@ pub fn wait_for_child(child: &mut Child, stdout: &Path, stderr: &Path, label: &s
             sizes = current;
             last_progress = Instant::now();
         }
-        if last_progress.elapsed() >= NO_PROGRESS_LIMIT {
+        if last_progress.elapsed() >= limit {
             let _ = child.kill();
             let _ = child.wait();
             panic!(
                 "{label} made no output progress for {:?}; child killed; stdout tail: {}; stderr tail: {}",
-                NO_PROGRESS_LIMIT,
+                limit,
                 tail(stdout),
                 tail(stderr)
             );

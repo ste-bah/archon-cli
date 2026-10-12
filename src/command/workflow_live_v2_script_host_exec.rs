@@ -103,6 +103,16 @@ impl WorkflowScriptHost {
             &execution.input,
             source_metadata.source_fingerprint.as_deref(),
         );
+        crate::command::workflow_test_seams::hold_before_call(
+            &execution.call.id,
+            execution
+                .call
+                .options
+                .host_command
+                .as_ref()
+                .map(|request| request.command_id.as_str()),
+        )
+        .await;
         poll_v2_run_control(
             &self.runner.workflow_store,
             &self.runner.run_id,
