@@ -4,12 +4,12 @@
   "acceptance:SUP-REQ-X-002": 1,
   "body:TASK-X-010": 1,
   "body:TASK-X-020": 1,
-  "fidelity:AC-X-001,REQ-X-001,REQ-X-002:TASK-X-010+TASK-X-020": 1,
   "fidelity:AC-X-001,REQ-X-001:TASK-X-010": 1,
+  "fidelity:AC-X-001,REQ-X-001:TASK-X-010+TASK-X-020": 1,
   "fidelity:REQ-X-002:TASK-X-010+TASK-X-020": 1,
   "judge:adversarial:AC-X-001": 1,
   "judge:adversarial:SUP-REQ-X-001,SUP-REQ-X-002": 1,
   "judge:passability:AC-X-001": 1,
-  "judge:passability:SUP-REQ-X-001,SUP-REQ-X-002": 1,
+  "judge:passability:AC-X-001,SUP-REQ-X-001,SUP-REQ-X-002": 1,
   "skeleton": 1
 }
