@@ -1,13 +1,16 @@
-//! The critic-logic list cannot rot (#434c): `build.rs` hashes exactly the
-//! listed files, every module a listed file loads is listed, every fidelity
-//! file beside them is listed or excluded with a reason, and the frozen
-//! schema-4 digest is what its comment says it is.
+//! The critic-logic list cannot rot (#434c, #434d): the listed files hash to
+//! the pinned digest, so no edit to them lands without a decision about
+//! `CRITIC_LOGIC_VERSION`; every module a listed file loads is listed; every
+//! fidelity file beside them is listed or excluded with a reason; and the
+//! frozen earlier-schema digest is what its comment says it is.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use super::super::legacy::LEGACY_CRITIC_LOGIC;
-use super::super::logic_digest::{EXCLUDED, FILES, digest, digest_of};
+use super::super::logic_digest::{
+    CRITIC_LOGIC_VERSION, EXCLUDED, FILES, SOURCES_DIGEST, digest, digest_of, pin_check,
+};
 use crate::command::workflow_host_command_logic_items::{child_file, facts, is_test_file};
 
 fn root() -> PathBuf {
@@ -54,11 +57,49 @@ fn unlisted_children(root: &Path, files: &[&str]) -> BTreeSet<String> {
     missing
 }
 
+fn read_source(file: &str) -> Vec<u8> {
+    std::fs::read(root().join(file)).unwrap_or_else(|error| panic!("{file}: {error}"))
+}
+
+/// The guard: an edit to a listed file is reviewed against the version.
 #[test]
-fn the_build_digest_is_the_listed_files_digest() {
-    let root = root();
-    let here = digest(|file| std::fs::read(root.join(file)).unwrap());
-    assert_eq!(here, env!("ARCHON_FIDELITY_LOGIC_DIGEST"));
+fn fidelity_critic_sources_match_their_pinned_digest() {
+    if let Err(stale) = pin_check(SOURCES_DIGEST, read_source) {
+        panic!("{stale}");
+    }
+}
+
+/// `build.rs` hashes exactly the listed files, so this test binary's build
+/// digest is the digest of the sources it was compiled from.
+#[test]
+fn fidelity_the_build_digest_is_the_listed_files_digest() {
+    assert_eq!(env!("ARCHON_FIDELITY_SOURCES_DIGEST"), digest(read_source));
+}
+
+/// The guard can go red: one byte changed in one listed file, and no re-pin,
+/// fails it with the decision to make; re-pinned, it passes, and the
+/// version — what the store keys on — has not moved.
+#[test]
+fn fidelity_a_source_edit_without_a_re_pin_trips_the_guard() {
+    let edited = |file: &str| {
+        let mut bytes = read_source(file);
+        if file == FILES[0] {
+            bytes.extend_from_slice(b"\n// an edit\n");
+        }
+        bytes
+    };
+    let stale = pin_check(SOURCES_DIGEST, edited).expect_err("an unreviewed edit");
+    assert!(
+        stale.contains("CRITIC_LOGIC_VERSION") && stale.contains("SOURCES_DIGEST"),
+        "{stale}"
+    );
+    let re_pinned = digest(edited);
+    assert_ne!(re_pinned, SOURCES_DIGEST);
+    assert_eq!(pin_check(&re_pinned, edited), Ok(()));
+    assert_eq!(
+        CRITIC_LOGIC_VERSION, 1,
+        "#434d keeps the meaning of every verdict"
+    );
 }
 
 #[test]
@@ -138,22 +179,35 @@ const LEGACY_FILES: &[&str] = &[
 ];
 /// The commit that introduced schema 4.
 const SCHEMA_FOUR_COMMIT: &str = "bc8cf2693";
+/// The last commit that wrote schema 5 (#434d moved to schema 6).
+const LAST_SCHEMA_FIVE_COMMIT: &str = "22e024436";
+
+/// `LEGACY_FILES` as they were at `commit`.
+fn digest_at(commit: &str) -> String {
+    let root = root();
+    digest_of(LEGACY_FILES, |file| {
+        let shown = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["show", &format!("{commit}:{file}")])
+            .output()
+            .expect("git");
+        assert!(shown.status.success(), "git show {file} failed");
+        shown.stdout
+    })
+}
 
 /// Reads git history, which a shallow clone lacks; run it with `--ignored`
 /// in a full clone.
 #[test]
 #[ignore = "needs git history back to bc8cf2693; run with --ignored in a full clone"]
 fn legacy_critic_logic_is_the_schema_four_sources_digest() {
-    let root = root();
-    let at_schema_four = digest_of(LEGACY_FILES, |file| {
-        let shown = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&root)
-            .args(["show", &format!("{SCHEMA_FOUR_COMMIT}:{file}")])
-            .output()
-            .expect("git");
-        assert!(shown.status.success(), "git show {file} failed");
-        shown.stdout
-    });
-    assert_eq!(at_schema_four, LEGACY_CRITIC_LOGIC);
+    assert_eq!(digest_at(SCHEMA_FOUR_COMMIT), LEGACY_CRITIC_LOGIC);
+}
+
+/// The digest schema-5 records written by 22e024436 carry.
+#[test]
+#[ignore = "needs git history back to 22e024436; run with --ignored in a full clone"]
+fn legacy_critic_logic_is_the_last_schema_five_sources_digest() {
+    assert_eq!(digest_at(LAST_SCHEMA_FIVE_COMMIT), LEGACY_CRITIC_LOGIC);
 }

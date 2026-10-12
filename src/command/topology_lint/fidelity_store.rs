@@ -38,8 +38,9 @@
 //!
 //! A record is found under a digest of the obligation's id and text, of the
 //! frozen skeleton section (a re-frozen skeleton re-asks every obligation),
-//! and of the critic's identity: a digest of the fidelity question and reply
-//! logic; the model the critic alias
+//! and of the critic's identity: the version of the fidelity question and
+//! reply logic ([`CRITIC_LOGIC_VERSION`], guarded by a pinned digest of its
+//! sources); the model the critic alias
 //! resolves to; the provider id; and the client's rendered request identity
 //! for the question with no obligations and no tasks — effective system
 //! blocks, the prompt's own wording and the frozen skeleton section, model,
@@ -72,13 +73,16 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::fidelity_critic::CRITIC_MODEL_ALIAS;
+pub(super) use logic_digest::CRITIC_LOGIC_VERSION;
 
 /// Records of another layout are never read as this one. 4: per-obligation
 /// records bound to their tasks' texts (#434). 5: the critic identity names a
 /// digest of the critic's own logic instead of the whole build, so a rebuild
-/// that leaves that logic alone reuses every verdict; schema-4 records are
-/// migrated once by [`legacy`] (#434c).
-const STORE_SCHEMA: u32 = 5;
+/// that leaves that logic alone reuses every verdict (#434c). 6: it names
+/// [`CRITIC_LOGIC_VERSION`] instead of that digest, so an edit that leaves
+/// a verdict's meaning alone reuses every verdict; schema-4 and schema-5
+/// records are migrated once by [`legacy`] (#434d).
+const STORE_SCHEMA: u32 = 6;
 
 /// Where the saved verdicts live: under the project, outside the host
 /// command's call staging directory, which the executor clears before every
@@ -89,8 +93,9 @@ pub(super) fn store_dir(cwd: &Path) -> PathBuf {
 
 /// What, besides the question, decides a critic's answer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct StoreIdentity {
-    critic_logic: String,
+    critic_logic_version: u32,
     model: String,
     provider: Option<String>,
     request: Option<String>,
@@ -100,7 +105,7 @@ impl StoreIdentity {
     /// This binary asking `client`'s critic.
     pub(super) fn of(client: &dyn WorkflowLlmClient) -> Self {
         Self {
-            critic_logic: env!("ARCHON_FIDELITY_LOGIC_DIGEST").to_string(),
+            critic_logic_version: CRITIC_LOGIC_VERSION,
             model: client.resolve_model_alias(CRITIC_MODEL_ALIAS),
             provider: client.provider_id(),
             request: client.request_identity(),
@@ -108,8 +113,8 @@ impl StoreIdentity {
     }
 
     #[cfg(test)]
-    pub(super) fn with_critic_logic(mut self, digest: &str) -> Self {
-        self.critic_logic = digest.to_string();
+    pub(super) fn with_critic_logic_version(mut self, version: u32) -> Self {
+        self.critic_logic_version = version;
         self
     }
 }
@@ -175,18 +180,55 @@ struct Record {
 pub(super) struct VerdictStore {
     dir: PathBuf,
     identity: StoreIdentity,
+    /// Whether this binary was built from the critic sources
+    /// [`CRITIC_LOGIC_VERSION`] was reviewed against. When not, the version
+    /// says nothing about the logic that would read or write a record, so
+    /// no record is read, migrated or written (#434d).
+    reviewed: bool,
 }
 
 impl VerdictStore {
     pub(super) fn new(dir: PathBuf, identity: StoreIdentity) -> Self {
-        Self { dir, identity }
+        Self::built_from(dir, identity, env!("ARCHON_FIDELITY_SOURCES_DIGEST"))
+    }
+
+    /// A store of a binary whose critic sources hash to `built`, as
+    /// `build.rs` computes `ARCHON_FIDELITY_SOURCES_DIGEST`. Fails closed,
+    /// never the gate: sources other than the pinned ones ask the critic
+    /// afresh for every obligation and keep nothing.
+    pub(super) fn built_from(dir: PathBuf, identity: StoreIdentity, built: &str) -> Self {
+        let reviewed = built == logic_digest::SOURCES_DIGEST;
+        if !reviewed {
+            tracing::warn!(
+                built,
+                pinned = logic_digest::SOURCES_DIGEST,
+                "fidelity critic sources of this build are not the pinned ones its critic logic \
+                 version was reviewed against; no saved verdict is read, migrated or written, \
+                 and every obligation is asked again"
+            );
+        }
+        Self {
+            dir,
+            identity,
+            reviewed,
+        }
     }
 
     /// The effective request envelope. Unknown envelopes cannot be reused.
     pub(super) fn for_request(&self, request: Option<String>) -> Self {
         let mut identity = self.identity.clone();
         identity.request = request;
-        Self::new(self.dir.clone(), identity)
+        Self {
+            dir: self.dir.clone(),
+            identity,
+            reviewed: self.reviewed,
+        }
+    }
+
+    /// Whether records may be read and written at all: a known envelope,
+    /// under reviewed critic sources.
+    fn keeps(&self) -> bool {
+        self.reviewed && self.identity.request.is_some()
     }
 
     pub(super) fn dir(&self) -> &Path {
@@ -210,7 +252,9 @@ impl VerdictStore {
     /// The entries saved for `question`'s obligation; `None` for anything
     /// less than a record this store would write now.
     fn read(&self, question: Question<'_>) -> Option<Vec<Entry>> {
-        self.identity.request.as_ref()?;
+        if !self.keeps() {
+            return None;
+        }
         let key = self.key(question);
         let record: Record = serde_json::from_slice(&std::fs::read(self.path(&key)).ok()?).ok()?;
         (record.schema == STORE_SCHEMA
@@ -281,7 +325,7 @@ impl VerdictStore {
         question: Question<'_>,
         verdict: &FidelityVerdict,
     ) -> Result<(Standing, bool)> {
-        if self.identity.request.is_none() {
+        if !self.keeps() {
             return Ok((Standing::Verdict(verdict.clone()), false));
         }
         let key = self.key(question);
@@ -352,9 +396,8 @@ fn standing(entries: &[Entry], question: Question<'_>) -> Option<Standing> {
 #[path = "fidelity_store_legacy.rs"]
 mod legacy;
 #[cfg(test)]
-pub(super) use legacy::LEGACY_CRITIC_LOGIC;
+pub(super) use legacy::{LEGACY_CRITIC_LOGIC, PREDECESSOR_VERSION};
 
-#[cfg(test)]
 #[path = "fidelity_logic_digest.rs"]
 mod logic_digest;
 

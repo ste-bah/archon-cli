@@ -1,10 +1,12 @@
 //! The re-ask: the original question, then only the last rejected reply and
-//! its exact parse error with the allowed keys. The critic is asked again
-//! while its replies make progress — each refused reply's first error falls
-//! in a (verdict, kind) class no earlier reply had. The same class again is
-//! no progress, whatever its error text; the audit is operational once
+//! its exact parse errors with the allowed keys. The critic is asked again
+//! while its replies make progress — a verdict is kept, or a refusal falls
+//! in a class no earlier reply had. The same classes again are no progress,
+//! whatever their error text; the audit is operational once
 //! [`FIDELITY_NO_PROGRESS_WINDOW`] of them come in a row. A verdict with a
-//! missing or unknown field is never accepted.
+//! missing or unknown field is never accepted, and nor is any verdict of the
+//! document it is in. Per-verdict acceptance (#434d) is in
+//! `fidelity_partial_tests.rs`.
 
 use super::*;
 
@@ -168,14 +170,15 @@ async fn the_same_error_from_different_bytes_is_no_progress() {
 #[tokio::test]
 async fn bad_replies_with_new_errors_are_progress_and_keep_the_conversation_going() {
     let temp = corpus();
-    // Each reply fails in a (verdict, kind) class no earlier reply had.
+    // Each reply fails in a class no earlier reply had. The fifth keeps
+    // G-WS-001's verdict; the sixth fails AC-WS-001 alone, in a new kind.
     let bad = vec![
         "not json".to_string(),
         stray_key_reply(0, "weakest_task_text", ""),
         stray_key_reply(1, "weakest_task_text", ""),
         r#"{"verdicts":[]}"#.to_string(),
         false_without(0, "quoted_task_text"),
-        false_without(1, "weakest_task_id"),
+        false_without(0, "weakest_task_id"),
     ];
     assert!(bad.len() > 1 + FIDELITY_NO_PROGRESS_WINDOW);
     let mut replies: Vec<_> = bad.iter().cloned().map(Ok).collect();
@@ -202,8 +205,12 @@ async fn bad_replies_with_new_errors_are_progress_and_keep_the_conversation_goin
         .as_str()
         .unwrap();
     assert!(
-        feedback.contains("G-WS-001") && feedback.contains("`weakest_task_id`"),
+        feedback.contains("AC-WS-001") && feedback.contains("`weakest_task_id`"),
         "a false verdict's missing key is named for the critic to fix: {feedback}"
+    );
+    assert!(
+        !feedback.contains("G-WS-001"),
+        "a kept verdict is not asked again: {feedback}"
     );
     assert_eq!(
         attempt_suffixes(&rejected_files(temp.path())),
@@ -249,7 +256,7 @@ async fn new_unknown_field_names_in_the_same_verdict_stop_after_the_window() {
 
 /// The base corpus with six more obligations claimed by its one task: one
 /// call batch of eight, in sorted order. Returns the cwd and the ids.
-fn wide_corpus() -> (tempfile::TempDir, Vec<String>) {
+pub(super) fn wide_corpus() -> (tempfile::TempDir, Vec<String>) {
     let temp = corpus();
     let cwd = temp.path();
     let extra: Vec<String> = (1..=6).map(|n| format!("REQ-WS-{n:03}")).collect();

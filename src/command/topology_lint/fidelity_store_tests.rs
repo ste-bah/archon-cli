@@ -7,7 +7,8 @@ use super::*;
 
 fn identity() -> StoreIdentity {
     StoreIdentity {
-        critic_logic: "critic-logic".into(),
+        // Any version but the one earlier schemas answer to: no migration.
+        critic_logic_version: 100,
         provider: Some("provider".into()),
         model: "model".into(),
         request: Some("representative-request".into()),
@@ -127,17 +128,20 @@ fn each_envelope_is_its_own_identity_and_unknown_envelopes_never_reuse() {
     let unknown = store.for_request(None);
     assert_eq!(unknown.load(asked.question()), None);
     assert!(!unknown.save(asked.question(), &supported()).unwrap().1);
-    let rebuilt = VerdictStore::new(store.dir().into(), identity().with_critic_logic("other"));
+    let rebuilt = VerdictStore::new(
+        store.dir().into(),
+        identity().with_critic_logic_version(101),
+    );
     assert_eq!(
         rebuilt.load(asked.question()),
         None,
-        "other critic logic re-asks"
+        "another critic logic version re-asks"
     );
     assert_eq!(records(&store), 1);
 }
 
 #[test]
-fn a_changed_critic_logic_digest_reasks_new_schema_records() {
+fn a_changed_critic_logic_version_reasks_new_schema_records() {
     let temp = tempfile::tempdir().unwrap();
     let original = store(temp.path());
     let asked = Asked::new(
@@ -147,9 +151,15 @@ fn a_changed_critic_logic_digest_reasks_new_schema_records() {
     original.save(asked.question(), &supported()).unwrap();
     let changed = VerdictStore::new(
         original.dir().into(),
-        identity().with_critic_logic("changed-critic-logic"),
+        identity().with_critic_logic_version(101),
     );
     assert_eq!(changed.load(asked.question()), None);
+    let same = VerdictStore::new(original.dir().into(), identity());
+    assert_eq!(
+        same.load(asked.question()),
+        Some(Standing::Verdict(supported())),
+        "the same version reuses it, whatever the sources' bytes"
+    );
 }
 
 /// A true verdict stands only over the same tasks with byte-identical texts:

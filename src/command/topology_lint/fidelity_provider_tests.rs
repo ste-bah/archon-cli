@@ -91,6 +91,7 @@ async fn a_stray_key_then_a_corrected_reply_is_judged_through_the_real_provider_
     stray["verdicts"][0]["weakest_task_text"] = "".into();
     let (endpoint, bodies) = serve(vec![stray.to_string(), good.to_string()]).await;
     let cache = tempfile::tempdir().unwrap();
+    let mut verdicts = Vec::new();
     let asked = ask(
         client(endpoint).as_ref(),
         cache.path(),
@@ -99,12 +100,14 @@ async fn a_stray_key_then_a_corrected_reply_is_judged_through_the_real_provider_
         &tasks,
         &SkeletonSummary::absent(),
         &FreezeBudget::unlimited(),
+        &mut |_, verdict| {
+            verdicts.push(verdict.clone());
+            Ok(())
+        },
     )
     .await
     .expect("answered");
-    let Asked::Answered(verdicts) = asked else {
-        panic!("stopped, not answered");
-    };
+    assert!(matches!(asked, Asked::Answered), "stopped, not answered");
     assert_eq!(verdicts.len(), 1);
     assert!(verdicts[0].necessarily_true);
     let bodies = bodies.lock().unwrap();

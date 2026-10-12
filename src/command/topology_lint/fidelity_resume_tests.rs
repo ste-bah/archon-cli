@@ -482,13 +482,13 @@ fn the_staged_set_gate_reads_its_catalog_no_progress_window() {
 }
 
 #[test]
-fn fidelity_identity_uses_the_critic_logic_digest() {
+fn fidelity_identity_uses_the_critic_logic_version() {
     let identity = StoreIdentity::of(Critic::new().as_ref());
     let value = serde_json::to_value(identity).unwrap();
-    assert_ne!(
-        value["critic_logic"].as_str().unwrap(),
-        env!("ARCHON_BUILD_FINGERPRINT"),
-        "the cache binds critic logic, not the whole binary build"
+    assert_eq!(
+        value["critic_logic_version"],
+        crate::command::topology_lint::fidelity_store::CRITIC_LOGIC_VERSION,
+        "the cache binds the critic logic's version, not its bytes or the build"
     );
 }
 
