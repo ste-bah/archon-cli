@@ -22,6 +22,7 @@ pub(super) fn verify_frozen_chain_capabilities() -> [CommandCapability; 2] {
 fn verify_capability(id: &str, stage: &str) -> CommandCapability {
     capability(
         id,
+        if stage == "acceptance" { 0 } else { 1 },
         &[
             "workflow",
             "verify-frozen-chain",

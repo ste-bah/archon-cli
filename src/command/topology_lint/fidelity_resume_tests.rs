@@ -466,7 +466,7 @@ fn the_staged_set_gate_reads_its_catalog_no_progress_window() {
 fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     let catalog =
         crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("rev").unwrap();
-    let old_digest = "c59953c92b47b59b10c4b6b0cf19e6ae736c88aa037bef173cb141d25dd7b6c7";
+    let old_digest = "55a7f0298eda54953ad405566bb59c72a2c32652587e0954420433a481d96f3a";
     let mut old = catalog.clone();
     old.schema_version = 1;
     old.recompute_digest().unwrap();
