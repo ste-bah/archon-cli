@@ -236,11 +236,11 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     let baseline = executor(None);
     assert!(!holds(&baseline, "freeze-skeleton", &unstamped));
     assert!(!holds(&baseline, "land-task-body", &unstamped));
-    // freeze-acceptance is at version 13: an unstamped record was judged by
+    // freeze-acceptance is at version 14: an unstamped record was judged by
     // older logic and runs again.
     assert!(!holds(&baseline, "freeze-acceptance", &unstamped));
     let acceptance = HostCommandRequest::new("freeze-acceptance", Some("c".into())).unwrap();
-    assert_eq!(baseline.logic_version(&acceptance).unwrap(), Some(13));
+    assert_eq!(baseline.logic_version(&acceptance).unwrap(), Some(14));
     for command in [
         "verify-frozen-acceptance",
         "verify-frozen-skeleton",

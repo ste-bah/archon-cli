@@ -14,20 +14,19 @@ pub(crate) fn acceptance_input_excluded(
     excludes: &[PathBuf],
     task_root: Option<&Path>,
 ) -> bool {
+    const BUILT_IN_ROOTS: &[&str] = &[
+        "credentials",
+        "credentials.toml",
+        "config.toml",
+        "config.json",
+        ".env",
+        ".archon/config.toml",
+        "target",
+        ".git",
+    ];
     path.starts_with(Path::new(".archon").join(crate::task_set_lineage::PIN_STORE_NAMESPACE))
         || excludes.iter().any(|e| path.starts_with(e))
-        || matches!(
-            path.to_str(),
-            Some(
-                "credentials"
-                    | "credentials.toml"
-                    | "config.toml"
-                    | "config.json"
-                    | ".env"
-                    | ".archon/config.toml"
-                    | "target"
-            )
-        )
+        || BUILT_IN_ROOTS.iter().any(|root| path.starts_with(root))
         || path.starts_with(".archon/workflows")
         || acceptance_harness_run_state(path)
         || task_root.is_some_and(|root| {
@@ -130,78 +129,21 @@ pub(super) fn project_excludes(policy: &ScratchPolicy) -> WorkflowResult<Vec<Pat
         .map_err(|error| WorkflowError::io(&policy.project, error))?;
     let tasks = std::fs::canonicalize(&policy.task_root)
         .map_err(|error| WorkflowError::io(&policy.task_root, error))?;
-    let relative = tasks
+    tasks
         .strip_prefix(&project)
         .map_err(|_| invalid("task root must belong to declared project"))?;
-    let mut excludes = policy.project_input_excludes.clone();
-    excludes.push(relative.join(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE));
-    excludes.push(relative.join(crate::task_set_contract::ACCEPTANCE_LOCK_FILE));
-    excludes.extend(task_root_pipeline_outputs(&policy.task_root, &relative)?);
-    Ok(excludes)
-}
-
-/// Paths written by decomposition into the task root. These are generated
-/// before/during body landing and are not inputs to the earlier frozen checks.
-fn task_root_pipeline_outputs(
-    task_root: &Path,
-    relative_root: &Path,
-) -> WorkflowResult<Vec<PathBuf>> {
-    let mut outputs = vec![
-        // src/command/workflow_decompose.rs:run_fixed_decomposition_with_factory_and_sink
-        relative_root.join(".decompose.log"),
-        relative_root.join(crate::task_set_contract::TASK_SKELETON_FILE),
-        relative_root.join(crate::task_set_contract::TASK_SKELETON_LOCK_FILE),
-    ];
-    // src/command/workflow_acceptance_republish.rs:publish writes the skeleton;
-    // src/command/workflow_host_command_binding.rs:land_task_body writes each
-    // frozen task's file_name into this task root.
-    let skeleton_path = task_root.join(crate::task_set_contract::TASK_SKELETON_FILE);
-    match skeleton_path.symlink_metadata() {
-        Ok(metadata) if metadata.is_file() => {
-            let bytes = std::fs::read(&skeleton_path)
-                .map_err(|error| WorkflowError::io(&skeleton_path, error))?;
-            let skeleton: crate::task_skeleton::TaskSkeleton = serde_json::from_slice(&bytes)
-                .map_err(|error| {
-                    invalid(format!(
-                        "task skeleton {} is malformed while building acceptance inputs: {error}",
-                        skeleton_path.display()
-                    ))
-                })?;
-            for task in &skeleton.tasks {
-                let name = Path::new(&task.file_name);
-                if name.components().count() != 1
-                    || !task.file_name.starts_with("TASK-")
-                    || !task.file_name.ends_with(".md")
-                {
-                    return Err(invalid(format!(
-                        "task skeleton {} contains a non-direct task body filename {:?}",
-                        skeleton_path.display(),
-                        task.file_name
-                    )));
-                }
-                outputs.push(relative_root.join(name));
-            }
-        }
-        Ok(_) => {
-            return Err(invalid(format!(
-                "task skeleton {} is not a regular file while building acceptance inputs",
-                skeleton_path.display()
-            )));
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(WorkflowError::io(&skeleton_path, error)),
-    }
-    Ok(outputs)
+    Ok(policy.project_input_excludes.clone())
 }
 pub(super) fn copy_project(
     root: &Path,
     relative: &Path,
     dest: &Path,
     excludes: &[PathBuf],
+    task_root: &Path,
     remaining: &mut u64,
 ) -> WorkflowResult<()> {
     control::check()?;
-    if excluded(relative, excludes) {
+    if acceptance_input_excluded(relative, excludes, Some(task_root)) {
         return Ok(());
     }
     let source = root.join(relative);
@@ -217,6 +159,7 @@ pub(super) fn copy_project(
                 &relative.join(item.file_name()),
                 dest,
                 excludes,
+                task_root,
                 remaining,
             )?;
         }

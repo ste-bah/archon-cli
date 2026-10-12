@@ -32,7 +32,11 @@ fn freeze_outputs_are_excluded_from_scratch_project_inputs() {
     let excludes = project_excludes(&policy).unwrap();
     let task_contract =
         Path::new("tasks/set").join(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
-    assert!(excluded(&task_contract, &excludes));
+    assert!(acceptance_input_excluded(
+        &task_contract,
+        &excludes,
+        Some(Path::new("tasks/set"))
+    ));
     assert!(!excluded(
         Path::new(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
         &excludes
@@ -43,24 +47,40 @@ fn freeze_outputs_are_excluded_from_scratch_project_inputs() {
             .join(crate::task_set_lineage::PIN_STORE_NAMESPACE)
             .join("set.json"),
     ] {
-        assert!(excluded(&path, &excludes), "{}", path.display());
+        assert!(acceptance_input_excluded(
+            &path,
+            &excludes,
+            Some(Path::new("tasks/set"))
+        ));
     }
     assert!(!excluded(Path::new("tasks/set/input.json"), &excludes));
     assert!(excluded(Path::new("target/debug/build/output"), &excludes));
-    assert!(excluded(
+    assert!(excluded(Path::new("target/debug/build/output"), &[]));
+    assert!(acceptance_input_excluded(
         Path::new("tasks/set/TASK-EXAMPLE-001.md"),
-        &excludes
+        &excludes,
+        Some(Path::new("tasks/set"))
     ));
-    assert!(excluded(
+    assert!(acceptance_input_excluded(
         &Path::new("tasks/set").join(crate::task_set_contract::TASK_SKELETON_FILE),
-        &excludes
+        &excludes,
+        Some(Path::new("tasks/set"))
     ));
-    assert!(excluded(
+    assert!(acceptance_input_excluded(
         &Path::new("tasks/set").join(crate::task_set_contract::TASK_SKELETON_LOCK_FILE),
-        &excludes
+        &excludes,
+        Some(Path::new("tasks/set"))
     ));
-    assert!(excluded(Path::new("tasks/set/.decompose.log"), &excludes));
-    assert!(!excluded(Path::new("src/TASK-EXAMPLE-001.md"), &excludes));
+    assert!(acceptance_input_excluded(
+        Path::new("tasks/set/.decompose.log"),
+        &excludes,
+        Some(Path::new("tasks/set"))
+    ));
+    assert!(!acceptance_input_excluded(
+        Path::new("src/TASK-EXAMPLE-001.md"),
+        &excludes,
+        Some(Path::new("tasks/set"))
+    ));
 }
 
 #[cfg(test)]
@@ -105,7 +125,27 @@ fn pipeline_task_root_outputs_do_not_change_input_digest() {
     let excludes = project_excludes(&policy).unwrap();
     let digest = |root: &Path, relative: &Path, excludes: &[PathBuf]| {
         let mut map = BTreeMap::new();
-        audit_path(root, relative, excludes, &mut map).unwrap();
+        let mut stack = vec![relative.to_path_buf()];
+        while let Some(path) = stack.pop() {
+            if !path.as_os_str().is_empty()
+                && acceptance_input_excluded(&path, excludes, Some(Path::new("tasks/set")))
+            {
+                continue;
+            }
+            let source = root.join(&path);
+            let metadata = match source.symlink_metadata() {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => panic!("{}: {error}", source.display()),
+            };
+            if metadata.is_dir() {
+                for item in std::fs::read_dir(&source).unwrap() {
+                    stack.push(path.join(item.unwrap().file_name()));
+                }
+            } else if metadata.is_file() {
+                map.insert(path.display().to_string(), file_digest(&source).unwrap());
+            }
+        }
         map
     };
     let initial = digest(&project, Path::new(""), &excludes);
@@ -179,7 +219,15 @@ fn project_input_copy_keeps_archon_data_and_omits_harness_and_pipeline_outputs()
     std::fs::create_dir_all(&destination).unwrap();
     let mut remaining = u64::MAX;
     for input in &policy.project_inputs {
-        copy_project(&project, input, &destination, &excludes, &mut remaining).unwrap();
+        copy_project(
+            &project,
+            input,
+            &destination,
+            &excludes,
+            Path::new("tasks/set"),
+            &mut remaining,
+        )
+        .unwrap();
     }
 
     assert_eq!(
@@ -221,3 +269,113 @@ fn same_named_nested_project_data_is_included_and_digested() {
         Some(&file_digest(&file).unwrap())
     );
 }
+
+#[cfg(test)]
+#[test]
+fn copied_file_sets_match_digest_inputs_for_scratch_and_hermetic_scopes() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let task_relative = Path::new("tasks/set");
+    let task_root = project.join(task_relative);
+    let fixtures = [
+        (".archon/project/data/registry.json", b"registry".as_slice()),
+        (".archon/logs/run.jsonl", b"harness".as_slice()),
+        (".archon/task-set-pins/set.json", b"pin".as_slice()),
+        ("target/debug/build/output", b"build".as_slice()),
+        ("tasks/set/acceptance-contract.json", b"contract".as_slice()),
+        ("tasks/set/acceptance-contract.lock", b"lock".as_slice()),
+        ("tasks/set/task-skeleton.json", b"skeleton".as_slice()),
+        ("tasks/set/task-skeleton.lock", b"skeleton lock".as_slice()),
+        ("tasks/set/.decompose.log", b"decomposition log".as_slice()),
+        ("tasks/set/TASK-NAMED-001.md", b"named".as_slice()),
+        ("tasks/set/TASK-UNNAMED-002.md", b"unnamed".as_slice()),
+        ("tasks/set/user-notes.txt", b"notes".as_slice()),
+        ("tasks/set/excluded/private.txt", b"excluded".as_slice()),
+        ("tasks/set/config.json", b"task config".as_slice()),
+    ];
+    for (relative, bytes) in fixtures {
+        let path = project.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    std::fs::create_dir_all(&task_root).unwrap();
+    let excludes = vec![PathBuf::from("tasks/set/excluded")];
+
+    let digest_inputs = |scope: &Path| {
+        let mut files = BTreeSet::new();
+        let mut stack = vec![scope.to_path_buf()];
+        while let Some(relative) = stack.pop() {
+            if !relative.as_os_str().is_empty()
+                && acceptance_input_excluded(&relative, &excludes, Some(task_relative))
+            {
+                continue;
+            }
+            let path = project.join(&relative);
+            let metadata = path.symlink_metadata().unwrap();
+            if metadata.is_dir() {
+                for entry in std::fs::read_dir(path).unwrap() {
+                    stack.push(relative.join(entry.unwrap().file_name()));
+                }
+            } else if metadata.is_file() {
+                files.insert(relative);
+            }
+        }
+        files
+    };
+    let copied_files = |destination: &Path| {
+        let mut files = BTreeSet::new();
+        let mut stack = vec![PathBuf::new()];
+        while let Some(relative) = stack.pop() {
+            let path = destination.join(&relative);
+            for entry in std::fs::read_dir(&path).unwrap() {
+                let entry = entry.unwrap();
+                let child = relative.join(entry.file_name());
+                if entry.file_type().unwrap().is_dir() {
+                    stack.push(child);
+                } else {
+                    files.insert(child);
+                }
+            }
+        }
+        files
+    };
+
+    let scratch = temp.path().join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let mut remaining = u64::MAX;
+    copy_project(
+        &project,
+        Path::new(".archon"),
+        &scratch,
+        &excludes,
+        task_relative,
+        &mut remaining,
+    )
+    .unwrap();
+    copy_project(
+        &project,
+        task_relative,
+        &scratch,
+        &excludes,
+        task_relative,
+        &mut remaining,
+    )
+    .unwrap();
+    let mut scratch_digest_inputs = digest_inputs(Path::new(".archon"));
+    scratch_digest_inputs.extend(digest_inputs(task_relative));
+    assert_eq!(copied_files(&scratch), scratch_digest_inputs);
+
+    let hermetic = temp.path().join("hermetic");
+    std::fs::create_dir_all(&hermetic).unwrap();
+    copy_project(
+        &project,
+        Path::new(""),
+        &hermetic,
+        &excludes,
+        task_relative,
+        &mut remaining,
+    )
+    .unwrap();
+    assert_eq!(copied_files(&hermetic), digest_inputs(Path::new("")));
+}
+use std::collections::BTreeSet;

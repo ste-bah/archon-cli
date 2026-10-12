@@ -222,10 +222,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #421 changes when a recorded freeze is reused (a later publication extends its pin), not how it is judged.
         // 12: #423 check blocks normalize CR/CRLF to LF; a shell setup error is refused as a pre-implementation proof.
         // #434 re-pin only: the fidelity critic's store and reply schema are in this closure; freeze never asks the critic.
-        // 13: #417 #428 harness state and generated task-root outputs are excluded consistently from copied and digested check inputs; live task-root outputs remain observed during checks.
-        version: 13,
+        // 14: #417 task-root exclusions and copies use the same project-relative input set as its digest.
+        version: 14,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "83bfd5102033fccf45a726740353951bf614a7f4ead4e787d71e740791652209",
+        sources_digest: "9c879d5473b6f621ed68f9ce920f5fb2e13dc85d1e6929f728f0efa50f8d2f20",
         build_bound: false,
     },
     CapabilityLogic {
@@ -234,7 +234,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 and #417 re-pin only: harness input paths and pipeline outputs do not alter this verdict.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "83bfd5102033fccf45a726740353951bf614a7f4ead4e787d71e740791652209",
+        sources_digest: "9c879d5473b6f621ed68f9ce920f5fb2e13dc85d1e6929f728f0efa50f8d2f20",
         build_bound: false,
     },
     CapabilityLogic {
@@ -271,7 +271,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
         // #434 and #417 re-pin only: trace never reads the newly excluded run state.
-        sources_digest: "05192e5f40609c054aeac7033bdba698d753824c024d7a34a1b504ec3652c6a0",
+        sources_digest: "32a5540804bc61f75556192dae105157919d9daee17febae6f2b441c5a40731e",
         build_bound: true,
     },
     CapabilityLogic {
@@ -279,10 +279,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 4: #417 copied check inputs omit freeze-owned files, which can change a check verdict.
         // 5: #417 harness-written project run state leaves hermetic check inputs, which can change a check verdict.
-        version: 5,
+        // 6: #417 copied task-root inputs now match the digest exclusions, which can change a check verdict.
+        version: 6,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
-        sources_digest: "33c97906bfaa98525a188f74407d995b3de883c5a8bdd4b94e285c181f64a6d3",
+        sources_digest: "5c55810b63f1f412d30bb0ab71090aaacab8f3ebaeeff57223f9084a93161187",
         build_bound: true,
     },
     CapabilityLogic {
@@ -291,7 +292,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: verify never asks the fidelity critic or reads pipeline outputs.
-        sources_digest: "33c97906bfaa98525a188f74407d995b3de883c5a8bdd4b94e285c181f64a6d3",
+        sources_digest: "5c55810b63f1f412d30bb0ab71090aaacab8f3ebaeeff57223f9084a93161187",
         build_bound: true,
     },
 ];

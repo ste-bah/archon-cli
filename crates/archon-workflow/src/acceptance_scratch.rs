@@ -277,6 +277,9 @@ impl ScratchRoots {
                     .map_err(|e| WorkflowError::io(roots.project.join(".git"), e))?;
             }
             let project_excludes = inputs::project_excludes(policy)?;
+            let task_relative = tasks
+                .strip_prefix(&project)
+                .map_err(|_| invalid("task root must belong to declared project"))?;
             for input in &policy.project_inputs {
                 if matches!(
                     input.to_str(),
@@ -296,14 +299,19 @@ impl ScratchRoots {
                     input,
                     &roots.project,
                     &project_excludes,
+                    task_relative,
                     &mut remaining,
                 )
                 .map_err(|error| inputs::name_collision(error, policy, &project, input, commit))?;
             }
-            let task_relative = tasks
-                .strip_prefix(&project)
-                .map_err(|_| invalid("task root must belong to declared project"))?;
-            io::copy_task_root(&tasks, &roots.project.join(task_relative), &mut remaining)?;
+            io::copy_task_root(
+                &tasks,
+                &roots.project.join(task_relative),
+                task_relative,
+                task_relative,
+                &project_excludes,
+                &mut remaining,
+            )?;
             io::readonly(&roots.project.join(task_relative))?;
             if let Some(seed) = &policy.cargo_seed {
                 // Copy only standard content-addressed cache areas, not credentials/config.

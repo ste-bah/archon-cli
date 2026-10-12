@@ -67,6 +67,82 @@ fn freeze_outputs_are_absent_from_the_probe_copy_and_digest() {
 }
 
 #[test]
+fn hermetic_copy_file_set_matches_its_digest_inputs() {
+    let source = tempfile::tempdir().unwrap();
+    let destination = tempfile::tempdir().unwrap();
+    let project = source.path().canonicalize().unwrap();
+    let repository = repository(&source);
+    let task_root = project.join("tasks/set");
+    let files = [
+        (".archon/project/data/registry.json", b"registry".as_slice()),
+        (".archon/logs/run.jsonl", b"harness".as_slice()),
+        (".archon/task-set-pins/set.json", b"pin".as_slice()),
+        ("target/debug/build/output", b"build".as_slice()),
+        ("tasks/set/acceptance-contract.json", b"contract".as_slice()),
+        ("tasks/set/acceptance-contract.lock", b"lock".as_slice()),
+        ("tasks/set/task-skeleton.json", b"skeleton".as_slice()),
+        ("tasks/set/task-skeleton.lock", b"skeleton lock".as_slice()),
+        ("tasks/set/TASK-NAMED-001.md", b"named".as_slice()),
+        ("tasks/set/TASK-UNNAMED-002.md", b"unnamed".as_slice()),
+        ("tasks/set/user-notes.txt", b"notes".as_slice()),
+        ("tasks/set/config.json", b"task config".as_slice()),
+    ];
+    for (relative, bytes) in files {
+        let path = project.join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    std::fs::create_dir_all(&task_root).unwrap();
+    let task_root = task_root.canonicalize().unwrap();
+
+    let mut remaining = u64::MAX;
+    copy_data(
+        &project,
+        Path::new(""),
+        destination.path(),
+        &repository,
+        Some(&task_root),
+        &mut remaining,
+    )
+    .unwrap();
+
+    let mut digest_inputs = std::collections::BTreeSet::new();
+    let mut stack = vec![PathBuf::new()];
+    while let Some(relative) = stack.pop() {
+        if !relative.as_os_str().is_empty() && excluded(&relative, Some(&task_root)) {
+            continue;
+        }
+        let path = project.join(&relative);
+        if path == repository {
+            continue;
+        }
+        let metadata = path.symlink_metadata().unwrap();
+        if metadata.is_dir() {
+            for entry in std::fs::read_dir(path).unwrap() {
+                stack.push(relative.join(entry.unwrap().file_name()));
+            }
+        } else if metadata.is_file() {
+            digest_inputs.insert(relative);
+        }
+    }
+    let mut copied_files = std::collections::BTreeSet::new();
+    let mut stack = vec![PathBuf::new()];
+    while let Some(relative) = stack.pop() {
+        for entry in std::fs::read_dir(destination.path().join(&relative)).unwrap() {
+            let entry = entry.unwrap();
+            let child = relative.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                stack.push(child);
+            } else {
+                copied_files.insert(child);
+            }
+        }
+    }
+    assert_eq!(copied_files, digest_inputs);
+    assert!(copied_files.contains(Path::new("tasks/set/config.json")));
+}
+
+#[test]
 fn changed_check_data_invalidates_the_digest() {
     let source = tempfile::tempdir().unwrap();
     let input = source.path().join("check-data.json");
