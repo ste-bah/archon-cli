@@ -37,6 +37,7 @@ fn freeze_outputs_are_excluded_from_scratch_project_inputs() {
         &excludes,
         Some(Path::new("tasks/set"))
     ));
+    assert!(excluded(&task_contract, &excludes));
     assert!(!excluded(
         Path::new(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
         &excludes
@@ -52,6 +53,7 @@ fn freeze_outputs_are_excluded_from_scratch_project_inputs() {
             &excludes,
             Some(Path::new("tasks/set"))
         ));
+        assert!(excluded(&path, &excludes));
     }
     assert!(!excluded(Path::new("tasks/set/input.json"), &excludes));
     assert!(excluded(Path::new("target/debug/build/output"), &excludes));
@@ -81,6 +83,95 @@ fn freeze_outputs_are_excluded_from_scratch_project_inputs() {
         &excludes,
         Some(Path::new("tasks/set"))
     ));
+}
+
+#[cfg(test)]
+#[test]
+fn live_tripwire_tracks_project_relative_task_inputs_and_skips_freeze_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let task_root = project.join("tasks/set");
+    let repository = temp.path().join("repository");
+    std::fs::create_dir_all(&task_root).unwrap();
+    std::fs::create_dir_all(&repository).unwrap();
+    for (path, bytes) in [
+        ("config.json", b"config one".as_slice()),
+        ("target/build/output", b"target one".as_slice()),
+        (".git/config", b"nested git one".as_slice()),
+        (
+            crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE,
+            b"contract one".as_slice(),
+        ),
+        (
+            crate::task_set_contract::ACCEPTANCE_LOCK_FILE,
+            b"lock one".as_slice(),
+        ),
+    ] {
+        let path = task_root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repository)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "test@example.invalid"]);
+    git(&["config", "user.name", "test"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "fixture"]);
+    let commit = git(&["rev-parse", "HEAD"]);
+    let policy = ScratchPolicy {
+        repository,
+        project: project.clone(),
+        task_root: task_root.clone(),
+        scratch_parent: temp.path().join("scratch"),
+        project_inputs: vec![PathBuf::from("tasks/set")],
+        project_input_excludes: Vec::new(),
+        combined: false,
+        toolchain_path: String::new(),
+        environment: BTreeMap::new(),
+        environment_allowlist: Vec::new(),
+        cargo_seed: None,
+        timeout_secs: 1,
+        output_bytes: 1,
+        scratch_bytes: 1,
+        build_cache: None,
+    };
+
+    let before = live(&policy, &commit).unwrap();
+    let task_snapshot = &before[&task_root.display().to_string()];
+    for path in [
+        "tasks/set/config.json",
+        "tasks/set/target/build/output",
+        "tasks/set/.git/config",
+    ] {
+        assert!(task_snapshot.contains_key(path), "{path}");
+    }
+    for name in [
+        crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE,
+        crate::task_set_contract::ACCEPTANCE_LOCK_FILE,
+    ] {
+        assert!(!task_snapshot.contains_key(&format!("tasks/set/{name}")));
+        assert!(!before[&project.display().to_string()].contains_key(&format!("tasks/set/{name}")));
+    }
+    std::fs::write(task_root.join("config.json"), b"config changed").unwrap();
+    let after = live(&policy, &commit).unwrap();
+    assert_ne!(
+        task_snapshot,
+        &after[&task_root.display().to_string()],
+        "project-relative task inputs are guarded during observation"
+    );
 }
 
 #[cfg(test)]
@@ -263,7 +354,7 @@ fn same_named_nested_project_data_is_included_and_digested() {
     let relative = Path::new("config/acceptance-contract.json");
     assert!(!excluded(relative, &[]));
     let mut map = BTreeMap::new();
-    audit_path(temp.path(), relative, &[], &mut map).unwrap();
+    audit_path(temp.path(), relative, &[], None, &mut map).unwrap();
     assert_eq!(
         map.get("config/acceptance-contract.json"),
         Some(&file_digest(&file).unwrap())
@@ -292,6 +383,8 @@ fn copied_file_sets_match_digest_inputs_for_scratch_and_hermetic_scopes() {
         ("tasks/set/user-notes.txt", b"notes".as_slice()),
         ("tasks/set/excluded/private.txt", b"excluded".as_slice()),
         ("tasks/set/config.json", b"task config".as_slice()),
+        ("tasks/set/target/build/output", b"task target".as_slice()),
+        ("tasks/set/.git/config", b"task git".as_slice()),
     ];
     for (relative, bytes) in fixtures {
         let path = project.join(relative);
@@ -299,28 +392,32 @@ fn copied_file_sets_match_digest_inputs_for_scratch_and_hermetic_scopes() {
         std::fs::write(path, bytes).unwrap();
     }
     std::fs::create_dir_all(&task_root).unwrap();
-    let excludes = vec![PathBuf::from("tasks/set/excluded")];
-
+    let policy = ScratchPolicy {
+        repository: temp.path().join("repository"),
+        project: project.clone(),
+        task_root: task_root.clone(),
+        scratch_parent: temp.path().join("scratch"),
+        project_inputs: vec![PathBuf::from(".archon"), task_relative.to_path_buf()],
+        project_input_excludes: vec![PathBuf::from("tasks/set/excluded")],
+        combined: false,
+        toolchain_path: String::new(),
+        environment: BTreeMap::new(),
+        environment_allowlist: Vec::new(),
+        cargo_seed: None,
+        timeout_secs: 1,
+        output_bytes: 1,
+        scratch_bytes: 1,
+        build_cache: None,
+    };
+    let excludes = project_excludes(&policy).unwrap();
     let digest_inputs = |scope: &Path| {
-        let mut files = BTreeSet::new();
-        let mut stack = vec![scope.to_path_buf()];
-        while let Some(relative) = stack.pop() {
-            if !relative.as_os_str().is_empty()
-                && acceptance_input_excluded(&relative, &excludes, Some(task_relative))
-            {
-                continue;
-            }
-            let path = project.join(&relative);
-            let metadata = path.symlink_metadata().unwrap();
-            if metadata.is_dir() {
-                for entry in std::fs::read_dir(path).unwrap() {
-                    stack.push(relative.join(entry.unwrap().file_name()));
-                }
-            } else if metadata.is_file() {
-                files.insert(relative);
-            }
-        }
-        files
+        let mut map = BTreeMap::new();
+        audit_path(&project, scope, &excludes, Some(task_relative), &mut map).unwrap();
+        map.into_iter()
+            .filter_map(|(path, digest)| {
+                (digest != "directory" && digest != "missing").then_some(PathBuf::from(path))
+            })
+            .collect::<BTreeSet<_>>()
     };
     let copied_files = |destination: &Path| {
         let mut files = BTreeSet::new();
@@ -352,30 +449,43 @@ fn copied_file_sets_match_digest_inputs_for_scratch_and_hermetic_scopes() {
         &mut remaining,
     )
     .unwrap();
-    copy_project(
-        &project,
+    super::super::io::copy_task_root(
+        &task_root,
+        &scratch.join(task_relative),
         task_relative,
-        &scratch,
+        task_relative,
         &excludes,
-        task_relative,
         &mut remaining,
     )
     .unwrap();
     let mut scratch_digest_inputs = digest_inputs(Path::new(".archon"));
     scratch_digest_inputs.extend(digest_inputs(task_relative));
     assert_eq!(copied_files(&scratch), scratch_digest_inputs);
-
-    let hermetic = temp.path().join("hermetic");
-    std::fs::create_dir_all(&hermetic).unwrap();
-    copy_project(
-        &project,
-        Path::new(""),
-        &hermetic,
-        &excludes,
-        task_relative,
-        &mut remaining,
-    )
-    .unwrap();
-    assert_eq!(copied_files(&hermetic), digest_inputs(Path::new("")));
+    for path in [
+        "tasks/set/acceptance-contract.json",
+        "tasks/set/acceptance-contract.lock",
+        "tasks/set/task-skeleton.json",
+        "tasks/set/task-skeleton.lock",
+        "tasks/set/.decompose.log",
+        "tasks/set/TASK-NAMED-001.md",
+        "tasks/set/TASK-UNNAMED-002.md",
+    ] {
+        assert!(!copied_files(&scratch).contains(Path::new(path)), "{path}");
+        assert!(
+            !digest_inputs(task_relative).contains(Path::new(path)),
+            "{path}"
+        );
+    }
+    for path in [
+        "tasks/set/config.json",
+        "tasks/set/target/build/output",
+        "tasks/set/.git/config",
+    ] {
+        assert!(copied_files(&scratch).contains(Path::new(path)), "{path}");
+        assert!(
+            digest_inputs(task_relative).contains(Path::new(path)),
+            "{path}"
+        );
+    }
 }
 use std::collections::BTreeSet;

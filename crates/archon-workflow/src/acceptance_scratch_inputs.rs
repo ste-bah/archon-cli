@@ -129,10 +129,15 @@ pub(super) fn project_excludes(policy: &ScratchPolicy) -> WorkflowResult<Vec<Pat
         .map_err(|error| WorkflowError::io(&policy.project, error))?;
     let tasks = std::fs::canonicalize(&policy.task_root)
         .map_err(|error| WorkflowError::io(&policy.task_root, error))?;
-    tasks
+    let task_relative = tasks
         .strip_prefix(&project)
         .map_err(|_| invalid("task root must belong to declared project"))?;
-    Ok(policy.project_input_excludes.clone())
+    let mut excludes = policy.project_input_excludes.clone();
+    excludes.extend([
+        task_relative.join(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
+        task_relative.join(crate::task_set_contract::ACCEPTANCE_LOCK_FILE),
+    ]);
+    Ok(excludes)
 }
 pub(super) fn copy_project(
     root: &Path,
@@ -248,10 +253,11 @@ fn audit_path(
     root: &Path,
     rel: &Path,
     excludes: &[PathBuf],
+    task_root: Option<&Path>,
     map: &mut BTreeMap<String, String>,
 ) -> WorkflowResult<()> {
     control::check()?;
-    if excluded(rel, excludes) {
+    if acceptance_input_excluded(rel, excludes, task_root) {
         return Ok(());
     }
     let path = root.join(rel);
@@ -272,6 +278,7 @@ fn audit_path(
                 root,
                 &rel.join(item.map_err(|e| WorkflowError::io(&path, e))?.file_name()),
                 excludes,
+                task_root,
                 map,
             )?;
         }
@@ -308,17 +315,32 @@ pub(super) fn live(
         source.insert(name.into(), value);
     }
     let mut project = BTreeMap::new();
+    let project_root = std::fs::canonicalize(&policy.project)
+        .map_err(|error| WorkflowError::io(&policy.project, error))?;
+    let task_root = std::fs::canonicalize(&policy.task_root)
+        .map_err(|error| WorkflowError::io(&policy.task_root, error))?;
+    let task_relative = task_root
+        .strip_prefix(&project_root)
+        .map_err(|_| invalid("task root must belong to declared project"))?;
     for input in &policy.project_inputs {
-        audit_path(&policy.project, input, &project_excludes, &mut project)?;
+        audit_path(
+            &policy.project,
+            input,
+            &project_excludes,
+            Some(task_relative),
+            &mut project,
+        )?;
     }
     let mut tasks = BTreeMap::new();
-    let task_outputs = vec![
-        PathBuf::from(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
-        PathBuf::from(crate::task_set_contract::ACCEPTANCE_LOCK_FILE),
-    ];
-    // Keep pipeline outputs in the live tripwire so a file landing during an
-    // observation is detected; copying and digesting use the shared exclusion.
-    audit_path(&policy.task_root, Path::new(""), &task_outputs, &mut tasks)?;
+    // Audit the task tree in project-relative coordinates so the live
+    // tripwire applies the same exclusions as the scratch copy and digest.
+    audit_path(
+        &policy.project,
+        task_relative,
+        &project_excludes,
+        Some(task_relative),
+        &mut tasks,
+    )?;
     Ok(BTreeMap::from([
         (policy.repository.display().to_string(), source),
         (policy.project.display().to_string(), project),

@@ -1,24 +1,17 @@
-//! A hermetic copy of the tree at one commit, for a probe with no scratch
-//! policy (A4).
+//! A hermetic copy of one committed tree for a probe without scratch policy.
 //!
 //! The acceptance stage without `[workflow.acceptance_execution]` runs its
-//! checks in the live project and repository; a probe must never do that
-//! before or outside a round, so it builds what the scratch observation
-//! builds: a clone of the repository at the commit (sharing the source's
-//! objects, writing nothing into it) and, for the project,
+//! checks in the live project and repository, so it builds a clone of the
+//! repository at the commit and a project copy matching scratch observation:
 //!
-//! - its tracked copy inside that clone when the project lives inside the
-//!   repository and is tracked at the commit, or
-//! - otherwise (a project outside the repository, or one the commit does not
-//!   track) a copy of the project's own data beside the clone: every regular
-//!   file except what the scratch observation never exports either
-//!   (credentials and engine configuration, run state under
-//!   harness-owned run state, git metadata), the build output directory
-//!   `target`, and the repository itself when it is nested in the project.
+//! - its tracked copy inside the clone, or
+//! - otherwise a copy beside the clone of regular project files, excluding
+//!   credentials, engine configuration, harness run state, git metadata,
+//!   `target`, and any nested repository.
 //!
 //! The copy is made off the async runtime (`spawn_blocking`). Its project
-//! data is digested before and after copying: data that changed while it
-//! was copied is no evidence of any tree, and the run is unproven. A copy
+//! data is digested before and after copying; changes during copying make
+//! the run unproven. A copy
 //! larger than [`PROJECT_COPY_BYTES`] is refused with the reason, never
 //! truncated. Checks run under the acceptance stage's own direct-site
 //! environment (the default policy of the one check-environment rule,
@@ -156,33 +149,16 @@ pub(super) fn data_digest_scoped(
             repository.display()
         ))
     })?;
-    let task_root = task_root
-        .map(|root| {
-            let rooted = if root.is_absolute() {
-                root.to_path_buf()
-            } else {
-                project.join(root)
-            };
-            rooted.canonicalize().map_err(|error| {
-                Unrun(format!(
-                    "could not canonicalize task root {}: {error}",
-                    root.display()
-                ))
-            })
-        })
-        .transpose()?;
-    let task_root_relative = task_root
-        .as_deref()
-        .and_then(|root| root.strip_prefix(&project).ok());
+    let task_root_relative = task_root_relative(&project, task_root)?;
     let mut lines = Vec::new();
     let mut stack = vec![scope.to_path_buf()];
     while let Some(relative) = stack.pop() {
         if !relative.as_os_str().is_empty()
-            && (excluded(&relative, task_root_relative)
+            && (excluded(&relative, task_root_relative.as_deref())
                 || archon_workflow::acceptance_scratch::acceptance_input_excluded(
                     &relative,
                     excludes,
-                    task_root_relative,
+                    task_root_relative.as_deref(),
                 ))
         {
             continue;
@@ -207,6 +183,36 @@ pub(super) fn data_digest_scoped(
     }
     lines.sort();
     Ok(content_digest(lines.join("\n").as_bytes()))
+}
+
+/// Normalize the task root to the project-relative paths used by the shared
+/// input exclusion predicate. Reject roots outside the project explicitly.
+fn task_root_relative(project: &Path, task_root: Option<&Path>) -> Result<Option<PathBuf>, Unrun> {
+    task_root
+        .map(|root| {
+            let rooted = if root.is_absolute() {
+                root.to_path_buf()
+            } else {
+                project.join(root)
+            };
+            let canonical = rooted.canonicalize().map_err(|error| {
+                Unrun(format!(
+                    "could not canonicalize task root {}: {error}",
+                    root.display()
+                ))
+            })?;
+            canonical
+                .strip_prefix(project)
+                .map(Path::to_path_buf)
+                .map_err(|_| {
+                    Unrun(format!(
+                        "task root {} is outside project {}",
+                        canonical.display(),
+                        project.display()
+                    ))
+                })
+        })
+        .transpose()
 }
 
 impl HermeticCopy {
@@ -304,6 +310,31 @@ fn copy_data(
     task_root: Option<&Path>,
     remaining: &mut u64,
 ) -> Result<(), Unrun> {
+    let root = root.canonicalize().map_err(|error| {
+        Unrun(format!(
+            "could not canonicalize project root {}: {error}",
+            root.display()
+        ))
+    })?;
+    let task_root = task_root_relative(&root, task_root)?;
+    copy_data_relative(
+        &root,
+        relative,
+        dest,
+        repository,
+        task_root.as_deref(),
+        remaining,
+    )
+}
+
+fn copy_data_relative(
+    root: &Path,
+    relative: &Path,
+    dest: &Path,
+    repository: &Path,
+    task_root: Option<&Path>,
+    remaining: &mut u64,
+) -> Result<(), Unrun> {
     let io = |path: &Path, error: std::io::Error| Unrun(format!("{}: {error}", path.display()));
     let source = root.join(relative);
     if !relative.as_os_str().is_empty() && excluded(relative, task_root) {
@@ -318,7 +349,7 @@ fn copy_data(
         std::fs::create_dir_all(&target).map_err(|e| io(&target, e))?;
         for item in std::fs::read_dir(&source).map_err(|e| io(&source, e))? {
             let item = item.map_err(|e| io(&source, e))?;
-            copy_data(
+            copy_data_relative(
                 root,
                 &relative.join(item.file_name()),
                 dest,

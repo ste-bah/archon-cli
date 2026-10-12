@@ -7,6 +7,29 @@ fn repository(source: &tempfile::TempDir) -> PathBuf {
     path
 }
 
+fn committed_repository(path: &Path) -> String {
+    let run = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    run(&["init", "-q"]);
+    run(&["config", "user.email", "test@example.invalid"]);
+    run(&["config", "user.name", "test"]);
+    run(&["commit", "-q", "--allow-empty", "-m", "fixture"]);
+    run(&["rev-parse", "HEAD"])
+}
+
 #[test]
 fn freeze_outputs_are_absent_from_the_probe_copy_and_digest() {
     let source = tempfile::tempdir().unwrap();
@@ -72,6 +95,7 @@ fn hermetic_copy_file_set_matches_its_digest_inputs() {
     let destination = tempfile::tempdir().unwrap();
     let project = source.path().canonicalize().unwrap();
     let repository = repository(&source);
+    let commit = committed_repository(&repository);
     let task_root = project.join("tasks/set");
     let files = [
         (".archon/project/data/registry.json", b"registry".as_slice()),
@@ -95,40 +119,19 @@ fn hermetic_copy_file_set_matches_its_digest_inputs() {
     std::fs::create_dir_all(&task_root).unwrap();
     let task_root = task_root.canonicalize().unwrap();
 
-    let mut remaining = u64::MAX;
-    copy_data(
-        &project,
-        Path::new(""),
+    let before = data_digest(&project, &repository, Some(&task_root)).unwrap();
+    let copy = HermeticCopy::at(
         destination.path(),
         &repository,
+        &project,
         Some(&task_root),
-        &mut remaining,
+        &commit,
     )
     .unwrap();
-
-    let mut digest_inputs = std::collections::BTreeSet::new();
-    let mut stack = vec![PathBuf::new()];
-    while let Some(relative) = stack.pop() {
-        if !relative.as_os_str().is_empty() && excluded(&relative, Some(&task_root)) {
-            continue;
-        }
-        let path = project.join(&relative);
-        if path == repository {
-            continue;
-        }
-        let metadata = path.symlink_metadata().unwrap();
-        if metadata.is_dir() {
-            for entry in std::fs::read_dir(path).unwrap() {
-                stack.push(relative.join(entry.unwrap().file_name()));
-            }
-        } else if metadata.is_file() {
-            digest_inputs.insert(relative);
-        }
-    }
     let mut copied_files = std::collections::BTreeSet::new();
     let mut stack = vec![PathBuf::new()];
     while let Some(relative) = stack.pop() {
-        for entry in std::fs::read_dir(destination.path().join(&relative)).unwrap() {
+        for entry in std::fs::read_dir(copy.project.join(&relative)).unwrap() {
             let entry = entry.unwrap();
             let child = relative.join(entry.file_name());
             if entry.file_type().unwrap().is_dir() {
@@ -138,8 +141,57 @@ fn hermetic_copy_file_set_matches_its_digest_inputs() {
             }
         }
     }
-    assert_eq!(copied_files, digest_inputs);
+    for path in [
+        "tasks/set/acceptance-contract.json",
+        "tasks/set/acceptance-contract.lock",
+        "tasks/set/task-skeleton.json",
+        "tasks/set/task-skeleton.lock",
+        "tasks/set/TASK-NAMED-001.md",
+        "tasks/set/TASK-UNNAMED-002.md",
+    ] {
+        assert!(!copied_files.contains(Path::new(path)), "{path}");
+    }
     assert!(copied_files.contains(Path::new("tasks/set/config.json")));
+    assert_eq!(
+        before,
+        data_digest(&project, &repository, Some(&task_root)).unwrap(),
+        "excluded task-root artifacts do not enter the production digest"
+    );
+    for path in [
+        "acceptance-contract.json",
+        "acceptance-contract.lock",
+        "task-skeleton.json",
+        "task-skeleton.lock",
+        "TASK-NAMED-001.md",
+        "TASK-UNNAMED-002.md",
+    ] {
+        std::fs::write(task_root.join(path), b"changed excluded data").unwrap();
+    }
+    assert_eq!(
+        before,
+        data_digest(&project, &repository, Some(&task_root)).unwrap()
+    );
+    copy.remove().unwrap();
+}
+
+#[test]
+fn copy_data_rejects_a_task_root_outside_the_project() {
+    let source = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let destination = tempfile::tempdir().unwrap();
+    let root = source.path().canonicalize().unwrap();
+    let mut remaining = u64::MAX;
+    let error = copy_data(
+        &root,
+        Path::new(""),
+        destination.path(),
+        &repository(&source),
+        Some(outside.path()),
+        &mut remaining,
+    )
+    .unwrap_err();
+    assert!(error.0.contains("task root"), "{}", error.0);
+    assert!(error.0.contains("outside project"), "{}", error.0);
 }
 
 #[test]

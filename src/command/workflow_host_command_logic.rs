@@ -223,18 +223,19 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 12: #423 check blocks normalize CR/CRLF to LF; a shell setup error is refused as a pre-implementation proof.
         // #434 re-pin only: the fidelity critic's store and reply schema are in this closure; freeze never asks the critic.
         // 14: #417 task-root exclusions and copies use the same project-relative input set as its digest.
+        // #417 re-pin only: direct copy calls now normalize roots like the production caller.
         version: 14,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "9c879d5473b6f621ed68f9ce920f5fb2e13dc85d1e6929f728f0efa50f8d2f20",
+        sources_digest: "89dea315685991d8b47ef32a8873d55214dcd39c014db0b90d7b7a69d05610c4",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        // #434 and #417 re-pin only: harness input paths and pipeline outputs do not alter this verdict.
+        // #434 and #417 re-pin only: harness input paths, pipeline outputs, and copy API normalization do not alter this verdict.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "9c879d5473b6f621ed68f9ce920f5fb2e13dc85d1e6929f728f0efa50f8d2f20",
+        sources_digest: "89dea315685991d8b47ef32a8873d55214dcd39c014db0b90d7b7a69d05610c4",
         build_bound: false,
     },
     CapabilityLogic {
@@ -280,10 +281,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #417 copied check inputs omit freeze-owned files, which can change a check verdict.
         // 5: #417 harness-written project run state leaves hermetic check inputs, which can change a check verdict.
         // 6: #417 copied task-root inputs now match the digest exclusions, which can change a check verdict.
+        // #417 re-pin only: the direct copy API now shares the production caller's root normalization.
         version: 6,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
-        sources_digest: "5c55810b63f1f412d30bb0ab71090aaacab8f3ebaeeff57223f9084a93161187",
+        sources_digest: "217bb28d16e5939214afa4ef379dc5022707d6fde0a94c497f4986758049f1df",
         build_bound: true,
     },
     CapabilityLogic {
@@ -292,7 +294,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: verify never asks the fidelity critic or reads pipeline outputs.
-        sources_digest: "5c55810b63f1f412d30bb0ab71090aaacab8f3ebaeeff57223f9084a93161187",
+        sources_digest: "217bb28d16e5939214afa4ef379dc5022707d6fde0a94c497f4986758049f1df",
         build_bound: true,
     },
 ];
