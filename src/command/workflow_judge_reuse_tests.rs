@@ -354,6 +354,14 @@ fn supplementary_only_candidate(contract: &mut AcceptanceContract) {
     supplementary.id = "SUP-REQ-X-001".into();
     supplementary.criterion = "The output satisfies REQ-X-001.".into();
     supplementary.covers = vec!["REQ-X-001".into()];
+    // #417 reuses a saved verdict by what the judge reads (criterion, check,
+    // covers), not by id. The preflight gives this check REQ-X-001's text,
+    // which equals AC-X-001's, so it needs its own command to be a new check.
+    if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
+        &mut supplementary.check
+    {
+        command.push_str(" && test -s out.json");
+    }
     supplementary.judgment.verdict = JudgeDecision::Refuted;
     supplementary.judgment.counterexample.clear();
     supplementary.judgment.reason.clear();
