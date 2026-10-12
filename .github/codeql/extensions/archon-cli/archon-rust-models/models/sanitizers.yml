@@ -1,0 +1,8 @@
+extensions:
+  - addsTo:
+      pack: codeql/rust-all
+      extensible: barrierModel
+    data:
+      - ["archon_core::url_redact::redact_url", "ReturnValue", "log-injection", "manual"]
+      - ["archon_sdk::web::corpus::source::resolve_corpus_path", "ReturnValue", "path-injection", "manual"]
+      - ["archon_sdk::web::corpus::source::confine_to_roots", "ReturnValue", "path-injection", "manual"]
