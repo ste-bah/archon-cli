@@ -36,8 +36,7 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
     .await
 }
 
-/// The resume proper, with the running build's revision as a parameter so a
-/// test can resume a run launched by this binary as if by an upgraded one.
+/// Resume with the running build's revision, overridable in tests.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     cwd: &Path,
@@ -205,9 +204,18 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     let prd_text = std::str::from_utf8(&prd_bytes)?;
     let prd_requirement_texts =
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);
+    // Use the launcher's exact frozen-chain verifier against the live task
+    // root. The result is recorded in this runtime's phase seed below.
+    let resume_frozen_chain =
+        crate::command::workflow_decompose_frozen_chain::frozen_chain_snapshot(
+            &project_root,
+            &prd_path,
+            &task_root,
+        )?
+        .to_argument();
     let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
-    // Replay the frozen chain captured at launch; its snapshot controls which
-    // stages the script skips, regardless of later task-root changes.
+    // Keep the launch snapshot for the launch-identity equality check. The
+    // live snapshot above enters only the runtime phase seed on a transition.
     let frozen_chain = arguments
         .get("frozenChain")
         .filter(|value| value.is_object())
@@ -249,7 +257,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     )?;
     let persisted_catalog: archon_workflow::CommandCapabilityCatalog =
         read_run_json(&store, run_id, FIXED_CATALOG_PATH)?;
-    // The schemas this build reads, from the build's own catalog schema.
     if !crate::command::workflow_host_command_exec::identity::catalog_schema_readable(
         persisted_catalog.schema_version,
         catalog.schema_version,
@@ -345,6 +352,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &log_path,
         &criteria,
         &prd_requirement_texts,
+        Some(&resume_frozen_chain),
     )?;
     let seeded_arguments = crate::command::workflow_decompose_seed::seeded_arguments(
         &expected_arguments,

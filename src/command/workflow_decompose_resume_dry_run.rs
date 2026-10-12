@@ -90,6 +90,13 @@ pub(crate) async fn dry_run_fixed_decomposition(
     let prd_text = std::str::from_utf8(&prd_bytes)?;
     let requirement_texts =
         archon_workflow::v2::acceptance_stage::coverage::prd_requirement_texts(prd_text);
+    let resume_frozen_chain =
+        crate::command::workflow_decompose_frozen_chain::frozen_chain_snapshot(
+            &project_root,
+            &prd_path,
+            &task_root,
+        )?
+        .to_argument();
     let arguments: serde_json::Value = read_run_json(&store, run_id, FIXED_ARGUMENTS_PATH)?;
     let frozen_chain = arguments
         .get("frozenChain")
@@ -205,6 +212,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
                 &runtime,
                 &criteria,
                 &requirement_texts,
+                Some(&resume_frozen_chain),
             )?,
             format!("would-record transition {index} (derived in memory)"),
         )
@@ -214,6 +222,7 @@ pub(crate) async fn dry_run_fixed_decomposition(
             run_id,
             &criteria,
             &requirement_texts,
+            Some(&resume_frozen_chain),
         )?;
         let case = seed.as_ref().map_or_else(
             || "none (no harness transition)".to_string(),
@@ -265,6 +274,11 @@ pub(crate) async fn dry_run_fixed_decomposition(
         }
     }
     for (index, call) in calls.iter().enumerate() {
+        let capability = call
+            .options
+            .host_command
+            .as_ref()
+            .map(|request| request.command_id.as_str());
         let prompt = call.options.task.as_deref().unwrap_or("");
         let entry = prompt
             .split("Author ONLY entry ")
@@ -272,8 +286,9 @@ pub(crate) async fn dry_run_fixed_decomposition(
             .and_then(|tail| tail.split(':').next())
             .unwrap_or("");
         output.push_str(&format!(
-            "call[{index}] id={}{}\n",
+            "call[{index}] id={}{}{}\n",
             call.id,
+            capability.map_or_else(String::new, |name| format!(" capability={name}")),
             if entry.is_empty() {
                 String::new()
             } else {

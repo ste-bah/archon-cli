@@ -164,6 +164,10 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
         "{output}"
     );
     assert!(
+        output.contains("capability=freeze-acceptance"),
+        "host command calls name their capability: {output}"
+    );
+    assert!(
         output.contains("criterion=\"The fixture is proven.\""),
         "{output}"
     );
@@ -201,6 +205,7 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
             &state.identity,
             &std::collections::BTreeMap::new(),
             &std::collections::BTreeMap::new(),
+            None,
         )
         .unwrap()
         .expect("the changed runtime derives an in-memory seed");
@@ -225,4 +230,67 @@ async fn resume_dry_run_leaves_run_directory_byte_identical() {
         snapshot_tree(&run_dir),
         "dry run changed a run file"
     );
+}
+
+#[tokio::test]
+async fn upgraded_resume_dry_run_plans_verification_for_the_live_frozen_chain() {
+    let project = fixture_project();
+    let (store, run_id, _) =
+        super::super::workflow_decomposition_drift_tests::launch_and_pause(project.path()).await;
+    let state: FixedDecompositionStateV1 =
+        read_json(&store.run_dir(&run_id).join(FIXED_DECOMPOSITION_STATE_PATH));
+    let task_root = Path::new(&state.identity.task_root_identity);
+    crate::command::workflow_decompose_frozen_chain::test_support::freeze_chain(
+        project.path(),
+        Path::new(&state.identity.prd_identity),
+        task_root,
+        &["TASK-X-010"],
+    );
+    let contract_path =
+        task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+    let skeleton_path = task_root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE);
+    let contract_before = std::fs::read(&contract_path).unwrap();
+    let skeleton_before = std::fs::read(&skeleton_path).unwrap();
+
+    let mut old = state.identity.clone();
+    old.script_digest = "previous-script-digest".into();
+    store
+        .write_run_json(
+            &run_id,
+            TRANSITIONS_PATH,
+            &RuntimeTransitions {
+                schema_version:
+                    crate::command::workflow_decompose_transitions::TRANSITIONS_SCHEMA_VERSION,
+                transitions: vec![
+                    crate::command::workflow_decompose_transitions::RuntimeTransition::new(
+                        old,
+                        state.identity.clone(),
+                    ),
+                ],
+            },
+        )
+        .unwrap();
+
+    let before = snapshot_tree(&store.run_dir(&run_id));
+    let output = crate::command::workflow_decompose::dry_run_fixed_decomposition(
+        project.path(),
+        &run_id,
+        &launch_config(project.path()),
+    )
+    .await
+    .unwrap();
+    assert!(
+        output.contains("capability=verify-frozen-acceptance"),
+        "{output}"
+    );
+    assert!(
+        output.contains("capability=verify-frozen-skeleton"),
+        "{output}"
+    );
+    assert_eq!(before, snapshot_tree(&store.run_dir(&run_id)));
+    assert_eq!(contract_before, std::fs::read(&contract_path).unwrap());
+    assert_eq!(skeleton_before, std::fs::read(&skeleton_path).unwrap());
+    let launch_arguments: serde_json::Value =
+        read_json(&store.run_dir(&run_id).join(FIXED_ARGUMENTS_PATH));
+    assert_eq!(launch_arguments["frozenChain"]["acceptance"], false);
 }

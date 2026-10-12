@@ -1,30 +1,14 @@
-//! Phase seeds: where a resume after a runtime upgrade starts (Issue 360).
-//!
-//! Issue 358 reuses a recorded call only when its own input still matches.
-//! That keeps almost nothing once the script or its prompts change: each
-//! acceptance author prompt carries every other entry and earlier findings,
-//! so one changed decision changes every later input. What is worth keeping
-//! is the phase product, not the call sequence: the latest candidate, which
-//! gates judged it and how, and the replies authored since.
-//!
-//! At each script, catalog or template transition the resume derives that
-//! from the run's own records (`workflow_decompose_seed_derive`) and writes
-//! it once to `decomposition/phase-seeds/transition-<index>-<runtime>.json`,
-//! named by the transition and the runtime it was derived for. Every later
-//! resume on that runtime reads the same record back, so the seeded attempts
-//! replay from their own records; a later transition derives a new one. A
-//! seed is never used for another runtime: a transition record rebuilt with
-//! another runtime at the same index names another file, derived afresh from
-//! every record (the earlier seeded rounds included). The old calls stay on
-//! disk as evidence and are no longer replayed: the seeded calls continue
-//! every call and pause ordinal after them, and no call answers from an
-//! attempt recorded before the seed unless the executor finds that landing
-//! still live. The seed reaches the script as `args.phaseSeed`; the
-//! launch-bound arguments on disk never carry it.
-//!
-//! Visible as one event (kind `BinaryRevisionDrift`, `detail.event =
-//! decomposition_phase_seeded`), one `.decompose.log` line and the status
-//! lines below, each written once per seed.
+//! Phase seeds start a resume after a runtime upgrade (Issue 360). They keep
+//! the latest candidate, its gate findings and replies from run records when
+//! changed prompts make individual call results unusable. Each script,
+//! catalog or template transition writes one seed at
+//! `decomposition/phase-seeds/transition-<index>-<runtime>.json`; later
+//! resumes on that runtime read the same seed, while another transition gets
+//! a new seed derived from all records. Seeded call and pause ordinals follow
+//! the old history; old calls remain evidence and only live landings can
+//! answer from them. Script arguments expose the seed as `args.phaseSeed`,
+//! while launch-bound arguments remain unchanged. Each seed emits one
+//! `BinaryRevisionDrift` event, log line and status block.
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -58,6 +42,11 @@ pub(crate) struct PhaseSeed {
     /// The highest pause ordinal each pause subject took.
     pub(crate) pause_ordinals: BTreeMap<String, u64>,
     pub(crate) subjects: BTreeMap<String, SubjectSeed>,
+    /// Frozen artifacts verified from the live task root for this runtime.
+    /// This is separate from launch-bound arguments so resumed runs preserve
+    /// their original identity while replaying the same resume decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) resume_frozen_chain: Option<serde_json::Value>,
     /// The run's generation when the seed was derived: every pause taken
     /// before it covers history the seeded run no longer replays.
     pub(crate) pause_generation_floor: u64,
@@ -197,6 +186,7 @@ fn derive_seed(
     (index, runtime): (usize, FixedRunIdentityV1),
     criteria: &BTreeMap<String, String>,
     requirement_texts: &BTreeMap<String, String>,
+    resume_frozen_chain: Option<&serde_json::Value>,
 ) -> Result<PhaseSeed> {
     let results = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
     let records = results.load_call_records()?;
@@ -223,6 +213,7 @@ fn derive_seed(
         author_ordinals: derived.author_ordinals,
         pause_ordinals: derived.pause_ordinals,
         subjects: derived.subjects,
+        resume_frozen_chain: resume_frozen_chain.cloned(),
         event_id: None,
     })
 }
@@ -236,7 +227,7 @@ pub(crate) fn current_seed(
     log_path: &Path,
     criteria: &BTreeMap<String, String>,
 ) -> Result<Option<PhaseSeed>> {
-    current_seed_with_requirement_texts(store, run_id, log_path, criteria, &BTreeMap::new())
+    current_seed_with_requirement_texts(store, run_id, log_path, criteria, &BTreeMap::new(), None)
 }
 
 pub(crate) fn current_seed_with_requirement_texts(
@@ -245,6 +236,7 @@ pub(crate) fn current_seed_with_requirement_texts(
     log_path: &Path,
     criteria: &BTreeMap<String, String>,
     requirement_texts: &BTreeMap<String, String>,
+    resume_frozen_chain: Option<&serde_json::Value>,
 ) -> Result<Option<PhaseSeed>> {
     let Some((index, runtime)) = seeded_transition(store, run_id)? else {
         return Ok(None);
@@ -256,6 +248,7 @@ pub(crate) fn current_seed_with_requirement_texts(
         &runtime,
         criteria,
         requirement_texts,
+        resume_frozen_chain,
         Some(log_path),
     )
 }
@@ -266,6 +259,7 @@ pub(crate) fn current_seed_read_only(
     run_id: &str,
     criteria: &BTreeMap<String, String>,
     requirement_texts: &BTreeMap<String, String>,
+    resume_frozen_chain: Option<&serde_json::Value>,
 ) -> Result<Option<PhaseSeed>> {
     let Some((index, runtime)) = seeded_transition(store, run_id)? else {
         return Ok(None);
@@ -277,6 +271,7 @@ pub(crate) fn current_seed_read_only(
         &runtime,
         criteria,
         requirement_texts,
+        resume_frozen_chain,
     )
 }
 
@@ -289,6 +284,7 @@ pub(crate) fn current_seed_read_only_for_transition(
     runtime: &FixedRunIdentityV1,
     criteria: &BTreeMap<String, String>,
     requirement_texts: &BTreeMap<String, String>,
+    resume_frozen_chain: Option<&serde_json::Value>,
 ) -> Result<Option<PhaseSeed>> {
     seed_for_transition(
         store,
@@ -297,6 +293,7 @@ pub(crate) fn current_seed_read_only_for_transition(
         runtime,
         criteria,
         requirement_texts,
+        resume_frozen_chain,
         None,
     )
 }
@@ -310,6 +307,7 @@ fn seed_for_transition(
     runtime: &FixedRunIdentityV1,
     criteria: &BTreeMap<String, String>,
     requirement_texts: &BTreeMap<String, String>,
+    resume_frozen_chain: Option<&serde_json::Value>,
     log_path: Option<&Path>,
 ) -> Result<Option<PhaseSeed>> {
     let mut seed = match read_seed(store, run_id, index, runtime)? {
@@ -321,6 +319,7 @@ fn seed_for_transition(
                 (index, runtime.clone()),
                 criteria,
                 requirement_texts,
+                resume_frozen_chain,
             )?;
             if log_path.is_some() {
                 write_seed(store, run_id, &seed)?;
@@ -345,6 +344,11 @@ pub(crate) fn seeded_arguments(
 ) -> serde_json::Value {
     let mut arguments = arguments.clone();
     if let (Some(seed), Some(map)) = (seed, arguments.as_object_mut()) {
+        if let Some(frozen_chain) = &seed.resume_frozen_chain {
+            // A resume-time override is carried by the durable phase seed;
+            // launch-bound arguments.json remains byte-for-byte unchanged.
+            map.insert("frozenChain".into(), frozen_chain.clone());
+        }
         map.insert(
             "phaseSeed".into(),
             serde_json::json!({
