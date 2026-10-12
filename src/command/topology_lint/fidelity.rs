@@ -15,11 +15,13 @@
 //!
 //! Obligations are grouped by the exact set of tasks audited for them, so
 //! each task's full text travels once per cluster rather than once per
-//! obligation. Each call batch's verdicts are saved under the project's
-//! `.archon/lint-cache` the moment they arrive, keyed by a digest of the
-//! obligation texts, the task texts and the skeleton plus the binary and the
-//! critic (`fidelity_store.rs`): re-running lint over an unchanged set costs
-//! nothing, and editing one task re-asks only the clusters that task is in.
+//! obligation. Each verdict is saved under the project's `.archon/lint-cache`
+//! the moment it arrives, one record per obligation keyed by its text, the
+//! binary and the critic (`fidelity_store.rs`, #434). A verdict, true or
+//! false, is reused only over the same cluster with byte-identical task
+//! texts; only the obligations with no standing verdict are asked, so an
+//! edited task re-asks only the obligations whose cluster holds it, and two
+//! standing verdicts that disagree are one blocking finding quoting both.
 //! The staged set gate runs the calls under its host wall clock and stops
 //! resumable before it, so a retry continues from the saved batches
 //! (`fidelity_resume.rs`, Issue 259). A false verdict blocks
@@ -63,8 +65,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use archon_workflow::fidelity_audit::{
-    ClaimedObligation, ClaimingTask, ObligationWaiver, SkeletonSummary, fidelity_cluster_digest,
-    fidelity_finding,
+    ClaimedObligation, ClaimingTask, ObligationWaiver, SkeletonSummary,
+    fidelity_contradiction_finding, fidelity_finding,
 };
 use archon_workflow::llm_client_port::WorkflowLlmClient;
 use archon_workflow::obligation_ids::obligation_texts;
@@ -74,17 +76,11 @@ use super::LintSource;
 use super::fidelity_critic::CRITIC_MODEL_ALIAS;
 #[cfg(test)]
 use super::fidelity_critic::FIDELITY_NO_PROGRESS_WINDOW;
-use super::fidelity_resume::{LintIncomplete, Resolved, resolve};
-use super::fidelity_store::{StoreIdentity, VerdictStore, store_dir};
+use super::fidelity_resume::{Cluster, LintIncomplete, resolve};
+use super::fidelity_store::{Standing, StoreIdentity, VerdictStore, store_dir};
 use crate::command::topology_task_graph::task_requirement_claims_tolerant;
 use crate::command::workflow_freeze_budget::FreezeResume;
 use crate::command::workflow_gate::{GateEvaluation, GateFinding, GateId};
-
-/// Most obligations asked in one call. A cluster of one task claiming
-/// twenty-three ids drew replies that dropped an id or invented one, twice;
-/// eight verdicts per reply is a size the critic answers completely, and the
-/// task texts it re-sends per batch are what provider prompt caches absorb.
-const FIDELITY_MAX_OBLIGATIONS_PER_CALL: usize = 8;
 
 pub(super) struct FidelityFinding {
     pub(super) text: String,
@@ -335,40 +331,29 @@ async fn audit_scoped(
     // cluster order while the provider calls run a few at a time: one call
     // took minutes on the live host, and sixteen in sequence is an hour a set
     // gate should not spend when the provider serves them side by side.
-    let texts = &texts;
-    let inputs: Vec<(Vec<ClaimedObligation>, Vec<ClaimingTask>, String)> = clusters
+    let inputs: Vec<Cluster> = clusters
         .iter()
-        .flat_map(|(task_ids, obligation_ids)| {
+        .map(|(task_ids, obligation_ids)| {
             let tasks = task_ids
                 .iter()
                 .map(|id| ClaimingTask {
                     task_id: id.clone(),
                     text: task_texts[id].0.clone(),
                 })
-                .collect::<Vec<_>>();
-            obligation_ids
-                .chunks(FIDELITY_MAX_OBLIGATIONS_PER_CALL)
-                .map(move |batch| {
-                    let obligations = batch
-                        .iter()
-                        .map(|id| ClaimedObligation {
-                            id: id.clone(),
-                            text: texts[id].clone(),
-                        })
-                        .collect::<Vec<_>>();
-                    let digest = fidelity_cluster_digest(&obligations, &tasks, skeleton);
-                    (obligations, tasks.clone(), digest)
+                .collect();
+            let obligations = obligation_ids
+                .iter()
+                .map(|id| ClaimedObligation {
+                    id: id.clone(),
+                    text: texts[id].clone(),
                 })
-                .collect::<Vec<_>>()
+                .collect();
+            (obligations, tasks)
         })
         .collect();
     let unlimited = FreezeResume::none();
     let store = VerdictStore::new(store_dir(cwd), StoreIdentity::of(client));
-    let Resolved {
-        verdicts: resolved,
-        asked,
-        cached,
-    } = resolve(
+    let resolved = resolve(
         client,
         &store,
         &inputs,
@@ -378,20 +363,31 @@ async fn audit_scoped(
     .await?;
     let mut report = String::from("\n## obligation fidelity\n");
     let mut findings = Vec::new();
-    for ((_, tasks, _), verdicts) in inputs.iter().zip(resolved) {
+    for ((_, tasks), standings) in inputs.iter().zip(resolved.standings) {
         let task_ids: Vec<String> = tasks.iter().map(|task| task.task_id.clone()).collect();
-        let task_ids = &task_ids;
-        for verdict in verdicts {
-            if verdict.necessarily_true {
-                report.push_str(&format!(
-                    "  {}: necessarily true given {}\n",
-                    verdict.obligation_id,
-                    task_ids.join(", ")
-                ));
-                continue;
-            }
-            let claimants: Vec<String> = claiming[&verdict.obligation_id].iter().cloned().collect();
-            let text = fidelity_finding(&verdict, &claimants);
+        for standing in standings {
+            let (verdict, text) = match standing {
+                Standing::Verdict(verdict) if verdict.necessarily_true => {
+                    report.push_str(&format!(
+                        "  {}: necessarily true given {}\n",
+                        verdict.obligation_id,
+                        task_ids.join(", ")
+                    ));
+                    continue;
+                }
+                Standing::Verdict(verdict) => {
+                    let claimants = claimants_of(&claiming, &verdict.obligation_id);
+                    let text = fidelity_finding(&verdict, &claimants);
+                    (verdict, text)
+                }
+                // #434: two standing verdicts disagree; the false one is
+                // routed as any false verdict is, and the finding quotes both.
+                Standing::Contradiction { refuted, supported } => {
+                    let claimants = claimants_of(&claiming, &refuted.obligation_id);
+                    let text = fidelity_contradiction_finding(&refuted, &supported, &claimants);
+                    (refuted, text)
+                }
+            };
             if let Some(waiver) = waivers
                 .iter()
                 .find(|w| w.obligation_id == verdict.obligation_id)
@@ -430,17 +426,24 @@ async fn audit_scoped(
         report.push_str(&format!("  NOTE {note}\n"));
     }
     report.push_str(&format!(
-        "  {} claimed obligation(s) in {} cluster(s), {} call batch(es): {asked} asked of {}, {cached} served from {}\n",
+        "  {} claimed obligation(s) in {} cluster(s), {} call batch(es): {} asked of {}, {} served from {}\n",
         clusters.values().map(Vec::len).sum::<usize>(),
         clusters.len(),
-        inputs.len(),
+        resolved.batches,
+        resolved.asked,
         client.resolve_model_alias(CRITIC_MODEL_ALIAS),
+        resolved.cached,
         store.dir().display()
     ));
     if clusters.is_empty() {
         report.push_str("  no task claims an obligation the PRD defines; nothing to audit.\n");
     }
     Ok(FidelityAudit { report, findings })
+}
+
+/// Every task that claims `id`, in id order.
+fn claimants_of(claiming: &BTreeMap<String, BTreeSet<String>>, id: &str) -> Vec<String> {
+    claiming[id].iter().cloned().collect()
 }
 
 /// The set's frozen skeleton as the critic reads it. Absent is a legacy set

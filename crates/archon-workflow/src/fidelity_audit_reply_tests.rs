@@ -9,8 +9,8 @@ fn class(reply: &str) -> (Option<usize>, RefusalKind) {
         .class()
 }
 
-const DONE: &str = r#"{"obligation_id":"DONE-9","necessarily_true":true,"reason":"r"}"#;
-const AC: &str = r#"{"obligation_id":"AC-WS-003","necessarily_true":true,"reason":"r"}"#;
+const DONE: &str = r#"{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r"}"#;
+const AC: &str = r#"{"obligation_id":"AC-WS-003","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r"}"#;
 
 #[test]
 fn shape_errors_map_to_their_verdict_and_kind() {
@@ -30,7 +30,7 @@ fn shape_errors_map_to_their_verdict_and_kind() {
     );
     let stray = |name: &str| {
         format!(
-            r#"{{"verdicts":[{AC},{{"obligation_id":"DONE-9","necessarily_true":true,"reason":"r","{name}":""}}]}}"#
+            r#"{{"verdicts":[{AC},{{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r","{name}":""}}]}}"#
         )
     };
     assert_eq!(class(&stray("x")), (Some(1), RefusalKind::UnknownField));
@@ -47,13 +47,13 @@ fn shape_errors_map_to_their_verdict_and_kind() {
     );
     assert_eq!(
         class(&format!(
-            r#"{{"verdicts":[{{"obligation_id":"AC-WS-003","necessarily_true":true,"reason":5}},{DONE}]}}"#
+            r#"{{"verdicts":[{{"obligation_id":"AC-WS-003","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":5}},{DONE}]}}"#
         )),
         (Some(0), RefusalKind::InvalidType("reason"))
     );
     // An index past the cluster is the document's: indexes stay in the cluster.
     let past = format!(
-        r#"{{"verdicts":[{AC},{DONE},{AC},{{"obligation_id":"X","necessarily_true":true,"reason":"r","stray":1}}]}}"#
+        r#"{{"verdicts":[{AC},{DONE},{AC},{{"obligation_id":"X","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r","stray":1}}]}}"#
     );
     assert_eq!(class(&past), (None, RefusalKind::UnknownField));
 }
@@ -86,11 +86,11 @@ fn validation_errors_map_to_their_verdict_and_kind() {
         class(&false_without(
             r#","weakest_task_id":"TASK-WS-005","quoted_task_text":"paraphrase""#
         )),
-        (Some(1), RefusalKind::Other)
+        (Some(1), RefusalKind::NotVerbatim("quoted_task_text"))
     );
     assert_eq!(
         class(&format!(
-            r#"{{"verdicts":[{{"obligation_id":"AC-WS-003","necessarily_true":true,"reason":" "}},{DONE}]}}"#
+            r#"{{"verdicts":[{{"obligation_id":"AC-WS-003","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":" "}},{DONE}]}}"#
         )),
         (Some(0), RefusalKind::BlankRequired("reason"))
     );

@@ -150,7 +150,7 @@ fn both_verdicts_parse_and_a_false_verdict_renders_the_finding() {
         {"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005",
          "reason":"the task tests against a temporary root so the shared registry may stay empty",
          "quoted_task_text":"library-level focused tests against a temporary target root; the shared project root is untouched."},
-        {"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"the spec is required to reference registered ids","quoted_task_text":""}
+        {"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"the spec is required to reference registered ids","quoted_task_text":""}
     ]}"#;
     let verdicts = parse_fidelity_response(reply, &obligations(), &tasks()).expect("parses");
     assert_eq!(verdicts.len(), 2);
@@ -170,7 +170,7 @@ fn both_verdicts_parse_and_a_false_verdict_renders_the_finding() {
 fn a_quote_that_re_wraps_lines_still_counts_as_verbatim() {
     let reply = r#"{"verdicts":[
         {"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005","reason":"r","quoted_task_text":"against a temporary target root; the shared"},
-        {"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}
+        {"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""}
     ]}"#;
     assert!(parse_fidelity_response(reply, &obligations(), &tasks()).is_ok());
 }
@@ -182,7 +182,7 @@ fn a_quote_that_re_wraps_lines_still_counts_as_verbatim() {
 fn a_quote_with_double_escaped_newlines_still_counts_as_verbatim() {
     let reply = r#"{"verdicts":[
         {"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005","reason":"r","quoted_task_text":"Scope: library-level focused tests against a temporary\\ntarget root; the shared"},
-        {"obligation_id":"DONE-9","necessarily_true":true,"reason":"r"}
+        {"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r"}
     ]}"#;
     let verdicts = parse_fidelity_response(reply, &obligations(), &tasks()).expect("parses");
     assert!(
@@ -201,31 +201,31 @@ fn malformed_replies_are_errors_not_passes() {
         ("not json", "not the verdict document"),
         (r#"{"verdicts":[]}"#, "do not match the cluster"),
         (
-            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""},{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""},{"obligation_id":"AC-WS-999","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
+            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""},{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""},{"obligation_id":"AC-WS-999","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
             "extra=[\"AC-WS-999\"]",
         ),
         (
-            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005","reason":"r","quoted_task_text":"paraphrased loophole"},{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
+            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005","reason":"r","quoted_task_text":"paraphrased loophole"},{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
             "does not appear verbatim",
         ),
         (
-            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-404","reason":"r","quoted_task_text":"temporary"},{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
+            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-404","reason":"r","quoted_task_text":"temporary"},{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
             "not in the audited cluster",
         ),
         (
-            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
+            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
             "missing=[\"DONE-9\"]",
         ),
         (
-            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005","reason":"r","quoted_task_text":""},{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
+            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":false,"weakest_task_id":"TASK-WS-005","reason":"r","quoted_task_text":""},{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
             "quotes nothing",
         ),
         (
-            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"weakest_task_id":"","reason":"","quoted_task_text":""},{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
+            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"","quoted_task_text":""},{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
             "empty reason",
         ),
         (
-            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":"","extra":1},{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
+            r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":"","extra":1},{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#,
             "not the verdict document",
         ),
     ];
@@ -242,7 +242,7 @@ fn malformed_replies_are_errors_not_passes() {
 /// verdict type serializes.
 #[test]
 fn prompt_lists_the_exact_verdict_keys_and_parse_errors_name_their_path() {
-    let keys = "obligation_id, necessarily_true, weakest_task_id, reason, quoted_task_text";
+    let keys = "obligation_id, necessarily_true, weakest_task_id, reason, quoted_task_text, supporting_task_id, supporting_text";
     let prompt = fidelity_prompt(&obligations(), &tasks(), &SkeletonSummary::absent());
     assert!(
         prompt.contains(&format!(
@@ -256,6 +256,8 @@ fn prompt_lists_the_exact_verdict_keys_and_parse_errors_name_their_path() {
         weakest_task_id: String::new(),
         reason: String::new(),
         quoted_task_text: String::new(),
+        supporting_task_id: String::new(),
+        supporting_text: String::new(),
     };
     let serialized: std::collections::BTreeSet<String> = serde_json::to_value(&verdict)
         .unwrap()
@@ -266,13 +268,13 @@ fn prompt_lists_the_exact_verdict_keys_and_parse_errors_name_their_path() {
         .collect();
     let listed: std::collections::BTreeSet<String> = keys.split(", ").map(str::to_string).collect();
     assert_eq!(serialized, listed);
-    let stray = r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"reason":"r"},{"obligation_id":"DONE-9","necessarily_true":true,"reason":"r","weakest_task_text":""}]}"#;
+    let stray = r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r"},{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r","weakest_task_text":""}]}"#;
     let error = parse_fidelity_response(stray, &obligations(), &tasks()).expect_err("stray key");
     assert!(
         error.contains("verdicts[1]") && error.contains("unknown field `weakest_task_text`"),
         "{error}"
     );
-    let missing = r#"{"verdicts":[{"obligation_id":"AC-WS-003","reason":"r"},{"obligation_id":"DONE-9","necessarily_true":true,"reason":"r"}]}"#;
+    let missing = r#"{"verdicts":[{"obligation_id":"AC-WS-003","reason":"r"},{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r"}]}"#;
     let error = parse_fidelity_response(missing, &obligations(), &tasks()).expect_err("missing");
     assert!(
         error.contains("verdicts[0]") && error.contains("missing field `necessarily_true`"),
@@ -286,7 +288,7 @@ fn prompt_lists_the_exact_verdict_keys_and_parse_errors_name_their_path() {
 /// nothing to name or quote, so leaving the two keys out is still an answer.
 #[test]
 fn a_false_verdict_without_its_weakest_task_or_quote_is_refused_naming_the_key() {
-    let done = r#"{"obligation_id":"DONE-9","necessarily_true":true,"reason":"r"}"#;
+    let done = r#"{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r"}"#;
     let cases = [
         (
             r#"{"obligation_id":"AC-WS-003","necessarily_true":false,"reason":"r","quoted_task_text":"temporary"}"#,
@@ -318,7 +320,7 @@ fn a_false_verdict_without_its_weakest_task_or_quote_is_refused_naming_the_key()
 
 #[test]
 fn a_true_verdict_without_weakest_task_or_quote_is_an_answer() {
-    let reply = r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"reason":"r"},{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#;
+    let reply = r#"{"verdicts":[{"obligation_id":"AC-WS-003","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","reason":"r"},{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""}]}"#;
     let verdicts = parse_fidelity_response(reply, &obligations(), &tasks()).expect("answered");
     for verdict in &verdicts {
         assert!(verdict.necessarily_true);
@@ -337,7 +339,7 @@ fn an_over_long_reason_is_cut_to_the_limit_and_accepted() {
         .join(" ");
     assert_eq!(reason.chars().count(), 449);
     let reply = format!(
-        r#"{{"verdicts":[{{"obligation_id":"AC-WS-003","necessarily_true":true,"weakest_task_id":"","reason":"{reason}","quoted_task_text":""}},{{"obligation_id":"DONE-9","necessarily_true":true,"weakest_task_id":"","reason":"r","quoted_task_text":""}}]}}"#
+        r#"{{"verdicts":[{{"obligation_id":"AC-WS-003","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"{reason}","quoted_task_text":""}},{{"obligation_id":"DONE-9","necessarily_true":true,"supporting_task_id":"TASK-WS-009","supporting_text":"Bindings may carry status: pending-ingest.","weakest_task_id":"","reason":"r","quoted_task_text":""}}]}}"#
     );
     let verdicts = parse_fidelity_response(&reply, &obligations(), &tasks()).expect("parses");
     let kept = &verdicts[0].reason;
@@ -432,3 +434,5 @@ fn cluster_digest_changes_with_any_text_or_the_skeleton_and_nothing_else() {
 
 #[path = "fidelity_audit_reply_tests.rs"]
 mod reply;
+#[path = "fidelity_audit_support_tests.rs"]
+mod support;

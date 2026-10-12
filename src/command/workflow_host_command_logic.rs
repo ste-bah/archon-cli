@@ -221,6 +221,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 11: #417 #418 #419 freeze-owned outputs leave check inputs; passability and judge verdicts reuse by scoped input keys.
         // #421 changes when a recorded freeze is reused (a later publication extends its pin), not how it is judged.
         // 12: #423 check blocks normalize CR/CRLF to LF; a shell setup error is refused as a pre-implementation proof.
+        // #434 re-pin only: the fidelity critic's store and reply schema are in this closure; freeze never asks the critic.
         version: 12,
         sources: &[GATE, CONTRACT, FREEZE],
         sources_digest: "5c5df7fcb1d980cbf4c25e98811aa6b1d13bd2d9b07942fcc9cb3270497353fd",
@@ -229,6 +230,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "freeze-skeleton",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        // #434 re-pin only, as freeze-acceptance.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
         sources_digest: "5c5df7fcb1d980cbf4c25e98811aa6b1d13bd2d9b07942fcc9cb3270497353fd",
@@ -243,7 +245,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
         // 7: #428 the host stamps frozen skeleton frontmatter fields at landing.
-        // 8: #434 a cross-task fidelity gap blocks only its weakest task's body; the set gate routes the rest.
+        // 8: #434 a fidelity gap blocks only its weakest task's body; true verdicts quote a checked anchor and are reused per obligation.
         version: 8,
         sources: &[GATE, CONTRACT, LINT],
         sources_digest: "6778a29afce5be9fde9fb0383911c7cf770949aaa90be81cb05090a1bf6f07be",
@@ -256,7 +258,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380's obligation model changes the frozen contract verdict.
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
-        version: 6,
+        // 7: #434 true fidelity verdicts quote a checked anchor and are reused per obligation over byte-identical cluster texts.
+        version: 7,
         sources: &[GATE, CONTRACT, LINT],
         sources_digest: "6778a29afce5be9fde9fb0383911c7cf770949aaa90be81cb05090a1bf6f07be",
         build_bound: false,
@@ -266,6 +269,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
+        // #434 re-pin only: trace never asks the fidelity critic.
         sources_digest: "94cf8997b1bb0784d0d3a2de8fd1edd57a2dbc6d0400d583f22ffcdb63679c4d",
         build_bound: true,
     },
@@ -275,6 +279,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #417 copied check inputs omit freeze-owned files, which can change a check verdict.
         version: 4,
         sources: &[GATE, CONTRACT, VERIFY],
+        // #434 re-pin only: verify never asks the fidelity critic.
         sources_digest: "b93a354868cdee593ece3d2f804e6def4a8fe3251d3e36f82d7e30a7befe8fd2",
         build_bound: true,
     },
@@ -283,6 +288,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
+        // #434 re-pin only: verify never asks the fidelity critic.
         sources_digest: "b93a354868cdee593ece3d2f804e6def4a8fe3251d3e36f82d7e30a7befe8fd2",
         build_bound: true,
     },

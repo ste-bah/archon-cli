@@ -84,9 +84,9 @@ async fn a_stray_key_then_a_corrected_reply_is_judged_through_the_real_provider_
     }];
     let tasks = [ClaimingTask {
         task_id: "TASK-X-001".into(),
-        text: "required behavior".into(),
+        text: "The task stores the required behavior in the shared registry on every run.".into(),
     }];
-    let good = serde_json::json!({"verdicts": [{"obligation_id": "REQ-X-001", "necessarily_true": true, "weakest_task_id": "", "reason": "the task obliges it", "quoted_task_text": ""}]});
+    let good = serde_json::json!({"verdicts": [{"obligation_id": "REQ-X-001", "necessarily_true": true, "weakest_task_id": "", "reason": "the task obliges it", "quoted_task_text": "", "supporting_task_id": "TASK-X-001", "supporting_text": "The task stores the required behavior in the shared registry on every run."}]});
     let mut stray = good.clone();
     stray["verdicts"][0]["weakest_task_text"] = "".into();
     let (endpoint, bodies) = serve(vec![stray.to_string(), good.to_string()]).await;

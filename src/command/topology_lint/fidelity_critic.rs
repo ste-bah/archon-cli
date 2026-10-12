@@ -30,8 +30,8 @@ pub(super) const CRITIC_MODEL_ALIAS: &str = "opus";
 /// verdict comes earlier than the last error (a shorter reply that fixed a
 /// later verdict). The same class again is no progress, whatever its text:
 /// a new unknown key name in the same verdict, or a byte-identical reply.
-/// There are at most (verdicts + 1) × 29 classes (each verdict of the
-/// cluster plus the document, times 29 kinds), so progress is bounded by the
+/// There are at most (verdicts + 1) × 46 classes (each verdict of the
+/// cluster plus the document, times 46 kinds), so progress is bounded by the
 /// definition itself; there is no fixed total on attempts, and only this
 /// window ends a run of no progress. Observed live: one stray empty key in
 /// a complete document, re-sent unchanged at temperature 0.0, came back

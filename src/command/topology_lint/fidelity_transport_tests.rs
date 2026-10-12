@@ -18,7 +18,6 @@ async fn lint(client: Arc<dyn archon_workflow::WorkflowLlmClient>, cache: &Path)
             task_id: "TASK-X-001".into(),
             text: "required behavior".into(),
         }],
-        "batch".into(),
     )];
     let resume = crate::command::workflow_freeze_budget::FreezeResume::saving(
         FreezeBudget::unlimited(),

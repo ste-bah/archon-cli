@@ -21,6 +21,8 @@ mod body;
 mod chain;
 #[path = "fidelity_reask_tests.rs"]
 mod reask;
+#[path = "fidelity_reuse_tests.rs"]
+mod reuse;
 #[path = "fidelity_skeleton_tests.rs"]
 mod skeleton;
 
@@ -99,6 +101,24 @@ impl WorkflowLlmClient for FakeCritic {
 
 const LOOPHOLE: &str =
     "Focused tests run against a temporary target root; the shared store is untouched.";
+/// The prose of TASK-WS-001 a true verdict quotes in support (#434).
+const SUPPORT: &str =
+    "Ingestion writes every registry entry into the shared store before it returns.";
+
+/// The saved verdict records under `cwd` (lock files are not records).
+fn record_files(cwd: &Path) -> Vec<PathBuf> {
+    let cache = cwd.join(".archon/lint-cache/fidelity");
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(cache)
+        .map(|entries| {
+            entries
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+                .collect()
+        })
+        .unwrap_or_default();
+    paths.sort();
+    paths
+}
 
 /// One PRD with two obligations, one task claiming both. Returns the cwd.
 fn corpus() -> tempfile::TempDir {
@@ -113,7 +133,7 @@ fn corpus() -> tempfile::TempDir {
     std::fs::write(
         tasks.join("TASK-WS-001.md"),
         format!(
-            "# TASK-WS-001 — Ingest\n\n```yaml\ntask_id: TASK-WS-001\ntitle: Ingest\ncomplexity: medium\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"G-WS-001\", \"AC-WS-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Scope\n\n{LOOPHOLE}\n\n## Focused Tests\n\n- `cargo test -p widgets`\n"
+            "# TASK-WS-001 — Ingest\n\n```yaml\ntask_id: TASK-WS-001\ntitle: Ingest\ncomplexity: medium\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"G-WS-001\", \"AC-WS-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Scope\n\n{LOOPHOLE}\n\n{SUPPORT}\n\n## Focused Tests\n\n- `cargo test -p widgets`\n"
         ),
     )
     .expect("task");
@@ -127,7 +147,7 @@ fn reply(false_for: &[&str]) -> String {
             if false_for.contains(id) {
                 serde_json::json!({"obligation_id": id, "necessarily_true": false, "weakest_task_id": "TASK-WS-001", "reason": "a temporary root leaves the shared store empty", "quoted_task_text": LOOPHOLE})
             } else {
-                serde_json::json!({"obligation_id": id, "necessarily_true": true, "weakest_task_id": "", "reason": "the task must write the entry", "quoted_task_text": ""})
+                serde_json::json!({"obligation_id": id, "necessarily_true": true, "weakest_task_id": "", "reason": "the task must write the entry", "quoted_task_text": "", "supporting_task_id": "TASK-WS-001", "supporting_text": SUPPORT})
             }
         })
         .collect::<Vec<_>>();
@@ -207,11 +227,12 @@ async fn a_true_verdict_adds_no_finding_and_is_served_from_cache_next_time() {
             .iter()
             .any(|f| f.text.starts_with("obligation "))
     );
-    assert!(first.report.contains("1 asked of"), "{}", first.report);
+    assert!(first.report.contains("2 asked of"), "{}", first.report);
     let again = evaluate(temp.path(), Ok(critic.clone())).await;
     assert_eq!(critic.calls(), 1, "an unchanged set must not be re-asked");
-    assert!(again.report.contains("0 asked of") && again.report.contains("1 served from"));
-    // Editing the claiming task changes the digest and re-asks.
+    assert!(again.report.contains("0 asked of") && again.report.contains("2 served from"));
+    // Editing the claiming task re-asks the obligations it claims, even
+    // outside the supporting quote: an added allowance can be the loophole.
     let task = temp.path().join("tasks/PRD-WS-001/TASK-WS-001.md");
     std::fs::write(
         &task,
@@ -219,8 +240,9 @@ async fn a_true_verdict_adds_no_finding_and_is_served_from_cache_next_time() {
     )
     .unwrap();
     let critic = FakeCritic::new(vec![Ok(reply(&[]))]);
-    evaluate(temp.path(), Ok(critic.clone())).await;
-    assert_eq!(critic.calls(), 1);
+    let edited = evaluate(temp.path(), Ok(critic.clone())).await;
+    assert_eq!(critic.calls(), 1, "{}", edited.report);
+    assert!(edited.report.contains("2 asked of"), "{}", edited.report);
 }
 
 #[tokio::test]
@@ -382,7 +404,7 @@ async fn a_large_cluster_is_asked_in_bounded_batches() {
         ),
     );
     std::fs::write(&task, body).unwrap();
-    let true_verdict = |id: &str| serde_json::json!({"obligation_id": id, "necessarily_true": true, "reason": "obliged"});
+    let true_verdict = |id: &str| serde_json::json!({"obligation_id": id, "necessarily_true": true, "reason": "obliged", "supporting_task_id": "TASK-WS-001", "supporting_text": SUPPORT});
     // Batches follow the sorted claim list: AC, G, REQ-001..006 then REQ-007.
     let first: Vec<_> = ["AC-WS-001", "G-WS-001"]
         .into_iter()

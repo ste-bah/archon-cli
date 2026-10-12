@@ -116,13 +116,13 @@ async fn a_changed_skeleton_invalidates_the_cached_verdict() {
     audit_set(cwd, critic.as_ref()).await.expect("audit");
     let again = audit_set(cwd, critic.as_ref()).await.expect("audit");
     assert_eq!(critic.calls(), 1, "unchanged skeleton is served from cache");
-    assert!(again.report.contains("1 served from"), "{}", again.report);
+    assert!(again.report.contains("2 served from"), "{}", again.report);
     std::fs::write(skeleton_path(cwd), skeleton_json(false)).unwrap();
     let critic = FakeCritic::new(vec![Ok(reply(&[]))]);
     let refrozen = audit_set(cwd, critic.as_ref()).await.expect("audit");
     assert_eq!(critic.calls(), 1, "a re-frozen skeleton re-asks");
     assert!(
-        refrozen.report.contains("1 asked of"),
+        refrozen.report.contains("2 asked of"),
         "{}",
         refrozen.report
     );
@@ -131,11 +131,10 @@ async fn a_changed_skeleton_invalidates_the_cached_verdict() {
     assert!(
         prompt.contains(r#"{"task_id":"TASK-WS-003","file_name":"TASK-WS-003.md","depends_on":[]"#)
     );
-    let cache = cwd.join(".archon/lint-cache/fidelity");
     assert_eq!(
-        std::fs::read_dir(&cache).unwrap().count(),
-        2,
-        "two digests, one per skeleton"
+        record_files(cwd).len(),
+        4,
+        "one record per obligation per skeleton"
     );
 }
 
@@ -164,18 +163,15 @@ async fn a_set_without_a_skeleton_is_audited_and_the_prompt_says_so() {
         "{prompt}"
     );
     assert!(!prompt.contains(r#"{"task_id":"#));
-    let cache = cwd.join(".archon/lint-cache/fidelity");
-    let without: Vec<String> = std::fs::read_dir(&cache)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
+    let without = record_files(cwd);
     std::fs::write(skeleton_path(cwd), skeleton_json(true)).unwrap();
     let critic = FakeCritic::new(vec![Ok(reply(&[]))]);
     audit_set(cwd, critic.as_ref()).await.expect("audit");
     assert_eq!(critic.calls(), 1, "freezing a skeleton re-asks");
     assert_eq!(
-        std::fs::read_dir(&cache).unwrap().count(),
-        without.len() + 1
+        record_files(cwd).len(),
+        without.len() + 2,
+        "one record per obligation"
     );
 }
 

@@ -39,20 +39,29 @@ use crate::task_skeleton::TaskSkeleton;
 pub const MAX_REASON_CHARS: usize = 400;
 /// Longest `quoted_task_text` kept, verbatim from the weakest task.
 pub const MAX_QUOTE_CHARS: usize = 300;
+/// Least a true verdict's `supporting_text` may be: this many words, or
+/// [`MIN_SUPPORT_CHARS`] characters, so it is a passage a reader can check,
+/// not a word that happens to occur (#434).
+pub const MIN_SUPPORT_WORDS: usize = 8;
+/// See [`MIN_SUPPORT_WORDS`].
+pub const MIN_SUPPORT_CHARS: usize = 40;
 /// The keys of one verdict, exactly: the fields of [`FidelityVerdict`],
 /// which refuses any other. The prompt and the re-ask name them.
-pub const VERDICT_KEYS: [&str; 5] = [
+pub const VERDICT_KEYS: [&str; 7] = [
     "obligation_id",
     "necessarily_true",
     "weakest_task_id",
     "reason",
     "quoted_task_text",
+    "supporting_task_id",
+    "supporting_text",
 ];
 /// The keys of the verdict document, exactly.
 pub const DOCUMENT_KEYS: [&str; 1] = ["verdicts"];
 
 /// One PRD obligation with the exact text the PRD states for it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ClaimedObligation {
     pub id: String,
     pub text: String,
@@ -164,6 +173,19 @@ impl SkeletonSummary {
 /// The typed answer for one obligation, as checked and as stored: every
 /// field is present. A critic's reply is read as [`ReplyVerdict`] first, and
 /// [`checked_verdict`] decides what an omitted key means.
+///
+/// # Why a true verdict quotes its evidence (#434)
+///
+/// A false verdict always quoted the loophole; a true verdict quoted
+/// nothing, so a reader could not see what the critic held to oblige the
+/// result. A true verdict now names the task whose text obliges it
+/// (`supporting_task_id`) and copies those words (`supporting_text`); the
+/// host checks the quote is verbatim, exactly as it checks a loophole quote,
+/// and that it is an anchor a reader can check (long enough, once in the
+/// task, in its prose). The quote is evidence only: a stored verdict is
+/// reused solely over byte-identical cluster texts, because a qualifier
+/// beside the quote or a loophole elsewhere can make the obligation false
+/// while the quote stays.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FidelityVerdict {
@@ -172,12 +194,19 @@ pub struct FidelityVerdict {
     pub weakest_task_id: String,
     pub reason: String,
     pub quoted_task_text: String,
+    pub supporting_task_id: String,
+    pub supporting_text: String,
 }
 
 #[path = "fidelity_audit_reply.rs"]
 mod reply;
 pub use reply::{FidelityRefusal, RefusalKind};
 use reply::{ReplyVerdict, checked_verdict, json_kind, shape_class};
+
+#[path = "fidelity_audit_check.rs"]
+mod check;
+use check::check_verdict;
+pub use check::verdict_holds;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -207,7 +236,7 @@ pub fn fidelity_prompt(
     skeleton: &SkeletonSummary,
 ) -> String {
     let mut prompt = format!(
-        "You are auditing whether a task decomposition is faithful to its PRD. Below are PRD obligations, each with the exact text the PRD states, followed by the FROZEN SKELETON of the whole task set, followed by the FULL text of every task file that claims to implement them or that a claiming task names as owning part of the result. Assume every listed task passes its own acceptance criteria and focused tests exactly as written, including every allowance the task text grants itself (temporary roots, pending/deferred statuses, fail-closed residual gaps, minimum counts of zero, optional lanes). For each obligation: is the PRD obligation then necessarily true? Answer strictly: it is necessarily true only when no reading of the task texts lets every task pass while the obligation stays false in the project the PRD describes; a task that satisfies itself somewhere other than where the PRD requires the result, or that permits the result to be absent, deferred or empty, does not make the obligation true. Return JSON only as {{\"verdicts\":[{{\"obligation_id\":\"...\",\"necessarily_true\":true,\"weakest_task_id\":\"...\",\"reason\":\"...\",\"quoted_task_text\":\"...\"}}]}} with exactly one verdict for every obligation id and no extra ids or fields. Each verdict has exactly these keys and no others: {verdict_keys}. reason: one line of at most {MAX_REASON_CHARS} characters saying why, never empty — for a true verdict it names what in the task text obliges the result. When necessarily_true is false, weakest_task_id names the listed task whose allowance grants the loophole and quoted_task_text is an excerpt of at most {MAX_QUOTE_CHARS} characters copied verbatim from that task's text, exactly as it appears; when necessarily_true is true, both are empty strings. Every string is a single line with newlines escaped as \\n; emit the JSON document alone.\n\nThe FROZEN SKELETON lists every task in the set with its frozen depends_on, blocks, implements and deliverable_contracts. Inter-task ordering and result ownership are FACTS established by the frozen skeleton, not allowances in task prose: depends_on is transitive, so a task runs after everything its dependencies depend on, and a task's implements and deliverable_contracts say what it owns. A task listed in the skeleton whose full text is not included below is not yet written; it will be audited when it is written and again at the set gate, so its absence is never by itself a ground to refute an obligation. Judge the allowances in the task texts that ARE included, against the ordering and ownership the skeleton establishes, and never refute an obligation on ordering or ownership grounds the skeleton already guarantees. When the set has no frozen skeleton the section says so, and only the task texts establish ordering and ownership.\n\nREPOSITORY PATH CLAIMS: the task set was decomposed against one code repository at one recorded base commit, and a task text that says a backticked repository path exists, or does not exist and will be created, is making a claim the host checks deterministically against that repository and refuses when it is wrong. You are not shown the repository. Never refute or accept an obligation on your own belief about whether a named file exists; take a task's existence claims as the host-checked facts they are and judge only whether, given them, the task text obliges the result where the PRD requires it.\n\nObligations: {}\n\n{}",
+        "You are auditing whether a task decomposition is faithful to its PRD. Below are PRD obligations, each with the exact text the PRD states, followed by the FROZEN SKELETON of the whole task set, followed by the FULL text of every task file that claims to implement them or that a claiming task names as owning part of the result. Assume every listed task passes its own acceptance criteria and focused tests exactly as written, including every allowance the task text grants itself (temporary roots, pending/deferred statuses, fail-closed residual gaps, minimum counts of zero, optional lanes). For each obligation: is the PRD obligation then necessarily true? Answer strictly: it is necessarily true only when no reading of the task texts lets every task pass while the obligation stays false in the project the PRD describes; a task that satisfies itself somewhere other than where the PRD requires the result, or that permits the result to be absent, deferred or empty, does not make the obligation true. Return JSON only as {{\"verdicts\":[{{\"obligation_id\":\"...\",\"necessarily_true\":true,\"weakest_task_id\":\"...\",\"reason\":\"...\",\"quoted_task_text\":\"...\",\"supporting_task_id\":\"...\",\"supporting_text\":\"...\"}}]}} with exactly one verdict for every obligation id and no extra ids or fields. Each verdict has exactly these keys and no others: {verdict_keys}. reason: one line of at most {MAX_REASON_CHARS} characters saying why, never empty — for a true verdict it names what in the task text obliges the result. When necessarily_true is false, weakest_task_id names the listed task whose allowance grants the loophole and quoted_task_text is an excerpt of at most {MAX_QUOTE_CHARS} characters copied verbatim from that task's text, exactly as it appears; supporting_task_id and supporting_text are empty strings. When necessarily_true is true, supporting_task_id names the listed task whose text obliges the result and supporting_text is an excerpt of at most {MAX_QUOTE_CHARS} characters copied verbatim from that task's text, exactly as it appears: at least {MIN_SUPPORT_WORDS} words of the task's prose that oblige the result and occur only once in that task, never a heading, a code block or an HTML comment; weakest_task_id and quoted_task_text are empty strings. Every string is a single line with newlines escaped as \\n; emit the JSON document alone.\n\nThe FROZEN SKELETON lists every task in the set with its frozen depends_on, blocks, implements and deliverable_contracts. Inter-task ordering and result ownership are FACTS established by the frozen skeleton, not allowances in task prose: depends_on is transitive, so a task runs after everything its dependencies depend on, and a task's implements and deliverable_contracts say what it owns. A task listed in the skeleton whose full text is not included below is not yet written; it will be audited when it is written and again at the set gate, so its absence is never by itself a ground to refute an obligation. Judge the allowances in the task texts that ARE included, against the ordering and ownership the skeleton establishes, and never refute an obligation on ordering or ownership grounds the skeleton already guarantees. When the set has no frozen skeleton the section says so, and only the task texts establish ordering and ownership.\n\nREPOSITORY PATH CLAIMS: the task set was decomposed against one code repository at one recorded base commit, and a task text that says a backticked repository path exists, or does not exist and will be created, is making a claim the host checks deterministically against that repository and refuses when it is wrong. You are not shown the repository. Never refute or accept an obligation on your own belief about whether a named file exists; take a task's existence claims as the host-checked facts they are and judge only whether, given them, the task text obliges the result where the PRD requires it.\n\nObligations: {}\n\n{}",
         serde_json::to_string(obligations).unwrap_or_default(),
         skeleton.as_str(),
         verdict_keys = VERDICT_KEYS.join(", "),
@@ -301,93 +330,6 @@ pub fn parse_fidelity_reply(
     Ok(verdicts)
 }
 
-/// Check one verdict's provenance against its cluster, cutting an over-long
-/// `reason` or `quoted_task_text` to its limit first.
-///
-/// Issue-42: a cluster failed the gate twice with "reason longer than 400
-/// characters" although both its verdicts were true — the critic had answered
-/// the question and merely said too much, and the gate turned a verbose pass
-/// into an operational failure. Length is now a cut, not a refusal: the reason
-/// keeps its first [`MAX_REASON_CHARS`] characters plus `…`; the quote keeps
-/// its first [`MAX_QUOTE_CHARS`] characters and nothing more, so the verbatim
-/// check below runs on exactly the text the finding will print. Provenance is
-/// still refused outright: a weakest task outside the cluster, a false verdict
-/// that names no weakest task or quotes nothing, or a quote the named task
-/// does not contain.
-fn check_verdict(
-    verdict: &mut FidelityVerdict,
-    tasks: &[ClaimingTask],
-) -> Result<(), (RefusalKind, String)> {
-    let id = &verdict.obligation_id;
-    let other = |message: String| Err((RefusalKind::Other, message));
-    if verdict.reason.trim().is_empty() {
-        return Err((
-            RefusalKind::BlankRequired("reason"),
-            format!("verdict for {id} has an empty reason"),
-        ));
-    }
-    if verdict.reason.chars().count() > MAX_REASON_CHARS {
-        let mut cut: String = verdict.reason.chars().take(MAX_REASON_CHARS).collect();
-        cut.push('…');
-        verdict.reason = cut;
-    }
-    if verdict.quoted_task_text.chars().count() > MAX_QUOTE_CHARS {
-        // A cut that lands after the backslash of an escaped newline would
-        // leave a stray backslash no task text contains; a shorter prefix
-        // of a verbatim excerpt is still verbatim, so it is dropped.
-        let cut: String = verdict
-            .quoted_task_text
-            .chars()
-            .take(MAX_QUOTE_CHARS)
-            .collect();
-        verdict.quoted_task_text = cut.trim_end_matches('\\').to_string();
-    }
-    let weakest = tasks
-        .iter()
-        .find(|task| task.task_id == verdict.weakest_task_id);
-    if verdict.necessarily_true {
-        if !verdict.weakest_task_id.is_empty() && weakest.is_none() {
-            return other(format!(
-                "verdict for {id} names weakest task '{}' which is not in the audited cluster",
-                verdict.weakest_task_id
-            ));
-        }
-        return Ok(());
-    }
-    let Some(weakest) = weakest else {
-        return other(format!(
-            "false verdict for {id} names weakest task '{}' which is not in the audited cluster",
-            verdict.weakest_task_id
-        ));
-    };
-    let quote = collapse_whitespace(&verdict.quoted_task_text);
-    if quote.is_empty() {
-        return Err((
-            RefusalKind::BlankRequired("quoted_task_text"),
-            format!("false verdict for {id} quotes nothing from the task"),
-        ));
-    }
-    if !collapse_whitespace(&weakest.text).contains(&quote) {
-        return other(format!(
-            "false verdict for {id} quotes text that does not appear verbatim in task '{}'",
-            weakest.task_id
-        ));
-    }
-    Ok(())
-}
-
-/// Whitespace-insensitive comparison: a model that re-wraps a line has still
-/// quoted it, while one that paraphrases has not. A literal two-character
-/// `\n` counts as whitespace too — asked to escape newlines, a critic that
-/// escapes them twice has still copied the line, and the decoded backslash-n
-/// is packaging, not a change to the words.
-fn collapse_whitespace(text: &str) -> String {
-    text.replace("\\n", " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 /// The blocking finding for a false verdict. Names every claiming task, so
 /// the reader sees that the obligation is owned and still not delivered, and
 /// quotes the loophole so the fix is the sentence, not a search.
@@ -399,6 +341,28 @@ pub fn fidelity_finding(verdict: &FidelityVerdict, claiming_task_ids: &[String])
         verdict.reason.trim(),
         verdict.weakest_task_id,
         verdict.quoted_task_text.trim()
+    )
+}
+
+/// The blocking finding for an obligation whose stored verdicts disagree
+/// while both still hold on the current texts (#434): a true and a false
+/// verdict over the same cluster with byte-identical texts. Neither is taken over the other; the finding quotes both,
+/// so the record of the disagreement is the finding itself.
+pub fn fidelity_contradiction_finding(
+    refuted: &FidelityVerdict,
+    supported: &FidelityVerdict,
+    claiming_task_ids: &[String],
+) -> String {
+    format!(
+        "obligation {} is claimed by {} and the critic's verdicts contradict each other on unchanged evidence; neither is taken — false: {} — task {}: \"{}\" — true: {} — task {}: \"{}\"",
+        refuted.obligation_id,
+        claiming_task_ids.join(", "),
+        refuted.reason.trim(),
+        refuted.weakest_task_id,
+        refuted.quoted_task_text.trim(),
+        supported.reason.trim(),
+        supported.supporting_task_id,
+        supported.supporting_text.trim()
     )
 }
 

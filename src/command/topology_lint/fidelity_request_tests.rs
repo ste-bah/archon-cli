@@ -93,3 +93,27 @@ async fn an_unknown_envelope_is_reasked_without_claiming_saved_progress() {
     assert!(records(temp.path()).is_empty());
     assert_eq!(resume.progress.total(), 0);
 }
+
+/// The catalog identity changes with #356 (schema 2: timeout semantics); rebuilding
+/// schema 1 reproduces the old catalog. The fixed script digest moves by design
+/// (Issues 261, 288 four times, 337, 357, 360, 366, 379, 381, 383, 384, 385, 389, 392, 423); older runs resume via #358 and the #360 seed.
+#[test]
+fn issue356_catalog_identity_changes_and_script_matches_the_release() {
+    let catalog =
+        crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("rev").unwrap();
+    let old_digest = "c59953c92b47b59b10c4b6b0cf19e6ae736c88aa037bef173cb141d25dd7b6c7";
+    let mut old = catalog.clone();
+    old.schema_version = 1;
+    old.recompute_digest().unwrap();
+    assert_eq!(old.digest, old_digest);
+    assert_ne!(
+        catalog.digest, old_digest,
+        "timeout semantics must change resume identity"
+    );
+    assert_eq!(
+        archon_workflow::workflow_scaffold_hash(
+            crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
+        ),
+        "05011e793d3a51c593dbe12dd73a60b8cdf1705c0470066a36034f67ecdfa92e"
+    );
+}
