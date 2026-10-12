@@ -119,6 +119,46 @@ fn a_relative_root_never_matches_a_command() {
     assert_eq!(named_root("bar baz r p", &forms), None);
 }
 
+#[cfg(unix)]
+#[test]
+fn filesystem_identity_catches_symlink_aliases_and_paths_inside_the_root() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("live-root");
+    std::fs::create_dir(&root).unwrap();
+    let inside = root.join("child");
+    std::fs::create_dir(&inside).unwrap();
+    let alias = temp.path().join("alias");
+    std::os::unix::fs::symlink(&root, &alias).unwrap();
+    let forms = root_forms([root.as_path()]);
+
+    assert!(named_root(&format!("cd {}", alias.display()), &forms).is_some());
+    assert!(named_root(&format!("cat {}/file", inside.display()), &forms).is_some());
+    let missing_through_alias = alias.join("not-created");
+    assert!(named_root(&format!("cat {}", missing_through_alias.display()), &forms).is_some());
+}
+
+#[cfg(unix)]
+#[test]
+fn unrelated_paths_on_the_same_volume_do_not_name_the_root() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("live-root");
+    std::fs::create_dir(&root).unwrap();
+    let forms = root_forms([root.as_path()]);
+
+    let outside_temp = temp.path().join("scratch").join("not-created");
+    assert_eq!(
+        named_root(&format!("cat {}", outside_temp.display()), &forms),
+        None
+    );
+
+    let outside_file = temp.path().join("outside-file");
+    std::fs::write(&outside_file, "outside the live root").unwrap();
+    assert_eq!(
+        named_root(&format!("cat {}", outside_file.display()), &forms),
+        None
+    );
+}
+
 /// The three `repository.lock` texts no freeze may believe (Issue 366, N1):
 /// one that is not JSON, one of another schema, and one whose recorded
 /// root is gone. Each leaves the true repository root unknown.
@@ -240,4 +280,37 @@ fn windows_forms_drop_every_filesystem_root_and_keep_both_spellings() {
     for form in [canonical.clone(), archon_shell::paths::plain(canonical)] {
         assert!(forms.contains(&form), "{form:?}: {forms:?}");
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_short_name_alias_is_matched_by_file_identity() {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetShortPathNameW(input: *const u16, output: *mut u16, capacity: u32) -> u32;
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("Long Directory Name").join("Repository");
+    std::fs::create_dir_all(&root).unwrap();
+    let input: Vec<u16> = root.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut output = vec![0u16; 32_768];
+    // SAFETY: both buffers are valid for the duration of the call, and the
+    // output buffer's capacity is supplied to the Win32 API.
+    let length =
+        unsafe { GetShortPathNameW(input.as_ptr(), output.as_mut_ptr(), output.len() as u32) };
+    if length == 0 || length as usize >= output.len() {
+        println!("skipping 8.3 alias assertion: GetShortPathNameW is unavailable");
+        return;
+    }
+    output.truncate(length as usize);
+    let short = PathBuf::from(OsString::from_wide(&output));
+    if short == root {
+        println!("skipping 8.3 alias assertion: short names are disabled for this volume");
+        return;
+    }
+    let forms = root_forms([root.as_path()]);
+    assert!(named_root(&format!("type {}", short.display()), &forms).is_some());
 }

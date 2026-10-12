@@ -386,6 +386,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rquickjs",
  "semver",
+ "same-file",
  "serde",
  "serde_json",
  "serde_path_to_error",

@@ -217,9 +217,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #399 fixes resume seed reconstruction; identical gate input keeps its verdict.
         // 9: #400 validates incremental subsets independently, allowing supplementary-only updates to pass.
         // 7: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 9,
+        // 10: resolves filesystem aliases without refusing unrelated paths on the same volume.
+        version: 10,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ee0ff2270e6857708098d1ab0be90fa567e919478c3ab45fb0b4bc6a150ca240",
+        sources_digest: "5ab41fa6b48e2f59b93d2271e2805f8a15165f4285bbe83136ab17532103d471",
         build_bound: false,
     },
     CapabilityLogic {
@@ -227,7 +228,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ee0ff2270e6857708098d1ab0be90fa567e919478c3ab45fb0b4bc6a150ca240",
+        sources_digest: "5ab41fa6b48e2f59b93d2271e2805f8a15165f4285bbe83136ab17532103d471",
         build_bound: false,
     },
     CapabilityLogic {

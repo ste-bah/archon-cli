@@ -240,6 +240,15 @@ fn lexical(token: &str) -> Option<PathBuf> {
     Some(resolved)
 }
 
+fn names_by_identity(path: &Path, root: &Path) -> bool {
+    let Ok(root_handle) = same_file::Handle::from_path(root) else {
+        return false;
+    };
+    path.ancestors()
+        .filter_map(|ancestor| same_file::Handle::from_path(ancestor).ok())
+        .any(|ancestor| ancestor == root_handle)
+}
+
 /// The first of `forms` (from [`root_forms`]) that `text` names, in the
 /// host's [`Spelling`].
 pub(crate) fn named_root<'a>(text: &str, forms: &'a [PathBuf]) -> Option<&'a PathBuf> {
@@ -251,7 +260,7 @@ fn named_root_in<'a>(spelling: Spelling, text: &str, forms: &'a [PathBuf]) -> Op
     let text = spelling.fold(text);
     let ends = |c: char| spelling.ends_token(c);
     let paths: Vec<PathBuf> = text.split(ends).filter_map(lexical).collect();
-    forms.iter().find(|form| {
+    let textual = forms.iter().find(|form| {
         let root = spelling.fold(&form.to_string_lossy());
         let form = Path::new(&root);
         let named_at = |at: usize| match text[at + root.len()..].chars().next() {
@@ -265,6 +274,11 @@ fn named_root_in<'a>(spelling: Spelling, text: &str, forms: &'a [PathBuf]) -> Op
         !root.is_empty()
             && (text.match_indices(&root).any(|(at, _)| named_at(at))
                 || paths.iter().any(|path| path.starts_with(form)))
+    });
+    textual.or_else(|| {
+        forms
+            .iter()
+            .find(|form| paths.iter().any(|path| names_by_identity(path, form)))
     })
 }
 
