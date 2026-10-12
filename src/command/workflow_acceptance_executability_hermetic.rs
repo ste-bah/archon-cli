@@ -9,15 +9,10 @@
 //!   credentials, engine configuration, harness run state, git metadata,
 //!   `target`, and any nested repository.
 //!
-//! The copy is made off the async runtime (`spawn_blocking`). Its project
-//! data is digested before and after copying; changes during copying make
-//! the run unproven. A copy larger than [`PROJECT_COPY_BYTES`] is refused with the reason, never
-//! truncated. Checks run under the acceptance stage's own direct-site
-//! environment (the default policy of the one check-environment rule,
-//! `archon_workflow::acceptance_check_environment`, Issue 345), building warm
-//! from one cached target directory per repository under the copy parent.
-//! Copies older than a day that a killed probe left are swept before a new one is made; a copy that cannot
-//! be removed is reported.
+//! The copy is made off the async runtime. Project data is digested before
+//! and after copying; changes make the run unproven, and oversized copies are
+//! refused. Checks use the direct-site environment and a cached target under
+//! the copy parent. Stale copies are swept; removal failures are reported.
 
 use std::path::{Path, PathBuf};
 
@@ -198,24 +193,30 @@ fn task_root_relative(project: &Path, task_root: Option<&Path>) -> Result<Option
             } else {
                 project.join(root)
             };
-            let canonical = rooted.canonicalize().map_err(|error| {
+            let canonical = archon_shell::paths::canonicalize(&rooted).map_err(|error| {
                 Unrun(format!(
                     "could not canonicalize task root {}: {error}",
                     root.display()
                 ))
             })?;
-            canonical
-                .strip_prefix(project)
-                .map(Path::to_path_buf)
-                .map_err(|_| {
-                    Unrun(format!(
-                        "task root {} is outside project {}",
-                        canonical.display(),
-                        project.display()
-                    ))
-                })
+            task_root_relative_paths(project, &canonical).map_err(|_| {
+                Unrun(format!(
+                    "task root {} is outside project {}",
+                    canonical.display(),
+                    project.display()
+                ))
+            })
         })
         .transpose()
+}
+
+fn task_root_relative_paths(project: &Path, task_root: &Path) -> Result<PathBuf, ()> {
+    let project = archon_shell::paths::plain(project.to_path_buf());
+    let task_root = archon_shell::paths::plain(task_root.to_path_buf());
+    task_root
+        .strip_prefix(&project)
+        .map(Path::to_path_buf)
+        .map_err(|_| ())
 }
 
 impl HermeticCopy {
@@ -228,8 +229,7 @@ impl HermeticCopy {
         commit: &str,
     ) -> Result<Self, Unrun> {
         let canonical = |path: &Path| {
-            path.canonicalize()
-                .map(archon_shell::paths::plain)
+            archon_shell::paths::canonicalize(path)
                 .map_err(|error| Unrun(format!("{}: {error}", path.display())))
         };
         let (source, live_project) = (canonical(repository)?, canonical(project)?);
@@ -377,7 +377,7 @@ fn copy_data_relative(
 /// The warm build directory for `repository`'s copies.
 pub(super) fn warm_target(parent: &Path, repository: &Path) -> PathBuf {
     let key = content_digest(
-        (repository.canonicalize().map(archon_shell::paths::plain))
+        (archon_shell::paths::canonicalize(repository))
             .unwrap_or_else(|_| repository.to_path_buf())
             .to_string_lossy()
             .as_bytes(),

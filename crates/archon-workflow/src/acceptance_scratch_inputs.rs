@@ -125,9 +125,9 @@ pub(crate) fn freeze_owned(path: &Path) -> bool {
 }
 
 pub(super) fn project_excludes(policy: &ScratchPolicy) -> WorkflowResult<Vec<PathBuf>> {
-    let project = std::fs::canonicalize(&policy.project)
+    let project = archon_shell::paths::canonicalize(&policy.project)
         .map_err(|error| WorkflowError::io(&policy.project, error))?;
-    let tasks = std::fs::canonicalize(&policy.task_root)
+    let tasks = archon_shell::paths::canonicalize(&policy.task_root)
         .map_err(|error| WorkflowError::io(&policy.task_root, error))?;
     let task_relative = tasks
         .strip_prefix(&project)
@@ -315,9 +315,9 @@ pub(super) fn live(
         source.insert(name.into(), value);
     }
     let mut project = BTreeMap::new();
-    let project_root = std::fs::canonicalize(&policy.project)
+    let project_root = archon_shell::paths::canonicalize(&policy.project)
         .map_err(|error| WorkflowError::io(&policy.project, error))?;
-    let task_root = std::fs::canonicalize(&policy.task_root)
+    let task_root = archon_shell::paths::canonicalize(&policy.task_root)
         .map_err(|error| WorkflowError::io(&policy.task_root, error))?;
     let task_relative = task_root
         .strip_prefix(&project_root)

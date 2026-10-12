@@ -8,6 +8,22 @@ fn repository_path_comparison_normalizes_verbatim_and_plain_spellings() {
     assert!(same_path(verbatim, plain));
 }
 
+#[test]
+fn task_root_relative_normalizes_verbatim_and_plain_project_spellings() {
+    let verbatim = archon_shell::paths::plain(PathBuf::from(r"\\?\C:\work\project"));
+    let plain = PathBuf::from(r"C:\work\project");
+    assert_eq!(verbatim, plain);
+
+    let directory = tempfile::tempdir().unwrap();
+    let project = archon_shell::paths::canonicalize(directory.path()).unwrap();
+    let task = project.join("tasks/set");
+    std::fs::create_dir_all(&task).unwrap();
+    assert_eq!(
+        task_root_relative_paths(&project, &task).unwrap(),
+        PathBuf::from("tasks/set")
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn canonicalized_repository_path_compares_with_its_plain_spelling() {
@@ -15,6 +31,34 @@ fn canonicalized_repository_path_compares_with_its_plain_spelling() {
     let verbatim = std::fs::canonicalize(directory.path()).unwrap();
     let plain = archon_shell::paths::canonicalize(directory.path()).unwrap();
     assert!(same_path(&verbatim, &plain));
+}
+
+#[cfg(windows)]
+#[test]
+fn task_root_digest_and_hermetic_copy_accept_a_windows_task_root() {
+    let source = tempfile::tempdir().unwrap();
+    let destination = tempfile::tempdir().unwrap();
+    let project = source.path();
+    let repository = repository(&source);
+    let commit = committed_repository(&repository);
+    let task_root = project.join("tasks/set");
+    std::fs::create_dir_all(&task_root).unwrap();
+    std::fs::write(task_root.join("input.txt"), b"task input").unwrap();
+
+    assert!(data_digest(project, &repository, Some(&task_root)).is_ok());
+    let copy = HermeticCopy::at(
+        destination.path(),
+        &repository,
+        project,
+        Some(&task_root),
+        &commit,
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(copy.project.join("tasks/set/input.txt")).unwrap(),
+        b"task input"
+    );
+    copy.remove().unwrap();
 }
 
 fn repository(source: &tempfile::TempDir) -> PathBuf {
