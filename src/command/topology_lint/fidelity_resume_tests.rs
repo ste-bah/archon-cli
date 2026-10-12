@@ -75,6 +75,16 @@ fn obligation_ids(prompt: &str) -> Vec<String> {
     ids
 }
 
+/// The words every corpus task carries, quoted in support (#434).
+const SUPPORT: &str = "of the gadget catalogue and lists every gadget it owns.";
+
+/// The first task whose text the prompt carries.
+fn first_task(prompt: &str) -> String {
+    let marker = "===== BEGIN TASK ";
+    let rest = &prompt[prompt.find(marker).expect("a task text") + marker.len()..];
+    rest[..rest.find(' ').expect("id")].to_string()
+}
+
 #[async_trait]
 impl WorkflowLlmClient for Critic {
     async fn send_message(
@@ -95,7 +105,9 @@ impl WorkflowLlmClient for Critic {
         _model: &str,
         _temperature: f64,
     ) -> WorkflowResult<WorkflowAgentOutcome> {
-        let ids = obligation_ids(messages[0]["content"].as_str().unwrap());
+        let prompt = messages[0]["content"].as_str().unwrap();
+        let ids = obligation_ids(prompt);
+        let task = first_task(prompt);
         self.asked.lock().unwrap().push(ids.clone());
         let calls = self.calls.fetch_add(1, SeqCst) + 1;
         if self.hang {
@@ -111,7 +123,7 @@ impl WorkflowLlmClient for Critic {
         }
         let verdicts: Vec<_> = ids
             .iter()
-            .map(|id| serde_json::json!({"obligation_id": id, "necessarily_true": true, "reason": "obliged"}))
+            .map(|id| serde_json::json!({"obligation_id": id, "necessarily_true": true, "reason": "obliged", "supporting_task_id": task, "supporting_text": SUPPORT}))
             .collect();
         Ok(WorkflowAgentOutcome {
             content: serde_json::json!({ "verdicts": verdicts }).to_string(),
@@ -138,7 +150,7 @@ impl WorkflowLlmClient for Critic {
 
 fn task(n: usize, claims: [usize; 2]) -> String {
     format!(
-        "# TASK-QX-00{n} — Part {n}\n\n```yaml\ntask_id: TASK-QX-00{n}\ntitle: Part {n}\ncomplexity: medium\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"{PREFIX}00{}\", \"{PREFIX}00{}\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Scope\n\nBuilds part {n} of the gadget catalogue.\n\n## Focused Tests\n\n- `cargo test -p gadgets`\n",
+        "# TASK-QX-00{n} — Part {n}\n\n```yaml\ntask_id: TASK-QX-00{n}\ntitle: Part {n}\ncomplexity: medium\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"{PREFIX}00{}\", \"{PREFIX}00{}\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Scope\n\nBuilds part {n} of the gadget catalogue and lists every gadget it owns.\n\n## Focused Tests\n\n- `cargo test -p gadgets`\n",
         claims[0], claims[1]
     )
 }
@@ -266,13 +278,18 @@ async fn a_lint_stalled_on_the_provider_exits_resumable_and_a_retry_reuses_its_u
         classify(&output),
         Some(OperationalKind::IncompleteResumable)
     );
-    assert_eq!(reported_progress(stderr.as_bytes()), Some(2), "{stderr}");
+    // Progress counts obligation verdicts: two batches of two (#434).
+    assert_eq!(reported_progress(stderr.as_bytes()), Some(4), "{stderr}");
     assert_eq!(
         first.calls(),
         3,
         "the next call starts and stops only on inactivity"
     );
-    assert_eq!(records(cwd).len(), 2, "each finished batch is saved");
+    assert_eq!(
+        records(cwd).len(),
+        4,
+        "each finished batch's verdicts are saved"
+    );
 
     let retry = Critic::new();
     let resume = staged(hand_clock().1);
@@ -285,13 +302,13 @@ async fn a_lint_stalled_on_the_provider_exits_resumable_and_a_retry_reuses_its_u
         retry.asked(),
         first.asked()
     );
-    assert_eq!(resume.progress.total(), 3, "two reused, one saved");
+    assert_eq!(resume.progress.total(), 6, "four reused, two saved");
     assert!(
-        evaluation.report.contains("1 asked of") && evaluation.report.contains("2 served from"),
+        evaluation.report.contains("2 asked of") && evaluation.report.contains("4 served from"),
         "{}",
         evaluation.report
     );
-    assert_eq!(records(cwd).len(), 3);
+    assert_eq!(records(cwd).len(), 6);
 }
 
 /// A silent provider stalls under both staged and ordinary invocation policies.
@@ -344,7 +361,7 @@ async fn progress_grows_across_retries_until_the_lint_finishes() {
             .expect_err("one batch per attempt, then a silent provider");
         let (stderr, _) = resumable_exit(&error).expect("resumable");
         let progress = reported_progress(stderr.as_bytes());
-        assert_eq!(progress, Some(u64::from(attempt)));
+        assert_eq!(progress, Some(2 * u64::from(attempt)));
         history.push(OperationalAttempt {
             attempt,
             reason: OperationalKind::IncompleteResumable.label(),
@@ -357,11 +374,12 @@ async fn progress_grows_across_retries_until_the_lint_finishes() {
     let resume = staged(hand_clock().1);
     complete(cwd, last.clone(), &resume).await;
     assert_eq!(last.calls(), 1);
-    assert_eq!(resume.progress.total(), 3);
+    assert_eq!(resume.progress.total(), 6);
 }
 
-/// An edited task re-asks exactly its own cluster; an edited obligation
-/// exactly the batch that carries it. Every other unit is reused.
+/// An edited task re-asks exactly the obligations its cluster carries; an
+/// edited obligation re-asks exactly that obligation (#434). Every other
+/// verdict is reused.
 #[tokio::test]
 async fn a_changed_input_invalidates_exactly_the_affected_unit() {
     let temp = corpus();
@@ -381,39 +399,65 @@ async fn a_changed_input_invalidates_exactly_the_affected_unit() {
     std::fs::write(&prd, text).unwrap();
     let critic = Critic::new();
     complete(cwd, critic.clone(), &FreezeResume::none()).await;
-    assert_eq!(critic.asked(), vec![ids(&[5, 6])]);
+    assert_eq!(critic.asked(), vec![ids(&[5])]);
 }
 
-/// A record that cannot be read, and one that reads but no longer passes
-/// the reply validation, are both recomputed: the store is never trusted.
+/// The saved record of obligation `id`.
+fn record_of(cwd: &Path, id: &str) -> PathBuf {
+    records(cwd)
+        .into_iter()
+        .find(|path| {
+            let record: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            record["obligation"]["id"] == id
+        })
+        .unwrap_or_else(|| panic!("no record for {id}"))
+}
+
+/// A record that cannot be read, and ones that read but no longer pass the
+/// reply validation — a forged false verdict, a true verdict whose quote is
+/// not verbatim — are all recomputed: the store is never trusted.
 #[tokio::test]
 async fn a_corrupt_or_forged_record_is_recomputed_never_trusted() {
     let temp = corpus();
     let cwd = temp.path();
     complete(cwd, Critic::new(), &FreezeResume::none()).await;
-    let saved = records(cwd);
-    assert_eq!(saved.len(), 3);
-    std::fs::write(&saved[0], b"{\"schema\": 2, \"verd").unwrap();
-    let mut forged: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&saved[1]).unwrap()).unwrap();
-    let verdict = &mut forged["verdicts"][0];
-    verdict["necessarily_true"] = false.into();
-    verdict["weakest_task_id"] = "TASK-QX-001".into();
-    verdict["quoted_task_text"] = "a sentence no task contains".into();
-    std::fs::write(&saved[1], serde_json::to_vec(&forged).unwrap()).unwrap();
+    assert_eq!(records(cwd).len(), 6);
+    let [first, third, fifth] =
+        ["REQ-QX-001", "REQ-QX-003", "REQ-QX-005"].map(|id| record_of(cwd, id));
+    std::fs::write(&first, b"{\"schema\": 4, \"entr").unwrap();
+    let forge = |path: &Path, change: &dyn Fn(&mut serde_json::Value)| {
+        let mut forged: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        change(&mut forged["entries"][0]["verdict"]);
+        std::fs::write(path, serde_json::to_vec(&forged).unwrap()).unwrap();
+    };
+    forge(&third, &|verdict| {
+        verdict["necessarily_true"] = false.into();
+        verdict["weakest_task_id"] = "TASK-QX-002".into();
+        verdict["quoted_task_text"] = "a sentence no task contains".into();
+    });
+    forge(&fifth, &|verdict| {
+        verdict["supporting_text"] = "a sentence no task contains".into();
+    });
     let critic = Critic::new();
     let evaluation = complete(cwd, critic.clone(), &FreezeResume::none()).await;
-    assert_eq!(critic.calls(), 2, "{:?}", critic.asked());
+    assert_eq!(
+        critic.asked(),
+        vec![ids(&[1]), ids(&[3]), ids(&[5])],
+        "exactly the three untrusted verdicts are asked again"
+    );
     assert!(
         !evaluation.report.contains("BLOCKING"),
         "a forged verdict never reaches the report: {}",
         evaluation.report
     );
-    assert_eq!(records(cwd).len(), 3);
+    assert_eq!(records(cwd).len(), 6);
 }
 
-/// A verdict answered by another critic model, or by another binary, is
-/// not reused: either can change what the same question gets.
+/// A verdict answered by another critic model, or under other request
+/// settings, is not reused: either can change what the same question gets.
+/// Another binary is covered in `fidelity_store_tests.rs`.
 #[tokio::test]
 async fn a_saved_verdict_is_keyed_by_binary_and_critic_identity() {
     let temp = corpus();
@@ -428,28 +472,6 @@ async fn a_saved_verdict_is_keyed_by_binary_and_critic_identity() {
     Arc::get_mut(&mut other_settings).expect("unshared").request = Some("e".repeat(64));
     complete(cwd, other_settings.clone(), &FreezeResume::none()).await;
     assert_eq!(other_settings.calls(), 3, "other request settings re-ask");
-
-    let critic = Critic::new();
-    let store = VerdictStore::new(store_dir(cwd), StoreIdentity::of(critic.as_ref()));
-    let digest = "d".repeat(64);
-    let verdicts = vec![archon_workflow::fidelity_audit::FidelityVerdict {
-        obligation_id: format!("{PREFIX}001"),
-        necessarily_true: true,
-        weakest_task_id: String::new(),
-        reason: "obliged".into(),
-        quoted_task_text: String::new(),
-    }];
-    let obligations = vec![archon_workflow::fidelity_audit::ClaimedObligation {
-        id: format!("{PREFIX}001"),
-        text: "x".into(),
-    }];
-    store.save(&digest, &verdicts).expect("saved");
-    assert_eq!(store.load(&digest, &obligations, &[]), Some(verdicts));
-    let rebuilt = VerdictStore::new(
-        store_dir(cwd),
-        StoreIdentity::of(critic.as_ref()).with_binary("another-revision"),
-    );
-    assert_eq!(rebuilt.load(&digest, &obligations, &[]), None);
 }
 
 /// The staged set gate reads its own catalog no-progress window, never a copy.
@@ -457,30 +479,6 @@ async fn a_saved_verdict_is_keyed_by_binary_and_critic_identity() {
 fn the_staged_set_gate_reads_its_catalog_no_progress_window() {
     let resume = FreezeResume::staged("task-set-lint");
     assert_eq!(resume.budget.outer_secs(), lint_wall_clock());
-}
-
-/// The catalog identity changes with #356 (schema 2: timeout semantics); rebuilding
-/// schema 1 reproduces the old catalog. The fixed script digest moves by design
-/// (Issues 261, 288 four times, 337, 357, 360, 366, 381, 383, 384, 385, 389, 392); older runs resume via #358 and the #360 seed.
-#[test]
-fn issue356_catalog_identity_changes_and_script_matches_the_release() {
-    let catalog =
-        crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("rev").unwrap();
-    let old_digest = "c59953c92b47b59b10c4b6b0cf19e6ae736c88aa037bef173cb141d25dd7b6c7";
-    let mut old = catalog.clone();
-    old.schema_version = 1;
-    old.recompute_digest().unwrap();
-    assert_eq!(old.digest, old_digest);
-    assert_ne!(
-        catalog.digest, old_digest,
-        "timeout semantics must change resume identity"
-    );
-    assert_eq!(
-        archon_workflow::workflow_scaffold_hash(
-            crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
-        ),
-        "05011e793d3a51c593dbe12dd73a60b8cdf1705c0470066a36034f67ecdfa92e"
-    );
 }
 
 #[test]

@@ -8,6 +8,9 @@ use super::*;
 pub(super) const HOLLOW: &str =
     "Focused tests read a fixture registry; the shared store is not written.";
 const STALE: &str = "An earlier attempt at this body, already replaced.";
+/// The prose of the candidate a true verdict quotes in support (#434).
+pub(super) const REGISTERS: &str =
+    "Registration records every widget in the shared registry it is given.";
 
 /// The base corpus (TASK-WS-001 on disk claiming both obligations) with the
 /// PRD's claims split: TASK-WS-001 keeps G-WS-001; the candidate TASK-WS-002
@@ -29,13 +32,13 @@ fn candidate_path(cwd: &Path) -> PathBuf {
 
 pub(super) fn candidate_body(scope: &str) -> String {
     format!(
-        "# TASK-WS-002 — Register\n\n```yaml\ntask_id: TASK-WS-002\ntitle: Register\ncomplexity: medium\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"AC-WS-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Scope\n\n{scope}\n\n## Focused Tests\n\n- `cargo test -p registry`\n"
+        "# TASK-WS-002 — Register\n\n```yaml\ntask_id: TASK-WS-002\ntitle: Register\ncomplexity: medium\nstatus: pending\ndepends_on: []\nblocks: []\nimplements: [\"AC-WS-001\"]\nrequired_env_keys: []\nrequired_tools: [cargo]\ndeliverable_contracts: []\n```\n\n## Scope\n\n{scope}\n\n{REGISTERS}\n\n## Focused Tests\n\n- `cargo test -p registry`\n"
     )
 }
 
 pub(super) fn body_reply(necessarily_true: bool) -> String {
     let verdict = if necessarily_true {
-        serde_json::json!({"obligation_id": "AC-WS-001", "necessarily_true": true, "weakest_task_id": "", "reason": "the task must write the entry", "quoted_task_text": ""})
+        serde_json::json!({"obligation_id": "AC-WS-001", "necessarily_true": true, "weakest_task_id": "", "reason": "the task must write the entry", "quoted_task_text": "", "supporting_task_id": "TASK-WS-002", "supporting_text": REGISTERS})
     } else {
         serde_json::json!({"obligation_id": "AC-WS-001", "necessarily_true": false, "weakest_task_id": "TASK-WS-002", "reason": "a fixture registry leaves the shared store empty", "quoted_task_text": HOLLOW})
     };
@@ -123,7 +126,7 @@ async fn a_cross_task_gap_is_a_note_in_the_body_gate_and_blocks_at_the_set_gate_
     std::fs::write(candidate_path(cwd), body).expect("land candidate body");
     let set_reply = serde_json::json!({
         "verdicts": [
-            {"obligation_id": "G-WS-001", "necessarily_true": true, "weakest_task_id": "", "reason": "the task requires ingestion", "quoted_task_text": ""}
+            {"obligation_id": "G-WS-001", "necessarily_true": true, "weakest_task_id": "", "reason": "the task requires ingestion", "quoted_task_text": "", "supporting_task_id": "TASK-WS-001", "supporting_text": SUPPORT}
         ]
     })
     .to_string();
@@ -239,7 +242,7 @@ async fn a_co_claimant_on_disk_joins_the_candidates_cluster_and_the_set_gate_reu
     // Land the body, then run the set gate: the shared cluster is cached and
     // only G-WS-001 (claimed by TASK-WS-001 alone) is a new question.
     std::fs::write(candidate_path(cwd), candidate_body(HOLLOW)).unwrap();
-    let only_g = serde_json::json!({ "verdicts": [{"obligation_id": "G-WS-001", "necessarily_true": true, "reason": "obliged"}] });
+    let only_g = serde_json::json!({ "verdicts": [{"obligation_id": "G-WS-001", "necessarily_true": true, "reason": "obliged", "supporting_task_id": "TASK-WS-001", "supporting_text": SUPPORT}] });
     let set_critic = FakeCritic::new(vec![Ok(only_g.to_string())]);
     let evaluation = evaluate(cwd, Ok(set_critic.clone())).await;
     assert!(

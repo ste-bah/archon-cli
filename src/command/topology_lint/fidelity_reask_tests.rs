@@ -8,12 +8,14 @@
 
 use super::*;
 
-const VERDICT_KEYS: [&str; 5] = [
+const VERDICT_KEYS: [&str; 7] = [
     "obligation_id",
     "necessarily_true",
     "weakest_task_id",
     "reason",
     "quoted_task_text",
+    "supporting_task_id",
+    "supporting_text",
 ];
 
 /// A complete true-verdict document whose verdict `index` carries one
@@ -279,7 +281,7 @@ fn wide_reply(ids: &[String], stray_at: Option<usize>) -> String {
         .iter()
         .enumerate()
         .map(|(n, id)| {
-            let mut verdict = serde_json::json!({"obligation_id": id, "necessarily_true": true, "weakest_task_id": "", "reason": "obliged", "quoted_task_text": ""});
+            let mut verdict = serde_json::json!({"obligation_id": id, "necessarily_true": true, "weakest_task_id": "", "reason": "obliged", "quoted_task_text": "", "supporting_task_id": "TASK-WS-001", "supporting_text": SUPPORT});
             if stray_at == Some(n) {
                 verdict["zz_stray"] = "".into();
             }

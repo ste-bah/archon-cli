@@ -29,28 +29,6 @@ fn chain_corpus() -> tempfile::TempDir {
     temp
 }
 
-fn claimant_only_digest(cwd: &Path) -> String {
-    let obligations = vec![
-        ClaimedObligation {
-            id: "AC-WS-001".into(),
-            text: "Ingestion stores a registry entry.".into(),
-        },
-        ClaimedObligation {
-            id: "G-WS-001".into(),
-            text: "Ingest widgets into the shared store.".into(),
-        },
-    ];
-    let text = std::fs::read_to_string(cwd.join("tasks/PRD-WS-001/TASK-WS-001.md")).unwrap();
-    fidelity_cluster_digest(
-        &obligations,
-        &[ClaimingTask {
-            task_id: "TASK-WS-001".into(),
-            text,
-        }],
-        &SkeletonSummary::absent(),
-    )
-}
-
 #[tokio::test]
 async fn a_named_sibling_joins_the_cluster_and_changes_its_digest() {
     let temp = chain_corpus();
@@ -81,17 +59,21 @@ async fn a_named_sibling_joins_the_cluster_and_changes_its_digest() {
         "{}",
         evaluation.report
     );
-    let cache = cwd.join(".archon/lint-cache/fidelity");
-    let cached: Vec<String> = std::fs::read_dir(&cache)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+    // #434: one record per obligation, each bound to every task of its
+    // cluster: the named sibling is part of what a verdict rests on.
+    let records: Vec<serde_json::Value> = record_files(cwd)
+        .iter()
+        .map(|path| serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap())
         .collect();
-    assert_eq!(cached.len(), 1, "{cached:?}");
-    assert_ne!(
-        cached[0],
-        format!("{}.json", claimant_only_digest(cwd)),
-        "the digest covers the sibling, so the cache key changes with the chain"
-    );
+    assert_eq!(records.len(), 2, "{records:?}");
+    for record in &records {
+        let tasks = record["entries"][0]["tasks"].as_object().unwrap();
+        assert_eq!(
+            tasks.keys().collect::<Vec<_>>(),
+            ["TASK-WS-001", "TASK-WS-002"],
+            "the sibling's text is bound into the record"
+        );
+    }
 }
 
 #[tokio::test]
@@ -127,7 +109,7 @@ async fn a_false_verdict_on_the_sibling_names_the_claimant_and_points_at_the_sib
     let cwd = temp.path();
     let verdicts = serde_json::json!({"verdicts": [
         {"obligation_id": "AC-WS-001", "necessarily_true": false, "weakest_task_id": "TASK-WS-002", "reason": "the sibling writes nothing the PRD names", "quoted_task_text": SIBLING},
-        {"obligation_id": "G-WS-001", "necessarily_true": true, "reason": "obliged"}
+        {"obligation_id": "G-WS-001", "necessarily_true": true, "reason": "obliged", "supporting_task_id": "TASK-WS-001", "supporting_text": SUPPORT}
     ]});
     let evaluation = evaluate(cwd, Ok(FakeCritic::new(vec![Ok(verdicts.to_string())]))).await;
     assert!(evaluation.operational_error().is_none());

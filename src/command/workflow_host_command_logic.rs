@@ -218,17 +218,20 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 9: #400 validates incremental subsets independently, allowing supplementary-only updates to pass.
         // 7: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 10: #374 resolves filesystem aliases without refusing unrelated paths on the same volume.
+        // #434 re-pin only: the fidelity critic's verdict store and reply
+        // schema are in this closure, but freeze never asks the critic.
         version: 10,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "a548ce0d37c5767c2c42e7fa85c50aa8eba96361ec60f62346c2908fbc91687b",
+        sources_digest: "d8e1c375d02fcf66d090324ffb82c42b2e5ffb2330665d61651b0707a612944b",
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        // #434 re-pin only, as freeze-acceptance.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "a548ce0d37c5767c2c42e7fa85c50aa8eba96361ec60f62346c2908fbc91687b",
+        sources_digest: "d8e1c375d02fcf66d090324ffb82c42b2e5ffb2330665d61651b0707a612944b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -239,9 +242,12 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380's obligation model changes the frozen contract verdict.
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 6: #434 cross-task fidelity gaps are left for the set gate to route to their weakest task.
-        version: 6,
+        // 7: #434 a true fidelity verdict quotes a checked supporting anchor;
+        // verdicts are reused per obligation only over byte-identical cluster
+        // texts, and standing verdicts that disagree are a contradiction finding.
+        version: 7,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "9b39e0a8af13325ca0a0efed0c1fb134dcd67f803c13744a6188b84c0961a751",
+        sources_digest: "c6b3f4133428704cdbf8e21a48726b4daf942ae601f1120d3eaf2e0b0ded9ad0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -250,9 +256,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // makes progress (R8).
         // 4: #380's obligation model changes the frozen contract verdict.
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 5,
+        // 6: #434 as land-task-body 7: per-obligation fidelity reuse over
+        // byte-identical cluster texts, supporting anchors, contradiction findings.
+        version: 6,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "9b39e0a8af13325ca0a0efed0c1fb134dcd67f803c13744a6188b84c0961a751",
+        sources_digest: "c6b3f4133428704cdbf8e21a48726b4daf942ae601f1120d3eaf2e0b0ded9ad0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -260,7 +268,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
-        sources_digest: "542fa5562fa425d5c4463cc4361b30617a63497d75032a96a85f85c69749a7d0",
+        // #434 re-pin only: trace never asks the fidelity critic.
+        sources_digest: "a5fb6628ace6161cd02043068e4132e2052175e725385f26ac5665fc27455c5c",
         build_bound: true,
     },
     CapabilityLogic {
@@ -268,7 +277,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "f34d32365f205ddadc4ef487c0d08cfcbdb7d53daa56c3b70a39dda8d84ac0ba",
+        // #434 re-pin only: verify never asks the fidelity critic.
+        sources_digest: "ba1e5c9da5a86e70c7777f71adb67ae3a29b5370e391849d8557daf8a6e9a654",
         build_bound: true,
     },
     CapabilityLogic {
@@ -276,7 +286,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "f34d32365f205ddadc4ef487c0d08cfcbdb7d53daa56c3b70a39dda8d84ac0ba",
+        // #434 re-pin only: verify never asks the fidelity critic.
+        sources_digest: "ba1e5c9da5a86e70c7777f71adb67ae3a29b5370e391849d8557daf8a6e9a654",
         build_bound: true,
     },
 ];
