@@ -4,6 +4,7 @@ mod cargo_credit;
 mod context_fit;
 #[cfg(test)]
 mod context_fit_tests;
+mod flatten_history;
 mod message_history;
 mod progress_stop;
 mod progress_window;
@@ -28,6 +29,13 @@ impl SubagentRunner {
     /// Run the subagent loop with the given initial prompt.
     /// Returns the accumulated text output from the final turn.
     pub async fn run(&self, initial_prompt: &str) -> anyhow::Result<String> {
+        Ok(self.run_with_completion(initial_prompt).await?.content)
+    }
+
+    pub async fn run_with_completion(
+        &self,
+        initial_prompt: &str,
+    ) -> anyhow::Result<super::SubagentCompletion> {
         // The session has started: from here, and not while it was queued for
         // a subagent slot, silence counts against the host's inactivity bound.
         archon_tools::subagent_activity::note();
@@ -60,6 +68,7 @@ impl SubagentRunner {
         let mut reactive_rate_limit_retried = false;
         let mut pressure = PressureState::default();
         let mut incomplete_audit_replies = 0u8;
+        let mut inspection_tools_withdrawn = false;
 
         for turn in 0..self.max_turns {
             // Issue-213 C5: the turn an interrupted call's record names.
@@ -76,7 +85,29 @@ impl SubagentRunner {
                 .shutdown_flag
                 .load(std::sync::atomic::Ordering::Relaxed)
             {
-                return Ok("[Agent shutdown requested]".to_string());
+                return Ok(super::SubagentCompletion {
+                    content: "[Agent shutdown requested]".to_string(),
+                    stop_reason: None,
+                });
+            }
+
+            if !inspection_tools_withdrawn
+                && self
+                    .tool_context
+                    .workflow_read_guard
+                    .as_ref()
+                    .is_some_and(|guard| guard.read_only_ceiling_reached())
+            {
+                let note = "Inspection tools are no longer available in this call; answer now with your deliverable from what you have read.";
+                let message = flatten_history::flatten_history(
+                    messages.as_slice(),
+                    initial_prompt,
+                    note,
+                    request_round::read_ceiling_fit_budget(self),
+                );
+                self.record_transcript(&message);
+                messages.replace(vec![message]);
+                inspection_tools_withdrawn = true;
             }
 
             if let Some(landing) = &self.tool_context.audit_landing
@@ -107,6 +138,17 @@ impl SubagentRunner {
             .map_err(|_| {
                 window.stall_error("while preparing an LLM request", turn.saturating_add(1))
             })?;
+            let offered_tool_names = prepared_request
+                .template
+                .tools
+                .iter()
+                .filter_map(|definition| {
+                    definition
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned)
+                })
+                .collect::<Vec<_>>();
             // A completed preparation may carry a compaction summary, which is
             // model output; without one it took no measurable time.
             archon_tools::subagent_activity::note();
@@ -159,6 +201,44 @@ impl SubagentRunner {
 
             // If no tool calls, subagent is done — return accumulated text
             if stream.pending_tools.is_empty() {
+                if crate::subagent::starts_with_text_tool_call(&stream.text_content) {
+                    let tool_name =
+                        crate::subagent::extract_text_tool_call_name(&stream.text_content)
+                            .expect("recognized text tool-call prefix has a name");
+                    // Text-form tool calls are rejected and re-asked below;
+                    // changing their arguments does not count as progress.
+                    window.observe_turn(turn.saturating_add(1), "", &[], &[]);
+                    tracing::warn!(
+                        turn = turn.saturating_add(1),
+                        "subagent wrote a tool call as text; requesting a tool-interface call or final answer"
+                    );
+                    let answer = serde_json::json!({
+                        "role": "assistant",
+                        "content": stream.text_content,
+                    });
+                    self.record_transcript(&answer);
+                    messages.push(answer);
+                    let feedback = serde_json::json!({
+                        "role": "user",
+                        "content": if inspection_tools_withdrawn {
+                            "Inspection tools are no longer available in this call and text tool calls are not run; answer now with your deliverable from what you have read.".to_owned()
+                        } else if !offered_tool_names.iter().any(|name| name == &tool_name) {
+                            if offered_tool_names.is_empty() {
+                                "No tools are available in this call; answer now with your deliverable from what you have read.".to_owned()
+                            } else {
+                                format!(
+                                    "Your last message began with a call to `{tool_name}` written as text; `{tool_name}` is not available in this call, so it was not run. The tools you can call are: {}. Call one of them through the tool interface, or, if none fits, answer now with your deliverable from what you have read.",
+                                    offered_tool_names.join(", ")
+                                )
+                            }
+                        } else {
+                            "Your last message began with a tool call written as text; it was not run. If that message also contained your final answer, repeat the final answer now without the tool-call text. Otherwise call the tool through the tool interface.".to_owned()
+                        },
+                    });
+                    self.record_transcript(&feedback);
+                    messages.push(feedback);
+                    continue;
+                }
                 window.observe_turn(turn.saturating_add(1), &stream.text_content, &[], &[]);
                 if let Some(landing) = &self.tool_context.audit_landing {
                     let parsed = serde_json::from_str::<serde_json::Value>(&stream.text_content);
@@ -196,7 +276,10 @@ impl SubagentRunner {
                     }));
                 }
                 self.emit_activity_stream("final", "subagent turn complete", None, false);
-                return Ok(stream.text_content);
+                return Ok(super::SubagentCompletion {
+                    content: stream.text_content,
+                    stop_reason: stream.stop_reason,
+                });
             }
 
             let round_cancel = self

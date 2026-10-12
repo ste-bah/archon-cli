@@ -25,7 +25,8 @@ const ACCEPTANCE_SHAPE = JSON.stringify({
       criterion: "",
       check: {
         kind: "command",
-        command: "<shell command that exercises the deliverable and exits non-zero when the criterion is false>",
+        // Live replies put long scripts in check blocks; inline scripts break JSON parsing.
+        command_block: true,
         cwd: "project_root"
       },
       gap_permitted: false,
@@ -328,7 +329,9 @@ async function authorCandidate(w, policy) {
     }
     attempt += 1;
     if (authored.stopReason !== "end_turn" || typeof authored.content !== "string" || authored.content.length === 0) {
-      feedback = [`Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
+      feedback = [authored.stopReason === "max_tokens"
+        ? "The provider cut off the reply at its output limit; make the check shorter and return one complete artifact."
+        : `Provider outcome was incomplete (stopReason=${authored.stopReason || "missing"}); return one complete artifact.`];
       lastFindings = feedback.slice();
       recordAnswered(progress, call, "incomplete", false, !measuredReplies);
       continue;

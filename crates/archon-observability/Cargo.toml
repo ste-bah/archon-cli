@@ -63,6 +63,7 @@ serde_json = { workspace = true }
 urlencoding = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+fs2 = { workspace = true }
 # #189 Phase 10: OTLP span export, off unless an endpoint is configured.
 # `tracing-opentelemetry` is deliberately absent — a tracing layer is a parallel
 # sink, and stacking one alongside the redaction layer would export the

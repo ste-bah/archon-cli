@@ -182,6 +182,7 @@ pub(crate) const JUDGE_TIMEOUT_SECS: u64 = 7_200;
 /// Judge `contract` in one batch: a truncated reply is continued, a reply
 /// with no usable verdict is re-asked, and a judge that cannot complete is
 /// [`JudgeIncomplete`].
+#[cfg(test)]
 pub(super) async fn judge_contract(
     client: &dyn WorkflowLlmClient,
     contract: AcceptanceContract,
@@ -192,6 +193,7 @@ pub(super) async fn judge_contract(
 
 /// [`judge_contract`], continuing (and saving) the batch's partial reply in
 /// `partial` so a retry resumes it instead of asking again (Issue 260).
+#[cfg(test)]
 pub(super) async fn judge_contract_resumable(
     client: &dyn WorkflowLlmClient,
     contract: AcceptanceContract,
@@ -223,6 +225,16 @@ pub(super) async fn judge_contract_resumable(
         partial,
     )
     .await
+}
+
+/// Judge an incremental batch. A partial subset cannot establish full
+/// contract structure, so validate its decisions and required prose only.
+pub(super) async fn judge_contract_subset_resumable(
+    client: &dyn WorkflowLlmClient,
+    subset: AcceptanceContract,
+    partial: Option<&PartialReply<'_>>,
+) -> Result<AcceptanceContract> {
+    judge_batch(client, subset, "sonnet", require_judged_prose, partial).await
 }
 
 /// Judge a subset of a contract's checks — the ones being re-authored — in

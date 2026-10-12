@@ -64,7 +64,18 @@ fn resolve_existing_host_path(
         .map(archon_shell::paths::plain)
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                format!("File does not exist: {}", normalized.display())
+                let message = format!("File does not exist: {}", normalized.display());
+                match missing_path_suggestions(&normalized, ctx) {
+                    Some(suggestions) => format!(
+                        "{message}. Did you mean: {}?",
+                        suggestions
+                            .iter()
+                            .map(|path| path.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    None => message,
+                }
             } else {
                 format!(
                     "Failed to resolve file path '{}': {e}",
@@ -74,6 +85,68 @@ fn resolve_existing_host_path(
         })?;
     ensure_allowed(&resolved, ctx)?;
     Ok((normalized, resolved))
+}
+
+fn missing_path_suggestions(path: &Path, ctx: &ToolContext) -> Option<Vec<PathBuf>> {
+    const MAX_DIRECTORY_ENTRIES: usize = 4096;
+    const MAX_SUGGESTIONS: usize = 3;
+
+    let parent = path.parent()?;
+    let requested_name = path.file_name()?.to_str()?;
+    let canonical_parent = fs::canonicalize(parent)
+        .ok()
+        .map(archon_shell::paths::plain)?;
+    if !canonical_parent.is_dir() || ensure_allowed(&canonical_parent, ctx).is_err() {
+        return None;
+    }
+
+    let entries = fs::read_dir(&canonical_parent).ok()?;
+    let mut ranked = Vec::new();
+    let mut scanned = 0;
+    for entry in entries {
+        let entry = entry.ok()?;
+        scanned += 1;
+        if scanned > MAX_DIRECTORY_ENTRIES {
+            return None;
+        }
+        let name = entry.file_name();
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
+        let distance = edit_distance(requested_name, name_str);
+        let threshold = 2.max(requested_name.chars().count() / 8);
+        if distance <= threshold {
+            ranked.push((distance, name_str.to_owned()));
+        }
+    }
+
+    ranked.sort_by(|(distance_a, name_a), (distance_b, name_b)| {
+        distance_a.cmp(distance_b).then_with(|| name_a.cmp(name_b))
+    });
+    let suggestions = ranked
+        .into_iter()
+        .take(MAX_SUGGESTIONS)
+        .map(|(_, name)| canonical_parent.join(name))
+        .collect::<Vec<_>>();
+    (!suggestions.is_empty()).then_some(suggestions)
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let right = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    let mut current = vec![0; right.len() + 1];
+
+    for (left_index, left_char) in left.chars().enumerate() {
+        current[0] = left_index + 1;
+        for (right_index, right_char) in right.iter().enumerate() {
+            current[right_index + 1] = (previous[right_index + 1] + 1)
+                .min(current[right_index] + 1)
+                .min(previous[right_index] + usize::from(left_char != *right_char));
+        }
+        std::mem::swap(&mut previous, &mut current);
+    }
+
+    previous[right.len()]
 }
 
 pub(crate) fn resolve_write_target_path(
@@ -403,3 +476,7 @@ mod world_write_tests;
 #[cfg(test)]
 #[path = "path_guard_resume_history_tests.rs"]
 mod resume_history_tests;
+
+#[cfg(test)]
+#[path = "path_guard_suggestions_tests.rs"]
+mod suggestions_tests;

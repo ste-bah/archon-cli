@@ -113,18 +113,18 @@ pub(crate) struct SupervisedProcessOutput {
     pub(crate) stderr: Vec<u8>,
     pub(crate) stdout_bytes: u64,
     pub(crate) stderr_bytes: u64,
+    pub(crate) stdout_retained_bytes: u64,
+    pub(crate) stderr_retained_bytes: u64,
+    pub(crate) stdout_truncated: bool,
+    pub(crate) stderr_truncated: bool,
+    pub(crate) stdout_path: Option<std::path::PathBuf>,
+    pub(crate) stderr_path: Option<std::path::PathBuf>,
 }
 
 impl SupervisedProcessOutput {
-    /// Whether the child wrote more (stdout, stderr) than was kept, from the
-    /// byte counts. A call whose output overflowed fails in the supervisor,
-    /// so a returned output is not expected to be truncated; a record reports
-    /// these counts rather than assuming that.
+    /// Whether each stream exceeded its retained byte limit.
     pub(crate) fn truncation(&self) -> (bool, bool) {
-        (
-            self.stdout_bytes > self.stdout.len() as u64,
-            self.stderr_bytes > self.stderr.len() as u64,
-        )
+        (self.stdout_truncated, self.stderr_truncated)
     }
 }
 
@@ -135,6 +135,20 @@ pub(crate) async fn supervise_process_group(
     control: HostCommandControl,
     group_records: Option<&std::path::Path>,
 ) -> WorkflowResult<SupervisedProcessOutput> {
+    // A command id can be launched concurrently more than once. Give every
+    // supervisor its own spill directory before creating either stream file;
+    // callers may provide a call-level directory shared by sibling launches.
+    if let Some(directory) = request.spill_dir.take() {
+        let already_unique = directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("attempt-"));
+        request.spill_dir = Some(if already_unique {
+            directory
+        } else {
+            directory.join(format!("attempt-{}", uuid::Uuid::new_v4()))
+        });
+    }
     let mut command = archon_shell::spawn::tokio_command(&request.program);
     archon_shell::spawn::replace_environment(command.as_std_mut(), &request.environment);
     command
@@ -190,6 +204,8 @@ pub(crate) async fn supervise_process_group(
     // Reserving before spawn makes a failed directory incapable of launching
     // an unrecorded child. A crash in the spawn/registration gap retains the
     // unresolved launch barrier, which the normal resume check reads.
+    let (stdout_file, stdout_path, stdout_relative) = io::spill_file(&request, "stdout")?;
+    let (stderr_file, stderr_path, stderr_relative) = io::spill_file(&request, "stderr")?;
     let mut launch = launch::LaunchBarrier::reserve(group_records, &request.command_id)?;
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -261,6 +277,9 @@ pub(crate) async fn supervise_process_group(
         "stdout",
         event_tx.clone(),
         progress.clone(),
+        stdout_file,
+        stdout_path,
+        stdout_relative,
     ));
     let stderr_task = tokio::spawn(drain_pipe(
         stderr,
@@ -268,6 +287,9 @@ pub(crate) async fn supervise_process_group(
         "stderr",
         event_tx.clone(),
         progress.clone(),
+        stderr_file,
+        stderr_path,
+        stderr_relative,
     ));
     let stdin_task = match request.stdin.take() {
         Some(bytes) => {
@@ -382,6 +404,12 @@ pub(crate) async fn supervise_process_group(
                 stderr: stderr.bytes,
                 stdout_bytes: stdout.total,
                 stderr_bytes: stderr.total,
+                stdout_retained_bytes: stdout.retained,
+                stderr_retained_bytes: stderr.retained,
+                stdout_truncated: stdout.truncated,
+                stderr_truncated: stderr.truncated,
+                stdout_path: stdout.path,
+                stderr_path: stderr.path,
             })
         }
         Outcome::TimedOut => {
@@ -402,9 +430,6 @@ pub(crate) async fn supervise_process_group(
             let (stdout, stderr) = pipes.map_err(WorkflowError::StageFailed)?;
             // An overflow the drain had not reported when the clock ran out is
             // still an overflow: the outcome must not depend on that order.
-            if let Some(error) = io::overflow(&request, &stdout, &stderr) {
-                return Err(error);
-            }
             Ok(SupervisedProcessOutput {
                 exit_code: None,
                 timed_out: true,
@@ -412,6 +437,12 @@ pub(crate) async fn supervise_process_group(
                 stderr: stderr.bytes,
                 stdout_bytes: stdout.total,
                 stderr_bytes: stderr.total,
+                stdout_retained_bytes: stdout.retained,
+                stderr_retained_bytes: stderr.retained,
+                stdout_truncated: stdout.truncated,
+                stderr_truncated: stderr.truncated,
+                stdout_path: stdout.path,
+                stderr_path: stderr.path,
             })
         }
         Outcome::Controlled(signal) => {
@@ -446,11 +477,6 @@ pub(crate) async fn supervise_process_group(
             group_guard.reaped();
             abort_stdin(stdin_task);
             let error = match event {
-                SupervisorEvent::OutputLimit {
-                    stream,
-                    limit,
-                    observed,
-                } => io::over_limit(&request, stream, limit, observed),
                 SupervisorEvent::Failed(detail) => io::failed(&request, &detail),
                 SupervisorEvent::Checkpoint(detail) => WorkflowError::HostOperational(detail),
             };

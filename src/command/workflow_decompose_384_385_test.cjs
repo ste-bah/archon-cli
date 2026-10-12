@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
-const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js',
+const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js',
   'workflow_decompose_v1_set_gate.js', 'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js']
   .map(name => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 const context = () => {
@@ -29,6 +29,37 @@ function promptRules() {
   ]) assert.ok(body.includes(rule), `body prompt lacks rule: ${rule}`);
   assert.ok(acceptance.includes('fail on the pre-implementation baseline'), 'acceptance prompt lacks baseline proof rule');
   assert.ok(acceptance.includes('moves aside every data file it names by a path relative to its working directory'), 'acceptance prompt lacks already-true proof rule');
+}
+
+async function replyFormatIsTheLastTaskSection() {
+  const ctx = context();
+  const tasks = [];
+  const state = {entries:new Map(), retryIds:new Set(['A'])};
+  const w = {agent:async (_id, options) => {
+    tasks.push(options.task);
+    return {status:'accepted',stopReason:'end_turn',content:'{"id":'};
+  }};
+  await ctx.authorAcceptanceEntries(w, ctx.acceptanceAuthorPrompt(), 1, state);
+  state.retryIds = new Set(['A']);
+  await ctx.authorAcceptanceEntries(w, ctx.acceptanceAuthorPrompt(), 2, state);
+  assert.equal(tasks.length, 2);
+  assert.ok(tasks[0].includes('"command_block":true'), 'the acceptance entry shape uses a check block');
+  assert.ok(!tasks[0].includes('"command":"'), 'the acceptance entry shape has no inline command example');
+  const format = ctx.acceptanceReplyFormat();
+  const formatLines = format.split('\n');
+  assert.ok(formatLines.includes('```json'), 'the reply example opens a JSON fence on its own line');
+  assert.ok(formatLines.includes('```check'), 'the reply example opens a check fence on its own line');
+  assert.ok(formatLines.filter(line => line === '```').length >= 2, 'the reply example closes both fences on their own lines');
+  assert.ok(format.includes('Every fence line is alone on its line: open with exactly ```json or ```check, close with exactly ```; never put text after a fence on the same line.'));
+  for (const line of formatLines) {
+    if (line.startsWith('```')) assert.ok(['```json','```check','```'].includes(line), `unexpected fence line: ${line}`);
+  }
+  for (const task of tasks) {
+    assert.ok(task.includes('Reply format: see the end of this task.'));
+    assert.ok(task.endsWith(format), 'the complete reply-format block is the final task section');
+    assert.ok(!task.endsWith(`\n\`\`\`\n${format}`), 'the format is not wrapped in an outer fence');
+  }
+  assert.match(tasks[1], /The host refused this entry's last answered reply[\s\S]*JSON parse error/);
 }
 
 async function gateOutageReusesCandidate() {
@@ -70,7 +101,7 @@ async function wrongStopReasonIsSpecific() {
   const out = await ctx.authorAcceptanceEntries({agent:async () => ({
     status:'accepted',stopReason:'max_tokens',content:'{"id":"A"}'
   })}, 'author', 1, {entries:new Map(),retryIds:new Set(['A'])});
-  assert.match(out.summary, /expected stop reason end_turn, got max_tokens/);
+  assert.match(out.summary, /cut off the reply at its output limit; make the check shorter/);
 }
 
 async function missingContentIsSpecific() {
@@ -82,7 +113,7 @@ async function missingContentIsSpecific() {
 }
 
 (async () => {
-  for (const [name, test] of [['prompt rules',promptRules],['gate outage candidate reuse',gateOutageReusesCandidate],
+  for (const [name, test] of [['prompt rules',promptRules],['reply format last on first and repair attempts',replyFormatIsTheLastTaskSection],['gate outage candidate reuse',gateOutageReusesCandidate],
     ['wrong id measured refusal',wrongIdRefusalHasSpecificMeasuredProgress],['specific stop reason',wrongStopReasonIsSpecific],
     ['specific missing content',missingContentIsSpecific]]) {
     await test(); console.log(`PASS ${name}`);

@@ -2,6 +2,7 @@ use super::*;
 use crate::events::{
     AgentActivityRole as Role, AgentActivityStatus as Status, AgentActivityUpdate,
 };
+use serial_test::serial;
 
 fn activity(id: &str, status: Status) -> TuiEvent {
     TuiEvent::AgentActivity(AgentActivityUpdate {
@@ -54,14 +55,17 @@ fn terminal_on_full_queue(status: Status) {
     });
 }
 #[test]
+#[serial(tui_drain_metrics)]
 fn gc_full_channel_completion_reconciles() {
     terminal_on_full_queue(Status::Complete);
 }
 #[test]
+#[serial(tui_drain_metrics)]
 fn gc_full_channel_failure_reconciles() {
     terminal_on_full_queue(Status::Failed);
 }
 #[test]
+#[serial(tui_drain_metrics)]
 fn gc_full_channel_cancellation_reconciles() {
     terminal_on_full_queue(Status::Cancelled);
 }
@@ -100,6 +104,7 @@ fn gc_duplicate_completed_call_preserves_live_row() {
 }
 
 #[test]
+#[serial(tui_drain_metrics)]
 fn r2_running_sync_rejection_preserves_queued_events() {
     let (tx, mut rx) = bounded_tui_event_channel_with_capacity(1);
     tx.send(TuiEvent::GenerationStarted).unwrap();
@@ -112,6 +117,7 @@ fn r2_running_sync_rejection_preserves_queued_events() {
 }
 
 #[tokio::test]
+#[serial(tui_drain_metrics)]
 async fn r2_queued_async_waits_for_capacity() {
     let (tx, mut rx) = bounded_tui_event_channel_with_capacity(1);
     tx.send(TuiEvent::GenerationStarted).unwrap();
@@ -126,6 +132,7 @@ async fn r2_queued_async_waits_for_capacity() {
 }
 
 #[tokio::test]
+#[serial(tui_drain_metrics)]
 async fn r2_running_atomic_async_waits_for_capacity() {
     let (tx, mut rx) = bounded_tui_event_channel_with_capacity(1);
     tx.send(TuiEvent::GenerationStarted).unwrap();

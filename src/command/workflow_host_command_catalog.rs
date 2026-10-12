@@ -44,6 +44,9 @@ pub(crate) struct ResolvedHostCommand {
     pub(crate) max_stderr_bytes: u64,
     pub(crate) declared_write_set: Vec<PathBuf>,
     pub(crate) remediation_scopes: BTreeSet<RemediationScope>,
+    /// Per-call directory for complete stdout/stderr spills. Not persisted as
+    /// request metadata; it is derived from this run's staging root and call id.
+    pub(crate) spill_dir: Option<PathBuf>,
 }
 
 /// No-progress window for provider-backed capabilities. Binary-only: the catalog
@@ -426,6 +429,14 @@ pub(crate) fn resolve_host_command(
         max_stderr_bytes: capability.max_stderr_bytes,
         declared_write_set,
         remediation_scopes: capability.remediation_scopes.clone(),
+        spill_dir: Some(
+            context
+                .run_staging_root
+                .parent()
+                .unwrap_or(&context.run_staging_root)
+                .join("host-command-results")
+                .join(call_id),
+        ),
     })
 }
 

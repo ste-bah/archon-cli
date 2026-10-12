@@ -4,6 +4,9 @@ use archon_tools::agent_tool::SubagentRequest;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+mod text_tool_call;
+pub(crate) use text_tool_call::{extract_text_tool_call_name, starts_with_text_tool_call};
+
 // ---------------------------------------------------------------------------
 // Auto-background configuration (AGT-025)
 // ---------------------------------------------------------------------------

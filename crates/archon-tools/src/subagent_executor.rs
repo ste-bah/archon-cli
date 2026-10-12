@@ -80,13 +80,7 @@ pub enum SubagentClassification {
 pub enum SubagentOutcome {
     /// Runner finished successfully before the timer (or with no
     /// timer). Carries the final text to return to the caller.
-    Completed(String),
-    /// A completed call with provider usage captured from the live run.
-    CompletedWithUsage {
-        content: String,
-        tokens_in: Option<u64>,
-        tokens_out: Option<u64>,
-    },
+    Completed(SubagentCompletion),
     /// Runner finished with an error before the timer (or with no
     /// timer). Carries the user-facing reason.
     Failed(String),
@@ -97,6 +91,16 @@ pub enum SubagentOutcome {
     AutoBackgrounded,
     /// The cancel token was tripped before the runner finished.
     Cancelled,
+}
+
+/// Final answer text and the provider's stop reason for a completed run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentCompletion {
+    pub content: String,
+    pub stop_reason: Option<String>,
+    /// Provider usage, absent when the provider did not report that count.
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
 }
 
 /// Side effects returned by `on_visible_complete`. The executor has
@@ -156,6 +160,23 @@ pub trait SubagentExecutor: Send + Sync {
         cancel: CancellationToken,
     ) -> Result<String, ExecutorError>;
 
+    async fn run_to_completion_with_metadata(
+        &self,
+        subagent_id: String,
+        request: SubagentRequest,
+        ctx: ToolContext,
+        cancel: CancellationToken,
+    ) -> Result<SubagentCompletion, ExecutorError> {
+        self.run_to_completion(subagent_id, request, ctx, cancel)
+            .await
+            .map(|content| SubagentCompletion {
+                content,
+                stop_reason: None,
+                tokens_in: None,
+                tokens_out: None,
+            })
+    }
+
     async fn run_to_completion_with_system(
         &self,
         subagent_id: String,
@@ -171,6 +192,24 @@ pub trait SubagentExecutor: Send + Sync {
         }
         self.run_to_completion(subagent_id, request, ctx, cancel)
             .await
+    }
+
+    async fn run_to_completion_with_system_metadata(
+        &self,
+        subagent_id: String,
+        request: SubagentRequest,
+        system: Vec<serde_json::Value>,
+        ctx: ToolContext,
+        cancel: CancellationToken,
+    ) -> Result<SubagentCompletion, ExecutorError> {
+        self.run_to_completion_with_system(subagent_id, request, system, ctx, cancel)
+            .await
+            .map(|content| SubagentCompletion {
+                content,
+                stop_reason: None,
+                tokens_in: None,
+                tokens_out: None,
+            })
     }
 
     /// Inner terminal side effects: `SubagentManager` update +

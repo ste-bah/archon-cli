@@ -241,7 +241,6 @@ impl Tool for TaskCreateTool {
         fn map_outcome_to_status(outcome: &SubagentOutcome) -> Option<TaskStatus> {
             match outcome {
                 SubagentOutcome::Completed(_) => Some(TaskStatus::Completed),
-                SubagentOutcome::CompletedWithUsage { .. } => Some(TaskStatus::Completed),
                 SubagentOutcome::Failed(_) => Some(TaskStatus::Failed),
                 SubagentOutcome::Cancelled => Some(TaskStatus::Stopped),
                 // Inner runner keeps executing in a detached task. The
@@ -331,17 +330,8 @@ impl Tool for TaskCreateTool {
                     );
                 }
                 match outcome {
-                    SubagentOutcome::Completed(text) => {
-                        let response = json!({ "task_id": task_id, "result": text });
-                        match serde_json::to_string_pretty(&response) {
-                            Ok(s) => ToolResult::success(s),
-                            Err(e) => {
-                                ToolResult::error(format!("failed to serialize response: {e}"))
-                            }
-                        }
-                    }
-                    SubagentOutcome::CompletedWithUsage { content, .. } => {
-                        let response = json!({ "task_id": task_id, "result": content });
+                    SubagentOutcome::Completed(completion) => {
+                        let response = json!({ "task_id": task_id, "result": completion.content });
                         match serde_json::to_string_pretty(&response) {
                             Ok(s) => ToolResult::success(s),
                             Err(e) => {

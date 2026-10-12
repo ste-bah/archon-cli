@@ -10,7 +10,11 @@
 //! reply that passed validation is saved; an unreadable or mismatched file
 //! is ignored.
 
-use super::judge::{PartialReply, batched_judge_prompt, judge_contract_resumable};
+#[cfg(test)]
+use super::judge::judge_contract_resumable;
+use super::judge::{
+    PartialReply, batched_judge_prompt, judge_contract_subset_resumable, require_judged_prose,
+};
 use super::*;
 use crate::command::workflow_freeze_budget::{FREEZE_CACHE_DIR, FreezeProgress};
 
@@ -105,6 +109,7 @@ impl JudgeStore {
 
     /// The judge, answered from a saved identical batch when one
     /// exists, and saved otherwise.
+    #[cfg(test)]
     pub(super) async fn judge(
         &self,
         client: &dyn WorkflowLlmClient,
@@ -131,6 +136,42 @@ impl JudgeStore {
         let judged = judge_contract_resumable(client, subset, expected, Some(&partial)).await?;
         if self.save(&key, &judged) {
             // Never destroy the continuation before the verdict is on disk.
+            partial.completed();
+            self.progress.saved(true);
+        }
+        Ok(judged)
+    }
+
+    /// Judge an incremental subset, whose shape is not a complete contract.
+    pub(super) async fn judge_subset(
+        &self,
+        client: &dyn WorkflowLlmClient,
+        subset: AcceptanceContract,
+        expected: &BTreeSet<String>,
+    ) -> Result<AcceptanceContract> {
+        let key = Self::key(client, &subset, expected)?;
+        let partial = PartialReply::new(&self.dir, &key, &self.progress);
+        let saved = self.load(&key, &subset).filter(|judged| {
+            require_judged_prose(judged).is_ok()
+                && judged
+                    .acceptance
+                    .iter()
+                    .chain(&judged.supplementary)
+                    .map(|entry| entry.id.clone())
+                    .collect::<BTreeSet<_>>()
+                    == *expected
+        });
+        partial.count_saved(saved.is_some());
+        if let Some(judged) = saved {
+            partial.completed();
+            eprintln!(
+                "acceptance judge: reused the saved verdicts of an identical batch ({key}); no provider call made"
+            );
+            self.progress.reused(true);
+            return Ok(judged);
+        }
+        let judged = judge_contract_subset_resumable(client, subset, Some(&partial)).await?;
+        if self.save(&key, &judged) {
             partial.completed();
             self.progress.saved(true);
         }

@@ -146,6 +146,14 @@ impl SubagentPipelineClient {
         self
     }
 
+    /// `[workflow.generated] read_only_hard_call_ceiling` (Issue-58): past
+    /// this many inspection calls a read-only workflow call is refused.
+    #[must_use]
+    pub fn with_read_only_hard_call_ceiling(mut self, hard: u32) -> Self {
+        self.workflow_read_guard.read_only_hard_call_ceiling = hard;
+        self
+    }
+
     /// `[workflow.generated] tree_wide_mutators` / `allow_tree_wide_mutators`:
     /// the formatter and fixer shapes the guard refuses unless scoped, and the
     /// operator switch that lets them run over the whole tree.
@@ -406,23 +414,16 @@ pub(crate) fn llm_response_for_subagent_outcome(
     timeout_secs: Option<u64>,
 ) -> Result<LlmResponse> {
     match outcome {
-        SubagentOutcome::Completed(content) => Ok(LlmResponse {
-            content,
+        SubagentOutcome::Completed(completion) => Ok(LlmResponse {
+            content: completion.content,
             tool_uses: Vec::new(),
-            tokens_in: None,
-            tokens_out: None,
-            stop_reason: Some("end_turn".to_string()),
-        }),
-        SubagentOutcome::CompletedWithUsage {
-            content,
-            tokens_in,
-            tokens_out,
-        } => Ok(LlmResponse {
-            content,
-            tool_uses: Vec::new(),
-            tokens_in,
-            tokens_out,
-            stop_reason: Some("end_turn".to_string()),
+            tokens_in: completion.tokens_in,
+            tokens_out: completion.tokens_out,
+            stop_reason: Some(
+                completion
+                    .stop_reason
+                    .unwrap_or_else(|| "end_turn".to_string()),
+            ),
         }),
         SubagentOutcome::Failed(error) => Err(anyhow!("subagent failed: {error}")),
         SubagentOutcome::Cancelled if timed_out => Err(anyhow!(

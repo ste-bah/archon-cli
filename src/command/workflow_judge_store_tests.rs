@@ -99,6 +99,34 @@ async fn an_identical_batch_reuses_the_saved_verdicts_and_any_other_is_judged() 
 }
 
 #[tokio::test]
+async fn an_incremental_supplementary_only_batch_is_judged_and_saved() {
+    use super::super::judge::continuation_tests::Scripted;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut subset = contract("check");
+    let mut supplementary = subset.acceptance.remove(0);
+    supplementary.id = "SUP-1".into();
+    subset.supplementary.push(supplementary);
+    let expected = BTreeSet::from(["SUP-1".to_string()]);
+    let client = Scripted::new(vec![Ok((
+        r#"{"decisions":[{"id":"SUP-1","verdict":"accepted","counterexample":"none","reason":"valid"}]}"#,
+        Some("end_turn"),
+    ))]);
+    let store = JudgeStore::at(dir.path().join("judge"));
+
+    let judged = store
+        .judge_subset(&client, subset, &expected)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        judged.supplementary[0].judgment.verdict,
+        archon_workflow::task_set_contract::JudgeDecision::Accepted
+    );
+    assert_eq!(client.calls().len(), 1);
+}
+
+#[tokio::test]
 async fn an_unreadable_saved_verdict_is_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));

@@ -39,6 +39,12 @@ impl HostCommandProcessAdapter for ModeProcess {
             stderr: Vec::new(),
             stdout_bytes: 0,
             stderr_bytes: 0,
+            stdout_retained_bytes: 0,
+            stderr_retained_bytes: 0,
+            stdout_truncated: false,
+            stderr_truncated: false,
+            stdout_path: None,
+            stderr_path: None,
         };
         match self.mode.load(Ordering::SeqCst) {
             TIME_OUT => Ok(output(None, true)),

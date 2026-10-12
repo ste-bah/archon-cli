@@ -44,6 +44,7 @@ fn command(pid_file: &Path, rest: &str, timeout_secs: u64) -> ResolvedHostComman
         max_stderr_bytes: 1024 * 1024,
         declared_write_set: Vec::new(),
         remediation_scopes: BTreeSet::from([RemediationScope::Operational]),
+        spill_dir: None,
     }
 }
 

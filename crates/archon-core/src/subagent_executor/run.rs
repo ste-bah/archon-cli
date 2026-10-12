@@ -21,18 +21,18 @@ impl AgentSubagentExecutor {
         ctx: ToolContext,
         cancel: CancellationToken,
     ) -> Result<String, ExecutorError> {
-        // Every way the call ends after its activity row opens closes the row
-        // (Issue 322): the run's completion, `settle` for an error before it,
-        // and the row's drop for an abandoned call.
-        let mut row = self.activity_row(&subagent_id);
-        let result = self
-            .run_subagent_in_slot(subagent_id, request, system, ctx, cancel.clone(), &mut row)
-            .await;
-        row.settle(&result, &cancel);
-        result
+        self.run_subagent_to_completion_with_system_metadata(
+            subagent_id,
+            request,
+            system,
+            ctx,
+            cancel,
+        )
+        .await
+        .map(|completion| completion.content)
     }
 
-    async fn run_subagent_in_slot(
+    pub(super) async fn run_subagent_in_slot(
         &self,
         subagent_id: String,
         request: SubagentRequest,
@@ -40,7 +40,7 @@ impl AgentSubagentExecutor {
         ctx: ToolContext,
         cancel: CancellationToken,
         row: &mut super::activity::ActivityRow,
-    ) -> Result<String, ExecutorError> {
+    ) -> Result<archon_tools::subagent_executor::SubagentCompletion, ExecutorError> {
         let _capacity_permit = self
             .acquire_subagent_slot(&subagent_id, &request, &cancel, row)
             .await?;
@@ -62,26 +62,42 @@ impl AgentSubagentExecutor {
         let result = self
             .run_registered_subagent_to_completion(&ids, request, system, ctx, cancel, row)
             .await;
-        if let Some(progress) = self
+        let progress = self
             .subagent_manager
             .lock()
             .await
-            .get_progress(&ids.manager_id)
-        {
-            self.usage_cache.lock().await.insert(
-                ids.cache_id.clone(),
-                (
-                    progress
-                        .input_tokens_available
-                        .then_some(progress.cumulative_input_tokens),
-                    progress
-                        .output_tokens_available
-                        .then_some(progress.cumulative_output_tokens),
-                ),
-            );
+            .get_progress(&ids.manager_id);
+        let usage = progress.as_ref().map(|progress| {
+            (
+                progress
+                    .input_tokens_available
+                    .then_some(progress.cumulative_input_tokens),
+                progress
+                    .output_tokens_available
+                    .then_some(progress.cumulative_output_tokens),
+            )
+        });
+        if let Some((tokens_in, tokens_out)) = usage {
+            self.usage_cache
+                .lock()
+                .await
+                .insert(ids.cache_id.clone(), (tokens_in, tokens_out));
         }
-        self.on_inner_complete(ids.cache_id, result.clone().map_err(|err| err.to_string()))
-            .await;
+        let result = result.map(|mut completion| {
+            if let Some((tokens_in, tokens_out)) = usage {
+                completion.tokens_in = tokens_in;
+                completion.tokens_out = tokens_out;
+            }
+            completion
+        });
+        self.on_inner_complete(
+            ids.cache_id,
+            result
+                .clone()
+                .map(|completion| completion.content)
+                .map_err(|err| err.to_string()),
+        )
+        .await;
         // Last, not before: a completion interrupted part-way through has still
         // left the entry `Running`, and the drop is what covers that.
         registration.settle();
@@ -163,7 +179,7 @@ impl AgentSubagentExecutor {
         ctx: ToolContext,
         cancel: CancellationToken,
         row: &mut super::activity::ActivityRow,
-    ) -> Result<String, ExecutorError> {
+    ) -> Result<archon_tools::subagent_executor::SubagentCompletion, ExecutorError> {
         self.fire_subagent_start_hooks(&ids.manager_id, &request, ctx.nested)
             .await;
         let (mut runner, context, _tool_cancellation) = if let Some(context) = &ids.resume_context {
@@ -204,18 +220,34 @@ impl AgentSubagentExecutor {
         row.started(activity_agent_type, &activity_model);
         let runner_result = std::panic::AssertUnwindSafe(archon_tools::host_timeout::scope(
             context.host_timeout,
-            runner.run(&request.prompt),
+            runner.run_with_completion(&request.prompt),
         ))
         .catch_unwind()
         .await;
         let inner_result = match runner_result {
-            Ok(result) => result.map_err(|e| format!("Subagent failed: {e}")),
+            Ok(result) => result
+                .map(
+                    |completion| archon_tools::subagent_executor::SubagentCompletion {
+                        content: completion.content,
+                        stop_reason: completion.stop_reason,
+                        tokens_in: None,
+                        tokens_out: None,
+                    },
+                )
+                .map_err(|e| format!("Subagent failed: {e}")),
             Err(payload) => Err(format!(
                 "Subagent panicked: {}",
                 super::activity::panic_message(payload.as_ref())
             )),
         };
-        row.finished(activity_agent_type, &activity_model, &inner_result);
+        row.finished(
+            activity_agent_type,
+            &activity_model,
+            &inner_result
+                .as_ref()
+                .map(|c| c.content.clone())
+                .map_err(Clone::clone),
+        );
 
         inner_result.map_err(ExecutorError::Internal)
     }

@@ -11,7 +11,7 @@ use archon_llm::provider::{LlmError, LlmResponse, ModelInfo, ProviderFeature};
 use archon_llm::types::Usage;
 use archon_tools::host_timeout::{HostTimeout, scope};
 use archon_tools::subagent_dispatch_clock::{DispatchClock, scope_session};
-use archon_tools::tool::{PermissionLevel, Tool, ToolCapability, ToolResult};
+use archon_tools::tool::{PermissionLevel, Tool, ToolCapability, ToolContext, ToolResult};
 
 use super::*;
 use crate::agent::AgentConfig;
@@ -183,6 +183,44 @@ fn runner_with_read(
     )
 }
 
+fn runner_with_read_ceiling(provider: Arc<ScriptedProvider>, session: &str) -> SubagentRunner {
+    let mut registry = crate::dispatch::ToolRegistry::new();
+    registry.register(Box::new(FixedRead { refusal: false }));
+    let definitions = registry.tool_definitions();
+    let mut context = ToolContext {
+        working_dir: std::env::current_dir().unwrap_or_default(),
+        session_id: session.into(),
+        mode: archon_tools::tool::AgentMode::Normal,
+        ..Default::default()
+    };
+    context.workflow_read_guard = Some(Arc::new(
+        archon_tools::workflow_read_guard::WorkflowReadGuard::shell_only(
+            &archon_tools::workflow_read_guard::WorkflowReadGuardSettings {
+                read_only_soft_call_ceiling: 0,
+                read_only_hard_call_ceiling: 1,
+                ..Default::default()
+            },
+        ),
+    ));
+    SubagentRunner::new(
+        provider,
+        "You are a test subagent.".into(),
+        definitions,
+        Arc::new(registry),
+        context,
+        "mock-model".into(),
+        10_000,
+        300,
+        Arc::new(AgentConfig::default()),
+        Arc::new(IdentityProvider::new(
+            IdentityMode::Clean,
+            "test".into(),
+            String::new(),
+            String::new(),
+        )),
+    )
+}
+
 fn read(path: &str) -> Option<String> {
     Some(serde_json::json!({ "file_path": path }).to_string())
 }
@@ -250,6 +288,37 @@ async fn repeating_the_same_read_and_text_stops_at_the_window() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn different_text_form_tool_calls_do_not_renew_the_window() {
+    let turns = [
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/0.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/1.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/2.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/3.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/4.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/5.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/6.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/7.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/8.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/9.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/10.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/11.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/12.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/13.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/14.rs</arg_value></tool_call>",
+        "<tool_call>Read<arg_key>file_path</arg_key><arg_value>/src/15.rs</arg_value></tool_call>",
+    ];
+    let (result, elapsed, _) = run(
+        turns.into_iter().map(|text| (Some(text), None)).collect(),
+        "pw-text-tool-call",
+    )
+    .await;
+    let error = stall_text(result);
+
+    assert_eq!(elapsed, WINDOW, "{error}");
+    assert!(!error.contains("max turns"), "{error}");
+}
+
+#[tokio::test(start_paused = true)]
 async fn refused_reads_do_not_renew_and_end_as_resumable_no_progress() {
     let mut turns = vec![(
         Some(r#"Read {"file_path":"/src/refused_0.rs"}"#),
@@ -260,7 +329,7 @@ async fn refused_reads_do_not_renew_and_end_as_resumable_no_progress() {
     }
     let clock = DispatchClock::new();
     clock.admit();
-    let runner = runner_with_read(ScriptedProvider::new(turns), "pw-refused", true);
+    let runner = runner_with_read_ceiling(ScriptedProvider::new(turns), "pw-refused");
     let started = tokio::time::Instant::now();
     let result = scope_session(
         "pw-refused",
@@ -270,9 +339,40 @@ async fn refused_reads_do_not_renew_and_end_as_resumable_no_progress() {
     .await;
     let elapsed = started.elapsed().as_secs();
     let error = stall_text(result);
-    assert_eq!(elapsed, WINDOW, "{error}");
+    // The first inspection is admitted at turn 1 (500s); every later hard
+    // ceiling refusal leaves the window anchored there.
+    assert_eq!(elapsed, 500 + WINDOW, "{error}");
     assert!(error.contains("refused tool calls: 14"), "{error}");
-    assert!(!error.contains("READ_CEILING_MARKER"), "{error}");
+    // The host timeout counts typed refusals as refusals, not novel activity,
+    // so they do not renew the window. Their reason text stays on the tool result.
+}
+
+#[tokio::test]
+async fn hard_ceiling_refusal_is_typed() {
+    let guard = Arc::new(
+        archon_tools::workflow_read_guard::WorkflowReadGuard::shell_only(
+            &archon_tools::workflow_read_guard::WorkflowReadGuardSettings {
+                read_only_soft_call_ceiling: 0,
+                read_only_hard_call_ceiling: 1,
+                ..Default::default()
+            },
+        ),
+    );
+    let context = ToolContext {
+        working_dir: std::env::current_dir().unwrap_or_default(),
+        workflow_read_guard: Some(guard),
+        ..Default::default()
+    };
+    let tool = FixedRead { refusal: false };
+    let input = serde_json::json!({"file_path": "/src/ceiling.rs"});
+    let admitted =
+        crate::tool_run_admission::execute_tool_attempt(&tool, input.clone(), &context, false)
+            .await;
+    assert!(!admitted.is_guard_refusal());
+    let refused =
+        crate::tool_run_admission::execute_tool_attempt(&tool, input, &context, false).await;
+    assert!(refused.is_guard_refusal(), "{}", refused.content);
+    assert!(refused.content.contains("read ceiling reached:"));
 }
 
 #[tokio::test(start_paused = true)]

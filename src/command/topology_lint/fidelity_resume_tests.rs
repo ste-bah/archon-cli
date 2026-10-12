@@ -1,17 +1,11 @@
-//! A silent fidelity critic pauses resumably; retries reuse the saved batches.
-//!
-//! Fixtures are a made-up PRD in a made-up domain: three tasks, each the
-//! only claimant of its own two requirements, so the audit asks exactly
-//! three call batches (one per cluster) and each can be counted.
-
+//! Silent fidelity critics pause resumably; retries reuse saved batches.
+use archon_workflow::error::WorkflowResult;
+use archon_workflow::llm_client_port::{WorkflowAgentOutcome, WorkflowLlmClient};
+use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
-use archon_workflow::error::WorkflowResult;
-use archon_workflow::llm_client_port::{WorkflowAgentOutcome, WorkflowLlmClient};
-use async_trait::async_trait;
 
 use super::*;
 use crate::command::topology_lint::LintSource;
@@ -26,9 +20,7 @@ use anyhow::Result;
 
 const PREFIX: &str = "REQ-QX-";
 
-/// Answers every obligation its prompt carries as necessarily true, and
-/// records which ids each call asked. After `jump_after` calls it moves the
-/// clock far past any deadline, as a provider that took the whole budget.
+/// Answers obligations and records ids; can move the clock past a deadline.
 struct Critic {
     asked: Mutex<Vec<Vec<String>>>,
     jump: Option<(usize, Arc<AtomicU64>)>,
@@ -263,6 +255,12 @@ async fn a_lint_stalled_on_the_provider_exits_resumable_and_a_retry_reuses_its_u
         stderr: stderr.clone().into_bytes(),
         stdout_bytes: 0,
         stderr_bytes: stderr.len() as u64,
+        stdout_retained_bytes: 0,
+        stderr_retained_bytes: stderr.len() as u64,
+        stdout_truncated: false,
+        stderr_truncated: false,
+        stdout_path: None,
+        stderr_path: None,
     };
     assert_eq!(
         classify(&output),
@@ -463,7 +461,7 @@ fn the_staged_set_gate_reads_its_catalog_no_progress_window() {
 
 /// The catalog identity changes with #356 (schema 2: timeout semantics); rebuilding
 /// schema 1 reproduces the old catalog. The fixed script digest moves by design
-/// (Issues 261, 288 four times, 337, 357, 360, 366, 379, 381, 383, 384, 385, 389); older runs resume via #358 and the #360 seed.
+/// (Issues 261, 288 four times, 337, 357, 360, 366, 379, 381, 383, 384, 385, 389, 392); older runs resume via #358 and the #360 seed.
 #[test]
 fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     let catalog =
@@ -481,7 +479,7 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "041fd0fe2dc6c5c938099377bf41e0a068278ace9760f2e018d1c65a60a95e80"
+        "4adcee2be8d6278b54ade7b137f7886dc1be23436e43dc58f15375b8fc1633a7"
     );
 }
 

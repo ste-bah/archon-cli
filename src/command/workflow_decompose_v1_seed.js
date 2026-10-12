@@ -79,6 +79,12 @@ function seedEntries(seed, policy, state) {
       && !unreadableIds.has(entry.id))
       .map((entry) => entry.id)
     : []);
+  const owed = owedSupplementary();
+  for (const entry of listed) {
+    const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(entry.id)?.[1];
+    if (requirement) owed.set(entry.id, { requirement, text: currentRequirementText(requirement) });
+    state.entries.set(entry.id, entry);
+  }
   // Every gate registers the supplementary checks it says are owed, in order,
   // as the loop did; the last one also names the entries it sent back.
   // `null` from the last gate: a finding no rule attributes to one entry, which
@@ -102,12 +108,6 @@ function seedEntries(seed, policy, state) {
     const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(id)?.[1];
     return requirement ? (args.prdRequirementTexts || {})[requirement] : undefined;
   };
-  const owed = owedSupplementary();
-  for (const entry of listed) {
-    const requirement = /^SUP-(REQ-[A-Za-z0-9-]+)$/.exec(entry.id)?.[1];
-    if (requirement) owed.set(entry.id, { requirement, text: currentRequirementText(requirement) });
-    state.entries.set(entry.id, entry);
-  }
   // A reply authored after that gate is the entry's latest version, and a
   // repair only when it differs from what the gate judged: a gate asked the
   // same candidate again answers from its record, which keeps its old time.
@@ -121,8 +121,19 @@ function seedEntries(seed, policy, state) {
   const unreadable = Object.keys(seed.unreadable_replies || {});
   for (const reply of Array.isArray(seed.replies) ? seed.replies : []) {
     let entry = null;
-    try { entry = unwrapEntry(JSON.parse(reply.text), reply.id); } catch (_) { entry = null; }
+    try {
+      entry = unwrapEntry(JSON.parse(reply.text), reply.id);
+      if (entry && replyFenceBlocks(reply.text).some((block) => block.info === "check")) {
+        const refusal = resolveCommandBlock(entry, reply.text);
+        if (refusal) entry = null;
+      }
+    } catch (_) { entry = null; }
     if (!entry || entry.id !== reply.id) { unreadable.push(reply.id); continue; }
+    if (entry.check && entry.check.kind === "command" &&
+        (typeof entry.check.command !== "string" || !entry.check.command.trim())) {
+      unreadable.push(reply.id);
+      continue;
+    }
     const judged = state.entries.get(reply.id);
     // The candidate's host-stamped criterion cannot prove what the author
     // saw. Missing prompt text is conservatively treated as criterion drift.

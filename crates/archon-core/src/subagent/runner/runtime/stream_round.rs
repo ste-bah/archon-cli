@@ -21,6 +21,7 @@ fn stream_idle_timeout(runner: &SubagentRunner) -> Duration {
 
 pub(super) struct StreamRoundResult {
     pub text_content: String,
+    pub stop_reason: Option<String>,
     pub thinking_blocks: BTreeMap<u32, PendingThinkingBlock>,
     pub pending_tools: Vec<PendingTool>,
     pub reasoning_encrypted: Option<String>,
@@ -308,6 +309,7 @@ pub(super) async fn collect_stream_round(
     }
     Ok(StreamRoundResult {
         text_content,
+        stop_reason: finish_reason,
         thinking_blocks,
         pending_tools,
         reasoning_encrypted,

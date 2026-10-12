@@ -236,11 +236,11 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     let baseline = executor(None);
     assert!(!holds(&baseline, "freeze-skeleton", &unstamped));
     assert!(!holds(&baseline, "land-task-body", &unstamped));
-    // freeze-acceptance is at version 5 (#378 after main's #366/#288/#380): an unstamped
-    // record was judged by older logic and runs again.
+    // freeze-acceptance is at version 9: an unstamped record was judged by
+    // older logic and runs again.
     assert!(!holds(&baseline, "freeze-acceptance", &unstamped));
     let acceptance = HostCommandRequest::new("freeze-acceptance", Some("c".into())).unwrap();
-    assert_eq!(baseline.logic_version(&acceptance).unwrap(), Some(5));
+    assert_eq!(baseline.logic_version(&acceptance).unwrap(), Some(9));
     for command in [
         "verify-frozen-acceptance",
         "verify-frozen-skeleton",
@@ -265,8 +265,8 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     assert!(!holds(&bumped, "land-task-body", &unstamped));
     // The stamp the host writes is the version the key names.
     let request = HostCommandRequest::new("freeze-skeleton", Some("c".into())).unwrap();
-    assert_eq!(bumped.logic_version(&request).unwrap(), Some(3));
-    assert_eq!(baseline.logic_version(&request).unwrap(), Some(2));
+    assert_eq!(bumped.logic_version(&request).unwrap(), Some(4));
+    assert_eq!(baseline.logic_version(&request).unwrap(), Some(3));
     // A command this build no longer declares has no logic to vouch for it.
     let mut narrowed = catalog.clone();
     narrowed.capabilities.remove("freeze-skeleton");
@@ -347,7 +347,7 @@ fn logic_361_a_bump_rekeys_that_capability_alone_and_none_names_no_key() {
             request.command_id
         );
     }
-    let bumped = build(Some(("freeze-skeleton", Some(3))));
+    let bumped = build(Some(("freeze-skeleton", Some(4))));
     assert_ne!(
         bumped.call_identity(&skeleton).unwrap(),
         launched.call_identity(&skeleton).unwrap()
@@ -356,7 +356,7 @@ fn logic_361_a_bump_rekeys_that_capability_alone_and_none_names_no_key() {
         bumped.call_identity(&verify).unwrap(),
         launched.call_identity(&verify).unwrap()
     );
-    let again = build(Some(("freeze-skeleton", Some(4))));
+    let again = build(Some(("freeze-skeleton", Some(5))));
     assert_ne!(
         again.call_identity(&skeleton).unwrap(),
         bumped.call_identity(&skeleton).unwrap()

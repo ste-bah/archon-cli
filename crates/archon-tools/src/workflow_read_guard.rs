@@ -40,6 +40,7 @@ pub use focused::FocusedTestPlan;
 use focused::FocusedTests;
 pub use forbidden::{ForbiddenPathScope, scope_forbidden_paths};
 pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
+pub use read_only::{READ_CEILING_MARKER, READ_ONLY_INSPECTION_TOOLS};
 use records::{append_record, clip, first_line, record_head};
 pub use repeat::{IDENTICAL_FAILURES_BEFORE_REFUSAL, REPEATED_FAILURE_MARKER, masked_failure};
 pub use run_store::{AdmittedWrites, RunStoreScope, current_run_store, scope_run_store};
@@ -86,7 +87,7 @@ fn normalise_command(command: &str) -> String {
 /// The inspection shapes both modes count: the inspection tools, and a Bash
 /// command the shell classifier recognises as read-only.
 fn inspection_call(name: &str, command: &str) -> bool {
-    matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
+    WorkflowReadGuard::is_read_only_inspection_tool(name)
         || (name == "Bash" && shell::inspection(command))
 }
 
@@ -132,7 +133,7 @@ pub enum GuardMode {
     /// read budget and everything that hangs off it.
     WriteCapable,
     /// A call that can only inspect and run Bash: shell admission plus the
-    /// soft inspection reminder (Issue-58). Every other entry point is a no-op.
+    /// inspection ceilings (Issue-58). Every other entry point is a no-op.
     ReadOnly,
 }
 
@@ -165,6 +166,7 @@ pub struct WorkflowReadGuard {
     worktree_root: Option<PathBuf>,
     /// The read-only ceilings (Issue-58); 0 is off. Unread in write mode.
     read_only_soft_ceiling: u32,
+    read_only_hard_ceiling: u32,
     state: Mutex<State>,
 }
 
@@ -306,10 +308,10 @@ impl WorkflowReadGuard {
             return Some(refusal);
         }
         // A read-only call answers to the three shell admissions above and
-        // to its own progress reminder, never to the budget, the focused
+        // to its own inspection ceilings, never to the budget, the focused
         // submit nudge or the fallback below.
         if self.read_only() {
-            return read_only::admit(state, name, input);
+            return read_only::admit(self, state, name, input);
         }
         if let Some(refusal) = repeat::admit(state, name, input) {
             return Some(refusal);
@@ -338,7 +340,7 @@ impl WorkflowReadGuard {
         // with nothing written, 3× reads_per_write since the last substantive
         // write — refuses inspection-shaped calls the classifier missed. Never
         // matches a write-class tool.
-        let fallback = (matches!(name, "Read" | "Grep" | "Glob" | "read-own-evidence")
+        let fallback = (WorkflowReadGuard::is_read_only_inspection_tool(name)
             || (name == "Bash" && shell::fallback_inspection(command)))
             && if state.writes == 0 {
                 state.calls > u64::from(self.max_reads).saturating_mul(2)

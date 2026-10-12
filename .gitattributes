@@ -74,3 +74,7 @@ crates/archon-workflow/src/v2/script/*.js text eol=lf
 # Without this a Windows checkout fails generated_provider_capabilities_doc_
 # matches_code on line endings alone, while macOS and Linux CI pass.
 docs/generated/** text eol=lf
+
+# Reply fixtures embedded via include_str! are compared by byte length with
+# recorded live replies; a CRLF checkout would add one byte per line.
+src/command/fixtures/** text eol=lf

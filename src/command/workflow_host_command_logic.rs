@@ -210,22 +210,27 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // changed; a reused check verdict binds normalized literal paths,
         // their filesystem state, the shell, environment and this logic.
         // 4: #380 complete wrapped obligation text changes freeze verdicts.
-        // #385's re-ask improves recovery from an unusable provider reply; it
-        // does not change the verdict for a usable reply.
-        // #376 changes requirements-trace only; it does not change freeze verdicts.
-        // 5: #378 (merged after #366/#288/#380) validates supplementary-only
-        // acceptance prose before the incremental judge refuses it, changing
-        // freeze-acceptance verdicts.
-        version: 5,
+        // #385's re-ask improves recovery from an unusable provider reply;
+        // it does not change the verdict for a usable reply. #392 changes
+        // which authored reply shapes can supply an acceptance entry.
+        // #392 accepts a sole unnamed check block when command_block is omitted.
+        // #399 fixes resume seed reconstruction; identical gate input keeps its verdict.
+        // 9: #400 validates incremental subsets independently, allowing supplementary-only updates to pass.
+        // 7: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        // Supplementary prose validation changes freeze-acceptance verdicts.
+        version: 9,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "44ab46d131a084a81fe40c3636eba2168dadbabc2a519e2757425d53be2faae3",
+        sources_digest: "fe9ffc8fe743e5b95a0e7026d92e71a5836ec9d5e1bce3620a6d6d309f0e986c",
+
         build_bound: false,
     },
     CapabilityLogic {
         id: "freeze-skeleton",
-        version: 2,
+        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "44ab46d131a084a81fe40c3636eba2168dadbabc2a519e2757425d53be2faae3",
+        sources_digest: "fe9ffc8fe743e5b95a0e7026d92e71a5836ec9d5e1bce3620a6d6d309f0e986c",
+
         build_bound: false,
     },
     CapabilityLogic {
@@ -234,9 +239,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // file and binds by its task_id; the fidelity critic re-asks on an
         // unparseable answer while it makes progress.
         // 4: #380's obligation model changes the frozen contract verdict.
-        version: 4,
+        // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 5,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "7fa330cf108f4e891b67959813abaf8128f9fb55c15d61c9741c6d4c22809601",
+        sources_digest: "2ea48aa6cbf3ad27a7e892764ab9470cfd525d84b2dba56a8fbb6d27057bdc6f",
+
         build_bound: false,
     },
     CapabilityLogic {
@@ -244,32 +251,38 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: the fidelity critic re-asks on an unparseable answer while it
         // makes progress (R8).
         // 4: #380's obligation model changes the frozen contract verdict.
-        version: 4,
+        // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 5,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "7fa330cf108f4e891b67959813abaf8128f9fb55c15d61c9741c6d4c22809601",
+        sources_digest: "2ea48aa6cbf3ad27a7e892764ab9470cfd525d84b2dba56a8fbb6d27057bdc6f",
+
         build_bound: false,
     },
     CapabilityLogic {
         id: "requirements-trace",
-        // 3: #376 parses requirements frontmatter as YAML, changing trace verdicts;
-        // #380 independently changes obligation text used by this trace.
+        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
-        sources_digest: "f482ac0d2583c98b2d2276ff1600d708c7c0b89539bca147a44ef15a4df3f3ac",
+        sources_digest: "e2270c0a5393f9a02fd48164cbd8960ac3eec92a093f6e7c9c2aa326d3cca5f6",
+
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-acceptance",
-        version: 2,
+        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "7caffce75168a072bbedef49c9e7c7ec718cb70e5429232f5722a5b83c92a86b",
+        sources_digest: "0411746f5d76f3812ee984af9156ce2df0a6192ed291da3a00ddb8a2b109bfd8",
+
         build_bound: true,
     },
     CapabilityLogic {
         id: "verify-frozen-skeleton",
-        version: 2,
+        // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
+        version: 3,
         sources: &[GATE, CONTRACT, VERIFY],
-        sources_digest: "7caffce75168a072bbedef49c9e7c7ec718cb70e5429232f5722a5b83c92a86b",
+        sources_digest: "0411746f5d76f3812ee984af9156ce2df0a6192ed291da3a00ddb8a2b109bfd8",
+
         build_bound: true,
     },
 ];

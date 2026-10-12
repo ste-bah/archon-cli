@@ -39,7 +39,7 @@ mod merge;
 pub(crate) mod passability;
 #[path = "workflow_acceptance_preflight.rs"]
 mod preflight;
-use judge::{gate_stamp, judge_contract, predecessor_findings};
+use judge::{gate_stamp, predecessor_findings};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FreezeAcceptanceResult {

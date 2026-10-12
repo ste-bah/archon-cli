@@ -49,6 +49,7 @@ fn request(root: &Path, mode: u32, pipe: u32) -> ResolvedHostCommand {
         max_stderr_bytes: 4096,
         declared_write_set: vec![],
         remediation_scopes: Default::default(),
+        spill_dir: None,
     }
 }
 async fn stop(pin: Pinned) {

@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const root = process.env.ARCHON_TEST_SCRIPT_ROOT || __dirname;
-const source = ['workflow_decompose_v1.js', 'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js',
+const source = ['workflow_decompose_v1.js', 'workflow_decompose_reply_blocks.js', 'workflow_decompose_v1_acceptance.js', 'workflow_decompose_v1_set_gate.js',
   'workflow_decompose_v1_progress.js', 'workflow_decompose_v1_context.js', 'workflow_decompose_v1_seed.js']
   .map((name) => fs.readFileSync(`${root}/${name}`, 'utf8')).join('\n');
 
@@ -239,6 +239,36 @@ async function currentSupplementaryCriterionSurvivesTwoResumes() {
   assert.deepEqual(second.seen.agents, [], 'the full-text entry is carried on the next resume');
 }
 
+async function supplementaryGateFindingsAreAttributedOnRestore() {
+  const criteria = { 'AC-1': 'ac-1', 'AC-2': 'ac-2' };
+  const requirementTexts = { 'REQ-X': 'requirement X', 'REQ-Y': 'requirement Y', 'REQ-Z': 'requirement Z' };
+  const entries = [entry('AC-1'), entry('AC-2')];
+  const supplementary = Object.entries(requirementTexts).map(([requirement, text]) => ({
+    ...entry(`SUP-${requirement}`), criterion: text, covers: [requirement]
+  }));
+  const candidate = JSON.stringify({ entries, supplementary });
+  const gate = { call_id: 'gate', published: false, findings: [
+    finding("check 'SUP-REQ-X' was refuted by the host judge; reason: weak", 'SUP-REQ-X'),
+    finding("check 'SUP-REQ-Y': proves nothing about its requirement", 'SUP-REQ-Y')
+  ] };
+  const subjects = (gates, replies = []) => ({ acceptance: { kind: 'entries', candidate, gates, replies,
+    carried_entries: [...entries, ...supplementary], refuted_ids: [], invalid: {}, carried: 5 } });
+  const repairedX = { ...supplementary[0], check: { ...supplementary[0].check, command: 't SUP-REQ-X 1' } };
+  const run = await seeded(subjects([gate], [{ id: repairedX.id, text: JSON.stringify(repairedX), criterion: 'requirement X' }]),
+    criteria, { acceptance: 25 }, requirementTexts);
+  assert.deepEqual(run.seen.agents, ['acceptance-author-SUP-REQ-Y-28'],
+    'a newer SUP-X reply repairs its refutation while the check_not_proven prefix attributes SUP-Y');
+
+  const noGate = await seeded(subjects([]), criteria, { acceptance: 25 }, requirementTexts);
+  assert.deepEqual(noGate.seen.agents, [], 'without a gate all carried entries remain accepted');
+
+  const unknown = await seeded(subjects([{ call_id: 'unknown', published: false, findings: [
+    finding("check 'SUP-REQ-UNKNOWN' was refuted by the host judge", 'SUP-REQ-UNKNOWN')
+  ] }]), criteria, { acceptance: 25 }, requirementTexts);
+  assert.deepEqual(unknown.seen.agents.sort(), [...entries, ...supplementary].map((item) => `acceptance-author-${item.id}-28`).sort(),
+    'an unknown finding id keeps the conservative full send-back');
+}
+
 async function freshGateOwesSupplementaryAndPromptGetsCurrentPrdText() {
   const full = 'The complete current requirement text from the fresh PRD.';
   const ctx = context({ A: 'criterion A' }, null, { 'REQ-X': full });
@@ -262,6 +292,28 @@ async function unreadableReplyIsRetried() {
     unreadable_replies: { A: 'accepted author reply could not be reconstructed' }, carried_entries: [],
     refuted_ids: [], invalid: {}, carried: 0 } }, { A: 'a' });
   assert.deepEqual(seen.agents, ['acceptance-author-A-28']);
+}
+
+async function commandRepliesRestoreSafely() {
+  const carried = entry('A');
+  const resolved = { ...entry('A'), check: { kind: 'command', cwd: 'project_root', command: 'echo resolved' } };
+  const makeContext = (reply, carriedEntries) => {
+    const ctx = context({ A: 'a' }, null);
+    const state = { entries: new Map() };
+    ctx.seedEntries({ candidate: null, replies: [reply], carried_entries: carriedEntries,
+      unreadable_replies: {}, invalid: {}, gates: [], refuted_ids: [] },
+    { phase: 'acceptance', author: true, retryScopes: new Set(['candidate_artifact']) }, state);
+    return { ctx, state };
+  };
+  const restored = makeContext({ id: 'A', criterion: 'a', text: JSON.stringify(resolved) }, []);
+  assert.equal(restored.state.entries.get('A').check.command, 'echo resolved');
+  assert.deepEqual([...restored.state.retryIds], [], 'a complete reply remains readable');
+
+  const scriptless = { id: 'A', criterion: 'old', check: { kind: 'command', cwd: 'project_root' } };
+  const protectedState = makeContext({ id: 'A', criterion: 'a', text: JSON.stringify(scriptless) }, [carried]);
+  assert.equal(protectedState.state.entries.get('A').check.command, carried.check.command,
+    'a script-less reply does not replace the carried entry');
+  assert.deepEqual([...protectedState.state.retryIds], ['A'], 'the entry is re-authored');
 }
 
 async function artifactSeeds() {
@@ -306,9 +358,10 @@ async function sample() {
   for (const test of [refutedEntryOnly, unchangedReplyIsNoRepair, unattributableRefusalReauthorsAsTheLoopDoes, invalidEntryOnly,
     changedSupplementaryCriterionIsReauthored, pointerRefusalRepairedSince, neverFrozen,
     heldEntriesSurviveStaleAndOmittingGates, currentSupplementaryCriterionSurvivesTwoResumes,
+    supplementaryGateFindingsAreAttributedOnRestore,
     freshGateOwesSupplementaryAndPromptGetsCurrentPrdText,
     replyCriterionComesFromItsAuthorPrompt, missingPromptCriterionReauthorsButCandidateFallbackCarries,
-    unreadableReplyIsRetried, artifactSeeds, pausesContinue, sample]) {
+    unreadableReplyIsRetried, commandRepliesRestoreSafely, artifactSeeds, pausesContinue, sample]) {
     await test();
     console.log(`ok ${test.name}`);
   }

@@ -170,6 +170,15 @@ fn build_compaction_telemetry(
     }
 }
 
+/// Budget used by the request's ordinary history fit, for a read-ceiling
+/// flattening that must preserve its task and final instruction.
+pub(super) fn read_ceiling_fit_budget(runner: &SubagentRunner) -> Option<u64> {
+    let telemetry = build_compaction_telemetry(runner);
+    let reserve = runner.agent_config.response_reserve_tokens();
+    (telemetry.runtime_context_budget > reserve)
+        .then(|| telemetry.runtime_context_budget.saturating_sub(reserve))
+}
+
 async fn maybe_compact_for_context_window(
     runner: &SubagentRunner,
     messages: &mut MessageHistory,
@@ -233,7 +242,7 @@ async fn build_llm_request(
         // Filled by the round's single projection, in `stream_round`.
         messages: Vec::new(),
         // #171 part 3: an Arc bump, not a deep clone of ~70 frozen schemas.
-        tools: archon_llm::provider::SharedTools::clone(&runner.tool_definitions),
+        tools: request_tools(runner),
         thinking,
         speed,
         effort: resolve_effort(runner).await,
@@ -263,6 +272,35 @@ async fn build_llm_request(
         &crate::agent::request_cache::CacheSettings::from_context(&runner.agent_config.context),
     );
     request
+}
+
+fn request_tools(runner: &SubagentRunner) -> archon_llm::provider::SharedTools {
+    if !runner
+        .tool_context
+        .workflow_read_guard
+        .as_ref()
+        .is_some_and(|guard| guard.read_only_ceiling_reached())
+    {
+        return archon_llm::provider::SharedTools::clone(&runner.tool_definitions);
+    }
+
+    archon_llm::provider::shared_tools(
+        runner
+            .tool_definitions
+            .iter()
+            .filter(|definition| {
+                !definition
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(archon_tools::workflow_read_guard::WorkflowReadGuard::is_read_only_inspection_tool)
+                    || definition
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .is_none()
+            })
+            .cloned()
+            .collect(),
+    )
 }
 
 fn build_system_messages(

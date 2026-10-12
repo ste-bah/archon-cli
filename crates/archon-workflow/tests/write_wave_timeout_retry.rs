@@ -103,7 +103,10 @@ async fn timed_out_branch_with_partial_work_is_retried_in_run_and_lands() {
         *dispatch.timeout_overrides.lock().unwrap(),
         vec![None, Some(1_800)]
     );
-    let transport = std::fs::read_to_string(f.v2.root().join("transport.jsonl")).unwrap();
+    let transport = archon_observability::transport::read_transport_evidence(
+        &f.v2.root().join("transport.jsonl"),
+    )
+    .unwrap();
     let row = transport
         .lines()
         .find(|line| line.contains("\"kind\":\"write_branch_timeout_retry\""))
@@ -201,7 +204,10 @@ async fn a_host_cut_inside_the_retry_stalls_without_a_third_session() {
         std::fs::read_to_string(result.data["partial_work"]["patch_path"].as_str().unwrap())
             .unwrap();
     assert!(patch.contains("implemented by retry"), "{patch}");
-    let rows = std::fs::read_to_string(f.v2.root().join("transport.jsonl")).unwrap();
+    let rows = archon_observability::transport::read_transport_evidence(
+        &f.v2.root().join("transport.jsonl"),
+    )
+    .unwrap();
     assert_eq!(
         rows.matches("\"kind\":\"write_branch_timeout_retry\"")
             .count(),
@@ -278,8 +284,10 @@ async fn a_no_progress_stop_is_not_re_asked_and_goes_to_remediation() {
         "a no-progress stop must not be re-asked in-run"
     );
     assert_eq!(git(&f.repo, &["rev-parse", "HEAD"]), f.base);
-    let transport =
-        std::fs::read_to_string(f.v2.root().join("transport.jsonl")).unwrap_or_default();
+    let transport = archon_observability::transport::read_transport_evidence(
+        &f.v2.root().join("transport.jsonl"),
+    )
+    .unwrap_or_default();
     assert!(
         !transport.contains("\"kind\":\"write_branch_timeout_retry\""),
         "{transport}"

@@ -28,6 +28,7 @@ fn resolved(root: &std::path::Path, relative: &[&str]) -> ResolvedHostCommand {
         max_stderr_bytes: 1024,
         declared_write_set: relative.iter().map(|path| root.join(path)).collect(),
         remediation_scopes: BTreeSet::from([RemediationScope::Operational]),
+        spill_dir: None,
     }
 }
 

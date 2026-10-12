@@ -265,6 +265,15 @@ pub(crate) fn derive_with_requirement_texts(
         &records,
         &gates,
         &HostOwned::new(criteria, requirement_texts),
+        &criteria
+            .keys()
+            .cloned()
+            .chain(
+                requirement_texts
+                    .keys()
+                    .map(|requirement| format!("SUP-{requirement}")),
+            )
+            .collect(),
     )? {
         derived.subjects.insert("acceptance".into(), seed);
     }
@@ -280,7 +289,7 @@ struct Reply<'a> {
     record: &'a WorkflowV2CallRecord,
     id: String,
     ordinal: u64,
-    text: &'a str,
+    text: String,
     entry: Value,
 }
 
@@ -324,6 +333,7 @@ fn acceptance(
     records: &[&WorkflowV2CallRecord],
     gates: &[Gate<'_>],
     host: &HostOwned<'_>,
+    known_ids: &std::collections::BTreeSet<String>,
 ) -> Result<Option<SubjectSeed>> {
     let mut replies_read = Vec::new();
     let mut candidates = Vec::new();
@@ -340,9 +350,9 @@ fn acceptance(
             continue;
         };
         any_reply = true;
-        let text = record::extract_object(content);
-        let entry = record::reply_entry(text, &id);
+        let entry = record::reply_entry_with_blocks(content, &id);
         if let Some(entry) = entry.as_ref() {
+            let text = serde_json::to_string(entry)?;
             let entry = host.stamp(entry.clone(), &id);
             replies_read.push(Reply {
                 record,
@@ -376,18 +386,25 @@ fn acceptance(
             .map(|(id, entry, _)| (id.clone(), host.stamp(entry.clone(), id)))
             .collect();
         let mut refuted = std::collections::BTreeSet::new();
-        // A gate may explicitly refute an entry whose bytes happen to match
-        // its candidate. That entry is still owed a repair in a later round;
-        // it cannot make an identical later reply part of the round the gate
-        // already holds.
+        // A gate may name an entry with either a refuted-check finding or a
+        // check-local defect, even when its bytes match the candidate. That
+        // entry is still owed a repair in a later round; it cannot make an
+        // identical later reply part of the round the gate already holds.
         for finding in &gate.3.findings {
-            let Some(text) = finding["text"].as_str() else {
-                continue;
-            };
-            if let Some(id) = text
-                .strip_prefix("check '")
+            let defect_id = finding["deterministic_defect"]["subject"]
+                .as_str()
+                .filter(|id| by_id.contains_key(*id) || known_ids.contains(*id));
+            let text_id = finding["text"]
+                .as_str()
+                .and_then(|text| text.strip_prefix("check '"))
+                .and_then(|rest| rest.split_once("':").map(|(id, _)| id))
+                .filter(|id| by_id.contains_key(*id) || known_ids.contains(*id));
+            let refuted_id = finding["text"]
+                .as_str()
+                .and_then(|text| text.strip_prefix("check '"))
                 .and_then(|rest| rest.split_once("' was refuted").map(|(id, _)| id))
-            {
+                .filter(|id| by_id.contains_key(*id) || known_ids.contains(*id));
+            if let Some(id) = defect_id.or(text_id).or(refuted_id) {
                 refuted.insert(id.to_string());
             }
         }

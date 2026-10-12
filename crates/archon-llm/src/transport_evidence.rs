@@ -213,7 +213,10 @@ mod tests {
                 assert!(capture.terminal);
             })
             .await;
-        let raw = std::fs::read_to_string(root.path().join("transport.jsonl")).unwrap();
+        let raw = archon_observability::transport::read_transport_evidence(
+            &root.path().join("transport.jsonl"),
+        )
+        .unwrap();
         assert!(!raw.contains("private-cr"));
         assert!(raw.contains("[DONE]"));
     }

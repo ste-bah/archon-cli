@@ -182,14 +182,9 @@ pub(super) fn record_retry_row(
         "recorded_at": chrono::Utc::now().to_rfc3339(),
     });
     let path = v2_store.root().join("transport.jsonl");
-    let _ = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .and_then(|mut file| {
-            use std::io::Write;
-            writeln!(file, "{row}")
-        });
+    if let Ok(scope) = archon_observability::transport::EvidenceScope::new(path, call_id) {
+        scope.record(row);
+    }
 }
 
 #[cfg(test)]

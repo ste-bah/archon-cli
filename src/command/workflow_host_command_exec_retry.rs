@@ -82,6 +82,9 @@ impl FixedHostCommandExecutor {
             })?
             .to_string();
         let mut history: Vec<OperationalAttempt> = Vec::new();
+        // A call may be executed again after resume, when its attempt count
+        // starts over. Keep durable spills from separate executions disjoint.
+        let execution_id = uuid::Uuid::new_v4();
         loop {
             let attempt = history.len() as u32 + 1;
             if attempt > 1 {
@@ -103,9 +106,14 @@ impl FixedHostCommandExecutor {
             // after a cancellation waits for it (#297 round 8).
             let (control, handle) = HostCommandControl::tracked(teardown.clone());
             let started = std::time::Instant::now();
+            let mut attempt_command = command.clone();
+            if let Some(directory) = &command.spill_dir {
+                attempt_command.spill_dir =
+                    Some(directory.join(format!("attempt-{attempt}-{execution_id}")));
+            }
             let observed = self
                 .execute_process_with_run_control(
-                    command.clone(),
+                    attempt_command,
                     control,
                     handle,
                     expected_generation,

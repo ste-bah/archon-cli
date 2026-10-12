@@ -24,7 +24,7 @@ fn session(
         );
         tokio::select! {
             _ = cancel.cancelled() => SubagentOutcome::Cancelled,
-            () = work => SubagentOutcome::Completed("done".into()),
+            () = work => SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion { content: "done".into(), stop_reason: None, tokens_in: None, tokens_out: None }),
         }
     })
 }
@@ -274,7 +274,18 @@ fn a_completed_session_is_never_reported_inactive() {
         silent: N,
         limit: N,
     });
-    assert!(inactivity_failure(&SubagentOutcome::Completed("x".into()), cut).is_none());
+    assert!(
+        inactivity_failure(
+            &SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion {
+                content: "x".into(),
+                stop_reason: None,
+                tokens_in: None,
+                tokens_out: None,
+            }),
+            cut
+        )
+        .is_none()
+    );
     assert!(inactivity_failure(&SubagentOutcome::Cancelled, cut).is_some());
     assert!(inactivity_failure(&SubagentOutcome::Cancelled, Some(HostCut::NoProgress)).is_none());
 }
@@ -322,7 +333,7 @@ async fn session_and_outer_clocks_start_together_at_admission() {
         drop(wait);
         tokio::select! {
             _ = inner.cancelled() => SubagentOutcome::Cancelled,
-            () = tokio::time::sleep(secs(30)) => SubagentOutcome::Completed("done".into()),
+            () = tokio::time::sleep(secs(30)) => SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion { content: "done".into(), stop_reason: None, tokens_in: None, tokens_out: None }),
         }
     });
     let started = Instant::now();
