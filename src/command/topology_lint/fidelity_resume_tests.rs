@@ -457,9 +457,9 @@ async fn a_corrupt_or_forged_record_is_recomputed_never_trusted() {
 
 /// A verdict answered by another critic model, or under other request
 /// settings, is not reused: either can change what the same question gets.
-/// Another binary is covered in `fidelity_store_tests.rs`.
+/// Another critic-logic digest is covered in `fidelity_store_tests.rs`.
 #[tokio::test]
-async fn a_saved_verdict_is_keyed_by_binary_and_critic_identity() {
+async fn a_saved_verdict_is_keyed_by_critic_identity() {
     let temp = corpus();
     let cwd = temp.path();
     complete(cwd, Critic::new(), &FreezeResume::none()).await;
@@ -482,15 +482,18 @@ fn the_staged_set_gate_reads_its_catalog_no_progress_window() {
 }
 
 #[test]
-fn fidelity_binary_identity_is_more_than_the_committed_revision() {
+fn fidelity_identity_uses_the_critic_logic_digest() {
     let identity = StoreIdentity::of(Critic::new().as_ref());
     let value = serde_json::to_value(identity).unwrap();
     assert_ne!(
-        value["binary"].as_str().unwrap(),
-        env!("ARCHON_GIT_HASH"),
-        "same-HEAD source edits, including parser edits, must invalidate verdicts"
+        value["critic_logic"].as_str().unwrap(),
+        env!("ARCHON_BUILD_FINGERPRINT"),
+        "the cache binds critic logic, not the whole binary build"
     );
 }
 
 #[path = "fidelity_request_tests.rs"]
 mod request_tests;
+
+#[path = "fidelity_legacy_migration_tests.rs"]
+mod legacy_migration_tests;

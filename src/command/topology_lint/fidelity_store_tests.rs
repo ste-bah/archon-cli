@@ -7,7 +7,7 @@ use super::*;
 
 fn identity() -> StoreIdentity {
     StoreIdentity {
-        binary: "build".into(),
+        critic_logic: "critic-logic".into(),
         provider: Some("provider".into()),
         model: "model".into(),
         request: Some("representative-request".into()),
@@ -127,13 +127,29 @@ fn each_envelope_is_its_own_identity_and_unknown_envelopes_never_reuse() {
     let unknown = store.for_request(None);
     assert_eq!(unknown.load(asked.question()), None);
     assert!(!unknown.save(asked.question(), &supported()).unwrap().1);
-    let rebuilt = VerdictStore::new(store.dir().into(), identity().with_binary("other"));
+    let rebuilt = VerdictStore::new(store.dir().into(), identity().with_critic_logic("other"));
     assert_eq!(
         rebuilt.load(asked.question()),
         None,
-        "another binary re-asks"
+        "other critic logic re-asks"
     );
     assert_eq!(records(&store), 1);
+}
+
+#[test]
+fn a_changed_critic_logic_digest_reasks_new_schema_records() {
+    let temp = tempfile::tempdir().unwrap();
+    let original = store(temp.path());
+    let asked = Asked::new(
+        obligation_with("The registry holds every entry."),
+        tasks(OBLIGES, "Second task."),
+    );
+    original.save(asked.question(), &supported()).unwrap();
+    let changed = VerdictStore::new(
+        original.dir().into(),
+        identity().with_critic_logic("changed-critic-logic"),
+    );
+    assert_eq!(changed.load(asked.question()), None);
 }
 
 /// A true verdict stands only over the same tasks with byte-identical texts:
@@ -310,3 +326,9 @@ fn concurrent_saves_never_lose_a_verdict() {
         ));
     }
 }
+
+#[path = "fidelity_store_legacy_tests.rs"]
+mod legacy_tests;
+
+#[path = "fidelity_logic_digest_tests.rs"]
+mod logic_digest_tests;

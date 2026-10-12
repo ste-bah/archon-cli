@@ -38,9 +38,8 @@
 //!
 //! A record is found under a digest of the obligation's id and text, of the
 //! frozen skeleton section (a re-frozen skeleton re-asks every obligation),
-//! and of the critic's identity: a build fingerprint of source contents,
-//! manifests, lockfile, compiler and build configuration (so a rebuilt
-//! binary re-asks every obligation once); the model the critic alias
+//! and of the critic's identity: a digest of the fidelity question and reply
+//! logic; the model the critic alias
 //! resolves to; the provider id; and the client's rendered request identity
 //! for the question with no obligations and no tasks — effective system
 //! blocks, the prompt's own wording and the frozen skeleton section, model,
@@ -75,8 +74,11 @@ use sha2::{Digest, Sha256};
 use super::fidelity_critic::CRITIC_MODEL_ALIAS;
 
 /// Records of another layout are never read as this one. 4: per-obligation
-/// records bound to their tasks' texts (#434).
-const STORE_SCHEMA: u32 = 4;
+/// records bound to their tasks' texts (#434). 5: the critic identity names a
+/// digest of the critic's own logic instead of the whole build, so a rebuild
+/// that leaves that logic alone reuses every verdict; schema-4 records are
+/// migrated once by [`legacy`] (#434c).
+const STORE_SCHEMA: u32 = 5;
 
 /// Where the saved verdicts live: under the project, outside the host
 /// command's call staging directory, which the executor clears before every
@@ -88,7 +90,7 @@ pub(super) fn store_dir(cwd: &Path) -> PathBuf {
 /// What, besides the question, decides a critic's answer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct StoreIdentity {
-    binary: String,
+    critic_logic: String,
     model: String,
     provider: Option<String>,
     request: Option<String>,
@@ -98,7 +100,7 @@ impl StoreIdentity {
     /// This binary asking `client`'s critic.
     pub(super) fn of(client: &dyn WorkflowLlmClient) -> Self {
         Self {
-            binary: env!("ARCHON_BUILD_FINGERPRINT").to_string(),
+            critic_logic: env!("ARCHON_FIDELITY_LOGIC_DIGEST").to_string(),
             model: client.resolve_model_alias(CRITIC_MODEL_ALIAS),
             provider: client.provider_id(),
             request: client.request_identity(),
@@ -106,8 +108,8 @@ impl StoreIdentity {
     }
 
     #[cfg(test)]
-    pub(super) fn with_binary(mut self, binary: &str) -> Self {
-        self.binary = binary.to_string();
+    pub(super) fn with_critic_logic(mut self, digest: &str) -> Self {
+        self.critic_logic = digest.to_string();
         self
     }
 }
@@ -225,22 +227,21 @@ impl VerdictStore {
         standing(&self.read(question)?, question)
     }
 
-    /// Save a fresh answer to `question`, atomically, and say what now
-    /// stands: the answer, or a contradiction with a verdict of the other
-    /// meaning that still stands. The flag is whether a record was written.
-    pub(super) fn save(
-        &self,
-        question: Question<'_>,
-        verdict: &FidelityVerdict,
-    ) -> Result<(Standing, bool)> {
-        if self.identity.request.is_none() {
-            return Ok((Standing::Verdict(verdict.clone()), false));
+    fn record(&self, question: Question<'_>, key: String, entries: Vec<Entry>) -> Record {
+        Record {
+            schema: STORE_SCHEMA,
+            key,
+            obligation: question.obligation.clone(),
+            skeleton: question.skeleton.to_string(),
+            identity: self.identity.clone(),
+            entries,
         }
+    }
+
+    /// Run `under` holding the exclusive lock on `{key}.lock`.
+    fn locked<T>(&self, key: &str, under: impl FnOnce() -> Result<T>) -> Result<T> {
         std::fs::create_dir_all(&self.dir)
             .with_context(|| format!("creating fidelity store {}", self.dir.display()))?;
-        let key = self.key(question);
-        // Read, merge and rename under one exclusive lock: a verdict another
-        // gate saved for this obligation a moment ago is merged, never lost.
         let lock_path = self.dir.join(format!("{key}.lock"));
         let lock_file = std::fs::OpenOptions::new()
             .create(true)
@@ -253,43 +254,63 @@ impl VerdictStore {
         let _held = lock
             .write()
             .with_context(|| format!("locking fidelity record {}", lock_path.display()))?;
-        let mut entries: Vec<Entry> = self
-            .read(question)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|entry| {
-                entry.verdict.necessarily_true != verdict.necessarily_true && holds(entry, question)
-            })
-            .collect();
-        entries.push(Entry {
-            audited_at: chrono::Utc::now().to_rfc3339(),
-            tasks: question.texts.clone(),
-            verdict: verdict.clone(),
-        });
-        let standing = standing(&entries, question).ok_or_else(|| {
-            anyhow!(
-                "fidelity verdict for {} does not pass its own check against the texts it answered",
-                question.obligation.id
-            )
-        })?;
-        let record = Record {
-            schema: STORE_SCHEMA,
-            key: key.clone(),
-            obligation: question.obligation.clone(),
-            skeleton: question.skeleton.to_string(),
-            identity: self.identity.clone(),
-            entries,
-        };
-        let path = self.path(&key);
-        let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
-        let written = serde_json::to_vec_pretty(&record)
+        under()
+    }
+
+    /// Stage `record` beside its path and rename it into place.
+    fn write(&self, record: &Record) -> Result<()> {
+        let path = self.path(&record.key);
+        let staging = self
+            .dir
+            .join(format!(".{}.{}.tmp", record.key, std::process::id()));
+        let written = serde_json::to_vec_pretty(record)
             .map_err(anyhow::Error::from)
             .and_then(|bytes| Ok(std::fs::write(&staging, bytes)?))
             .and_then(|()| Ok(std::fs::rename(&staging, &path)?));
         if written.is_err() {
             let _ = std::fs::remove_file(&staging);
         }
-        written.with_context(|| format!("writing fidelity record {}", path.display()))?;
+        written.with_context(|| format!("writing fidelity record {}", path.display()))
+    }
+
+    /// Save a fresh answer to `question`, atomically, and say what now
+    /// stands: the answer, or a contradiction with a verdict of the other
+    /// meaning that still stands. The flag is whether a record was written.
+    pub(super) fn save(
+        &self,
+        question: Question<'_>,
+        verdict: &FidelityVerdict,
+    ) -> Result<(Standing, bool)> {
+        if self.identity.request.is_none() {
+            return Ok((Standing::Verdict(verdict.clone()), false));
+        }
+        let key = self.key(question);
+        // Read, merge and rename under one exclusive lock: a verdict another
+        // gate saved for this obligation a moment ago is merged, never lost.
+        let standing = self.locked(&key, || {
+            let mut entries: Vec<Entry> = self
+                .read(question)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|entry| {
+                    entry.verdict.necessarily_true != verdict.necessarily_true
+                        && holds(entry, question)
+                })
+                .collect();
+            entries.push(Entry {
+                audited_at: chrono::Utc::now().to_rfc3339(),
+                tasks: question.texts.clone(),
+                verdict: verdict.clone(),
+            });
+            let standing = standing(&entries, question).ok_or_else(|| {
+                anyhow!(
+                    "fidelity verdict for {} does not pass its own check against the texts it answered",
+                    question.obligation.id
+                )
+            })?;
+            self.write(&self.record(question, key.clone(), entries))?;
+            Ok(standing)
+        })?;
         Ok((standing, true))
     }
 }
@@ -327,6 +348,15 @@ fn standing(entries: &[Entry], question: Question<'_>) -> Option<Standing> {
         (None, None) => None,
     }
 }
+
+#[path = "fidelity_store_legacy.rs"]
+mod legacy;
+#[cfg(test)]
+pub(super) use legacy::LEGACY_CRITIC_LOGIC;
+
+#[cfg(test)]
+#[path = "fidelity_logic_digest.rs"]
+mod logic_digest;
 
 #[cfg(test)]
 #[path = "fidelity_store_tests.rs"]

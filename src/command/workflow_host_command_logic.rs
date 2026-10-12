@@ -181,6 +181,8 @@ const FREEZE: &[&str] = &[
 const LINT: &[&str] = &[
     "src/command/workflow_staged_cli.rs",
     "src/command/topology_lint.rs",
+    "src/command/topology_lint/fidelity_critic.rs",
+    "src/command/topology_lint/fidelity_store.rs",
     "src/command/topology_lint/repository_claims.rs",
     "src/command/topology_task_graph.rs",
     "crates/archon-workflow/src/fidelity_audit.rs",
@@ -228,6 +230,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #439 re-pin only: resume phase selection shares this closure; freeze verdicts are unchanged.
         // #417 re-pin only: the landing destination allowlist names the topology stores; freeze verdicts are unchanged.
         // #425 re-pin only: the repository claim parser changed; freeze verdicts do not read claims.
+        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
         sources_digest: "793e9e890ac86e337cd493ab44b63aec2d55376601d8cb1c7bc27199524aade6",
@@ -239,6 +242,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 and #417 re-pin only: harness input paths, pipeline outputs, and copy API normalization do not alter this verdict.
         // #439 re-pin only, as freeze-acceptance.
         // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims.
+        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
         sources_digest: "793e9e890ac86e337cd493ab44b63aec2d55376601d8cb1c7bc27199524aade6",
@@ -255,6 +259,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 7: #428 the host stamps frozen skeleton frontmatter fields at landing.
         // 8: #434 a fidelity gap blocks only its weakest task's body; true verdicts quote a checked anchor and are reused per obligation.
         // 9: #425 dotted identifiers followed by a file citation are not repository-path claims; shared-scope negation and tree-aware dotted or single-word scope resolution now preserve claim polarity and identify the actual scoped path.
+        // #434c re-pin only: identical critic logic and request identities reuse validated verdicts across binary rebuilds.
         version: 9,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
@@ -270,6 +275,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
         // 7: #434 true fidelity verdicts quote a checked anchor and are reused per obligation over byte-identical cluster texts.
         // 8: #425 dotted identifiers followed by a file citation are not repository-path claims; shared-scope negation and tree-aware dotted or single-word scope resolution now preserve claim polarity and identify the actual scoped path.
+        // #434c re-pin only: identical critic logic and request identities reuse validated verdicts across binary rebuilds.
         version: 8,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
@@ -292,6 +298,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #417 harness-written project run state leaves hermetic check inputs, which can change a check verdict.
         // 6: #417 copied task-root inputs now match the digest exclusions, which can change a check verdict.
         // #417 re-pin only: the direct copy API now shares the production caller's root normalization.
+        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
         version: 6,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
@@ -308,6 +315,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 and #417 re-pin only: verify never asks the fidelity critic or reads pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
         // #425 re-pin only: the repository claim parser changed; skeleton verification verdicts do not read claims.
+        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
         sources_digest: "62d09347f7690c9fcabc9d1aba1a25eab288992c73c0bafdb6badf20444be157",
         build_bound: true,
     },
