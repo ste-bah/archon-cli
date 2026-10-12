@@ -183,8 +183,8 @@ impl archon_workflow::WorkflowLlmClient for BoardProbeAgent {
             Ok(content) => Ok(archon_workflow::WorkflowAgentOutcome {
                 content: content.to_string(),
                 tool_uses: Vec::new(),
-                tokens_in: 1,
-                tokens_out: 1,
+                tokens_in: Some(1),
+                tokens_out: Some(1),
                 stop_reason: None,
             }),
             Err(error) => Err(archon_workflow::WorkflowError::port(error)),

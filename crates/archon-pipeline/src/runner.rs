@@ -306,8 +306,8 @@ impl LeannIntegration {
 pub struct LlmResponse {
     pub content: String,
     pub tool_uses: Vec<ToolUseEntry>,
-    pub tokens_in: u64,
-    pub tokens_out: u64,
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
     /// Provider completion reason. `None` only when the underlying execution
     /// surface cannot expose one (for example a completed full subagent loop).
     pub stop_reason: Option<String>,

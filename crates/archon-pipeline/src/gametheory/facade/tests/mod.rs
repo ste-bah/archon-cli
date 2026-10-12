@@ -46,8 +46,8 @@ impl LlmClient for MockLlmClient {
         Ok(LlmResponse {
             content: self.canned_response.lock().unwrap().clone(),
             tool_uses: vec![],
-            tokens_in: 100,
-            tokens_out: 200,
+            tokens_in: Some(100),
+            tokens_out: Some(200),
             stop_reason: None,
         })
     }
@@ -115,8 +115,8 @@ impl LlmClient for CapturingLlmClient {
         Ok(LlmResponse {
             content,
             tool_uses: vec![],
-            tokens_in: 100,
-            tokens_out: 200,
+            tokens_in: Some(100),
+            tokens_out: Some(200),
             stop_reason: None,
         })
     }
@@ -203,8 +203,8 @@ impl LlmClient for SlowTier1LlmClient {
         Ok(LlmResponse {
             content: self.response.clone(),
             tool_uses: vec![],
-            tokens_in: 100,
-            tokens_out: 200,
+            tokens_in: Some(100),
+            tokens_out: Some(200),
             stop_reason: None,
         })
     }

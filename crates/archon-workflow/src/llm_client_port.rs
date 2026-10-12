@@ -140,8 +140,8 @@ pub struct WorkflowAgentToolUse {
 pub struct WorkflowAgentOutcome {
     pub content: String,
     pub tool_uses: Vec<WorkflowAgentToolUse>,
-    pub tokens_in: u64,
-    pub tokens_out: u64,
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
     pub stop_reason: Option<String>,
 }
 

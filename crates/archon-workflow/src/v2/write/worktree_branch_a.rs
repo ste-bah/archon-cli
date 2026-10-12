@@ -9,34 +9,6 @@ pub(super) struct WorktreeBranchExecution {
     /// Set for a write branch whose task carries the host preamble, so a
     /// fresh session started mid-attempt is told what its worktree holds.
     pub(super) refresh: Option<super::partial_work::BranchTaskRefresh>,
-    /// Wall clock this execution may spend across every re-dispatch, when it
-    /// is not the dispatcher's call budget. The in-run timeout retry sets it
-    /// to the retry budget: its dispatch timeout is pinned to that budget, and
-    /// a re-ask loop bounded by the first session's hours instead would let a
-    /// transport drop inside the retry re-dispatch long past it.
-    pub(super) time_budget: BranchTimeBudget,
-}
-
-/// The wall-clock bound a branch's re-ask loop runs under.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum BranchTimeBudget {
-    /// The dispatcher's total call budget (`call_time_budget`).
-    #[default]
-    CallTimeBudget,
-    /// A budget fixed by the caller; `None` is unbounded by time.
-    Fixed(Option<std::time::Duration>),
-}
-
-impl BranchTimeBudget {
-    pub(super) fn resolve(
-        self,
-        dispatch: &dyn WorkflowAgentDispatch,
-    ) -> Option<std::time::Duration> {
-        match self {
-            Self::CallTimeBudget => dispatch.call_time_budget(),
-            Self::Fixed(budget) => budget,
-        }
-    }
 }
 
 pub(super) type CapturedWorktreeManifest =
@@ -71,7 +43,6 @@ pub(super) fn prepare_worktree_branch_execution(
             depends_on: vec![execution.call.id.clone()],
         },
         refresh: None,
-        time_budget: BranchTimeBudget::CallTimeBudget,
     })
 }
 
@@ -133,8 +104,6 @@ pub(super) async fn run_worktree_branch_agent(
     // remediation goes on (round 3, decision B).
     let mut transport_failures = 0usize;
     let mut size_retries = 0usize;
-    let started = std::time::Instant::now();
-    let time_budget = branch.time_budget.resolve(dispatch);
     loop {
         let before = worktree_progress::fingerprint(
             &branch.workspace_root,
@@ -210,11 +179,7 @@ pub(super) async fn run_worktree_branch_agent(
                     &branch.workspace_root,
                     &branch.execution.call.id,
                     dispatch.resume_memory_calls(),
-                    super::partial_work::effective_call_budget(
-                        dispatch.dispatch_timeout(),
-                        time_budget,
-                        started.elapsed(),
-                    ),
+                    dispatch.dispatch_timeout(),
                 );
                 prompt = match &size_notice {
                     Some(notice) => format!("{base}\n\n{notice}"),

@@ -98,6 +98,9 @@ pub enum SubagentOutcome {
 pub struct SubagentCompletion {
     pub content: String,
     pub stop_reason: Option<String>,
+    /// Provider usage, absent when the provider did not report that count.
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
 }
 
 /// Side effects returned by `on_visible_complete`. The executor has
@@ -111,6 +114,9 @@ pub struct OutcomeSideEffects {
     /// `[Worktree: ... (branch: ...)]` note when the worktree had
     /// uncommitted changes and could not be auto-removed).
     pub text_suffix: Option<String>,
+    /// Provider usage, absent when the provider did not report that count.
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +172,8 @@ pub trait SubagentExecutor: Send + Sync {
             .map(|content| SubagentCompletion {
                 content,
                 stop_reason: None,
+                tokens_in: None,
+                tokens_out: None,
             })
     }
 
@@ -199,6 +207,8 @@ pub trait SubagentExecutor: Send + Sync {
             .map(|content| SubagentCompletion {
                 content,
                 stop_reason: None,
+                tokens_in: None,
+                tokens_out: None,
             })
     }
 

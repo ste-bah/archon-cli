@@ -45,6 +45,8 @@ async fn runner_accumulates_tokens_from_mock_stream() {
                 output_tokens: 5,
                 cache_creation_input_tokens: 10,
                 cache_read_input_tokens: 20,
+                input_tokens_available: true,
+                output_tokens_available: true,
                 ..Usage::default()
             },
         },
@@ -66,6 +68,7 @@ async fn runner_accumulates_tokens_from_mock_stream() {
                 output_tokens: 25,
                 cache_creation_input_tokens: 0,
                 cache_read_input_tokens: 0,
+                output_tokens_available: true,
                 ..Usage::default()
             }),
         },
@@ -90,6 +93,8 @@ async fn runner_accumulates_tokens_from_mock_stream() {
     assert_eq!(g.cumulative_output_tokens, 30);
     assert_eq!(g.cumulative_cache_creation_tokens, 10);
     assert_eq!(g.cumulative_cache_read_tokens, 20);
+    assert!(g.input_tokens_available);
+    assert!(g.output_tokens_available);
     // No tool_use blocks were dispatched.
     assert_eq!(g.tool_use_count, 0);
     assert!(g.recent_activities.is_empty());

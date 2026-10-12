@@ -162,8 +162,8 @@ async fn inflight(action: LifecycleAction, expected: RunStatus) {
             Ok(archon_workflow::WorkflowAgentOutcome {
                 content: serde_json::to_string(&result).unwrap(),
                 tool_uses: Vec::new(),
-                tokens_in: 1,
-                tokens_out: 1,
+                tokens_in: Some(1),
+                tokens_out: Some(1),
                 stop_reason: None,
             })
         }

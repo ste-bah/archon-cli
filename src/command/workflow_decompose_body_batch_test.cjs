@@ -15,10 +15,11 @@ function harness(cap, options = {}) {
  context.__archonValidateAcceptanceEntry = () => '[]';
  vm.createContext(withAuthorContext(context));
  vm.runInContext(scriptSource(),context);
- let active=0,peak=0,failedAt=null,firstEndedAfterFourthStarted=null; const bodyCalls=[],landed=[];
+ let active=0,peak=0,failedAt=null,firstEndedAfterFourthStarted=null; const bodyCalls=[],bodyPrompts=[],landed=[];
  const w={
   agent:async(id,opts)=>{
    if(!id.startsWith('body-')) return {status:'accepted',stopReason:'end_turn',content:JSON.stringify({id:'AC-X-1'})};
+   bodyPrompts.push(opts.task);
    const taskId=opts.task.match(/host-frozen task_id (TASK-X-\d+)/)[1];
    bodyCalls.push({id,taskId,peakAtStart:active+1,afterFailure:failedAt!==null}); active++;peak=Math.max(peak,active);
    if(options.holdFirst&&taskId==='TASK-X-1') {
@@ -38,7 +39,14 @@ function harness(cap, options = {}) {
   },
   finalReport:async(_,report)=>report
  };
- return {context,w,bodyCalls,landed,peak:()=>peak,active:()=>active,fourthBeforeFirstEnded:()=>firstEndedAfterFourthStarted};
+ return {context,w,bodyCalls,bodyPrompts,landed,peak:()=>peak,active:()=>active,fourthBeforeFirstEnded:()=>firstEndedAfterFourthStarted};
+}
+
+async function bodyPathsAreRepositoryRootRelative() {
+ const h=harness(1);
+ await h.context.workflow(h.w);
+ assert(h.bodyPrompts.length>0);
+ assert(h.bodyPrompts.every(prompt=>prompt.includes('Every path and every file::test locator anywhere in this body is relative to the repository root, never to a crate or module directory.')));
 }
 
 async function boundedPool() {
@@ -90,5 +98,5 @@ async function lowestFailingBodyIsRaised() {
  assert.equal(h.active(),0,'no sibling agent abandoned mid-call');
 }
 
-boundedPool().then(sequentialWhenCapIsOne).then(frozenBodiesAreSkipped).then(failureSurfacesAfterSiblingsSettle).then(lowestFailingBodyIsRaised)
+bodyPathsAreRepositoryRootRelative().then(boundedPool).then(sequentialWhenCapIsOne).then(frozenBodiesAreSkipped).then(failureSurfacesAfterSiblingsSettle).then(lowestFailingBodyIsRaised)
  .then(()=>console.log('bounded body pool passed')).catch(e=>{console.error(e);process.exitCode=1});

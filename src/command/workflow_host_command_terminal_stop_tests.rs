@@ -229,12 +229,7 @@ fn a_terminal_stop_refuses_the_operational_pauses_of_its_generation() {
     running.status = RunStatus::Running;
     store.save_state(&running).unwrap();
     let run_root = store.run_dir(&run.id);
-    let attempts = [OperationalAttempt {
-        attempt: 3,
-        reason: "timeout",
-        elapsed_secs: 9,
-        progress: None,
-    }];
+    let attempts = [OperationalAttempt::new(3, "timeout", 9, None)];
     let report = OperationalReport {
         run_id: &run.id,
         call_id: "host-command:task-set-lint:fixed",

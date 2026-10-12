@@ -35,6 +35,7 @@ pub fn load_config_from(path: PathBuf) -> Result<ArchonConfig, ConfigError> {
     );
     validate(&config)?;
     warn_incoherent_permissions(&config, &path);
+    warn_obsolete_write_call_time_budget(&content, &path);
     Ok(config)
 }
 
@@ -54,7 +55,37 @@ pub fn load_config_if_exists(path: PathBuf) -> Result<Option<ArchonConfig>, Conf
     );
     validate(&config)?;
     warn_incoherent_permissions(&config, &path);
+    warn_obsolete_write_call_time_budget(&content, &path);
     Ok(Some(config))
+}
+
+/// What a config that still sets the removed write-call time budget is told.
+pub const OBSOLETE_WRITE_CALL_TIME_BUDGET_WARNING: &str =
+    "obsolete config key is ignored because write branches have only a no-progress window";
+
+/// Whether a parsed config layer still sets the removed write-call time budget.
+///
+/// The key remains tolerated by deserialization for forward-compatible config
+/// loading, but has no effect: write branches are bounded by a no-progress
+/// window instead (#213).
+pub fn sets_obsolete_write_call_time_budget(value: &toml::Value) -> bool {
+    value
+        .get("workflow")
+        .and_then(|workflow| workflow.get("generated"))
+        .and_then(|generated| generated.get("write_call_time_budget_secs"))
+        .is_some()
+}
+
+fn warn_obsolete_write_call_time_budget(content: &str, path: &std::path::Path) {
+    if toml::from_str::<toml::Value>(content)
+        .is_ok_and(|value| sets_obsolete_write_call_time_budget(&value))
+    {
+        tracing::warn!(
+            config = %path.display(),
+            key = "workflow.generated.write_call_time_budget_secs",
+            "{OBSOLETE_WRITE_CALL_TIME_BUDGET_WARNING}"
+        );
+    }
 }
 
 /// Report permission/sandbox combinations that validate field-by-field and
@@ -65,9 +96,6 @@ pub fn load_config_if_exists(path: PathBuf) -> Result<Option<ArchonConfig>, Conf
 /// and changes no value and no decision.
 fn warn_incoherent_permissions(config: &ArchonConfig, path: &std::path::Path) {
     for warning in permission_coherence_warnings(config) {
-        tracing::warn!(config = %path.display(), "{warning}");
-    }
-    for warning in write_call_time_budget_warnings(config) {
         tracing::warn!(config = %path.display(), "{warning}");
     }
 }

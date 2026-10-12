@@ -306,8 +306,8 @@ impl WorkflowLlmClient for ScriptedLlm {
         Ok(WorkflowAgentOutcome {
             content,
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: None,
         })
     }
@@ -405,8 +405,8 @@ async fn transport_evidence_survives_spawned_http_agent_and_repair() {
             Ok(WorkflowAgentOutcome {
                 content: String::new(),
                 tool_uses: vec![],
-                tokens_in: 0,
-                tokens_out: 0,
+                tokens_in: Some(0),
+                tokens_out: Some(0),
                 stop_reason: None,
             })
         }

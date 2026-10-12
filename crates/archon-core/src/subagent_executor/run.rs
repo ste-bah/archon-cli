@@ -62,11 +62,39 @@ impl AgentSubagentExecutor {
         let result = self
             .run_registered_subagent_to_completion(&ids, request, system, ctx, cancel, row)
             .await;
+        let progress = self
+            .subagent_manager
+            .lock()
+            .await
+            .get_progress(&ids.manager_id);
+        let usage = progress.as_ref().map(|progress| {
+            (
+                progress
+                    .input_tokens_available
+                    .then_some(progress.cumulative_input_tokens),
+                progress
+                    .output_tokens_available
+                    .then_some(progress.cumulative_output_tokens),
+            )
+        });
+        if let Some((tokens_in, tokens_out)) = usage {
+            self.usage_cache
+                .lock()
+                .await
+                .insert(ids.cache_id.clone(), (tokens_in, tokens_out));
+        }
+        let result = result.map(|mut completion| {
+            if let Some((tokens_in, tokens_out)) = usage {
+                completion.tokens_in = tokens_in;
+                completion.tokens_out = tokens_out;
+            }
+            completion
+        });
         self.on_inner_complete(
             ids.cache_id,
             result
                 .clone()
-                .map(|c| c.content)
+                .map(|completion| completion.content)
                 .map_err(|err| err.to_string()),
         )
         .await;
@@ -202,6 +230,8 @@ impl AgentSubagentExecutor {
                     |completion| archon_tools::subagent_executor::SubagentCompletion {
                         content: completion.content,
                         stop_reason: completion.stop_reason,
+                        tokens_in: None,
+                        tokens_out: None,
                     },
                 )
                 .map_err(|e| format!("Subagent failed: {e}")),

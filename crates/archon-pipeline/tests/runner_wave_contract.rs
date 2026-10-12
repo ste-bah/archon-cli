@@ -42,8 +42,8 @@ impl LlmClient for CountingLlm {
         Ok(LlmResponse {
             content: "ok".to_string(),
             tool_uses: Vec::new(),
-            tokens_in: 1,
-            tokens_out: 1,
+            tokens_in: Some(1),
+            tokens_out: Some(1),
             stop_reason: Some("end_turn".to_string()),
         })
     }

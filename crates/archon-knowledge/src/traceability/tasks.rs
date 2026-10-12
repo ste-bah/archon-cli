@@ -14,9 +14,9 @@
 //! # The grammar it accepts, and what it refuses
 //!
 //! Metadata is a fenced ```` ```yaml ```` block, not `---` front matter.
-//! `implements:` is a single-line flow sequence: `implements: [REQ-AB-020,
-//! REQ-AB-021]` or `implements: []`. A block sequence, a quoted scalar or a
-//! missing bracket is an error naming the file — not an empty list. A task that
+//! `implements:` is a YAML sequence, in flow (`[REQ-AB-020, REQ-AB-021]`) or
+//! block form. A malformed value is an error naming the file — not an empty
+//! list. A task that
 //! claims nothing and a task whose claim could not be read are different facts,
 //! and collapsing them is how an unclaimed requirement disappears from a report.
 
@@ -26,6 +26,10 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::errors::{KnowledgeError, Result};
+
+use self::sections::{headings_match, section_bullets};
+
+mod sections;
 
 /// Where a verifier command was declared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,13 +168,6 @@ impl TaskBinding {
     }
 }
 
-fn implements_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"^\s*implements:\s*(?P<body>.*)$").expect("implements regex is a literal")
-    })
-}
-
 fn canonical_task_id_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -190,29 +187,6 @@ fn task_id_from_source_path(source_path: &str) -> Option<String> {
         .then_some(candidate)
 }
 
-fn task_id_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"^\s*task_id:\s*(?P<id>\S+)\s*$").expect("task_id regex is a literal")
-    })
-}
-
-fn required_tools_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"^\s*required_tools:\s*(?P<body>.*)$")
-            .expect("required_tools regex is a literal")
-    })
-}
-
-fn typed_verifier_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"^\s*typed_verifier_command:\s*(?P<cmd>.+?)\s*$")
-            .expect("typed_verifier regex is a literal")
-    })
-}
-
 fn backtick_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"`([^`]+)`").expect("backtick regex is a literal"))
@@ -229,33 +203,34 @@ pub fn parse_task_binding(raw: &str, source_path: &str) -> Result<TaskBinding> {
         ..TaskBinding::default()
     };
 
-    for line in yaml_block(raw).lines() {
-        if binding.task_id.is_empty()
-            && let Some(caps) = task_id_re().captures(line)
-        {
-            binding.task_id = caps["id"].to_string();
-            continue;
-        }
-        if let Some(caps) = implements_re().captures(line) {
-            binding.implements = parse_flow_sequence(caps["body"].trim(), source_path)?;
-            continue;
-        }
-        if let Some(caps) = required_tools_re().captures(line) {
-            // Parsed leniently, unlike `implements:`. A malformed tool list
-            // costs a little classification precision; refusing the whole task
-            // file over it would lose the requirement claims too, which are the
-            // thing traceability actually exists to read.
-            binding.required_tools =
-                parse_flow_sequence(caps["body"].trim(), source_path).unwrap_or_default();
-            continue;
-        }
-        if let Some(caps) = typed_verifier_re().captures(line) {
-            binding.verifier_commands.push(VerifierCommand {
-                command: normalize_command(&caps["cmd"]),
-                origin: VerifierOrigin::TypedVerifier,
-            });
-        }
+    let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(yaml_block(raw)).map_err(|error| {
+        KnowledgeError::Traceability(format!(
+            "{source_path}: YAML parse error in task yaml block: {error}"
+        ))
+    })?;
+    let mapping = yaml.as_mapping();
+    let field = |name: &str| {
+        mapping.and_then(|mapping| mapping.get(serde_yaml_ng::Value::String(name.to_string())))
+    };
+    binding.task_id = field("task_id")
+        .and_then(serde_yaml_ng::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if let Some(implements) = field("implements") {
+        binding.implements = parse_string_sequence(implements).ok_or_else(|| {
+            let body = yaml_field_body(yaml_block(raw), "implements").unwrap_or_default();
+            KnowledgeError::Traceability(format!(
+                "{source_path}: `implements:` must be a single-line flow sequence \
+                 like `implements: [REQ-X-001]`; found `{body}`"
+            ))
+        })?;
     }
+    // Malformed required_tools remains lenient: losing classification precision
+    // must not hide the requirement claims this reader exists to expose.
+    binding.required_tools = field("required_tools")
+        .and_then(parse_string_sequence)
+        .unwrap_or_default();
+    collect_typed_verifiers(&yaml, &mut binding.verifier_commands);
 
     if binding.task_id.is_empty() {
         return Err(KnowledgeError::Traceability(format!(
@@ -303,25 +278,44 @@ fn yaml_block(raw: &str) -> &str {
     archon_context::fenced::fenced_block_tagged(raw, "yaml").map_or(raw, |block| block.body)
 }
 
-/// `[A, B]` → `["A", "B"]`; `[]` → `[]`. Anything else is an error.
-fn parse_flow_sequence(body: &str, source_path: &str) -> Result<Vec<String>> {
-    let inner = body
-        .strip_prefix('[')
-        .and_then(|rest| rest.strip_suffix(']'))
-        .ok_or_else(|| {
-            KnowledgeError::Traceability(format!(
-                "{source_path}: `implements:` must be a single-line flow sequence \
-                 like `implements: [REQ-X-001]`; found `{body}`"
-            ))
-        })?;
-    if inner.trim().is_empty() {
-        return Ok(Vec::new());
+fn parse_string_sequence(value: &serde_yaml_ng::Value) -> Option<Vec<String>> {
+    let items = value.as_sequence()?;
+    items
+        .iter()
+        .map(|item| item.as_str().map(str::to_string))
+        .collect()
+}
+
+fn yaml_field_body<'a>(yaml: &'a str, field: &str) -> Option<&'a str> {
+    yaml.lines().find_map(|line| {
+        let (key, value) = line.trim().split_once(':')?;
+        (key == field).then_some(value.trim())
+    })
+}
+
+fn collect_typed_verifiers(yaml: &serde_yaml_ng::Value, output: &mut Vec<VerifierCommand>) {
+    match yaml {
+        serde_yaml_ng::Value::Mapping(mapping) => {
+            for (key, value) in mapping {
+                if key.as_str() == Some("typed_verifier_command")
+                    && let Some(command) = value.as_str()
+                {
+                    output.push(VerifierCommand {
+                        command: normalize_command(command),
+                        origin: VerifierOrigin::TypedVerifier,
+                    });
+                } else {
+                    collect_typed_verifiers(value, output);
+                }
+            }
+        }
+        serde_yaml_ng::Value::Sequence(items) => {
+            for item in items {
+                collect_typed_verifiers(item, output);
+            }
+        }
+        _ => {}
     }
-    Ok(inner
-        .split(',')
-        .map(|item| item.trim().trim_matches('\'').trim_matches('"').to_string())
-        .filter(|item| !item.is_empty())
-        .collect())
 }
 
 /// Backticked spans under `## Files Expected to Change` that look like paths.
@@ -455,84 +449,17 @@ fn classify_focused_test(bullet: &str, declared_tools: &[String]) -> FocusedTest
     FocusedTestEntry::Prose(bullet.trim().to_string())
 }
 
-/// Bullets under a `##`-level heading, matched case-insensitively.
-/// Whether a heading found in the document answers the requested one.
-///
-/// Equal, or one a whole-word prefix of the other. See the call site for the
-/// two live failures this exists for.
-fn headings_match(found: &str, requested: &str) -> bool {
-    if found.is_empty() {
-        return false;
-    }
-    let found = found.to_ascii_lowercase();
-    let requested = requested.to_ascii_lowercase();
-    if found == requested {
-        return true;
-    }
-    let (shorter, longer) = if found.len() < requested.len() {
-        (&found, &requested)
-    } else {
-        (&requested, &found)
-    };
-    // `as_bytes().get(..) == Some(&b' ')` rather than `chars().nth`: the prefix
-    // is ASCII-compared already, and a space is one byte in UTF-8, so this
-    // cannot split a multi-byte character.
-    longer.starts_with(shorter.as_str()) && longer.as_bytes().get(shorter.len()) == Some(&b' ')
-}
-
-fn section_bullets(raw: &str, heading: &str) -> Vec<String> {
-    let mut items = Vec::new();
-    let mut inside = false;
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix('#') {
-            let found = rest.trim_start_matches('#').trim();
-            // Either heading may be a prefix of the other, because authors go
-            // wrong in both directions and both directions silently yield zero
-            // bullets.
-            //
-            // Shorter than requested: `## Files Expected` where the contract
-            // says `## Files Expected to Change`. The task then parses as
-            // owning NOTHING and every path it declared is invisible. Observed
-            // live: one generated spec in three used the short form, listing
-            // four real files the report then called "declares no paths".
-            //
-            // Longer than requested: `## Focused Tests and Evidence` where the
-            // contract says `## Focused Tests`. Observed live in the same
-            // corpus — "exact-heading parsing found three fatal section-name
-            // defects (`Focused Tests and …` is ignored)" — and the writers
-            // spent a remediation round renaming headings to satisfy this
-            // parser. A reader that forces the document to change is the wrong
-            // way round.
-            //
-            // The boundary check is what keeps this from being a substring
-            // match: the shorter must end where the longer has a space, so
-            // `Files Forbidden…` can never satisfy `Files Expected…` and
-            // `Focused Testing` can never satisfy `Focused Tests`.
-            inside = headings_match(found, heading);
-            continue;
-        }
-        if !inside {
-            continue;
-        }
-        if let Some(item) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("* "))
-        {
-            let item = item.trim();
-            if !item.is_empty() {
-                items.push(item.to_string());
-            }
-        }
-    }
-    items
-}
-
 /// Collapse internal whitespace so a declared command and a recorded one can be
 /// compared for equality without either being reformatted.
 pub fn normalize_command(command: &str) -> String {
     command.split_whitespace().collect::<Vec<_>>().join(" ")
 }
+
+/// Bullets under a `##`-level heading, matched case-insensitively.
+/// Whether a heading found in the document answers the requested one.
+///
+/// Equal, or one a whole-word prefix of the other. See the call site for the
+/// two live failures this exists for.
 
 #[cfg(test)]
 mod tests;

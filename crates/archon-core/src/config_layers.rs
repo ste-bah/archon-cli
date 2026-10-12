@@ -178,6 +178,7 @@ pub fn load_layered_config(
     // Start with an empty table and merge each layer on top
     let mut merged = Value::Table(toml::map::Map::new());
     let mut audit_sources = std::collections::BTreeMap::new();
+    let mut obsolete_write_budget = Vec::new();
 
     // Every selected layer is authority. Discarding a parse failure could
     // silently erase an environment allowlist and launch with another policy.
@@ -190,6 +191,9 @@ pub fn load_layered_config(
             &info.layer.to_string(),
             &mut audit_sources,
         );
+        if crate::config::sets_obsolete_write_call_time_budget(&value) {
+            obsolete_write_budget.push(info.path.display().to_string());
+        }
         merged = deep_merge_toml(merged, value);
     }
 
@@ -198,6 +202,9 @@ pub fn load_layered_config(
         let value = read_and_parse_toml(path)?;
         validate_audit_layer(path, &value)?;
         crate::config::record_audit_sources(&value, path, "settings", &mut audit_sources);
+        if crate::config::sets_obsolete_write_call_time_budget(&value) {
+            obsolete_write_budget.push(path.display().to_string());
+        }
         merged = deep_merge_toml(merged, value);
     }
 
@@ -208,8 +215,15 @@ pub fn load_layered_config(
 
     config.workflow.repository_audit.sources = audit_sources;
     validate(&config)?;
-    for warning in crate::config::write_call_time_budget_warnings(&config) {
-        eprintln!("warning: {warning}");
+    // Printed, not logged: startup loads this before logging is set up, so a
+    // log line here would never reach the user (#213: the legacy key loads
+    // with one 'ignored' warning).
+    if !obsolete_write_budget.is_empty() {
+        eprintln!(
+            "warning: workflow.generated.write_call_time_budget_secs in {}: {}",
+            obsolete_write_budget.join(", "),
+            crate::config::OBSOLETE_WRITE_CALL_TIME_BUDGET_WARNING
+        );
     }
     Ok(config)
 }

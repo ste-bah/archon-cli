@@ -151,15 +151,37 @@ impl WorkflowV2CallRecord {
         result: WorkflowV2Result,
         depends_on: Vec<String>,
     ) -> Self {
-        let now = chrono::Utc::now().to_rfc3339();
+        Self::new_with_started_at(
+            chrono::Utc::now(),
+            run_id,
+            call,
+            attempt,
+            input_hash,
+            result,
+            depends_on,
+        )
+    }
+
+    /// Construct a completed record using the timestamp captured when its
+    /// dispatch was admitted. `finished_at` is captured here at completion.
+    pub fn new_with_started_at(
+        started_at: chrono::DateTime<chrono::Utc>,
+        run_id: impl Into<String>,
+        call: WorkflowV2HostCall,
+        attempt: u32,
+        input_hash: String,
+        result: WorkflowV2Result,
+        depends_on: Vec<String>,
+    ) -> Self {
+        let finished_at = chrono::Utc::now().max(started_at + chrono::Duration::nanoseconds(1));
         Self {
             run_id: run_id.into(),
             call,
             attempt,
             schema_version: RESULT_SCHEMA_VERSION.to_string(),
-            started_at: now.clone(),
+            started_at: started_at.to_rfc3339(),
             admission_sequence: None,
-            finished_at: now,
+            finished_at: finished_at.to_rfc3339(),
             input_hash,
             output_hash: stable_result_hash(&result),
             status: result.status,

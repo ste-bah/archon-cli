@@ -345,12 +345,12 @@ async fn progress_grows_across_retries_until_the_lint_finishes() {
         let (stderr, _) = resumable_exit(&error).expect("resumable");
         let progress = reported_progress(stderr.as_bytes());
         assert_eq!(progress, Some(u64::from(attempt)));
-        history.push(OperationalAttempt {
+        history.push(OperationalAttempt::new(
             attempt,
-            reason: OperationalKind::IncompleteResumable.label(),
-            elapsed_secs: 0,
+            OperationalKind::IncompleteResumable.label(),
+            0,
             progress,
-        });
+        ));
         assert_eq!(next_step(&history), NextStep::Retry);
     }
     let last = Critic::new();
@@ -461,7 +461,7 @@ fn the_staged_set_gate_reads_its_catalog_no_progress_window() {
 
 /// The catalog identity changes with #356 (schema 2: timeout semantics); rebuilding
 /// schema 1 reproduces the old catalog. The fixed script digest moves by design
-/// (Issues 261, 288 four times, 337, 357, 360, 366, 381, 383, 384, 385, 389, 392); older runs resume via #358 and the #360 seed.
+/// (Issues 261, 288 four times, 337, 357, 360, 366, 379, 381, 383, 384, 385, 389, 392); older runs resume via #358 and the #360 seed.
 #[test]
 fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     let catalog =

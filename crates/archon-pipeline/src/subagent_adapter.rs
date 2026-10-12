@@ -417,8 +417,8 @@ pub(crate) fn llm_response_for_subagent_outcome(
         SubagentOutcome::Completed(completion) => Ok(LlmResponse {
             content: completion.content,
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: completion.tokens_in,
+            tokens_out: completion.tokens_out,
             stop_reason: Some(
                 completion
                     .stop_reason

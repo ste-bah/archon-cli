@@ -392,6 +392,6 @@ impl CountingAuthor {
     fn reply(&self) -> archon_workflow::WorkflowResult<WorkflowAgentOutcome> {
         Ok(WorkflowAgentOutcome { content:serde_json::json!({"status":"accepted","summary":"authored",
             "evidence":[{"kind":"implementation","summary":"authored script"}],"data":{"workflow_js":self.script}}).to_string(),
-            tool_uses:vec![],tokens_in:1,tokens_out:1,stop_reason:Some("end_turn".into()) })
+            tool_uses:vec![],tokens_in:Some(1),tokens_out:Some(1),stop_reason:Some("end_turn".into()) })
     }
 }

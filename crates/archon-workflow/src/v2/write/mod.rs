@@ -476,8 +476,8 @@ use worktree_wave_prepare::*;
 mod tests;
 
 #[cfg(test)]
-#[path = "call_time_budget_tests.rs"]
-mod call_time_budget_tests;
+#[path = "branch_interruption_tests.rs"]
+mod branch_interruption_tests;
 
 #[cfg(test)]
 #[path = "worktree_unapplied_tests.rs"]

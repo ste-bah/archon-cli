@@ -115,6 +115,8 @@ pub struct AgentSubagentExecutor {
     /// `run_to_completion` and consumed by `on_inner_complete` when
     /// deciding whether to call `save_agent_memory`.
     memory_cache: Arc<Mutex<HashMap<String, MemoryMeta>>>,
+    /// Provider usage captured before `handle_inner_complete` removes progress.
+    usage_cache: Arc<Mutex<HashMap<String, (Option<u64>, Option<u64>)>>>,
     /// Awaitable admission control for foreground/awaited subagent runs.
     ///
     /// `SubagentManager::register_with_id` still enforces the configured
@@ -183,6 +185,7 @@ impl AgentSubagentExecutor {
             identity,
             worktree_cache: Arc::new(Mutex::new(HashMap::new())),
             memory_cache: Arc::new(Mutex::new(HashMap::new())),
+            usage_cache: Arc::new(Mutex::new(HashMap::new())),
             subagent_capacity,
             archon_md_cache: Arc::new(crate::archonmd::ArchonMdCache::new()),
             recall_cache: Arc::new(crate::agents::memory::AgentMemoryRecallCache::new()),

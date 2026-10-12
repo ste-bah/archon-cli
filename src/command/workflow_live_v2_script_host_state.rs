@@ -188,6 +188,7 @@ impl WorkflowScriptHost {
         execution: &WorkflowV2CallExecution,
         attempt: u32,
         input_hash: &str,
+        started_at: chrono::DateTime<chrono::Utc>,
         generation: Option<u64>,
     ) -> archon_workflow::WorkflowResult<()> {
         // Every run persists admission before dispatch, even without a fixed projection.
@@ -203,7 +204,8 @@ impl WorkflowScriptHost {
             summary: "fixed decomposition call in flight".to_string(),
             ..WorkflowV2Result::default()
         };
-        let record = WorkflowV2CallRecord::new(
+        let record = WorkflowV2CallRecord::new_with_started_at(
+            started_at,
             self.runner.v2_store.run_id(),
             call,
             attempt,

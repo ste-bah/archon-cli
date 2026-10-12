@@ -4,11 +4,14 @@ use std::{collections::BTreeMap, ffi::OsString};
 use super::workflow_host_command_catalog::HostCommandResolutionContext;
 use archon_workflow::EnvironmentProfileId;
 
-// PATH resolves descendants; HOME and temporary-directory/toolchain overrides
-// keep host helpers using the same locations as the invoking process.
+// PATH resolves descendants; HOME, ARCHON_CONFIG_DIR and temporary-directory/
+// toolchain overrides keep host helpers using the same locations as the
+// invoking process (a child without ARCHON_CONFIG_DIR would read another
+// configuration than its parent).
 const PROCESS_ENVIRONMENT: &[&str] = &[
     "PATH",
     "HOME",
+    "ARCHON_CONFIG_DIR",
     "TMPDIR",
     "TMP",
     "TEMP",

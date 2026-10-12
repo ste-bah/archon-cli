@@ -103,6 +103,16 @@ impl WorkflowScriptHost {
             &execution.input,
             source_metadata.source_fingerprint.as_deref(),
         );
+        crate::command::workflow_test_seams::hold_before_call(
+            &execution.call.id,
+            execution
+                .call
+                .options
+                .host_command
+                .as_ref()
+                .map(|request| request.command_id.as_str()),
+        )
+        .await;
         poll_v2_run_control(
             &self.runner.workflow_store,
             &self.runner.run_id,
@@ -289,6 +299,7 @@ impl WorkflowScriptHost {
             .runner
             .v2_store
             .next_dispatch_attempt(&execution.call.id, &input_hash)?;
+        let call_started_at = chrono::Utc::now();
         if self.generated_decomposed_prd_run()
             && source_metadata.source_metadata_required
             && source_metadata.source_fingerprint.is_none()
@@ -311,7 +322,13 @@ impl WorkflowScriptHost {
             dispatched_at,
         )?;
         if let Err(err) = self
-            .persist_fixed_call_started(&execution, attempt, &input_hash, execution_generation)
+            .persist_fixed_call_started(
+                &execution,
+                attempt,
+                &input_hash,
+                call_started_at,
+                execution_generation,
+            )
             .await
         {
             // Issue 303: a saved started record never outlives this executor.
@@ -437,7 +454,8 @@ impl WorkflowScriptHost {
         let completion_evidence = completion_evidence_from_result(&result);
         let evidence_snapshot_hash = evidence_snapshot_hash(&completion_evidence);
         let dispatched_items = archon_workflow::v2::call_data::dispatched_items(&execution);
-        let record = WorkflowV2CallRecord::new(
+        let record = WorkflowV2CallRecord::new_with_started_at(
+            call_started_at,
             self.runner.v2_store.run_id(),
             execution.call.clone(),
             attempt,

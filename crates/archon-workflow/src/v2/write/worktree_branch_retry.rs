@@ -91,11 +91,10 @@ pub(super) fn stopped_for_no_progress(result: &WorkflowV2Result) -> bool {
 /// The budget the retry runs under: the smaller of the host's per-dispatch
 /// timeout and the configured retry budget, or whichever exists.
 pub(super) fn retry_budget(dispatch: &dyn WorkflowAgentDispatch) -> Option<std::time::Duration> {
-    super::partial_work::effective_call_budget(
-        dispatch.dispatch_timeout(),
-        dispatch.timeout_retry_budget(),
-        std::time::Duration::ZERO,
-    )
+    match (dispatch.dispatch_timeout(), dispatch.timeout_retry_budget()) {
+        (Some(dispatch), Some(retry)) => Some(dispatch.min(retry)),
+        (dispatch, retry) => dispatch.or(retry),
+    }
 }
 
 /// The branch execution for the retry: the same call, its task re-rendered
@@ -132,10 +131,6 @@ pub(super) fn retry_execution(
         // The retry prompt already says what the worktree holds; a transport
         // drop inside the retry re-sends it as is.
         refresh: None,
-        // The retry's loop is bounded by the retry's budget, not by the first
-        // session's call budget: a transport drop inside the retry may re-ask,
-        // but never past the minutes the retry was given.
-        time_budget: BranchTimeBudget::Fixed(budget),
     }
 }
 

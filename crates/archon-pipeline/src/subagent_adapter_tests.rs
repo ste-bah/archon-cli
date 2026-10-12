@@ -16,9 +16,9 @@ impl LlmClient for NoopClient {
         Ok(LlmResponse {
             content: String::new(),
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
             stop_reason: None,
+            tokens_in: None,
+            tokens_out: None,
         })
     }
 }
@@ -343,6 +343,8 @@ fn completed_subagent_reports_a_typed_end_turn_stop_reason() {
         SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion {
             content: "body".into(),
             stop_reason: None,
+            tokens_in: None,
+            tokens_out: None,
         }),
         false,
         None,
@@ -354,18 +356,22 @@ fn completed_subagent_reports_a_typed_end_turn_stop_reason() {
 }
 
 #[test]
-fn completed_subagent_preserves_provider_stop_reason() {
+fn completed_subagent_preserves_provider_usage_and_stop_reason() {
     let response = llm_response_for_subagent_outcome(
         SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion {
             content: "partial body".into(),
             stop_reason: Some("max_tokens".into()),
+            tokens_in: Some(321),
+            tokens_out: Some(54),
         }),
         false,
         None,
     )
-    .expect("a completed subagent is a successful turn");
+    .unwrap();
     assert_eq!(response.content, "partial body");
     assert_eq!(response.stop_reason.as_deref(), Some("max_tokens"));
+    assert_eq!(response.tokens_in, Some(321));
+    assert_eq!(response.tokens_out, Some(54));
 }
 
 #[test]
@@ -389,6 +395,9 @@ fn abnormal_subagent_endings_stay_errors_rather_than_typed_turns() {
         assert!(error.to_string().contains(needle), "{error}");
     }
 }
+
+#[path = "subagent_adapter_usage_tests.rs"]
+mod usage_tests;
 
 #[test]
 fn run_agent_returns_the_mapped_outcome_rather_than_building_a_response_inline() {

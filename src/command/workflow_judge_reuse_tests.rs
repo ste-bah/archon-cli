@@ -21,6 +21,7 @@ fn cache_contract() -> AcceptanceContract {
 }
 struct RecordingJudge {
     batches: Mutex<Vec<Vec<String>>>,
+    omit_supplementary: bool,
 }
 #[async_trait]
 impl WorkflowLlmClient for RecordingJudge {
@@ -53,7 +54,23 @@ impl WorkflowLlmClient for RecordingJudge {
             .map(|c| c["id"].as_str().unwrap().to_string())
             .collect::<Vec<_>>();
         self.batches.lock().unwrap().push(ids.clone());
-        Ok(WorkflowAgentOutcome {content:serde_json::json!({"decisions":ids.iter().map(|id|serde_json::json!({"id":id,"verdict":"accepted","counterexample":"no passing false state","reason":"verified"})).collect::<Vec<_>>()}).to_string(),stop_reason:Some("end_turn".into()),..Default::default()})
+        let decisions = ids
+            .iter()
+            .filter(|id| !self.omit_supplementary || !id.starts_with("SUP-"))
+            .map(|id| {
+                serde_json::json!({
+                    "id": id,
+                    "verdict": "accepted",
+                    "counterexample": "no passing false state",
+                    "reason": "verified"
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(WorkflowAgentOutcome {
+            content: serde_json::json!({"decisions": decisions}).to_string(),
+            stop_reason: Some("end_turn".into()),
+            ..Default::default()
+        })
     }
     async fn send_message_with_temperature(
         &self,
@@ -75,8 +92,9 @@ async fn frozen() -> (
 ) {
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, original) = seed(&temp);
-    std::fs::write(&prd,"## Acceptance Criteria\n| ID | Criterion |\n|---|---|\n| AC-X-001 | output is valid |\n| AC-X-002 | second output is valid |\n").unwrap();
+    std::fs::write(&prd,"## Requirements\n| ID | Requirement |\n|---|---|\n| REQ-X-001 | output is valid |\n\n## Acceptance Criteria\n| ID | Criterion |\n|---|---|\n| AC-X-001 | output is valid |\n| AC-X-002 | second output is valid |\n").unwrap();
     let mut contract: AcceptanceContract = serde_json::from_slice(&original).unwrap();
+    contract.acceptance[0].covers = vec!["REQ-X-001".into()];
     let mut second = contract.acceptance[0].clone();
     second.id = "AC-X-002".into();
     contract.acceptance.push(second);
@@ -87,6 +105,7 @@ async fn frozen() -> (
     .unwrap();
     let judge = Arc::new(RecordingJudge {
         batches: Mutex::new(vec![]),
+        omit_supplementary: false,
     });
     freeze_acceptance(temp.path(), &tasks, &prd, judge.clone())
         .await
@@ -324,5 +343,82 @@ fn pin_reuse_covers_supplementary_checks_too() {
     assert_eq!(
         current.supplementary[0].judgment.verdict,
         JudgeDecision::Accepted
+    );
+}
+
+fn supplementary_only_candidate(contract: &mut AcceptanceContract) {
+    let mut supplementary = contract.acceptance[0].clone();
+    supplementary.id = "SUP-REQ-X-001".into();
+    supplementary.criterion = "The output satisfies REQ-X-001.".into();
+    supplementary.covers = vec!["REQ-X-001".into()];
+    supplementary.judgment.verdict = JudgeDecision::Refuted;
+    supplementary.judgment.counterexample.clear();
+    supplementary.judgment.reason.clear();
+    supplementary.judgment.host_call_id.clear();
+    supplementary.judgment.sampling = None;
+    contract.supplementary.push(supplementary);
+}
+
+#[tokio::test]
+async fn supplementary_only_subset_is_judged_and_merged_with_reused_acceptance() {
+    let (temp, tasks, prd, mut contract, judge) = frozen().await;
+    let reused = contract.acceptance[0].judgment.clone();
+    supplementary_only_candidate(&mut contract);
+
+    let prepared = prepare_acceptance_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &prd,
+        GateMode::Observe,
+        serde_json::to_vec(&contract).unwrap(),
+        judge.clone(),
+    )
+    .await
+    .expect("the merged contract passes full acceptance validation");
+
+    assert_eq!(
+        *judge.batches.lock().unwrap(),
+        vec![vec!["SUP-REQ-X-001".to_string()]],
+        "the accepted AC verdict is reused and only the new supplementary check is judged"
+    );
+    let merged: AcceptanceContract = serde_json::from_slice(&prepared.contract_bytes).unwrap();
+    assert_eq!(merged.acceptance[0].judgment, reused);
+    assert_eq!(
+        merged.supplementary[0].judgment.verdict,
+        JudgeDecision::Accepted
+    );
+}
+
+#[tokio::test]
+async fn supplementary_only_reply_missing_its_judgment_is_refused() {
+    let (temp, tasks, prd, mut contract, _) = frozen().await;
+    supplementary_only_candidate(&mut contract);
+    let judge = Arc::new(RecordingJudge {
+        batches: Mutex::new(vec![]),
+        omit_supplementary: true,
+    });
+
+    let error = prepare_acceptance_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &prd,
+        GateMode::Observe,
+        serde_json::to_vec(&contract).unwrap(),
+        judge.clone(),
+    )
+    .await
+    .expect_err("a reply omitting the supplementary judgment is refused");
+
+    assert!(
+        format!("{error:#}").contains("missing=[\"SUP-REQ-X-001\"]"),
+        "{error:#}"
+    );
+    // #385: the same rejection class on every reply is no progress, so the
+    // judge is asked once and then re-asked for the whole no-progress window
+    // before the batch ends incomplete; each ask names only the new check.
+    assert_eq!(
+        judge.batches.lock().unwrap().as_slice(),
+        // 1 + JUDGE_NO_PROGRESS_WINDOW (3) in workflow_task_set_judge.rs.
+        vec![vec!["SUP-REQ-X-001".to_string()]; 4]
     );
 }

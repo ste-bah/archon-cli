@@ -123,8 +123,8 @@ pub(super) async fn collect_stream_into(
     Ok(LlmResponse {
         content: text_parts.join(""),
         tool_uses,
-        tokens_in: usage.context_input_tokens,
-        tokens_out: usage.output_tokens,
+        tokens_in: Some(usage.context_input_tokens),
+        tokens_out: Some(usage.output_tokens),
         stop_reason,
     })
 }

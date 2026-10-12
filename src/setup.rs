@@ -135,6 +135,11 @@ pub(crate) fn extra_known_env_vars() -> Vec<&'static str> {
         .iter()
         .copied()
         .chain([archon_shell::progress::SUPERVISED_ENV])
+        .chain(
+            crate::command::workflow_test_seams::known_env_vars()
+                .iter()
+                .copied(),
+        )
         .collect()
 }
 

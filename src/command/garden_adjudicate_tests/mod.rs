@@ -70,8 +70,8 @@ impl archon_pipeline::runner::LlmClient for RecordingClient {
         Ok(archon_pipeline::runner::LlmResponse {
             content: verdicts,
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: None,
         })
     }

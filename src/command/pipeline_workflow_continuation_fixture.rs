@@ -32,8 +32,8 @@ impl RefusingContinuation {
         Ok(LlmResponse {
             content: self.replies.lock().unwrap().pop().expect("a reply"),
             tool_uses: vec![],
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: Some("end_turn".into()),
         })
     }

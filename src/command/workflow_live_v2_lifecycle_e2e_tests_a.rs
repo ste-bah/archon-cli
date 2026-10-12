@@ -402,8 +402,8 @@ impl WorkflowLlmClient for CannedLifecycleLlm {
                 content.to_string(),
             ),
             tool_uses: Vec::new(),
-            tokens_in: 0,
-            tokens_out: 0,
+            tokens_in: Some(0),
+            tokens_out: Some(0),
             stop_reason: None,
         })
     }

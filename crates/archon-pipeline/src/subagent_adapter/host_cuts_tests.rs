@@ -24,7 +24,7 @@ fn session(
         );
         tokio::select! {
             _ = cancel.cancelled() => SubagentOutcome::Cancelled,
-            () = work => SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion { content: "done".into(), stop_reason: None }),
+            () = work => SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion { content: "done".into(), stop_reason: None, tokens_in: None, tokens_out: None }),
         }
     })
 }
@@ -278,7 +278,9 @@ fn a_completed_session_is_never_reported_inactive() {
         inactivity_failure(
             &SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion {
                 content: "x".into(),
-                stop_reason: None
+                stop_reason: None,
+                tokens_in: None,
+                tokens_out: None,
             }),
             cut
         )
@@ -331,7 +333,7 @@ async fn session_and_outer_clocks_start_together_at_admission() {
         drop(wait);
         tokio::select! {
             _ = inner.cancelled() => SubagentOutcome::Cancelled,
-            () = tokio::time::sleep(secs(30)) => SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion { content: "done".into(), stop_reason: None }),
+            () = tokio::time::sleep(secs(30)) => SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion { content: "done".into(), stop_reason: None, tokens_in: None, tokens_out: None }),
         }
     });
     let started = Instant::now();
