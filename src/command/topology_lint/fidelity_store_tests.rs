@@ -7,7 +7,7 @@ use super::*;
 
 fn identity() -> StoreIdentity {
     StoreIdentity {
-        binary: "build".into(),
+        critic_logic: "critic-logic".into(),
         provider: Some("provider".into()),
         model: "model".into(),
         request: Some("representative-request".into()),
@@ -106,6 +106,45 @@ fn records(store: &VerdictStore) -> usize {
         .count()
 }
 
+fn write_legacy(store: &VerdictStore, asked: &Asked, binary: &str, verdict: FidelityVerdict) {
+    let entries = vec![Entry {
+        audited_at: "2026-01-01T00:00:00Z".into(),
+        tasks: asked.texts.clone(),
+        verdict,
+    }];
+    let material = serde_json::json!([
+        LEGACY_STORE_SCHEMA,
+        asked.obligation,
+        "skeleton",
+        {
+            "binary": binary,
+            "model": "model",
+            "provider": "provider",
+            "request": "representative-request",
+        }
+    ]);
+    let key = hex::encode(Sha256::digest(material.to_string().as_bytes()));
+    let record = serde_json::json!({
+        "schema": LEGACY_STORE_SCHEMA,
+        "key": key,
+        "obligation": asked.obligation,
+        "skeleton": "skeleton",
+        "identity": {
+            "binary": binary,
+            "model": "model",
+            "provider": "provider",
+            "request": "representative-request",
+        },
+        "entries": entries,
+    });
+    std::fs::create_dir_all(store.dir()).unwrap();
+    std::fs::write(
+        store.dir().join(format!("{key}.json")),
+        serde_json::to_vec(&record).unwrap(),
+    )
+    .unwrap();
+}
+
 #[test]
 fn each_envelope_is_its_own_identity_and_unknown_envelopes_never_reuse() {
     let temp = tempfile::tempdir().unwrap();
@@ -127,13 +166,104 @@ fn each_envelope_is_its_own_identity_and_unknown_envelopes_never_reuse() {
     let unknown = store.for_request(None);
     assert_eq!(unknown.load(asked.question()), None);
     assert!(!unknown.save(asked.question(), &supported()).unwrap().1);
-    let rebuilt = VerdictStore::new(store.dir().into(), identity().with_binary("other"));
+    let rebuilt = VerdictStore::new(store.dir().into(), identity().with_critic_logic("other"));
     assert_eq!(
         rebuilt.load(asked.question()),
         None,
         "another binary re-asks"
     );
     assert_eq!(records(&store), 1);
+}
+
+#[test]
+fn legacy_binary_record_is_reused_and_promoted_under_the_critic_logic_key() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = store(temp.path());
+    let asked = Asked::new(
+        obligation_with("The registry holds every entry."),
+        tasks(OBLIGES, "Second task."),
+    );
+    write_legacy(&store, &asked, "binary-X", supported());
+
+    let legacy = store.legacy_records().unwrap();
+    assert_eq!(legacy.len(), 1);
+    assert_eq!(
+        store.load_legacy(asked.question(), &legacy).unwrap(),
+        Some(Standing::Verdict(supported()))
+    );
+    assert_eq!(
+        records(&store),
+        2,
+        "legacy source and promoted schema-5 key"
+    );
+    assert_eq!(
+        store.load(asked.question()),
+        Some(Standing::Verdict(supported())),
+        "promoted record round-trips under the new key"
+    );
+}
+
+#[test]
+fn legacy_request_and_model_mismatches_reask() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = store(temp.path());
+    let asked = Asked::new(
+        obligation_with("The registry holds every entry."),
+        tasks(OBLIGES, "Second task."),
+    );
+    write_legacy(&base, &asked, "binary-X", supported());
+    let records = base.legacy_records().unwrap();
+
+    let changed_request = base.for_request(Some("different-request".into()));
+    assert_eq!(
+        changed_request
+            .load_legacy(asked.question(), &records)
+            .unwrap(),
+        None
+    );
+    let mut changed_model_identity = identity();
+    changed_model_identity.model = "different-model".into();
+    let changed_model = VerdictStore::new(base.dir().into(), changed_model_identity);
+    assert_eq!(
+        changed_model
+            .load_legacy(asked.question(), &records)
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn invalid_and_torn_legacy_records_are_ignored_without_panicking() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = store(temp.path());
+    let asked = Asked::new(
+        obligation_with("The registry holds every entry."),
+        tasks(OBLIGES, "Second task."),
+    );
+    let mut no_longer_holds = supported();
+    no_longer_holds.supporting_text = "text no longer present".into();
+    write_legacy(&store, &asked, "binary-X", no_longer_holds);
+    std::fs::write(store.dir().join("torn.json"), b"{\"schema\":4").unwrap();
+
+    let records = store.legacy_records().unwrap();
+    assert_eq!(records.len(), 1, "the torn file is not parsed as a record");
+    assert_eq!(store.load_legacy(asked.question(), &records).unwrap(), None);
+}
+
+#[test]
+fn a_changed_critic_logic_digest_reasks_new_schema_records() {
+    let temp = tempfile::tempdir().unwrap();
+    let original = store(temp.path());
+    let asked = Asked::new(
+        obligation_with("The registry holds every entry."),
+        tasks(OBLIGES, "Second task."),
+    );
+    original.save(asked.question(), &supported()).unwrap();
+    let changed = VerdictStore::new(
+        original.dir().into(),
+        identity().with_critic_logic("changed-critic-logic"),
+    );
+    assert_eq!(changed.load(asked.question()), None);
 }
 
 /// A true verdict stands only over the same tasks with byte-identical texts:

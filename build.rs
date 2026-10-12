@@ -7,6 +7,8 @@ fn main() {
     embed_git_hash();
     let fingerprint = build_fingerprint::build_fingerprint(Path::new("."));
     println!("cargo:rustc-env=ARCHON_BUILD_FINGERPRINT={fingerprint}");
+    let fidelity_logic = fidelity_logic_digest(Path::new("."));
+    println!("cargo:rustc-env=ARCHON_FIDELITY_LOGIC_DIGEST={fidelity_logic}");
     // A directory makes cargo rerun this script when any file under it
     // changes, so the fingerprint follows uncommitted source edits too.
     for file in [
@@ -22,6 +24,27 @@ fn main() {
         println!("cargo:rerun-if-changed={file}");
     }
     generate_known_env_vars();
+}
+
+/// Hash only the code that renders the fidelity question and judges a reply.
+fn fidelity_logic_digest(root: &Path) -> String {
+    use sha2::{Digest, Sha256};
+
+    let files = [
+        "src/command/topology_lint/fidelity_critic.rs",
+        "crates/archon-workflow/src/fidelity_audit.rs",
+    ];
+    let mut hash = Sha256::new();
+    for file in files {
+        let name = file.as_bytes();
+        let contents = std::fs::read(root.join(file))
+            .unwrap_or_else(|error| panic!("reading fidelity logic source {file}: {error}"));
+        hash.update((name.len() as u64).to_le_bytes());
+        hash.update(name);
+        hash.update((contents.len() as u64).to_le_bytes());
+        hash.update(contents);
+    }
+    format!("{:x}", hash.finalize())
 }
 
 fn embed_git_hash() {

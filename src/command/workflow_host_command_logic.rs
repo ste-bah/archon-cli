@@ -181,6 +181,8 @@ const FREEZE: &[&str] = &[
 const LINT: &[&str] = &[
     "src/command/workflow_staged_cli.rs",
     "src/command/topology_lint.rs",
+    "src/command/topology_lint/fidelity_critic.rs",
+    "src/command/topology_lint/fidelity_store.rs",
     "src/command/topology_lint/repository_claims.rs",
     "src/command/topology_task_graph.rs",
     "crates/archon-workflow/src/fidelity_audit.rs",
@@ -227,9 +229,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 15: #417 Windows task-root paths normalize before containment checks, so probes can run and produce a different verdict.
         // #439 re-pin only: resume phase selection shares this closure; freeze verdicts are unchanged.
         // #417 re-pin only: the landing destination allowlist names the topology stores; freeze verdicts are unchanged.
+        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
+        sources_digest: "eb8904f3d78b322974e9797d6a6339710f106d7198a70eb797d164700ff661b2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -237,9 +240,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // #434 and #417 re-pin only: harness input paths, pipeline outputs, and copy API normalization do not alter this verdict.
         // #439 re-pin only, as freeze-acceptance.
+        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
+        sources_digest: "eb8904f3d78b322974e9797d6a6339710f106d7198a70eb797d164700ff661b2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -252,9 +256,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
         // 7: #428 the host stamps frozen skeleton frontmatter fields at landing.
         // 8: #434 a fidelity gap blocks only its weakest task's body; true verdicts quote a checked anchor and are reused per obligation.
+        // #434c re-pin only: identical critic logic and request identities reuse validated verdicts across binary rebuilds.
         version: 8,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
+        sources_digest: "ac02186f87e8d3639861dcb688243405832936fd5668d919a2a8d7f347f7f237",
         build_bound: false,
     },
     CapabilityLogic {
@@ -265,9 +270,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
         // 7: #434 true fidelity verdicts quote a checked anchor and are reused per obligation over byte-identical cluster texts.
+        // #434c re-pin only: identical critic logic and request identities reuse validated verdicts across binary rebuilds.
         version: 7,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
+        sources_digest: "ac02186f87e8d3639861dcb688243405832936fd5668d919a2a8d7f347f7f237",
         build_bound: false,
     },
     CapabilityLogic {
@@ -286,11 +292,12 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #417 harness-written project run state leaves hermetic check inputs, which can change a check verdict.
         // 6: #417 copied task-root inputs now match the digest exclusions, which can change a check verdict.
         // #417 re-pin only: the direct copy API now shares the production caller's root normalization.
+        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
         version: 6,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
-        sources_digest: "e62cf9cdeed73a0c10b405e38b8ac6463c3ef09edd309d02020be7bbfe59ec73",
+        sources_digest: "977d348976078bfcfe7a4d026ed8b8f131499023d5891e043e75881dafbdb450",
         build_bound: true,
     },
     CapabilityLogic {
@@ -300,7 +307,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: verify never asks the fidelity critic or reads pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
-        sources_digest: "e62cf9cdeed73a0c10b405e38b8ac6463c3ef09edd309d02020be7bbfe59ec73",
+        // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
+        sources_digest: "977d348976078bfcfe7a4d026ed8b8f131499023d5891e043e75881dafbdb450",
         build_bound: true,
     },
 ];

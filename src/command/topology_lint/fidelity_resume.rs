@@ -135,6 +135,7 @@ pub(super) async fn resolve(
         client.message_request_identity(&super::fidelity_critic::request(&[], &[], skeleton)),
     );
     let store = &store;
+    let legacy_records = store.legacy_records()?;
     let skeleton_digest = fidelity_cluster_digest(&[], &[], skeleton);
     let texts: Vec<TaskTexts> = clusters
         .iter()
@@ -151,10 +152,10 @@ pub(super) async fn resolve(
         .enumerate()
         .map(|(cluster, (obligations, _))| {
             (0..obligations.len())
-                .map(|obligation| store.load(question(cluster, obligation)))
-                .collect()
+                .map(|obligation| store.load_legacy(question(cluster, obligation), &legacy_records))
+                .collect::<Result<Vec<_>>>()
         })
-        .collect();
+        .collect::<Result<_>>()?;
     let cached = resolved
         .iter()
         .flatten()
