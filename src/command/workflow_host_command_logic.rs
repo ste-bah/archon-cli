@@ -239,7 +239,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // unparseable answer while it makes progress.
         // 4: #380's obligation model changes the frozen contract verdict.
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 5,
+        // 6: #425 repository claims recognize leading negation and explicit directory scopes.
+        version: 6,
         sources: &[GATE, CONTRACT, LINT],
         sources_digest: "92fb4ddcfe02bbe62d22a5c8f51da17f9356e0589e8fd31c02dc6b1afaf1bb59",
         build_bound: false,
@@ -250,7 +251,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // makes progress (R8).
         // 4: #380's obligation model changes the frozen contract verdict.
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 5,
+        // 6: #425 repository claims recognize leading negation and explicit directory scopes.
+        version: 6,
         sources: &[GATE, CONTRACT, LINT],
         sources_digest: "92fb4ddcfe02bbe62d22a5c8f51da17f9356e0589e8fd31c02dc6b1afaf1bb59",
         build_bound: false,

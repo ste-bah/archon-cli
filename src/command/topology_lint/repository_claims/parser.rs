@@ -118,6 +118,8 @@ const TERMINATORS: &[&str] = &[
     "in the repository",
     "in the repo",
     "at",
+    "in",
+    "within",
     "and",
     "but",
     "—",
@@ -159,6 +161,9 @@ fn split_sentences(line: &str) -> Vec<&str> {
 }
 
 fn claims_in_sentence(sentence: &str) -> Vec<PathClaim> {
+    if let Some(claims) = leading_absence_claims(sentence) {
+        return claims;
+    }
     let mut claims = Vec::new();
     let mut rest = sentence;
     while let Some(open) = rest.find('`') {
@@ -170,13 +175,21 @@ fn claims_in_sentence(sentence: &str) -> Vec<PathClaim> {
         let before = &rest[..open];
         let after = &after_open[close + 1..];
         if !is_incomplete_path_fragment(before, after)
-            && let Some(path) = repository_relative_token(token)
+            && let Some(path) = repository_or_scoped_token(token, after)
         {
-            let claim = claim_after(after).or_else(|| claim_before(before));
+            let claim = claim_after(after)
+                .or_else(|| explicit_scope(after).map(|(_, claim)| claim))
+                .or_else(|| claim_before(before));
             if let Some(claim) = claim {
+                let qualified = qualified_path(&path, after);
+                let scoped_join = qualified.is_some();
+                let path = qualified.unwrap_or(path);
+                let scope = explicit_scope(after).map(|(scope, _)| scope);
                 claims.push(PathClaim {
                     path,
                     claim,
+                    scope,
+                    scoped_join,
                     sentence: sentence.trim().to_string(),
                 });
             }
@@ -184,6 +197,107 @@ fn claims_in_sentence(sentence: &str) -> Vec<PathClaim> {
         rest = after;
     }
     claims
+}
+
+/// A sentence-leading `No` or `Neither` negates each path in its coordinated
+/// list. The list is accepted only when its final path has an existence
+/// predicate, so incomplete or ambiguous prose remains unclaimed.
+fn leading_absence_claims(sentence: &str) -> Option<Vec<PathClaim>> {
+    let trimmed = sentence.trim_start();
+    let lowered = trimmed.to_ascii_lowercase();
+    let (lead, conjunction) = if lowered.starts_with("neither ") {
+        ("neither ", " nor ")
+    } else if lowered.starts_with("no ") {
+        ("no ", " or ")
+    } else {
+        return None;
+    };
+    let mut rest = &trimmed[lead.len()..];
+    let mut paths = Vec::new();
+    loop {
+        rest = rest.trim_start();
+        let token = rest.strip_prefix('`')?;
+        let close = token.find('`')?;
+        let path = repository_or_scoped_token(&token[..close], &token[close + 1..])?;
+        paths.push(path);
+        rest = &token[close + 1..];
+        let lowered_rest = rest.to_ascii_lowercase();
+        if lowered_rest.starts_with(conjunction) {
+            rest = &rest[conjunction.len()..];
+            continue;
+        }
+        if matches!(claim_after(rest), Some(Claim::Exists)) {
+            return Some(
+                paths
+                    .into_iter()
+                    .map(|path| {
+                        let qualified = qualified_path(&path, rest);
+                        let scoped_join = qualified.is_some();
+                        PathClaim {
+                            path: qualified.unwrap_or(path),
+                            claim: Claim::Absent,
+                            scope: explicit_scope(rest).map(|(scope, _)| scope),
+                            scoped_join,
+                            sentence: sentence.trim().to_string(),
+                        }
+                    })
+                    .collect(),
+            );
+        }
+        return None;
+    }
+}
+
+/// Return a directory scope only when it directly follows an existence
+/// predicate. Trailing prose elsewhere in the sentence cannot scope a path.
+fn explicit_scope(after: &str) -> Option<(String, Claim)> {
+    let lowered = after.trim_start().to_ascii_lowercase();
+    let tail = [(ABSENT_AFTER, Claim::Absent), (EXISTS_AFTER, Claim::Exists)]
+        .iter()
+        .find_map(|(phrases, claim)| {
+            phrases.iter().find_map(|phrase| {
+                let tail = lowered.strip_prefix(phrase)?.trim_start();
+                ["under ", "in "]
+                    .iter()
+                    .find_map(|scope| tail.strip_prefix(scope))
+                    .map(|tail| (tail, *claim))
+            })
+        })?;
+    let (tail, claim) = tail;
+    let token = tail.strip_prefix('`')?;
+    let end = token.find('`')?;
+    repository_relative_token(&token[..end]).map(|scope| (scope, claim))
+}
+
+/// Bare file names may be joined to an explicit scope. A token that already
+/// has a path component remains root-relative; the tree-aware checker decides
+/// whether such a scoped claim is unambiguous.
+fn qualified_path(path: &str, after: &str) -> Option<String> {
+    if path.contains('/') {
+        return None;
+    }
+    let (directory, _) = explicit_scope(after)?;
+    let joined = format!("{}/{}", directory.trim_end_matches('/'), path);
+    Some(archon_workflow::repository_record::normalize_relative(
+        &joined,
+    ))
+}
+
+fn repository_or_scoped_token(token: &str, after: &str) -> Option<String> {
+    repository_relative_token(token).or_else(|| {
+        let lowered = after.to_ascii_lowercase();
+        let has_scope = lowered.contains(" under `") || lowered.contains(" in `");
+        let file = token.trim();
+        let (stem, extension) = file.rsplit_once('.')?;
+        (has_scope
+            && !file.contains('/')
+            && !file.chars().any(char::is_whitespace)
+            && !stem.is_empty()
+            && !extension.is_empty()
+            && extension.len() <= 8
+            && extension.chars().all(|c| c.is_ascii_alphanumeric()))
+        .then(|| file.to_string())
+    })
 }
 
 /// Do not treat a backticked component as a repository path when it is one
