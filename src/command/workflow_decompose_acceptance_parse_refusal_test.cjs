@@ -31,6 +31,15 @@ async function refusal(reply, stopReason = 'end_turn') {
 (async () => {
   const fixture = fs.readFileSync(`${root}/fixtures/decompose_command_block_reply.txt`, 'utf8');
   const json = ctxForBlocks();
+  for (const [reply, expected] of [
+    ['```check\r\nfirst\r\nsecond\r\n```', 'first\nsecond'],
+    ['```check\nfirst\rsecond\r```', 'first\nsecond'],
+    ['```check\r\nfirst\nsecond\rthird\n```', 'first\nsecond\nthird']
+  ]) {
+    const entry = {id:'A', check:{kind:'command', command_block:true}};
+    assert.equal(json.resolveCommandBlock(entry, reply), null);
+    assert.equal(entry.check.command, expected);
+  }
   const entry = JSON.parse(json.extractJsonObject(fixture));
   assert.equal(entry.id, 'SUP-REQ-X', 'the check fence may be the first fence in the reply');
   assert.equal(json.resolveCommandBlock(entry, fixture), null);

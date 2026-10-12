@@ -63,15 +63,21 @@ struct ReplyBlock {
 fn reply_blocks(content: &str) -> Vec<ReplyBlock> {
     let mut lines = Vec::new();
     let mut start = 0;
-    for (index, byte) in content.bytes().enumerate() {
-        if byte == b'\n' {
-            let end = index + 1;
-            let mut body_end = index;
-            if body_end > start && content.as_bytes()[body_end - 1] == b'\r' {
-                body_end -= 1;
-            }
+    let bytes = content.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if matches!(bytes[index], b'\r' | b'\n') {
+            let body_end = index;
+            let end = if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
+                index + 2
+            } else {
+                index + 1
+            };
             lines.push((start, end, &content[start..body_end]));
             start = end;
+            index = end;
+        } else {
+            index += 1;
         }
     }
     if start < content.len() {
@@ -292,7 +298,8 @@ pub(super) fn resolve_command_block(entry: &mut Value, content: &str) -> Option<
     if block.content.trim().is_empty() {
         return Some(format!("acceptance entry {id} check block is empty"));
     }
-    check.insert("command".into(), Value::String(block.content.clone()));
+    let command = block.content.replace("\r\n", "\n").replace('\r', "\n");
+    check.insert("command".into(), Value::String(command));
     check.remove("command_block");
     None
 }
