@@ -29,6 +29,7 @@ fn grounded() -> (tempfile::TempDir, PathBuf, PathBuf, RepositoryTree) {
     std::fs::write(repo.join("src/lib.rs"), "pub mod existing;\n").unwrap();
     std::fs::write(repo.join("src/existing.rs"), "pub fn f() {}\n").unwrap();
     std::fs::write(repo.join("crate/tests/x.rs"), "// scoped alternate\n").unwrap();
+    std::fs::write(repo.join("crate/tests/only.rs"), "// one candidate\n").unwrap();
     std::fs::write(repo.join("crate/tests/tests/x.rs"), "// scoped candidate\n").unwrap();
     std::fs::write(repo.join("docs/v1.2/foo.rs"), "// dotted scope\n").unwrap();
     std::fs::create_dir_all(repo.join("crates/x/src/widgets")).unwrap();
@@ -192,7 +193,11 @@ fn dotted_symbols_are_not_file_claims_and_only_direct_directory_scopes_join() {
     );
     assert_eq!(
         scoped_claims("`foo.rs` currently exists in `src/`."),
-        vec![("foo.rs".to_string(), Claim::Exists, Some("src".to_string()))]
+        vec![(
+            "foo.rs".to_string(),
+            Claim::Exists,
+            Some("src/".to_string())
+        )]
     );
     assert_eq!(
         claims("`spec_refs.rs` exists in `crates/x/src/`."),

@@ -115,11 +115,41 @@ fn a_unique_nested_directory_cited_by_base_name_is_that_directory() {
     assert!(missing[0].contains("`crates/x/src/widgets/ghost.rs` exists"));
 }
 
+// D2: several directories end with the scope (`crate/tests` and
+// `crate/tests/tests` both end with `/tests`). A claim is refuted only when
+// every candidate refutes it.
+
 #[test]
-fn an_ambiguous_nested_directory_is_no_claim() {
-    // `crate/tests` and `crate/tests/tests` both end with `/tests`.
+fn several_nested_directories_refute_an_exists_claim_absent_from_all() {
     let found = findings("`ghost.rs` exists in `tests/`.");
-    assert!(found.is_empty(), "{found:?}");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].contains("`crate/tests/ghost.rs` or `crate/tests/tests/ghost.rs` exists"),
+        "{}",
+        found[0]
+    );
+}
+
+#[test]
+fn several_nested_directories_refute_an_absent_claim_present_in_all() {
+    let found = findings("`x.rs` does not exist in `tests/`.");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].contains("`crate/tests/x.rs` or `crate/tests/tests/x.rs` does not exist"),
+        "{}",
+        found[0]
+    );
+}
+
+#[test]
+fn several_nested_directories_that_disagree_give_no_finding() {
+    for text in [
+        "`only.rs` exists in `tests/`.",
+        "`only.rs` does not exist in `tests/`.",
+    ] {
+        let found = findings(text);
+        assert!(found.is_empty(), "{text:?}: {found:?}");
+    }
 }
 
 #[test]
@@ -159,6 +189,63 @@ fn a_scope_keeps_its_case() {
             .into_iter()
             .map(|claim| claim.scope)
             .collect::<Vec<_>>(),
-        vec![Some("Docs/V2".to_string())]
+        vec![Some("Docs/V2/".to_string())]
     );
+}
+
+// D1: a trailing `/` spells a directory, so a missing dotted directory is
+// still joined and checked. Without the `/` a dotted scope that matches
+// nothing stays no claim.
+
+#[test]
+fn a_missing_dotted_directory_with_a_slash_is_checked() {
+    let found = findings("`foo.rs` exists under `docs/v1.3/`.");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].contains("`docs/v1.3/foo.rs` exists"),
+        "{}",
+        found[0]
+    );
+}
+
+#[test]
+fn a_missing_versioned_directory_with_a_slash_is_checked() {
+    let found = findings("`site.py` exists in `python3.12/`.");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].contains("`python3.12/site.py` exists"),
+        "{}",
+        found[0]
+    );
+}
+
+#[test]
+fn a_missing_dot_d_directory_with_a_slash_is_checked() {
+    let found = findings("`app.conf` exists in `conf.d/`.");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].contains("`conf.d/app.conf` exists"),
+        "{}",
+        found[0]
+    );
+}
+
+#[test]
+fn a_missing_dotted_scope_without_a_slash_is_no_claim() {
+    let found = findings("`foo.rs` exists under `docs/v1.3`.");
+    assert!(found.is_empty(), "{found:?}");
+}
+
+// A module path is never a directory scope.
+
+#[test]
+fn a_module_path_is_not_a_directory_scope() {
+    let text = "`foo.rs` exists in `crate::widgets`.";
+    assert!(
+        extract_claims(text).is_empty(),
+        "{:?}",
+        extract_claims(text)
+    );
+    let found = findings(text);
+    assert!(found.is_empty(), "{found:?}");
 }

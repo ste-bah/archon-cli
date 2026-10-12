@@ -297,11 +297,14 @@ fn skip_filler(rest: &str) -> Option<&str> {
 }
 
 /// A scope candidate is repository-relative syntax. The repository tree,
-/// rather than its spelling, determines whether it names a file or directory.
+/// rather than its spelling, determines whether it names a file or directory;
+/// a trailing `/` is kept, because it spells a directory the tree may lack
+/// (`docs/v1.3/`). A module path (`crate::widgets`) is no scope.
 fn repository_directory_token(token: &str) -> Option<String> {
     let token = token.trim();
     if token.is_empty()
         || token.chars().any(char::is_whitespace)
+        || token.contains("::")
         || token.starts_with('/')
         || token.starts_with('~')
         || token.contains("://")
@@ -317,7 +320,11 @@ fn repository_directory_token(token: &str) -> Option<String> {
     if normalized.is_empty() {
         return None;
     }
-    Some(normalized)
+    Some(if token.ends_with('/') {
+        format!("{normalized}/")
+    } else {
+        normalized
+    })
 }
 
 /// Bare file names may be joined to an explicit scope. A token that already
