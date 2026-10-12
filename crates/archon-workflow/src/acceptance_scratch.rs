@@ -18,9 +18,9 @@ pub use direct::{
 mod inputs;
 use control::git;
 
-#[cfg(test)]
 #[path = "acceptance_scratch_paths.rs"]
 mod paths;
+pub use paths::relative_key;
 #[cfg(test)]
 pub(crate) use paths::shell_arg;
 

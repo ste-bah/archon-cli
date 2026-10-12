@@ -264,15 +264,15 @@ fn audit_path(
     let meta = match path.symlink_metadata() {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            map.insert(rel.display().to_string(), "missing".into());
+            map.insert(relative_key(rel), "missing".into());
             return Ok(());
         }
         Err(e) => return Err(WorkflowError::io(&path, e)),
     };
     if meta.is_file() {
-        map.insert(rel.display().to_string(), file_digest(&path)?);
+        map.insert(relative_key(rel), file_digest(&path)?);
     } else if meta.is_dir() {
-        map.insert(rel.display().to_string(), "directory".into());
+        map.insert(relative_key(rel), "directory".into());
         for item in std::fs::read_dir(&path).map_err(|e| WorkflowError::io(&path, e))? {
             audit_path(
                 root,

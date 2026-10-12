@@ -272,11 +272,10 @@ pub(super) fn inventory_with(
     ) -> WorkflowResult<()> {
         control::check()?;
         let meta = std::fs::symlink_metadata(path).map_err(|e| WorkflowError::io(path, e))?;
-        let key = path
-            .strip_prefix(root)
-            .map_err(|_| invalid("inventory escaped root"))?
-            .to_string_lossy()
-            .into_owned();
+        let key = super::relative_key(
+            path.strip_prefix(root)
+                .map_err(|_| invalid("inventory escaped root"))?,
+        );
         let value = if meta.file_type().is_symlink() {
             format!(
                 "link:{}",

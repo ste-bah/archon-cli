@@ -16,7 +16,9 @@
 
 use std::path::{Path, PathBuf};
 
-use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, CHECK_TIMED_OUT, CheckAllowance};
+use archon_workflow::acceptance_scratch::{
+    CHECK_DEFERRED, CHECK_TIMED_OUT, CheckAllowance, acceptance_input_excluded, relative_key,
+};
 
 use super::*;
 
@@ -43,7 +45,7 @@ impl HostProbe {
 }
 
 fn excluded(relative: &Path, task_root: Option<&Path>) -> bool {
-    archon_workflow::acceptance_scratch::acceptance_input_excluded(relative, &[], task_root)
+    acceptance_input_excluded(relative, &[], task_root)
 }
 
 fn same_path(left: &Path, right: &Path) -> bool {
@@ -153,11 +155,7 @@ pub(super) fn data_digest_scoped(
     while let Some(relative) = stack.pop() {
         if !relative.as_os_str().is_empty()
             && (excluded(&relative, task_root_relative.as_deref())
-                || archon_workflow::acceptance_scratch::acceptance_input_excluded(
-                    &relative,
-                    excludes,
-                    task_root_relative.as_deref(),
-                ))
+                || acceptance_input_excluded(&relative, excludes, task_root_relative.as_deref()))
         {
             continue;
         }
@@ -176,7 +174,7 @@ pub(super) fn data_digest_scoped(
             let digest = std::fs::read(&path)
                 .map(|bytes| content_digest(&bytes))
                 .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
-            lines.push(format!("{}\t{digest}", relative.display()));
+            lines.push(format!("{}\t{digest}", relative_key(&relative)));
         }
     }
     lines.sort();

@@ -231,9 +231,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #417 re-pin only: the landing destination allowlist names the topology stores; freeze verdicts are unchanged.
         // #425 re-pin only: the repository claim parser changed; freeze verdicts do not read claims.
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
+        // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ba95d27a3347dc7a49177230e04fbb63da4541089c39af63f49ae695594c34ed",
+        sources_digest: "10a3718c4683313da8808fbe12df5f7b2c6ea48af039f75d5d5555479265ac7f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -243,9 +244,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #439 re-pin only, as freeze-acceptance.
         // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims.
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
+        // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "ba95d27a3347dc7a49177230e04fbb63da4541089c39af63f49ae695594c34ed",
+        sources_digest: "10a3718c4683313da8808fbe12df5f7b2c6ea48af039f75d5d5555479265ac7f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -288,7 +290,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, TRACE],
         // #434 and #417 re-pin only: trace never reads the newly excluded run state.
-        sources_digest: "32a5540804bc61f75556192dae105157919d9daee17febae6f2b441c5a40731e",
+        // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
+        sources_digest: "9e0ce1c6cddd650817d51099e89db20fbe402bafe1bb1d1367f69991044cc762",
         build_bound: true,
     },
     CapabilityLogic {
@@ -304,7 +307,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
         // #425 re-pin only: the repository claim parser changed; acceptance verification verdicts do not read claims.
-        sources_digest: "34f8045de970dca5c0342f94f386e1c3750d25ae77d4ddf0cb22892be2388981",
+        // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
+        sources_digest: "4b8846b257c4c3fd76843484ef145c7f2e5c7568ab2812fb7eb6b047585daf89",
         build_bound: true,
     },
     CapabilityLogic {
@@ -316,7 +320,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #439 re-pin only: resume phase selection does not change verification verdicts.
         // #425 re-pin only: the repository claim parser changed; skeleton verification verdicts do not read claims.
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
-        sources_digest: "34f8045de970dca5c0342f94f386e1c3750d25ae77d4ddf0cb22892be2388981",
+        // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
+        sources_digest: "4b8846b257c4c3fd76843484ef145c7f2e5c7568ab2812fb7eb6b047585daf89",
         build_bound: true,
     },
 ];
