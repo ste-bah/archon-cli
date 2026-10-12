@@ -266,7 +266,35 @@ fn explicit_scope(after: &str) -> Option<(String, Claim)> {
     let (tail, claim) = tail;
     let token = tail.strip_prefix('`')?;
     let end = token.find('`')?;
-    repository_relative_token(&token[..end]).map(|scope| (scope, claim))
+    repository_directory_token(&token[..end]).map(|scope| (scope, claim))
+}
+
+/// A scope is a repository directory, including one written without a
+/// trailing slash. A final component with the same short extension shape as
+/// a repository file is not a directory scope.
+fn repository_directory_token(token: &str) -> Option<String> {
+    let token = token.trim();
+    if token.is_empty()
+        || token.chars().any(char::is_whitespace)
+        || token.starts_with('/')
+        || token.starts_with('~')
+        || token.contains("://")
+        || token.contains(['*', '{', '}', '$', '<', '>', '|', '=', '"', '\''])
+        || token.contains("...")
+        || token.contains('…')
+        || token.starts_with("..")
+        || token.contains("/..")
+    {
+        return None;
+    }
+    let normalized = archon_workflow::repository_record::normalize_relative(token);
+    if normalized.is_empty() {
+        return None;
+    }
+    if !token.ends_with('/') && has_file_extension(normalized.rsplit('/').next()?) {
+        return None;
+    }
+    Some(normalized)
 }
 
 /// Bare file names may be joined to an explicit scope. A token that already
@@ -285,12 +313,10 @@ fn qualified_path(path: &str, after: &str) -> Option<String> {
 
 fn repository_or_scoped_token(token: &str, after: &str) -> Option<String> {
     repository_relative_token(token).or_else(|| {
-        let lowered = after.to_ascii_lowercase();
-        let has_scope = lowered.contains(" under `") || lowered.contains(" in `");
+        explicit_scope(after)?;
         let file = token.trim();
         let (stem, extension) = file.rsplit_once('.')?;
-        (has_scope
-            && !file.contains('/')
+        (!file.contains('/')
             && !file.chars().any(char::is_whitespace)
             && !stem.is_empty()
             && !extension.is_empty()
@@ -349,11 +375,17 @@ pub(crate) fn repository_relative_token(token: &str) -> Option<String> {
         return Some(kept);
     }
     let last = normalized.rsplit('/').next().unwrap_or(&normalized);
-    let (stem, extension) = last.rsplit_once('.')?;
-    let extension_ok = !extension.is_empty()
+    has_file_extension(last).then_some(kept)
+}
+
+fn has_file_extension(component: &str) -> bool {
+    let Some((stem, extension)) = component.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && !extension.is_empty()
         && extension.len() <= 8
-        && extension.chars().all(|c| c.is_ascii_alphanumeric());
-    (extension_ok && !stem.is_empty()).then_some(kept)
+        && extension.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 fn claim_after(after: &str) -> Option<Claim> {

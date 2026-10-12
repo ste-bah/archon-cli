@@ -229,7 +229,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #417 re-pin only: the landing destination allowlist names the topology stores; freeze verdicts are unchanged.
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
+        sources_digest: "793e9e890ac86e337cd493ab44b63aec2d55376601d8cb1c7bc27199524aade6",
         build_bound: false,
     },
     CapabilityLogic {
@@ -239,7 +239,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #439 re-pin only, as freeze-acceptance.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "36974940d382ce517610ea94fe4d89c39bc14e25e8c0ff18372af6fd7936a961",
+        sources_digest: "793e9e890ac86e337cd493ab44b63aec2d55376601d8cb1c7bc27199524aade6",
         build_bound: false,
     },
     CapabilityLogic {
@@ -252,9 +252,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
         // 7: #428 the host stamps frozen skeleton frontmatter fields at landing.
         // 8: #434 a fidelity gap blocks only its weakest task's body; true verdicts quote a checked anchor and are reused per obligation.
-        version: 8,
+        // 9: #425 dotted identifiers followed by a file citation are not repository-path claims.
+        version: 9,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
+        sources_digest: "e4e235dd913590cc2882e91ecbd9f26f6f6302548cded5d66df3f63b8eee7f2e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -265,9 +266,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
         // 7: #434 true fidelity verdicts quote a checked anchor and are reused per obligation over byte-identical cluster texts.
-        version: 7,
+        // 8: #425 dotted identifiers followed by a file citation are not repository-path claims.
+        version: 8,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "51ac4cafb63fd5044c7f55fca0b60cc704b993ea031765917d6074dc5a216431",
+        sources_digest: "e4e235dd913590cc2882e91ecbd9f26f6f6302548cded5d66df3f63b8eee7f2e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -290,7 +292,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
-        sources_digest: "e62cf9cdeed73a0c10b405e38b8ac6463c3ef09edd309d02020be7bbfe59ec73",
+        sources_digest: "62d09347f7690c9fcabc9d1aba1a25eab288992c73c0bafdb6badf20444be157",
         build_bound: true,
     },
     CapabilityLogic {
@@ -300,7 +302,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: verify never asks the fidelity critic or reads pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
-        sources_digest: "e62cf9cdeed73a0c10b405e38b8ac6463c3ef09edd309d02020be7bbfe59ec73",
+        sources_digest: "62d09347f7690c9fcabc9d1aba1a25eab288992c73c0bafdb6badf20444be157",
         build_bound: true,
     },
 ];

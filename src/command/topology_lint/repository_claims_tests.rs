@@ -142,6 +142,48 @@ fn leading_negation_and_explicit_directory_scopes_are_resolved() {
 }
 
 #[test]
+fn dotted_symbols_are_not_file_claims_and_only_direct_directory_scopes_join() {
+    assert!(claims(
+        "... — pinned by the existing `promotion_gates.live` assertion in `strategy_spec.rs`; no spec surface enables live trading."
+    )
+    .is_empty());
+    assert_eq!(
+        claims("`foo.rs` exists under `src/bar/`."),
+        vec![("src/bar/foo.rs".to_string(), Claim::Exists)]
+    );
+    assert_eq!(
+        claims("`spec_refs.rs` exists in `crates/x/src/`."),
+        vec![("crates/x/src/spec_refs.rs".to_string(), Claim::Exists)]
+    );
+    assert!(claims("the `a.b` field in `config.json`").is_empty());
+    assert!(claims("`promotion_gates.live == \"out_of_scope\"`").is_empty());
+    assert!(claims("`foo.rs` exists in `config.json`.").is_empty());
+}
+
+#[test]
+fn dotted_symbols_do_not_block_but_a_real_missing_path_still_does() {
+    let (_temp, project, _tasks, tree) = grounded();
+    let false_positive = "... — pinned by the existing `promotion_gates.live` assertion in `strategy_spec.rs`; no spec surface enables live trading.";
+    assert!(
+        findings_against(&tree, &project, "TASK-X-425", false_positive).is_empty(),
+        "dotted symbol was treated as a path claim"
+    );
+
+    let missing = findings_against(&tree, &project, "TASK-X-425", "`src/missing.rs` exists.");
+    assert_eq!(missing.len(), 1, "{missing:?}");
+    assert!(
+        missing[0].contains("`src/missing.rs` exists"),
+        "{}",
+        missing[0]
+    );
+    assert!(
+        missing[0].contains("it is absent from repository"),
+        "{}",
+        missing[0]
+    );
+}
+
+#[test]
 fn scoped_slash_paths_are_only_checked_when_the_tree_resolves_one_candidate() {
     let (_temp, project, _tasks, tree) = grounded();
     let findings = findings_against(
