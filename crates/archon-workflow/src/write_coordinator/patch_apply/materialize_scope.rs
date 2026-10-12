@@ -76,6 +76,11 @@ pub(crate) const ENGINE_LOADED: &[&str] = &[
     "teams",
     "test-fixtures",
     "tools",
+    // Per-graph traces (`archon-topology` `TopologyPaths::for_project`) and
+    // their folded store (`topology_fold::schema::topology_db_path`): the
+    // engine writes and reads both, so no landing may.
+    "topology",
+    "topology.db",
     "video-artifacts",
     "web",
     "workflow-templates",
