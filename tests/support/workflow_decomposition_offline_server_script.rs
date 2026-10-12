@@ -237,6 +237,8 @@ fn fidelity_answer(serialized_request: &str) -> Option<String> {
     let obligations_text = content.split_once("Obligations: ")?.1;
     let obligations_json = obligations_text.split_once("\n\n")?.0;
     let obligations: Vec<serde_json::Value> = serde_json::from_str(obligations_json).ok()?;
+    // #434: a true verdict quotes a prose anchor from a listed task.
+    let (supporting_task_id, supporting_text) = supporting_anchor(&content).unwrap_or_default();
     let verdicts = obligations
         .iter()
         .map(|obligation| {
@@ -245,11 +247,57 @@ fn fidelity_answer(serialized_request: &str) -> Option<String> {
                 "necessarily_true": true,
                 "weakest_task_id": "",
                 "reason": "The task requires the named deliverable in the project and its focused check verifies it.",
-                "quoted_task_text": ""
+                "quoted_task_text": "",
+                "supporting_task_id": supporting_task_id,
+                "supporting_text": supporting_text
             })
         })
         .collect::<Vec<_>>();
     Some(serde_json::json!({"verdicts": verdicts}).to_string())
+}
+
+/// The first listed task's first prose line the real checker accepts as a
+/// supporting anchor: outside fences, comments and headings, at least eight
+/// words (cut at a word boundary to 200 characters) and found once.
+fn supporting_anchor(prompt: &str) -> Option<(String, String)> {
+    let collapse = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut rest = prompt;
+    while let Some(start) = rest.find("===== BEGIN TASK ") {
+        let after = &rest[start + "===== BEGIN TASK ".len()..];
+        let (id, after) = after.split_once(" =====\n")?;
+        let end_marker = format!("\n===== END TASK {id} =====");
+        let (text, next) = after.split_once(end_marker.as_str())?;
+        rest = next;
+        let whole = collapse(text);
+        let mut fenced = false;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                fenced = !fenced;
+                continue;
+            }
+            if fenced || trimmed.starts_with('#') || trimmed.contains("<!--") {
+                continue;
+            }
+            if trimmed.contains("-->") || trimmed.contains('\\') {
+                continue;
+            }
+            let mut quote = String::new();
+            for word in trimmed.split_whitespace() {
+                if quote.len() + word.len() + 1 > 200 {
+                    break;
+                }
+                if !quote.is_empty() {
+                    quote.push(' ');
+                }
+                quote.push_str(word);
+            }
+            if quote.split(' ').count() >= 8 && whole.matches(quote.as_str()).count() == 1 {
+                return Some((id.to_string(), quote));
+            }
+        }
+    }
+    None
 }
 #[cfg(test)]
 #[path = "workflow_decomposition_offline_server_script_tests.rs"]

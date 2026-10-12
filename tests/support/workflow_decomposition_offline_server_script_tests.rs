@@ -237,7 +237,7 @@ fn fidelity_critic_answers_every_obligation_in_a_serialized_provider_body() {
         "Obligations: [{\"id\":\"AC-X-001\",\"text\":\"ready\"},{\"id\":\"REQ-X-001\",\"text\":\"alpha\"}]\n\n",
         "FROZEN SKELETON (every task in the set, one JSON object per line):\n",
         "{\"task_id\":\"TASK-X-010\"}\n",
-        "===== BEGIN TASK TASK-X-010 =====\nCreate the required outputs.\n===== END TASK TASK-X-010 ====="
+        "===== BEGIN TASK TASK-X-010 =====\n## Objective\nCreate the required outputs in the project and verify each one with its focused check.\n===== END TASK TASK-X-010 ====="
     );
     let body = serde_json::json!({
         "max_tokens": 1,
@@ -254,6 +254,12 @@ fn fidelity_critic_answers_every_obligation_in_a_serialized_provider_body() {
         assert_eq!(verdict["necessarily_true"], true, "{verdict}");
         assert_eq!(verdict["weakest_task_id"], "", "{verdict}");
         assert_eq!(verdict["quoted_task_text"], "", "{verdict}");
+        assert_eq!(verdict["supporting_task_id"], "TASK-X-010", "{verdict}");
+        assert_eq!(
+            verdict["supporting_text"],
+            "Create the required outputs in the project and verify each one with its focused check.",
+            "{verdict}"
+        );
         assert!(!verdict["reason"].as_str().unwrap().is_empty(), "{verdict}");
     }
     let obligations = [
@@ -268,7 +274,7 @@ fn fidelity_critic_answers_every_obligation_in_a_serialized_provider_body() {
     ];
     let tasks = [ClaimingTask {
         task_id: "TASK-X-010".into(),
-        text: "Create the required outputs.".into(),
+        text: "## Objective\nCreate the required outputs in the project and verify each one with its focused check.".into(),
     }];
     assert!(
         parse_fidelity_response(&answer, &obligations, &tasks).is_ok(),
@@ -280,7 +286,9 @@ fn fidelity_critic_answers_every_obligation_in_a_serialized_provider_body() {
             "necessarily_true": false,
             "weakest_task_id": "TASK-X-010",
             "reason": "The task permits the output to be absent.",
-            "quoted_task_text": "Create the required outputs."
+            "quoted_task_text": "Create the required outputs in the project",
+            "supporting_task_id": "",
+            "supporting_text": ""
         }]
     })
     .to_string();
