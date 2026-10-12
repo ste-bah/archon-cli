@@ -5,11 +5,15 @@ function replyFenceBlocks(text) {
   const lines = [];
   let offset = 0;
   while (offset < source.length) {
-    let end = offset;
-    while (end < source.length && source[end] !== "\r" && source[end] !== "\n") end++;
-    let next = end;
-    if (source[end] === "\r" && source[end + 1] === "\n") next += 2;
-    else if (end < source.length) next++;
+    const lf = source.indexOf("\n", offset);
+    const cr = source.indexOf("\r", offset);
+    const end = lf < 0 ? cr : cr < 0 ? lf : Math.min(lf, cr);
+    if (end < 0) {
+      lines.push({ start: offset, end: source.length, body: source.slice(offset) });
+      break;
+    }
+    let next = end + 1;
+    if (source[end] === "\r" && source[next] === "\n") next++;
     lines.push({ start: offset, end: next, body: source.slice(offset, end) });
     offset = next;
   }
