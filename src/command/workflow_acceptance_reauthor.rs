@@ -1,20 +1,9 @@
 //! Bounded re-author and re-judge of named acceptance checks.
 //!
-//! A check the judge refuted can never run (`acceptance_world::resolve_command`
-//! refuses it), so publishing one only schedules implementation work that
-//! cannot turn it green. The only party that can repair such a check is its
-//! author, told what the judge said. This module is that loop for the host:
-//! each named entry goes back to a read-only author agent with the judge's
-//! reason and counterexample, the reply is re-judged and probed, and the
-//! loop runs while it makes progress: it stops once [`REAUTHOR_ATTEMPTS`]
-//! consecutive attempts repaired no named check, and then a check still not
-//! accepted fails the whole operation with a per-check report naming every
-//! attempt spent. Every entry not named is returned
-//! exactly as it was, judgment included.
-//!
-//! The authoring rules are the decomposition author's (`workflow_decompose_v1.js`,
-//! acceptance phase): same entry shapes, same grounding, same "fail when the
-//! criterion is false" rule. Nothing here knows a PRD.
+//! This loop asks a read-only author to repair refuted checks, re-judges
+//! replies, and stops after [`REAUTHOR_ATTEMPTS`] idle attempts. Unnamed
+//! entries retain their original judgment. It follows the decomposition
+//! acceptance shapes and grounding rules.
 
 use std::collections::BTreeMap;
 
@@ -40,7 +29,7 @@ const EXACT_TOOL_POLICY_MARKER: &str = "__ARCHON_EXACT_TOOLS__";
 const AUTHOR_TOOLS: [&str; 3] = HOST_READ_ONLY_TOOLS;
 
 /// The two entry shapes the decomposition author is shown.
-const ENTRY_SHAPES: &str = r#"[{"id":"<exact acceptance id>","criterion":"","check":{"kind":"floor","contract":{"kind":"<deliverable kind>","artifact_path":"<repository-relative artifact path>","artifact_format":"json","required_true_fields":["<field that must be true>"],"typed_verifier_command":"<command that exercises the deliverable and fails when the criterion is false>"}},"gap_permitted":false,"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}},{"id":"<exact acceptance id>","criterion":"","check":{"kind":"command","command":"<shell command that exercises the deliverable and exits non-zero when the criterion is false>","cwd":"project_root"},"gap_permitted":false,"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]"#;
+const ENTRY_SHAPES: &str = r#"[{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"floor","contract":{"kind":"<deliverable kind>","artifact_path":"<repository-relative artifact path>","artifact_format":"json","required_true_fields":["<field that must be true>"],"typed_verifier_command":"<command that exercises the deliverable and fails when the criterion is false>"}},"gap_permitted":false,"covers":["<requirement id defined by the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}},{"id":"<exact acceptance id defined by the PRD>","criterion":"","check":{"kind":"command","command_block":true,"cwd":"project_root"},"gap_permitted":false,"covers":["<requirement id defined by the PRD whose violation makes this check fail>"],"judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}}]"#;
 
 /// Where the author reads.
 pub(crate) struct AuthorScope {
@@ -399,14 +388,26 @@ fn candidate_entry(
     reply: &str,
     frozen: &AcceptanceCriterion,
 ) -> std::result::Result<AcceptanceCriterion, String> {
+    if let Some(refusal) =
+        crate::command::workflow_task_set::acceptance_reply_blocks::unclosed_block_refusal(reply)
+    {
+        return Err(refusal);
+    }
     let document =
         crate::command::workflow_freeze_candidate::candidate_document(reply.trim().as_bytes());
-    let mut value: serde_json::Value = serde_json::from_slice(&document).map_err(|error| {
-        format!(
-            "the reply for check '{}' is not one JSON entry ({error}); return the raw JSON object alone",
-            frozen.id
-        )
-    })?;
+    let mut value: serde_json::Value = match serde_json::from_slice(&document) {
+        Ok(value) => value,
+        Err(error) => {
+            let extracted =
+                crate::command::workflow_task_set::acceptance_reply_blocks::extract_object(reply);
+            serde_json::from_str(&extracted).map_err(|_| {
+                format!(
+                    "the reply for check '{}' is not one JSON entry ({error}); return the raw JSON object alone",
+                    frozen.id
+                )
+            })?
+        }
+    };
     if value["id"] != serde_json::json!(frozen.id)
         && let Some([only]) = value["acceptance"].as_array().map(Vec::as_slice)
         && only["id"] == serde_json::json!(frozen.id)
@@ -418,6 +419,13 @@ fn candidate_entry(
             "the reply is not an entry with id '{}'; return exactly that entry",
             frozen.id
         ));
+    }
+    if let Some(refusal) =
+        crate::command::workflow_task_set::acceptance_reply_blocks::resolve_command_block(
+            &mut value, reply,
+        )
+    {
+        return Err(refusal);
     }
     let check: AcceptanceCheck =
         serde_json::from_value(value["check"].clone()).map_err(|error| {
