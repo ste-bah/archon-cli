@@ -29,6 +29,10 @@ use archon_workflow::task_skeleton::validate_full_chain;
 const RESUME_CHAIN_DIR: &str = "decomposition/resume-frozen-chain";
 const RESUME_CHAIN_SCHEMA: u32 = 1;
 
+#[path = "workflow_decompose_frozen_chain_override.rs"]
+mod freeze_override;
+use freeze_override::freeze_needs_rejudging;
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ResumeFrozenChainRecord {
@@ -110,7 +114,9 @@ pub(crate) fn resume_chain_argument(
     let stale_acceptance = freeze_needs_rejudging(store, run_id, "freeze-acceptance")?;
     let stale_skeleton = freeze_needs_rejudging(store, run_id, "freeze-skeleton")?;
     effective.acceptance &= stale_acceptance;
-    effective.skeleton &= stale_skeleton;
+    // The launcher consumes a chain, so later frozen phases cannot survive a
+    // missing earlier phase.
+    effective.skeleton &= effective.acceptance && stale_skeleton;
     if !effective.skeleton {
         effective.subjects.clear();
         effective.bodies.clear();
@@ -118,37 +124,11 @@ pub(crate) fn resume_chain_argument(
     Ok(effective.to_argument())
 }
 
-fn freeze_needs_rejudging(store: &WorkflowStore, run_id: &str, capability: &str) -> Result<bool> {
-    use archon_workflow::{WorkflowV2HostMethod, WorkflowV2ResultStore};
-
-    let records =
-        WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2")).load_call_records()?;
-    let Some(record) = records.iter().rev().find(|record| {
-        record.call.method == WorkflowV2HostMethod::HostCommand
-            && record
-                .call
-                .options
-                .host_command
-                .as_ref()
-                .is_some_and(|request| request.command_id == capability)
-    }) else {
-        return Ok(false);
-    };
-    if !freeze_record_status_allows_override(record.status, record.invalidated_by.is_some()) {
-        return Ok(false);
-    }
-    freeze_outcome_requires_rejudging(&record.result.data, capability)
-}
-
 fn freeze_record_status_allows_override(
     status: archon_workflow::WorkflowV2Status,
     invalidated: bool,
 ) -> bool {
-    !invalidated
-        && matches!(
-            status,
-            archon_workflow::WorkflowV2Status::Accepted | archon_workflow::WorkflowV2Status::Noop
-        )
+    !invalidated && matches!(status, archon_workflow::WorkflowV2Status::Accepted)
 }
 
 fn freeze_outcome_requires_rejudging(
