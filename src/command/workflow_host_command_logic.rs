@@ -220,7 +220,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 10: #374 resolves filesystem aliases without refusing unrelated paths on the same volume.
         version: 10,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "782ebf5427a739d24d4a792b77dcc02ec373ad361faa85cce5f547901a68828e",
+        sources_digest: "a548ce0d37c5767c2c42e7fa85c50aa8eba96361ec60f62346c2908fbc91687b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -228,7 +228,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "782ebf5427a739d24d4a792b77dcc02ec373ad361faa85cce5f547901a68828e",
+        sources_digest: "a548ce0d37c5767c2c42e7fa85c50aa8eba96361ec60f62346c2908fbc91687b",
         build_bound: false,
     },
     CapabilityLogic {
@@ -238,9 +238,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // unparseable answer while it makes progress.
         // 4: #380's obligation model changes the frozen contract verdict.
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 5,
+        // 6: #434 cross-task fidelity gaps are left for the set gate to route to their weakest task.
+        version: 6,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "92fb4ddcfe02bbe62d22a5c8f51da17f9356e0589e8fd31c02dc6b1afaf1bb59",
+        sources_digest: "9b39e0a8af13325ca0a0efed0c1fb134dcd67f803c13744a6188b84c0961a751",
         build_bound: false,
     },
     CapabilityLogic {
@@ -251,7 +252,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         version: 5,
         sources: &[GATE, CONTRACT, LINT],
-        sources_digest: "92fb4ddcfe02bbe62d22a5c8f51da17f9356e0589e8fd31c02dc6b1afaf1bb59",
+        sources_digest: "9b39e0a8af13325ca0a0efed0c1fb134dcd67f803c13744a6188b84c0961a751",
         build_bound: false,
     },
     CapabilityLogic {

@@ -93,6 +93,73 @@ async fn a_false_verdict_on_the_candidate_is_a_body_finding_naming_obligation_an
 }
 
 #[tokio::test]
+async fn a_cross_task_gap_is_a_note_in_the_body_gate_and_blocks_at_the_set_gate_for_its_weakest_task()
+ {
+    let temp = split_corpus();
+    let cwd = temp.path();
+    let body = candidate_body("This task names TASK-WS-001 as the owner of the shared result.");
+    let cross_task_false = serde_json::json!({
+        "verdicts": [{
+            "obligation_id": "AC-WS-001",
+            "necessarily_true": false,
+            "weakest_task_id": "TASK-WS-001",
+            "reason": "the sibling leaves the shared store empty",
+            "quoted_task_text": LOOPHOLE
+        }]
+    })
+    .to_string();
+    let body_critic = FakeCritic::new(vec![Ok(cross_task_false)]);
+    let (body_report, findings) = audit_candidate(cwd, &body, Ok(body_critic))
+        .await
+        .expect("cross-task verdict is recorded");
+    assert!(findings.is_empty(), "{body_report}");
+    assert!(
+        body_report.contains("NOTE obligation AC-WS-001 has a cross-task gap assigned to TASK-WS-001; the set gate will evaluate it"),
+        "{body_report}"
+    );
+    assert!(!body_report.contains("BLOCKING obligation AC-WS-001"));
+    assert!(!body_report.contains(LOOPHOLE), "the note is redacted");
+
+    std::fs::write(candidate_path(cwd), body).expect("land candidate body");
+    let set_reply = serde_json::json!({
+        "verdicts": [
+            {"obligation_id": "G-WS-001", "necessarily_true": true, "weakest_task_id": "", "reason": "the task requires ingestion", "quoted_task_text": ""}
+        ]
+    })
+    .to_string();
+    let set_critic = FakeCritic::new(vec![Ok(set_reply)]);
+    let evaluation = super::evaluate(cwd, Ok(set_critic.clone())).await;
+    assert!(
+        evaluation.operational_error().is_none(),
+        "{:?}",
+        evaluation.operational_error()
+    );
+    let finding = evaluation
+        .findings
+        .iter()
+        .find(|finding| finding.text.starts_with("obligation AC-WS-001"))
+        .expect("the set gate keeps the cross-task gap blocking");
+    assert_eq!(finding.subject, "AC-WS-001");
+    assert_eq!(
+        finding.remediation_scope,
+        archon_workflow::RemediationScope::Body
+    );
+    assert!(
+        finding
+            .source_path
+            .as_ref()
+            .unwrap()
+            .ends_with("TASK-WS-001.md")
+    );
+    assert!(evaluation.report.contains("BLOCKING obligation AC-WS-001"));
+    assert_eq!(
+        set_critic.calls(),
+        1,
+        "the set gate asks only its uncached sibling obligation"
+    );
+}
+
+#[tokio::test]
 async fn a_true_verdict_on_the_candidate_adds_no_finding() {
     let temp = split_corpus();
     let cwd = temp.path();
