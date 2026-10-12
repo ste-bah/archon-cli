@@ -269,6 +269,7 @@ cozo.workspace = true
 # can use it too.
 regex.workspace = true
 libc = "0.2"
+same-file = "1.0.6"
 # TASK #246 dropped its `crossterm` direct dependency at issue #174:
 # `panic_save` now restores the terminal through
 # `archon_tui::terminal::restore_terminal`, which is what pops the keyboard
