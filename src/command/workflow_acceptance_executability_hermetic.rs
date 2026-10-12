@@ -44,6 +44,7 @@ const COPY_PREFIX: &str = "archon-probe-";
 pub(super) const WARM_TARGETS: &str = "archon-probe-targets";
 
 /// Why a hermetic run gave no verdict.
+#[derive(Debug)]
 pub(super) struct Unrun(pub(super) String);
 
 impl HostProbe {
@@ -58,7 +59,7 @@ impl HostProbe {
 /// Project paths never copied, as the scratch observation never exports
 /// them (`acceptance_scratch_inputs::excluded`), plus the build output the
 /// scratch refuses to overlay.
-fn excluded(relative: &Path) -> bool {
+fn excluded(relative: &Path, path: &Path, task_root: Option<&Path>) -> bool {
     matches!(
         relative.to_str(),
         Some(
@@ -70,7 +71,18 @@ fn excluded(relative: &Path) -> bool {
                 | ".archon/config.toml"
                 | "target"
         )
-    ) || relative.starts_with(".archon/workflows")
+    ) || task_root.is_some_and(|root| {
+        path.strip_prefix(root)
+            .ok()
+            .is_some_and(|task_relative| {
+                task_relative
+                    == Path::new(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE)
+                    || task_relative
+                        == Path::new(archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE)
+            })
+    })
+        || archon_workflow::acceptance_scratch::freeze_owned_path(relative)
+        || relative.starts_with(".archon/workflows")
         // A decomposition log, wherever the task root sits: every retry
         // appends to it, so digesting it would change the key each attempt.
         || relative.file_name().is_some_and(|name| name == ".decompose.log")
@@ -147,11 +159,44 @@ pub(super) fn sweep(parent: &Path) -> Vec<String> {
 }
 
 /// A content digest of the project data a copy takes.
-pub(super) fn data_digest(project: &Path, repository: &Path) -> String {
+pub(super) fn data_digest(
+    project: &Path,
+    repository: &Path,
+    task_root: Option<&Path>,
+) -> Result<String, Unrun> {
+    let project = project.canonicalize().map_err(|error| {
+        Unrun(format!(
+            "could not canonicalize project root {}: {error}",
+            project.display()
+        ))
+    })?;
+    let repository = repository.canonicalize().map_err(|error| {
+        Unrun(format!(
+            "could not canonicalize repository root {}: {error}",
+            repository.display()
+        ))
+    })?;
+    let task_root = task_root
+        .map(|root| {
+            let rooted = if root.is_absolute() {
+                root.to_path_buf()
+            } else {
+                project.join(root)
+            };
+            rooted.canonicalize().map_err(|error| {
+                Unrun(format!(
+                    "could not canonicalize task root {}: {error}",
+                    root.display()
+                ))
+            })
+        })
+        .transpose()?;
     let mut lines = Vec::new();
     let mut stack = vec![PathBuf::new()];
     while let Some(relative) = stack.pop() {
-        if !relative.as_os_str().is_empty() && excluded(&relative) {
+        if !relative.as_os_str().is_empty()
+            && excluded(&relative, &project.join(&relative), task_root.as_deref())
+        {
             continue;
         }
         let path = project.join(&relative);
@@ -173,12 +218,18 @@ pub(super) fn data_digest(project: &Path, repository: &Path) -> String {
         }
     }
     lines.sort();
-    content_digest(lines.join("\n").as_bytes())
+    Ok(content_digest(lines.join("\n").as_bytes()))
 }
 
 impl HermeticCopy {
     /// `repository` at `commit` and `project`'s data, under `parent`.
-    fn at(parent: &Path, repository: &Path, project: &Path, commit: &str) -> Result<Self, Unrun> {
+    fn at(
+        parent: &Path,
+        repository: &Path,
+        project: &Path,
+        task_root: Option<&Path>,
+        commit: &str,
+    ) -> Result<Self, Unrun> {
         let canonical = |path: &Path| {
             path.canonicalize()
                 .map(archon_shell::paths::plain)
@@ -229,16 +280,18 @@ impl HermeticCopy {
         match tracked {
             Some(inside) => copy.project = inside,
             None => {
-                let before = data_digest(&live_project, &source);
+                let task_root = task_root.map(canonical).transpose()?;
+                let before = data_digest(&live_project, &source, task_root.as_deref())?;
                 let mut remaining = PROJECT_COPY_BYTES;
                 copy_data(
                     &live_project,
                     Path::new(""),
                     &copy.project,
                     &source,
+                    task_root.as_deref(),
                     &mut remaining,
                 )?;
-                if data_digest(&live_project, &source) != before {
+                if data_digest(&live_project, &source, task_root.as_deref())? != before {
                     return Err(Unrun(
                         "the project data changed while it was copied, so the copy is no evidence of any one tree".into(),
                     ));
@@ -257,13 +310,14 @@ fn copy_data(
     relative: &Path,
     dest: &Path,
     repository: &Path,
+    task_root: Option<&Path>,
     remaining: &mut u64,
 ) -> Result<(), Unrun> {
     let io = |path: &Path, error: std::io::Error| Unrun(format!("{}: {error}", path.display()));
-    if !relative.as_os_str().is_empty() && excluded(relative) {
+    let source = root.join(relative);
+    if !relative.as_os_str().is_empty() && excluded(relative, &source, task_root) {
         return Ok(());
     }
-    let source = root.join(relative);
     if source == repository {
         return Ok(());
     }
@@ -278,6 +332,7 @@ fn copy_data(
                 &relative.join(item.file_name()),
                 dest,
                 repository,
+                task_root,
                 remaining,
             )?;
         }
@@ -339,14 +394,17 @@ pub(super) async fn run_in_copy(
     probe
         .copies_made
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let (repo, project, at) = (
+    let (repo, project, task_root, at) = (
         repository.to_path_buf(),
         probe.project.clone(),
+        probe.task_root.clone(),
         commit.to_string(),
     );
-    let copy = tokio::task::spawn_blocking(move || HermeticCopy::at(&parent, &repo, &project, &at))
-        .await
-        .map_err(|error| Unrun(format!("the copy task failed: {error}")))??;
+    let copy = tokio::task::spawn_blocking(move || {
+        HermeticCopy::at(&parent, &repo, &project, task_root.as_deref(), &at)
+    })
+    .await
+    .map_err(|error| Unrun(format!("the copy task failed: {error}")))??;
     let target = warm_target(&probe.copy_parent, repository);
     let mut site = DirectSite {
         repository: copy.repository.clone(),
@@ -411,3 +469,7 @@ pub(super) async fn run_in_copy(
         None => Ok(results),
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_hermetic_tests.rs"]
+mod tests;

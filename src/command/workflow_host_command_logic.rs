@@ -218,7 +218,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 9: #400 validates incremental subsets independently, allowing supplementary-only updates to pass.
         // 7: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 10: #374 resolves filesystem aliases without refusing unrelated paths on the same volume.
-        version: 10,
+        // 11: #417 #418 #419 freeze-owned outputs leave check inputs; passability and judge verdicts reuse by scoped input keys.
+        version: 11,
         sources: &[GATE, CONTRACT, FREEZE],
         sources_digest: "782ebf5427a739d24d4a792b77dcc02ec373ad361faa85cce5f547901a68828e",
         build_bound: false,
@@ -265,7 +266,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
     CapabilityLogic {
         id: "verify-frozen-acceptance",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 3,
+        // 4: #417 copied check inputs omit freeze-owned files, which can change a check verdict.
+        version: 4,
         sources: &[GATE, CONTRACT, VERIFY],
         sources_digest: "f34d32365f205ddadc4ef487c0d08cfcbdb7d53daa56c3b70a39dda8d84ac0ba",
         build_bound: true,

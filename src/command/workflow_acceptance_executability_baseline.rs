@@ -173,6 +173,7 @@ pub(crate) struct ReuseAudit {
     pub(crate) reused: bool,
     pub(crate) why: String,
     pub(crate) evidence: Option<String>,
+    pub(crate) input_key: Option<String>,
 }
 
 /// How the checks that failed on a probe's pre-implementation tree failed

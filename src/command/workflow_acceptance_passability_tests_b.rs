@@ -3,6 +3,89 @@
 //! credential, cannot instruct the judge, and is never silently absent.
 
 use super::*;
+use archon_workflow::task_set_contract::AcceptanceCriterion;
+use std::collections::BTreeMap;
+
+#[test]
+fn passability_key_uses_probe_inputs_and_outcome_not_output_text() {
+    let client = EvidenceJudge::default();
+    let requirements = BTreeMap::new();
+    let entry: AcceptanceCriterion = serde_json::from_value(serde_json::json!({
+        "id":"AC-X-001", "criterion":"output valid", "check":{"kind":"command","command":"true","cwd":"project_root"},
+        "judgment":{"verdict":"accepted","counterexample":"","reason":"","host_call_id":""}
+    })).unwrap();
+    let result = |stdout: &[u8], exit_code| archon_workflow::acceptance_scratch::CheckResult {
+        acceptance_id: "AC-X-001".into(),
+        exit_code,
+        quota_walk_count: 0,
+        stdout: stdout.to_vec(),
+        stderr: vec![],
+        environment_note: None,
+        operational_error: None,
+        classification: None,
+    };
+    let shown = |entry: &AcceptanceCriterion, output: &str| serde_json::json!({"id":entry.id,"criterion":entry.criterion,"check":entry.check,"baseline":{"commit":"tree","stdout":output}});
+    let evidence = shown(&entry, "pid=56677");
+    let base = super::super::passability::key(
+        &client,
+        "sonnet",
+        &evidence,
+        &entry,
+        &requirements,
+        Some("probe-key"),
+        &result(b"pid=56677", Some(1)),
+    );
+    assert_eq!(
+        base,
+        super::super::passability::key(
+            &client,
+            "sonnet",
+            &shown(&entry, "pid=57919"),
+            &entry,
+            &requirements,
+            Some("probe-key"),
+            &result(b"pid=57919", Some(1))
+        )
+    );
+    let mut changed_entry = entry.clone();
+    changed_entry.criterion.push_str(" changed");
+    assert_ne!(
+        base,
+        super::super::passability::key(
+            &client,
+            "sonnet",
+            &shown(&changed_entry, "pid=57919"),
+            &changed_entry,
+            &requirements,
+            Some("probe-key"),
+            &result(b"pid=57919", Some(1))
+        )
+    );
+    assert_ne!(
+        base,
+        super::super::passability::key(
+            &client,
+            "sonnet",
+            &evidence,
+            &entry,
+            &requirements,
+            Some("different-probe-key"),
+            &result(b"pid=56677", Some(1))
+        )
+    );
+    assert_ne!(
+        base,
+        super::super::passability::key(
+            &client,
+            "sonnet",
+            &evidence,
+            &entry,
+            &requirements,
+            Some("probe-key"),
+            &result(b"pid=56677", Some(2))
+        )
+    );
+}
 
 const UNPASSABLE_2: &str = r#"echo "gate refused dataset fixture-2: observed rows 45 below required minimum 400" >&2; exit 1"#;
 

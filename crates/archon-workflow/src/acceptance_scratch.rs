@@ -27,6 +27,11 @@ pub(crate) use paths::shell_arg;
 /// The project paths never copied out of the project (credentials, engine
 /// configuration, workflows, git), whatever the inputs name.
 pub(crate) use inputs::excluded as project_input_excluded;
+
+/// Whether a path is written by freezing and cannot be check input.
+pub fn freeze_owned_path(path: &Path) -> bool {
+    inputs::freeze_owned(path)
+}
 #[path = "acceptance_scratch_hooks.rs"]
 mod hooks;
 pub use hooks::{AllowanceHook, CHECK_DEFERRED, CheckAllowance, CheckHook, ObserveHooks};
@@ -258,6 +263,7 @@ impl ScratchRoots {
                 std::fs::copy(roots.repository.join(".git"), roots.project.join(".git"))
                     .map_err(|e| WorkflowError::io(roots.project.join(".git"), e))?;
             }
+            let project_excludes = inputs::project_excludes(policy)?;
             for input in &policy.project_inputs {
                 if matches!(
                     input.to_str(),
@@ -276,7 +282,7 @@ impl ScratchRoots {
                     &project,
                     input,
                     &roots.project,
-                    &policy.project_input_excludes,
+                    &project_excludes,
                     &mut remaining,
                 )
                 .map_err(|error| inputs::name_collision(error, policy, &project, input, commit))?;
@@ -284,12 +290,7 @@ impl ScratchRoots {
             let task_relative = tasks
                 .strip_prefix(&project)
                 .map_err(|_| invalid("task root must belong to declared project"))?;
-            io::copy_tree(
-                &tasks,
-                &roots.project.join(task_relative),
-                &mut remaining,
-                false,
-            )?;
+            io::copy_task_root(&tasks, &roots.project.join(task_relative), &mut remaining)?;
             io::readonly(&roots.project.join(task_relative))?;
             if let Some(seed) = &policy.cargo_seed {
                 // Copy only standard content-addressed cache areas, not credentials/config.

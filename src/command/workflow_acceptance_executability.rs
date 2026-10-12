@@ -176,6 +176,7 @@ enum Site {
 /// The host's probe, at the acceptance stage's own execution site.
 pub(crate) struct HostProbe {
     project: PathBuf,
+    task_root: Option<PathBuf>,
     identity: std::sync::OnceLock<serde_json::Value>,
     data_states: Mutex<BTreeMap<PathBuf, Vec<String>>>,
     repository: PathBuf,
@@ -266,6 +267,7 @@ impl HostProbe {
         let check_cap_secs = probe_check_cap_secs(&site);
         Self {
             project,
+            task_root: None,
             identity: std::sync::OnceLock::new(),
             data_states: Mutex::new(BTreeMap::new()),
             repository,
@@ -326,6 +328,7 @@ impl HostProbe {
         let (site, repository) = sites::freeze_site(project, tasks_root);
         let unavailable = matches!(site, Site::Unavailable(_));
         let mut probe = Self::new(project.to_path_buf(), repository, site);
+        probe.task_root = Some(tasks_root.to_path_buf());
         probe.memo = true;
         if unavailable {
             return probe;

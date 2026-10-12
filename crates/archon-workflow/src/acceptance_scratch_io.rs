@@ -37,11 +37,27 @@ pub(super) fn copy_tree(
     remaining: &mut u64,
     exclude_git: bool,
 ) -> WorkflowResult<()> {
-    copy_tree_inner(source, dest, remaining, exclude_git, false)
+    copy_tree_inner(
+        source,
+        dest,
+        remaining,
+        exclude_git,
+        false,
+        false,
+        Path::new(""),
+    )
+}
+/// Copy a task root without freeze-owned artifacts, which are not check inputs.
+pub(super) fn copy_task_root(
+    source: &Path,
+    dest: &Path,
+    remaining: &mut u64,
+) -> WorkflowResult<()> {
+    copy_tree_inner(source, dest, remaining, false, false, true, Path::new(""))
 }
 /// The caller selects only registry/git cache subtrees, never Cargo home itself.
 pub(super) fn copy_cache(source: &Path, dest: &Path, remaining: &mut u64) -> WorkflowResult<()> {
-    copy_tree_inner(source, dest, remaining, false, true)
+    copy_tree_inner(source, dest, remaining, false, true, false, Path::new(""))
 }
 fn copy_tree_inner(
     source: &Path,
@@ -49,6 +65,8 @@ fn copy_tree_inner(
     remaining: &mut u64,
     exclude_git: bool,
     cache: bool,
+    exclude_freeze_owned: bool,
+    relative: &Path,
 ) -> WorkflowResult<()> {
     if cache
         && source.components().any(|part| {
@@ -74,7 +92,16 @@ fn copy_tree_inner(
         for item in std::fs::read_dir(source).map_err(|e| WorkflowError::io(source, e))? {
             let item = item.map_err(|e| WorkflowError::io(source, e))?;
             let name = item.file_name();
+            let child_relative = relative.join(&name);
             if exclude_git && name == ".git" {
+                continue;
+            }
+            if exclude_freeze_owned
+                && (super::freeze_owned_path(&child_relative)
+                    || child_relative
+                        == Path::new(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE)
+                    || child_relative == Path::new(crate::task_set_contract::ACCEPTANCE_LOCK_FILE))
+            {
                 continue;
             }
             copy_tree_inner(
@@ -83,6 +110,8 @@ fn copy_tree_inner(
                 remaining,
                 exclude_git,
                 cache,
+                exclude_freeze_owned,
+                &child_relative,
             )?;
         }
     } else if meta.is_file() {
@@ -259,3 +288,26 @@ pub(super) fn redact(
 #[cfg(test)]
 #[path = "acceptance_scratch_redaction_tests.rs"]
 mod redaction_tests;
+
+#[cfg(test)]
+#[test]
+fn task_root_copy_omits_freeze_owned_contract_and_lock() {
+    let source = tempfile::tempdir().unwrap();
+    let destination = tempfile::tempdir().unwrap();
+    let contract = crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE;
+    let lock = crate::task_set_contract::ACCEPTANCE_LOCK_FILE;
+    std::fs::write(source.path().join(contract), b"contract").unwrap();
+    std::fs::write(source.path().join(lock), b"lock").unwrap();
+    std::fs::write(source.path().join("input.json"), b"input").unwrap();
+
+    let mut remaining = u64::MAX;
+    copy_task_root(source.path(), destination.path(), &mut remaining).unwrap();
+
+    assert!(!destination.path().join(contract).exists());
+    assert!(!destination.path().join(lock).exists());
+    assert!(std::fs::read(destination.path().join("acceptance-contract.json")).is_err());
+    assert_eq!(
+        std::fs::read(destination.path().join("input.json")).unwrap(),
+        b"input"
+    );
+}

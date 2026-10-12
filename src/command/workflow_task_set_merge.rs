@@ -7,8 +7,10 @@
 //! the same criterion judged accepted and clean, keeps the accepted entry and
 //! its stored verdict. Progress becomes monotone per criterion; the judge is
 //! never asked twice about the same check; nothing here knows a PRD.
+#[cfg(test)]
 use std::collections::BTreeSet;
 
+#[cfg(test)]
 use archon_workflow::task_set_contract::{
     AcceptanceContract, JudgeDecision, acceptance_policy_findings,
 };
@@ -16,6 +18,7 @@ use archon_workflow::task_set_contract::{
 /// Replace every defective criterion in `contract` with the accepted entry of
 /// the same id from `base` when both describe the same PRD and criterion.
 /// Returns the ids replaced.
+#[cfg(test)]
 pub(super) fn keep_previously_accepted(
     contract: &mut AcceptanceContract,
     base: &AcceptanceContract,
@@ -54,6 +57,7 @@ pub(super) fn keep_previously_accepted(
 }
 
 /// Ids the host or the judge found fault with.
+#[cfg(test)]
 fn defective_ids(contract: &AcceptanceContract) -> BTreeSet<String> {
     let mut ids: BTreeSet<String> = acceptance_policy_findings(contract)
         .into_iter()

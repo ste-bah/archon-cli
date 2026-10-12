@@ -236,7 +236,8 @@ async fn logic_361_unversioned_checks_run_again_and_an_unversioned_landing_reuse
         "requirements-trace",
     ] {
         let expected = match check {
-            "verify-frozen-acceptance" | "requirements-trace" => 3,
+            "verify-frozen-acceptance" => 4,
+            "requirements-trace" => 3,
             "task-set-lint" => 4,
             _ => unreachable!(),
         };

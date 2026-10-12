@@ -68,23 +68,40 @@ fn memo() -> &'static Mutex<BTreeMap<String, CheckResult>> {
 }
 
 /// The state of the project data the site copies, for `tree`.
-fn data_state(probe: &HostProbe, tree: &Baseline) -> Vec<String> {
+fn data_state(probe: &HostProbe, tree: &Baseline) -> Result<Vec<String>, Unrun> {
     let mut states = probe.data_states.lock().expect("data states lock");
-    states
-        .entry(tree.repository.clone())
-        .or_insert_with(|| match &probe.site {
-            Site::Scratch(binding) => {
-                let policy = &binding.policy;
-                (policy.project_inputs.iter())
-                    .map(|input| data_digest(&policy.project.join(input), &policy.repository))
-                    .chain([data_digest(&policy.task_root, &policy.repository)])
-                    .collect()
-            }
-            Site::Direct | Site::Hermetic | Site::Unavailable(_) => {
-                vec![data_digest(&probe.project, &tree.repository)]
-            }
-        })
-        .clone()
+    if let Some(state) = states.get(&tree.repository) {
+        return Ok(state.clone());
+    }
+    let state = match &probe.site {
+        Site::Scratch(binding) => {
+            let policy = &binding.policy;
+            let mut state = policy
+                .project_inputs
+                .iter()
+                .map(|input| {
+                    data_digest(
+                        &policy.project.join(input),
+                        &policy.repository,
+                        Some(&policy.task_root),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            state.push(data_digest(
+                &policy.task_root,
+                &policy.repository,
+                Some(&policy.task_root),
+            )?);
+            state
+        }
+        Site::Direct | Site::Hermetic | Site::Unavailable(_) => vec![data_digest(
+            &probe.project,
+            &tree.repository,
+            probe.task_root.as_deref(),
+        )?],
+    };
+    states.insert(tree.repository.clone(), state.clone());
+    Ok(state)
 }
 
 #[path = "workflow_acceptance_executability_sites_reuse.rs"]
@@ -106,7 +123,7 @@ pub(super) async fn run_at(
         return Err(Unrun(reason.clone()));
     }
     let data = if probe.memo {
-        data_state(probe, tree)
+        data_state(probe, tree)?
     } else {
         Vec::new()
     };
@@ -170,6 +187,7 @@ pub(super) async fn run_at(
                         key.as_ref()
                             .and_then(|key| store.as_ref()?.evidence_ref(key))
                     }),
+                    input_key: key.clone(),
                 },
             );
         }

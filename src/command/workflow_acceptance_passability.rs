@@ -138,12 +138,14 @@ fn shown(
 }
 
 /// The digest of the shown check and the full covered requirement texts.
-fn key(
+pub(super) fn key(
     client: &dyn WorkflowLlmClient,
     model: &str,
     check: &serde_json::Value,
     entry: &AcceptanceCriterion,
     requirements: &BTreeMap<String, String>,
+    input_key: Option<&str>,
+    result: &archon_workflow::acceptance_scratch::CheckResult,
 ) -> String {
     // The displayed prefix is bounded, but every decisive suffix affects reuse.
     let full_requirements: Vec<_> = entry
@@ -158,20 +160,25 @@ fn key(
     let mut judgment = check.clone();
     if let Some(baseline) = judgment.get_mut("baseline") {
         if let Some(baseline) = baseline.as_object_mut() {
-            baseline.remove("reused");
-            baseline.remove("reuse_why");
-            baseline.remove("evidence_reference");
+            baseline.retain(|field, _| field == "commit");
         }
     }
     let input = serde_json::json!([
-        "acceptance-passability-v3",
+        "acceptance-passability-v4",
         INSTRUCTION,
         judgment,
         full_requirements,
+        input_key.unwrap_or("volatile-no-probe-key"),
+        result.exit_code,
+        result.classification,
         client.resolve_model_alias(model),
         client.provider_id(),
     ]);
-    content_digest(input.to_string().as_bytes())
+    let mut key = content_digest(input.to_string().as_bytes());
+    if input_key.is_none() {
+        key.push_str(&uuid::Uuid::new_v4().to_string());
+    }
+    key
 }
 
 /// A check to judge: its id, its evidence, how it is shown, and its key.
@@ -258,7 +265,20 @@ fn candidates(
                 runs.reuse.get(&entry.id),
             );
             let shown = shown(entry, requirements, &evidence);
-            let key = key(client, model, &shown, entry, requirements);
+            let result = runs.failures.get(&entry.id)?;
+            let input_key = runs
+                .reuse
+                .get(&entry.id)
+                .and_then(|reuse| reuse.input_key.as_deref());
+            let key = key(
+                client,
+                model,
+                &shown,
+                entry,
+                requirements,
+                input_key,
+                result,
+            );
             Some(Candidate {
                 id: entry.id.clone(),
                 evidence,
