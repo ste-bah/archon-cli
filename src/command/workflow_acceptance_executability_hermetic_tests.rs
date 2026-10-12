@@ -1,6 +1,22 @@
 use super::*;
 use std::io::Write;
 
+#[test]
+fn repository_path_comparison_normalizes_verbatim_and_plain_spellings() {
+    let verbatim = Path::new(r"\\?\C:\work\repository");
+    let plain = Path::new(r"C:\work\repository");
+    assert!(same_path(verbatim, plain));
+}
+
+#[cfg(windows)]
+#[test]
+fn canonicalized_repository_path_compares_with_its_plain_spelling() {
+    let directory = tempfile::tempdir().unwrap();
+    let verbatim = std::fs::canonicalize(directory.path()).unwrap();
+    let plain = archon_shell::paths::canonicalize(directory.path()).unwrap();
+    assert!(same_path(&verbatim, &plain));
+}
+
 fn repository(source: &tempfile::TempDir) -> PathBuf {
     let path = source.path().join("repository");
     std::fs::create_dir_all(&path).unwrap();

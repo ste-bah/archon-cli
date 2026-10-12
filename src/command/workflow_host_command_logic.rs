@@ -226,7 +226,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #417 re-pin only: direct copy calls now normalize roots like the production caller.
         version: 14,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "89dea315685991d8b47ef32a8873d55214dcd39c014db0b90d7b7a69d05610c4",
+        sources_digest: "5a80a599802ba1655756582613650565935715bd0b7bc37c978b279ae243ab4f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -235,7 +235,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 and #417 re-pin only: harness input paths, pipeline outputs, and copy API normalization do not alter this verdict.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
-        sources_digest: "89dea315685991d8b47ef32a8873d55214dcd39c014db0b90d7b7a69d05610c4",
+        sources_digest: "5a80a599802ba1655756582613650565935715bd0b7bc37c978b279ae243ab4f",
         build_bound: false,
     },
     CapabilityLogic {

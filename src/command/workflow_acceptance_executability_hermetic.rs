@@ -11,14 +11,12 @@
 //!
 //! The copy is made off the async runtime (`spawn_blocking`). Its project
 //! data is digested before and after copying; changes during copying make
-//! the run unproven. A copy
-//! larger than [`PROJECT_COPY_BYTES`] is refused with the reason, never
+//! the run unproven. A copy larger than [`PROJECT_COPY_BYTES`] is refused with the reason, never
 //! truncated. Checks run under the acceptance stage's own direct-site
 //! environment (the default policy of the one check-environment rule,
 //! `archon_workflow::acceptance_check_environment`, Issue 345), building warm
 //! from one cached target directory per repository under the copy parent.
-//! Copies older than a day that a
-//! killed probe left are swept before a new one is made; a copy that cannot
+//! Copies older than a day that a killed probe left are swept before a new one is made; a copy that cannot
 //! be removed is reported.
 
 use std::path::{Path, PathBuf};
@@ -51,6 +49,11 @@ impl HostProbe {
 
 fn excluded(relative: &Path, task_root: Option<&Path>) -> bool {
     archon_workflow::acceptance_scratch::acceptance_input_excluded(relative, &[], task_root)
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    archon_shell::paths::plain(left.to_path_buf())
+        == archon_shell::paths::plain(right.to_path_buf())
 }
 
 /// The copy. [`HermeticCopy::remove`] removes it and says whether it could;
@@ -137,13 +140,13 @@ pub(super) fn data_digest_scoped(
     scope: &Path,
     excludes: &[PathBuf],
 ) -> Result<String, Unrun> {
-    let project = project.canonicalize().map_err(|error| {
+    let project = archon_shell::paths::canonicalize(project).map_err(|error| {
         Unrun(format!(
             "could not canonicalize project root {}: {error}",
             project.display()
         ))
     })?;
-    let repository = repository.canonicalize().map_err(|error| {
+    let repository = archon_shell::paths::canonicalize(repository).map_err(|error| {
         Unrun(format!(
             "could not canonicalize repository root {}: {error}",
             repository.display()
@@ -164,7 +167,7 @@ pub(super) fn data_digest_scoped(
             continue;
         }
         let path = project.join(&relative);
-        if path == repository {
+        if same_path(&path, &repository) {
             continue;
         }
         let Ok(meta) = path.symlink_metadata() else {
@@ -310,7 +313,7 @@ fn copy_data(
     task_root: Option<&Path>,
     remaining: &mut u64,
 ) -> Result<(), Unrun> {
-    let root = root.canonicalize().map_err(|error| {
+    let root = archon_shell::paths::canonicalize(root).map_err(|error| {
         Unrun(format!(
             "could not canonicalize project root {}: {error}",
             root.display()
@@ -340,7 +343,7 @@ fn copy_data_relative(
     if !relative.as_os_str().is_empty() && excluded(relative, task_root) {
         return Ok(());
     }
-    if source == repository {
+    if same_path(&source, repository) {
         return Ok(());
     }
     let meta = source.symlink_metadata().map_err(|e| io(&source, e))?;
