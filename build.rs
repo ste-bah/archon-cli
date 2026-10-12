@@ -2,11 +2,17 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 mod build_fingerprint;
+// Only the list and its hash are used here; the rest serves the binary.
+#[allow(dead_code)]
+#[path = "src/command/topology_lint/fidelity_logic_digest.rs"]
+mod fidelity_logic_digest;
 
 fn main() {
     embed_git_hash();
     let fingerprint = build_fingerprint::build_fingerprint(Path::new("."));
     println!("cargo:rustc-env=ARCHON_BUILD_FINGERPRINT={fingerprint}");
+    let fidelity_sources = fidelity_sources_digest(Path::new("."));
+    println!("cargo:rustc-env=ARCHON_FIDELITY_SOURCES_DIGEST={fidelity_sources}");
     // A directory makes cargo rerun this script when any file under it
     // changes, so the fingerprint follows uncommitted source edits too.
     for file in [
@@ -22,6 +28,20 @@ fn main() {
         println!("cargo:rerun-if-changed={file}");
     }
     generate_known_env_vars();
+}
+
+/// The digest of the fidelity critic's sources this binary is built from
+/// (the list is in `fidelity_logic_digest.rs`). The store compares it with
+/// the pinned digest its critic logic version was reviewed against, so an
+/// unreviewed edit, a dirty tree included, never reuses a saved verdict.
+fn fidelity_sources_digest(root: &Path) -> String {
+    for file in fidelity_logic_digest::FILES {
+        println!("cargo:rerun-if-changed={file}");
+    }
+    fidelity_logic_digest::digest(|file| {
+        std::fs::read(root.join(file))
+            .unwrap_or_else(|error| panic!("reading fidelity critic source {file}: {error}"))
+    })
 }
 
 fn embed_git_hash() {

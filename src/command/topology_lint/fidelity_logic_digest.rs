@@ -15,7 +15,11 @@
 //!
 //! A developer cannot change these files and forget the version: the
 //! binary's tests pin the digest of [`FILES`] in [`SOURCES_DIGEST`] and fail
-//! when they differ ([`pin_check`]). The fix is one of two: the change
+//! when they differ ([`pin_check`]). A binary built without that review —
+//! only targeted tests run, or a dirty tree — is caught too: `build.rs`
+//! mounts this file and hashes [`FILES`] into
+//! `ARCHON_FIDELITY_SOURCES_DIGEST`, and a store whose build digest is not
+//! [`SOURCES_DIGEST`] reads, migrates and writes no record. The fix is one of two: the change
 //! cannot alter what a stored verdict means — set [`SOURCES_DIGEST`] to the
 //! reported digest, with a comment saying why — or it can — bump
 //! [`CRITIC_LOGIC_VERSION`] too, which re-asks every obligation once. The
@@ -42,8 +46,12 @@ pub const CRITIC_LOGIC_VERSION: u32 = 1;
 ///   is kept; only the rest are asked again, with a re-ask turn that names
 ///   them. No check is weakened and the question is unchanged, so a stored
 ///   verdict means what it meant.
-#[cfg_attr(not(test), allow(dead_code, reason = "read by the guard test"))]
-pub const SOURCES_DIGEST: &str = "b39b7c6f7d9bd70634a5fa3c65ee62f705de1b875315d5464b6ff86fa8f58506";
+/// - Re-pinned, version unchanged, for the #434d review: a kept verdict
+///   answered again in the same conversation with the other meaning, and
+///   passing every check, is recorded beside it as a contradiction instead
+///   of being dropped. That is the store's existing rule for two standing
+///   verdicts that disagree; no verdict is accepted that was refused before.
+pub const SOURCES_DIGEST: &str = "6608fca72fd0d66c6d4d0e97d5485c799e240b62f33f2ffe3a89f7aea476bf59";
 
 /// Hashed, sorted: the critic call, its prompt rendering, its reply reader
 /// and checks (the `#[path]` modules of `fidelity_audit.rs`).

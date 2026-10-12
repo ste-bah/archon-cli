@@ -180,18 +180,55 @@ struct Record {
 pub(super) struct VerdictStore {
     dir: PathBuf,
     identity: StoreIdentity,
+    /// Whether this binary was built from the critic sources
+    /// [`CRITIC_LOGIC_VERSION`] was reviewed against. When not, the version
+    /// says nothing about the logic that would read or write a record, so
+    /// no record is read, migrated or written (#434d).
+    reviewed: bool,
 }
 
 impl VerdictStore {
     pub(super) fn new(dir: PathBuf, identity: StoreIdentity) -> Self {
-        Self { dir, identity }
+        Self::built_from(dir, identity, env!("ARCHON_FIDELITY_SOURCES_DIGEST"))
+    }
+
+    /// A store of a binary whose critic sources hash to `built`, as
+    /// `build.rs` computes `ARCHON_FIDELITY_SOURCES_DIGEST`. Fails closed,
+    /// never the gate: sources other than the pinned ones ask the critic
+    /// afresh for every obligation and keep nothing.
+    pub(super) fn built_from(dir: PathBuf, identity: StoreIdentity, built: &str) -> Self {
+        let reviewed = built == logic_digest::SOURCES_DIGEST;
+        if !reviewed {
+            tracing::warn!(
+                built,
+                pinned = logic_digest::SOURCES_DIGEST,
+                "fidelity critic sources of this build are not the pinned ones its critic logic \
+                 version was reviewed against; no saved verdict is read, migrated or written, \
+                 and every obligation is asked again"
+            );
+        }
+        Self {
+            dir,
+            identity,
+            reviewed,
+        }
     }
 
     /// The effective request envelope. Unknown envelopes cannot be reused.
     pub(super) fn for_request(&self, request: Option<String>) -> Self {
         let mut identity = self.identity.clone();
         identity.request = request;
-        Self::new(self.dir.clone(), identity)
+        Self {
+            dir: self.dir.clone(),
+            identity,
+            reviewed: self.reviewed,
+        }
+    }
+
+    /// Whether records may be read and written at all: a known envelope,
+    /// under reviewed critic sources.
+    fn keeps(&self) -> bool {
+        self.reviewed && self.identity.request.is_some()
     }
 
     pub(super) fn dir(&self) -> &Path {
@@ -215,7 +252,9 @@ impl VerdictStore {
     /// The entries saved for `question`'s obligation; `None` for anything
     /// less than a record this store would write now.
     fn read(&self, question: Question<'_>) -> Option<Vec<Entry>> {
-        self.identity.request.as_ref()?;
+        if !self.keeps() {
+            return None;
+        }
         let key = self.key(question);
         let record: Record = serde_json::from_slice(&std::fs::read(self.path(&key)).ok()?).ok()?;
         (record.schema == STORE_SCHEMA
@@ -286,7 +325,7 @@ impl VerdictStore {
         question: Question<'_>,
         verdict: &FidelityVerdict,
     ) -> Result<(Standing, bool)> {
-        if self.identity.request.is_none() {
+        if !self.keeps() {
             return Ok((Standing::Verdict(verdict.clone()), false));
         }
         let key = self.key(question);

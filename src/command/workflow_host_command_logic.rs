@@ -266,7 +266,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
-        sources_digest: "c3ea03b23f8530b5dc31735853b67b18fa6991bd1b37f5017b9a9b0fa7d7d6b4",
+        // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is recorded as a contradiction. Verdict meaning is unchanged.
+        sources_digest: "0dda881e52c8591adcb749e02afaf3aa384256bd54fe32acc7de0d3cc6f8ca57",
         build_bound: false,
     },
     CapabilityLogic {
@@ -283,7 +284,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
-        sources_digest: "c3ea03b23f8530b5dc31735853b67b18fa6991bd1b37f5017b9a9b0fa7d7d6b4",
+        // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is recorded as a contradiction. Verdict meaning is unchanged.
+        sources_digest: "0dda881e52c8591adcb749e02afaf3aa384256bd54fe32acc7de0d3cc6f8ca57",
         build_bound: false,
     },
     CapabilityLogic {

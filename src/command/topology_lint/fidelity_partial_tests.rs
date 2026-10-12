@@ -202,3 +202,49 @@ async fn fidelity_a_verdict_that_never_quotes_verbatim_ends_alone_and_the_rest_a
         evaluation.report
     );
 }
+
+/// A re-ask reply that answers a kept obligation again with the other
+/// meaning, and passes every check, is not dropped: both verdicts are
+/// recorded as a contradiction, which blocks; the kept verdict is never
+/// replaced by the later one.
+#[tokio::test]
+async fn fidelity_a_kept_verdict_answered_again_with_the_other_meaning_is_a_contradiction() {
+    let temp = corpus();
+    let ids = ["AC-WS-001".to_string(), "G-WS-001".to_string()];
+    let critic = FakeCritic::new(vec![
+        Ok(batch_reply(&ids, &ids[1..])),
+        Ok(reply(&["AC-WS-001"])),
+    ]);
+    let evaluation = evaluate(temp.path(), Ok(critic.clone())).await;
+    assert!(
+        evaluation.operational_error().is_none(),
+        "{:?}",
+        evaluation.operational_error()
+    );
+    assert_eq!(critic.calls(), 2);
+    assert_eq!(still_asked(&reask_turn(&critic, 1)), "G-WS-001");
+    let contradiction = evaluation
+        .findings
+        .iter()
+        .find(|finding| finding.text.starts_with("obligation AC-WS-001"))
+        .expect("a blocking finding for the flipped obligation");
+    assert!(
+        contradiction.text.contains("contradict each other"),
+        "{}",
+        contradiction.text
+    );
+    assert!(
+        !evaluation
+            .findings
+            .iter()
+            .any(|finding| finding.text.starts_with("obligation G-WS-001")),
+        "G-WS-001's only verdict is true"
+    );
+    let record = record_files(temp.path())
+        .into_iter()
+        .map(|path| std::fs::read_to_string(path).unwrap())
+        .find(|text| text.contains("\"id\": \"AC-WS-001\""))
+        .expect("AC-WS-001's record");
+    let record: serde_json::Value = serde_json::from_str(&record).unwrap();
+    assert_eq!(record["entries"].as_array().unwrap().len(), 2, "both kept");
+}

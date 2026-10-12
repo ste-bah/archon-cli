@@ -149,3 +149,67 @@ async fn this_build_migrates_schema_four_and_five_records_under_their_version() 
         );
     }
 }
+
+/// A store whose build digest is `built` (#434d test seam), under this
+/// build's version.
+async fn resolve_built_from(cwd: &Path, critic: &Arc<Critic>, built: &str) -> Resolved {
+    let identity = StoreIdentity::of(critic.as_ref());
+    let store = VerdictStore::built_from(store_dir(cwd), identity, built);
+    resolve(
+        critic.as_ref(),
+        &store,
+        &clusters(),
+        &SkeletonSummary::absent(),
+        &FreezeResume::none(),
+    )
+    .await
+    .expect("resolved")
+}
+
+/// Every file of the store, with its bytes.
+fn snapshot(cwd: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut files: Vec<_> = std::fs::read_dir(store_dir(cwd))
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            let bytes = std::fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+/// #434d: a binary built from critic sources other than the pinned ones
+/// (an unreviewed edit, a dirty tree) reuses no saved verdict, migrates no
+/// earlier record and writes nothing; it asks the critic, and the gate runs.
+#[tokio::test]
+async fn unreviewed_critic_sources_read_migrate_and_write_no_record() {
+    let temp = tempfile::tempdir().unwrap();
+    let cwd = temp.path();
+    let first = resolve_under(cwd, &Critic::new(), CRITIC_LOGIC_VERSION).await;
+    assert_eq!((first.asked, first.cached), (6, 0));
+    for path in &records(cwd)[..2] {
+        convert_to_schema_four(path);
+    }
+    let before = snapshot(cwd);
+
+    let critic = Critic::new();
+    let unreviewed = resolve_built_from(cwd, &critic, "an-unreviewed-sources-digest").await;
+    assert_eq!(critic.calls(), 3, "every batch is asked");
+    assert_eq!(
+        (unreviewed.asked, unreviewed.cached),
+        (6, 0),
+        "no record is read"
+    );
+    assert_eq!(snapshot(cwd), before, "nothing is written or migrated");
+
+    let critic = Critic::new();
+    let reviewed = resolve_built_from(cwd, &critic, env!("ARCHON_FIDELITY_SOURCES_DIGEST")).await;
+    assert_eq!(
+        critic.calls(),
+        0,
+        "the reviewed build reuses and migrates them"
+    );
+    assert_eq!((reviewed.asked, reviewed.cached), (0, 6));
+}

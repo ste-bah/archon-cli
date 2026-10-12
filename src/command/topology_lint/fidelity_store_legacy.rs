@@ -212,9 +212,10 @@ impl VerdictStore {
     }
 
     /// Earlier verdicts answer this store's questions only under the critic
-    /// logic version they were written by, and only for a known request.
+    /// logic version they were written by, only for a known request, and
+    /// only under reviewed critic sources.
     fn migrates(&self) -> bool {
-        self.identity.critic_logic_version == PREDECESSOR_VERSION && self.identity.request.is_some()
+        self.identity.critic_logic_version == PREDECESSOR_VERSION && self.keeps()
     }
 
     /// What stands for `question`: its schema-6 record when it has one;

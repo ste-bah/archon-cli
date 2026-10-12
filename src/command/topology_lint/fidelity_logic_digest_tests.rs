@@ -69,6 +69,13 @@ fn fidelity_critic_sources_match_their_pinned_digest() {
     }
 }
 
+/// `build.rs` hashes exactly the listed files, so this test binary's build
+/// digest is the digest of the sources it was compiled from.
+#[test]
+fn fidelity_the_build_digest_is_the_listed_files_digest() {
+    assert_eq!(env!("ARCHON_FIDELITY_SOURCES_DIGEST"), digest(read_source));
+}
+
 /// The guard can go red: one byte changed in one listed file, and no re-pin,
 /// fails it with the decision to make; re-pinned, it passes, and the
 /// version — what the store keys on — has not moved.

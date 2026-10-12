@@ -205,6 +205,22 @@ pub(super) async fn resolve(
                         if saved {
                             resume.progress.saved(false);
                         }
+                        // A verdict of the other meaning for an obligation
+                        // already answered in this call is a contradiction,
+                        // whether or not the store kept either one.
+                        let standing = match (standings[position].take(), standing) {
+                            (Some(Standing::Verdict(kept)), Standing::Verdict(new))
+                                if kept.necessarily_true != new.necessarily_true =>
+                            {
+                                let (refuted, supported) = if new.necessarily_true {
+                                    (kept, new)
+                                } else {
+                                    (new, kept)
+                                };
+                                Standing::Contradiction { refuted, supported }
+                            }
+                            (_, standing) => standing,
+                        };
                         standings[position] = Some(standing);
                         Ok(())
                     };
