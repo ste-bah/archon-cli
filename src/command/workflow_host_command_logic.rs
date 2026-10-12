@@ -240,7 +240,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 4: #380's obligation model changes the frozen contract verdict.
         // 5: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // 6: #425 repository claims recognize leading negation and explicit directory scopes.
-        version: 6,
+        // 7: #428 the host stamps frozen skeleton frontmatter fields at landing.
+        version: 7,
         sources: &[GATE, CONTRACT, LINT],
         sources_digest: "92fb4ddcfe02bbe62d22a5c8f51da17f9356e0589e8fd31c02dc6b1afaf1bb59",
         build_bound: false,

@@ -155,6 +155,8 @@ pub(crate) mod finish;
 mod live;
 #[path = "workflow_host_command_exec_retry.rs"]
 mod retry;
+#[path = "workflow_host_command_exec_stamp.rs"]
+mod stamp;
 
 #[async_trait]
 impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
@@ -225,7 +227,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
 
     async fn execute(
         &self,
-        request: HostCommandRequest,
+        mut request: HostCommandRequest,
         expected_generation: Option<u64>,
     ) -> WorkflowResult<HostCommandResult> {
         let expected_generation = expected_generation.ok_or_else(|| {
@@ -262,6 +264,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             Err(error) => return Err(error),
         };
         let call_id = self.content_identity(&request, &context)?;
+        let stamped_fields = stamp::stamp_request(&mut request, &context)?;
         let pause = super::workflow_host_staging_pause::StagingPause::new(
             &self.context.project_root,
             &self.run_root,
@@ -456,6 +459,12 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             })?;
             // Through the anchor, after the lock: a failure is recorded.
             finish::remove_published(&staging, &receipt, &pause, &secrets);
+            let mut stdout = stdout;
+            if !stamped_fields.is_empty() {
+                stdout.push_str("\nHost note: replaced differing frozen frontmatter fields (authored values redacted): ");
+                stdout.push_str(&stamped_fields.join(", "));
+                stdout.push('.');
+            }
             Ok(HostCommandResult {
                 exit_code: observed.exit_code,
                 stdout,

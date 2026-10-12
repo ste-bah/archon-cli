@@ -8,6 +8,71 @@ use super::workflow_host_command_catalog::fixed_decomposition_catalog;
 use super::workflow_host_command_exec::{FixedHostCommandExecutor, WorkflowHostCommandExecutor};
 use super::workflow_host_command_exec_tests::{context, seed_frozen_chain, seed_frozen_subjects};
 
+fn frozen_with_owned_fields() -> archon_workflow::task_skeleton::FrozenTask {
+    archon_workflow::task_skeleton::FrozenTask {
+        task_id: "TASK-X-010".into(),
+        file_name: "TASK-X-010.md".into(),
+        depends_on: vec![archon_workflow::task_skeleton::FrozenDependency {
+            task_id: "TASK-X-001".into(),
+            ..Default::default()
+        }],
+        blocks: vec!["TASK-X-011".into()],
+        implements: vec!["AC-X-001".into()],
+        deliverable_contracts: Vec::new(),
+    }
+}
+
+#[test]
+fn frozen_frontmatter_is_stamped_and_differences_are_reported_without_values() {
+    let candidate = "```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: []\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n# Body\n";
+    let (stamped, notes) = super::workflow_host_command_binding::stamp_frozen_frontmatter(
+        candidate,
+        &frozen_with_owned_fields(),
+    )
+    .unwrap();
+    assert_eq!(notes, ["depends_on", "blocks", "implements"]);
+    assert!(stamped.contains("task_id: TASK-X-010"));
+    assert!(stamped.contains("task_id: TASK-X-001"));
+    assert!(stamped.contains("AC-X-001"));
+    assert!(stamped.contains("# Body"));
+    assert!(!notes.iter().any(|note| note.contains("TASK-X-001")));
+}
+
+#[test]
+fn frozen_frontmatter_omissions_are_stamped() {
+    let candidate = "```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: low\nstatus: ready\nrequired_env_keys: []\nrequired_tools: []\n```\n";
+    let (stamped, notes) = super::workflow_host_command_binding::stamp_frozen_frontmatter(
+        candidate,
+        &frozen_with_owned_fields(),
+    )
+    .unwrap();
+    assert_eq!(
+        notes,
+        [
+            "depends_on",
+            "blocks",
+            "implements",
+            "deliverable_contracts"
+        ]
+    );
+    assert!(stamped.contains("TASK-X-001"));
+}
+
+#[test]
+fn unknown_frontmatter_fields_remain_a_hard_refusal() {
+    let candidate = "```yaml\ntask_id: TASK-X-010\ntitle: T\ncomplexity: low\nstatus: ready\nunknown_author_field: secret\n```\n";
+    let error = super::workflow_host_command_binding::stamp_frozen_frontmatter(
+        candidate,
+        &frozen_with_owned_fields(),
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("unknown field 'unknown_author_field'")
+    );
+}
+
 async fn refusal(answer: &str) -> archon_workflow::GatePolicyFinding {
     let temp = tempfile::tempdir().unwrap();
     let context = context(temp.path());
