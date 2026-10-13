@@ -42,7 +42,6 @@ pub(super) async fn prove(
         probe.project.canonicalize().map(archon_shell::paths::plain),
     ];
     let live: Vec<&Path> = live.iter().flatten().map(PathBuf::as_path).collect();
-    let at = super::silent::context(probe, contract);
     for id in passing {
         let names = (contract.acceptance.iter())
             .chain(&contract.supplementary)
@@ -69,6 +68,7 @@ pub(super) async fn prove(
         let run =
             super::repairs::tree_results(probe, baseline, &mutated, &digest, &refs, None, false)
                 .await;
+        let at = super::silent::baseline_context(probe, &mutated, run.copy_layout.as_ref());
         let result = run.results.get(id);
         if result.is_some_and(super::repairs::timed_out) {
             // #356: the mutated check (its nonce kept across retries) is
@@ -79,6 +79,12 @@ pub(super) async fn prove(
             }
             continue;
         }
+        let setup_failure = match result {
+            Some(result) if result.operational_error.is_none() => {
+                super::silent::setup_path_failure_off_thread(&mutated, result, &at).await
+            }
+            _ => None,
+        };
         let host = match result {
             Some(result) if markers.guarded(result) => {
                 Some("the mutation's live-root guard stopped it".to_string())
@@ -86,6 +92,7 @@ pub(super) async fn prove(
             Some(result) if result.operational_error.is_none() && !markers.restored_all(result) => {
                 Some("the run did not restore every input it moved aside (it was killed, or an input was left behind), so its verdict proves nothing".to_string())
             }
+            _ if setup_failure.is_some() => setup_failure,
             _ => run.unrun(id),
         };
         if let Some(reason) = host {
@@ -103,7 +110,9 @@ pub(super) async fn prove(
         // Issue 328: nor did a run that failed for its host (a program that
         // could not start, a tree that did not build) fail on its own terms.
         let crashed = !super::crash_findings(&mutated, [result]).is_empty()
-            || (super::silent::silent_failure_off_thread(&mutated, result, &at).await).is_some();
+            || super::silent::silent_failure_off_thread(&mutated, result, &at)
+                .await
+                .is_some();
         if moved.is_empty() {
             findings.insert(
                 id.clone(),

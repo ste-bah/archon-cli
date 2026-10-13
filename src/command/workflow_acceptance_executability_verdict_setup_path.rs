@@ -100,6 +100,23 @@ pub(super) fn refusal(
     None
 }
 
+/// Whether a failed check stopped at a missing setup path outside its copy.
+pub(crate) fn failure(
+    command: &str,
+    result: &super::CheckResult,
+    at: &super::Context,
+) -> Option<String> {
+    if result.operational_error.is_some() || super::super::baseline::passed(result) {
+        return None;
+    }
+    refusal(
+        result.exit_code?,
+        &super::simple_commands(command),
+        &super::output(result),
+        at.tree.as_ref(),
+    )
+}
+
 /// The program's file name, as a check may start it by a path.
 fn base(word: &str) -> &str {
     word.rsplit(['/', '\\']).next().unwrap_or(word)

@@ -5,7 +5,7 @@
 //! failing on an absent deliverable inside the tree is still a proof.
 
 use super::probe_tests::trees;
-use super::verdict_probe_tests::REPO;
+use super::verdict_probe_tests::{REPO, round_at};
 use super::{ExecutabilityProbe, HostProbe};
 
 #[tokio::test]
@@ -126,6 +126,71 @@ async fn a_direct_baseline_uses_its_hermetic_copy_layout_for_setup_paths() {
         "live tree paths stay outside the setup-path rule"
     );
     trees.assert_live_untouched(copies.path());
+}
+
+/// The input mutation in `prove` reruns a Direct baseline check in a fresh
+/// hermetic copy. Its output must be judged against that copy's layout too.
+#[tokio::test]
+async fn a_direct_prove_rerun_with_a_missing_outside_setup_path_is_unproven() {
+    let check = "test -f data/state.txt || cargo metadata --no-deps --format-version 1 --manifest-path ../absent/Cargo.toml";
+    let trees = trees(&[(
+        "AC-420-022",
+        check,
+        archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    )]);
+    let copies = tempfile::tempdir().unwrap();
+    let probe = round_at(&trees, &trees.base, copies.path());
+    let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
+    assert!(findings.is_empty(), "no author finding: {findings:?}");
+    let unproven = probe.take_unproven();
+    assert!(
+        unproven.contains_key("AC-420-022"),
+        "the setup failure in the prove rerun has no verdict: {unproven:?}"
+    );
+    trees.assert_live_untouched(copies.path());
+}
+
+/// Site layout is a copy-only rule: the same Direct check on the live tree
+/// still treats its absent sibling path as an ordinary failed verdict.
+#[tokio::test]
+async fn a_live_direct_probe_keeps_the_live_tree_setup_path_rule() {
+    let check = "cargo metadata --no-deps --format-version 1 --manifest-path ../absent/Cargo.toml";
+    let trees = trees(&[(
+        "AC-420-023",
+        check,
+        archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+    )]);
+    let probe = HostProbe::at(
+        trees.set.project.path().to_path_buf(),
+        trees.repo.clone(),
+        None,
+    );
+    let contract = trees.contract();
+    let output = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(check)
+        .current_dir(trees.set.project.path())
+        .output()
+        .unwrap();
+    assert_ne!(output.status.code(), Some(0));
+    let result = archon_workflow::acceptance_scratch::CheckResult {
+        acceptance_id: "AC-420-023".into(),
+        exit_code: output.status.code(),
+        stdout: output.stdout,
+        stderr: output.stderr,
+        quota_walk_count: 0,
+        operational_error: None,
+        classification: None,
+        environment_note: None,
+    };
+    let at = probe.check_site(&contract);
+    assert!(super::verdict::no_verdict(check, &result, &at).is_none());
+    let originals = super::originals(&at, &contract, vec![result]).await;
+    assert_eq!(
+        originals.get("AC-420-023"),
+        Some(&super::Original::Failed),
+        "live-tree setup failure remains an ordinary failed check"
+    );
 }
 
 /// The live tree (an acceptance round's own site, no scratch policy): a

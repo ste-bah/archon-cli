@@ -67,7 +67,7 @@ use super::verdict_shell::{Simple, expands, simple_commands};
 mod shell_setup;
 
 #[path = "workflow_acceptance_executability_verdict_setup_path.rs"]
-mod setup_path;
+pub(super) mod setup_path;
 
 #[path = "workflow_acceptance_executability_verdict_subcommand.rs"]
 mod subcommand;
@@ -220,7 +220,7 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
     if let Some(reason) = shell_setup::refusal(code, command, &commands, &output(result)) {
         return Some(reason);
     }
-    if let Some(reason) = setup_path::refusal(code, &commands, &output(result), at.tree.as_ref()) {
+    if let Some(reason) = setup_path::failure(command, result, at) {
         return Some(reason);
     }
     if matches!(code, 126 | 127)
@@ -255,6 +255,7 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
     })
 }
 
+/// Whether a failed check stopped at a missing setup path outside its copy.
 /// Whether `result` may have failed for its host (rules 1, 2, 4 and a
 /// rejected subcommand, without the check's text): such a run is never remembered as a verdict, so a retry
 /// runs it again.

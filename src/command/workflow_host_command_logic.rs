@@ -236,10 +236,12 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 17: #420 a pre-implementation failure at a setup path outside the probe's tree that the output reports absent (`cd X`, `--manifest-path X`) gives no verdict: unproven, then its author's, never a passability verdict.
         // #420 review, same unreleased version 17: the rule applies only in a host-made copy (scratch, hermetic), never on the live tree, and a top-level name the copy holds (`../repo`) stays inside it.
         // 18: #446 direct-site baseline runs use their hermetic copy's layout when applying that rule.
+        // #446 review, same unreleased version 18.
         version: 18,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        sources_digest: "e3bbdb7d14ae309c7b4bce980be9e385e8c3c70c4604b566dedf2cf89c9075af",
+        // #446 re-pin only: the source closure digest reflects the baseline judge handoff; version 18 already records the verdict change.
+        sources_digest: "5b9ce05163a453e3768085e9721ac79a0a8975099af368e4ace40c7c6e621054",
         build_bound: false,
     },
     CapabilityLogic {
@@ -257,7 +259,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 re-pin only: the skeleton freeze judges no check run, so the new no-verdict rule never applies.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // #446 re-pin only: the skeleton freeze judges no baseline run.
-        sources_digest: "e3bbdb7d14ae309c7b4bce980be9e385e8c3c70c4604b566dedf2cf89c9075af",
+        // #446 re-pin only: the source closure digest changed with the generic copy-layout handoff; skeleton verdicts are unchanged.
+        sources_digest: "5b9ce05163a453e3768085e9721ac79a0a8975099af368e4ace40c7c6e621054",
         build_bound: false,
     },
     CapabilityLogic {
@@ -331,7 +334,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
-        sources_digest: "8baf2c49a2975b17e6c8cd7f566076aa8fb45599f4416db97debf413f951f668",
+        // #446 re-pin only: the shared source closure digest changed with the generic copy-layout handoff; verification verdicts are unchanged.
+        sources_digest: "f03bdd9a1377270e04432ec4e4f2c6b1dd51e5426fc3f9c2d5b8a2736c48e29f",
         build_bound: true,
     },
     CapabilityLogic {
@@ -350,7 +354,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
-        sources_digest: "8baf2c49a2975b17e6c8cd7f566076aa8fb45599f4416db97debf413f951f668",
+        // #446 re-pin only: the shared source closure digest changed with the generic copy-layout handoff; verification verdicts are unchanged.
+        sources_digest: "f03bdd9a1377270e04432ec4e4f2c6b1dd51e5426fc3f9c2d5b8a2736c48e29f",
         build_bound: true,
     },
 ];

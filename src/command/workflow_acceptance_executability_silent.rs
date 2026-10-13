@@ -35,7 +35,7 @@ const EVIDENCE_BYTES: usize = 800;
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
     let at = Context::new(super::sites::listing_environment(probe), contract);
-    match copy_tree(probe) {
+    match scratch_copy_tree(probe) {
         Some((depth, roots)) => at.within(depth, roots),
         None => at,
     }
@@ -43,13 +43,18 @@ pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Conte
 
 /// The pre-implementation tree is always checked in a copy for a direct
 /// site, even though that site's live checks have no copy layout.
-pub(super) fn baseline_context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
+pub(super) fn baseline_context(
+    probe: &HostProbe,
+    contract: &AcceptanceContract,
+    layout: Option<&super::hermetic::CopyLayout>,
+) -> Context {
     let at = Context::new(super::sites::listing_environment(probe), contract);
-    let layout = match probe.site {
-        Site::Direct => hermetic_copy_tree(probe),
-        _ => copy_tree(probe),
+    let tree = match probe.site {
+        Site::Direct | Site::Hermetic => layout.and_then(|layout| layout.site_tree()),
+        Site::Scratch(_) => scratch_copy_tree(probe),
+        Site::Unavailable(_) => None,
     };
-    match layout {
+    match tree {
         Some((depth, roots)) => at.within(depth, roots),
         None => at,
     }
@@ -62,7 +67,7 @@ pub(super) fn baseline_context(probe: &HostProbe, contract: &AcceptanceContract)
 /// holds `repo` and `project` (`HermeticCopy::at`), or keeps a project its
 /// repository tracks inside `repo`, at its depth there. The live tree is no
 /// copy (`None`): a path above a check's directory may be real there.
-fn copy_tree(probe: &HostProbe) -> Option<(usize, &'static [&'static str])> {
+fn scratch_copy_tree(probe: &HostProbe) -> Option<(usize, &'static [&'static str])> {
     const SCRATCH: &[&str] = &[
         "repo",
         "project",
@@ -74,28 +79,8 @@ fn copy_tree(probe: &HostProbe) -> Option<(usize, &'static [&'static str])> {
     ];
     match probe.site {
         Site::Scratch(_) => Some((1, SCRATCH)),
-        Site::Direct | Site::Unavailable(_) => None,
-        Site::Hermetic => hermetic_copy_tree(probe),
+        Site::Direct | Site::Hermetic | Site::Unavailable(_) => None,
     }
-}
-
-/// The copy made by `hermetic::run_in_copy`: it holds a repository and a
-/// separate project when the project is outside that repository.
-fn hermetic_copy_tree(probe: &HostProbe) -> Option<(usize, &'static [&'static str])> {
-    const HERMETIC: &[&str] = &["repo", "project"];
-    let canonical = |path: &std::path::Path| archon_shell::paths::canonicalize(path).ok();
-    let inside = canonical(&probe.project)
-        .zip(canonical(&probe.repository))
-        .and_then(|(project, repository)| {
-            project
-                .strip_prefix(&repository)
-                .ok()
-                .map(|inside| inside.components().count())
-        });
-    Some(match inside {
-        Some(levels) => (1 + levels, &HERMETIC[..1]),
-        None => (1, HERMETIC),
-    })
 }
 
 impl HostProbe {
@@ -131,6 +116,29 @@ pub(super) fn silent_failure(
         .find(|entry| entry.id == result.acceptance_id)?;
     let (_, text) = executed_text(entry)?;
     no_verdict(text, result, at)
+}
+
+pub(super) async fn setup_path_failure_off_thread(
+    contract: &AcceptanceContract,
+    result: &CheckResult,
+    at: &Context,
+) -> Option<String> {
+    let (contract, result, at) = (contract.clone(), result.clone(), at.clone());
+    tokio::task::spawn_blocking(move || setup_path_failure(&contract, &result, &at))
+        .await
+        .unwrap_or_else(|error| Some(format!("deciding its setup-path verdict failed: {error}")))
+}
+
+fn setup_path_failure(
+    contract: &AcceptanceContract,
+    result: &CheckResult,
+    at: &Context,
+) -> Option<String> {
+    let entry = (contract.acceptance.iter())
+        .chain(&contract.supplementary)
+        .find(|entry| entry.id == result.acceptance_id)?;
+    let (_, text) = executed_text(entry)?;
+    super::verdict::setup_path::failure(text, result, at)
 }
 
 /// The strike file of check `id` of `contract` on `commit`.

@@ -344,7 +344,7 @@ pub(super) async fn cannot_fail_findings(
     }
     let short: String = baseline.commit.chars().take(12).collect();
     let run = tree_results(probe, baseline, contract, digest, refs, known, false).await;
-    let at = silent::baseline_context(probe, contract);
+    let at = silent::baseline_context(probe, contract, run.copy_layout.as_ref());
     let mut passing = Vec::new();
     for reference in refs {
         let id = &reference.acceptance_id;
@@ -420,6 +420,7 @@ pub(super) async fn newly_passing_findings(
     let short: String = (tree.commit.as_deref().unwrap_or("the round's tree").chars())
         .take(12)
         .collect();
+    let at = silent::baseline_context(probe, contract, run.copy_layout.as_ref());
     for reference in &held {
         let id = &reference.acceptance_id;
         let result = run.results.get(id);
@@ -430,13 +431,22 @@ pub(super) async fn newly_passing_findings(
                     "the repair could not be run on the tree its original failed on ({short}: {reason}), so it is not proven to keep that verdict"
                 ),
             );
-        } else if result.is_some_and(passed) {
-            findings.insert(
-                id.clone(),
-                format!(
-                    "check '{id}': the check it replaces failed its own assertion on the tree at {short}, and this repair passes there; a repair may fix how a check asserts its criterion, never turn a failing product green without a product change: keep every assertion the original made, so that it still fails on that tree"
-                ),
-            );
+        } else if let Some(result) = result {
+            if let Some(reason) = silent::silent_failure_off_thread(contract, result, &at).await {
+                probe.unproven(
+                    id,
+                    format!(
+                        "the repair gave no verdict on the tree its original failed on ({short}: {reason}), so it is not proven to keep that verdict"
+                    ),
+                );
+            } else if passed(result) {
+                findings.insert(
+                    id.clone(),
+                    format!(
+                        "check '{id}': the check it replaces failed its own assertion on the tree at {short}, and this repair passes there; a repair may fix how a check asserts its criterion, never turn a failing product green without a product change: keep every assertion the original made, so that it still fails on that tree"
+                    ),
+                );
+            }
         }
     }
     findings

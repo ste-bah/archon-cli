@@ -22,6 +22,10 @@ use archon_workflow::acceptance_scratch::{nested_repository, nested_repository_s
 
 use super::*;
 
+#[path = "workflow_acceptance_executability_hermetic_layout.rs"]
+mod layout;
+pub(super) use layout::{CopyLayout, CopyRun, deferred, warm_target};
+
 /// The largest project copy a probe makes without a scratch policy naming
 /// what the checks read.
 pub(super) const PROJECT_COPY_BYTES: u64 = 16 << 30;
@@ -55,6 +59,16 @@ pub(super) struct HermeticCopy {
     pub(super) repository: PathBuf,
     pub(super) project: PathBuf,
     removed: bool,
+}
+
+impl HermeticCopy {
+    fn layout(&self) -> CopyLayout {
+        CopyLayout {
+            root: self.root.clone(),
+            repository: self.repository.clone(),
+            project: self.project.clone(),
+        }
+    }
 }
 
 impl HermeticCopy {
@@ -371,30 +385,6 @@ fn copy_data_relative(
     Ok(())
 }
 
-/// The warm build directory for `repository`'s copies.
-pub(super) fn warm_target(parent: &Path, repository: &Path) -> PathBuf {
-    let key = content_digest(
-        (archon_shell::paths::canonicalize(repository))
-            .unwrap_or_else(|_| repository.to_path_buf())
-            .to_string_lossy()
-            .as_bytes(),
-    );
-    parent.join(WARM_TARGETS).join(&key[..16])
-}
-
-fn deferred(id: &str) -> CheckResult {
-    CheckResult {
-        classification: None,
-        acceptance_id: id.to_string(),
-        exit_code: None,
-        quota_walk_count: 0,
-        stdout: Vec::new(),
-        stderr: Vec::new(),
-        operational_error: Some(CHECK_DEFERRED.to_string()),
-        environment_note: None,
-    }
-}
-
 /// Run `refs` of `contract` in one hermetic copy of `repository` at
 /// `commit` (see the module docs).
 pub(super) async fn run_in_copy(
@@ -405,7 +395,7 @@ pub(super) async fn run_in_copy(
     digest: &str,
     refs: &[FrozenCommandRef],
     hooks: &archon_workflow::acceptance_scratch::ObserveHooks,
-) -> Result<Vec<CheckResult>, Unrun> {
+) -> Result<CopyRun, Unrun> {
     let parent = probe.copy_parent.clone();
     for failure in sweep(&parent) {
         probe.note(format!(
@@ -427,6 +417,7 @@ pub(super) async fn run_in_copy(
     })
     .await
     .map_err(|error| Unrun(format!("the copy task failed: {error}")))??;
+    let layout = copy.layout();
     let target = warm_target(&probe.copy_parent, repository);
     let mut site = DirectSite {
         repository: copy.repository.clone(),
@@ -488,7 +479,7 @@ pub(super) async fn run_in_copy(
     }
     match failure {
         Some(error) => Err(Unrun(error)),
-        None => Ok(results),
+        None => Ok(CopyRun { results, layout }),
     }
 }
 

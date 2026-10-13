@@ -1,6 +1,4 @@
-//! Where a probe's hermetic runs happen: the scratch observation at a
-//! commit, or the probe's own copy, with verdicts a freeze already observed
-//! reused only while the tree and the project data they ran on are the same.
+//! Where a probe's hermetic runs happen and when its prior verdicts can be reused.
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -128,9 +126,12 @@ fn data_state(probe: &HostProbe, tree: &Baseline) -> Result<Vec<String>, Unrun> 
 mod reuse;
 pub(super) use reuse::check_key;
 
-/// Run `refs` once on `tree`, hermetically: in the scratch observation at
-/// that commit (without the shared build cache when `cold`), else in the
-/// probe's own copy. A freeze probe reuses verdicts it already observed.
+pub(super) struct SiteRun {
+    pub(super) results: Vec<CheckResult>,
+    pub(super) copy_layout: Option<hermetic::CopyLayout>,
+}
+
+/// Run `refs` once on `tree`, in scratch or the probe's own copy.
 pub(super) async fn run_at(
     probe: &HostProbe,
     tree: &Baseline,
@@ -138,7 +139,7 @@ pub(super) async fn run_at(
     digest: &str,
     refs: &[FrozenCommandRef],
     cold: bool,
-) -> Result<Vec<CheckResult>, Unrun> {
+) -> Result<SiteRun, Unrun> {
     if let Site::Unavailable(reason) = &probe.site {
         return Err(Unrun(reason.clone()));
     }
@@ -158,9 +159,7 @@ pub(super) async fn run_at(
     let seen: Vec<Option<CheckResult>> = (keys.iter())
         .map(|key| {
             let key = key.as_ref()?;
-            // A verdict is reusable only while its original evidence file
-            // still exists and validates. The process memo is merely a speed
-            // layer over that durable evidence, never evidence itself.
+            // A saved verdict is reusable only with valid durable evidence.
             let store = store.as_ref()?;
             let saved = store.load(key)?;
             let remembered = (probe.process_memo())
@@ -232,7 +231,10 @@ pub(super) async fn run_at(
     let written = Arc::new(Mutex::new(Vec::new()));
     let hooks = probe.observe_hooks(&pending_keys, store.as_ref(), &written);
     let ran = if pending.is_empty() {
-        Ok(Vec::new())
+        Ok(SiteRun {
+            results: Vec::new(),
+            copy_layout: None,
+        })
     } else if let Site::Scratch(binding) = &probe.site {
         let mut binding = NativeBinding::clone(binding);
         if cold {
@@ -251,6 +253,10 @@ pub(super) async fn run_at(
         .await
         .map_err(|error| Unrun(format!("scratch probe task failed: {error}")))
         .and_then(|observed| observed.map_err(|error| Unrun(format!("{error:#}"))))
+        .map(|results| SiteRun {
+            results,
+            copy_layout: None,
+        })
     } else {
         hermetic::run_in_copy(
             probe,
@@ -262,16 +268,21 @@ pub(super) async fn run_at(
             &hooks,
         )
         .await
+        .map(|run| SiteRun {
+            results: run.results,
+            copy_layout: Some(run.layout),
+        })
     };
     // A voided run's verdicts were told early, but are no evidence.
     let ran = ran.inspect_err(|_| probe.unsave(store.as_ref(), &written))?;
     probe.promote(store.as_ref(), &written);
     probe.defer(
-        (ran.iter())
+        (ran.results.iter())
             .filter(|result| result.operational_error.as_deref() == Some(CHECK_DEFERRED))
             .map(|result| result.acceptance_id.as_str()),
     );
-    let mut ran: BTreeMap<String, CheckResult> = (ran.into_iter())
+    let copy_layout = ran.copy_layout;
+    let mut ran: BTreeMap<String, CheckResult> = (ran.results.into_iter())
         .map(|result| (result.acceptance_id.clone(), result))
         .collect();
     let mut results = Vec::new();
@@ -291,7 +302,10 @@ pub(super) async fn run_at(
         }
         results.push(result);
     }
-    Ok(results)
+    Ok(SiteRun {
+        results,
+        copy_layout,
+    })
 }
 
 /// Whether `text` is a full object id: SHA-1 (40) or SHA-256 (64) hex.

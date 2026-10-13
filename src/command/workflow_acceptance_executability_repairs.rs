@@ -30,6 +30,8 @@ use super::*;
 /// Verdicts on one tree, and how the host got them.
 pub(super) struct TreeRun {
     pub(super) results: BTreeMap<String, CheckResult>,
+    /// Layout built for the most recent run whose output is in `results`.
+    pub(super) copy_layout: Option<super::hermetic::CopyLayout>,
     /// Why the last attempt could not run at all.
     why: String,
     /// Every environment repair made, oldest first.
@@ -43,6 +45,7 @@ impl TreeRun {
             results: (results.iter())
                 .map(|result| (result.acceptance_id.clone(), result.clone()))
                 .collect(),
+            copy_layout: None,
             why: why.to_string(),
             repairs: Vec::new(),
         }
@@ -151,7 +154,8 @@ pub(super) async fn tree_results(
         }
         match run_at(probe, tree, contract, digest, &pending, cold).await {
             Ok(ran) => {
-                for result in ran {
+                run.copy_layout = ran.copy_layout;
+                for result in ran.results {
                     run.results.insert(result.acceptance_id.clone(), result);
                 }
                 // A pending check the run returned nothing for gave no
