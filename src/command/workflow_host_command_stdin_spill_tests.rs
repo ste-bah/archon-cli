@@ -133,6 +133,37 @@ fn a_view_is_read_whole_even_when_the_inline_limit_is_shorter_than_it() {
 }
 
 #[test]
+fn a_large_valid_view_is_accepted() {
+    let (_run, staging, attempt) = run_layout();
+    let mut view = spill(&attempt, b"large valid view candidate").unwrap();
+    // JSON permits trailing whitespace. Padding the host-written line keeps
+    // the schema, path, length, and digest valid while exercising large views.
+    view.pop();
+    view.extend(std::iter::repeat_n(b' ', 64 * 1024));
+    view.push(b'\n');
+    assert!(view.len() > 64 * 1024);
+
+    assert_eq!(
+        read_candidate(view.as_slice(), 64, &staging).unwrap(),
+        b"large valid view candidate"
+    );
+}
+
+#[test]
+fn a_malformed_view_names_stdin_and_the_schema_problem() {
+    let (_run, staging, _) = run_layout();
+    let view = [STDIN_SPILL_PREFIX.as_bytes(), b"{"].concat();
+
+    let error = read_candidate(view.as_slice(), 64, &staging).unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("candidate stdin spill view on stdin is malformed"),
+        "{message}"
+    );
+    assert!(message.contains("EOF while parsing an object"), "{message}");
+}
+
+#[test]
 fn a_second_spill_into_the_same_attempt_is_refused_not_overwritten() {
     let (_run, _staging, attempt) = run_layout();
     spill(&attempt, b"first").unwrap();

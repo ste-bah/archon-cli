@@ -20,10 +20,6 @@ use archon_workflow::{WorkflowError, WorkflowResult};
 /// The reserved first bytes of a spill view.
 pub(crate) const STDIN_SPILL_PREFIX: &str = "archon-host-stdin-spill/v1 ";
 
-/// The longest view a child reads: a view names one absolute path, a
-/// length and a digest.
-const MAX_VIEW_BYTES: usize = 64 * 1024;
-
 /// The file a spilled candidate is written to, in the attempt's directory.
 pub(crate) const STDIN_SPILL_FILE: &str = "stdin.bin";
 
@@ -102,19 +98,13 @@ pub(crate) fn read_candidate(
         }
         return Ok(bytes);
     }
-    // A view is one short line, whatever the inline limit: read all of it.
+    // A spill view is host-written metadata, independent of the inline limit.
     stdin
-        .take(MAX_VIEW_BYTES as u64)
         .read_to_end(&mut bytes)
         .context("reading trusted candidate stdin spill view")?;
-    if bytes.len() > MAX_VIEW_BYTES {
-        return Err(anyhow!(
-            "candidate stdin spill view exceeds {MAX_VIEW_BYTES} bytes"
-        ));
-    }
     let view = &bytes[STDIN_SPILL_PREFIX.len()..];
     let view: StdinSpillView = serde_json::from_slice(view.trim_ascii_end())
-        .context("candidate stdin spill view is malformed")?;
+        .map_err(|error| anyhow!("candidate stdin spill view on stdin is malformed: {error:#}"))?;
     let results = staging_root
         .parent()
         .and_then(Path::parent)

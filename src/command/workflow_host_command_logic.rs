@@ -203,8 +203,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #446 follow-up re-pin only: archive collisions keep both prior byte sets; verdicts are unchanged.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: file split, no logic change
-        sources_digest: "10eabc0a012fd69083110f752c0220de5ff9883c39dfe96885946d1c4bab3eb3",
+        // integration re-pin: #386 spill view cap removed (house rule: no new limits)
+        sources_digest: "4076e0756b00e9a487c4c36b68eb0b5e40e5dba626d4050e50215606e0f13a60",
         build_bound: false,
     },
     CapabilityLogic {
@@ -235,8 +235,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #446 follow-up: archive collisions keep both prior byte sets.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // integration re-pin: file split, no logic change
-        sources_digest: "10eabc0a012fd69083110f752c0220de5ff9883c39dfe96885946d1c4bab3eb3",
+        // integration re-pin: #386 spill view cap removed (house rule: no new limits)
+        sources_digest: "4076e0756b00e9a487c4c36b68eb0b5e40e5dba626d4050e50215606e0f13a60",
         build_bound: false,
     },
     CapabilityLogic {
@@ -274,7 +274,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: observe-mode refused bodies now stay unpublished; refused candidates never publish, existing results remain valid, and lineage protects any future version bump.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        sources_digest: "078341b7f9de27aefef85301990df3086b80755345d84ecb2c380ce665df849f",
+        // integration re-pin: #386 spill view cap removed (house rule: no new limits)
+        sources_digest: "2960c4a0cbea12cf5b3dc87541c695444cc20fb456a093d9b7cb1f053f40616d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -307,7 +308,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // reconciliation; no gate calls the new entry, so every verdict is unchanged.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        sources_digest: "078341b7f9de27aefef85301990df3086b80755345d84ecb2c380ce665df849f",
+        // integration re-pin: #386 spill view cap removed (house rule: no new limits)
+        sources_digest: "2960c4a0cbea12cf5b3dc87541c695444cc20fb456a093d9b7cb1f053f40616d",
         build_bound: false,
     },
     CapabilityLogic {
