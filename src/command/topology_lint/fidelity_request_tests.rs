@@ -114,6 +114,6 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58"
+        "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0"
     );
 }

@@ -235,7 +235,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        sources_digest: "e3dfb00b17a57484a5d5836084ac22b99ea0cc461bc5a976dc48c17a365db911",
+        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
+        sources_digest: "cf4b3be4389f87730311a15627ac9431b4dd44aca442fadc05f5e5239fe14674",
         build_bound: false,
     },
     CapabilityLogic {
@@ -249,7 +250,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        sources_digest: "e3dfb00b17a57484a5d5836084ac22b99ea0cc461bc5a976dc48c17a365db911",
+        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
+        sources_digest: "cf4b3be4389f87730311a15627ac9431b4dd44aca442fadc05f5e5239fe14674",
         build_bound: false,
     },
     CapabilityLogic {
@@ -269,7 +271,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
-        sources_digest: "771d5f0e009ff4d4fffb9cc6421a1fac4c2cf6434b541af698e9f22cd367fe39",
+        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
+        sources_digest: "9493a5111ca9fe9ba11fd68043dd6eb48320b0c7e439b6f38b04045b6312b74e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -287,7 +290,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
-        sources_digest: "771d5f0e009ff4d4fffb9cc6421a1fac4c2cf6434b541af698e9f22cd367fe39",
+        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
+        sources_digest: "9493a5111ca9fe9ba11fd68043dd6eb48320b0c7e439b6f38b04045b6312b74e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -298,7 +302,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 and #417 re-pin only: trace never reads the newly excluded run state.
         // #434d re-pin only: trace never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "a1cf658cb5a70bbda38e6a83f7a0edebdb32917d9b0e61ba1c9aaec1e40bee53",
+        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
+        sources_digest: "415748e57878c745f5a3595a010737b94be06537f0b025f33705b74b472f2c51",
         build_bound: true,
     },
     CapabilityLogic {
@@ -316,7 +321,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: the repository claim parser changed; acceptance verification verdicts do not read claims.
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "16a7023279eac8618cbdb8b2ee6ddc192542796d543f0e1132a6d99ddcbb529a",
+        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
+        sources_digest: "a6a3148fda030d30bf3c077e49d8fc249b7eef85d370f685e584db67be2cfe33",
         build_bound: true,
     },
     CapabilityLogic {
@@ -330,7 +336,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "16a7023279eac8618cbdb8b2ee6ddc192542796d543f0e1132a6d99ddcbb529a",
+        // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
+        sources_digest: "a6a3148fda030d30bf3c077e49d8fc249b7eef85d370f685e584db67be2cfe33",
         build_bound: true,
     },
 ];
