@@ -64,7 +64,13 @@ pub fn redact_text(value: &str, marker: &str) -> String {
         .replace_all(&out, |c: &Captures<'_>| format!("{}{}", &c[1], marker))
         .into_owned();
     out = TRUNCATED_CREDENTIAL_FIELD
-        .replace_all(&out, |c: &Captures<'_>| format!("{}{}", &c[1], marker))
+        .replace_all(&out, |c: &Captures<'_>| {
+            if is_credential_field_prefix(&c[1]) {
+                format!("{}{}", &c[1], marker)
+            } else {
+                c[0].to_string()
+            }
+        })
         .into_owned();
     let input = out;
     out = QUOTED_CREDENTIAL_FIELD
@@ -74,7 +80,9 @@ pub fn redact_text(value: &str, marker: &str) -> String {
                 .next()
                 .unwrap_or_default();
             let shell_header = line.contains(" -H ") || line.trim_start().starts_with("curl ");
-            if c[1].contains('=') && (c[0].contains('$') || shell_header) {
+            if !is_credential_field_prefix(&c[1])
+                || (c[1].contains('=') && (c[0].contains('$') || shell_header))
+            {
                 c[0].to_string()
             } else {
                 format!("{}\"{}\"", &c[1], marker)
@@ -87,7 +95,9 @@ pub fn redact_text(value: &str, marker: &str) -> String {
             let start = c.get(0).unwrap().start();
             let line = input[..start].rsplit('\n').next().unwrap_or_default();
             let shell_header = line.contains(" -H ") || line.trim_start().starts_with("curl ");
-            if c[1].contains('=') && (shell_header || c[2].contains('$')) {
+            if !is_credential_field_prefix(&c[1])
+                || (c[1].contains('=') && (shell_header || c[2].contains('$')))
+            {
                 c[0].to_string()
             } else {
                 format!("{}{}", &c[1], marker)
@@ -130,6 +140,9 @@ pub fn redact_json(value: Value, marker: &str) -> Value {
 /// Whether a structured key contains a credential carrier name.
 pub fn is_credential_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
+    if is_usage_counter_key(&key) {
+        return false;
+    }
     [
         "api_key",
         "api-key",
@@ -153,6 +166,46 @@ pub fn is_credential_key(key: &str) -> bool {
     ]
     .iter()
     .any(|needle| key.contains(needle))
+}
+
+fn is_usage_counter_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    [
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "max_tokens",
+        "token_count",
+        "tokens_used",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+    ]
+    .contains(&key.as_str())
+        || (key.ends_with("_tokens")
+            && [
+                "input_",
+                "output_",
+                "cache_",
+                "prompt_",
+                "completion_",
+                "total_",
+                "reasoning_",
+                "audio_",
+                "image_",
+            ]
+            .iter()
+            .any(|prefix| key.starts_with(prefix)))
+}
+
+fn is_credential_field_prefix(prefix: &str) -> bool {
+    let name = prefix
+        .trim()
+        .trim_matches(['"', '\''])
+        .trim_end_matches(':');
+    let name = name.trim().trim_matches(['"', '\'']);
+    is_credential_key(name)
 }
 
 #[cfg(test)]
@@ -248,6 +301,51 @@ mod tests {
         assert_eq!(safe["credentials"], "[REDACTED]");
         assert_eq!(safe["oauth_token"], "[REDACTED]");
         assert_eq!(safe["message"], "token budget");
+    }
+
+    #[test]
+    fn usage_counters_survive_credential_field_redaction_in_every_sink() {
+        let usage_keys = [
+            "input_tokens",
+            "output_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "max_tokens",
+            "token_count",
+            "tokens_used",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+        ];
+        let credential_keys = [
+            "api_key",
+            "provider_api_key",
+            "access_token",
+            "refresh_token",
+            "client_secret",
+            "password",
+            "authorization",
+            "cookie",
+        ];
+
+        for key in usage_keys {
+            let value = redact_json(json!({key: 19}), "[REDACTED]");
+            assert_eq!(value[key], 19, "usage counter was redacted: {key}");
+
+            let wire = format!(r#"{{"{key}":19}}"#);
+            assert_eq!(redact_text(&wire, "[REDACTED]"), wire, "{key}");
+        }
+
+        for key in credential_keys {
+            let value = redact_json(json!({key: "ordinary-value"}), "[REDACTED]");
+            assert_eq!(value[key], "[REDACTED]", "credential key survived: {key}");
+
+            let wire = format!(r#"{{"{key}":"ordinary-value"}}"#);
+            assert!(
+                redact_text(&wire, "[REDACTED]").contains("[REDACTED]"),
+                "credential field survived: {key}"
+            );
+        }
     }
 
     #[test]

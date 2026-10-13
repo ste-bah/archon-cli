@@ -236,8 +236,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
-        // Re-pin only: evidence redaction changes persisted diagnostics, not freeze verdict rules.
-        sources_digest: "dff6381b7cdd9b850d2882503c1499e3df4057c448a07bd86c531b7490742013",
+        // #444 re-pin only: test credentials are assembled from parts; redaction preserves usage counters and does not change capability verdict logic.
+        sources_digest: "e97841cfc735b947a43e75bf5547084182605f8156e7193921cdd7b39a11cf24",
         build_bound: false,
     },
     CapabilityLogic {
@@ -252,8 +252,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
-        // Re-pin only: evidence redaction changes persisted diagnostics, not freeze verdict rules.
-        sources_digest: "dff6381b7cdd9b850d2882503c1499e3df4057c448a07bd86c531b7490742013",
+        // #444 re-pin only: test credentials are assembled from parts; redaction preserves usage counters and does not change capability verdict logic.
+        sources_digest: "e97841cfc735b947a43e75bf5547084182605f8156e7193921cdd7b39a11cf24",
         build_bound: false,
     },
     CapabilityLogic {
@@ -274,8 +274,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
         // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
-        // Re-pin only: evidence redaction changes persisted diagnostics, not landing verdict rules.
-        sources_digest: "30974363aae01d6f6f819dc4103d3e40c41d95497ff22fdc9b1e47ccccade6e6",
+        // #444 re-pin only: test credentials are assembled from parts; redaction preserves usage counters and does not change capability verdict logic.
+        sources_digest: "073add9e4fc4532ab499a852ce831c933710171e3ed3aa1d1250a58137f20537",
         build_bound: false,
     },
     CapabilityLogic {
@@ -294,8 +294,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
         // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
-        // Re-pin only: intact prose can contribute to bounded analysis text, so lint outcomes may differ; credential rules remain in force.
-        sources_digest: "30974363aae01d6f6f819dc4103d3e40c41d95497ff22fdc9b1e47ccccade6e6",
+        // #444 re-pin only: test credentials are assembled from parts; redaction preserves usage counters and does not change capability verdict logic.
+        sources_digest: "073add9e4fc4532ab499a852ce831c933710171e3ed3aa1d1250a58137f20537",
         build_bound: false,
     },
     CapabilityLogic {
@@ -329,8 +329,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
-        // Re-pin only: evidence redaction changes persisted diagnostics, not verification criteria.
-        sources_digest: "3d44461e910738a13948cea94d73b9dc8c990c38d212a9342edbca15a07342ed",
+        // #444 re-pin only: test credentials are assembled from parts; redaction preserves usage counters and does not change capability verdict logic.
+        sources_digest: "d39413722b1b74dad04172154540f75f453a70019d7ab586f5a4e55f5deee4ad",
         build_bound: true,
     },
     CapabilityLogic {
@@ -345,8 +345,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
-        // Re-pin only: evidence redaction changes persisted diagnostics, not verification criteria.
-        sources_digest: "3d44461e910738a13948cea94d73b9dc8c990c38d212a9342edbca15a07342ed",
+        // #444 re-pin only: test credentials are assembled from parts; redaction preserves usage counters and does not change capability verdict logic.
+        sources_digest: "d39413722b1b74dad04172154540f75f453a70019d7ab586f5a4e55f5deee4ad",
         build_bound: true,
     },
 ];
