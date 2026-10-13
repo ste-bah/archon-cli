@@ -328,9 +328,15 @@ for plain `command` hooks. A hook whose failure blocks must finish before the
 guarded operation proceeds, so `async` is silently ignored for it.
 Background commands still use the no-progress window and process-group cleanup.
 An async no-progress stop is logged once at WARN with the hook command, event
-and reason. Async results are fire-and-forget: they are neither stored nor
-delivered to the agent, TUI or print-mode result channels. Async result delivery
-is tracked separately in issue #359.
+and reason. Async results never change the turn: each finished background hook
+leaves one observation (event, source, outcome, message) in a bounded store of
+128; older ones are dropped and counted. The TUI shows each one as a
+`[diagnostic]` line. Print mode reports the store once, after the query ends:
+`text` writes `[async hook:<event>:<outcome> source=<source>]` lines to stderr,
+`json` adds `async_hook_diagnostics` (and `async_hook_diagnostics_dropped`) to the
+result object, and `stream-json` writes one `async_hook_diagnostic` NDJSON line
+per outcome to stdout, then an `async_hook_diagnostics_dropped` line when any
+were dropped. A hook still running when print mode exits is not reported.
 
 ## Other execution details worth knowing
 

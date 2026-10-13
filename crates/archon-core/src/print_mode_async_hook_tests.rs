@@ -148,3 +148,40 @@ async fn print_mode_json_run_end_includes_hook_diagnostics() {
     );
     assert_eq!(result["async_hook_diagnostics"][0]["source"], "project");
 }
+
+#[tokio::test]
+async fn print_mode_stream_json_emits_hook_diagnostics_as_ndjson() {
+    let (stdout, stderr) = run_with_diagnostic(OutputFormat::StreamJson).await;
+    let output = String::from_utf8(stdout).unwrap();
+    let diagnostics: Vec<serde_json::Value> = output
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|line| line["type"] == "async_hook_diagnostic")
+        .collect();
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "stream-json must emit the hook outcome exactly once: {output}"
+    );
+    assert_eq!(diagnostics[0]["content"]["event"], "BeforeAgentRun");
+    assert_eq!(diagnostics[0]["content"]["outcome"], "failure");
+    assert_eq!(diagnostics[0]["content"]["source"], "project");
+    assert!(
+        String::from_utf8(stderr).unwrap().is_empty(),
+        "stream-json keeps the hook outcome on stdout only"
+    );
+}
+
+#[test]
+fn stream_json_batch_reports_the_dropped_count() {
+    let batch = crate::hooks::AsyncHookDiagnosticBatch {
+        diagnostics: Vec::new(),
+        dropped: 3,
+    };
+    let mut out = Vec::new();
+    write_async_diagnostics_stream_json(&mut out, &batch);
+    let line: serde_json::Value =
+        serde_json::from_str(String::from_utf8(out).unwrap().trim()).unwrap();
+    assert_eq!(line["type"], "async_hook_diagnostics_dropped");
+    assert_eq!(line["content"]["dropped"], 3);
+}

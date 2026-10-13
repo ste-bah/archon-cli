@@ -197,7 +197,10 @@ async fn run_print_mode_with_writers(
                 let _ = writeln!(stderr, "{}", result.content);
             }
 
-            // Write formatted output
+            // Write formatted output. Async hook outcomes are written once, as
+            // a batch, after the query ends (every format, below): the store
+            // holds every outcome, including any that arrive after this
+            // channel closes, so emitting them here as well would duplicate.
             if matches!(&event, AgentEvent::AsyncHookDiagnostic(_)) {
                 continue;
             }
@@ -215,9 +218,17 @@ async fn run_print_mode_with_writers(
     agent.close_event_channel();
     let _ = event_handle.await;
     let async_diagnostics = agent.close_async_hook_diagnostics();
-    if output_format == OutputFormat::Text {
-        let mut stderr = stderr_writer.clone();
-        write_async_diagnostics(&mut stderr, &async_diagnostics);
+    match output_format {
+        OutputFormat::Text => {
+            let mut stderr = stderr_writer.clone();
+            write_async_diagnostics(&mut stderr, &async_diagnostics);
+        }
+        OutputFormat::StreamJson => {
+            let mut stdout = stdout_writer.clone();
+            write_async_diagnostics_stream_json(&mut stdout, &async_diagnostics);
+        }
+        // Json carries the batch inside its single result object.
+        OutputFormat::Json => {}
     }
 
     // A denied tool is not a failed turn: `process_result` is Ok, the agent
@@ -362,6 +373,29 @@ fn write_async_diagnostics(
             batch.dropped
         );
     }
+}
+
+/// Stream-json delivery: one `async_hook_diagnostic` NDJSON line per kept
+/// outcome (the same line shape `format_agent_event` gives the event), then
+/// one `async_hook_diagnostics_dropped` line when the bounded store dropped any.
+fn write_async_diagnostics_stream_json(
+    stdout: &mut impl std::io::Write,
+    batch: &crate::hooks::AsyncHookDiagnosticBatch,
+) {
+    for diagnostic in &batch.diagnostics {
+        let event = AgentEvent::AsyncHookDiagnostic(diagnostic.clone());
+        if let Some(line) = format_agent_event(&event, &OutputFormat::StreamJson) {
+            let _ = stdout.write_all(line.as_bytes());
+        }
+    }
+    if batch.dropped > 0 {
+        let line = crate::output_format::format_stream_event(
+            "async_hook_diagnostics_dropped",
+            &serde_json::json!({ "dropped": batch.dropped }),
+        );
+        let _ = stdout.write_all(line.as_bytes());
+    }
+    let _ = stdout.flush();
 }
 
 #[cfg(test)]
