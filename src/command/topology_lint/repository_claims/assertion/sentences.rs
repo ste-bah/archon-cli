@@ -10,8 +10,12 @@ pub(crate) fn sentences(text: &str) -> Vec<(&str, bool)> {
     let mut out = Vec::new();
     let mut list: Option<OpenList> = None;
     for line in crate::command::topology_lint::fences::prose_lines(text) {
+        // A blank line ends the list once it has items; before its first
+        // item it only separates the opener from the list.
         if line.trim().is_empty() {
-            list = None;
+            if list.as_ref().is_some_and(|open| open.first.is_some()) {
+                list = None;
+            }
             continue;
         }
         let line_carried = list.as_mut().is_some_and(|open| open.carries(line));

@@ -86,10 +86,33 @@ const CLAUSE_WORDS: &[&str] = &[
     "then", "which", "where", "when", "while", "after", "before", "if", "unless", "because", "so",
     "but", "since", "once",
 ];
-/// A path right after one of these is a location, not the clause subject.
+/// A path right after one of these is a location, not the clause subject,
+/// unless the noun it locates is an output (`OUTPUT_NOUNS`).
 const PREPOSITIONS: &[&str] = &[
     "in", "under", "at", "from", "of", "inside", "within", "into", "on", "beside", "by", "to",
     "for",
+];
+/// Nouns for what a run writes; a path located by one is that output.
+const OUTPUT_NOUNS: &[&str] = &[
+    "report",
+    "reports",
+    "output",
+    "outputs",
+    "artifact",
+    "artifacts",
+    "aggregate",
+    "review",
+    "reviews",
+    "result",
+    "results",
+    "log",
+    "logs",
+    "manifest",
+    "manifests",
+    "snapshot",
+    "record",
+    "records",
+    "file",
 ];
 /// Predicate wording that names the repository the claim is checked against.
 const REPOSITORY_WORDS: &[&str] = &[
@@ -158,7 +181,7 @@ fn tokens(segment: &str) -> Vec<(usize, Token)> {
             out.push((index, Token::Marker));
             index += len;
         } else if is_word_char(character) {
-            // A hyphen between letters joins a word ("run-real").
+            // A hyphen between letters joins a word ("two-part").
             let joins = |offset: usize, c: char| {
                 c == '-' && rest[offset + 1..].chars().next().is_some_and(is_word_char)
             };
@@ -254,16 +277,18 @@ fn word(tokens: &[(usize, Token)], index: Option<usize>) -> Option<&str> {
 }
 
 fn is_lead(tokens: &[(usize, Token)], index: usize, segment: &str) -> bool {
-    let Some(this) = word(tokens, Some(index)) else {
+    let Some(full) = word(tokens, Some(index)) else {
         return false;
     };
+    // A prefixed verb is its verb ("re-verify").
+    let this = full.rsplit('-').next().unwrap_or(full);
     let before = word(tokens, index.checked_sub(1));
     if before.is_some_and(|w| NOT_BEFORE_LEAD.contains(&w)) {
         return false;
     }
     if ASSERT_VERBS.contains(&this) {
         let start = tokens[index].0;
-        return !segment[start + this.len()..].starts_with('!');
+        return !segment[start + full.len()..].starts_with('!');
     }
     CHECK_VERBS.contains(&this)
         && (word(tokens, Some(index + 1)) == Some("that")
@@ -369,10 +394,16 @@ fn asserted_at(segment: &str, carried: bool, at: usize) -> bool {
     let Some(index) = walked.seen.iter().position(|(offset, _)| *offset == at) else {
         return false;
     };
-    let located = index
+    // "the parser in `x`" presupposes `x`; "the report at `x`" says where a
+    // run-time output is, which the assertion checks.
+    let preposition = index
         .checked_sub(1)
-        .and_then(|before| word(&walked.tokens, Some(before)))
-        .is_some_and(|w| PREPOSITIONS.contains(&w));
+        .and_then(|before| word(&walked.tokens, Some(before)));
+    let noun = index
+        .checked_sub(2)
+        .and_then(|before| word(&walked.tokens, Some(before)));
+    let located = preposition.is_some_and(|w| PREPOSITIONS.contains(&w))
+        && !noun.is_some_and(|w| OUTPUT_NOUNS.contains(&w));
     walked.seen[index].1 && !located
 }
 

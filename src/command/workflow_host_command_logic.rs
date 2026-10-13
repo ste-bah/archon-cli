@@ -237,7 +237,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
-        sources_digest: "61a8153497951ec77522dfa6760c9aaf75588793110edb0833228cf0826f838d",
+        sources_digest: "e1984d4d3e613772a4f06f727a246cc8020db398b759d621a02ae2f1e3646ae1",
         build_bound: false,
     },
     CapabilityLogic {
@@ -253,7 +253,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
-        sources_digest: "61a8153497951ec77522dfa6760c9aaf75588793110edb0833228cf0826f838d",
+        sources_digest: "e1984d4d3e613772a4f06f727a246cc8020db398b759d621a02ae2f1e3646ae1",
         build_bound: false,
     },
     CapabilityLogic {
@@ -273,14 +273,16 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 11: #443 review: the asserted clause ends at its first path's predicate; a marker continues only an
         // enumeration its lead opened; numbered items and indented openers carry only their own list; a
         // preposition before the path, repository wording ("(N lines)", "base commit") or a planned change claims.
-        version: 11,
+        // 12: #443 re-review: a blank line before an assertion list's first item keeps the list; a path an output
+        // noun locates ("the report at `x`") stays exempt; a prefixed lead ("re-verify that") is a lead.
+        version: 12,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
         // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
         // #443: the version bumps above; asserted runtime paths are no longer repository claims.
-        sources_digest: "590548a7a023a29252c38ae58caa11e923e3ce85654b03773d256dc0ee777d44",
+        sources_digest: "8c726d292b6348e74bd951da09d9b6fce73de8780dec08289429c1a95f228336",
         build_bound: false,
     },
     CapabilityLogic {
@@ -296,14 +298,15 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 9: #443 a path in the asserted clause of a test the body specifies is a runtime expectation, not a
         // repository claim; same rule as land-task-body 10.
         // 10: #443 review, same rule as land-task-body 11.
-        version: 10,
+        // 11: #443 re-review, same rule as land-task-body 12.
+        version: 11,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
         // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
         // #443: the version bumps above; asserted runtime paths are no longer repository claims.
-        sources_digest: "590548a7a023a29252c38ae58caa11e923e3ce85654b03773d256dc0ee777d44",
+        sources_digest: "8c726d292b6348e74bd951da09d9b6fce73de8780dec08289429c1a95f228336",
         build_bound: false,
     },
     CapabilityLogic {
@@ -338,7 +341,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
-        sources_digest: "4828a0766bb1cde100be683c052cb800fc6fd0f301c66cc96f4556c9e01b90e2",
+        sources_digest: "88e3db1f17e8bde0b6aa79f9f93f2848df6da4a9aab7aa8e6a1a24045224b7a2",
         build_bound: true,
     },
     CapabilityLogic {
@@ -354,7 +357,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
-        sources_digest: "4828a0766bb1cde100be683c052cb800fc6fd0f301c66cc96f4556c9e01b90e2",
+        sources_digest: "88e3db1f17e8bde0b6aa79f9f93f2848df6da4a9aab7aa8e6a1a24045224b7a2",
         build_bound: true,
     },
 ];
