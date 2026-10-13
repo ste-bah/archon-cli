@@ -41,6 +41,20 @@ pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Conte
     }
 }
 
+/// The pre-implementation tree is always checked in a copy for a direct
+/// site, even though that site's live checks have no copy layout.
+pub(super) fn baseline_context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
+    let at = Context::new(super::sites::listing_environment(probe), contract);
+    let layout = match probe.site {
+        Site::Direct => hermetic_copy_tree(probe),
+        _ => copy_tree(probe),
+    };
+    match layout {
+        Some((depth, roots)) => at.within(depth, roots),
+        None => at,
+    }
+}
+
 /// Issue 420: the copy `probe`'s checks run in, as (depth of a check's
 /// working directory below the copy's top, the names the top holds). A
 /// scratch site holds `repo`, `project` and its own directories
@@ -58,26 +72,30 @@ fn copy_tree(probe: &HostProbe) -> Option<(usize, &'static [&'static str])> {
         "target",
         "project-baseline",
     ];
-    const HERMETIC: &[&str] = &["repo", "project"];
     match probe.site {
         Site::Scratch(_) => Some((1, SCRATCH)),
         Site::Direct | Site::Unavailable(_) => None,
-        Site::Hermetic => {
-            let canonical = |path: &std::path::Path| archon_shell::paths::canonicalize(path).ok();
-            let inside = canonical(&probe.project)
-                .zip(canonical(&probe.repository))
-                .and_then(|(project, repository)| {
-                    project
-                        .strip_prefix(&repository)
-                        .ok()
-                        .map(|inside| inside.components().count())
-                });
-            Some(match inside {
-                Some(levels) => (1 + levels, &HERMETIC[..1]),
-                None => (1, HERMETIC),
-            })
-        }
+        Site::Hermetic => hermetic_copy_tree(probe),
     }
+}
+
+/// The copy made by `hermetic::run_in_copy`: it holds a repository and a
+/// separate project when the project is outside that repository.
+fn hermetic_copy_tree(probe: &HostProbe) -> Option<(usize, &'static [&'static str])> {
+    const HERMETIC: &[&str] = &["repo", "project"];
+    let canonical = |path: &std::path::Path| archon_shell::paths::canonicalize(path).ok();
+    let inside = canonical(&probe.project)
+        .zip(canonical(&probe.repository))
+        .and_then(|(project, repository)| {
+            project
+                .strip_prefix(&repository)
+                .ok()
+                .map(|inside| inside.components().count())
+        });
+    Some(match inside {
+        Some(levels) => (1 + levels, &HERMETIC[..1]),
+        None => (1, HERMETIC),
+    })
 }
 
 impl HostProbe {

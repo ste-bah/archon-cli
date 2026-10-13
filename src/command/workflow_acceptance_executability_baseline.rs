@@ -344,7 +344,7 @@ pub(super) async fn cannot_fail_findings(
     }
     let short: String = baseline.commit.chars().take(12).collect();
     let run = tree_results(probe, baseline, contract, digest, refs, known, false).await;
-    let at = silent::context(probe, contract);
+    let at = silent::baseline_context(probe, contract);
     let mut passing = Vec::new();
     for reference in refs {
         let id = &reference.acceptance_id;

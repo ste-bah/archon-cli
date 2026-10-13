@@ -62,6 +62,72 @@ async fn a_sibling_root_absent_from_the_copy_is_unproven_and_never_judged() {
     trees.assert_live_untouched(copies.path());
 }
 
+/// A round's direct site executes baseline checks in a hermetic copy too;
+/// its verdict context must describe that copy, while the same check on the
+/// live tree keeps the live-tree rule.
+#[tokio::test]
+async fn a_direct_baseline_uses_its_hermetic_copy_layout_for_setup_paths() {
+    let outside_copy =
+        "cargo metadata --no-deps --format-version 1 --manifest-path ../absent/Cargo.toml";
+    let inside_copy =
+        "cargo metadata --no-deps --format-version 1 --manifest-path crates/new/Cargo.toml";
+    let trees = trees(&[
+        ("AC-420-020", outside_copy, REPO),
+        ("AC-420-021", inside_copy, REPO),
+    ]);
+    let copies = tempfile::tempdir().unwrap();
+    let probe = super::verdict_probe_tests::round_at(&trees, &trees.base, copies.path());
+    let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
+    assert!(findings.is_empty(), "{findings:?}");
+    let unproven = probe.take_unproven();
+    assert!(
+        unproven.contains_key("AC-420-020"),
+        "the baseline copy's absent outside path is unproven: {unproven:?}"
+    );
+    assert!(
+        !unproven.contains_key("AC-420-021"),
+        "an absent path inside the copy remains a verdict: {unproven:?}"
+    );
+    let runs = probe.take_baseline_runs().expect("a baseline");
+    assert_eq!(
+        runs.failures.keys().cloned().collect::<Vec<_>>(),
+        ["AC-420-021"]
+    );
+
+    let output = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(outside_copy)
+        .current_dir(&trees.repo)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(101));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("does not exist"));
+    let result = archon_workflow::acceptance_scratch::CheckResult {
+        acceptance_id: "AC-420-020".into(),
+        exit_code: output.status.code(),
+        stdout: output.stdout,
+        stderr: output.stderr,
+        quota_walk_count: 0,
+        operational_error: None,
+        classification: None,
+        environment_note: None,
+    };
+    let contract = trees.contract();
+    let live = HostProbe::at(
+        trees.set.project.path().to_path_buf(),
+        trees.repo.clone(),
+        None,
+    )
+    .check_site(&contract);
+    let originals = super::originals(&live, &contract, vec![result]).await;
+    assert_eq!(
+        originals.get("AC-420-020"),
+        Some(&super::Original::Failed),
+        "live tree paths stay outside the setup-path rule"
+    );
+    trees.assert_live_untouched(copies.path());
+}
+
 /// The live tree (an acceptance round's own site, no scratch policy): a
 /// project beside its repository runs `--manifest-path ../repo/...`, a real
 /// path there. An absent crate is the deliverable not built yet, so the
