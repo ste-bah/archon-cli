@@ -40,7 +40,10 @@ pub use focused::FocusedTestPlan;
 use focused::FocusedTests;
 pub use forbidden::{ForbiddenPathScope, scope_forbidden_paths};
 pub use mutators::{TreeWideMutator, default_tree_wide_mutators};
-pub use read_only::{READ_CEILING_MARKER, READ_ONLY_INSPECTION_TOOLS};
+pub use read_only::{
+    ANSWER_IN_TASK_FORMAT, INSPECTION_WITHDRAWN_MARKER, READ_CEILING_MARKER,
+    READ_ONLY_INSPECTION_TOOLS,
+};
 use records::{append_record, clip, first_line, record_head};
 pub use repeat::{IDENTICAL_FAILURES_BEFORE_REFUSAL, REPEATED_FAILURE_MARKER, masked_failure};
 pub use run_store::{AdmittedWrites, RunStoreScope, current_run_store, scope_run_store};
@@ -112,6 +115,10 @@ struct State {
     /// Inspection calls a read-only guard has admitted (Issue-58); never
     /// reset, since nothing a read-only call does can earn more reading.
     read_only_inspections: u32,
+    /// Why a read-only guard withdrew inspection before its hard ceiling
+    /// (Issue-396): the session kept getting the same results, so it is
+    /// asked for its deliverable instead of being failed.
+    inspection_withdrawn: Option<String>,
     /// Failures of each normalised Bash command since the last substantive
     /// write (Issue-124); see `repeat`.
     failing_runs: BTreeMap<String, u32>,

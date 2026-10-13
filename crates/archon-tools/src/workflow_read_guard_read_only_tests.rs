@@ -108,7 +108,8 @@ fn the_hard_ceiling_refuses_at_the_threshold_and_keeps_refusing() {
         assert_eq!(guard.before_tool("Read", &read_input()), None);
     }
     let expected = format!(
-        "{READ_CEILING_MARKER} 4 inspection calls; answer now with your deliverable from what you have read. Further Read, Grep, Glob and shell inspection calls are refused; build and test commands still run."
+        "{READ_CEILING_MARKER} 4 inspection calls; answer now with your deliverable from what you have read. {} Further Read, Grep, Glob and shell inspection calls are refused; build and test commands still run.",
+        super::ANSWER_IN_TASK_FORMAT
     );
     for tool_input in [
         ("Read", read_input()),
@@ -279,4 +280,76 @@ async fn a_ceiling_refusal_is_recorded_like_any_other() {
             .unwrap()
             .starts_with("refused: read ceiling reached:")
     );
+}
+
+/// Issue-396: a read-only call that keeps getting the same results has its
+/// inspection withdrawn once, without any ceiling, and is told why.
+#[test]
+fn withdrawing_inspection_refuses_reads_and_keeps_build_commands() {
+    let guard = read_only(0, 0);
+    assert!(!guard.inspection_withdrawn());
+    assert_eq!(guard.before_tool("Read", &read_input()), None);
+
+    assert!(guard.withdraw_inspection("Your recent tool calls kept returning the same results."));
+    assert!(guard.inspection_withdrawn());
+    assert!(!guard.read_only_ceiling_reached(), "no ceiling was reached");
+    assert_eq!(
+        guard.withdrawal_reason().as_deref(),
+        Some("Your recent tool calls kept returning the same results.")
+    );
+    assert!(
+        !guard.withdraw_inspection("again"),
+        "withdrawn once: a second stall must keep the caller's stop"
+    );
+    for (tool, input) in [
+        ("Read", read_input()),
+        ("Grep", json!({"pattern": "needle", "path": "src"})),
+        ("Glob", json!({"pattern": "**/*.rs"})),
+        ("read-own-evidence", json!({"offset": 0})),
+        ("Bash", bash_input("cat src/lib.rs")),
+    ] {
+        let refusal = guard
+            .before_tool(tool, &input)
+            .unwrap_or_else(|| panic!("{tool} admitted after the withdrawal"));
+        assert!(
+            refusal.starts_with(super::INSPECTION_WITHDRAWN_MARKER),
+            "{refusal}"
+        );
+        assert!(refusal.contains("kept returning the same results"), "{refusal}");
+        assert!(refusal.contains(super::ANSWER_IN_TASK_FORMAT), "{refusal}");
+        assert!(!refusal.contains(READ_CEILING_MARKER), "{refusal}");
+    }
+    assert_eq!(guard.before_tool("Bash", &bash_input("cargo test -p demo")), None);
+}
+
+#[test]
+fn a_write_capable_guard_never_withdraws_inspection() {
+    let guard = WorkflowReadGuard::new(1_000, 1_000, false, false);
+    assert_eq!(guard.mode(), GuardMode::WriteCapable);
+    assert!(!guard.withdraw_inspection("same results"));
+    assert!(!guard.inspection_withdrawn());
+    assert_eq!(guard.withdrawal_reason(), None);
+    assert_eq!(guard.before_tool("Read", &read_input()), None);
+}
+
+#[test]
+fn a_call_past_its_hard_ceiling_is_not_withdrawn_again() {
+    let guard = read_only(0, 1);
+    assert_eq!(guard.before_tool("Read", &read_input()), None);
+    assert!(guard.inspection_withdrawn(), "the ceiling already withdrew it");
+    assert!(!guard.withdraw_inspection("same results"));
+    assert_eq!(guard.withdrawal_reason(), None);
+}
+
+/// The hard-ceiling refusal asks for the task's own deliverable in its own
+/// format, not a report about the reading.
+#[test]
+fn the_ceiling_refusal_names_the_task_format() {
+    let guard = read_only(0, 1);
+    assert_eq!(guard.before_tool("Read", &read_input()), None);
+    let refusal = guard.before_tool("Read", &read_input()).unwrap();
+    assert!(refusal.starts_with(READ_CEILING_MARKER), "{refusal}");
+    assert!(refusal.contains(super::ANSWER_IN_TASK_FORMAT), "{refusal}");
+    assert!(refusal.contains("reply with that file"), "{refusal}");
+    assert!(refusal.contains("Do not reply with a report about your reading"), "{refusal}");
 }

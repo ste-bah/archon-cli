@@ -448,6 +448,8 @@ mod parallel;
 mod progress;
 #[path = "tests/read_ceiling.rs"]
 mod read_ceiling;
+#[path = "tests/stall_withdrawal.rs"]
+mod stall_withdrawal;
 mod stream_retry;
 #[path = "tests/text_tool_call.rs"]
 mod text_tool_call;

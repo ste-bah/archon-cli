@@ -93,17 +93,17 @@ impl SubagentRunner {
             }
 
             if !inspection_tools_withdrawn
-                && self
+                && let Some(guard) = self
                     .tool_context
                     .workflow_read_guard
                     .as_ref()
-                    .is_some_and(|guard| guard.read_only_ceiling_reached())
+                    .filter(|guard| guard.inspection_withdrawn())
             {
-                let note = "Inspection tools are no longer available in this call; answer now with your deliverable from what you have read.";
+                let note = withdrawn_note(guard.withdrawal_reason().as_deref());
                 let message = flatten_history::flatten_history(
                     messages.as_slice(),
                     initial_prompt,
-                    note,
+                    &note,
                     request_round::read_ceiling_fit_budget(self),
                 );
                 self.record_transcript(&message);
@@ -222,7 +222,10 @@ impl SubagentRunner {
                     let feedback = serde_json::json!({
                         "role": "user",
                         "content": if inspection_tools_withdrawn {
-                            "Inspection tools are no longer available in this call and text tool calls are not run; answer now with your deliverable from what you have read.".to_owned()
+                            format!(
+                                "Inspection tools are no longer available in this call and text tool calls are not run; answer now with your deliverable from what you have read. {}",
+                                archon_tools::workflow_read_guard::ANSWER_IN_TASK_FORMAT
+                            )
                         } else if !offered_tool_names.iter().any(|name| name == &tool_name) {
                             if offered_tool_names.is_empty() {
                                 "No tools are available in this call; answer now with your deliverable from what you have read.".to_owned()
@@ -350,6 +353,21 @@ impl SubagentRunner {
                 .after_round(&self.tool_context, round_activity)
                 .await
             {
+                // Issue-396: a read-only session's deliverable is its final
+                // message, so the first stall withdraws inspection and asks
+                // for it; the session fails only when it stalls again.
+                if self
+                    .tool_context
+                    .workflow_read_guard
+                    .as_ref()
+                    .is_some_and(|guard| guard.withdraw_inspection(STALL_WITHDRAWAL_REASON))
+                {
+                    tracing::warn!(
+                        turn = turn.saturating_add(1),
+                        "read-only session kept getting the same results; inspection withdrawn and the deliverable requested"
+                    );
+                    continue;
+                }
                 self.emit_activity_stream("error", reason.clone(), None, true);
                 anyhow::bail!("{reason}");
             }
@@ -363,6 +381,19 @@ impl SubagentRunner {
         );
         anyhow::bail!("Subagent reached max turns ({})", self.max_turns)
     }
+}
+
+/// Why a read-only session's inspection is withdrawn at its first stall.
+const STALL_WITHDRAWAL_REASON: &str =
+    "Your recent tool calls kept returning the same results, and nothing changed between them.";
+
+/// The instruction that replaces the history when inspection is withdrawn.
+fn withdrawn_note(reason: Option<&str>) -> String {
+    format!(
+        "{}Inspection tools are no longer available in this call; answer now with your deliverable from what you have read. {}",
+        reason.map(|reason| format!("{reason} ")).unwrap_or_default(),
+        archon_tools::workflow_read_guard::ANSWER_IN_TASK_FORMAT
+    )
 }
 
 fn adjusted_deadline(
