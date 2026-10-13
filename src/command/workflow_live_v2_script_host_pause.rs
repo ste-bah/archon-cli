@@ -210,20 +210,35 @@ impl WorkflowScriptHost {
             } else {
                 WorkflowEventKind::Paused
             };
-            let event = emit_event(locked, &lock_run_id, kind, detail).map_err(|error| {
-                WorkflowError::ControlPaused(format!(
-                    "pause '{lock_pause_id}' was saved, but its evidence event was not recorded: {error}; run {lock_run_id} is paused, not failed; {lock_resume} resumes it"
-                ))
-            })?;
-            worker_stage.store(2, Ordering::Release);
+            let event = emit_event(locked, &lock_run_id, kind, detail.clone());
             let record = ScriptPauseRecord {
                 pause_id: lock_pause_id.clone(),
                 joined,
-                event_seq: Some(event),
+                event_seq: event.as_ref().ok().copied(),
                 generation: run.generation,
                 covered,
                 host_taken: false,
                 judged_at_pause: Default::default(),
+                unrecorded_event: event.is_err().then_some(detail),
+            };
+            let event = match event {
+                Ok(event) => {
+                    worker_stage.store(2, Ordering::Release);
+                    event
+                }
+                // #289: the event log refused the evidence. The pause is
+                // saved, so its replay record is still written: the pause
+                // keeps durable evidence in a run file of its own, and a
+                // resume passes it like any pause taken.
+                Err(error) => {
+                    let kept = match locked.write_run_json(&lock_run_id, &record_path, &record) {
+                        Ok(()) => format!("its replay record was written to {}", locked.run_dir(&lock_run_id).join(&record_path).display()),
+                        Err(record_error) => format!("its replay record was not written either: {record_error}"),
+                    };
+                    return Err(WorkflowError::ControlPaused(format!(
+                        "pause '{lock_pause_id}' was saved, but its evidence event was not recorded: {error}; {kept}; run {lock_run_id} is paused, not failed; {lock_resume} resumes it"
+                    )));
+                }
             };
             locked.write_run_json(&lock_run_id, &record_path, &record).map_err(|error| {
                 WorkflowError::ControlPaused(format!(

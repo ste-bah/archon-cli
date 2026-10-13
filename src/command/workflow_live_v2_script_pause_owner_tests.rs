@@ -108,6 +108,26 @@ async fn a_saved_pause_reports_when_its_evidence_event_cannot_be_written() {
         archon_workflow::RunStatus::Paused,
         "the state transition may have saved before evidence failed"
     );
+    // #289: the pause keeps durable evidence in a run file of its own even
+    // though the event log refused it: the replay record, with no event.
+    let records: Vec<serde_json::Value> =
+        std::fs::read_dir(store.run_dir(&run_id).join("v2/script-pauses"))
+            .expect("the replay record directory is written")
+            .map(|entry| {
+                serde_json::from_slice(&std::fs::read(entry.unwrap().path()).unwrap()).unwrap()
+            })
+            .collect();
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0]["pause_id"], "pause-no-event");
+    assert!(records[0]["event_seq"].is_null(), "{records:?}");
+    assert_eq!(
+        records[0]["unrecorded_event"]["event"], "script_pause",
+        "the refused evidence event is kept in the record: {records:?}"
+    );
+    assert!(
+        matches!(&outcome, Err(WorkflowError::ControlPaused(message)) if message.contains("replay record was written")),
+        "the message says what was kept: {outcome:?}"
+    );
 }
 
 #[tokio::test]

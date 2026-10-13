@@ -49,6 +49,10 @@ pub(super) struct ScriptPauseRecord {
     /// taken (`workflow_live_v2_script_host_pause_judged`).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub(super) judged_at_pause: std::collections::BTreeMap<String, String>,
+    /// #289: the evidence event the event log refused (`event_seq` is then
+    /// `None`), kept here so the pause's cause and evidence stay in a run file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) unrecorded_event: Option<serde_json::Value>,
 }
 
 /// The attempts `records` (the store's slots) hold that a pause covers.
@@ -209,6 +213,7 @@ impl HostPauseCoverage {
             covered: self.covered,
             host_taken: true,
             judged_at_pause,
+            unrecorded_event: None,
         };
         if let Err(error) = store.write_run_json(run_id, &path, &record) {
             tracing::warn!(%error, run_id, "host pause coverage not recorded");
