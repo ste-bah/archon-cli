@@ -2,10 +2,12 @@
 //!
 //! A session's own limit is a no-progress window, never a total. It opens
 //! when the session starts and renews only on NOVEL activity: an admitted
-//! tool call whose tool and canonical arguments this session has not made
-//! before, or assistant text this session has not produced before. A refused
-//! call, a repeated identical call, an alternation between two identical
-//! calls and repeated text renew nothing. There is no turn-count cap here.
+//! tool call that gave the session something new, or assistant text this
+//! session has not produced before. A refused call, a repeated identical
+//! call, an alternation between two identical calls and repeated text renew
+//! nothing, and neither does a read that returns only content the session
+//! was already given (Issue 391; see `progress_novelty`). There is no
+//! turn-count cap here.
 //!
 //! The same novelty renews the host's dispatch clocks
 //! (`archon_tools::subagent_dispatch_clock::progress`), so the runner and the
@@ -19,6 +21,7 @@ use std::time::Duration;
 
 use tokio::time::Instant;
 
+use super::progress_novelty::{ContentLedger, Novelty, ObservedCall};
 use super::*;
 
 /// How much of a novel activity its record quotes.
@@ -29,6 +32,7 @@ pub(super) struct ProgressWindow {
     deadline: Option<Instant>,
     renewed_at: Instant,
     seen: HashSet<u64>,
+    ledger: ContentLedger,
     last: Option<String>,
     refused_calls: u64,
 }
@@ -49,6 +53,7 @@ impl ProgressWindow {
             deadline,
             renewed_at: now,
             seen: HashSet::new(),
+            ledger: ContentLedger::default(),
             last: None,
             refused_calls: 0,
         })
@@ -68,18 +73,19 @@ impl ProgressWindow {
         self.deadline = self.deadline.map(|deadline| deadline + by);
     }
 
-    /// Observe one finished model turn: its text and the tool calls it made.
-    /// Any novel text or admitted call renews the window; `true` when it did.
+    /// Observe one finished model turn: its text, the tool calls it made
+    /// (`echo_tools`, to tell text that only echoes a call) and how each call
+    /// ended. Any novel text or call renews the window; `true` when it did.
     pub(super) fn observe_turn(
         &mut self,
         turn: u32,
         text: &str,
-        tools: &[PendingTool],
-        refused: &[bool],
+        echo_tools: &[PendingTool],
+        calls: &[ObservedCall],
     ) -> bool {
         let mut novel = None;
         let text = text.trim();
-        let echoes_tool = tools.iter().any(|tool| {
+        let echoes_tool = echo_tools.iter().any(|tool| {
             let arguments = serde_json::from_str::<serde_json::Value>(&tool.input_json)
                 .map(|value| archon_tools::repeat_tool_guard::canonical_arguments(&value))
                 .unwrap_or_else(|_| tool.input_json.trim().to_string());
@@ -91,24 +97,25 @@ impl ProgressWindow {
                 preview(text)
             ));
         }
-        for (index, tool) in tools.iter().enumerate() {
-            if refused.get(index).copied().unwrap_or(false) {
+        for call in calls {
+            if call.refused {
                 self.refused_calls = self.refused_calls.saturating_add(1);
+                // The host's clocks count it too: their cut usually fires
+                // first and must carry the count (Issue 382).
+                archon_tools::subagent_dispatch_clock::refused();
                 continue;
             }
-            let arguments = serde_json::from_str::<serde_json::Value>(&tool.input_json)
-                .map(|value| archon_tools::repeat_tool_guard::canonical_arguments(&value))
-                .unwrap_or_else(|_| tool.input_json.trim().to_string());
-            if self
-                .seen
-                .insert(digest(&("tool", tool.name.as_str(), arguments.as_str())))
-            {
-                novel = Some(format!(
-                    "turn {turn}: new tool call {} {}",
-                    tool.name,
-                    preview(&arguments)
-                ));
-            }
+            let arguments = call.arguments();
+            let kind = match self.ledger.observe(call, &arguments) {
+                Novelty::None => continue,
+                Novelty::NewCall => "new tool call",
+                Novelty::NewContent => "new content from tool call",
+            };
+            novel = Some(format!(
+                "turn {turn}: {kind} {} {}",
+                call.name,
+                preview(&arguments)
+            ));
         }
         let Some(activity) = novel else {
             return false;
@@ -127,15 +134,21 @@ impl ProgressWindow {
     pub(super) fn stall_error(&self, phase: &str, turn: u32) -> anyhow::Error {
         anyhow::anyhow!(
             "subagent timed out after {}s without progress {phase} at turn {turn}: no new tool \
-             call and no new assistant text for its no-progress window of {}s, which renews \
-             on novel activity only; {}",
+             call, no read of content not already given and no new assistant text for its \
+             no-progress window of {}s, which renews on novel activity only; {}",
             self.renewed_at.elapsed().as_secs(),
             self.window.map_or(0, |window| window.as_secs()),
-            format!(
-                "{}; refused tool calls: {}",
-                archon_tools::subagent_dispatch_clock::last_progress_text(self.last.as_deref()),
-                self.refused_calls
-            ),
+            self.progress_text(),
+        )
+    }
+
+    /// The last novel activity (which names its turn) and the refused calls,
+    /// in the words the host's cut uses (Issue 382).
+    pub(super) fn progress_text(&self) -> String {
+        format!(
+            "{}; refused tool calls: {}",
+            archon_tools::subagent_dispatch_clock::last_progress_text(self.last.as_deref()),
+            self.refused_calls
         )
     }
 }

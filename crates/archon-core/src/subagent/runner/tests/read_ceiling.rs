@@ -60,6 +60,12 @@ async fn ceiling_withdraws_inspection_tools_and_runner_returns_the_answer() {
     assert!(next_messages.contains(
         "Inspection tools are no longer available in this call; answer now with your deliverable from what you have read."
     ));
+    // The ceiling asks for the task's own deliverable in its own format,
+    // never a report about the reading (R8 body author).
+    assert!(
+        next_messages.contains(archon_tools::workflow_read_guard::ANSWER_IN_TASK_FORMAT),
+        "{next_messages}"
+    );
 }
 
 #[tokio::test]

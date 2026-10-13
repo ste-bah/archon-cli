@@ -246,7 +246,10 @@ async fn activity_without_novel_progress_never_renews_the_window() {
     .await;
     let (cut, last) = output.expect_err("a busy loop is cut");
     assert_eq!(cut, DispatchCut::Execution(secs(100)));
-    assert_eq!(last, "last novel activity: turn 1: new tool call Read a.rs");
+    assert_eq!(
+        last,
+        "last novel activity: turn 1: new tool call Read a.rs; refused tool calls: 0"
+    );
     assert_eq!(
         last_progress_text(None),
         "last novel activity: none since the window opened"
@@ -271,4 +274,29 @@ async fn a_child_session_never_stops_its_parents_clocks() {
     })
     .await;
     assert!(slot_wait("parent").is_none(), "outside the scope");
+}
+
+/// Issue 382: the host's no-progress cut names the refused calls, which
+/// renew nothing, beside the last novel activity and its turn.
+#[tokio::test(start_paused = true)]
+async fn the_host_cut_names_the_refused_calls_and_the_last_novel_turn() {
+    let output = within_named(secs(100), async {
+        let call = current_call().expect("the call clock is installed");
+        host_progress_scope("refusing", call, async {
+            assert!(admitted("refusing"));
+            progress("turn 7: new tool call Read a.rs");
+            loop {
+                tokio::time::sleep(secs(10)).await;
+                refused();
+            }
+        })
+        .await
+    })
+    .await;
+    let (cut, text) = output.expect_err("refusals are not progress");
+    assert_eq!(cut, DispatchCut::Execution(secs(100)));
+    assert_eq!(
+        text,
+        "last novel activity: turn 7: new tool call Read a.rs; refused tool calls: 10"
+    );
 }

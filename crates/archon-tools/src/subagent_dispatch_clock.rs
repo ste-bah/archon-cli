@@ -21,7 +21,10 @@
 //! or assistant text it has not produced before. Model output that repeats
 //! itself, a repeated identical tool call and a tool round ending are not
 //! progress, so a session that loops is cut one window after its last novel
-//! activity, which the cut names ([`DispatchClock::last_progress`]).
+//! activity, which the cut names ([`DispatchClock::last_progress`]), together
+//! with the tool calls the guards refused meanwhile ([`refused`], Issue 382):
+//! the host cut usually fires before the runner's own stop, so the count must
+//! be on the host's record too.
 //!
 //! A pending clock never leaves a call unbounded. Time before admission that
 //! is not a reported slot wait is counted apart, and a call whose executor
@@ -29,6 +32,7 @@
 //! diagnosis ([`DispatchCut::NeverAdmitted`]): a missing admission report is
 //! named, never silently timed from dispatch.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -118,6 +122,8 @@ pub struct DispatchClock {
     state: watch::Sender<State>,
     /// The latest novel activity that renewed the window.
     last: Mutex<Option<String>>,
+    /// Tool calls a guard refused in the call's sessions (Issue 382).
+    refused: AtomicU64,
 }
 
 impl DispatchClock {
@@ -134,6 +140,7 @@ impl DispatchClock {
         Arc::new(Self {
             state,
             last: Mutex::new(None),
+            refused: AtomicU64::new(0),
         })
     }
 
@@ -182,6 +189,26 @@ impl DispatchClock {
     /// The latest novel activity that renewed the window, if any did.
     pub fn last_progress(&self) -> Option<String> {
         self.last.lock().ok().and_then(|last| last.clone())
+    }
+
+    /// A tool call a guard refused: never progress, but counted for the cut.
+    pub fn refused(&self) {
+        self.refused.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Tool calls refused so far in the call's sessions.
+    pub fn refused_calls(&self) -> u64 {
+        self.refused.load(Ordering::Relaxed)
+    }
+
+    /// What a no-progress cut of this clock says after its own words: the
+    /// last novel activity (which names its turn) and the refused calls.
+    pub fn cut_text(&self) -> String {
+        format!(
+            "{}; refused tool calls: {}",
+            last_progress_text(self.last_progress().as_deref()),
+            self.refused_calls()
+        )
     }
 
     /// Stop the clock until the returned guard drops.
@@ -329,7 +356,8 @@ pub async fn within<T>(
     within_named(limit, work).await.map_err(|(cut, _)| cut)
 }
 
-/// [`within`], with the cut's last novel activity ([`last_progress_text`]).
+/// [`within`], with the cut's last novel activity and refused-call count
+/// ([`DispatchClock::cut_text`]).
 pub async fn within_named<T>(
     limit: Duration,
     work: impl std::future::Future<Output = T>,
@@ -339,7 +367,7 @@ pub async fn within_named<T>(
     tokio::select! {
         biased;
         output = work => Ok(output),
-        cut = clock.cut(limit) => Err((cut, last_progress_text(clock.last_progress().as_deref()))),
+        cut = clock.cut(limit) => Err((cut, clock.cut_text())),
     }
 }
 
@@ -370,6 +398,14 @@ pub fn progress(activity: &str) {
             .clocks
             .iter()
             .for_each(|clock| clock.progress(activity));
+    }
+}
+
+/// Count a tool call a guard refused on every clock of the current session
+/// (Issue 382). Not progress: it renews nothing.
+pub fn refused() {
+    if let Ok(session) = SESSION.try_with(Clone::clone) {
+        session.clocks.iter().for_each(|clock| clock.refused());
     }
 }
 

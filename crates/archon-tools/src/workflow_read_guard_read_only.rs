@@ -44,9 +44,27 @@ fn command(input: &Value) -> &str {
 /// inspection calls, which no longer moves.
 pub(super) fn refusal(inspections: u32) -> String {
     format!(
-        "{READ_CEILING_MARKER} {inspections} inspection calls; answer now with your deliverable from what you have read. Further Read, Grep, Glob and shell inspection calls are refused; build and test commands still run."
+        "{READ_CEILING_MARKER} {inspections} inspection calls; answer now with your deliverable from what you have read. {ANSWER_IN_TASK_FORMAT} Further Read, Grep, Glob and shell inspection calls are refused; build and test commands still run."
     )
 }
+
+/// What every "answer now" instruction adds: the answer is the task's own
+/// deliverable in the task's own format. Live, a body author told only to
+/// "answer from what you have read" returned a report about its reading in
+/// place of the file its task required, and the attempt was lost.
+pub const ANSWER_IN_TASK_FORMAT: &str = "Your answer is the deliverable your task specifies, in exactly the format the task specifies: when the task says your reply must be a file or a document, reply with that file or document and nothing else. Do not reply with a report about your reading, the inspection limit or what you could not check; where something is unverified, apply the task's own rule for it.";
+
+/// The refusal every inspection call gets once inspection was withdrawn for
+/// repeated results (Issue-396).
+pub(super) fn withdrawn_refusal(reason: &str) -> String {
+    format!(
+        "{INSPECTION_WITHDRAWN_MARKER} {reason} Answer now with your deliverable from what you have read. {ANSWER_IN_TASK_FORMAT} Further Read, Grep, Glob and shell inspection calls are refused; build and test commands still run."
+    )
+}
+
+/// The prefix of the refusal after a withdrawal for repeated results, kept
+/// apart from [`READ_CEILING_MARKER`]: no count was reached.
+pub const INSPECTION_WITHDRAWN_MARKER: &str = "inspection withdrawn:";
 
 /// The one-line nudge appended to an inspection result from the soft ceiling
 /// on. Without a hard ceiling there is nothing to warn of past it.
@@ -72,6 +90,9 @@ pub(super) fn admit(
     if !inspection_call(name, command(input)) {
         return None;
     }
+    if let Some(reason) = &state.inspection_withdrawn {
+        return Some(withdrawn_refusal(reason));
+    }
     let hard = guard.read_only_hard_ceiling;
     if hard > 0 && state.read_only_inspections >= hard {
         return Some(refusal(state.read_only_inspections));
@@ -89,6 +110,39 @@ impl WorkflowReadGuard {
             return false;
         }
         self.read_only_inspections() >= self.read_only_hard_ceiling
+    }
+
+    /// Whether this read-only call may no longer inspect: its hard ceiling
+    /// is reached, or inspection was withdrawn (Issue-396). The runner then
+    /// withdraws the inspection tools and asks for the deliverable.
+    pub fn inspection_withdrawn(&self) -> bool {
+        self.read_only_ceiling_reached() || self.withdrawal_reason().is_some()
+    }
+
+    /// Why inspection was withdrawn before the hard ceiling, if it was.
+    pub fn withdrawal_reason(&self) -> Option<String> {
+        if !self.read_only() {
+            return None;
+        }
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .inspection_withdrawn
+            .clone()
+    }
+
+    /// Withdraw inspection from a read-only call that keeps getting the same
+    /// results (Issue-396): its deliverable is its final message, so it is
+    /// asked for it rather than failed. `true` only when this call withdrew
+    /// it; a write-capable guard, or a call already withdrawn (by this or
+    /// by its hard ceiling), returns `false` and the caller keeps its stop.
+    pub fn withdraw_inspection(&self, reason: &str) -> bool {
+        if !self.read_only() || self.inspection_withdrawn() {
+            return false;
+        }
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.inspection_withdrawn = Some(reason.to_string());
+        true
     }
 
     /// Tool names the hard ceiling refuses independent of input. Bash is

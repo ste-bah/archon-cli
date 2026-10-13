@@ -279,7 +279,7 @@ fn request_tools(runner: &SubagentRunner) -> archon_llm::provider::SharedTools {
         .tool_context
         .workflow_read_guard
         .as_ref()
-        .is_some_and(|guard| guard.read_only_ceiling_reached())
+        .is_some_and(|guard| guard.inspection_withdrawn())
     {
         return archon_llm::provider::SharedTools::clone(&runner.tool_definitions);
     }

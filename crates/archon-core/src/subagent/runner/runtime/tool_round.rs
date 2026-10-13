@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 
+use super::progress_novelty::ObservedCall;
 use super::tool_helpers::{is_guard_refusal, tool_allows_empty_input};
 use super::*;
 
@@ -18,8 +19,12 @@ struct PreparedTool {
     id: String,
     name: String,
     input: Result<serde_json::Value, String>,
+    /// The input as the model sent it, for the no-progress window.
+    raw_input: String,
 }
 
+/// Run one tool round and record it. Returns how each call ended, with the
+/// result text the model received, for the no-progress window (Issue 391).
 pub(super) async fn replay_tool_round(
     runner: &SubagentRunner,
     messages: &mut MessageHistory,
@@ -27,24 +32,34 @@ pub(super) async fn replay_tool_round(
     thinking_blocks: BTreeMap<u32, PendingThinkingBlock>,
     pending_tools: Vec<PendingTool>,
     round_cancel: tokio_util::sync::CancellationToken,
-) -> Vec<bool> {
+) -> Vec<ObservedCall> {
     let prepared = prepare_tools_for_execution(runner, &pending_tools);
     record_assistant_tool_use_message(runner, messages, text_content, thinking_blocks, &prepared);
     let exec_results = execute_prepared_tools(runner, &prepared, round_cancel).await;
-    let refused = prepared
-        .iter()
-        .zip(&exec_results)
-        .map(|(_, result)| is_guard_refusal(result))
-        .collect();
+    let refused: Vec<bool> = exec_results.iter().map(is_guard_refusal).collect();
     // Before the results are recorded, not after: recording is what writes the
     // text into the history and the transcript, and an unrouted SendMessage
     // writes its own request envelope there as though it had been delivered.
     let exec_results = route_send_message_results(runner, &prepared, exec_results).await;
-    record_tool_results(runner, messages, &prepared, exec_results);
+    let errors: Vec<bool> = exec_results.iter().map(|result| result.is_error).collect();
+    let delivered = record_tool_results(runner, messages, &prepared, exec_results);
     drain_pending_user_turns(runner, messages).await;
     super::message_history::drain_repeat_tool_reminders(runner, messages);
     super::message_history::deliver_focused_test_completion(runner, messages);
-    refused
+    prepared
+        .into_iter()
+        .zip(refused)
+        .zip(errors)
+        .zip(delivered)
+        .map(|(((tool, refused), is_error), delivered)| ObservedCall {
+            name: tool.name,
+            input: tool.input.ok(),
+            raw_input: tool.raw_input,
+            refused,
+            is_error,
+            delivered,
+        })
+        .collect()
 }
 
 /// Deliver any `SendMessage` this round produced.
@@ -237,6 +252,7 @@ fn prepare_tools_for_execution(
             id: tool.id.clone(),
             name: tool.name.clone(),
             input,
+            raw_input: tool.input_json.clone(),
         });
     }
     prepared
@@ -296,12 +312,14 @@ async fn execute_prepared_tools(
     join_all(exec_futures).await
 }
 
+/// Record the round's results; returns each result's text as the model
+/// receives it (after the provider cap).
 fn record_tool_results(
     runner: &SubagentRunner,
     messages: &mut MessageHistory,
     prepared: &[PreparedTool],
     exec_results: Vec<ToolResult>,
-) {
+) -> Vec<String> {
     for prepared_tool in prepared {
         record_tool_progress(runner, prepared_tool);
     }
@@ -322,7 +340,17 @@ fn record_tool_results(
         ),
     );
     runner.record_transcript(&raw_transcript);
+    let delivered = canonical["content"]
+        .as_array()
+        .map(|results| {
+            results
+                .iter()
+                .map(|result| result["content"].as_str().unwrap_or_default().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
     messages.push(canonical);
+    delivered
 }
 
 fn build_tool_result_messages(
@@ -399,6 +427,7 @@ mod result_boundary_tests {
             id: "tool-1".into(),
             name: "Read".into(),
             input: Ok(serde_json::json!({})),
+            raw_input: "{}".into(),
         }
     }
 
@@ -466,6 +495,7 @@ mod result_boundary_tests {
             id: "tool-9".into(),
             name: "Read".into(),
             input: Err("tool input was not valid JSON".into()),
+            raw_input: "{not json".into(),
         };
 
         assert_eq!(
