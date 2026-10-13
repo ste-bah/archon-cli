@@ -236,7 +236,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
-        sources_digest: "df7bcef01019b763e214820c41065e58d8f13fe355f659b8abbe84f0b3a6172a",
+        // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
+        sources_digest: "88fbfd373091989dcf68d46818cc455e6f37b90c4827611600f8d891d2c7d599",
         build_bound: false,
     },
     CapabilityLogic {
@@ -251,7 +252,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
-        sources_digest: "df7bcef01019b763e214820c41065e58d8f13fe355f659b8abbe84f0b3a6172a",
+        // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
+        sources_digest: "88fbfd373091989dcf68d46818cc455e6f37b90c4827611600f8d891d2c7d599",
         build_bound: false,
     },
     CapabilityLogic {
@@ -271,7 +273,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
-        sources_digest: "771d5f0e009ff4d4fffb9cc6421a1fac4c2cf6434b541af698e9f22cd367fe39",
+        // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
+        sources_digest: "dd14a98fc276247bc4affab98ae044d805936fa8425dbd591c39326cedb84121",
         build_bound: false,
     },
     CapabilityLogic {
@@ -289,7 +292,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
-        sources_digest: "771d5f0e009ff4d4fffb9cc6421a1fac4c2cf6434b541af698e9f22cd367fe39",
+        // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
+        sources_digest: "dd14a98fc276247bc4affab98ae044d805936fa8425dbd591c39326cedb84121",
         build_bound: false,
     },
     CapabilityLogic {
@@ -318,7 +322,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: the repository claim parser changed; acceptance verification verdicts do not read claims.
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "16a7023279eac8618cbdb8b2ee6ddc192542796d543f0e1132a6d99ddcbb529a",
+        // #386 re-pin only: stdin spill and progress-event spill code in this closure; verification takes no stdin and its verdicts are unchanged.
+        sources_digest: "1c4ba5850aeaba4f8954c299cbfa7dd338820dde806e4ef76d63de9dda8ab4af",
         build_bound: true,
     },
     CapabilityLogic {
@@ -332,7 +337,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "16a7023279eac8618cbdb8b2ee6ddc192542796d543f0e1132a6d99ddcbb529a",
+        // #386 re-pin only: stdin spill and progress-event spill code in this closure; verification takes no stdin and its verdicts are unchanged.
+        sources_digest: "1c4ba5850aeaba4f8954c299cbfa7dd338820dde806e4ef76d63de9dda8ab4af",
         build_bound: true,
     },
 ];

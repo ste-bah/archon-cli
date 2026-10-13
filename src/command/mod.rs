@@ -392,6 +392,7 @@ pub(crate) mod workflow_host_command_postcondition;
 #[cfg(test)]
 mod workflow_host_command_publication_tests;
 pub(crate) mod workflow_host_command_publish;
+pub(crate) mod workflow_host_command_stdin_spill;
 pub(crate) mod workflow_host_command_supervisor;
 pub(crate) mod workflow_host_command_teardown_latch;
 #[cfg(test)]

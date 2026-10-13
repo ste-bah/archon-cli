@@ -405,15 +405,10 @@ pub(crate) fn resolve_host_command(
                 capability.id
             )));
         }
-        (StdinDelivery::Utf8Bytes, Some(value)) => {
-            if value.len() as u64 > capability.max_stdin_bytes {
-                return Err(WorkflowError::SpecInvalid(format!(
-                    "host command capability '{}' stdin exceeds {} bytes",
-                    capability.id, capability.max_stdin_bytes
-                )));
-            }
-            Some(value.as_bytes().to_vec())
-        }
+        // Issue 386: `max_stdin_bytes` bounds what the pipe carries inline.
+        // A longer candidate is spilled per attempt by the executor
+        // (`spill_oversized_stdin`), never refused here.
+        (StdinDelivery::Utf8Bytes, Some(value)) => Some(value.as_bytes().to_vec()),
     };
     let environment =
         super::workflow_host_environment::resolve(&capability.environment_profile, context);

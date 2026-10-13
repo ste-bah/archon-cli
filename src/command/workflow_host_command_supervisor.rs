@@ -14,6 +14,7 @@ use super::workflow_host_command_catalog::ResolvedHostCommand;
 use super::workflow_host_command_teardown_latch::{TeardownLatch, TeardownToken};
 #[path = "workflow_host_command_supervisor_io.rs"]
 mod io;
+pub(crate) use io::create_spill_directories;
 use io::{SupervisorEvent, abort_stdin, drain_pipe, finish_pipe_tasks, spawn_stdin};
 #[path = "workflow_host_command_supervisor_guard.rs"]
 mod guard;

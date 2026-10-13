@@ -32,16 +32,18 @@ fn host_command_rejects_empty_command_id() {
 }
 
 #[test]
-fn host_command_accepts_only_bounded_stdin() {
+fn host_command_keeps_stdin_past_the_inline_bound_for_the_host_to_spill() {
     let request = HostCommandRequest::new("task-set-lint", Some("candidate".into())).unwrap();
     assert_eq!(request.command_id, "task-set-lint");
     assert_eq!(request.stdin.as_deref(), Some("candidate"));
     assert_eq!(request.target, None);
 
+    // Issue 386: an oversized stdin no longer fails the run at the bridge;
+    // the request keeps every byte, which the host spills to the run.
     let oversized = "x".repeat(HostCommandRequest::MAX_STDIN_BYTES + 1);
-    let error = HostCommandRequest::new("task-set-lint", Some(oversized))
-        .expect_err("oversized stdin must fail");
-    assert!(error.to_string().contains("stdin exceeds"));
+    let request = HostCommandRequest::new("task-set-lint", Some(oversized.clone()))
+        .expect("oversized stdin is kept for the host to spill");
+    assert_eq!(request.stdin.as_deref(), Some(oversized.as_str()));
 }
 
 #[test]

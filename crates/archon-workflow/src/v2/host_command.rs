@@ -1,6 +1,6 @@
 //! Provider-neutral contracts for trusted host command capabilities.
 //!
-//! A workflow script selects only a symbolic capability and bounded stdin.
+//! A workflow script selects only a symbolic capability and its stdin.
 //! Executable, argv, cwd, environment, limits, destinations, write sets, and
 //! reuse identity remain host-owned.
 
@@ -23,7 +23,9 @@ pub struct HostCommandRequest {
 }
 
 impl HostCommandRequest {
-    /// Absolute bridge bound. Catalog capabilities may impose a smaller limit.
+    /// The most any capability takes inline through its pipe; a catalog
+    /// capability may take less. A longer stdin is not refused: the host
+    /// spills it to the run and the child reads it from there (Issue 386).
     pub const MAX_STDIN_BYTES: usize = 2 * 1024 * 1024;
 
     pub fn new(command_id: impl Into<String>, stdin: Option<String>) -> WorkflowResult<Self> {
@@ -32,15 +34,6 @@ impl HostCommandRequest {
             return Err(WorkflowError::SpecInvalid(
                 "hostCommand requires a non-empty command capability id".to_string(),
             ));
-        }
-        if stdin
-            .as_ref()
-            .is_some_and(|value| value.len() > Self::MAX_STDIN_BYTES)
-        {
-            return Err(WorkflowError::SpecInvalid(format!(
-                "hostCommand stdin exceeds the {} byte bridge limit",
-                Self::MAX_STDIN_BYTES
-            )));
         }
         Ok(Self {
             command_id,

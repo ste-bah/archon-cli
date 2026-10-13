@@ -3,10 +3,9 @@
 //! that envelope, and its bounded candidate stdin. Split out of
 //! `workflow_freeze_cli.rs` to hold the 500-line ceiling.
 
-use std::io::Read;
 use std::path::Path;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::Result;
 
 use super::StagedArgs;
 
@@ -114,14 +113,12 @@ pub(super) fn write_staged_manifest(
     Ok(())
 }
 
-pub(super) fn read_bounded_stdin(limit: usize) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    std::io::stdin()
-        .take(limit as u64 + 1)
-        .read_to_end(&mut bytes)
-        .context("reading trusted candidate stdin")?;
-    if bytes.len() > limit {
-        return Err(anyhow!("candidate stdin exceeds {limit} bytes"));
-    }
-    Ok(bytes)
+/// The candidate: stdin, or the run spill a bounded view on it names
+/// (Issue 386, `workflow_host_command_stdin_spill`).
+pub(super) fn read_bounded_stdin(limit: usize, staging_root: &Path) -> Result<Vec<u8>> {
+    crate::command::workflow_host_command_stdin_spill::read_candidate(
+        std::io::stdin(),
+        limit,
+        staging_root,
+    )
 }

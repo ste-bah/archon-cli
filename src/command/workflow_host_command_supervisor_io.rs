@@ -103,7 +103,7 @@ pub(super) fn spill_file(
 }
 
 /// Create each directory below the run's spill root without following links.
-fn create_spill_directories(directory: &std::path::Path) -> WorkflowResult<()> {
+pub(crate) fn create_spill_directories(directory: &std::path::Path) -> WorkflowResult<()> {
     let results_root = directory
         .ancestors()
         .find(|path| {
