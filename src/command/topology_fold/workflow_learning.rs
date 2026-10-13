@@ -266,10 +266,6 @@ pub(crate) fn plan_dispatch(records: &[WorkflowLearningRecord]) -> DispatchPlan 
 /// Replay every planned call against a learning stack. Returns how many the
 /// learning stack accepted; a call whose episode could not be stored is
 /// logged and not counted.
-pub(crate) fn apply_dispatch(plan: &DispatchPlan, learning: &mut LearningIntegration) -> usize {
-    apply_dispatch_each(plan, learning, &mut |_| {})
-}
-
 fn apply_dispatch_each(
     plan: &DispatchPlan,
     learning: &mut LearningIntegration,
