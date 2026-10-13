@@ -131,7 +131,6 @@ fault_matrix! {
     pause_mid_set_gate_fidelity: PauseMidCall "fidelity" 3;
     #[cfg(unix)]
     kill_mid_acceptance_author: KillMidCall "acceptance" 1;
-    #[ignore = "defect #422: SIGKILL of the run during a host command leaves survivors_unknown, so the resume refuses and asks for a manual step"]
     #[cfg(unix)]
     kill_mid_freeze_acceptance_judge: KillMidCall "judge" 1;
     #[cfg(unix)]
@@ -139,10 +138,8 @@ fault_matrix! {
     #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     kill_mid_body_author: KillMidCall "body" 1;
-    #[ignore = "defect #422: SIGKILL of the run during a host command leaves survivors_unknown, so the resume refuses and asks for a manual step"]
     #[cfg(unix)]
     kill_mid_body_gate_fidelity: KillMidCall "fidelity" 1;
-    #[ignore = "defect #422: SIGKILL of the run during a host command leaves survivors_unknown, so the resume refuses and asks for a manual step"]
     #[cfg(unix)]
     kill_mid_set_gate_fidelity: KillMidCall "fidelity" 3;
     #[cfg(unix)]

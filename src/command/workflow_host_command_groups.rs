@@ -347,6 +347,8 @@ fn left_groups_impl(
             record = marker.record;
         }
         record.file = Some(path.clone());
+        // Issue 422: a killed executor left its marker unsettled; probe its scope.
+        let crashed = owner == Owner::Exited && marked && !authoritative && !record.stalled;
         match owner {
             // A marker its owner can no longer settle: the record is judged
             // by what it names (a crash), or by its stall if it was kept.
@@ -363,7 +365,7 @@ fn left_groups_impl(
             record.stalled = true;
             record.survivors_unknown = true;
         }
-        let probe = record_running(&record);
+        let probe = crash::probe(&mut record, crashed);
         if probe.is_none() {
             record.survivors_unknown = true;
         }
@@ -424,6 +426,9 @@ fn remove_healed(path: &Path) -> anyhow::Result<()> {
         )),
     }
 }
+
+#[path = "workflow_host_command_groups_crash.rs"]
+mod crash;
 
 #[path = "workflow_host_command_groups_stalled.rs"]
 mod stalled;

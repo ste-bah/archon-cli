@@ -98,12 +98,11 @@ fn crash_before_keep_reads_identities_from_the_supervision_marker() {
     drop(guard);
 }
 
-#[test]
-fn crash_mid_freeze_keeps_incomplete_marker_scope_unknown() {
-    let run = tempfile::tempdir().unwrap();
-    let dir = run.path().join(GROUP_RECORDS_DIR);
-    let id = ended_group();
-    let guard = record_group(&dir, id, id, None, None, "cmd").unwrap();
+/// The durable state an executor SIGKILLed mid-command leaves: its record
+/// and an unsettled supervision marker (survivors unknown), written by a
+/// host that no longer runs.
+fn crashed_record(dir: &Path, pgid: u32, session: Option<u32>) -> PathBuf {
+    let guard = record_group(dir, pgid, pgid, session, None, "cmd").unwrap();
     let path = guard.path().to_path_buf();
     let mut record = read(&path);
     record.host_pid = ended_group();
@@ -116,12 +115,138 @@ fn crash_mid_freeze_keeps_incomplete_marker_scope_unknown() {
     )
     .unwrap();
     owner::release(&path.with_extension("pending"));
-    let result = require_no_running_groups(run.path(), "run");
-    drop(guard);
+    std::mem::forget(guard);
+    path
+}
+
+// Issue 422: a resume after SIGKILL proves the recorded scope empty itself.
+#[test]
+fn crash_mid_command_heals_when_the_recorded_scope_is_proven_empty() {
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    let id = ended_group();
+    let path = crashed_record(&dir, id, Some(id));
+    let ended = require_no_running_groups(run.path(), "run")
+        .expect("a crash whose recorded scope is empty must resume without a manual step");
+    assert_eq!(ended.len(), 1, "{ended:?}");
+    assert_eq!(ended[0].pgid, id);
+    assert!(!ended[0].survivors_unknown, "{:?}", ended[0]);
+    assert!(!path.exists(), "the healed record stays");
     assert!(
-        result.is_err(),
-        "an incomplete freeze was healed after its owner exited"
+        !path.with_extension("pending").exists(),
+        "the healed marker stays"
     );
+}
+
+#[test]
+fn crash_mid_command_refuses_naming_a_live_member_of_its_group() {
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    let (mut leader, (pgid, start)) = group_leader();
+    let path = crashed_record(&dir, pgid, None);
+    let refused = require_no_running_groups(run.path(), "run");
+    let _ = leader.kill();
+    let _ = leader.wait();
+    let note = refused.unwrap_err().to_string();
+    assert!(
+        note.contains(&format!("pid {pgid} (creation time {start};")),
+        "the refusal must name the live member by pid and start time: {note}"
+    );
+    assert!(!note.contains("verify by hand"), "{note}");
+    assert!(
+        path.exists(),
+        "a refused record must stay for the next resume"
+    );
+    let start_wait = std::time::Instant::now();
+    while require_no_running_groups(run.path(), "run").is_err() {
+        assert!(
+            start_wait.elapsed() < std::time::Duration::from_secs(5),
+            "the record did not heal once its member exited"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn crash_mid_command_heals_when_its_leader_pid_names_another_process() {
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    // A live process now holds the recorded leader pid, with another start
+    // time: the kernel never reuses a pid while its group or session lives.
+    let (mut stranger, (pid, start)) = sleeper();
+    let path = crashed_record(&dir, pid, Some(pid));
+    let mut record = read(&path);
+    record.leader_start = Some(start + 1);
+    std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+    record.survivors_unknown = true;
+    std::fs::write(
+        path.with_extension("pending"),
+        guard::supervised_marker(&record).unwrap(),
+    )
+    .unwrap();
+    let result = require_no_running_groups(run.path(), "run");
+    let _ = stranger.kill();
+    let _ = stranger.wait();
+    let ended = result.expect("a reused leader pid is not a live member of the recorded scope");
+    assert_eq!(ended.len(), 1, "{ended:?}");
+}
+
+#[test]
+fn crash_mid_command_refuses_naming_a_live_pinned_descendant() {
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    let id = ended_group();
+    let (mut escaped, identity) = sleeper();
+    let path = crashed_record(&dir, id, Some(id));
+    let mut record = read(&path);
+    record.survivors = vec![identity];
+    record.survivors_unknown = true;
+    std::fs::write(
+        path.with_extension("pending"),
+        guard::supervised_marker(&record).unwrap(),
+    )
+    .unwrap();
+    let refused = require_no_running_groups(run.path(), "run");
+    let _ = escaped.kill();
+    let _ = escaped.wait();
+    let note = refused.unwrap_err().to_string();
+    assert!(
+        note.contains(&format!(
+            "pid {} (creation time {};",
+            identity.0, identity.1
+        )),
+        "{note}"
+    );
+}
+
+#[test]
+fn crash_with_an_unreadable_record_keeps_the_manual_refusal() {
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    let id = ended_group();
+    let path = crashed_record(&dir, id, Some(id));
+    std::fs::write(&path, b"{not json").unwrap();
+    std::fs::remove_file(path.with_extension("pending")).unwrap();
+    let note = require_no_running_groups(run.path(), "run")
+        .unwrap_err()
+        .to_string();
+    assert!(note.contains("is unreadable"), "{note}");
+    assert!(note.contains("verify by hand"), "{note}");
+}
+
+#[test]
+fn a_settled_stall_with_unknown_survivors_still_refuses_after_owner_exit() {
+    let run = tempfile::tempdir().unwrap();
+    let dir = run.path().join(GROUP_RECORDS_DIR);
+    let id = ended_group();
+    let guard = record_group(&dir, id, id, Some(id), None, "cmd").unwrap();
+    guard.keep(None);
+    // Its writer is gone, as after the crash of a stalled executor.
+    owned_by(&dir, ended_group());
+    let note = require_no_running_groups(run.path(), "run")
+        .unwrap_err()
+        .to_string();
+    assert!(note.contains("unknown survivors"), "{note}");
 }
 
 #[test]

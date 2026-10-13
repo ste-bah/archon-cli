@@ -235,7 +235,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        sources_digest: "e3dfb00b17a57484a5d5836084ac22b99ea0cc461bc5a976dc48c17a365db911",
+        // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
+        sources_digest: "df7bcef01019b763e214820c41065e58d8f13fe355f659b8abbe84f0b3a6172a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -249,7 +250,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        sources_digest: "e3dfb00b17a57484a5d5836084ac22b99ea0cc461bc5a976dc48c17a365db911",
+        // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
+        sources_digest: "df7bcef01019b763e214820c41065e58d8f13fe355f659b8abbe84f0b3a6172a",
         build_bound: false,
     },
     CapabilityLogic {
