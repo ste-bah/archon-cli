@@ -49,8 +49,11 @@ use crate::run::{ArtifactRef, RunStatus, StageStatus, WorkflowRun};
 use crate::spec::{StageKind, StageSpec};
 use crate::store::WorkflowStore;
 
-/// File name of the single record stream, under `<run>/learning/`.
-pub const LEARNING_RECORDS_FILE: &str = "records.jsonl";
+/// File name of the single record stream, under `<run>/learning/`. Private:
+/// every reader and writer goes through [`learning_records_path`], so no
+/// caller can join the name to another directory (#284: lessons were appended
+/// to `<run>/records.jsonl` while the dispatcher read `<run>/learning/`).
+const LEARNING_RECORDS_FILE: &str = "records.jsonl";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -186,7 +189,7 @@ impl WorkflowLearningSink {
         let records = learning_records(run);
         let learning_dir = learning_dir(&self.store, &run.id);
         std::fs::create_dir_all(&learning_dir).map_err(|e| WorkflowError::io(&learning_dir, e))?;
-        write_jsonl(&learning_dir.join(LEARNING_RECORDS_FILE), &records)?;
+        write_jsonl(&learning_records_path(&self.store, &run.id), &records)?;
 
         // From the v2 call records, not from `records` above: a curated lesson
         // has to key on what a call *did*, and the stage records cannot say —

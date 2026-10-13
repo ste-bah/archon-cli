@@ -11,8 +11,13 @@
 //! replaces it with the declared set -- recording the authored list beside
 //! it so the substitution is visible.
 //!
-//! Left alone: an item with no task, or whose tasks declare no command; a
-//! host-planned residual round or an escalated round (their commands are the
+//! A write item whose known tasks declare no command at all runs none: its
+//! list becomes empty, and the authored copy is kept beside it under
+//! [`AUTHORED_FOCUSED_TESTS_KEY`], because the declared set is empty and an
+//! invented command would otherwise reach the baseline and the branch.
+//!
+//! Left alone: an item with no task in the universe; a read-only item whose
+//! tasks declare no command; a host-planned residual round or an escalated round (their commands are the
 //! host's plan for exactly those files); and a read-only goal verifier that
 //! carries no command at all (it states `verification_requirements`
 //! instead, and the host demotes one that runs nothing).
@@ -67,20 +72,19 @@ fn reconcile(
     }
     let task_ids = strings(item.get("canonical_task_ids"));
     let mut declared: Vec<String> = Vec::new();
+    let mut known = false;
     for task in universe
         .tasks
         .iter()
         .filter(|task| task_ids.contains(&task.canonical_task_id))
     {
+        known = true;
         for command in &task.focused_tests {
             let command = command.trim().to_string();
             if !command.is_empty() && !declared.contains(&command) {
                 declared.push(command);
             }
         }
-    }
-    if declared.is_empty() {
-        return;
     }
     let authored = FOCUSED_KEYS
         .iter()
@@ -89,6 +93,21 @@ fn reconcile(
         .unwrap_or_default();
     let writes =
         item.get("work_type").and_then(serde_json::Value::as_str) == Some("implementation");
+    if declared.is_empty() {
+        // The tasks declare nothing, so a write item runs nothing: any
+        // authored command was invented.
+        if known && writes && !authored.is_empty() {
+            item.insert(
+                AUTHORED_FOCUSED_TESTS_KEY.to_string(),
+                serde_json::json!(authored),
+            );
+            for key in FOCUSED_KEYS {
+                item.remove(key);
+            }
+            item.insert("focused_verification".to_string(), serde_json::json!([]));
+        }
+        return;
+    }
     let goal = !strings(item.get("verification_requirements")).is_empty();
     if !writes && (authored.is_empty() || goal) {
         // A goal verifier: it proves its requirements with commands of its

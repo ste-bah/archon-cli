@@ -21,19 +21,23 @@
 //! dropped — a hook that quietly does nothing is how `learning_hooks` became
 //! dead in the first place.
 //!
-//! # Why `on_agent_start` is called too
+//! # One recorded outcome per record, keyed by the record
 //!
-//! `LearningIntegration::on_agent_complete` is a no-op on its own: it reads
-//! `active_trajectories` and `active_agent_contexts`, both of which are
-//! populated only by `on_agent_start`. Calling completion alone would dispatch
-//! nothing at all. So each record is replayed as a start/complete pair against
-//! the same instance, which is what actually produces a SONA feedback signal
-//! and a DESC episode.
+//! Each record is replayed through `LearningIntegration::record_outcome`: the
+//! SONA feedback and the DESC episode a start/complete pair would produce,
+//! without the injection and ReasoningBank lookups a starting agent uses
+//! (nothing here reads that context; the injection query alone scanned every
+//! stored episode once per record). The episode is keyed by the record's run
+//! and stage id ([`episode_key`]), so a record delivered again -- a resume, a
+//! retried spool, a fold killed half way -- replaces its episode instead of
+//! adding a duplicate.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use archon_pipeline::learning::integration::{LearningIntegration, LearningIntegrationConfig};
+use archon_pipeline::learning::integration::{
+    LearningIntegration, LearningIntegrationConfig, RecordedOutcome,
+};
 use archon_workflow::{WorkflowLearningRecord, WorkflowStore};
 use std::io::Write;
 
@@ -46,6 +50,10 @@ const INTEGRATION_HOOKS: &[&str] = &["sona", "reasoningbank", "desc"];
 /// One replayed agent outcome.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DispatchCall {
+    /// The record's stage id, so a caller can track what was delivered.
+    pub stage_id: String,
+    /// The DESC episode key: stable for the record ([`episode_key`]).
+    pub episode_id: String,
     pub agent: String,
     pub phase: String,
     pub task: String,
@@ -99,12 +107,15 @@ pub(crate) fn bridge_workflow_learning_with_records(
     store: &WorkflowStore,
     run_id: &str,
     extra: &[WorkflowLearningRecord],
+    on_delivered: &mut dyn FnMut(&DispatchCall),
 ) -> LearningDispatchOutcome {
     write_run_records(store, run_id);
     if !extra.is_empty() {
-        let path = store
-            .run_dir(run_id)
-            .join(archon_workflow::LEARNING_RECORDS_FILE);
+        // The one stream `fold_workflow_learning` reads below.
+        let path = archon_workflow::learning_records_path(store, run_id);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let mut known = std::collections::BTreeSet::new();
         if let Ok(text) = std::fs::read_to_string(&path) {
             for line in text.lines() {
@@ -137,7 +148,7 @@ pub(crate) fn bridge_workflow_learning_with_records(
             tracing::warn!(%run_id, "additional workflow learning records not written");
         }
     }
-    fold_workflow_learning(project_root, store, run_id)
+    fold_workflow_learning_each(project_root, store, run_id, on_delivered)
 }
 
 /// Write the run's learning record stream from its final persisted state.
@@ -173,6 +184,17 @@ pub(crate) fn fold_workflow_learning(
     store: &WorkflowStore,
     run_id: &str,
 ) -> LearningDispatchOutcome {
+    fold_workflow_learning_each(project_root, store, run_id, &mut |_| {})
+}
+
+/// [`fold_workflow_learning`], calling `on_delivered` after each record the
+/// learning stack accepted.
+fn fold_workflow_learning_each(
+    project_root: &Path,
+    store: &WorkflowStore,
+    run_id: &str,
+    on_delivered: &mut dyn FnMut(&DispatchCall),
+) -> LearningDispatchOutcome {
     let records = match archon_workflow::read_learning_records(store, run_id) {
         Ok(records) => records,
         Err(error) => {
@@ -205,7 +227,7 @@ pub(crate) fn fold_workflow_learning(
         outcome.integration_unavailable = true;
         return outcome;
     };
-    outcome.dispatched = apply_dispatch(&plan, &mut learning);
+    outcome.dispatched = apply_dispatch_each(&plan, &mut learning, on_delivered);
     outcome
 }
 
@@ -241,17 +263,49 @@ pub(crate) fn plan_dispatch(records: &[WorkflowLearningRecord]) -> DispatchPlan 
     plan
 }
 
-/// Replay every planned call against a learning stack. Returns how many landed.
-pub(crate) fn apply_dispatch(plan: &DispatchPlan, learning: &mut LearningIntegration) -> usize {
+/// Replay every planned call against a learning stack. Returns how many the
+/// learning stack accepted; a call whose episode could not be stored is
+/// logged and not counted.
+fn apply_dispatch_each(
+    plan: &DispatchPlan,
+    learning: &mut LearningIntegration,
+    on_delivered: &mut dyn FnMut(&DispatchCall),
+) -> usize {
+    let mut delivered = 0;
     for call in &plan.calls {
-        learning.on_agent_start(&call.agent, &call.phase, &call.task, &call.pipeline_id);
-        learning.on_agent_complete(&call.agent, call.quality, &call.summary);
+        let recorded = learning.record_outcome(&RecordedOutcome {
+            episode_id: &call.episode_id,
+            agent: &call.agent,
+            phase: &call.phase,
+            task: &call.task,
+            session_id: &call.pipeline_id,
+            quality: call.quality,
+            summary: &call.summary,
+        });
+        match recorded {
+            Ok(_) => {
+                delivered += 1;
+                on_delivered(call);
+            }
+            Err(error) => {
+                tracing::warn!(%error, stage_id = %call.stage_id, "workflow learning record not stored");
+            }
+        }
     }
-    plan.calls.len()
+    delivered
+}
+
+/// The DESC episode key of one record: its run and stage id, hashed. Stable,
+/// so delivering the record again replaces its episode.
+pub(crate) fn episode_key(run_id: &str, stage_id: &str) -> String {
+    let digest = archon_workflow::workflow_scaffold_hash(&format!("{run_id}\n{stage_id}"));
+    format!("workflow-{}", &digest[..32])
 }
 
 fn dispatch_call(record: &WorkflowLearningRecord) -> DispatchCall {
     DispatchCall {
+        stage_id: record.stage_id.clone(),
+        episode_id: episode_key(&record.run_id, &record.stage_id),
         agent: record.agent_key().to_string(),
         phase: if record.phase.trim().is_empty() {
             "workflow".to_string()

@@ -15,6 +15,10 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+#[path = "core_outcome.rs"]
+mod outcome;
+pub use outcome::RecordedOutcome;
+
 // ---------------------------------------------------------------------------
 // LearningIntegration - main orchestrator
 // ---------------------------------------------------------------------------

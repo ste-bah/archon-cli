@@ -77,9 +77,41 @@ fn the_same_set_in_another_order_and_host_planned_or_goal_items_are_left_alone()
             "residual_expansion_paths": ["src/x.rs"], "focused_verification": ["cargo test x"]}),
         serde_json::json!({"canonical_task_ids": ["TASK-A"], "work_type": "implementation",
             "escalation_owner_task_ids": ["TASK-B"], "focused_verification": ["cargo test x"]}),
-        serde_json::json!({"canonical_task_ids": ["TASK-B"], "work_type": "implementation",
+        // A write item of a task that declares none, with nothing authored.
+        serde_json::json!({"canonical_task_ids": ["TASK-B"], "work_type": "implementation"}),
+        // A read-only item of such a task keeps its own commands.
+        serde_json::json!({"canonical_task_ids": ["TASK-B"],
             "focused_verification": ["cargo test b"]}),
+        // An item whose task is not in the universe: nothing is known of it.
+        serde_json::json!({"canonical_task_ids": ["TASK-Z"], "work_type": "implementation",
+            "focused_verification": ["cargo test z"]}),
     ] {
         assert_eq!(stamped(item.clone()), item);
+    }
+}
+
+#[test]
+fn a_command_invented_for_a_task_that_declares_none_is_removed() {
+    for key in FOCUSED_KEYS {
+        let item = stamped(serde_json::json!({
+            "canonical_task_ids": ["TASK-B"], "work_type": "implementation",
+            key: ["cargo test -p crate"],
+        }));
+        assert_eq!(
+            item["focused_verification"],
+            serde_json::json!([]),
+            "the item runs the declared set, which is empty: {item}"
+        );
+        for key in ["focused_tests", "focusedTests"] {
+            assert!(
+                item.get(key).is_none(),
+                "an invented command must not survive under {key}: {item}"
+            );
+        }
+        assert_eq!(
+            item[AUTHORED_FOCUSED_TESTS_KEY],
+            serde_json::json!(["cargo test -p crate"]),
+            "the removed copy stays visible beside the item"
+        );
     }
 }

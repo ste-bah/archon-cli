@@ -12,7 +12,7 @@ mod sherlock;
 mod tests;
 mod types;
 
-pub use core::LearningIntegration;
+pub use core::{LearningIntegration, RecordedOutcome};
 pub use memory::{PendingStore, PipelineMemoryCoordinator};
 pub use phd::{PhDLearningIntegration, StyleFeedback};
 pub use sherlock::{SherlockLearningIntegration, SherlockVerdict};

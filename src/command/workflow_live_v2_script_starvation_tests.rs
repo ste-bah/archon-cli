@@ -156,6 +156,17 @@ fn assert_starvation_pause(
     assert_eq!(pause.detail["cause"], "script_thread_starved");
     // Kept on a recurrence too, whose `cause` is `recurring_script_error`.
     assert_eq!(pause.detail["stop_cause"], "script_thread_starved");
+    // Issue-213 C5: the call in flight is recorded with the pause.
+    let slow = WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"))
+        .load_call_record("slow-agent")
+        .unwrap()
+        .expect("the call in flight keeps a record of the pause");
+    assert_eq!(
+        (slow.status, slow.result.data["interrupted"].as_str()),
+        (WorkflowV2Status::NeedsReview, Some("paused")),
+        "{}",
+        slow.result.summary
+    );
 }
 
 /// Fails before the fix: the run never ends (the watchdog is paused for the

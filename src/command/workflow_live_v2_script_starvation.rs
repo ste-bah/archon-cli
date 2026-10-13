@@ -127,10 +127,16 @@ impl ScriptStarvationGuard {
                 .pause_on_script_stop(&error, "script_thread_starved")
                 .await
             {
-                Some(stop) => stop,
-                None => WorkflowError::SpecInvalid(format!(
-                    "{error}; the host could not persist its pause"
-                )),
+                // Issue-213 C5: what was in flight is recorded with the pause.
+                Some(stop) => host.recorded_control_stop(stop, false).await,
+                // The run is not paused: the fixed executor pauses for this
+                // error, and what was in flight names it.
+                None => {
+                    host.recorded_fault_stop(WorkflowError::SpecInvalid(format!(
+                        "{error}; the host could not persist its pause"
+                    )))
+                    .await
+                }
             },
         ))
     }

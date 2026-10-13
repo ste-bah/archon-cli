@@ -5,6 +5,13 @@ use archon_core::config::LearningConfig;
 use archon_workflow::{StageStatus, Verification, WorkflowLearningRecord, WorkflowStore};
 use serde_json::Value;
 
+#[path = "workflow_decompose_learning_findings.rs"]
+mod findings;
+pub(crate) use findings::gate_finding_records;
+#[path = "workflow_decompose_learning_delivery.rs"]
+mod delivery;
+pub(super) use delivery::with_fold_lock;
+
 pub(crate) fn hooks(content: &str, config: &LearningConfig) -> Vec<String> {
     // This run has no embedding provider for SONA trajectories. DESC has a
     // real consumer (the episode store); ReasoningBank is useful for review
@@ -51,7 +58,7 @@ pub(crate) fn lesson_records(
         if let Some(text) = find_text(source, &["response", "summary", "text", "content"]) {
             lessons.push((
                 "author_attempt".into(),
-                format!("Author attempt outcome: {}", bounded(&text)),
+                format!("Author attempt outcome: {}", text),
                 false,
             ));
         }
@@ -69,7 +76,7 @@ pub(crate) fn lesson_records(
         ) {
             lessons.push((
                 "probe_baseline".into(),
-                format!("Probe baseline output: {}", bounded(&text)),
+                format!("Probe baseline output: {}", text),
                 false,
             ));
         }
@@ -78,7 +85,7 @@ pub(crate) fn lesson_records(
         if let Some(text) = find_text(source, &["finding", "findings", "reason", "summary"]) {
             lessons.push((
                 "set_gate_finding".into(),
-                format!("Set gate finding: {}", bounded(&text)),
+                format!("Set gate finding: {}", text),
                 true,
             ));
         }
@@ -189,8 +196,11 @@ fn collect_lessons(value: &Value, out: &mut Vec<(String, String, bool)>) {
                     false,
                 ));
             }
-            for child in map.values() {
-                collect_lessons(child, out);
+            for (key, child) in map {
+                // Read whole, by `gate_finding_records`.
+                if key != "gateEnvelope" {
+                    collect_lessons(child, out);
+                }
             }
         }
         Value::Array(items) => {
@@ -229,14 +239,6 @@ pub(crate) fn fold(
     Ok(())
 }
 
-pub(super) fn with_fold_lock<T>(
-    store: &WorkflowStore,
-    run_id: &str,
-    operation: impl FnOnce(&WorkflowStore) -> archon_workflow::WorkflowResult<T>,
-) -> archon_workflow::WorkflowResult<T> {
-    store.with_run_lock(run_id, operation)
-}
-
 fn fold_locked(
     cwd: &Path,
     store: &WorkflowStore,
@@ -270,14 +272,23 @@ fn fold_locked(
             )
         })
         .flat_map(|call| {
-            lesson_records(
+            let mut lessons = lesson_records(
                 run_id,
                 &safe_task,
                 &call.call.id,
                 call.attempt,
                 &call.result.data,
                 &hooks,
-            )
+            );
+            if let Some(command) = &call.call.options.host_command {
+                lessons.extend(gate_finding_records(
+                    run_id,
+                    &command.command_id,
+                    &call.result.data,
+                    &hooks,
+                ));
+            }
+            lessons
         })
         .collect();
     let records = stage_journal(&journal, &pending_journal, candidates)?;
@@ -285,16 +296,7 @@ fn fold_locked(
     crate::command::topology_fold::fold_project_pending_blocking(
         cwd, run_id, &safe_task, "default",
     );
-    let outcome =
-        crate::command::topology_fold::workflow_learning::bridge_workflow_learning_with_records(
-            cwd, store, run_id, &records,
-        );
-    finish_journal_dispatch(
-        &pending_journal,
-        !outcome.integration_unavailable && outcome.dispatched >= records.len(),
-    )?;
-    tracing::debug!(%run_id, dispatched = outcome.dispatched, records = records.len(), "fixed decomposition learning fold finished");
-    Ok(())
+    delivery::deliver_pending(cwd, store, run_id, &pending_journal, &records)
 }
 
 pub(super) fn read_journal(path: &Path) -> anyhow::Result<Vec<WorkflowLearningRecord>> {
@@ -394,6 +396,7 @@ pub(super) fn write_journal(path: &Path, records: &[WorkflowLearningRecord]) -> 
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn finish_journal_dispatch(path: &Path, dispatched: bool) -> anyhow::Result<()> {
     if dispatched {
         write_journal(path, &[])?;

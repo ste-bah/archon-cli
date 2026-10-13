@@ -422,6 +422,9 @@ mod workflow_host_command_supervisor_windows_tests;
 
 pub(crate) mod workflow_decompose_learning;
 #[cfg(test)]
+#[path = "workflow_decompose_learning_fold_tests.rs"]
+mod workflow_decompose_learning_fold_tests;
+#[cfg(test)]
 #[path = "workflow_decompose_learning_tests.rs"]
 mod workflow_decompose_learning_tests;
 pub(crate) mod workflow_host_envelope_seal;

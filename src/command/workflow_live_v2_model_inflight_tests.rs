@@ -354,12 +354,19 @@ fn stale_generation_cannot_persist_accepted_fixed_call_or_checkpoint() {
     assert!(v2.load_checkpoint().unwrap().is_none());
 
     let execution = include_str!("workflow_live_v2_script_host_exec.rs");
+    let interrupt = include_str!("workflow_live_v2_script_host_interrupt.rs");
     let state = include_str!("workflow_live_v2_script_host_state.rs");
+    // Issue-213 C5: the dispatched answer is published through
+    // `publish_or_record_stop`, with the same generation and fence.
     assert!(
         execution.contains(
-            "publish_dispatched_call(&record, call_generation, self.call_fenced(&execution))"
+            ".publish_or_record_stop(\n                &execution,\n                &record,\n                call_generation,\n                self.call_fenced(&execution),"
         ),
         "{execution}"
+    );
+    assert!(
+        interrupt.contains(".publish_dispatched_call(record, call_generation, fenced)"),
+        "{interrupt}"
     );
     assert!(
         state.contains("FixedCallProjectionKind::Started,\n            generation,"),
