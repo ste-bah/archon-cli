@@ -102,7 +102,11 @@ fn a_microtask_loop_during_an_in_flight_host_call_is_cut_and_named() {
         cut.in_flight,
         vec![serde_json::json!({ "id": "slow-host-call" })]
     );
-    assert!(cut.no_progress_ms >= cut.window_ms, "{cut:?}");
+    // The cut is decided on the script thread's own CPU since its last beat
+    // (wall time only without a CPU clock). Windows counts thread CPU in
+    // scheduler ticks, so it can read past the wall time since the beat.
+    let decided_on = cut.script_thread_cpu_ms.unwrap_or(cut.no_progress_ms);
+    assert!(decided_on >= cut.window_ms, "{cut:?}");
 }
 
 /// Fails before the fix, the same way: a synchronous loop with a call in flight.
