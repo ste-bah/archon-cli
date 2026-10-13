@@ -168,6 +168,52 @@ async function refusal(reply, stopReason = 'end_turn') {
   const maxTokenRefusal = await refusal('{"id":"A"}', 'max_tokens');
   assert.match(maxTokenRefusal.summary, /cut off the reply at its output limit; make the check shorter/);
   assert.equal(maxTokenRefusal.malformedClass, 'stop-max-tokens');
+  // #383: the excerpt and the engine message are redacted with the host's
+  // public-copy rule (events.rs sanitize_value): a secret-shaped word becomes
+  // <redacted>, whole, even where the excerpt window cuts it.
+  const secretKey = 'sk-ant-api03-' + 'A'.repeat(40);
+  const nearSecret = `{"id":"A","check":{"kind":"command","command":"curl -H x-api-key ${secretKey} \\q here"}}`;
+  const secretRefusal = await refusal(nearSecret);
+  assert.ok(!secretRefusal.summary.includes(secretKey), secretRefusal.summary);
+  assert.ok(!secretRefusal.summary.includes('A'.repeat(20)), 'no part of the key survives');
+  assert.match(secretRefusal.summary, /excerpt: ".*x-api-key <redacted> /);
+  const parseFn = ctxForBlocks().acceptanceParseRefusal;
+  const at = (source, offset) => ({message: `Unexpected token at position ${offset}`});
+  // A key that starts before the window and ends inside it.
+  const straddle = 'x'.repeat(10) + ' ' + secretKey + ' ' + 'y'.repeat(200);
+  const straddleText = parseFn('A', straddle, at(straddle, 11 + secretKey.length + 79 - 5));
+  assert.ok(!straddleText.includes('A'.repeat(5)), straddleText);
+  assert.match(straddleText, /excerpt: "…<redacted> y/);
+  // `Bearer` before the window, its credential inside it.
+  const bearer = 'z'.repeat(5) + ' Bearer ' + 'opaque-credential-value ' + 'w'.repeat(300);
+  const bearerText = parseFn('A', bearer, at(bearer, 13 + 79 + 2));
+  assert.ok(!bearerText.includes('opaque-credential'), bearerText);
+  assert.match(bearerText, /excerpt: "…<redacted> w/);
+  // key=value forms and an engine message that quotes the reply.
+  const assigned = parseFn('A', '{"a":"run token=abc123 \\q"}', {message: 'Bad escape near "token=abc123 \\q" at position 22'});
+  assert.ok(!assigned.includes('abc123'), assigned);
+  assert.match(assigned, /JSON parse error at offset 22: Bad escape near <redacted> \\q" at position 22/);
+  // An error at the very end: the window ends at the reply's end, no trailing ellipsis.
+  const tail = 'p'.repeat(300) + ' {"x":';
+  const tailText = parseFn('A', tail, at(tail, tail.length));
+  const tailExcerpt = JSON.parse(tailText.match(/; excerpt: ("(?:\\.|[^"\\])*")/)[1]);
+  assert.ok(tailExcerpt.startsWith('…') && tailExcerpt.endsWith('{"x":'), tailExcerpt);
+  assert.equal(tailExcerpt.length, 159);
+  // A byte offset in a multi-byte reply is mapped to characters.
+  const multi = 'é'.repeat(100) + ' MARK ' + 'é'.repeat(100);
+  const multiText = parseFn('A', multi, {message: 'invalid at byte offset 201'});
+  assert.match(multiText, /at byte offset 201/);
+  assert.match(multiText, /MARK/);
+  // A word that only looks like the rule's prefixes stays.
+  const plain = parseFn('A', 'tokens=5 sk-short secret', at('', 3));
+  assert.match(plain, /excerpt: "tokens=5 sk-short secret"/);
+  // The script's rule is the host's word for word (held equal by
+  // workflow_decompose_redaction_tests.rs over a shared corpus).
+  const words = ctxForBlocks().redactSecretShapedText;
+  assert.equal(words('Authorization: Bearer abc def'), '<redacted> Bearer <redacted> def');
+  assert.equal(words('(sk-ant-x) "password=p" api_key=1,'), '<redacted> <redacted> <redacted>');
+  assert.equal(words('sk-0123456789abcdef sk-0123456789abcdefg'), 'sk-0123456789abcdef <redacted>');
+  assert.equal(words('sk-ééééééééé'), '<redacted>', 'the length rule counts UTF-8 bytes, as Rust does');
   console.log('PASS acceptance parse refusal');
 })().catch(error => { console.error(`FAIL acceptance parse refusal: ${error.stack}`); process.exitCode = 1; });
 
