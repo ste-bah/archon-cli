@@ -269,7 +269,10 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
             Err(error) => return Err(error),
         };
         let call_id = self.content_identity(&request, &context)?;
-        let stamped_fields = stamp::stamp_request(&mut request, &context)?;
+        let stamped_fields = match stamp::stamp_request(&mut request, &context)? {
+            Ok(notes) => notes,
+            Err(unstampable) => return unstampable.refused(&request.command_id),
+        };
         let pause = super::workflow_host_staging_pause::StagingPause::new(
             &self.context.project_root,
             &self.run_root,

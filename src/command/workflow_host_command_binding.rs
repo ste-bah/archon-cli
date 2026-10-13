@@ -25,7 +25,8 @@ pub(crate) fn unbound_context(
 #[derive(Debug)]
 pub(crate) enum Unbound {
     /// It names a frozen subject and does not parse as that subject's file
-    /// (the parse cause), or holds several frozen subjects' task files:
+    /// (the parse cause), holds several frozen subjects' task files, or the
+    /// host cannot stamp the bound subject's frontmatter into it (#428):
     /// refused as a body shape.
     Unparsed(UnparsedSubject),
     /// It binds zero (naming none) or several subjects.
@@ -170,6 +171,8 @@ pub(crate) fn bind_request(
 
 /// Stamp the skeleton-owned frontmatter into a bound body before it reaches
 /// the landing command. The note names only fields, never authored values.
+/// A fault of the candidate itself is `SpecInvalid` (the caller refuses the
+/// candidate with it); every other error is the host's.
 pub(crate) fn stamp_frozen_frontmatter(
     candidate: &str,
     frozen: &archon_workflow::task_skeleton::FrozenTask,
@@ -232,11 +235,8 @@ pub(crate) fn stamp_frozen_frontmatter(
         &frozen.deliverable_contracts,
         &mut notes,
     )?;
-    let stamped_yaml = serde_yaml_ng::to_string(&metadata).map_err(|error| {
-        WorkflowError::SpecInvalid(format!(
-            "could not serialize stamped task frontmatter: {error}"
-        ))
-    })?;
+    // Serializing the host's own mapping is a host fault, never `SpecInvalid`.
+    let stamped_yaml = serde_yaml_ng::to_string(&metadata)?;
     let stamped_yaml = stamped_yaml.strip_prefix("---\n").unwrap_or(&stamped_yaml);
     let mut result = String::with_capacity(candidate.len() + stamped_yaml.len());
     result.push_str(&candidate[..body_start]);
@@ -288,7 +288,7 @@ impl UnparsedSubject {
 }
 
 /// The subject the task file's frontmatter names ([`task_file_anchor`]),
-/// when it is a frozen one the task file fails to parse as.
+/// when it is a frozen one the task file fails to parse or be stamped as.
 ///
 /// [`task_file_anchor`]: crate::command::topology_lint::task_file_anchor
 fn named_subject_refusal(
@@ -301,12 +301,17 @@ fn named_subject_refusal(
     let frozen = tasks.iter().find(|frozen| frozen.task_id == named)?;
     let task_file = task_root.join(&frozen.file_name);
     let block = &candidate[anchor.opener..];
-    let error =
-        archon_workflow::task_universe::parsing::parse_task_file(&task_file, block).err()?;
-    let cause = unclosed_frontmatter(block, candidate).unwrap_or_else(|| match error {
-        WorkflowError::SpecInvalid(text) => text,
-        other => other.to_string(),
-    });
+    let cause = match archon_workflow::task_universe::parsing::parse_task_file(&task_file, block) {
+        Err(error) => unclosed_frontmatter(block, candidate).unwrap_or_else(|| match error {
+            WorkflowError::SpecInvalid(text) => text,
+            other => other.to_string(),
+        }),
+        // #428: it parses, yet the host cannot stamp it (an unknown field).
+        Ok(_) => match stamp_frozen_frontmatter(block, frozen) {
+            Err(WorkflowError::SpecInvalid(text)) => text,
+            _ => return None,
+        },
+    };
     Some(UnparsedSubject {
         reason: format!(
             "candidate TASK body for {named} does not parse: {cause}; return the whole task file"
