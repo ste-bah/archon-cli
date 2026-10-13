@@ -238,7 +238,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #387 re-pin only: the launch and resume paths in this closure (frozen-contract launch decision, requirement inventory) do not change how a freeze judges.
-        sources_digest: "63aebfb8664ab9a596d13f8f906d9d91305655b6776e31c404a4d7f888af0911",
+        // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair; the freeze judges as before.
+        sources_digest: "800d73dc4d79ff37dca8b3d1eb04a50ce21cb5b2fa825125a501467977ca998a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -255,7 +256,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #387 re-pin only: the launch and resume paths in this closure (frozen-contract launch decision, requirement inventory) do not change how a freeze judges.
-        sources_digest: "63aebfb8664ab9a596d13f8f906d9d91305655b6776e31c404a4d7f888af0911",
+        // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair; the freeze judges as before.
+        sources_digest: "800d73dc4d79ff37dca8b3d1eb04a50ce21cb5b2fa825125a501467977ca998a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -277,7 +279,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
-        sources_digest: "792d480d613ded7fe33c915a59eede418d9158b5524649eb16538f3384dc73ef",
+        // #387 re-pin only: launch routing of refused frozen checks; lint verdicts are unchanged.
+        sources_digest: "8b92ac2ecbb18750d47336401e5e9ed52968cb57b8024abffd7a1b2eea2813e5",
         build_bound: false,
     },
     CapabilityLogic {
@@ -297,7 +300,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
-        sources_digest: "792d480d613ded7fe33c915a59eede418d9158b5524649eb16538f3384dc73ef",
+        // #387 re-pin only: launch routing of refused frozen checks; lint verdicts are unchanged.
+        sources_digest: "8b92ac2ecbb18750d47336401e5e9ed52968cb57b8024abffd7a1b2eea2813e5",
         build_bound: false,
     },
     CapabilityLogic {
@@ -328,7 +332,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #386 re-pin only: stdin spill and progress-event spill code in this closure; verification takes no stdin and its verdicts are unchanged.
         // #387 re-pin only: the launch decision lives beside verify_frozen_stage, which is unchanged.
-        sources_digest: "3167e3ded23c429f51757cf07b72c13bba52ffd90841173760ad21c03f860db9",
+        // #387 re-pin only: the launch decision returns its routing instead of refusing; verify_frozen_stage is unchanged.
+        sources_digest: "87ab1413f9df946580f587db9303f06cbe57463839903e9c73f663612c7f3d48",
         build_bound: true,
     },
     CapabilityLogic {
@@ -344,7 +349,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #386 re-pin only: stdin spill and progress-event spill code in this closure; verification takes no stdin and its verdicts are unchanged.
         // #387 re-pin only: the launch decision lives beside verify_frozen_stage, which is unchanged.
-        sources_digest: "3167e3ded23c429f51757cf07b72c13bba52ffd90841173760ad21c03f860db9",
+        // #387 re-pin only: the launch decision returns its routing instead of refusing; verify_frozen_stage is unchanged.
+        sources_digest: "87ab1413f9df946580f587db9303f06cbe57463839903e9c73f663612c7f3d48",
         build_bound: true,
     },
 ];

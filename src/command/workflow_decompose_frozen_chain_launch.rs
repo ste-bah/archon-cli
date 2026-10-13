@@ -9,11 +9,13 @@
 //! `freeze_override_decision`), or no recorded freeze in this project
 //! vouches for the contract at all, the launch verifies every frozen check
 //! under this build's acceptance entry rules (the freeze's own shape and
-//! live-root rules, `entry_defects`). A check they refuse stops the launch,
-//! naming it and the repair command, as a check the judge did not accept
-//! already does. Every decision is printed and logged with its reason.
+//! live-root rules, `entry_defects`). A check they refuse is re-authored
+//! before the run starts, through the sanctioned per-check repair
+//! `freeze-acceptance --reauthor` uses (`workflow_decompose_launch_repair`); every other frozen check
+//! stays frozen and no judge re-runs on it. Every decision is printed,
+//! logged and, for a repair, recorded as an event.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -79,25 +81,40 @@ pub(crate) fn recorded_freeze_logic(
     })
 }
 
-/// The launch's decision for an acceptance stage it found `frozen` (none
-/// otherwise): the lines it prints
-/// and logs, or the refusal when this build's rules refuse a frozen check.
-/// `roots` are the live roots a check must not name (repository, project
-/// and the task set's own).
+/// What a launch does with an acceptance stage it found frozen.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct LaunchAcceptance {
+    /// Every decision line, printed and written to the decomposition log.
+    pub(crate) lines: Vec<String>,
+    /// The frozen checks this build's acceptance entry rules refuse, each
+    /// with every refusal text: they are re-authored before the run starts.
+    pub(crate) reauthor: BTreeMap<String, String>,
+    /// Why the checks were validated at all: the recorded freeze logic.
+    pub(crate) recorded: String,
+}
+
+/// The launch's decision for an acceptance stage it found `frozen` (nothing
+/// otherwise). A check this build's rules refuse is never a reason to stop:
+/// it is routed to re-authoring (`workflow_decompose_launch_repair`) and every
+/// other frozen check stays frozen. `repository_root`, the project and the
+/// task set's own roots are the live roots a check must not name.
 pub(crate) fn launch_acceptance_decision(
     frozen: bool,
     store: &WorkflowStore,
     (project_root, task_root, repository_root): (&Path, &Path, &Path),
     catalog: &archon_workflow::CommandCapabilityCatalog,
-) -> Result<Vec<String>> {
+) -> Result<LaunchAcceptance> {
     if !frozen {
-        return Ok(Vec::new());
+        return Ok(LaunchAcceptance::default());
     }
     let (kind, reason) = match recorded_freeze_logic(store, task_root, catalog)? {
         RecordedFreezeLogic::Holds(reason) => {
-            return Ok(vec![format!(
-                "frozen_chain_launch acceptance=verify reason={reason}"
-            )]);
+            return Ok(LaunchAcceptance {
+                lines: vec![format!(
+                    "frozen_chain_launch acceptance=verify reason={reason}"
+                )],
+                ..LaunchAcceptance::default()
+            });
         }
         RecordedFreezeLogic::Stale(reason) => ("stale", reason),
         RecordedFreezeLogic::Unrecorded(reason) => ("unrecorded", reason),
@@ -114,36 +131,44 @@ pub(crate) fn launch_acceptance_decision(
     );
     let roots = crate::command::workflow_task_set::live_root::absolute_roots(&roots)
         .map_err(|why| anyhow!("live roots of {}: {why}", task_root.display()))?;
-    let mut refused = BTreeSet::new();
-    let mut texts = Vec::new();
+    let mut reauthor: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let entries = contract.acceptance.iter().chain(&contract.supplementary);
     for entry in entries.clone() {
         let text = serde_json::to_string(entry)?;
         let defects = crate::command::workflow::entry_defects(&text, &roots)
             .map_err(|why| anyhow!("frozen check '{}' cannot be validated: {why}", entry.id))?;
         for defect in defects {
-            refused.insert(entry.id.clone());
-            texts.push(crate::command::workflow::refusal_text(&entry.id, &defect));
+            let refusal = crate::command::workflow::refusal_text(&entry.id, &defect);
+            reauthor.entry(entry.id.clone()).or_default().push(refusal);
         }
     }
-    if !refused.is_empty() {
-        return Err(anyhow!(
-            "frozen acceptance contract under {} was not judged by logic this build vouches for ({kind}: {reason}); this build's acceptance rules refuse check(s) {}: {}; repair them before decomposing on it: {}",
-            task_root.display(),
-            refused.iter().cloned().collect::<Vec<_>>().join(", "),
-            texts.join(" | "),
-            crate::command::workflow_task_set::republish::reauthor_command(
-                project_root,
-                task_root,
-                &contract,
-                &refused
-            )
-        ));
-    }
-    Ok(vec![format!(
-        "frozen_chain_launch acceptance=verify reason={kind} recorded freeze logic ({reason}); this build's acceptance entry rules pass all {} frozen check(s)",
-        entries.count()
-    )])
+    let recorded = format!("{kind} recorded freeze logic ({reason})");
+    let total = entries.count();
+    let line = if reauthor.is_empty() {
+        format!(
+            "frozen_chain_launch acceptance=verify reason={recorded}; this build's acceptance entry rules pass all {total} frozen check(s)"
+        )
+    } else {
+        format!(
+            "frozen_chain_launch acceptance=reauthor ids={} kept={} reason={recorded}; this build's acceptance entry rules refuse them: {}",
+            reauthor.keys().cloned().collect::<Vec<_>>().join(","),
+            total - reauthor.len(),
+            reauthor
+                .values()
+                .flatten()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" | ")
+        )
+    };
+    Ok(LaunchAcceptance {
+        lines: vec![line],
+        reauthor: reauthor
+            .into_iter()
+            .map(|(id, texts)| (id, texts.join("\n")))
+            .collect(),
+        recorded,
+    })
 }
 
 #[cfg(test)]

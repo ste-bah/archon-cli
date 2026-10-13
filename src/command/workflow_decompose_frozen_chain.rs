@@ -31,7 +31,7 @@ mod freeze_override;
 use freeze_override::{freeze_outcome_decision, freeze_record_status_allows_override};
 #[path = "workflow_decompose_frozen_chain_launch.rs"]
 mod launch_chain;
-pub(crate) use launch_chain::launch_acceptance_decision;
+pub(crate) use launch_chain::{LaunchAcceptance, launch_acceptance_decision};
 #[path = "workflow_decompose_frozen_chain_resume.rs"]
 mod resume_chain;
 #[cfg(test)]

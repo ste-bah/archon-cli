@@ -36,12 +36,23 @@ fn frozen(command: Option<fn(&Path) -> String>) -> Fixture {
     );
     super::super::test_support::freeze_acceptance(&project, &prd, &tasks);
     if let Some(command) = command {
-        // Re-freeze the same contract with another check: contract, lock
-        // and pin agree, so the frozen chain verifies.
+        // Re-freeze the same contract with another check, judged by the
+        // scripted judge: contract (in the host's own serialization), lock
+        // and pin agree, so the frozen chain verifies and a per-check
+        // repair can be judged like it.
         let path = tasks.join(ACCEPTANCE_CONTRACT_FILE);
-        let mut contract: serde_json::Value =
+        let mut contract: AcceptanceContract =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        contract["acceptance"][0]["check"]["command"] = command(&project).into();
+        let entry = &mut contract.acceptance[0];
+        entry.check = archon_workflow::task_set_contract::AcceptanceCheck::Command {
+            command: command(&project),
+            cwd: archon_workflow::task_set_contract::TrustedCwd::ProjectRoot,
+        };
+        entry.judgment.sampling = Some(serde_json::json!({
+            "temperature": 0.0,
+            "model": "fixture-judge",
+            "provider": crate::command::workflow_task_set::reauthor::test_client::SCRIPTED_PROVIDER,
+        }));
         let bytes = serde_json::to_vec_pretty(&contract).unwrap();
         let digest = content_digest(&bytes);
         std::fs::write(&path, &bytes).unwrap();
@@ -123,7 +134,7 @@ fn recorded_freeze(fixture: &Fixture, version: u32) {
         .unwrap();
 }
 
-fn decide(fixture: &Fixture) -> Result<Vec<String>> {
+fn decide(fixture: &Fixture) -> Result<LaunchAcceptance> {
     let catalog =
         crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("fixture")
             .unwrap();
@@ -143,8 +154,10 @@ fn current() -> u32 {
 fn a_current_recorded_freeze_is_verified_in_place_and_says_so() {
     let fixture = frozen(None);
     recorded_freeze(&fixture, current());
-    let lines = decide(&fixture).unwrap();
+    let decision = decide(&fixture).unwrap();
+    let lines = &decision.lines;
     assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(decision.reauthor.is_empty());
     assert!(lines[0].starts_with("frozen_chain_launch acceptance=verify reason=run "));
     assert!(
         lines[0].contains("replays under this build's logic"),
@@ -157,8 +170,10 @@ fn a_current_recorded_freeze_is_verified_in_place_and_says_so() {
 fn a_stale_recorded_freeze_whose_checks_pass_current_rules_is_verified_and_named() {
     let fixture = frozen(None);
     recorded_freeze(&fixture, current() - 1);
-    let lines = decide(&fixture).unwrap();
+    let decision = decide(&fixture).unwrap();
+    let lines = &decision.lines;
     assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(decision.reauthor.is_empty());
     assert!(
         lines[0].contains("reason=stale recorded freeze logic"),
         "{}",
@@ -187,28 +202,46 @@ fn names_live_root(project: &Path) -> String {
 }
 
 #[test]
-fn a_stale_recorded_freeze_whose_check_a_current_rule_refuses_stops_the_launch() {
+fn a_stale_recorded_freeze_routes_a_check_a_current_rule_refuses_to_re_authoring() {
     let fixture = frozen(Some(names_live_root));
     recorded_freeze(&fixture, current() - 1);
-    let error = decide(&fixture).unwrap_err().to_string();
-    assert!(error.contains("refuse check(s) AC-X-001"), "{error}");
-    assert!(error.contains("(stale: run "), "{error}");
-    assert!(error.contains("--reauthor"), "{error}");
+    let decision = decide(&fixture).expect("a refused frozen check never stops the launch");
+    assert_eq!(
+        decision.reauthor.keys().collect::<Vec<_>>(),
+        vec!["AC-X-001"],
+        "{decision:?}"
+    );
+    assert!(
+        decision.reauthor["AC-X-001"].contains("acceptance entry 'AC-X-001' was refused"),
+        "{decision:?}"
+    );
+    assert!(
+        decision
+            .recorded
+            .starts_with("stale recorded freeze logic (run ")
+    );
+    assert!(
+        decision.lines[0].starts_with(
+            "frozen_chain_launch acceptance=reauthor ids=AC-X-001 kept=0 reason=stale"
+        ),
+        "{}",
+        decision.lines[0]
+    );
 }
 
 #[test]
 fn a_current_recorded_freeze_is_not_re_validated() {
-    // Its judge ran this build's rules already; the refusal above is only
+    // Its judge ran this build's rules already; the routing above is only
     // for logic this build cannot vouch for.
     let fixture = frozen(Some(names_live_root));
     recorded_freeze(&fixture, current());
-    assert!(decide(&fixture).is_ok());
+    assert!(decide(&fixture).unwrap().reauthor.is_empty());
 }
 
 #[test]
 fn an_unrecorded_freeze_is_verified_under_current_rules() {
     let fixture = frozen(None);
-    let lines = decide(&fixture).unwrap();
+    let lines = decide(&fixture).unwrap().lines;
     assert!(
         lines[0].contains("reason=unrecorded recorded freeze logic"),
         "{}",
@@ -219,9 +252,13 @@ fn an_unrecorded_freeze_is_verified_under_current_rules() {
         "{}",
         lines[0]
     );
-    let refused = frozen(Some(names_live_root));
-    let error = decide(&refused).unwrap_err().to_string();
-    assert!(error.contains("(unrecorded: no run"), "{error}");
+    let routed = decide(&frozen(Some(names_live_root))).unwrap();
+    assert_eq!(routed.reauthor.len(), 1, "{routed:?}");
+    assert!(
+        routed
+            .recorded
+            .starts_with("unrecorded recorded freeze logic (no run")
+    );
 }
 
 #[test]
@@ -230,14 +267,14 @@ fn nothing_is_decided_for_a_stage_that_is_not_frozen() {
     let catalog =
         crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("fixture")
             .unwrap();
-    let lines = launch_acceptance_decision(
+    let decision = launch_acceptance_decision(
         false,
         &fixture.store,
         (&fixture.project, &fixture.tasks, &fixture.project),
         &catalog,
     )
     .unwrap();
-    assert!(lines.is_empty());
+    assert_eq!(decision, LaunchAcceptance::default());
 }
 
 /// Stops a launch at provider construction: everything before it ran.
@@ -255,6 +292,13 @@ impl archon_workflow::WorkflowLlmClientFactory for LaunchBarrier {
 }
 
 async fn launch(fixture: &Fixture) -> anyhow::Error {
+    launch_with(fixture, &LaunchBarrier).await
+}
+
+async fn launch_with(
+    fixture: &Fixture,
+    factory: &dyn archon_workflow::WorkflowLlmClientFactory,
+) -> anyhow::Error {
     let mut config = archon_core::config::ArchonConfig::default();
     config.workflow.repository_root = Some(fixture.project.clone());
     crate::command::workflow_decompose::run_fixed_decomposition_with_factory(
@@ -265,22 +309,141 @@ async fn launch(fixture: &Fixture) -> anyhow::Error {
         true,
         &config,
         &archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new()),
-        &LaunchBarrier,
+        factory,
     )
     .await
     .unwrap_err()
 }
 
+/// The re-author's client first (scripted author and judge), then the
+/// barrier for the run's own client.
+struct ReauthorThenBarrier {
+    reauthor: std::sync::Mutex<Option<std::sync::Arc<dyn archon_workflow::WorkflowLlmClient>>>,
+    origins: std::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl archon_workflow::WorkflowLlmClientFactory for ReauthorThenBarrier {
+    async fn build_client(
+        &self,
+        request: archon_workflow::WorkflowLlmClientRequest,
+    ) -> archon_workflow::WorkflowResult<std::sync::Arc<dyn archon_workflow::WorkflowLlmClient>>
+    {
+        self.origins.lock().unwrap().push(request.origin);
+        match self.reauthor.lock().unwrap().take() {
+            Some(client) => Ok(client),
+            None => Err(archon_workflow::WorkflowError::port("barrier observed")),
+        }
+    }
+}
+
 #[tokio::test]
-async fn a_launch_on_a_frozen_check_this_builds_rules_refuse_stops_before_any_run() {
+async fn a_launch_re_authors_a_frozen_check_this_builds_rules_refuse_and_goes_on() {
+    use crate::command::workflow_task_set::reauthor::test_client::{
+        ScriptedAuthorJudge, command_entry,
+    };
     let fixture = frozen(Some(names_live_root));
-    let error = format!("{:#}", launch(&fixture).await);
-    assert!(error.contains("refuse check(s) AC-X-001"), "{error}");
-    assert!(!error.contains("barrier observed"), "{error}");
+    // The pre-implementation tree the repaired check is proven on.
+    crate::command::workflow_task_set::passability_tests_support::commit_project(&fixture.project);
+    let client = std::sync::Arc::new(ScriptedAuthorJudge::new(
+        |entry, _| command_entry(entry, "test -f marker"),
+        |_, _| true,
+    ));
+    let factory = ReauthorThenBarrier {
+        reauthor: std::sync::Mutex::new(Some(client.clone())),
+        origins: std::sync::Mutex::new(Vec::new()),
+    };
+    let error = format!("{:#}", launch_with(&fixture, &factory).await);
     assert!(
-        fixture.store.list_runs().unwrap().is_empty(),
-        "a refused launch creates no run"
+        error.contains("barrier observed"),
+        "the launch went on: {error}"
     );
+    assert_eq!(
+        factory.origins.lock().unwrap()[0],
+        "workflow-decompose-launch-reauthor"
+    );
+    assert_eq!(client.authored(), 1, "only the refused check is authored");
+    // The judge asks once per sample; it is asked of the refused check only.
+    let judged = client.judged_ids.lock().unwrap().clone();
+    assert!(
+        !judged.is_empty() && judged.iter().all(|id| id == "AC-X-001"),
+        "{judged:?}"
+    );
+    let prompts = client.prompts.lock().unwrap().join("\n");
+    assert!(
+        prompts.contains("acceptance entry 'AC-X-001' was refused"),
+        "the author is shown the rule that refused the check: {prompts}"
+    );
+    let contract: AcceptanceContract = serde_json::from_slice(
+        &std::fs::read(fixture.tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        matches!(
+            &contract.acceptance[0].check,
+            archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. }
+                if command == "test -f marker"
+        ),
+        "{:?}",
+        contract.acceptance[0].check
+    );
+    let log = std::fs::read_to_string(fixture.tasks.join(".decompose.log")).unwrap();
+    assert!(
+        log.contains(
+            "frozen_chain_launch acceptance=reauthor ids=AC-X-001 kept=0 reason=unrecorded"
+        ),
+        "{log}"
+    );
+    assert!(
+        log.contains("frozen_chain_launch acceptance=reauthored ids=AC-X-001 acceptance_digest="),
+        "{log}"
+    );
+    let run = fixture.store.list_runs().unwrap().pop().unwrap();
+    let events = std::fs::read_to_string(fixture.store.events_path(&run.id)).unwrap();
+    let event: serde_json::Value = events
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|event| {
+            event["detail"]["event"]
+                == crate::command::workflow_decompose_launch_repair::REAUTHORED_EVENT
+        })
+        .unwrap_or_else(|| panic!("no repair event: {events}"));
+    assert_eq!(event["detail"]["ids"], serde_json::json!(["AC-X-001"]));
+    assert!(
+        event["detail"]["refusals"]["AC-X-001"]
+            .as_str()
+            .unwrap()
+            .contains("was refused")
+    );
+    // The run builds on the republished contract, verified in place.
+    let arguments: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            fixture
+                .store
+                .run_dir(&run.id)
+                .join(crate::command::workflow_decompose::FIXED_ARGUMENTS_PATH),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(arguments["frozenChain"]["acceptance"], true, "{arguments}");
+    let pin: AcceptancePinView = serde_json::from_slice(
+        &std::fs::read(crate::command::workflow_task_set::acceptance_pin_path(
+            &fixture.project,
+            &fixture.tasks,
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        pin.acceptance_digest,
+        content_digest(&std::fs::read(fixture.tasks.join(ACCEPTANCE_CONTRACT_FILE)).unwrap())
+    );
+}
+
+#[derive(serde::Deserialize)]
+struct AcceptancePinView {
+    acceptance_digest: String,
 }
 
 #[tokio::test]
