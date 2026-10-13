@@ -139,6 +139,16 @@ pub(super) async fn chained_run(
     versions_behind: u32,
     pin_link: Option<&str>,
 ) -> (tempfile::TempDir, WorkflowStore, String, String) {
+    chained_run_behind(versions_behind, versions_behind, pin_link).await
+}
+
+/// As [`chained_run`], with the acceptance and skeleton freezes judged
+/// `acceptance_behind` and `skeleton_behind` logic versions ago.
+pub(super) async fn chained_run_behind(
+    acceptance_behind: u32,
+    skeleton_behind: u32,
+    pin_link: Option<&str>,
+) -> (tempfile::TempDir, WorkflowStore, String, String) {
     let project = fixture_project();
     let (store, run_id, _) =
         super::super::workflow_decomposition_drift_tests::launch_and_pause(project.path()).await;
@@ -151,7 +161,13 @@ pub(super) async fn chained_run(
     let support = crate::command::workflow_decompose_frozen_chain::test_support::freeze_acceptance;
     let pin = crate::command::workflow_task_set::acceptance_pin_path(project.path(), &task_root);
     let versions = crate::command::workflow_host_command_logic::versions();
-    let behind = |capability: &str| versions[capability] - versions_behind;
+    let behind = |capability: &str| {
+        versions[capability]
+            - match capability {
+                "freeze-acceptance" => acceptance_behind,
+                _ => skeleton_behind,
+            }
+    };
     let acceptance_digest = support(project.path(), &prd, &task_root);
     use archon_workflow::task_set_contract::{
         ACCEPTANCE_CONTRACT_FILE as CONTRACT, ACCEPTANCE_LOCK_FILE as LOCK,
@@ -309,3 +325,6 @@ async fn digest_only_repin_replays_the_recorded_freeze() {
 
 #[path = "workflow_decomposition_upgrade_live_frozen_resume_tests.rs"]
 mod production_resume;
+
+#[path = "workflow_decomposition_upgrade_frozen_bump_tests.rs"]
+mod frozen_bump;

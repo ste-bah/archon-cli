@@ -5,7 +5,8 @@ use std::io::Write;
 fn repository_path_comparison_normalizes_verbatim_and_plain_spellings() {
     let verbatim = Path::new(r"\\?\C:\work\repository");
     let plain = Path::new(r"C:\work\repository");
-    assert!(same_path(verbatim, plain));
+    // The repository is the project: the empty project-relative path.
+    assert_eq!(nested_repository(plain, verbatim), Some(PathBuf::new()));
 }
 
 #[test]
@@ -30,7 +31,7 @@ fn canonicalized_repository_path_compares_with_its_plain_spelling() {
     let directory = tempfile::tempdir().unwrap();
     let verbatim = std::fs::canonicalize(directory.path()).unwrap();
     let plain = archon_shell::paths::canonicalize(directory.path()).unwrap();
-    assert!(same_path(&verbatim, &plain));
+    assert_eq!(nested_repository(&plain, &verbatim), Some(PathBuf::new()));
 }
 
 #[cfg(windows)]

@@ -17,7 +17,8 @@
 use std::path::{Path, PathBuf};
 
 use archon_workflow::acceptance_scratch::{
-    CHECK_DEFERRED, CHECK_TIMED_OUT, CheckAllowance, acceptance_input_excluded, relative_key,
+    CHECK_DEFERRED, CHECK_TIMED_OUT, CheckAllowance, acceptance_input_excluded, nested_repository,
+    nested_repository_skipped, relative_key,
 };
 
 use super::*;
@@ -46,11 +47,6 @@ impl HostProbe {
 
 fn excluded(relative: &Path, task_root: Option<&Path>) -> bool {
     acceptance_input_excluded(relative, &[], task_root)
-}
-
-fn same_path(left: &Path, right: &Path) -> bool {
-    archon_shell::paths::plain(left.to_path_buf())
-        == archon_shell::paths::plain(right.to_path_buf())
 }
 
 /// The copy. [`HermeticCopy::remove`] removes it and says whether it could;
@@ -150,6 +146,8 @@ pub(super) fn data_digest_scoped(
         ))
     })?;
     let task_root_relative = task_root_relative(&project, task_root)?;
+    // Issue 440: the one nested-repository rule the copies apply.
+    let nested = nested_repository(&project, &repository);
     let mut lines = Vec::new();
     let mut stack = vec![scope.to_path_buf()];
     while let Some(relative) = stack.pop() {
@@ -159,10 +157,10 @@ pub(super) fn data_digest_scoped(
         {
             continue;
         }
-        let path = project.join(&relative);
-        if same_path(&path, &repository) {
+        if nested_repository_skipped(&relative, nested.as_deref()) {
             continue;
         }
+        let path = project.join(&relative);
         let Ok(meta) = path.symlink_metadata() else {
             continue;
         };
@@ -318,11 +316,17 @@ fn copy_data(
         ))
     })?;
     let task_root = task_root_relative(&root, task_root)?;
+    let repository = archon_shell::paths::canonicalize(repository).map_err(|error| {
+        Unrun(format!(
+            "could not canonicalize repository root {}: {error}",
+            repository.display()
+        ))
+    })?;
     copy_data_relative(
         &root,
         relative,
         dest,
-        repository,
+        nested_repository(&root, &repository).as_deref(),
         task_root.as_deref(),
         remaining,
     )
@@ -332,7 +336,7 @@ fn copy_data_relative(
     root: &Path,
     relative: &Path,
     dest: &Path,
-    repository: &Path,
+    nested: Option<&Path>,
     task_root: Option<&Path>,
     remaining: &mut u64,
 ) -> Result<(), Unrun> {
@@ -341,7 +345,7 @@ fn copy_data_relative(
     if !relative.as_os_str().is_empty() && excluded(relative, task_root) {
         return Ok(());
     }
-    if same_path(&source, repository) {
+    if nested_repository_skipped(relative, nested) {
         return Ok(());
     }
     let meta = source.symlink_metadata().map_err(|e| io(&source, e))?;
@@ -354,7 +358,7 @@ fn copy_data_relative(
                 root,
                 &relative.join(item.file_name()),
                 dest,
-                repository,
+                nested,
                 task_root,
                 remaining,
             )?;
@@ -496,3 +500,7 @@ pub(super) async fn run_in_copy(
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_hermetic_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_nested_repository_tests.rs"]
+mod nested_repository_tests;

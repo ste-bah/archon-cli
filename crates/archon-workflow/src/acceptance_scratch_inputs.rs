@@ -37,6 +37,28 @@ pub(crate) fn acceptance_input_excluded(
         || path.starts_with(".git")
 }
 
+/// Issue 440: the run's repository as a project-relative path when it is
+/// the project (the empty path) or lies inside it; `None` when it holds the
+/// project or lies elsewhere. Both roots are canonical. Every walk of
+/// project inputs -- the scratch copy, its live audit, the hermetic copy
+/// and the probe digest -- skips exactly this path
+/// ([`nested_repository_skipped`]): each site materialises the repository
+/// from its commit, never from the live working tree inside the project.
+pub(crate) fn nested_repository(project: &Path, repository: &Path) -> Option<PathBuf> {
+    let project = archon_shell::paths::plain(project.to_path_buf());
+    let repository = archon_shell::paths::plain(repository.to_path_buf());
+    repository
+        .strip_prefix(&project)
+        .ok()
+        .map(Path::to_path_buf)
+}
+
+/// Whether the project-relative `path` is the nested repository
+/// ([`nested_repository`]); a walk that meets it does not enter it.
+pub(crate) fn nested_repository_skipped(path: &Path, nested: Option<&Path>) -> bool {
+    nested.is_some_and(|nested| path == nested)
+}
+
 fn task_root_pipeline_output(path: &Path) -> bool {
     path == Path::new(crate::task_set_contract::ACCEPTANCE_CONTRACT_FILE)
         || path == Path::new(crate::task_set_contract::ACCEPTANCE_LOCK_FILE)
@@ -143,12 +165,14 @@ pub(super) fn copy_project(
     root: &Path,
     relative: &Path,
     dest: &Path,
-    excludes: &[PathBuf],
+    (excludes, nested): (&[PathBuf], Option<&Path>),
     task_root: &Path,
     remaining: &mut u64,
 ) -> WorkflowResult<()> {
     control::check()?;
-    if acceptance_input_excluded(relative, excludes, Some(task_root)) {
+    if acceptance_input_excluded(relative, excludes, Some(task_root))
+        || nested_repository_skipped(relative, nested)
+    {
         return Ok(());
     }
     let source = root.join(relative);
@@ -163,7 +187,7 @@ pub(super) fn copy_project(
                 root,
                 &relative.join(item.file_name()),
                 dest,
-                excludes,
+                (excludes, nested),
                 task_root,
                 remaining,
             )?;
@@ -252,12 +276,13 @@ fn file_digest(path: &Path) -> WorkflowResult<String> {
 fn audit_path(
     root: &Path,
     rel: &Path,
-    excludes: &[PathBuf],
+    (excludes, nested): (&[PathBuf], Option<&Path>),
     task_root: Option<&Path>,
     map: &mut BTreeMap<String, String>,
 ) -> WorkflowResult<()> {
     control::check()?;
-    if acceptance_input_excluded(rel, excludes, task_root) {
+    if acceptance_input_excluded(rel, excludes, task_root) || nested_repository_skipped(rel, nested)
+    {
         return Ok(());
     }
     let path = root.join(rel);
@@ -277,7 +302,7 @@ fn audit_path(
             audit_path(
                 root,
                 &rel.join(item.map_err(|e| WorkflowError::io(&path, e))?.file_name()),
-                excludes,
+                (excludes, nested),
                 task_root,
                 map,
             )?;
@@ -322,11 +347,14 @@ pub(super) fn live(
     let task_relative = task_root
         .strip_prefix(&project_root)
         .map_err(|_| invalid("task root must belong to declared project"))?;
+    let repository_root = archon_shell::paths::canonicalize(&policy.repository)
+        .map_err(|error| WorkflowError::io(&policy.repository, error))?;
+    let nested = nested_repository(&project_root, &repository_root);
     for input in &policy.project_inputs {
         audit_path(
             &policy.project,
             input,
-            &project_excludes,
+            (&project_excludes, nested.as_deref()),
             Some(task_relative),
             &mut project,
         )?;
@@ -337,7 +365,7 @@ pub(super) fn live(
     audit_path(
         &policy.project,
         task_relative,
-        &project_excludes,
+        (&project_excludes, nested.as_deref()),
         Some(task_relative),
         &mut tasks,
     )?;
@@ -378,3 +406,7 @@ pub(super) fn name_collision(
         other => other,
     }
 }
+
+#[cfg(test)]
+#[path = "acceptance_scratch_inputs_nested_tests.rs"]
+mod nested_tests;
