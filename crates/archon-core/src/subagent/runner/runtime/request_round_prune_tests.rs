@@ -150,3 +150,63 @@ fn a_small_prune_keeps_the_unestimated_part_of_the_measured_count() {
     assert_eq!(verdict, PruneVerdict::StillOver);
     assert!(last_known >= 256_000, "{last_known}");
 }
+
+/// Re-review of the #369 follow-up: the provider counts the PROJECTED request,
+/// in which tool results older than `preserve_recent_turns` are already cut
+/// to their context budget (64 KB by default). A prune that merges such an
+/// old result reclaims far more of the stored history than of what the
+/// provider counted, so the measured count may only be lowered by what the
+/// projection loses. The reviewer's input: measured 300,000; history estimate
+/// about 250,000; limit 256,000; one old result stored at 256,000 bytes.
+#[test]
+fn pruning_an_old_result_the_projection_already_cut_stays_over_the_limit() {
+    let config = context(256_000);
+    let big = "r".repeat(256_000);
+    let filler = "f".repeat(740_000);
+    let mut stored = vec![
+        serde_json::json!({"role": "user", "content": "task"}),
+        serde_json::json!({"role": "assistant", "content": [
+            {"type": "tool_use", "id": "old-1", "name": "Read", "input": {"path": "a"}}
+        ]}),
+        serde_json::json!({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "old-1", "content": big}
+        ]}),
+    ];
+    // Three recent user turns: everything after the first is preserved.
+    for turn in 0..3 {
+        stored.push(serde_json::json!({"role": "user", "content": format!("turn {turn} {}", &filler[..filler.len() / 3])}));
+        stored.push(serde_json::json!({"role": "assistant", "content": "ok"}));
+    }
+    let mut messages = MessageHistory::new(stored);
+    let estimate_before = messages.estimated_tokens();
+    assert!(
+        (240_000..256_000).contains(&estimate_before),
+        "{estimate_before}"
+    );
+    let mut last_known = 300_000;
+    let mut body = body_bytes(&messages);
+    let verdict = prune_then_judge_pressure(
+        &config,
+        &mut messages,
+        &mut last_known,
+        &mut body,
+        0,
+        |m| {
+            let before = m.estimated_tokens();
+            let mut pruned = m.as_slice().to_vec();
+            pruned[2] = serde_json::json!({"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "old-1", "content": "[superseded: see later read]"}
+            ]});
+            m.replace(pruned);
+            before - m.estimated_tokens()
+        },
+    );
+    // Stored reclaim is ~64,000 tokens; the provider only ever saw ~16,000.
+    assert!(estimate_before - messages.estimated_tokens() > 60_000);
+    println!(
+        "stored reclaim {}, lowered measured count {last_known}",
+        estimate_before - messages.estimated_tokens()
+    );
+    assert_eq!(verdict, PruneVerdict::StillOver);
+    assert!(last_known >= 280_000, "{last_known}");
+}

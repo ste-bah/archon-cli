@@ -110,7 +110,9 @@ pub(super) enum PruneVerdict {
 /// A prune that reclaimed anything changed the request, so the provider's
 /// measured count (`last_known_context_tokens`, the size of the request
 /// BEFORE the prune) no longer describes it. It is lowered by what the prune
-/// reclaimed, and pressure is judged on that and the fresh estimate of the
+/// reclaimed from the request as the provider sees it (the projection that
+/// cuts old tool results), and pressure is judged on that and the fresh
+/// estimate of the
 /// pruned history, whichever is larger. Lowering rather than clearing keeps
 /// the part of the measured count no history estimate sees (system prompt,
 /// tool schemas), so a prune that only nibbles cannot pass a request the
@@ -126,10 +128,22 @@ pub(super) fn prune_then_judge_pressure(
     envelope_bytes: usize,
     prune: impl FnOnce(&mut MessageHistory) -> u64,
 ) -> PruneVerdict {
-    let reclaimed = prune(messages);
-    if reclaimed == 0 {
+    // The provider counts the projected request, in which tool results older
+    // than the preserved turns are already cut to their context budget; only
+    // what the prune takes out of THAT may come off the measured count.
+    let projected_tokens = |messages: &MessageHistory| {
+        crate::agent::autocompact::estimate_messages_tokens(
+            &crate::agent::tool_result_context::project_messages_for_request(
+                messages.as_slice(),
+                context.preserve_recent_turns,
+            ),
+        )
+    };
+    let projected_before = projected_tokens(messages);
+    if prune(messages) == 0 {
         return PruneVerdict::NothingPruned;
     }
+    let reclaimed = projected_before.saturating_sub(projected_tokens(messages));
     *last_known_context_tokens = last_known_context_tokens.saturating_sub(reclaimed);
     *request_body_bytes = crate::agent::autocompact::estimated_body_bytes(
         envelope_bytes,
