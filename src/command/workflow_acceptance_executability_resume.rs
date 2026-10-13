@@ -23,19 +23,21 @@ use std::path::PathBuf;
 use archon_workflow::acceptance_scratch::{AllowanceHook, CheckHook, ObserveHooks};
 use serde::{Deserialize, Serialize};
 
+use super::hermetic::{CheckEvidence, CopyLayout};
 use super::*;
 use crate::command::workflow_freeze_budget::{
     FREEZE_CACHE_DIR, FreezeBudget, FreezeIncomplete, FreezeResume,
 };
 use crate::command::workflow_task_set::passability::evidence::Redactor;
 
-const SCHEMA: u32 = 3;
+const SCHEMA: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 struct Saved {
     schema: u32,
     key: String,
     result: CheckResult,
+    copy_layout: Option<CopyLayout>,
 }
 
 /// Saved verdicts, one file per memo key.
@@ -71,9 +73,11 @@ impl ResultStore {
     }
 
     /// The verdict saved under `key`; anything unreadable is no verdict.
-    pub(super) fn load(&self, key: &str) -> Option<CheckResult> {
+    pub(super) fn load(&self, key: &str) -> Option<CheckEvidence> {
         let _ = std::fs::remove_file(self.path(key)?.with_extension("provisional"));
         let path = self.path(key)?;
+        // Schema 3 predates copy layouts; the schema guard below deletes it
+        // so the caller observes a miss and reruns the check.
         let saved = std::fs::read(&path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok());
@@ -85,7 +89,10 @@ impl ResultStore {
                     && saved.result.classification.is_some()
                     && !super::verdict::may_be_host_failure(&saved.result) =>
             {
-                Some(saved.result)
+                Some(CheckEvidence {
+                    result: saved.result,
+                    copy_layout: saved.copy_layout,
+                })
             }
             _ => {
                 let _ = std::fs::remove_file(path);
@@ -95,7 +102,17 @@ impl ResultStore {
     }
 
     /// Save `result` under `key`, atomically; false when it was not saved.
+    #[cfg(test)]
     pub(super) fn save(&self, key: &str, result: &CheckResult) -> bool {
+        self.save_evidence(key, result, None)
+    }
+
+    pub(super) fn save_evidence(
+        &self,
+        key: &str,
+        result: &CheckResult,
+        copy_layout: Option<CopyLayout>,
+    ) -> bool {
         let Some(path) = self.path(key) else {
             return false;
         };
@@ -122,6 +139,7 @@ impl ResultStore {
             schema: SCHEMA,
             key: key.to_string(),
             result,
+            copy_layout,
         };
         let path = path.with_extension("provisional");
         let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
@@ -154,6 +172,13 @@ impl ResultStore {
     pub(super) fn remove(&self, key: &str) {
         if let Some(path) = self.path(key) {
             let _ = std::fs::remove_file(path.with_extension("provisional"));
+        }
+    }
+
+    pub(super) fn discard(&self, key: &str) {
+        if let Some(path) = self.path(key) {
+            let _ = std::fs::remove_file(path.with_extension("provisional"));
+            let _ = std::fs::remove_file(path);
         }
     }
 }
@@ -282,18 +307,38 @@ impl HostProbe {
     /// The hooks one observation (or copy) of `keys` (id to memo key) runs
     /// under: the budget's allowance per check, and each verdict saved as
     /// it finishes, its key pushed to `written`.
+    #[cfg(test)]
     pub(super) fn observe_hooks(
         &self,
         keys: &BTreeMap<String, String>,
         store: Option<&ResultStore>,
         written: &Arc<Mutex<Vec<String>>>,
     ) -> ObserveHooks {
+        self.observe_hooks_with_layout(keys, store, written, &Arc::new(Mutex::new(None)))
+    }
+
+    pub(super) fn observe_hooks_with_layout(
+        &self,
+        keys: &BTreeMap<String, String>,
+        store: Option<&ResultStore>,
+        written: &Arc<Mutex<Vec<String>>>,
+        copy_layout: &Arc<Mutex<Option<CopyLayout>>>,
+    ) -> ObserveHooks {
         let (budget, cap) = (self.resume.budget.clone(), self.check_bound_secs());
         let on_check = store.map(|store| {
-            let (store, keys, written) = (store.clone(), keys.clone(), written.clone());
+            let (store, keys, written, copy_layout) = (
+                store.clone(),
+                keys.clone(),
+                written.clone(),
+                copy_layout.clone(),
+            );
             Arc::new(move |result: &CheckResult| {
                 if let Some(key) = keys.get(&result.acceptance_id)
-                    && store.save(key, result)
+                    && store.save_evidence(
+                        key,
+                        result,
+                        copy_layout.lock().ok().and_then(|layout| layout.clone()),
+                    )
                 {
                     written.lock().expect("written lock").push(key.clone());
                 }

@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use archon_workflow::acceptance_check_environment as check_env;
 use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, ObserveHooks, observe_commands_hooked};
 
-use super::hermetic::{Unrun, data_digest, data_digest_scoped};
+use super::hermetic::{CheckEvidence, CopyLayout, Unrun, data_digest, data_digest_scoped};
 use super::*;
 
 /// A freeze probe's site and the repository it proves checks against: the
@@ -60,8 +60,8 @@ impl HostProbe {
 
 /// Verdicts already observed in this process, by site, tree and check: a
 /// freeze's trees do not move under it, so each check is run once per tree.
-fn memo() -> &'static Mutex<BTreeMap<String, CheckResult>> {
-    static MEMO: OnceLock<Mutex<BTreeMap<String, CheckResult>>> = OnceLock::new();
+fn memo() -> &'static Mutex<BTreeMap<String, CheckEvidence>> {
+    static MEMO: OnceLock<Mutex<BTreeMap<String, CheckEvidence>>> = OnceLock::new();
     MEMO.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
@@ -127,8 +127,7 @@ mod reuse;
 pub(super) use reuse::check_key;
 
 pub(super) struct SiteRun {
-    pub(super) results: Vec<CheckResult>,
-    pub(super) copy_layout: Option<hermetic::CopyLayout>,
+    pub(super) results: Vec<CheckEvidence>,
 }
 
 /// Run `refs` once on `tree`, in scratch or the probe's own copy.
@@ -156,12 +155,16 @@ pub(super) async fn run_at(
         })
         .collect();
     let store = probe.store();
-    let seen: Vec<Option<CheckResult>> = (keys.iter())
+    let seen: Vec<Option<CheckEvidence>> = (keys.iter())
         .map(|key| {
             let key = key.as_ref()?;
             // A saved verdict is reusable only with valid durable evidence.
             let store = store.as_ref()?;
             let saved = store.load(key)?;
+            if matches!(probe.site, Site::Hermetic) && saved.copy_layout.is_none() {
+                store.discard(key);
+                return None;
+            }
             let remembered = (probe.process_memo())
                 .then(|| memo().lock().ok()?.get(key).cloned())
                 .flatten();
@@ -229,11 +232,12 @@ pub(super) async fn run_at(
         .filter_map(|((reference, key), _)| Some((reference.acceptance_id.clone(), key.clone()?)))
         .collect();
     let written = Arc::new(Mutex::new(Vec::new()));
-    let hooks = probe.observe_hooks(&pending_keys, store.as_ref(), &written);
+    let observed_layout = Arc::new(Mutex::new(None::<CopyLayout>));
+    let hooks =
+        probe.observe_hooks_with_layout(&pending_keys, store.as_ref(), &written, &observed_layout);
     let ran = if pending.is_empty() {
         Ok(SiteRun {
             results: Vec::new(),
-            copy_layout: None,
         })
     } else if let Site::Scratch(binding) = &probe.site {
         let mut binding = NativeBinding::clone(binding);
@@ -254,8 +258,7 @@ pub(super) async fn run_at(
         .map_err(|error| Unrun(format!("scratch probe task failed: {error}")))
         .and_then(|observed| observed.map_err(|error| Unrun(format!("{error:#}"))))
         .map(|results| SiteRun {
-            results,
-            copy_layout: None,
+            results: CheckEvidence::from_results(results, None),
         })
     } else {
         hermetic::run_in_copy(
@@ -266,11 +269,11 @@ pub(super) async fn run_at(
             digest,
             &pending,
             &hooks,
+            &observed_layout,
         )
         .await
         .map(|run| SiteRun {
-            results: run.results,
-            copy_layout: Some(run.layout),
+            results: CheckEvidence::from_results(run.results, Some(run.layout)),
         })
     };
     // A voided run's verdicts were told early, but are no evidence.
@@ -281,8 +284,7 @@ pub(super) async fn run_at(
             .filter(|result| result.operational_error.as_deref() == Some(CHECK_DEFERRED))
             .map(|result| result.acceptance_id.as_str()),
     );
-    let copy_layout = ran.copy_layout;
-    let mut ran: BTreeMap<String, CheckResult> = (ran.results.into_iter())
+    let mut ran: BTreeMap<String, CheckEvidence> = (ran.results.into_iter())
         .map(|result| (result.acceptance_id.clone(), result))
         .collect();
     let mut results = Vec::new();
@@ -302,10 +304,7 @@ pub(super) async fn run_at(
         }
         results.push(result);
     }
-    Ok(SiteRun {
-        results,
-        copy_layout,
-    })
+    Ok(SiteRun { results })
 }
 
 /// Whether `text` is a full object id: SHA-1 (40) or SHA-256 (64) hex.

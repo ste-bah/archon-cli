@@ -48,13 +48,19 @@ impl HostProbe {
             .collect()
     }
 
+    #[cfg(test)]
     pub(super) async fn run(
         &self,
         contract: &AcceptanceContract,
         digest: &str,
         refs: &[FrozenCommandRef],
     ) -> Vec<CheckResult> {
-        self.run_with_layout(contract, digest, refs).await.results
+        self.run_with_layout(contract, digest, refs)
+            .await
+            .results
+            .into_iter()
+            .map(|evidence| evidence.result)
+            .collect()
     }
 
     pub(super) async fn run_with_layout(
@@ -73,7 +79,6 @@ impl HostProbe {
             Site::Unavailable(_) => {
                 return sites::SiteRun {
                     results: Vec::new(),
-                    copy_layout: None,
                 };
             }
             Site::Direct => {
@@ -95,17 +100,17 @@ impl HostProbe {
                     match run_check_direct(&site, contract, digest, reference, cancel.clone())
                         .await
                     {
-                        Ok(result) => results.push(result),
+                    Ok(result) => results.push(super::hermetic::CheckEvidence {
+                        result,
+                        copy_layout: None,
+                    }),
                         Err(error) => self.note(format!(
                             "executability probe of '{}' could not run ({error}); it is proven on the hermetic trees instead",
                             reference.acceptance_id
                         )),
                     }
                 }
-                return sites::SiteRun {
-                    results,
-                    copy_layout: None,
-                };
+                return sites::SiteRun { results };
             }
             Site::Scratch(_) | Site::Hermetic => {}
         }
@@ -117,7 +122,6 @@ impl HostProbe {
             ));
             return sites::SiteRun {
                 results: Vec::new(),
-                copy_layout: None,
             };
         };
         let tree = Baseline {
@@ -129,7 +133,6 @@ impl HostProbe {
             results: (refs.iter())
                 .filter_map(|reference| run.results.get(&reference.acceptance_id).cloned())
                 .collect(),
-            copy_layout: run.copy_layout,
         }
     }
 
@@ -172,14 +175,27 @@ impl HostProbe {
         let run = if refs.is_empty() {
             sites::SiteRun {
                 results: Vec::new(),
-                copy_layout: None,
             }
         } else {
             self.run_with_layout(contract, &digest, &refs).await
         };
         if hold {
-            let at = silent::baseline_context(self, contract, run.copy_layout.as_ref());
-            let observed = originals(&at, contract, run.results.clone()).await;
+            let at = silent::baseline_context(
+                self,
+                contract,
+                run.results
+                    .iter()
+                    .find_map(|evidence| evidence.copy_layout.as_ref()),
+            );
+            let observed = originals(
+                &at,
+                contract,
+                run.results
+                    .iter()
+                    .map(|evidence| evidence.result.clone())
+                    .collect(),
+            )
+            .await;
             let mut tree = self.failed_tree.lock().expect("failed tree lock");
             let held = tree.get_or_insert_with(|| FailedTree {
                 commit: self.site_commit(),
@@ -191,7 +207,11 @@ impl HostProbe {
             Site::Scratch(binding) => Some(binding.as_ref()),
             _ => None,
         };
-        findings.extend(crash_findings_at(contract, &run.results, binding));
+        findings.extend(crash_findings_at(
+            contract,
+            run.results.iter().map(|evidence| &evidence.result),
+            binding,
+        ));
         // A4/A5: what did not crash must also be able to fail, and a repair
         // must keep its original's verdict. A check the site could not run
         // is still proven on the hermetic trees: it is never published on

@@ -24,7 +24,7 @@ use super::*;
 
 #[path = "workflow_acceptance_executability_hermetic_layout.rs"]
 mod layout;
-pub(super) use layout::{CopyLayout, CopyRun, deferred, warm_target};
+pub(super) use layout::{CheckEvidence, CopyLayout, CopyRun, deferred, warm_target};
 
 /// The largest project copy a probe makes without a scratch policy naming
 /// what the checks read.
@@ -395,6 +395,7 @@ pub(super) async fn run_in_copy(
     digest: &str,
     refs: &[FrozenCommandRef],
     hooks: &archon_workflow::acceptance_scratch::ObserveHooks,
+    observed_layout: &std::sync::Mutex<Option<CopyLayout>>,
 ) -> Result<CopyRun, Unrun> {
     let parent = probe.copy_parent.clone();
     for failure in sweep(&parent) {
@@ -418,6 +419,7 @@ pub(super) async fn run_in_copy(
     .await
     .map_err(|error| Unrun(format!("the copy task failed: {error}")))??;
     let layout = copy.layout();
+    *observed_layout.lock().expect("observation layout lock") = Some(layout.clone());
     let target = warm_target(&probe.copy_parent, repository);
     let mut site = DirectSite {
         repository: copy.repository.clone(),

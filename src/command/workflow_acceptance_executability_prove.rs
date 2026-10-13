@@ -68,9 +68,8 @@ pub(super) async fn prove(
         let run =
             super::repairs::tree_results(probe, baseline, &mutated, &digest, &refs, None, false)
                 .await;
-        let at = super::silent::baseline_context(probe, &mutated, run.copy_layout.as_ref());
         let result = run.results.get(id);
-        if result.is_some_and(super::repairs::timed_out) {
+        if result.is_some_and(|result| super::repairs::timed_out(&result.result)) {
             // #356: the mutated check (its nonce kept across retries) is
             // judged on the base like any other stall.
             let commit = &baseline.commit;
@@ -81,6 +80,8 @@ pub(super) async fn prove(
         }
         let setup_failure = match result {
             Some(result) if result.operational_error.is_none() => {
+                let at =
+                    super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
                 super::silent::setup_path_failure_off_thread(&mutated, result, &at).await
             }
             _ => None,
@@ -105,11 +106,12 @@ pub(super) async fn prove(
             continue;
         }
         let result = result.expect("a result when the run completed");
+        let at = super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
         super::silent::ran(probe, &baseline.commit, &mutated, id);
         let moved = markers.moved(result);
         // Issue 328: nor did a run that failed for its host (a program that
         // could not start, a tree that did not build) fail on its own terms.
-        let crashed = !super::crash_findings(&mutated, [result]).is_empty()
+        let crashed = !super::crash_findings(&mutated, [&result.result]).is_empty()
             || super::silent::silent_failure_off_thread(&mutated, result, &at)
                 .await
                 .is_some();

@@ -53,6 +53,40 @@ fn round2_old_cache_is_discarded_from_disk() {
 }
 
 #[test]
+fn layoutless_current_schema_cache_is_discarded_for_rerun() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = super::ResultStore::new(
+        dir.path().into(),
+        crate::command::workflow_task_set::passability::evidence::Redactor::from_vars(
+            Vec::new(),
+            &[],
+        ),
+    );
+    let key = "e".repeat(64);
+    let path = store.path(&key).unwrap();
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 3,
+            "key": key,
+            "result": {
+                "acceptance_id": "AC-Z-004", "exit_code": 1,
+                "stdout": [], "stderr": [], "operational_error": null,
+                "classification": {"passed": false, "zero_work": false,
+                    "crash": "Failed"}
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        store.load(&key).is_none(),
+        "schema-3 entries have no layout"
+    );
+    assert!(!path.exists(), "layoutless evidence must be rerun");
+}
+
+#[test]
 fn round2_saved_crash_class_survives_redaction() {
     use archon_workflow::acceptance_check_crash::{CheckRunClass, classify_check_run};
     let command = "python3 - <<'PY'\nprint(missing)\nPY";

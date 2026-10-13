@@ -236,12 +236,12 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 17: #420 a pre-implementation failure at a setup path outside the probe's tree that the output reports absent (`cd X`, `--manifest-path X`) gives no verdict: unproven, then its author's, never a passability verdict.
         // #420 review, same unreleased version 17: the rule applies only in a host-made copy (scratch, hermetic), never on the live tree, and a top-level name the copy holds (`../repo`) stays inside it.
         // 18: #446 direct-site baseline runs use their hermetic copy's layout when applying that rule.
-        // #446 review, same unreleased version 18.
+        // #446 review 2, same unreleased version 18
         version: 18,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        // #446 re-pin only: the source closure digest reflects the baseline judge handoff; version 18 already records the verdict change.
-        sources_digest: "5b9ce05163a453e3768085e9721ac79a0a8975099af368e4ace40c7c6e621054",
+        // #446 re-pin only: the reviewed version-18 result handoff preserves layout through reuse.
+        sources_digest: "0ab49c499c4370687366ca8dbd448e3fa3dded72074e8008955dcbb215bfa282",
         build_bound: false,
     },
     CapabilityLogic {
@@ -259,8 +259,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 re-pin only: the skeleton freeze judges no check run, so the new no-verdict rule never applies.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // #446 re-pin only: the skeleton freeze judges no baseline run.
-        // #446 re-pin only: the source closure digest changed with the generic copy-layout handoff; skeleton verdicts are unchanged.
-        sources_digest: "5b9ce05163a453e3768085e9721ac79a0a8975099af368e4ace40c7c6e621054",
+        // #446 re-pin only: freeze-skeleton does not judge check runs; the shared source closure changed.
+        sources_digest: "0ab49c499c4370687366ca8dbd448e3fa3dded72074e8008955dcbb215bfa282",
         build_bound: false,
     },
     CapabilityLogic {
@@ -334,8 +334,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
-        // #446 re-pin only: the shared source closure digest changed with the generic copy-layout handoff; verification verdicts are unchanged.
-        sources_digest: "f03bdd9a1377270e04432ec4e4f2c6b1dd51e5426fc3f9c2d5b8a2736c48e29f",
+        // #446 re-pin only: verification shares changed source files but reads no probe result layout.
+        sources_digest: "0f8496d2dcb12efec6dd4edbfb6ca442ebc66196b7a435ce8f4a2c6a06832ca5",
         build_bound: true,
     },
     CapabilityLogic {
@@ -354,8 +354,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
-        // #446 re-pin only: the shared source closure digest changed with the generic copy-layout handoff; verification verdicts are unchanged.
-        sources_digest: "f03bdd9a1377270e04432ec4e4f2c6b1dd51e5426fc3f9c2d5b8a2736c48e29f",
+        // #446 re-pin only: verification shares changed source files but reads no probe result layout.
+        sources_digest: "0f8496d2dcb12efec6dd4edbfb6ca442ebc66196b7a435ce8f4a2c6a06832ca5",
         build_bound: true,
     },
 ];

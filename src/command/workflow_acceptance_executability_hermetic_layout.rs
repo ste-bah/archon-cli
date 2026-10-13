@@ -1,12 +1,42 @@
+use serde::{Deserialize, Serialize};
+
 use super::*;
 
 /// The paths the copy builder actually made. Judges derive their site tree
 /// from these paths, never from the corresponding live paths.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CopyLayout {
     pub root: PathBuf,
     pub repository: PathBuf,
     pub project: PathBuf,
+}
+
+/// One check result and the copy whose paths gave that result meaning.
+/// Live and scratch observations explicitly carry no copy layout.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CheckEvidence {
+    pub result: CheckResult,
+    pub copy_layout: Option<CopyLayout>,
+}
+
+impl std::ops::Deref for CheckEvidence {
+    type Target = CheckResult;
+
+    fn deref(&self) -> &Self::Target {
+        &self.result
+    }
+}
+
+impl CheckEvidence {
+    pub fn from_results(results: Vec<CheckResult>, copy_layout: Option<CopyLayout>) -> Vec<Self> {
+        results
+            .into_iter()
+            .map(|result| Self {
+                result,
+                copy_layout: copy_layout.clone(),
+            })
+            .collect()
+    }
 }
 
 impl CopyLayout {

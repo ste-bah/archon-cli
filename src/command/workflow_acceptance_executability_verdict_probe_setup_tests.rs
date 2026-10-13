@@ -62,6 +62,96 @@ async fn a_sibling_root_absent_from_the_copy_is_unproven_and_never_judged() {
     trees.assert_live_untouched(copies.path());
 }
 
+#[tokio::test]
+async fn a_same_commit_known_copy_result_keeps_its_layout_for_judgment() {
+    let command = "cargo metadata --no-deps --format-version 1 --manifest-path ../archon-446-outside/Cargo.toml";
+    let trees = trees(&[("AC-446-001", command, REPO)]);
+    let sibling = trees.outside.path().join("archon-446-outside");
+    std::fs::create_dir_all(&sibling).unwrap();
+    std::fs::write(
+        sibling.join("Cargo.toml"),
+        "[package]\nname='outside'\nversion='0.1.0'\nedition='2024'\n",
+    )
+    .unwrap();
+    let copies = tempfile::tempdir().unwrap();
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+        .with_baseline(super::Baseline {
+            commit: trees.head.clone(),
+            repository: trees.repo.clone(),
+        })
+        .with_copy_parent(copies.path().to_path_buf());
+
+    let findings = probe.script_defects(&trees.contract(), &trees.ids()).await;
+    let unproven = probe.take_unproven();
+    assert!(findings.is_empty(), "no author finding: {findings:?}");
+    let why = unproven
+        .get("AC-446-001")
+        .expect("outside-copy setup failure is unproven");
+    assert!(why.contains("outside the tree"), "{why}");
+    assert!(why.contains("../archon-446-outside/Cargo.toml"), "{why}");
+    let runs = probe.take_baseline_runs().expect("a baseline");
+    assert!(runs.failures.is_empty(), "no baseline verdict: {runs:?}");
+    trees.assert_live_untouched(copies.path());
+}
+
+#[tokio::test]
+async fn a_hermetic_memo_hit_keeps_its_layout_for_judgment() {
+    use crate::command::workflow_freeze_budget::{FreezeBudget, FreezeResume};
+
+    let command = "cargo metadata --no-deps --format-version 1 --manifest-path ../archon-446-memo-outside/Cargo.toml";
+    let trees = trees(&[("AC-446-002", command, REPO)]);
+    let sibling = trees.outside.path().join("archon-446-memo-outside");
+    std::fs::create_dir_all(&sibling).unwrap();
+    std::fs::write(
+        sibling.join("Cargo.toml"),
+        "[package]\nname='outside'\nversion='0.1.0'\nedition='2024'\n",
+    )
+    .unwrap();
+    let copies = tempfile::tempdir().unwrap();
+    let resume = FreezeResume::saving(FreezeBudget::unlimited(), true);
+    let probe = HostProbe::for_task_set(trees.set.project.path(), &trees.set.tasks)
+        .with_baseline(super::Baseline {
+            commit: trees.head.clone(),
+            repository: trees.repo.clone(),
+        })
+        .with_copy_parent(copies.path().to_path_buf())
+        .with_resume(&resume);
+    let contract = trees.contract();
+    let digest = super::contract_digest(&contract).unwrap();
+    let refs = super::refs_for(&contract, &digest, &trees.ids());
+    let first = probe.run_with_layout(&contract, &digest, &refs).await;
+    assert_eq!(first.results.len(), 1);
+    assert!(first.results[0].copy_layout.is_some());
+    let memo_hit = probe.run_with_layout(&contract, &digest, &refs).await;
+    assert_eq!(
+        probe.copies_made.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the second observation reused the saved result"
+    );
+    assert!(memo_hit.results[0].copy_layout.is_some());
+
+    let findings = super::baseline::cannot_fail_findings(
+        &probe,
+        probe.baseline.as_ref().unwrap(),
+        &contract,
+        &digest,
+        &refs,
+        Some(&memo_hit.results),
+    )
+    .await;
+    let unproven = probe.take_unproven();
+    assert!(findings.is_empty(), "no author finding: {findings:?}");
+    let why = unproven
+        .get("AC-446-002")
+        .expect("memoized outside-copy setup failure is unproven");
+    assert!(why.contains("outside the tree"), "{why}");
+    assert!(
+        why.contains("../archon-446-memo-outside/Cargo.toml"),
+        "{why}"
+    );
+    trees.assert_live_untouched(copies.path());
+}
+
 /// A round's direct site executes baseline checks in a hermetic copy too;
 /// its verdict context must describe that copy, while the same check on the
 /// live tree keeps the live-tree rule.
