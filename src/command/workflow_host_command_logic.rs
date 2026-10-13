@@ -233,10 +233,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // 16: #440 the scratch copy skips a repository nested inside a project input, as the probe digest does, so a check can no longer read that live tree and its verdict can change.
-        version: 16,
+        // 17: #420 a pre-implementation failure at a setup path outside the probe's tree that the output reports absent (`cd X`, `--manifest-path X`) gives no verdict: unproven, then its author's, never a passability verdict.
+        version: 17,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        sources_digest: "1479a93b9db4694e3bc99ecb0f4018c97f122ea2ee58494325a40199673b1920",
+        sources_digest: "7516e3b349e667c9ca319f4319d6767152e6c21d2c6ebd43644f768dbb202ee9",
         build_bound: false,
     },
     CapabilityLogic {
@@ -251,7 +252,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #440 re-pin only: the skeleton freeze runs no check and copies no input.
-        sources_digest: "1479a93b9db4694e3bc99ecb0f4018c97f122ea2ee58494325a40199673b1920",
+        // #420 re-pin only: the skeleton freeze judges no check run, so the new no-verdict rule never applies.
+        sources_digest: "7516e3b349e667c9ca319f4319d6767152e6c21d2c6ebd43644f768dbb202ee9",
         build_bound: false,
     },
     CapabilityLogic {
@@ -320,7 +322,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #440 re-pin only: frozen-chain verification runs no check and calls none of the changed copy, audit or digest walkers.
-        sources_digest: "5912d056e312c4c53ea0d907e3901103d6c0dedd0bc483b0d521ccc822ec785f",
+        // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
+        sources_digest: "ca4e7a6993747e784c88bad293bc30f0b4cc865e2bee6ab57066fb7935097cc8",
         build_bound: true,
     },
     CapabilityLogic {
@@ -335,7 +338,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #440 re-pin only: frozen-chain verification runs no check and calls none of the changed copy, audit or digest walkers.
-        sources_digest: "5912d056e312c4c53ea0d907e3901103d6c0dedd0bc483b0d521ccc822ec785f",
+        // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
+        sources_digest: "ca4e7a6993747e784c88bad293bc30f0b4cc865e2bee6ab57066fb7935097cc8",
         build_bound: true,
     },
 ];

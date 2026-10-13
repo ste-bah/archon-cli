@@ -42,6 +42,9 @@ static FUNCTION: LazyLock<Regex> = LazyLock::new(|| {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Simple {
     pub(super) program: Option<String>,
+    /// The command word as written: the program, or the builtin, function
+    /// or expansion that starts none.
+    pub(super) word: String,
     pub(super) args: Vec<String>,
 }
 
@@ -80,7 +83,8 @@ pub(super) fn simple_commands(text: &str) -> Vec<Simple> {
         let starts_none =
             BUILTINS.contains(&word.as_str()) || functions.contains(&word) || expands(&word);
         out.push(Simple {
-            program: (!starts_none).then_some(word),
+            program: (!starts_none).then(|| word.clone()),
+            word,
             args: words.collect(),
         });
     }

@@ -34,7 +34,25 @@ const EVIDENCE_BYTES: usize = 800;
 /// Where `probe`'s checks run: its site's environment, and `contract`'s
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
-    Context::new(super::sites::listing_environment(probe), contract)
+    Context::new(super::sites::listing_environment(probe), contract).with_headroom(headroom(probe))
+}
+
+/// Issue 420: how many levels of the tree a check's site keeps above its
+/// working directory. A scratch site materialises the project and the
+/// repository as two roots (none). The probe's own copy keeps a project the
+/// repository tracks inside its clone, and the live site is the live tree:
+/// there a project inside the repository has the levels between them.
+fn headroom(probe: &HostProbe) -> usize {
+    if matches!(probe.site, Site::Scratch(_)) {
+        return 0;
+    }
+    let canonical = |path: &std::path::Path| archon_shell::paths::canonicalize(path).ok();
+    match (canonical(&probe.project), canonical(&probe.repository)) {
+        (Some(project), Some(repository)) => project
+            .strip_prefix(&repository)
+            .map_or(0, |inside| inside.components().count()),
+        _ => 0,
+    }
 }
 
 impl HostProbe {

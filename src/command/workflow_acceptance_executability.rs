@@ -481,3 +481,6 @@ mod verdict_probe_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_verdict_probe_tests_b.rs"]
 mod verdict_probe_tests_b;
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_verdict_probe_setup_tests.rs"]
+mod verdict_probe_setup_tests;
