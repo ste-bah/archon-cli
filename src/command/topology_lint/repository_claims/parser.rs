@@ -130,37 +130,16 @@ const TERMINATORS: &[&str] = &[
 ];
 
 /// Every unambiguous claim in `text`, in order. Fenced code blocks are not
-/// prose and are skipped; inline backticks are read.
+/// prose and are skipped; inline backticks are read. What a specified test
+/// asserts at run time is no claim (`assertion`, #443).
 pub(crate) fn extract_claims(text: &str) -> Vec<PathClaim> {
-    let mut claims = Vec::new();
-    for line in super::super::fences::prose_lines(text) {
-        for sentence in split_sentences(line) {
-            claims.extend(claims_in_sentence(sentence));
-        }
-    }
-    claims
-}
-
-fn split_sentences(line: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    let bytes = line.as_bytes();
-    let mut index = 0;
-    while index + 1 < bytes.len() {
-        if matches!(bytes[index], b'.' | b';' | b'!' | b'?') && bytes[index + 1] == b' ' {
-            out.push(&line[start..=index]);
-            start = index + 1;
-        }
-        index += 1;
-    }
-    out.push(&line[start..]);
-    out.into_iter()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
+    super::assertion::sentences(text)
+        .into_iter()
+        .flat_map(|(sentence, carried)| claims_in_sentence(sentence, carried))
         .collect()
 }
 
-fn claims_in_sentence(sentence: &str) -> Vec<PathClaim> {
+fn claims_in_sentence(sentence: &str, carried: bool) -> Vec<PathClaim> {
     if let Some(claims) = leading_absence_claims(sentence) {
         return claims;
     }
@@ -177,8 +156,12 @@ fn claims_in_sentence(sentence: &str) -> Vec<PathClaim> {
         if !is_incomplete_path_fragment(before, after)
             && let Some(path) = repository_or_scoped_token(token, after)
         {
+            // The predicate after the path may be what a test asserts; a
+            // word before it is the body's own statement.
+            let at = sentence.len() - rest.len() + open;
             let claim = claim_after(after)
                 .or_else(|| explicit_scope(after).map(|(_, claim)| claim))
+                .filter(|_| !super::assertion::asserted_at(sentence, carried, at))
                 .or_else(|| claim_before(before));
             if let Some(claim) = claim {
                 let scope = explicit_scope(after).map(|(scope, _)| scope);

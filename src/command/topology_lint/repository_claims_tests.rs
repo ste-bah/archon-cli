@@ -255,6 +255,9 @@ fn scoped_slash_paths_are_only_checked_when_the_tree_resolves_one_candidate() {
 #[path = "repository_claims_scoped_tests.rs"]
 mod scoped_tests;
 
+#[path = "repository_claims_assertion_tests.rs"]
+mod assertion_tests;
+
 #[test]
 fn runtime_output_paths_are_not_repository_existence_claims() {
     for text in [

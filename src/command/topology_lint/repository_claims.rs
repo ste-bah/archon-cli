@@ -50,6 +50,7 @@ pub(crate) struct PathClaim {
     pub(crate) sentence: String,
 }
 
+mod assertion;
 mod parser;
 pub(crate) use parser::extract_claims;
 
