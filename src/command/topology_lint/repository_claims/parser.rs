@@ -161,7 +161,7 @@ fn claims_in_sentence(sentence: &str, carried: bool) -> Vec<PathClaim> {
             let at = sentence.len() - rest.len() + open;
             let claim = claim_after(after)
                 .or_else(|| explicit_scope(after).map(|(_, claim)| claim))
-                .filter(|_| !super::assertion::asserted_at(sentence, carried, at))
+                .filter(|_| !super::assertion::exempt(sentence, carried, at, after))
                 .or_else(|| claim_before(before));
             if let Some(claim) = claim {
                 let scope = explicit_scope(after).map(|(scope, _)| scope);

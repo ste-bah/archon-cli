@@ -12,74 +12,40 @@
 //! repository keeps its check:
 //!
 //! - A lead is a verb of checking outside backticks: `assert`, `asserts` or
-//!   `asserting` (not after an article or determiner, which makes it a noun,
-//!   and not `assert!`), or `check`, `verify`, `expect`, `confirm`, `ensure`
-//!   and their forms followed by `that` or preceded by `test`/`tests`.
-//! - A path is the subject of the asserted clause when the text between the
-//!   lead and the path is only the clause's opening: `:`, articles and
-//!   determiners, enumeration markers (`(a)`, `-`, `1.`), coordinated
-//!   backticked objects joined by `,`, `and` or `or`, and at most
+//!   `asserting` (not after a determiner, which makes it a noun, not after
+//!   `we`/`I`, which makes it the author's own statement, and not
+//!   `assert!`), or `check`, `verify`, `expect`, `confirm`, `ensure` and
+//!   their forms followed by `that` or preceded by `test`/`tests`.
+//! - The asserted clause runs from the lead to the first path's predicate.
+//!   Between the lead and the path only the clause's opening may stand:
+//!   `:`, articles and determiners, an enumeration marker, coordinated
+//!   backticked subjects joined by `,`, `and` or `or`, and at most
 //!   `MAX_CLAUSE_WORDS` other words. A comma after a plain word, a clause
-//!   word (`then`, `which`, `when`, …) or other punctuation ends the clause.
-//!   An enumeration marker after a lead in the same sentence starts the
-//!   next item's clause.
-//! - Enumerated items continue the clause. A sentence that ends with `;`
-//!   while a lead is open carries it to a next sentence that starts with an
-//!   enumeration marker; a line that ends with a lead and `:` carries it to
-//!   the list items under it (nested deeper when the line is itself a list
-//!   item), each item's first sentence opening on its marker.
-//! - Only the predicate after the path is the asserted clause. A word before
-//!   the path ("modify `x`", "the existing `x`", "new file `x`") is the
-//!   body's own statement about the repository and is still checked.
+//!   word (`then`, `which`, …) or other punctuation ends it. A path right
+//!   after a preposition ("the parser in `x`") is a location the clause
+//!   presupposes, not its subject.
+//! - After that predicate a new clause needs the lead again: `and that`, or
+//!   the next item of an enumeration the lead opened ("assert: (a) …, (b) …";
+//!   a `:` or other punctuation in between breaks the enumeration).
+//! - An enumeration the lead opened continues across `;` into a next
+//!   sentence that starts with a marker, and past a bare item number
+//!   ("assert: 1. `x` exists; 2. `y` exists"). A line that ends with a lead
+//!   and `:` carries it into the list right under it: items indented at
+//!   least as far as the line (further, when the line is itself a list
+//!   item), of one marker kind, up to a blank line or any other line.
+//! - Only a statement of state at run time is exempt. A predicate that names
+//!   the repository ("(12 lines)", "(directory)", "in the repository", "at
+//!   the base commit", "in the checkout") or plans a change ("will be
+//!   modified", "is new") is the body's own statement, as is a word before
+//!   the path ("modify `x`", "the existing `x`").
 
-/// Every prose sentence of `text` in order, each with whether it opens
-/// inside an assertion carried from the sentence or line before it. Fenced
-/// code blocks are not prose and are skipped.
-pub(super) fn sentences(text: &str) -> Vec<(&str, bool)> {
-    let mut out = Vec::new();
-    let mut list: Option<OpenList> = None;
-    for line in super::super::fences::prose_lines(text) {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let line_carried = list.as_ref().is_some_and(|open| open.carries(line));
-        if !line_carried {
-            list = None;
-        }
-        let mut open = false;
-        for (index, sentence) in split_sentences(line).into_iter().enumerate() {
-            let carried = if index == 0 {
-                line_carried
-            } else {
-                open && starts_item(sentence)
-            };
-            out.push((sentence, carried));
-            open = open_after(sentence, carried);
-        }
-        if let Some(opened) = OpenList::opened_by(line) {
-            list = Some(opened);
-        }
-    }
-    out
-}
+mod sentences;
+pub(super) use sentences::sentences;
 
-fn split_sentences(line: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    let bytes = line.as_bytes();
-    let mut index = 0;
-    while index + 1 < bytes.len() {
-        if matches!(bytes[index], b'.' | b';' | b'!' | b'?') && bytes[index + 1] == b' ' {
-            out.push(&line[start..=index]);
-            start = index + 1;
-        }
-        index += 1;
-    }
-    out.push(&line[start..]);
-    out.into_iter()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect()
+/// Is the claim on the path whose backtick opens at byte `at` of `sentence`
+/// what a test asserts at run time? `after` is the text after the path.
+pub(super) fn exempt(sentence: &str, carried: bool, at: usize, after: &str) -> bool {
+    asserted_at(sentence, carried, at) && !names_repository(after) && !plans_change(after)
 }
 
 /// Plain words allowed between a lead (or an enumeration marker) and the
@@ -104,18 +70,47 @@ const CHECK_VERBS: &[&str] = &[
     "ensures",
     "ensuring",
 ];
-/// A word before `assert` that makes it a noun ("an assert in `x`").
-const DETERMINERS: &[&str] = &[
-    "a", "an", "the", "each", "every", "one", "this", "no", "any", "its", "their",
+/// A word before a lead that makes it a noun ("an assert in `x`") or the
+/// author's own statement ("we assert `x` exists").
+const NOT_BEFORE_LEAD: &[&str] = &[
+    "a", "an", "the", "each", "every", "one", "this", "no", "any", "its", "their", "we", "i",
 ];
 /// Words of a clause's opening that are not counted.
 const FREE_WORDS: &[&str] = &[
     "that", "the", "a", "an", "both", "each", "every", "its", "their", "and", "or", "also",
 ];
+/// Nouns that may follow a path inside its subject ("`x` file exists").
+const SUBJECT_NOUNS: &[&str] = &["file", "module", "directory", "dir", "crate", "path"];
 /// Words that start another clause.
 const CLAUSE_WORDS: &[&str] = &[
     "then", "which", "where", "when", "while", "after", "before", "if", "unless", "because", "so",
     "but", "since", "once",
+];
+/// A path right after one of these is a location, not the clause subject.
+const PREPOSITIONS: &[&str] = &[
+    "in", "under", "at", "from", "of", "inside", "within", "into", "on", "beside", "by", "to",
+    "for",
+];
+/// Predicate wording that names the repository the claim is checked against.
+const REPOSITORY_WORDS: &[&str] = &[
+    "in the repository",
+    "in the repo",
+    "base commit",
+    "in the checkout",
+    "(directory)",
+    "(dir)",
+];
+/// Predicate openings that plan a change rather than state a fact.
+const PLAN_WORDS: &[&str] = &[
+    "will be",
+    "to be",
+    "must be",
+    "needs to be",
+    "need to be",
+    "is new",
+    "are new",
+    "is a new",
+    "new",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +120,8 @@ enum Token {
     Marker,
     Comma,
     Colon,
+    Dash,
+    End,
     Other,
 }
 
@@ -135,32 +132,39 @@ fn tokens(segment: &str) -> Vec<(usize, Token)> {
     let mut out = Vec::new();
     let leading = segment.len() - segment.trim_start().len();
     let mut start = 0;
-    if let Some(len) = item_marker_len(&segment[leading..]) {
+    if let Some((len, _)) = item_marker(&segment[leading..]) {
         out.push((leading, Token::Marker));
         start = leading + len;
     }
-    tokenize_from(segment, start, &mut out);
-    out
-}
-
-fn tokenize_from(segment: &str, start: usize, out: &mut Vec<(usize, Token)>) {
+    let last = segment.trim_end().len().saturating_sub(1);
     let mut index = start;
     while index < segment.len() {
         let rest = &segment[index..];
         let character = rest.chars().next().unwrap_or(' ');
+        let after_space = index == start
+            || segment[..index]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
         if character.is_whitespace() {
             index += character.len_utf8();
         } else if character == '`' {
             let close = rest[1..].find('`').map_or(segment.len(), |c| index + c + 2);
             out.push((index, Token::Code));
             index = close;
-        } else if let Some(len) = parenthesized_marker_len(rest) {
+        } else if let Some(len) = parenthesized_marker_len(rest)
+            .or_else(|| after_space.then(|| number_marker_len(rest)).flatten())
+        {
             out.push((index, Token::Marker));
             index += len;
         } else if is_word_char(character) {
+            // A hyphen between letters joins a word ("run-real").
+            let joins = |offset: usize, c: char| {
+                c == '-' && rest[offset + 1..].chars().next().is_some_and(is_word_char)
+            };
             let end = rest
                 .char_indices()
-                .find(|(_, c)| !is_word_char(*c))
+                .find(|(offset, c)| !is_word_char(*c) && !joins(*offset, *c))
                 .map_or(segment.len(), |(offset, _)| index + offset);
             out.push((index, Token::Word(segment[index..end].to_ascii_lowercase())));
             index = end;
@@ -168,12 +172,15 @@ fn tokenize_from(segment: &str, start: usize, out: &mut Vec<(usize, Token)>) {
             let token = match character {
                 ',' => Token::Comma,
                 ':' => Token::Colon,
+                '—' | '–' => Token::Dash,
+                '.' | ';' | '!' | '?' if index == last => Token::End,
                 _ => Token::Other,
             };
             out.push((index, token));
             index += character.len_utf8();
         }
     }
+    out
 }
 
 fn is_word_char(character: char) -> bool {
@@ -191,6 +198,14 @@ fn parenthesized_marker_len(rest: &str) -> Option<usize> {
         .then_some(close + 2)
 }
 
+/// `1.` or `1)` followed by a space or the end.
+fn number_marker_len(rest: &str) -> Option<usize> {
+    let digits = rest.chars().take_while(char::is_ascii_digit).count();
+    let after = rest[digits..].strip_prefix(['.', ')'])?;
+    ((1..=3).contains(&digits) && after.chars().next().is_none_or(char::is_whitespace))
+        .then_some(digits + 1)
+}
+
 fn is_item_label(label: &str) -> bool {
     let single_letter = label.len() == 1 && label.chars().all(|c| c.is_ascii_alphabetic());
     let roman = !label.is_empty()
@@ -200,91 +215,138 @@ fn is_item_label(label: &str) -> bool {
     single_letter || roman || number
 }
 
-/// The byte length of a list or enumeration marker at the start of `text`
-/// (`- `, `* `, `+ `, `1. `, `1) `, `a) `, `(a) `), including its space.
-fn item_marker_len(text: &str) -> Option<usize> {
-    for bullet in ["- ", "* ", "+ "] {
-        if text.starts_with(bullet) {
-            return Some(bullet.len());
+/// The kind of a list or enumeration marker; a list keeps one kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Bullet(char),
+    Number(char),
+    Label,
+}
+
+/// The byte length and kind of a list or enumeration marker at the start of
+/// `text` (`- `, `* `, `+ `, `1. `, `1) `, `a) `, `(a) `), its space included.
+fn item_marker(text: &str) -> Option<(usize, Kind)> {
+    for bullet in ['-', '*', '+'] {
+        if text
+            .strip_prefix(bullet)
+            .is_some_and(|r| r.starts_with(' '))
+        {
+            return Some((2, Kind::Bullet(bullet)));
         }
     }
     if let Some(len) = parenthesized_marker_len(text) {
-        return Some(len);
+        return Some((len, Kind::Label));
     }
-    let label_end = text.find(['.', ')'])?;
-    let label = &text[..label_end];
-    let after = &text[label_end + 1..];
-    let numbered =
-        !label.is_empty() && label.len() <= 3 && label.chars().all(|c| c.is_ascii_digit());
-    let lettered = text.as_bytes()[label_end] == b')' && is_item_label(label);
-    ((numbered || lettered) && after.starts_with(' ')).then_some(label_end + 1)
+    if let Some(len) = number_marker_len(text) {
+        return Some((len, Kind::Number(text.as_bytes()[len - 1] as char)));
+    }
+    let close = text.find(')')?;
+    let after = &text[close + 1..];
+    (is_item_label(&text[..close]) && after.chars().next().is_none_or(char::is_whitespace))
+        .then_some((close + 1, Kind::Label))
+}
+
+fn word(tokens: &[(usize, Token)], index: Option<usize>) -> Option<&str> {
+    match tokens.get(index?) {
+        Some((_, Token::Word(w))) => Some(w.as_str()),
+        _ => None,
+    }
 }
 
 fn is_lead(tokens: &[(usize, Token)], index: usize, segment: &str) -> bool {
-    let Token::Word(word) = &tokens[index].1 else {
+    let Some(this) = word(tokens, Some(index)) else {
         return false;
     };
-    let word_at = |offset: isize| -> Option<&str> {
-        let at = index.checked_add_signed(offset)?;
-        match tokens.get(at) {
-            Some((_, Token::Word(w))) => Some(w.as_str()),
-            _ => None,
-        }
-    };
-    if ASSERT_VERBS.contains(&word.as_str()) {
-        let start = tokens[index].0;
-        let macro_call = segment[start + word.len()..].starts_with('!');
-        return !macro_call && !word_at(-1).is_some_and(|w| DETERMINERS.contains(&w));
+    let before = word(tokens, index.checked_sub(1));
+    if before.is_some_and(|w| NOT_BEFORE_LEAD.contains(&w)) {
+        return false;
     }
-    CHECK_VERBS.contains(&word.as_str())
-        && (word_at(1) == Some("that") || word_at(-1).is_some_and(|w| w == "test" || w == "tests"))
+    if ASSERT_VERBS.contains(&this) {
+        let start = tokens[index].0;
+        return !segment[start + this.len()..].starts_with('!');
+    }
+    CHECK_VERBS.contains(&this)
+        && (word(tokens, Some(index + 1)) == Some("that")
+            || before.is_some_and(|w| w == "test" || w == "tests"))
 }
 
-/// The state of an assertion clause while reading a sentence left to right.
+/// The opening of an asserted clause: plain words counted, and whether the
+/// last token was a backticked subject.
 #[derive(Debug, Clone, Copy)]
 struct Clause {
     words: usize,
     after_code: bool,
 }
 
-impl Clause {
-    const OPEN: Clause = Clause {
-        words: 0,
-        after_code: false,
-    };
+const OPEN: Clause = Clause {
+    words: 0,
+    after_code: false,
+};
+
+/// One sentence read left to right.
+struct Walk {
+    /// Each token's offset, and whether a clause was open just before it.
+    seen: Vec<(usize, bool)>,
+    tokens: Vec<(usize, Token)>,
+    /// The lead opened an enumeration (`assert: (a) …`), or the sentence
+    /// was carried into one.
+    enumerated: bool,
+    /// A clause is open, or closed only by its predicate.
+    live: bool,
+    last_marker: bool,
 }
 
-/// Read `segment`'s tokens, starting inside an assertion when `carried`, and
-/// report for each token whether an assertion clause was open just before it,
-/// plus whether one is open at the end.
-fn walk(segment: &str, carried: bool) -> (Vec<(usize, bool)>, bool) {
+fn walk(segment: &str, carried: bool) -> Walk {
     let tokens = tokens(segment);
-    let mut clause = carried.then_some(Clause::OPEN);
-    let mut opened = carried;
+    let mut clause = carried.then_some(OPEN);
+    let mut enumerated = carried;
+    // Closed by a predicate, with nothing since that breaks the sentence.
+    let mut after_predicate = false;
     let mut seen = Vec::with_capacity(tokens.len());
     for index in 0..tokens.len() {
-        let (offset, token) = &tokens[index];
-        seen.push((*offset, clause.is_some()));
+        let token = &tokens[index].1;
+        seen.push((tokens[index].0, clause.is_some()));
         if is_lead(&tokens, index, segment) {
-            clause = Some(Clause::OPEN);
-            opened = true;
-            continue;
-        }
-        // An enumeration marker after a lead opens the next item's clause.
-        if *token == Token::Marker && opened {
-            clause = Some(Clause::OPEN);
+            clause = Some(OPEN);
+            enumerated = false;
+            after_predicate = false;
             continue;
         }
         let Some(state) = clause.as_mut() else {
+            match token {
+                Token::Marker if enumerated && after_predicate => clause = Some(OPEN),
+                Token::Word(w)
+                    if w == "that"
+                        && after_predicate
+                        && matches!(word(&tokens, index.checked_sub(1)), Some("and" | "or")) =>
+                {
+                    clause = Some(OPEN)
+                }
+                // Inside an item's predicate only a new clause breaks the
+                // enumeration ("…, and note: (b)"); parentheses do not.
+                Token::Colon | Token::Dash => after_predicate = false,
+                Token::Word(w) if CLAUSE_WORDS.contains(&w.as_str()) => after_predicate = false,
+                _ => {}
+            }
             continue;
         };
         match token {
+            Token::Marker => {
+                *state = OPEN;
+                enumerated = true;
+            }
             Token::Code => state.after_code = true,
             Token::Colon => state.after_code = false,
+            Token::End => {}
             Token::Comma if state.after_code => state.after_code = false,
-            Token::Word(word) if FREE_WORDS.contains(&word.as_str()) => state.after_code = false,
-            Token::Word(word) if !CLAUSE_WORDS.contains(&word.as_str()) => {
-                state.after_code = false;
+            Token::Word(w) if SUBJECT_NOUNS.contains(&w.as_str()) && state.after_code => {}
+            Token::Word(w) if FREE_WORDS.contains(&w.as_str()) => state.after_code = false,
+            Token::Word(w) if CLAUSE_WORDS.contains(&w.as_str()) => clause = None,
+            Token::Word(_) if state.after_code => {
+                clause = None;
+                after_predicate = true;
+            }
+            Token::Word(_) => {
                 state.words += 1;
                 if state.words > MAX_CLAUSE_WORDS {
                     clause = None;
@@ -293,63 +355,56 @@ fn walk(segment: &str, carried: bool) -> (Vec<(usize, bool)>, bool) {
             _ => clause = None,
         }
     }
-    (seen, opened)
+    Walk {
+        seen,
+        enumerated,
+        live: clause.is_some() || after_predicate,
+        last_marker: tokens.last().is_some_and(|(_, t)| *t == Token::Marker),
+        tokens,
+    }
 }
 
-/// Is the backticked token opening at byte `at` of `segment` the subject of
-/// an asserted clause? `carried` says the segment opens inside one.
-pub(super) fn asserted_at(segment: &str, carried: bool, at: usize) -> bool {
-    walk(segment, carried)
-        .0
-        .iter()
-        .find(|(offset, _)| *offset == at)
-        .is_some_and(|(_, open)| *open)
+fn asserted_at(segment: &str, carried: bool, at: usize) -> bool {
+    let walked = walk(segment, carried);
+    let Some(index) = walked.seen.iter().position(|(offset, _)| *offset == at) else {
+        return false;
+    };
+    let located = index
+        .checked_sub(1)
+        .and_then(|before| word(&walked.tokens, Some(before)))
+        .is_some_and(|w| PREPOSITIONS.contains(&w));
+    walked.seen[index].1 && !located
 }
 
-/// Does `segment` (read with `carried`) leave an assertion open for a next
-/// sentence that starts with an enumeration marker? Only a `;` continues it.
-fn open_after(segment: &str, carried: bool) -> bool {
-    segment.trim_end().ends_with(';') && walk(segment, carried).1
+/// The predicate text after a path: up to the next backtick.
+fn predicate(after: &str) -> String {
+    after
+        .split('`')
+        .next()
+        .unwrap_or(after)
+        .to_ascii_lowercase()
 }
 
-/// Does `segment` start with an enumeration marker that continues an open
-/// assertion from the previous sentence?
-fn starts_item(segment: &str) -> bool {
-    item_marker_len(segment.trim_start()).is_some()
-}
-
-/// A line whose last clause is a lead and `:` ("…, and assert:") opens the
-/// list under it.
-struct OpenList {
-    indent: usize,
-    nested_only: bool,
-}
-
-impl OpenList {
-    fn opened_by(line: &str) -> Option<Self> {
-        let trimmed = line.trim_end();
-        let body = trimmed.strip_suffix(':')?;
-        let tokens = tokens(body);
-        let last = tokens.len().checked_sub(1)?;
-        let lead = if matches!(&tokens[last].1, Token::Word(w) if w == "that") {
-            last.checked_sub(1)?
-        } else {
-            last
-        };
-        if !is_lead(&tokens, lead, body) {
-            return None;
-        }
-        let content = line.trim_start();
-        Some(Self {
-            indent: line.len() - content.len(),
-            nested_only: item_marker_len(content).is_some(),
+fn names_repository(after: &str) -> bool {
+    let text = predicate(after);
+    REPOSITORY_WORDS.iter().any(|w| text.contains(w))
+        || text.match_indices('(').any(|(open, _)| {
+            let inner = text[open + 1..].trim_start();
+            let digits = inner
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || matches!(c, ',' | '_'))
+                .count();
+            digits > 0 && inner[digits..].trim_start().starts_with("line")
         })
-    }
+}
 
-    /// Is `line` one of the list items this opener carries into?
-    fn carries(&self, line: &str) -> bool {
-        let content = line.trim_start();
-        let indent = line.len() - content.len();
-        item_marker_len(content).is_some() && (!self.nested_only || indent > self.indent)
-    }
+fn plans_change(after: &str) -> bool {
+    let text = predicate(after);
+    let rest = text.trim_start_matches(|c: char| {
+        c.is_whitespace() || matches!(c, '—' | '–' | '-' | ':' | ',' | '(')
+    });
+    PLAN_WORDS.iter().any(|phrase| {
+        rest.strip_prefix(phrase)
+            .is_some_and(|tail| tail.chars().next().is_none_or(|c| !c.is_alphanumeric()))
+    })
 }
