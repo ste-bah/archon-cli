@@ -39,6 +39,9 @@ const WORKSPACE: &[(&str, &str)] = &[
         "crates/two/tests/gate_refusals.rs",
         "#[test]\nfn refuses() {}\n",
     ),
+    // A directory whose name is a glob that also matches its sibling.
+    ("data/lit[1]/a.rs", "pub fn plain_item() {}\n"),
+    ("data/lit1/b.rs", "pub fn only_in_sibling() {}\n"),
 ];
 
 /// Declares a file of package `one`, so `one` is the task's area.
@@ -302,5 +305,24 @@ fn issue_442_an_anchor_in_a_file_a_task_declares_is_derived_not_refuted() {
             || trace.report.contains("2 derived from declarations"),
         "{}",
         trace.report
+    );
+}
+
+#[test]
+fn issue_442_a_directory_anchor_with_glob_characters_is_that_directory() {
+    let trace = trace_of(IN_ONE, "`data/lit[1]::plain_item`");
+    assert_supported(&trace);
+    assert!(
+        trace.report.contains("observables: 3 exist"),
+        "the directory, its anchor and the declared file: {}",
+        trace.report
+    );
+    let trace = trace_of(IN_ONE, "`data/lit[1]::only_in_sibling`");
+    let texts = finding_texts(&trace);
+    assert_eq!(texts.len(), 1, "{}", trace.report);
+    assert!(
+        texts[0].contains("`only_in_sibling` is not in any file under `data/lit[1]` at base"),
+        "{}",
+        texts[0]
     );
 }
