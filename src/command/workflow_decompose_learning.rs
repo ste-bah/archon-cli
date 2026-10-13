@@ -5,6 +5,10 @@ use archon_core::config::LearningConfig;
 use archon_workflow::{StageStatus, Verification, WorkflowLearningRecord, WorkflowStore};
 use serde_json::Value;
 
+#[path = "workflow_decompose_learning_findings.rs"]
+mod findings;
+pub(crate) use findings::gate_finding_records;
+
 pub(crate) fn hooks(content: &str, config: &LearningConfig) -> Vec<String> {
     // This run has no embedding provider for SONA trajectories. DESC has a
     // real consumer (the episode store); ReasoningBank is useful for review
@@ -51,7 +55,7 @@ pub(crate) fn lesson_records(
         if let Some(text) = find_text(source, &["response", "summary", "text", "content"]) {
             lessons.push((
                 "author_attempt".into(),
-                format!("Author attempt outcome: {}", bounded(&text)),
+                format!("Author attempt outcome: {}", text),
                 false,
             ));
         }
@@ -69,7 +73,7 @@ pub(crate) fn lesson_records(
         ) {
             lessons.push((
                 "probe_baseline".into(),
-                format!("Probe baseline output: {}", bounded(&text)),
+                format!("Probe baseline output: {}", text),
                 false,
             ));
         }
@@ -78,7 +82,7 @@ pub(crate) fn lesson_records(
         if let Some(text) = find_text(source, &["finding", "findings", "reason", "summary"]) {
             lessons.push((
                 "set_gate_finding".into(),
-                format!("Set gate finding: {}", bounded(&text)),
+                format!("Set gate finding: {}", text),
                 true,
             ));
         }
@@ -189,8 +193,11 @@ fn collect_lessons(value: &Value, out: &mut Vec<(String, String, bool)>) {
                     false,
                 ));
             }
-            for child in map.values() {
-                collect_lessons(child, out);
+            for (key, child) in map {
+                // Read whole, by `gate_finding_records`.
+                if key != "gateEnvelope" {
+                    collect_lessons(child, out);
+                }
             }
         }
         Value::Array(items) => {
@@ -270,14 +277,23 @@ fn fold_locked(
             )
         })
         .flat_map(|call| {
-            lesson_records(
+            let mut lessons = lesson_records(
                 run_id,
                 &safe_task,
                 &call.call.id,
                 call.attempt,
                 &call.result.data,
                 &hooks,
-            )
+            );
+            if let Some(command) = &call.call.options.host_command {
+                lessons.extend(gate_finding_records(
+                    run_id,
+                    &command.command_id,
+                    &call.result.data,
+                    &hooks,
+                ));
+            }
+            lessons
         })
         .collect();
     let records = stage_journal(&journal, &pending_journal, candidates)?;
@@ -289,10 +305,18 @@ fn fold_locked(
         crate::command::topology_fold::workflow_learning::bridge_workflow_learning_with_records(
             cwd, store, run_id, &records,
         );
-    finish_journal_dispatch(
-        &pending_journal,
-        !outcome.integration_unavailable && outcome.dispatched >= records.len(),
-    )?;
+    let delivered = !outcome.integration_unavailable && outcome.dispatched >= records.len();
+    if !records.is_empty() && !delivered {
+        tracing::warn!(
+            %run_id,
+            pending = records.len(),
+            dispatched = outcome.dispatched,
+            records_read = outcome.records_read,
+            integration_unavailable = outcome.integration_unavailable,
+            "fixed decomposition lessons were not all dispatched to the learning stack; they stay pending for the next fold"
+        );
+    }
+    finish_journal_dispatch(&pending_journal, delivered)?;
     tracing::debug!(%run_id, dispatched = outcome.dispatched, records = records.len(), "fixed decomposition learning fold finished");
     Ok(())
 }

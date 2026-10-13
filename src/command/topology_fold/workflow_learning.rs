@@ -102,9 +102,11 @@ pub(crate) fn bridge_workflow_learning_with_records(
 ) -> LearningDispatchOutcome {
     write_run_records(store, run_id);
     if !extra.is_empty() {
-        let path = store
-            .run_dir(run_id)
-            .join(archon_workflow::LEARNING_RECORDS_FILE);
+        // The one stream `fold_workflow_learning` reads below.
+        let path = archon_workflow::learning_records_path(store, run_id);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let mut known = std::collections::BTreeSet::new();
         if let Ok(text) = std::fs::read_to_string(&path) {
             for line in text.lines() {
