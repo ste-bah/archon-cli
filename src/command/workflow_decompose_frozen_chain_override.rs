@@ -27,11 +27,13 @@ impl OverrideDecision {
         }
     }
 
-    fn verify(reason: impl Into<String>) -> Self {
+    /// Switch to the verify-frozen path, with what `recorded_logic_holds`
+    /// answered for the judged attempt that decided it.
+    fn verify(reason: impl Into<String>, logic_holds: bool) -> Self {
         Self {
             verify: true,
             reason: reason.into(),
-            logic_holds: Some(false),
+            logic_holds: Some(logic_holds),
         }
     }
 }
@@ -374,9 +376,12 @@ pub(super) fn freeze_outcome_decision(
             ))
         }
     } else {
-        OverrideDecision::verify(format!(
-            "judged attempt {id} accepted with 0 findings, published, matches disk; this build's logic would not replay it ({logic_text})"
-        ))
+        OverrideDecision::verify(
+            format!(
+                "judged attempt {id} accepted with 0 findings, published, matches disk; this build's logic would not replay it ({logic_text})"
+            ),
+            holds,
+        )
     })
 }
 

@@ -123,19 +123,17 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     let script_digest = workflow_scaffold_hash(FIXED_SCRIPT_SOURCE);
     // What the task root already holds of the frozen chain, verified now. A
     // lock that does not verify stops the launch here, before a run exists.
-    let mut frozen_chain = crate::command::workflow_decompose_frozen_chain::frozen_chain_snapshot(
+    let frozen_chain = crate::command::workflow_decompose_frozen_chain::frozen_chain_snapshot(
         &project_root,
         &prd_path,
         &task_root,
     )?;
-    let launch_step = launch_repair::at_launch(
-        factory,
-        &mut frozen_chain,
+    let launch_decision = super::workflow_decompose_frozen_chain::launch_acceptance_decision(
+        frozen_chain.acceptance,
         &WorkflowStore::project(&project_root),
-        (&project_root, &prd_path, &task_root, &repository.root),
+        (&project_root, &task_root, &repository.root),
         &catalog,
-    )
-    .await?;
+    )?;
     // A task root that already records its repository must name this one; a
     // moved base commit is reported below, once the run exists to log it.
     let existing_record =
@@ -295,13 +293,15 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             )))
             .await
             .map_err(|error| anyhow!("reporting persisted fixed decomposition run id: {error}"))?;
-        launch_step.record(&store, &run_id, &log_path)?;
-        for line in &launch_step.lines {
-            let emitted = ui_sink
-                .emit(WorkflowUiEvent::Text(format!("{line}\n")))
-                .await;
-            emitted.map_err(|error| anyhow!("reporting {line}: {error}"))?;
-        }
+        // Issue 387: refused frozen checks are re-authored, only after the claim.
+        launch_repair::after_claim(
+            factory,
+            launch_decision,
+            &frozen_chain,
+            (&store, &run_id, &log_path, &ui_sink),
+            (&project_root, &prd_path, &task_root, &repository.root),
+        )
+        .await?;
 
         let client = factory
             .build_client(WorkflowLlmClientRequest {
