@@ -93,6 +93,72 @@ pub(super) fn prune_history_mechanically(messages: &mut MessageHistory) -> u64 {
     reclaimed
 }
 
+/// What mechanical pruning did to request pressure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PruneVerdict {
+    /// The pass reclaimed nothing; pressure stands as measured.
+    NothingPruned,
+    /// The pruned request is under every configured limit: no LLM compaction.
+    Cleared,
+    /// Still over a limit after the prune: LLM compaction follows.
+    StillOver,
+}
+
+/// Runs `prune` (the mechanical pass) and judges pressure on the result.
+/// `envelope_bytes` is the request envelope the body size is derived from.
+///
+/// A prune that reclaimed anything changed the request, so the provider's
+/// measured count (`last_known_context_tokens`, the size of the request
+/// BEFORE the prune) no longer describes it. It is lowered by what the prune
+/// reclaimed, and pressure is judged on that and the fresh estimate of the
+/// pruned history, whichever is larger. Lowering rather than clearing keeps
+/// the part of the measured count no history estimate sees (system prompt,
+/// tool schemas), so a prune that only nibbles cannot pass a request the
+/// provider will still count over the limit. Reusing the pre-prune count
+/// unchanged meant a prune could never clear token pressure, so LLM
+/// compaction always followed. The next response's measured count replaces
+/// this one when the run loop records it.
+pub(super) fn prune_then_judge_pressure(
+    context: &crate::config::ContextConfig,
+    messages: &mut MessageHistory,
+    last_known_context_tokens: &mut u64,
+    request_body_bytes: &mut usize,
+    envelope_bytes: usize,
+    prune: impl FnOnce(&mut MessageHistory) -> u64,
+) -> PruneVerdict {
+    let reclaimed = prune(messages);
+    if reclaimed == 0 {
+        return PruneVerdict::NothingPruned;
+    }
+    *last_known_context_tokens = last_known_context_tokens.saturating_sub(reclaimed);
+    *request_body_bytes = crate::agent::autocompact::estimated_body_bytes(
+        envelope_bytes,
+        messages.estimated_tokens(),
+    );
+    let after = current_trigger_tokens(messages, *last_known_context_tokens);
+    let still_over = context
+        .rate_limit_pressure_tokens
+        .is_some_and(|threshold| after >= threshold)
+        || context
+            .rate_limit_pressure_body_bytes
+            .is_some_and(|threshold| *request_body_bytes as u64 >= threshold);
+    if still_over {
+        PruneVerdict::StillOver
+    } else {
+        PruneVerdict::Cleared
+    }
+}
+
+/// #103 trigger guard: the freshest of provider-reported usage and our own
+/// estimate wins. Part 1 only made the estimate O(1); which number the guard
+/// picks is unchanged.
+pub(super) fn current_trigger_tokens(
+    messages: &MessageHistory,
+    last_known_context_tokens: u64,
+) -> u64 {
+    last_known_context_tokens.max(messages.estimated_tokens())
+}
+
 pub(super) async fn compact_proactively(
     runner: &SubagentRunner,
     messages: &mut MessageHistory,
@@ -240,3 +306,7 @@ mod tests {
 #[cfg(test)]
 #[path = "evidence_compaction_tests.rs"]
 mod evidence_compaction_tests;
+
+#[cfg(test)]
+#[path = "request_round_prune_tests.rs"]
+mod prune_tests;

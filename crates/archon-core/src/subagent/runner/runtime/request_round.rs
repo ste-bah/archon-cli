@@ -1,3 +1,4 @@
+use super::request_round_pressure::current_trigger_tokens;
 use super::*;
 
 pub(super) struct PreparedRequest {
@@ -385,28 +386,19 @@ async fn maybe_compact_for_request_pressure(
     }
     // Arithmetic before inference. `[prune]` may reclaim enough on its own,
     // and unlike the summariser it has no context window of its own to blow.
-    if super::request_round_pressure::prune_history_mechanically(messages) > 0 {
-        *request_body_bytes = crate::agent::autocompact::estimated_body_bytes(
-            envelope_bytes,
-            messages.estimated_tokens(),
-        );
-        let after = current_trigger_tokens(messages, *last_known_context_tokens);
-        let still_over = runner
-            .agent_config
-            .context
-            .rate_limit_pressure_tokens
-            .is_some_and(|threshold| after >= threshold)
-            || runner
-                .agent_config
-                .context
-                .rate_limit_pressure_body_bytes
-                .is_some_and(|threshold| *request_body_bytes as u64 >= threshold);
-        if !still_over {
-            // Under threshold again without spending a request. The watermark
-            // is deliberately untouched: nothing was attempted, so nothing
-            // should be held back later.
-            return;
-        }
+    // Cleared: under threshold again without spending a request. The
+    // watermark is deliberately untouched: nothing was attempted, so nothing
+    // should be held back later.
+    if super::request_round_pressure::prune_then_judge_pressure(
+        &runner.agent_config.context,
+        messages,
+        last_known_context_tokens,
+        request_body_bytes,
+        envelope_bytes,
+        super::request_round_pressure::prune_history_mechanically,
+    ) == super::request_round_pressure::PruneVerdict::Cleared
+    {
+        return;
     }
     if !super::request_round_pressure::proactive_rearmed(
         pressure.proactive_retry_watermark,
@@ -459,13 +451,6 @@ async fn maybe_compact_for_request_pressure(
         envelope_bytes,
         messages.estimated_tokens(),
     );
-}
-
-/// #103 trigger guard: the freshest of provider-reported usage and our own
-/// estimate wins. Part 1 only made the estimate O(1); which number the guard
-/// picks is unchanged.
-fn current_trigger_tokens(messages: &MessageHistory, last_known_context_tokens: u64) -> u64 {
-    last_known_context_tokens.max(messages.estimated_tokens())
 }
 
 fn pressure_reason(token_pressure: bool, body_pressure: bool) -> &'static str {
