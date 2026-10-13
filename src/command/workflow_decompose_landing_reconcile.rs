@@ -418,6 +418,9 @@ pub(crate) fn landing_report(run_dir: &Path) -> Result<Vec<String>> {
 }
 
 /// Write every restore back in one publication under the set's chain lock.
+/// Test-only: it locks after the plan was read, so production goes through
+/// `reconcile_task_root`, which holds the lock from before the reads.
+#[cfg(test)]
 pub(crate) fn apply(pin_path: &Path, task_root: &Path, plan: &ReconcilePlan) -> Result<()> {
     if plan.restores.is_empty() {
         return Ok(());
