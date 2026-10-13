@@ -366,11 +366,15 @@ async fn refused_reads_do_not_renew_and_end_as_resumable_no_progress() {
     // so they do not renew the window. Their reason text stays on the tool result.
 }
 
-/// Past the hard ceiling the refused rounds no longer wait for the window:
-/// the no-progress stop ends the session with its count (Issue 382).
+/// Past the hard ceiling (tools withdrawn) refused calls still renew
+/// nothing; the window ends the session, and both the runner's error and
+/// the host clock carry the count (Issue 382). No faster stop is added here.
 #[tokio::test(start_paused = true)]
-async fn refused_reads_past_the_ceiling_end_as_no_progress_with_their_count() {
-    let mut turns = vec![(None, read("/src/refused_0.rs"))];
+async fn refused_reads_past_the_ceiling_wait_for_the_window_with_their_count() {
+    let mut turns = vec![(
+        Some(r#"Read {"file_path":"/src/refused_0.rs"}"#),
+        read("/src/refused_0.rs"),
+    )];
     for offset in 1..20 {
         turns.push((None, read(&format!("/src/refused_{offset}.rs"))));
     }
@@ -385,13 +389,19 @@ async fn refused_reads_past_the_ceiling_end_as_no_progress_with_their_count() {
     )
     .await;
     let elapsed = started.elapsed().as_secs();
-    let error = result.expect_err("refused rounds end the session").to_string();
-    assert!(error.starts_with(archon_tools::NO_PROGRESS_STOP_MARKER), "{error}");
-    assert!(error.contains("refused tool calls: 8"), "{error}");
+    let error = stall_text(result);
+    // The first inspection is admitted at turn 1 (500s); every later hard
+    // ceiling refusal leaves the window anchored there.
+    assert_eq!(elapsed, 500 + WINDOW, "{error}");
+    assert!(error.contains("refused tool calls: 14"), "{error}");
     assert!(error.contains("last novel activity: turn 1: new tool call Read"), "{error}");
-    // Turn 1 admitted, then 8 refused rounds: 9 turns of 500 s.
-    assert_eq!(elapsed, 9 * 500, "{error}");
-    assert_eq!(clock.refused_calls(), 8);
+    assert_eq!(clock.refused_calls(), 14);
+    assert!(
+        clock.cut_text().starts_with("last novel activity: turn 1: new tool call Read"),
+        "{}",
+        clock.cut_text()
+    );
+    assert!(clock.cut_text().ends_with("; refused tool calls: 14"), "{}", clock.cut_text());
 }
 
 #[tokio::test]

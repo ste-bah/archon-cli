@@ -133,6 +133,32 @@ async fn the_same_range_of_a_changed_file_is_novel() {
     );
 }
 
+/// A different file with the same bytes is new content: the source is the
+/// file, not the text alone.
+#[tokio::test]
+async fn a_different_file_with_the_same_content_is_novel() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("a.md");
+    let second = dir.path().join("b.md");
+    write_lines(&first, 20, "line");
+    write_lines(&second, 20, "line");
+    let tool = archon_tools::file_read::ReadTool;
+    let mut ledger = ContentLedger::default();
+    assert_eq!(
+        judge(&mut ledger, dir.path(), &tool, read(&first, 0, 20)).await,
+        Novelty::NewCall
+    );
+    assert_eq!(
+        judge(&mut ledger, dir.path(), &tool, read(&second, 0, 20)).await,
+        Novelty::NewCall,
+        "same text, different file"
+    );
+    assert_eq!(
+        judge(&mut ledger, dir.path(), &tool, read(&second, 5, 10)).await,
+        Novelty::None
+    );
+}
+
 #[tokio::test]
 async fn a_read_error_keeps_the_argument_rule() {
     let dir = tempfile::tempdir().unwrap();

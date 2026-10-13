@@ -70,9 +70,6 @@ impl SubagentRunner {
         let mut pressure = PressureState::default();
         let mut incomplete_audit_replies = 0u8;
         let mut inspection_tools_withdrawn = false;
-        // Turns since inspection was withdrawn that answered with a tool call
-        // (written as text, or refused) instead of the deliverable.
-        let mut unanswered_after_withdrawal = 0u32;
 
         for turn in 0..self.max_turns {
             // Issue-213 C5: the turn an interrupted call's record names.
@@ -244,15 +241,6 @@ impl SubagentRunner {
                     });
                     self.record_transcript(&feedback);
                     messages.push(feedback);
-                    if inspection_tools_withdrawn {
-                        unanswered_after_withdrawal += 1;
-                        if let Some(reason) =
-                            unanswered_stop(unanswered_after_withdrawal, &window)
-                        {
-                            self.emit_activity_stream("error", reason.clone(), None, true);
-                            anyhow::bail!("{reason}");
-                        }
-                    }
                     continue;
                 }
                 window.observe_turn(turn.saturating_add(1), &stream.text_content, &[], &[]);
@@ -346,19 +334,6 @@ impl SubagentRunner {
                 &activity_tools,
                 &observed_calls,
             );
-            // Issue 382: once inspection is withdrawn, a round whose every
-            // call was refused is one more turn without the deliverable.
-            if inspection_tools_withdrawn {
-                if observed_calls.iter().all(|call| call.refused) {
-                    unanswered_after_withdrawal += 1;
-                    if let Some(reason) = unanswered_stop(unanswered_after_withdrawal, &window) {
-                        self.emit_activity_stream("error", reason.clone(), None, true);
-                        anyhow::bail!("{reason}");
-                    }
-                } else {
-                    unanswered_after_withdrawal = 0;
-                }
-            }
             // The workflow read guard has refused this round terminally
             // (Issue-54): the agent thrashed past the read wall without
             // writing. Its next turn could only be more of the same, so the
@@ -406,24 +381,6 @@ impl SubagentRunner {
         );
         anyhow::bail!("Subagent reached max turns ({})", self.max_turns)
     }
-}
-
-/// The stop for a session that, with inspection withdrawn, answered
-/// [`progress_stop::STALL_ROUNDS`] turns in a row with tool calls (written as
-/// text or refused) instead of its deliverable (Issue 382). Live, such a
-/// session was re-asked 2273 times, or refused 1087 times, over two hours
-/// before its no-progress window ended it. It is the no-progress stop the
-/// repeated-results rule already makes, with the same round count, so the
-/// write layer reads it the same way.
-fn unanswered_stop(turns: u32, window: &ProgressWindow) -> Option<String> {
-    (turns >= progress_stop::STALL_ROUNDS).then(|| {
-        format!(
-            "{} inspection tools were withdrawn and the agent answered the next {turns} turns \
-             with tool calls (written as text, or refused) instead of its deliverable; {}",
-            archon_tools::NO_PROGRESS_STOP_MARKER,
-            window.progress_text()
-        )
-    })
 }
 
 /// Why a read-only session's inspection is withdrawn at its first stall.
