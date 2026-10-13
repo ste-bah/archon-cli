@@ -118,3 +118,23 @@ fn an_unborn_base_lists_nothing_and_absolute_paths_resolve_against_the_root() {
     assert_eq!(tree.relative_to_root("/definitely/elsewhere/x.rs"), None);
     assert_eq!(tree.relative_to_root("./x/y.rs").as_deref(), Some("x/y.rs"));
 }
+
+#[test]
+fn paths_ending_with_matches_whole_trailing_components_only() {
+    let repo = committed_repo();
+    let tree = RepositoryTree::load(&record_for(repo.path())).unwrap();
+    let found = |relative: &str| -> Vec<String> {
+        tree.paths_ending_with(relative)
+            .into_iter()
+            .cloned()
+            .collect()
+    };
+    assert_eq!(found("lib.rs"), vec!["src/lib.rs".to_string()]);
+    assert_eq!(found("./lib.rs"), vec!["src/lib.rs".to_string()]);
+    assert!(found("ib.rs").is_empty(), "a partial component is no match");
+    assert!(
+        found("src/lib.rs").is_empty(),
+        "the root spelling is not listed"
+    );
+    assert!(found("").is_empty());
+}

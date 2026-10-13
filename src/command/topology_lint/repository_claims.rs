@@ -254,11 +254,9 @@ fn scope_directories(tree: &RepositoryTree, cited: &str) -> Vec<String> {
     if tree.exists_at_base(&scope) || tree.root().join(&scope).is_file() {
         return Vec::new();
     }
-    let suffix = format!("/{scope}");
     let (dirs, files): (Vec<&String>, Vec<&String>) = tree
-        .paths_at_base()
-        .iter()
-        .filter(|path| path.ends_with(&suffix))
+        .paths_ending_with(&scope)
+        .into_iter()
         .partition(|path| tree.is_dir_at_base(path));
     if !slashed && !files.is_empty() {
         return Vec::new();

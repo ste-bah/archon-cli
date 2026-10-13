@@ -247,6 +247,22 @@ impl RepositoryTree {
         &self.at_base
     }
 
+    /// Every base-commit path that `relative` names when it was written
+    /// relative to a subdirectory: the paths whose trailing components are
+    /// exactly `relative` (`tests/x.rs` names `crates/a/tests/x.rs`, never
+    /// `crates/a/other_tests/x.rs`). The root spelling itself is not listed.
+    pub fn paths_ending_with(&self, relative: &str) -> Vec<&String> {
+        let normalized = normalize_relative(relative);
+        if normalized.is_empty() {
+            return Vec::new();
+        }
+        let suffix = format!("/{normalized}");
+        self.at_base
+            .iter()
+            .filter(|path| path.ends_with(&suffix))
+            .collect()
+    }
+
     /// Is `relative` a file or directory at the base commit.
     pub fn exists_at_base(&self, relative: &str) -> bool {
         self.at_base.contains(normalize_relative(relative).as_str())

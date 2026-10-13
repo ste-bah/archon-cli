@@ -229,13 +229,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 15: #417 Windows task-root paths normalize before containment checks, so probes can run and produce a different verdict.
         // #439 re-pin only: resume phase selection shares this closure; freeze verdicts are unchanged.
         // #417 re-pin only: the landing destination allowlist names the topology stores; freeze verdicts are unchanged.
-        // #425 re-pin only: the repository claim parser changed; freeze verdicts do not read claims.
+        // #425 re-pin only: the repository claim parser changed; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         version: 15,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        sources_digest: "e3dfb00b17a57484a5d5836084ac22b99ea0cc461bc5a976dc48c17a365db911",
+        // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
+        sources_digest: "c527f174306bc4fc77b6a2001d3f494ac77faf6e8f9e7d172935601465e50e16",
         build_bound: false,
     },
     CapabilityLogic {
@@ -243,13 +244,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // #434 and #417 re-pin only: harness input paths, pipeline outputs, and copy API normalization do not alter this verdict.
         // #439 re-pin only, as freeze-acceptance.
-        // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims.
+        // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        sources_digest: "e3dfb00b17a57484a5d5836084ac22b99ea0cc461bc5a976dc48c17a365db911",
+        // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
+        sources_digest: "c527f174306bc4fc77b6a2001d3f494ac77faf6e8f9e7d172935601465e50e16",
         build_bound: false,
     },
     CapabilityLogic {
@@ -269,7 +271,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
-        sources_digest: "771d5f0e009ff4d4fffb9cc6421a1fac4c2cf6434b541af698e9f22cd367fe39",
+        // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
+        sources_digest: "6ec47746d4714fffd1cfc147233af77fc10aa7a5de677c0c6588404ebf5952b0",
         build_bound: false,
     },
     CapabilityLogic {
@@ -287,18 +290,23 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
-        sources_digest: "771d5f0e009ff4d4fffb9cc6421a1fac4c2cf6434b541af698e9f22cd367fe39",
+        // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
+        sources_digest: "6ec47746d4714fffd1cfc147233af77fc10aa7a5de677c0c6588404ebf5952b0",
         build_bound: false,
     },
     CapabilityLogic {
         id: "requirements-trace",
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
-        version: 3,
+        // 4: #442 a `path::symbol` or `path:line` span is a path plus an anchor judged in that file; a
+        // package-relative path is read against every base path it is a suffix of (the claiming task's
+        // own packages first) and refuted only when every reading refutes; a placeholder cargo target
+        // is no observable; a bare name that is a Cargo target exists (or is derived when declared).
+        version: 4,
         sources: &[GATE, CONTRACT, TRACE],
         // #434 and #417 re-pin only: trace never reads the newly excluded run state.
         // #434d re-pin only: trace never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "a1cf658cb5a70bbda38e6a83f7a0edebdb32917d9b0e61ba1c9aaec1e40bee53",
+        sources_digest: "c7fc2f08a7e3a4133bde32d181154ffdb2c165c5627dbcdda2f8846a87e632f9",
         build_bound: true,
     },
     CapabilityLogic {
@@ -316,7 +324,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: the repository claim parser changed; acceptance verification verdicts do not read claims.
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "16a7023279eac8618cbdb8b2ee6ddc192542796d543f0e1132a6d99ddcbb529a",
+        // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
+        sources_digest: "231195d677c92f9993cd36af39577cf8d941454c82045905e2154ddebac76acb",
         build_bound: true,
     },
     CapabilityLogic {
@@ -330,7 +339,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "16a7023279eac8618cbdb8b2ee6ddc192542796d543f0e1132a6d99ddcbb529a",
+        // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
+        sources_digest: "231195d677c92f9993cd36af39577cf8d941454c82045905e2154ddebac76acb",
         build_bound: true,
     },
 ];

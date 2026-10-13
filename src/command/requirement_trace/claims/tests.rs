@@ -19,6 +19,11 @@ pub(super) fn repository(root: &Path) -> String {
         ("src/other.rs", "pub fn other_thing() {}\n"),
         ("tests/existing.rs", "#[test]\nfn works() {}\n"),
     ];
+    commit(root, &files)
+}
+
+/// `files` written under `root` and committed as its only commit; the commit.
+pub(super) fn commit(root: &Path, files: &[(&str, &str)]) -> String {
     for (path, text) in files {
         let path = root.join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -353,7 +358,7 @@ fn spans_are_classified_without_guessing() {
     let runners = |first: &str| first == "cargo";
     let classify = |span: &str| observe::classify(span, &runners);
     assert!(
-        matches!(classify("src/a.rs:12"), Some(observe::Span::Path { raw, directory: false }) if raw == "src/a.rs")
+        matches!(classify("src/a.rs:12"), Some(observe::Span::Path { raw, directory: false, .. }) if raw == "src/a.rs")
     );
     assert!(matches!(
         classify("out/dir/"),

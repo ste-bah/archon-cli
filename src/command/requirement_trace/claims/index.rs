@@ -90,20 +90,69 @@ impl EvidenceIndex {
             return Resolved::Derived(path, owners);
         }
         // Written relative to a package or subdirectory: `tests/x.rs`.
-        let suffix = format!("/{path}");
-        if let Some(found) = self
-            .tree
-            .paths_at_base()
-            .iter()
-            .find(|p| p.ends_with(&suffix))
-        {
-            return Resolved::Exists(found.clone());
+        if let Some(found) = self.tree.paths_ending_with(&path).first() {
+            return Resolved::Exists((*found).clone());
         }
+        let suffix = format!("/{path}");
         let owners = self.owners(|declared| declared.ends_with(&suffix));
         if !owners.is_empty() {
             return Resolved::Derived(path, owners);
         }
         Resolved::Missing(path)
+    }
+
+    /// Every existing path `relative` may name, each one reading of it
+    /// (#442). The root spelling, when present, is always a reading. A path
+    /// written relative to a subdirectory reads as each base path it is a
+    /// component suffix of ([`RepositoryTree::paths_ending_with`], as
+    /// repository claims resolve a scope); when some of those lie inside
+    /// `area` (the packages the claiming task changes), only those do: a
+    /// crate-relative path in a body that works in one crate names that
+    /// crate's file, and reading it against every other crate would let any
+    /// one of them make a false claim true. With a root reading present,
+    /// only such in-area suffix readings join it.
+    pub(super) fn readings(&self, relative: &str, area: &[String]) -> Vec<String> {
+        let path = normalize_relative(relative);
+        let suffixed = self.tree.paths_ending_with(&path);
+        let inside: Vec<String> = suffixed
+            .iter()
+            .filter(|found| area.iter().any(|dir| found.starts_with(&format!("{dir}/"))))
+            .map(|found| (*found).clone())
+            .collect();
+        if self.present(&path) {
+            return std::iter::once(path).chain(inside).collect();
+        }
+        if inside.is_empty() {
+            return suffixed.into_iter().cloned().collect();
+        }
+        inside
+    }
+
+    /// The package directories (never the root package) that hold any of
+    /// `paths`: the innermost one for each.
+    pub(super) fn area(&self, paths: &BTreeSet<String>) -> Vec<String> {
+        let dirs = self.package_dirs();
+        let mut area = BTreeSet::new();
+        for path in paths {
+            if let Some(dir) = dirs
+                .iter()
+                .filter(|dir| !dir.is_empty() && path.starts_with(&format!("{dir}/")))
+                .max_by_key(|dir| dir.len())
+            {
+                area.insert(dir.clone());
+            }
+        }
+        area.into_iter().collect()
+    }
+
+    /// The number of lines `path` has: the larger of the base commit and the
+    /// checkout, so an author who read either is not contradicted.
+    pub(super) fn line_count(&self, path: &str) -> usize {
+        [self.base_text(path), self.checkout_text(path)]
+            .iter()
+            .map(|text| text.lines().count())
+            .max()
+            .unwrap_or(0)
     }
 
     pub(super) fn is_directory(&self, path: &str) -> bool {
@@ -126,6 +175,12 @@ impl EvidenceIndex {
         self.declared.get(path).cloned().unwrap_or_default()
     }
 
+    /// The tasks that declare some path under directory `dir`.
+    pub(super) fn declared_under(&self, dir: &str) -> BTreeSet<String> {
+        let prefix = format!("{dir}/");
+        self.owners(|declared| declared.starts_with(&prefix))
+    }
+
     /// Does the file at `path` (base commit or checkout) contain `word` as a
     /// whole identifier.
     pub(super) fn contains_word(&self, path: &str, word: &str) -> bool {
@@ -145,23 +200,34 @@ impl EvidenceIndex {
     /// Does any file at the base commit contain `word` as a whole word.
     /// One `git grep` per call: asked only when no declared file settles it.
     pub(super) fn in_repository(&self, word: &str) -> bool {
+        self.grep_base(word, None)
+    }
+
+    /// Does any file under directory `dir` at the base commit contain `word`
+    /// as a whole word, read as [`Self::in_repository`] reads the repository.
+    /// The checkout's tracked files under `dir` are read too, as
+    /// [`Self::contains_word`] reads both.
+    pub(super) fn in_directory(&self, word: &str, dir: &str) -> bool {
+        self.grep_base(word, Some(dir)) || self.grep(word, None, Some(dir))
+    }
+
+    fn grep_base(&self, word: &str, dir: Option<&str>) -> bool {
         if self.base() == UNBORN_BASE_COMMIT {
             return false;
         }
+        self.grep(word, Some(self.base()), dir)
+    }
+
+    /// `git grep` for whole word `word` at `revision` (the checkout when
+    /// `None`), under `dir` when given.
+    fn grep(&self, word: &str, revision: Option<&str>, dir: Option<&str>) -> bool {
         archon_shell::spawn::command("git")
             .arg("-C")
             .arg(self.tree.root())
-            .args([
-                "grep",
-                "-q",
-                "-I",
-                "-w",
-                "-F",
-                "-e",
-                word,
-                self.base(),
-                "--",
-            ])
+            .args(["grep", "-q", "-I", "-w", "-F", "-e", word])
+            .args(revision)
+            .arg("--")
+            .args(dir)
             .status()
             .is_ok_and(|status| status.success())
     }

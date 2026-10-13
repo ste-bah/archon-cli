@@ -256,6 +256,7 @@ fn line_observables(
             Span::Path {
                 raw,
                 directory: false,
+                ..
             } => Some(raw.as_str()),
             _ => None,
         })
@@ -270,7 +271,7 @@ fn line_observables(
         .filter(|rel| index.is_repository_path(rel));
     for span in spans {
         let (subject, verdict) = match span {
-            Span::Path { raw, .. } => {
+            Span::Path { raw, anchor, .. } => {
                 let Some(relative) = index.relative(&raw) else {
                     checked.insert(Checked {
                         subject: format!("`{raw}`"),
@@ -280,6 +281,12 @@ fn line_observables(
                 };
                 if !index.is_repository_path(&relative) || !promises {
                     continue;
+                }
+                if let Some(anchor) = &anchor {
+                    checked.insert(Checked {
+                        subject: format!("`{}`", check::anchored_text(&relative, anchor)),
+                        verdict: check::anchor(index, scope, &relative, anchor),
+                    });
                 }
                 (format!("`{relative}`"), check::path(index, &relative))
             }
@@ -417,6 +424,8 @@ fn render(index: &EvidenceIndex, results: &[ClaimResult]) -> String {
     out
 }
 
+#[cfg(test)]
+mod anchor_tests;
 #[cfg(test)]
 mod gate_tests;
 #[cfg(test)]

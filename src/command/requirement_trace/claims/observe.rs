@@ -28,14 +28,28 @@ pub(super) struct BodyLine {
 /// A backticked span, classified.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Span {
-    /// A path-shaped span, cleaned (`./`, `:line` and a trailing `/` removed).
+    /// A path-shaped span, cleaned (`./`, the anchor and a trailing `/`
+    /// removed).
     Path {
         raw: String,
         directory: bool,
+        /// What the span names inside the file, when it names anything.
+        anchor: Option<Anchor>,
     },
     /// The last segment of an identifier, qualified path or call.
     Symbol(String),
     Command(String),
+}
+
+/// What a path span names inside its file (#442): `path::symbol`, or
+/// `path:12`, `path:12-30` (or an en or em dash), `path:291/319`, `path:3,9`
+/// (a trailing `:column` is dropped).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Anchor {
+    /// The last segment of the qualified name written after `::`.
+    Symbol(String),
+    /// Every line number written, as written (`written`) and parsed.
+    Lines { written: String, numbers: Vec<u64> },
 }
 
 /// Words that, on a line naming a path, say the author knows the path is not
@@ -189,15 +203,13 @@ pub(super) fn classify(span: &str, runners: &dyn Fn(&str) -> bool) -> Option<Spa
     }
     if span.contains('/') && !span.contains("://") {
         let directory = span.ends_with('/');
-        let mut raw = span.trim_end_matches('/').to_string();
-        if let Some((path, tail)) = raw.rsplit_once(':')
-            && !tail.is_empty()
-            && tail.chars().all(|c| c.is_ascii_digit() || c == '-')
-        {
-            raw = path.to_string();
-        }
-        let raw = raw.strip_prefix("./").unwrap_or(&raw).to_string();
-        return (!raw.is_empty()).then_some(Span::Path { raw, directory });
+        let (path, anchor) = split_anchor(span.trim_end_matches('/'));
+        let raw = path.strip_prefix("./").unwrap_or(path).to_string();
+        return (!raw.is_empty()).then_some(Span::Path {
+            raw,
+            directory,
+            anchor,
+        });
     }
     let caps = ident_re().captures(span)?;
     let name = caps[1].to_string();
@@ -209,6 +221,45 @@ pub(super) fn classify(span: &str, runners: &dyn Fn(&str) -> bool) -> Option<Spa
         .skip(1)
         .any(|(i, c)| c.is_ascii_uppercase() && name[..i].chars().any(|p| p.is_ascii_lowercase()));
     (qualified || snake || camel).then_some(Span::Symbol(name))
+}
+
+/// Split a path span at its first `:` past a drive letter's (`C:/`):
+/// `::name` is a symbol anchor, line numbers are a line anchor (the tail may
+/// itself hold a `/`, as in `:291/319`). Anything else after the colon is not
+/// an anchor and the span stays whole.
+fn split_anchor(span: &str) -> (&str, Option<Anchor>) {
+    let Some(colon) = span.match_indices(':').map(|(at, _)| at).find(|&at| at > 1) else {
+        return (span, None);
+    };
+    let (path, tail) = (&span[..colon], &span[colon + 1..]);
+    if let Some(qualified) = tail.strip_prefix(':') {
+        return match ident_re().captures(qualified) {
+            Some(caps) => (path, Some(Anchor::Symbol(caps[1].to_string()))),
+            None => (span, None),
+        };
+    }
+    // Digits and range or list separators only; an empty part (`12-`) is a
+    // loose spelling of the numbers it does name.
+    let written = tail.split(':').next().unwrap_or_default();
+    let separators = ['-', '–', '—', '/', ','];
+    let lines = written
+        .chars()
+        .all(|c| c.is_ascii_digit() || separators.contains(&c));
+    let numbers: Option<Vec<u64>> = written
+        .split(separators)
+        .filter(|part| !part.is_empty())
+        .map(|part| part.parse().ok())
+        .collect();
+    match numbers {
+        Some(numbers) if lines && !numbers.is_empty() => (
+            path,
+            Some(Anchor::Lines {
+                written: written.to_string(),
+                numbers,
+            }),
+        ),
+        _ => (span, None),
+    }
 }
 
 /// Whether a line's paths and symbols are this claim's promise at all.
@@ -260,6 +311,7 @@ pub(super) fn parent_path(
                     Span::Path {
                         raw,
                         directory: false,
+                        ..
                     } => Some(raw),
                     _ => None,
                 })
@@ -302,7 +354,11 @@ pub(super) fn command_subjects(
         .collect();
     let mut subjects = Vec::new();
     if argv.first().map(String::as_str) == Some("cargo") {
-        let package = flag_values(&argv, &["-p", "--package"]).into_iter().next();
+        // A placeholder (`--test <name>`) names no target: it is not an
+        // observable, so it is neither tested nor refuted (#442).
+        let package = flag_values(&argv, &["-p", "--package"])
+            .into_iter()
+            .find(|name| is_cargo_name(name));
         if let Some(name) = &package {
             subjects.push(CommandSubject::Package(name.clone()));
         }
@@ -312,7 +368,10 @@ pub(super) fn command_subjects(
             ("--example", "example"),
             ("--bench", "bench"),
         ] {
-            for name in flag_values(&argv, &[flag]) {
+            for name in flag_values(&argv, &[flag])
+                .into_iter()
+                .filter(|name| is_cargo_name(name))
+            {
                 subjects.push(CommandSubject::Target(package.clone(), kind, name));
             }
         }
@@ -327,6 +386,14 @@ pub(super) fn command_subjects(
         }
     }
     subjects
+}
+
+/// A spelling Cargo accepts as a package or target name.
+fn is_cargo_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn flag_values(argv: &[String], flags: &[&str]) -> Vec<String> {
