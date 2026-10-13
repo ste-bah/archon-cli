@@ -236,7 +236,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
-        sources_digest: "c527f174306bc4fc77b6a2001d3f494ac77faf6e8f9e7d172935601465e50e16",
+        // Re-pin only: evidence redaction changes persisted diagnostics, not freeze verdict rules.
+        sources_digest: "dff6381b7cdd9b850d2882503c1499e3df4057c448a07bd86c531b7490742013",
         build_bound: false,
     },
     CapabilityLogic {
@@ -251,7 +252,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
-        sources_digest: "c527f174306bc4fc77b6a2001d3f494ac77faf6e8f9e7d172935601465e50e16",
+        // Re-pin only: evidence redaction changes persisted diagnostics, not freeze verdict rules.
+        sources_digest: "dff6381b7cdd9b850d2882503c1499e3df4057c448a07bd86c531b7490742013",
         build_bound: false,
     },
     CapabilityLogic {
@@ -272,7 +274,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
         // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
-        sources_digest: "6ec47746d4714fffd1cfc147233af77fc10aa7a5de677c0c6588404ebf5952b0",
+        // Re-pin only: evidence redaction changes persisted diagnostics, not landing verdict rules.
+        sources_digest: "30974363aae01d6f6f819dc4103d3e40c41d95497ff22fdc9b1e47ccccade6e6",
         build_bound: false,
     },
     CapabilityLogic {
@@ -291,7 +294,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
         // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
-        sources_digest: "6ec47746d4714fffd1cfc147233af77fc10aa7a5de677c0c6588404ebf5952b0",
+        // Re-pin only: intact prose can contribute to bounded analysis text, so lint outcomes may differ; credential rules remain in force.
+        sources_digest: "30974363aae01d6f6f819dc4103d3e40c41d95497ff22fdc9b1e47ccccade6e6",
         build_bound: false,
     },
     CapabilityLogic {
@@ -325,7 +329,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
-        sources_digest: "231195d677c92f9993cd36af39577cf8d941454c82045905e2154ddebac76acb",
+        // Re-pin only: evidence redaction changes persisted diagnostics, not verification criteria.
+        sources_digest: "3d44461e910738a13948cea94d73b9dc8c990c38d212a9342edbca15a07342ed",
         build_bound: true,
     },
     CapabilityLogic {
@@ -340,7 +345,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
-        sources_digest: "231195d677c92f9993cd36af39577cf8d941454c82045905e2154ddebac76acb",
+        // Re-pin only: evidence redaction changes persisted diagnostics, not verification criteria.
+        sources_digest: "3d44461e910738a13948cea94d73b9dc8c990c38d212a9342edbca15a07342ed",
         build_bound: true,
     },
 ];

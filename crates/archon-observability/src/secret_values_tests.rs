@@ -37,6 +37,18 @@ fn round2_registry_can_be_scoped_without_cross_test_pollution() {
 }
 
 #[test]
+fn evidence_secret_values_include_every_nonempty_value() {
+    let secrets = SecretValues::for_evidence(["x", "true", "false", "0", "1", "abc123"]);
+    assert!(secrets.iter().any(|value| value == "abc123"));
+    for value in ["x", "true", "false", "0", "1", "abc"] {
+        let held = SecretValues::for_evidence([value]);
+        assert!(held.iter().any(|secret| secret == value));
+        assert_eq!(held.text(&format!("held={value}")), "held=[REDACTED]");
+    }
+    assert_eq!(secrets.text("held=abc123"), "held=[REDACTED]");
+}
+
+#[test]
 fn python_ascii_json_secret_spellings_are_redacted() {
     for (secret, escaped) in [
         ("credential-é-canary", r"credential-\u00e9-canary"),

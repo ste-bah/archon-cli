@@ -38,8 +38,6 @@
 //! sensitive-field-name masking. External smoke coverage lives in
 //! `tests/redaction_smoke.rs`.
 
-use once_cell::sync::Lazy;
-use regex::Regex;
 use std::io::Write;
 use std::sync::Mutex as StdMutex;
 use tracing::Subscriber;
@@ -47,87 +45,23 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
-/// The secret VALUE shapes of [`REDACTION_RE`]: every alternative that
-/// matches a credential's own format, none that matches a plain word.
-/// Verbose-mode (`(?x)`) pattern text, shared so the two regexes below can
-/// never drift apart.
-const SECRET_SHAPES: &str = r#"
-            sk-ant-[A-Za-z0-9_\-]{20,}                 # Anthropic
-          | sk-(?:proj|svcacct)-[A-Za-z0-9_\-]{20,}    # OpenAI modern (2024+, sk-proj- / sk-svcacct-)
-          | sk-[A-Za-z0-9]{20,}                         # OpenAI legacy
-          | AKIA[0-9A-Z]{16}                            # AWS access key id
-          | gh[pousr]_[A-Za-z0-9]{36}                   # GitHub tokens
-          | (?:sk|pk)_(?:live|test)_[A-Za-z0-9]{24,}    # Stripe secret/publishable
-          | eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}  # JWT
-          | bearer\s+[A-Za-z0-9._\-]+                   # Authorization: bearer ...
-          # TASK-201 GCP service-account JSON: redact the WHOLE blob containing
-          # the `"type":"service_account"` marker. Non-greedy to the next `}`.
-          # Standard GCP SA shape is a flat object (private_key contains `\n`
-          # but no braces), so `[^{}]` before the marker + `[\s\S]*?` after
-          # catches the full object. Over-redaction on atypical nested shapes
-          # is the acceptable secrets-first posture.
-          | \{[^{}]*"type"\s*:\s*"service_account"[\s\S]*?\}
-          # TASK-201 PEM private key block (standalone or embedded). `(?:RSA |EC |)?`
-          # covers `BEGIN PRIVATE KEY`, `BEGIN RSA PRIVATE KEY`, `BEGIN EC PRIVATE KEY`.
-          # Literal spaces are needed (pattern uses `\s` because (?x) ignores
-          # inline whitespace).
-          | -----BEGIN\s(?:RSA\s|EC\s|)?PRIVATE\sKEY-----[\s\S]*?-----END\s(?:RSA\s|EC\s|)?PRIVATE\sKEY-----
-"#;
-
-/// The sensitive field-name words of [`REDACTION_RE`].
-const SENSITIVE_WORDS: &str = r#"
-            password
-          | api[_\-]?key
-          | authorization
-          | credentials                               # TASK-201 GCP field name
-          | secret
-          | token
-"#;
-
-/// Regex for secret shapes we must never log. Alternation covers:
-///   * OpenAI `sk-...` (20+ alnum)
-///   * Anthropic `sk-ant-...` (20+ alnum/underscore/dash)
-///   * AWS access key id `AKIA[0-9A-Z]{16}`
-///   * GitHub PAT/OAuth/user/server/refresh `gh[pousr]_[A-Za-z0-9]{36}`
-///   * Stripe live/test secret+publishable `sk_live_`, `sk_test_`, `pk_live_`, `pk_test_`
-///   * JWT `eyJ...<header>.<payload>.<sig>`
-///   * `bearer <token>` authorization values
-///   * GCP service-account JSON blob (TASK-201) — whole `{...}` containing the
-///     `"type":"service_account"` marker. Non-greedy to the next `}`, so
-///     standard-shaped GCP SA keys (flat object, no nested braces) are fully
-///     scrubbed. Over-redaction on nested JSON is an acceptable secrets-first
-///     trade-off.
-///   * PEM private key block (TASK-201) — `-----BEGIN [RSA |EC ]PRIVATE KEY-----
-///     ... -----END ...-----`, standalone or embedded in a larger value.
-///   * Sensitive field names (`password`, `api_key`, `api-key`, `authorization`,
-///     `credentials` [TASK-201], `secret`, `token`) — masked so the identifier
-///     itself never leaks into log lines even when the value happens to parse
-///     clean.
-///
-/// Compiled once at first use; pattern is spec-constant and cannot fail. The
-/// `regex` crate guarantees linear-time matching (no catastrophic
-/// backtracking), so pathological inputs cannot DoS this layer — the
-/// `*_no_catastrophic_backtracking_*` tests below are regression gates
-/// against that property.
-pub(crate) static REDACTION_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(&format!("(?ix)(\n{SECRET_SHAPES}\n|\n{SENSITIVE_WORDS}\n)"))
-        .expect("redaction regex is a compile-time constant")
-});
-
-/// [`SECRET_SHAPES`] alone: credential formats, never words.
-static SECRET_SHAPE_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(&format!("(?ix)(\n{SECRET_SHAPES}\n)"))
-        .expect("secret shape regex is a compile-time constant")
-});
-
 /// Replacement token written in place of any redacted substring.
 pub(crate) const REDACTED: &str = "***REDACTED***";
 
 /// Apply the redaction regex to a field value.
 #[inline]
 pub(crate) fn redact(value: &str) -> String {
-    let value = crate::secret_values::redact_registered(value);
-    REDACTION_RE.replace_all(&value, REDACTED).into_owned()
+    crate::shared_redactor::redact_text(value, REDACTED)
+}
+
+/// Mask sensitive identifiers when they are used as structured field names.
+#[inline]
+fn redact_field_name(value: &str) -> String {
+    if crate::shared_redactor::is_credential_key(value) {
+        REDACTED.to_string()
+    } else {
+        crate::secret_values::redact_registered(value)
+    }
 }
 
 /// Apply the same redaction to arbitrary text destined for a human.
@@ -139,7 +73,7 @@ pub(crate) fn redact(value: &str) -> String {
 /// looked like a feature.
 #[inline]
 pub fn redact_text(value: &str) -> String {
-    redact(value)
+    crate::shared_redactor::redact_text(value, REDACTED)
 }
 
 /// Redact secret VALUES only: registered secret values and the credential
@@ -151,8 +85,7 @@ pub fn redact_text(value: &str) -> String {
 /// is still replaced.
 #[inline]
 pub fn redact_secret_values(value: &str) -> String {
-    let value = crate::secret_values::redact_registered(value);
-    SECRET_SHAPE_RE.replace_all(&value, REDACTED).into_owned()
+    crate::shared_redactor::redact_text(value, REDACTED)
 }
 
 /// Writer abstraction for the redaction layer. We use a trait-object behind a
@@ -274,8 +207,13 @@ impl RedactingVisitor {
     fn push_field(&mut self, name: &str, value: String) {
         // Redact both the field name (so `api_key` itself is masked) and the
         // value (so `sk-...` literals never reach the sink).
-        let safe_name = redact(name);
-        let safe_value = redact(&value);
+        let credential_value = crate::shared_redactor::is_credential_key(name);
+        let safe_name = redact_field_name(name);
+        let safe_value = if credential_value {
+            REDACTED.to_string()
+        } else {
+            redact(&value)
+        };
         if self.json {
             self.json_fields.push((safe_name, safe_value));
         } else {

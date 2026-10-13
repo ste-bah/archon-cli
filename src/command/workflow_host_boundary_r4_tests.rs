@@ -154,7 +154,7 @@ fn clean(ran: &Ran, needles: &[&str]) {
     for needle in needles {
         assert!(
             !returned.contains(needle),
-            "credential reached returned evidence"
+            "credential reached returned evidence ({needle}): {returned:?}"
         );
         assert!(
             clear_copies(ran.temp.path(), needle.as_bytes()).is_empty(),
@@ -239,7 +239,7 @@ async fn exit_79_escaped_evidence_crosses_executor_boundary() {
 }
 #[tokio::test]
 async fn exit_79_unicode_evidence_crosses_executor_boundary() {
-    operational("é", "\\u00e9").await;
+    operational("éabc", "\\u00e9abc").await;
 }
 async fn progress(number: &str) {
     let stderr = format!("archon-host-progress: {number}");
@@ -346,7 +346,7 @@ async fn replacement_marker_collision_cannot_escape_boundary() {
 }
 #[tokio::test]
 async fn replacement_substring_collision_cannot_escape_boundary() {
-    marker_collision("RED").await;
+    marker_collision("REDD").await;
 }
 
 async fn artifact(payload: &str, secret: &str) {

@@ -215,9 +215,8 @@ fn branch_with(error: &str, data: serde_json::Value) -> WorkflowV2BranchOutcome 
     }
 }
 
-/// Issue-245: a legacy log-redacted copy records the same outcome, and the
-/// store is rewritten with the unredacted one; unredacted copies compare
-/// exactly.
+/// A legacy copy redacted by the former generic `token=` heuristic is no
+/// longer considered equivalent to an intact shell variable assignment.
 #[test]
 fn filed_unchanged_sees_through_legacy_redaction_only() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -229,9 +228,9 @@ fn filed_unchanged_sees_through_legacy_redaction_only() {
         serde_json::json!({"safe": 1, "reasoning": "kept"}),
     );
 
-    assert!(store.filed_unchanged("fix-1", Some(&legacy), &fresh));
+    assert!(!store.filed_unchanged("fix-1", Some(&legacy), &fresh));
     let stored = store.load_branch_outcome("fix-1", "item-1").unwrap();
-    assert_eq!(stored, Some(fresh.clone()), "the redacted copy is replaced");
+    assert_eq!(stored, Some(legacy), "the ambiguous legacy copy is retained");
 
     let other = branch_with("run token=\"$4\" again", serde_json::json!({"safe": 1}));
     assert!(!store.filed_unchanged("fix-1", Some(&fresh), &other));

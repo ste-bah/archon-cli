@@ -121,6 +121,23 @@ impl AuthProvider {
     /// Returns the HTTP header `(name, value)` for this auth method.
     pub fn header(&self) -> (String, String) {
         match self {
+            AuthProvider::ApiKey(key) | AuthProvider::BearerToken(key) => {
+                archon_observability::secret_values::register_values([key.expose().as_str()]);
+            }
+            AuthProvider::OAuthToken(creds) => {
+                archon_observability::secret_values::register_values([
+                    creds.access_token.expose().as_str(),
+                    creds.refresh_token.expose().as_str(),
+                ]);
+            }
+            AuthProvider::CodexOAuthToken(creds) => {
+                archon_observability::secret_values::register_values([
+                    creds.access_token.expose().as_str(),
+                    creds.refresh_token.expose().as_str(),
+                ]);
+            }
+        }
+        match self {
             AuthProvider::ApiKey(key) => ("x-api-key".to_string(), key.expose().clone()),
             AuthProvider::OAuthToken(creds) => (
                 "Authorization".to_string(),

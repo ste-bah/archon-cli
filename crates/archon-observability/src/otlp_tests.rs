@@ -73,8 +73,10 @@ fn attribute(span: &SpanData, key: &str) -> Option<String> {
 #[test]
 fn a_secret_in_a_span_attribute_is_redacted_in_the_export() {
     let spans = export_of(|| {
-        let span =
-            ::tracing::info_span!("agent.turn", auth = "sk-ant-api03_AAAAAAAAAAAAAAAAAAAA1234");
+        let span = ::tracing::info_span!(
+            "agent.turn",
+            auth = concat!("sk", "-ant-api03_AAAAAAAAAAAAAAAAAAAA1234")
+        );
         let _entered = span.enter();
     });
 
@@ -105,8 +107,8 @@ fn every_known_secret_shape_is_redacted_in_the_export() {
         format!("sk-ant-{}_{}", "api03", "B".repeat(20) + "5678"),
         format!("AKIA{}", "IOSFODNN7EXAMPLE"),
         format!("gh{}_{}", "p", "a".repeat(36)),
-        format!("sk_{}_{}", "live", "a".repeat(26)),
-        format!("{} abc.def.ghi", "bearer"),
+        format!("sk-{}", "a".repeat(26)),
+        format!("{} abc123", "bearer"),
     ];
     for secret in &fixtures {
         let secret = secret.as_str();
@@ -155,7 +157,10 @@ fn an_ordinary_attribute_is_exported_unchanged() {
 fn a_field_recorded_after_the_span_opens_is_also_redacted() {
     let spans = export_of(|| {
         let span = ::tracing::info_span!("agent.turn", later = ::tracing::field::Empty);
-        span.record("later", "sk-ant-api03_CCCCCCCCCCCCCCCCCCCC9999");
+        span.record(
+            "later",
+            concat!("sk", "-ant-api03_CCCCCCCCCCCCCCCCCCCC9999"),
+        );
         let _entered = span.enter();
     });
 

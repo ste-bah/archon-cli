@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::error::WorkflowResult;
 use crate::store::WorkflowStore;
@@ -230,161 +230,34 @@ fn usable_cause_string(value: Option<&Value>) -> Option<&str> {
 }
 
 #[cfg(test)]
-mod pause_cause_tests {
-    use super::{WorkflowEventLog, pause_cause, sanitize_value};
-    use crate::{WorkflowEventKind, WorkflowStore};
-    use serde_json::json;
-
-    #[test]
-    fn pause_cause_is_mandatory_and_uses_recorded_evidence_when_available() {
-        let detail = pause_cause(
-            json!({"action":"pause","pause_id":"call-7","reason":"stalled"}),
-            "run-1",
-        );
-        assert_eq!(detail["cause_kind"], "pause");
-        assert_eq!(detail["cause_reason"], "stalled");
-        assert_eq!(detail["call_id"], "call-7");
-
-        let detail = pause_cause(json!("legacy detail"), "run-2");
-        assert_eq!(detail["detail"], "legacy detail");
-        assert_eq!(detail["cause_kind"], "workflow_pause");
-        assert_eq!(detail["cause_reason"], "legacy detail");
-        assert_eq!(detail["call_id"], "run-control:run-2");
-
-        let detail = pause_cause(json!({"evidence":"stdout cap=256, observed=300"}), "run-3");
-        assert_eq!(detail["cause_reason"], "stdout cap=256, observed=300");
-
-        let detail = pause_cause(
-            json!({"event":"script_pause", "pause_id":"pause-7", "evidence":{"summary":"host judge needs review", "kind":"gate"}}),
-            "run-3",
-        );
-        assert_eq!(detail["cause_reason"], "host judge needs review");
-        assert_eq!(detail["call_id"], "pause-7");
-
-        let detail = pause_cause(
-            json!({
-                "cause_kind": null, "event": "host_command_pause",
-                "cause_reason": "", "evidence": "stderr output cap exceeded",
-                "call_id": null, "pause_id": "call-8"
-            }),
-            "run-4",
-        );
-        assert_eq!(detail["cause_kind"], "host_command_pause");
-        assert_eq!(detail["cause_reason"], "stderr output cap exceeded");
-        assert_eq!(detail["call_id"], "call-8");
-    }
-
-    #[test]
-    fn emitted_script_pause_event_sanitizes_nested_evidence_before_stringifying_it() {
-        let temp = tempfile::tempdir().unwrap();
-        let store = WorkflowStore::project(temp.path());
-        let run = store
-            .create_run(crate::WorkflowSpec {
-                schema: crate::spec::WORKFLOW_SCHEMA.into(),
-                name: "pause event".into(),
-                task: "test".into(),
-                target_repository_root: None,
-                max_parallelism: 1,
-                max_agents: 1,
-                stages: Vec::new(),
-                permissions: Default::default(),
-                learning_hooks: Vec::new(),
-            })
-            .unwrap();
-        let event = WorkflowEventLog::new(store)
-            .emit(
-                &run.id,
-                1,
-                WorkflowEventKind::Paused,
-                json!({
-                    "event":"script_pause",
-                    "pause_id":"pause-acceptance-2",
-                    "evidence":{
-                        "kind":"host_command",
-                        "context":{
-                            "api_key":"api-secret",
-                            "nested":{
-                                "token":"token-secret",
-                                "authorization":"Bearer auth-secret",
-                                "password":"password-secret"
-                            }
-                        }
-                    }
-                }),
-            )
-            .unwrap();
-        assert_eq!(event.detail["cause_kind"], "script_pause");
-        let reason = event.detail["cause_reason"].as_str().unwrap();
-        assert!(reason.contains("\"kind\":\"host_command\""), "{reason}");
-        for secret in [
-            "api-secret",
-            "token-secret",
-            "auth-secret",
-            "password-secret",
-        ] {
-            assert!(!reason.contains(secret), "leaked {secret}: {reason}");
-        }
-        assert_eq!(event.detail["call_id"], "pause-acceptance-2");
-    }
-
-    #[test]
-    fn nested_secret_fields_are_removed_before_evidence_becomes_cause_reason() {
-        let evidence = json!({
-            "category": "host_command",
-            "context": {
-                "api_key": "api-secret",
-                "nested": {
-                    "token": "token-secret",
-                    "authorization": "Bearer auth-secret",
-                    "password": "password-secret"
-                }
-            }
-        });
-        let sanitized = sanitize_value(json!({"evidence": evidence}));
-        let detail = pause_cause(sanitized, "run-secret-test");
-        let reason = detail["cause_reason"].as_str().unwrap();
-        assert!(reason.contains("\"category\":\"host_command\""), "{reason}");
-        for secret in [
-            "api-secret",
-            "token-secret",
-            "auth-secret",
-            "password-secret",
-        ] {
-            assert!(!reason.contains(secret), "leaked {secret}: {reason}");
-        }
-        assert!(!detail["evidence"].to_string().contains("api_key"));
-        assert!(!detail["evidence"].to_string().contains("token\""));
-        assert!(!detail["evidence"].to_string().contains("authorization"));
-        assert!(!detail["evidence"].to_string().contains("password"));
-    }
-}
+#[path = "events_pause_cause_tests.rs"]
+mod pause_cause_tests;
 
 pub fn sanitize_value(value: Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(sanitize_map(map)),
-        Value::Array(items) => Value::Array(items.into_iter().map(sanitize_value).collect()),
-        Value::String(text) => Value::String(redact_secret_like_text(&text)),
-        other => other,
-    }
-}
-
-fn sanitize_map(map: Map<String, Value>) -> Map<String, Value> {
-    let mut cleaned = Map::new();
-    for (key, value) in map {
-        let lower = key.to_ascii_lowercase();
-        if FORBIDDEN_FIELDS.iter().any(|field| lower.contains(field)) {
-            continue;
+    fn remove_forbidden(value: Value) -> Value {
+        match value {
+            Value::Object(map) => Value::Object(
+                map.into_iter()
+                    .filter(|(key, _)| {
+                        let lower = key.to_ascii_lowercase();
+                        !FORBIDDEN_FIELDS.iter().any(|field| lower.contains(field))
+                    })
+                    .map(|(key, value)| (key, remove_forbidden(value)))
+                    .collect(),
+            ),
+            Value::Array(items) => Value::Array(items.into_iter().map(remove_forbidden).collect()),
+            other => other,
         }
-        cleaned.insert(key, sanitize_value(value));
     }
-    cleaned
+    archon_observability::shared_redactor::redact_json(remove_forbidden(value), REDACTION_MARKER)
 }
 
 pub fn contains_forbidden_field(value: &Value) -> bool {
     match value {
         Value::Object(map) => map.iter().any(|(key, value)| {
             let lower = key.to_ascii_lowercase();
-            FORBIDDEN_FIELDS.iter().any(|field| lower.contains(field))
+            archon_observability::shared_redactor::is_credential_key(key)
+                || FORBIDDEN_FIELDS.iter().any(|field| lower.contains(field))
                 || contains_forbidden_field(value)
         }),
         Value::Array(items) => items.iter().any(contains_forbidden_field),
@@ -400,40 +273,6 @@ pub fn contains_forbidden_field(value: &Value) -> bool {
 /// authored, so this marker appearing as a whole word in such data means a
 /// redacted copy was read back as data; see [`redaction_marker_path`].
 pub const REDACTION_MARKER: &str = "<redacted>";
-
-fn redact_secret_like_text(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut token = String::new();
-    let mut after_bearer = false;
-    for ch in input.chars() {
-        if ch.is_whitespace() {
-            after_bearer = push_redacted_token(&mut out, &token, after_bearer);
-            token.clear();
-            out.push(ch);
-        } else {
-            token.push(ch);
-        }
-    }
-    push_redacted_token(&mut out, &token, after_bearer);
-    out
-}
-
-/// Writes one word, redacted when it is secret-shaped or is the credential
-/// after a `Bearer` scheme word. Returns whether the NEXT word is such a
-/// credential.
-fn push_redacted_token(out: &mut String, token: &str, after_bearer: bool) -> bool {
-    if token.is_empty() {
-        return after_bearer;
-    }
-    if after_bearer || looks_secret_like(token) {
-        out.push_str(REDACTION_MARKER);
-    } else {
-        out.push_str(token);
-    }
-    token
-        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`'))
-        .eq_ignore_ascii_case("bearer")
-}
 
 /// The JSON pointer of the first string in `value` that holds
 /// [`REDACTION_MARKER`] as a whole whitespace-delimited word, which is the
@@ -473,19 +312,83 @@ pub fn redaction_marker_path(value: &Value) -> Option<String> {
     walk(value, &mut path).then_some(path)
 }
 
-fn looks_secret_like(part: &str) -> bool {
-    let trimmed = part.trim_matches(|ch: char| {
-        matches!(ch, '"' | '\'' | '`' | ',' | ';' | ')' | '(' | '[' | ']')
-    });
-    let lower = trimmed.to_ascii_lowercase();
-    lower.starts_with("authorization:")
-        || lower.starts_with("api_key=")
-        || lower.starts_with("apikey=")
-        || lower.starts_with("token=")
-        || lower.starts_with("access_token=")
-        || lower.starts_with("refresh_token=")
-        || lower.starts_with("password=")
-        || lower.starts_with("secret=")
-        || lower.starts_with("sk-ant-")
-        || (lower.starts_with("sk-") && trimmed.len() >= 20)
+#[cfg(test)]
+mod issue_444_redaction_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn review_corpus_matches_the_shared_redactor() {
+        for (input, should_mask) in [
+            ("Authorization: Bearer abc123", true),
+            ("Proxy-Authorization: Basic abc123", true),
+            ("api-key: abc123", true),
+            ("Cookie: session=abc123", true),
+            ("Set-Cookie: session=abc123", true),
+            ("Bearer authentication", true),
+            ("Bearer abc123", true),
+            ("key=alpha", false),
+            ("token=\"$3\"", false),
+            ("curl -fsS -H token=\"x\" http://localhost/health", false),
+            ("$HOME $PATH", false),
+            ("token budget", false),
+            ("the secret is nearby", false),
+            ("password reset flow", false),
+            ("Bearer tokens", true),
+            ("https://alice:pass123@example.test", true),
+            ("x-api-key: abc123", true),
+            (r#"{"api_key":"abc123"}"#, true),
+            (r#"{"apiKey":"abc123"}"#, true),
+            (r#"{"access_token":"abc123"}"#, true),
+            (r#"{"refresh_token":"abc123"}"#, true),
+            (r#"{"client_secret":"abc123"}"#, true),
+            (r#"{"password":"abc123"}"#, true),
+            (r#"{"secret":"abc123"}"#, true),
+            (r#"{"token":"abc123"}"#, true),
+            (r#"{"auth_token":"abc123"}"#, true),
+            (r#"{"private_key":"abc123"}"#, true),
+            (r#"{"x-api-key":"abc123"}"#, true),
+            (
+                concat!(
+                    "--",
+                    "---BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----"
+                ),
+                true,
+            ),
+            (concat!("sk", "-abcdefghijklmnopqrst0000"), true),
+            (concat!("sk", "-ant-api03_ZZZZZZZZZZZZZZZZZZ1234"), true),
+            (concat!("gh", "p_1234567890abcdef"), true),
+            (concat!("gh", "o_1234567890abcdef"), true),
+            (concat!("gh", "u_1234567890abcdef"), true),
+            (concat!("gh", "s_1234567890abcdef"), true),
+            (concat!("gh", "r_1234567890abcdef"), true),
+            (concat!("gi", "thub_pat_1234567890abcdef"), true),
+            (concat!("AK", "IA0123456789ABCDEF"), true),
+            (concat!("AS", "IA0123456789ABCDEF"), true),
+            (concat!("xo", "xb-1234567890-abcdef"), true),
+            (concat!("sk", "_live_abcdefghijklmnopqrstuvwx"), true),
+            (concat!("sk", "_test_abcdefghijklmnopqrstuvwx"), true),
+            (concat!("pk", "_live_abcdefghijklmnopqrstuvwx"), true),
+            (concat!("pk", "_test_abcdefghijklmnopqrstuvwx"), true),
+            (concat!("rk", "_live_abcdefghijklmnopqrstuvwx"), true),
+            (
+                concat!("ey", "JhbGciOiJIUzI1NiI.eyJzdWIiOiIxMjM0NTY.SflKxwRJSMe"),
+                true,
+            ),
+        ] {
+            let output = sanitize_value(json!(input));
+            assert_eq!(
+                output.as_str().unwrap() == input,
+                !should_mask,
+                "{input:?} => {output:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parsed_credential_fields_are_removed_without_removing_neighbor_values() {
+        let output = sanitize_value(json!({"api_key":"abc123", "message":"token budget"}));
+        assert!(output.get("api_key").is_none());
+        assert_eq!(output["message"], "token budget");
+    }
 }

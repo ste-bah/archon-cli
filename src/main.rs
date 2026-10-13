@@ -38,6 +38,7 @@ use clap::Parser;
 use cli_args::Cli;
 
 fn main() -> Result<()> {
+    archon_observability::secret_values::register_environment();
     // SAFETY: no runtime or application threads exist yet. A limit that
     // cannot be lowered is reported once logging runs; it never stops startup.
     #[cfg(unix)]

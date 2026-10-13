@@ -14,13 +14,28 @@ const SECRET_NAME_PARTS: &[&str] = &[
     "PASS",
     "AUTH",
     "CREDENTIAL",
-    "PRIVATE",
 ];
 
 /// Shared credential-name rule for configured environments and headers.
 pub fn is_credential_name(name: &str) -> bool {
     let name = name.to_ascii_uppercase();
     SECRET_NAME_PARTS.iter().any(|part| name.contains(part))
+}
+
+/// Register provider credentials loaded from configuration for all sinks.
+pub fn register_values<'a>(values: impl IntoIterator<Item = &'a str>) {
+    SecretValues::for_evidence(values).register();
+}
+
+/// Register environment credentials once at process startup for every sink.
+pub fn register_environment() {
+    let values = std::env::vars_os()
+        .filter_map(|(name, value)| {
+            let name = name.to_string_lossy();
+            is_credential_name(&name).then(|| value.to_string_lossy().into_owned())
+        })
+        .collect::<Vec<_>>();
+    SecretValues::for_evidence(values.iter().map(String::as_str)).register();
 }
 
 /// Literal secrets and their escaped representations, independent of log regexes.
@@ -199,6 +214,7 @@ impl SecretValues {
         registry.normalize();
     }
 }
+
 static REGISTERED: Lazy<RwLock<SecretValues>> = Lazy::new(|| RwLock::new(SecretValues::default()));
 
 pub(crate) fn redact_registered(text: &str) -> String {
