@@ -35,7 +35,11 @@ async fn a_judge_refutation_runs_the_script_acceptance_author_and_freeze() {
     with_skeleton(&fixture);
     crate::command::workflow_task_set::passability_tests_support::commit_project(&fixture.project);
 
-    let provider = offline_provider::FakeProvider::start();
+    let provider = offline_provider::FakeProvider::start_with(offline_provider::Plan {
+        variant: offline_provider::Variant::Golden,
+        block: Some(("no-provider-role".to_string(), 1)),
+    });
+    assert!(!provider.wait_until_blocked(std::time::Duration::ZERO));
     let mut config = archon_core::config::ArchonConfig::default();
     config.api.base_url = Some(provider.base_url.clone());
     config.workflow.repository_root = Some(fixture.project.clone());
@@ -106,10 +110,77 @@ async fn a_judge_refutation_runs_the_script_acceptance_author_and_freeze() {
         "the acceptance freeze must publish its contract"
     );
     let requests = provider.requests.snapshot();
-    assert!(
-        requests.iter().any(|request| request.role == "acceptance"),
-        "wire-level offline provider served no acceptance-author request: {requests:?}"
+    let acceptance = requests
+        .iter()
+        .find(|request| request.role == "acceptance")
+        .expect("wire-level offline provider served no acceptance-author request");
+    assert_eq!(acceptance.method, "POST");
+    assert_eq!(acceptance.path, "/v1/messages");
+    assert!(acceptance.auth_present);
+    assert!(acceptance.known_path);
+    assert!(acceptance.key.starts_with("acceptance:"));
+    assert!(!acceptance.prompt.is_empty());
+    assert!(!acceptance.answer.is_empty());
+    assert_eq!(provider.requests.per_call().get(&acceptance.key), Some(&1));
+}
+
+#[test]
+fn offline_provider_content_variants_keep_their_fixture_contracts() {
+    let user_prompt = |content: String| {
+        serde_json::json!({
+            "messages": [{"role": "user", "content": content}]
+        })
+        .to_string()
+    };
+    let acceptance_prompt = |id: &str, criterion: &str| {
+        user_prompt(format!(
+            "Author exactly one acceptance entry identified below. Author ONLY entry {id}: {criterion}"
+        ))
+    };
+    let (role, reply) = offline_provider::variants::answer(
+        &acceptance_prompt(
+            "AC-X-001",
+            "The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.",
+        ),
+        offline_provider::Variant::SecretInAcceptanceReply,
     );
+    assert_eq!(role, "acceptance");
+    assert!(reply.contains(offline_provider::variants::SECRET_TOKEN));
+
+    for (variant, id, criterion, script) in [
+        (
+            offline_provider::Variant::CrlfCheck,
+            "SUP-REQ-X-001",
+            "SUPPLEMENTARY check owed to PRD requirement REQ-X-001 (no other check covers it): The first task creates `src/alpha.txt` with the nonempty line `alpha ready`.",
+            offline_provider::variants::CRLF_SCRIPT,
+        ),
+        (
+            offline_provider::Variant::HeredocCheck,
+            "SUP-REQ-X-002",
+            "SUPPLEMENTARY check owed to PRD requirement REQ-X-002 (no other check covers it): The second task depends on the first and creates `src/beta.json` as an object whose `ready` field is true.",
+            offline_provider::variants::HEREDOC_SCRIPT,
+        ),
+    ] {
+        let (role, reply) =
+            offline_provider::variants::answer(&acceptance_prompt(id, criterion), variant);
+        assert_eq!(role, "acceptance");
+        assert!(reply.contains(script));
+    }
+
+    let (role, _) = offline_provider::variants::answer(
+        &acceptance_prompt(
+            "AC-X-002",
+            "The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready_002` set to true.",
+        ),
+        offline_provider::Variant::Large(2),
+    );
+    assert_eq!(role, "acceptance");
+    let prd = offline_provider::variants::large::prd("# fixture\n", 2);
+    assert!(prd.contains("AC-X-002"));
+    let outcome: serde_json::Value =
+        serde_json::from_str(&offline_provider::variants::large::outcome(2)).unwrap();
+    assert_eq!(outcome["ready"], true);
+    assert_eq!(outcome["ready_002"], true);
 }
 
 fn copy_tree(from: &Path, to: &Path) {

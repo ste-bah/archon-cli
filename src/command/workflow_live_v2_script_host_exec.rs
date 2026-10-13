@@ -9,6 +9,8 @@ mod completed_reuse;
 mod dispatch;
 #[path = "workflow_live_v2_script_host_remediation.rs"]
 mod remediation;
+#[path = "workflow_live_v2_script_host_exec_status.rs"]
+mod status;
 #[path = "workflow_live_v2_script_host_task_ids.rs"]
 mod task_ids;
 use super::*;
@@ -220,23 +222,7 @@ impl WorkflowScriptHost {
                     &self.runner.run_id,
                     &execution.call.id,
                 )?;
-                if !self.fixed_decomposition_state_present() {
-                    self.runner
-                        .client
-                        .ui_sink
-                        .emit(WorkflowUiEvent::Text(format!(
-                            "Workflow V2 script call reused: {} via w.{}\n",
-                            execution.call.id,
-                            execution.call.method.as_str()
-                        )))
-                        .await
-                        .map_err(|error| {
-                            WorkflowError::NotificationDelivery(format!(
-                                "workflow call reuse status delivery failed: run_id={} stage_id={} status=reused: {error}",
-                                self.runner.run_id, execution.call.id
-                            ))
-                        })?;
-                }
+                self.emit_reuse_status(&execution).await?;
                 self.restore_reused_record(&record, from_history, execution_generation)?;
                 self.mark_reused(&record, execution_generation).await?;
                 return self.result_view_in_generation(&record, view_generation);

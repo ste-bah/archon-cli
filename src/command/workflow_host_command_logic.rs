@@ -47,6 +47,12 @@
 //! submissions still in flight; only the set gates re-judge what is frozen.
 use archon_workflow::{CommandCapability, WorkflowError};
 
+#[cfg(test)]
+#[path = "workflow_host_command_logic_denylist.rs"]
+mod denylist;
+#[cfg(test)]
+pub(crate) use denylist::LOGIC_DENYLIST;
+
 /// The version every capability has until its logic first changes after
 /// logic versions were introduced. Its key is the key the capability had
 /// before them. A record without a version stamp was not necessarily judged
@@ -88,63 +94,6 @@ pub(crate) struct CapabilityLogic {
     /// it as well.
     pub(crate) build_bound: bool,
 }
-
-/// Files the closure of a capability reaches that no verdict depends on,
-/// each with the reason. A file here can change without a logic-version
-/// decision, so an entry is a reviewed line; the guard test fails on an
-/// entry no capability reaches.
-#[cfg(test)]
-pub(crate) const LOGIC_DENYLIST: &[(&str, &str)] = &[
-    (
-        "crates/archon-llm/",
-        "LLM provider transport and model catalogue. The catalogue resolves the critic's \
-         model alias, so a remap changes which model judges task-set-lint: that is a \
-         model choice, not logic. It re-runs no recorded verdict; a lint that runs anyway \
-         asks the critic again, as its findings store keys on the resolved model. The \
-         request and its reply reader are hashed",
-    ),
-    (
-        "src/command/pipeline_workflow_llm.rs",
-        "adapter from the workflow LLM port to the pipeline runner: transport only",
-    ),
-    (
-        "crates/archon-tools/",
-        "the tools agents call at run time; the lint reads tool names and permissions, \
-         never a tool's behaviour",
-    ),
-    (
-        "crates/archon-mcp/",
-        "MCP server transport and lifecycle; the permitted tool list is read by hashed code",
-    ),
-    (
-        "crates/archon-memory/",
-        "memory store client, reached only through agent configuration",
-    ),
-    (
-        "crates/archon-core/src/agent/",
-        "interactive agent loop, reached through configuration types",
-    ),
-    (
-        "crates/archon-core/src/agents/",
-        "agent definition registry, reached through configuration types",
-    ),
-    (
-        "crates/archon-core/src/subagent/",
-        "subagent runner and retention, reached through configuration types",
-    ),
-    (
-        "crates/archon-core/src/sandbox/",
-        "container and SSH sandbox backends the configuration names",
-    ),
-    (
-        "crates/archon-core/src/orchestrator/",
-        "agent pool, reached through configuration types",
-    ),
-    (
-        "src/command/requirement_trace/slash.rs",
-        "the interactive /requirements front end; the host command runs the CLI path",
-    ),
-];
 
 /// How every gate builds and reads its envelope.
 const GATE: &[&str] = &[
@@ -254,7 +203,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #446 follow-up re-pin only: archive collisions keep both prior byte sets; verdicts are unchanged.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        sources_digest: "01061442c20265717722fbd48fee3a33f3b6ed289055f51193ff16aa041cb4e3",
+        // integration re-pin: file split, no logic change
+        sources_digest: "10eabc0a012fd69083110f752c0220de5ff9883c39dfe96885946d1c4bab3eb3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -285,7 +235,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #446 follow-up: archive collisions keep both prior byte sets.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        sources_digest: "01061442c20265717722fbd48fee3a33f3b6ed289055f51193ff16aa041cb4e3",
+        // integration re-pin: file split, no logic change
+        sources_digest: "10eabc0a012fd69083110f752c0220de5ff9883c39dfe96885946d1c4bab3eb3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -410,7 +361,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // but reads no probe result layout or evidence.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        sources_digest: "7d32c9b4134b260f1d375536b29786add4013b9e10e2e3cf4fe30fbea59c3b40",
+        // integration re-pin: file split, no logic change
+        sources_digest: "e20f189dcdcd95c7ee0b3da1e9cdcf77b31e7b4a98d1514bada5d56aa1cdea85",
         build_bound: true,
     },
     CapabilityLogic {
@@ -441,7 +393,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // but reads no probe result layout or evidence.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        sources_digest: "7d32c9b4134b260f1d375536b29786add4013b9e10e2e3cf4fe30fbea59c3b40",
+        // integration re-pin: file split, no logic change
+        sources_digest: "e20f189dcdcd95c7ee0b3da1e9cdcf77b31e7b4a98d1514bada5d56aa1cdea85",
         build_bound: true,
     },
 ];
