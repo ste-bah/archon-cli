@@ -21,9 +21,66 @@ use archon_workflow::HostCommandSubject;
 use archon_workflow::obligation_ids::acceptance_ids;
 use archon_workflow::task_set_contract::{
     ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, AcceptanceContract, AcceptancePin,
-    TASK_SKELETON_LOCK_FILE, content_digest, validate_acceptance_bundle,
+    TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE, content_digest, validate_acceptance_bundle,
 };
 use archon_workflow::task_skeleton::validate_full_chain;
+
+pub(crate) struct LaunchSnapshot {
+    pub(crate) frozen_chain: FrozenChainSnapshot,
+    pub(crate) decision: LaunchAcceptance,
+    pub(crate) deferred: bool,
+}
+
+/// Inspect a launch chain without settling a pending publication before claim.
+pub(crate) fn prepare_launch_snapshot(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+    store: &archon_workflow::WorkflowStore,
+    repository_root: &Path,
+    catalog: &archon_workflow::CommandCapabilityCatalog,
+) -> Result<LaunchSnapshot> {
+    let read = frozen_chain_snapshot_read_only(project_root, prd_path, task_root);
+    let deferred = read
+        .as_ref()
+        .err()
+        .is_some_and(|error| format!("{error:#}").contains("publish recovery is pending"));
+    let frozen_chain = match read {
+        Ok(snapshot) => snapshot,
+        Err(_) if deferred => FrozenChainSnapshot::default(),
+        Err(error) => return Err(error),
+    };
+    let decision = launch_acceptance_decision(
+        !deferred && frozen_chain.acceptance,
+        store,
+        (project_root, task_root, repository_root),
+        catalog,
+    )?;
+    Ok(LaunchSnapshot {
+        frozen_chain,
+        decision,
+        deferred,
+    })
+}
+
+/// Settle and decide a deferred launch chain after its task root was claimed.
+pub(crate) fn recover_deferred_launch_snapshot(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+    store: &archon_workflow::WorkflowStore,
+    repository_root: &Path,
+    catalog: &archon_workflow::CommandCapabilityCatalog,
+) -> Result<(FrozenChainSnapshot, LaunchAcceptance)> {
+    let snapshot = frozen_chain_snapshot(project_root, prd_path, task_root)?;
+    let decision = launch_acceptance_decision(
+        snapshot.acceptance,
+        store,
+        (project_root, task_root, repository_root),
+        catalog,
+    )?;
+    Ok((snapshot, decision))
+}
 
 #[path = "workflow_decompose_frozen_chain_override.rs"]
 mod freeze_override;
@@ -49,6 +106,12 @@ pub(crate) struct FrozenChainSnapshot {
     pub(crate) subjects: Vec<HostCommandSubject>,
     /// Frozen file names whose body file exists under the task root.
     pub(crate) bodies: Vec<String>,
+    /// Content digests let launch repair prove that it left frozen bodies intact.
+    #[serde(default)]
+    pub(crate) body_digests: Vec<(String, String)>,
+    /// Frozen artifacts the acceptance repair is not allowed to republish.
+    #[serde(default)]
+    pub(crate) preserved_digests: Vec<(String, String)>,
 }
 
 impl FrozenChainSnapshot {
@@ -99,6 +162,29 @@ pub(crate) fn frozen_chain_snapshot(
     task_root: &Path,
 ) -> Result<FrozenChainSnapshot> {
     frozen_chain_snapshot_with_recovery(project_root, prd_path, task_root, true)
+}
+
+/// Read and verify without settling an interrupted publication.
+pub(crate) fn frozen_chain_snapshot_read_only(
+    project_root: &Path,
+    prd_path: &Path,
+    task_root: &Path,
+) -> Result<FrozenChainSnapshot> {
+    if task_root.is_dir() {
+        let pin_path = super::workflow_task_set::acceptance_pin_path(project_root, task_root);
+        let lock_path = archon_workflow::task_set_publish_lock::lock_path(&pin_path);
+        if !lock_path.exists() {
+            let [journal, _] = archon_workflow::task_set_publish_lock::journal_paths(&pin_path);
+            if journal.exists() {
+                return Err(anyhow!(
+                    "frozen task chain publish recovery is pending at {}",
+                    journal.display()
+                ));
+            }
+            return snapshot_locked(project_root, prd_path, task_root);
+        }
+    }
+    frozen_chain_snapshot_with_recovery(project_root, prd_path, task_root, false)
 }
 
 fn frozen_chain_snapshot_with_recovery(
@@ -183,10 +269,26 @@ pub(crate) fn snapshot_locked(
         )
     })?;
     snapshot.skeleton = true;
+    for file_name in [TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE] {
+        let path = task_root.join(file_name);
+        let bytes = std::fs::read(&path)
+            .with_context(|| format!("reading frozen task-chain artifact {}", path.display()))?;
+        snapshot
+            .preserved_digests
+            .push((file_name.to_string(), content_digest(&bytes)));
+    }
     for task in &skeleton.tasks {
         let path = task_root.join(&task.file_name);
         if std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file()) {
             snapshot.bodies.push(task.file_name.clone());
+            let bytes = std::fs::read(&path)
+                .with_context(|| format!("reading frozen task body {}", path.display()))?;
+            snapshot
+                .body_digests
+                .push((task.file_name.clone(), content_digest(&bytes)));
+            snapshot
+                .preserved_digests
+                .push((task.file_name.clone(), content_digest(&bytes)));
         }
         snapshot.subjects.push(HostCommandSubject {
             task_id: task.task_id.clone(),

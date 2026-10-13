@@ -100,7 +100,7 @@ pub(crate) async fn reauthor_refused(
 pub(crate) async fn after_claim(
     factory: &dyn archon_workflow::WorkflowLlmClientFactory,
     decision: LaunchAcceptance,
-    launched: &FrozenChainSnapshot,
+    launched: &mut FrozenChainSnapshot,
     (store, run_id, log_path, ui): (
         &WorkflowStore,
         &str,
@@ -145,6 +145,30 @@ pub(crate) async fn after_claim(
         let (line, detail) = match repaired {
             Ok(repaired) => repaired,
             Err(error) => {
+                // A judge refutation is a content result. Hand it to the
+                // normal acceptance author loop in the fixed script; provider,
+                // IO, and publication failures remain launch errors.
+                if error
+                    .downcast_ref::<crate::command::workflow_task_set::reauthor::ReauthorStalled>()
+                    .is_some()
+                {
+                    log(&format!(
+                        "frozen_chain_launch acceptance=reauthor_refuted_routed ids={} detail={}",
+                        decision
+                            .reauthor
+                            .keys()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(","),
+                        crate::command::workflow_decompose_events::log_field(&format!("{error:#}"))
+                    ))?;
+                    launched.acceptance = false;
+                    launched.skeleton = false;
+                    launched.subjects.clear();
+                    launched.bodies.clear();
+                    launched.body_digests.clear();
+                    return Ok(());
+                }
                 log(&format!(
                     "frozen_chain_launch acceptance=reauthor_failed ids={} error={}",
                     decision
@@ -169,7 +193,10 @@ pub(crate) async fn after_claim(
         lines.push(line);
         let republished = frozen_chain_snapshot(project_root, prd_path, task_root)
             .context("reading the frozen chain the launch republished")?;
-        if republished.to_argument() != launched.to_argument() {
+        if republished.to_argument() != launched.to_argument()
+            || republished.body_digests != launched.body_digests
+            || republished.preserved_digests != launched.preserved_digests
+        {
             return Err(anyhow!(
                 "the per-check repair republished a frozen chain under {} that differs from the one this run was launched with ({} != {})",
                 task_root.display(),

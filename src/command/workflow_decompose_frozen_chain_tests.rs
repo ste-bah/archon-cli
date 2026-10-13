@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use archon_workflow::task_set_contract::{
-    ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, TASK_SKELETON_FILE,
+    ACCEPTANCE_CONTRACT_FILE, ACCEPTANCE_LOCK_FILE, TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE,
 };
 
 use super::test_support::contract_bytes;
@@ -176,6 +176,8 @@ fn a_frozen_acceptance_contract_alone_is_reported_without_subjects() {
             skeleton: false,
             subjects: Vec::new(),
             bodies: Vec::new(),
+            body_digests: Vec::new(),
+            preserved_digests: Vec::new(),
         }
     );
     verify_frozen_stage(
@@ -204,21 +206,44 @@ fn a_frozen_skeleton_reports_its_subjects_and_the_bodies_present() {
     freeze_acceptance(&mut fixture);
     freeze_skeleton(&fixture);
     let none = snapshot(&fixture).unwrap();
-    assert_eq!(
-        none,
-        FrozenChainSnapshot {
-            acceptance: true,
-            skeleton: true,
-            subjects: subjects(&["TASK-X-010", "TASK-X-020"]),
-            bodies: Vec::new(),
-        }
-    );
+    let skeleton_digests = [TASK_SKELETON_FILE, TASK_SKELETON_LOCK_FILE]
+        .map(|name| {
+            (
+                name.to_string(),
+                archon_workflow::task_set_contract::content_digest(
+                    &std::fs::read(fixture.tasks.join(name)).unwrap(),
+                ),
+            )
+        })
+        .to_vec();
+    assert!(none.acceptance && none.skeleton);
+    assert_eq!(none.subjects, subjects(&["TASK-X-010", "TASK-X-020"]));
+    assert!(none.bodies.is_empty() && none.body_digests.is_empty());
+    assert_eq!(none.preserved_digests, skeleton_digests);
     std::fs::write(fixture.tasks.join("TASK-X-020.md"), "# body").unwrap();
     // A directory or a stray file is not a body.
     std::fs::create_dir(fixture.tasks.join("TASK-X-010.md")).unwrap();
     std::fs::write(fixture.tasks.join("TASK-X-999.md"), "# stray").unwrap();
     let one = snapshot(&fixture).unwrap();
     assert_eq!(one.bodies, vec!["TASK-X-020.md".to_string()]);
+    assert_eq!(
+        one.body_digests,
+        vec![(
+            "TASK-X-020.md".to_string(),
+            archon_workflow::task_set_contract::content_digest(b"# body"),
+        )]
+    );
+    assert_eq!(
+        one.preserved_digests,
+        [
+            skeleton_digests[0].clone(),
+            skeleton_digests[1].clone(),
+            (
+                "TASK-X-020.md".to_string(),
+                archon_workflow::task_set_contract::content_digest(b"# body"),
+            ),
+        ]
+    );
     assert_eq!(
         one.to_argument(),
         serde_json::json!({
@@ -245,6 +270,14 @@ fn a_frozen_skeleton_reports_its_subjects_and_the_bodies_present() {
     )
     .unwrap();
     assert_eq!(verified.subjects, subjects(&["TASK-X-010", "TASK-X-020"]));
+    let before = snapshot(&fixture).unwrap().body_digests;
+    let preserved_before = snapshot(&fixture).unwrap().preserved_digests;
+    std::fs::write(fixture.tasks.join("TASK-X-020.md"), "# changed body").unwrap();
+    assert_ne!(snapshot(&fixture).unwrap().body_digests, before);
+    assert_ne!(
+        snapshot(&fixture).unwrap().preserved_digests,
+        preserved_before
+    );
 }
 
 #[test]

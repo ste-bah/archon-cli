@@ -357,7 +357,15 @@ pub(super) fn digest_of(path: &Path) -> Result<Option<String>> {
 
 pub(super) fn rename(from: &Path, to: &Path) -> Result<()> {
     std::fs::rename(from, to)
-        .with_context(|| format!("renaming {} to {}", from.display(), to.display()))
+        .with_context(|| format!("renaming {} to {}", from.display(), to.display()))?;
+    #[cfg(test)]
+    if test_hooks::take_rename_failure(to) {
+        return Err(anyhow!(
+            "injected publisher failure after rename to {}",
+            to.display()
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn remove_if_present(path: &Path) -> Result<()> {

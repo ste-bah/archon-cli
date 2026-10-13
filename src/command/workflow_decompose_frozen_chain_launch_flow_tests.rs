@@ -1,6 +1,7 @@
 //! Whole launches on a frozen contract: the decision, the repair after the
 //! task-root claim, and what each leaves on disk.
 use super::*;
+use sha2::{Digest, Sha256};
 
 /// Stops a launch at provider construction: everything before it ran.
 struct LaunchBarrier;
@@ -227,6 +228,26 @@ fn read_all(paths: &[PathBuf]) -> Vec<Vec<u8>> {
         .map(|path| std::fs::read(path).unwrap())
         .collect()
 }
+fn tree_fingerprint(root: &Path) -> Vec<(PathBuf, String)> {
+    let mut files = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        for entry in std::fs::read_dir(&path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            if meta.is_dir() {
+                pending.push(path);
+            } else if meta.is_file() {
+                let relative = path.strip_prefix(root).unwrap().to_path_buf();
+                let digest = format!("{:x}", Sha256::digest(std::fs::read(&path).unwrap()));
+                files.push((relative, digest));
+            }
+        }
+    }
+    files.sort();
+    files
+}
 
 /// A paused fixed decomposition that owns the fixture's task root.
 fn paused_owner(fixture: &Fixture) -> String {
@@ -299,10 +320,13 @@ fn scripted_factory(
 #[tokio::test]
 async fn a_launch_on_a_task_root_a_paused_run_owns_re_authors_nothing() {
     let fixture = frozen(Some(names_live_root));
-    let chain = with_skeleton(&fixture);
+    with_skeleton(&fixture);
     crate::command::workflow_task_set::passability_tests_support::commit_project(&fixture.project);
     let owner = paused_owner(&fixture);
-    let before = read_all(&chain);
+    let before = (
+        tree_fingerprint(&fixture.tasks),
+        tree_fingerprint(&fixture.store.run_dir(&owner)),
+    );
     let (factory, client) = scripted_factory(true);
     let error = format!("{:#}", launch_with(&fixture, &factory).await);
     assert!(
@@ -312,7 +336,10 @@ async fn a_launch_on_a_task_root_a_paused_run_owns_re_authors_nothing() {
         "{error}"
     );
     assert_eq!(
-        read_all(&chain),
+        (
+            tree_fingerprint(&fixture.tasks),
+            tree_fingerprint(&fixture.store.run_dir(&owner))
+        ),
         before,
         "the owner's frozen chain was rewritten"
     );
@@ -325,22 +352,59 @@ async fn a_launch_on_a_task_root_a_paused_run_owns_re_authors_nothing() {
 }
 
 #[tokio::test]
-async fn a_repair_that_cannot_finish_is_logged_and_leaves_the_chain_as_it_was() {
+async fn a_paused_owner_with_pending_publication_keeps_the_entire_root_unchanged() {
+    let fixture = frozen(Some(names_live_root));
+    with_skeleton(&fixture);
+    crate::command::workflow_task_set::passability_tests_support::commit_project(&fixture.project);
+    let target = fixture.tasks.join("TASK-X-010.md");
+    std::fs::write(&target, "before journal recovery\n").unwrap();
+    let pin =
+        crate::command::workflow_task_set::acceptance_pin_path(&fixture.project, &fixture.tasks);
+    let _cleanup = crate::command::workflow_task_set::crash_publish(
+        &pin,
+        &[(target, b"after journal recovery\n".to_vec())],
+        "committed",
+        false,
+    );
+    let owner = paused_owner(&fixture);
+    let before = (
+        tree_fingerprint(&fixture.tasks),
+        tree_fingerprint(&fixture.store.run_dir(&owner)),
+    );
+    let (factory, client) = scripted_factory(true);
+    let error = format!("{:#}", launch_with(&fixture, &factory).await);
+    assert!(
+        error.contains(&format!(
+            "active fixed decomposition {owner} already owns task root"
+        )),
+        "{error}"
+    );
+    assert_eq!(
+        (
+            tree_fingerprint(&fixture.tasks),
+            tree_fingerprint(&fixture.store.run_dir(&owner))
+        ),
+        before,
+        "pending publication recovery changed the owner's files before claim refusal"
+    );
+    assert_eq!(client.authored(), 0);
+    assert!(factory.origins.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_refuted_launch_repair_is_logged_and_leaves_the_chain_for_the_run_repair() {
     let fixture = frozen(Some(names_live_root));
     let chain = with_skeleton(&fixture);
     crate::command::workflow_task_set::passability_tests_support::commit_project(&fixture.project);
     let before = read_all(&chain);
     let (factory, client) = scripted_factory(false);
     let error = format!("{:#}", launch_with(&fixture, &factory).await);
-    assert!(
-        error.contains("the launch routed frozen check(s) AC-X-001 to re-authoring"),
-        "{error}"
-    );
+    assert!(error.contains("barrier observed"), "{error}");
     assert!(client.authored() >= 1);
     assert_eq!(
         read_all(&chain),
         before,
-        "a failed repair publishes nothing"
+        "a refuted repair publishes nothing"
     );
     let log = std::fs::read_to_string(fixture.tasks.join(".decompose.log")).unwrap();
     assert!(
@@ -348,7 +412,89 @@ async fn a_repair_that_cannot_finish_is_logged_and_leaves_the_chain_as_it_was() 
         "{log}"
     );
     assert!(
-        log.contains("frozen_chain_launch acceptance=reauthor_failed ids=AC-X-001 error="),
+        log.contains("frozen_chain_launch acceptance=reauthor_refuted_routed ids=AC-X-001"),
         "{log}"
+    );
+    assert!(
+        !log.contains("frozen_chain_launch acceptance=reauthor_failed"),
+        "{log}"
+    );
+}
+
+#[tokio::test]
+async fn a_judge_refutation_routes_into_the_existing_in_run_acceptance_repair() {
+    let fixture = frozen(Some(names_live_root));
+    with_skeleton(&fixture);
+    crate::command::workflow_task_set::passability_tests_support::commit_project(&fixture.project);
+    let (factory, client) = scripted_factory(false);
+    let error = format!("{:#}", launch_with(&fixture, &factory).await);
+    assert!(
+        error.contains("barrier observed"),
+        "launch stopped before its run client: {error}"
+    );
+    assert!(!error.contains("reauthor_failed"), "{error}");
+    assert!(client.authored() >= 1, "launch re-author ran");
+    let origins = factory.origins.lock().unwrap().clone();
+    assert_eq!(
+        origins.first().map(String::as_str),
+        Some("workflow-decompose-launch-reauthor")
+    );
+    assert!(
+        origins
+            .iter()
+            .any(|origin| origin == "workflow_decompose_v1"),
+        "{origins:?}"
+    );
+    let log = std::fs::read_to_string(fixture.tasks.join(".decompose.log")).unwrap();
+    assert!(log.contains("acceptance=reauthor_refuted_routed"), "{log}");
+    assert!(!log.contains("acceptance=reauthor_failed"), "{log}");
+    let run = fixture.store.list_runs().unwrap().pop().unwrap();
+    let args: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            fixture
+                .store
+                .run_dir(&run.id)
+                .join(crate::command::workflow_decompose::FIXED_ARGUMENTS_PATH),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(args["frozenChain"]["acceptance"], false, "{args}");
+}
+
+#[tokio::test]
+async fn a_publisher_failure_after_contract_rename_rolls_back_and_releases_the_claim() {
+    let fixture = frozen(Some(names_live_root));
+    let mut chain = with_skeleton(&fixture);
+    let body = fixture.tasks.join("TASK-X-010.md");
+    std::fs::write(&body, "frozen body\n").unwrap();
+    chain.push(body);
+    crate::command::workflow_task_set::passability_tests_support::commit_project(&fixture.project);
+    let before = read_all(&chain);
+    crate::command::workflow_task_set::fail_after_rename(
+        &fixture.tasks.join(ACCEPTANCE_CONTRACT_FILE),
+    );
+    let (factory, _) = scripted_factory(true);
+    let error = format!("{:#}", launch_with(&fixture, &factory).await);
+    assert!(
+        error.contains("injected publisher failure after rename"),
+        "{error}"
+    );
+    assert_eq!(
+        read_all(&chain),
+        before,
+        "the failed publish left a partial chain"
+    );
+    let run = fixture.store.list_runs().unwrap().pop().unwrap();
+    let release = fixture
+        .store
+        .run_dir(&run.id)
+        .join("decomposition/task-root-released.json");
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(release).unwrap()).unwrap();
+    assert_eq!(record["run_id"], run.id);
+    assert_eq!(
+        record["task_root"],
+        fixture.tasks.to_string_lossy().replace('\\', "/")
     );
 }

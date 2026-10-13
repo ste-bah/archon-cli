@@ -60,7 +60,7 @@ pub(crate) struct WorkflowScriptPlan {
     pub(super) harness_source: String,
     pub(super) calls: Vec<WorkflowV2HostCall>,
     pub(super) task_universe: Option<WorkflowV2TaskUniverse>,
-    pub(super) script_args: Option<serde_json::Value>,
+    pub(crate) script_args: Option<serde_json::Value>,
     pub(super) governed_learning_context: Vec<GeneratedWorkflowLearningContext>,
     pub(super) generated_config: GeneratedWorkflowConfig,
     /// The spec's `learning_hooks`, carried through to the persisted run.
