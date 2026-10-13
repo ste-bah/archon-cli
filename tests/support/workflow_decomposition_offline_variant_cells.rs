@@ -214,7 +214,6 @@ fn script_cell(name: &str, variant: Variant, id: &str, passing: &[(&str, &str)])
 
 #[cfg(unix)]
 #[test]
-#[ignore = "defect #423: a CRLF check block is frozen with its carriage returns, so the frozen check can never pass"]
 fn crlf_verifier_script_in_a_check_block() {
     assert!(CRLF_SCRIPT.contains("\r\n"));
     script_cell(
