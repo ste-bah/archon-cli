@@ -8,7 +8,6 @@ use crate::provider::{
 use crate::providers::openai_cache::{supports_explicit_prompt_cache, system_content_parts};
 use crate::providers::openai_protocol::map_http_error;
 use crate::streaming::StreamEvent;
-use crate::types::Usage;
 
 // ---------------------------------------------------------------------------
 // OpenAiProvider
@@ -379,27 +378,21 @@ impl LlmProvider for OpenAiProvider {
         let mut rx = self.stream(request).await?;
 
         let mut text_parts: Vec<String> = Vec::new();
-        let mut usage = Usage::default();
+        // Issue 424: delta usage is cumulative for its message, never added.
+        let mut usage = crate::usage::UsageAccumulator::default();
         let mut stop_reason = String::new();
 
         while let Some(event) = rx.recv().await {
+            usage.record_event(&event);
             match event {
-                StreamEvent::MessageStart { usage: u, .. } => {
-                    usage.merge(&u);
-                }
                 StreamEvent::TextDelta { text, .. } => {
                     text_parts.push(text);
                 }
                 StreamEvent::MessageDelta {
-                    stop_reason: event_stop_reason,
-                    usage: event_usage,
+                    stop_reason: Some(sr),
+                    ..
                 } => {
-                    if let Some(sr) = event_stop_reason {
-                        stop_reason = sr;
-                    }
-                    if let Some(event_usage) = event_usage {
-                        usage.merge(&event_usage);
-                    }
+                    stop_reason = sr;
                 }
                 _ => {}
             }
@@ -414,7 +407,7 @@ impl LlmProvider for OpenAiProvider {
 
         Ok(LlmResponse {
             content,
-            usage,
+            usage: usage.to_usage(),
             stop_reason,
         })
     }

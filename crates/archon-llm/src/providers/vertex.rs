@@ -583,32 +583,27 @@ impl LlmProvider for VertexProvider {
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
         let mut rx = self.stream(request).await?;
         let mut text_parts: Vec<String> = Vec::new();
-        let mut usage = Usage::default();
+        // Issue 424: delta usage is cumulative for its message, never added.
+        let mut usage = crate::usage::UsageAccumulator::default();
         let mut stop_reason = String::new();
 
         while let Some(event) = rx.recv().await {
+            usage.record_event(&event);
             match event {
-                StreamEvent::MessageStart { usage: u, .. } => {
-                    usage.merge(&u);
-                }
                 StreamEvent::TextDelta { text, .. } => {
                     text_parts.push(text);
                 }
                 StreamEvent::MessageDelta {
                     stop_reason: Some(sr),
-                    usage: Some(u),
+                    usage: Some(_),
                 } => {
                     stop_reason = sr;
-                    usage.merge(&u);
                 }
                 StreamEvent::MessageDelta {
                     stop_reason: Some(sr),
                     ..
                 } => {
                     stop_reason = sr;
-                }
-                StreamEvent::MessageDelta { usage: Some(u), .. } => {
-                    usage.merge(&u);
                 }
                 _ => {}
             }
@@ -623,7 +618,7 @@ impl LlmProvider for VertexProvider {
 
         Ok(LlmResponse {
             content,
-            usage,
+            usage: usage.to_usage(),
             stop_reason,
         })
     }

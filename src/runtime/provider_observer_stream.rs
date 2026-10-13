@@ -2,7 +2,6 @@
 
 use archon_llm::runtime::{ProviderRuntimeEventType, ProviderRuntimeSeverity};
 use archon_llm::streaming::StreamEvent;
-use archon_llm::types::Usage;
 use archon_llm::usage::UsageAccumulator;
 use tokio::sync::mpsc::Receiver;
 
@@ -95,26 +94,13 @@ pub(super) fn forward_stream(
                 recorder.record_call_usage_sync(
                     &request_id,
                     &observed,
-                    Some(&usage_into_usage(&usage)),
+                    Some(&usage.to_usage()),
                     status,
                 );
             })
             .await;
     });
     rx
-}
-
-fn usage_into_usage(usage: &UsageAccumulator) -> Usage {
-    Usage {
-        input_tokens: usage.billable_input_tokens,
-        output_tokens: usage.output_tokens,
-        cache_creation_input_tokens: usage.cache_creation_input_tokens,
-        cache_read_input_tokens: usage.cache_read_input_tokens,
-        input_tokens_available: usage.input_tokens_available,
-        output_tokens_available: usage.output_tokens_available,
-        cache_creation_input_tokens_available: usage.cache_creation_input_tokens_available,
-        cache_read_input_tokens_available: usage.cache_read_input_tokens_available,
-    }
 }
 
 async fn record_stream_error(

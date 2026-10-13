@@ -1,6 +1,19 @@
 use crate::streaming::StreamEvent;
 use crate::types::Usage;
 
+/// The usage of one stream, summed over its messages.
+///
+/// A message's usage arrives in `message_start` and in each `message_delta`.
+/// Delta counts are cumulative for their message (the Anthropic streaming
+/// spec: "The token counts shown in the `usage` field of the `message_delta`
+/// event are *cumulative*"), so a delta replaces the message's count rather
+/// than adding to it: `message_start` output 1 and a final `message_delta`
+/// output 15 is 15 tokens, not 16 (Issue 424). A count that a delta reports
+/// higher than `message_start` did (a proxy's placeholder 0 at start, the
+/// real input in the final delta) is taken from the delta (Issue 369). Each
+/// counter is the largest value reported for its message, as a cumulative
+/// count only grows; a counter an event leaves out is not reset. Messages
+/// end at `message_stop` or at the next `message_start`, and are summed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UsageAccumulator {
     pub context_input_tokens: u64,
@@ -12,14 +25,28 @@ pub struct UsageAccumulator {
     pub output_tokens_available: bool,
     pub cache_creation_input_tokens_available: bool,
     pub cache_read_input_tokens_available: bool,
-    saw_start_input: bool,
-    saw_start_cache_creation: bool,
-    saw_start_cache_read: bool,
+    /// The current message's counts so far; only growth over them is added.
+    message: MessageCounts,
     context_input_overflowed: bool,
     input_overflowed: bool,
     output_overflowed: bool,
     cache_creation_overflowed: bool,
     cache_read_overflowed: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct MessageCounts {
+    input: u64,
+    cache_creation: u64,
+    cache_read: u64,
+    output: u64,
+}
+
+/// How much `reported` (a cumulative count) grows `seen`, which it raises.
+fn growth(seen: &mut u64, reported: u64) -> u64 {
+    let added = reported.saturating_sub(*seen);
+    *seen = (*seen).max(reported);
+    added
 }
 
 impl UsageAccumulator {
@@ -29,96 +56,80 @@ impl UsageAccumulator {
             StreamEvent::MessageDelta {
                 usage: Some(usage), ..
             } => self.record_delta(usage),
+            StreamEvent::MessageStop => self.end_message(),
             _ => {}
         }
     }
 
+    /// A new message begins with `usage`.
     pub fn record_start(&mut self, usage: &Usage) {
-        self.saw_start_input = usage.input_tokens_available || usage.input_tokens != 0;
-        self.saw_start_cache_creation =
-            usage.cache_creation_input_tokens_available || usage.cache_creation_input_tokens != 0;
-        self.saw_start_cache_read =
-            usage.cache_read_input_tokens_available || usage.cache_read_input_tokens != 0;
+        self.end_message();
+        self.record_delta(usage);
+    }
+
+    /// The current message's cumulative `usage`.
+    pub fn record_delta(&mut self, usage: &Usage) {
+        let input = growth(&mut self.message.input, usage.input_tokens);
+        let cache_creation = growth(
+            &mut self.message.cache_creation,
+            usage.cache_creation_input_tokens,
+        );
+        let cache_read = growth(&mut self.message.cache_read, usage.cache_read_input_tokens);
+        let output = growth(&mut self.message.output, usage.output_tokens);
         add_usage_field(
             &mut self.billable_input_tokens,
             &mut self.input_tokens_available,
             &mut self.input_overflowed,
-            usage.input_tokens,
+            input,
             usage.input_tokens_available,
         );
         add_usage_field(
             &mut self.cache_creation_input_tokens,
             &mut self.cache_creation_input_tokens_available,
             &mut self.cache_creation_overflowed,
-            usage.cache_creation_input_tokens,
+            cache_creation,
             usage.cache_creation_input_tokens_available,
         );
         add_usage_field(
             &mut self.cache_read_input_tokens,
             &mut self.cache_read_input_tokens_available,
             &mut self.cache_read_overflowed,
-            usage.cache_read_input_tokens,
+            cache_read,
             usage.cache_read_input_tokens_available,
         );
-        add_context_input(
+        add_context_parts(
             &mut self.context_input_tokens,
             &mut self.context_input_overflowed,
-            usage,
+            input,
+            cache_creation,
+            cache_read,
         );
         add_usage_field(
             &mut self.output_tokens,
             &mut self.output_tokens_available,
             &mut self.output_overflowed,
-            usage.output_tokens,
+            output,
             usage.output_tokens_available,
         );
     }
 
-    pub fn record_delta(&mut self, usage: &Usage) {
-        if !self.saw_start_input {
-            add_usage_field(
-                &mut self.billable_input_tokens,
-                &mut self.input_tokens_available,
-                &mut self.input_overflowed,
-                usage.input_tokens,
-                usage.input_tokens_available,
-            );
+    fn end_message(&mut self) {
+        self.message = MessageCounts::default();
+    }
+
+    /// The accumulated totals as one [`Usage`] (billable input as
+    /// `input_tokens`).
+    pub fn to_usage(&self) -> Usage {
+        Usage {
+            input_tokens: self.billable_input_tokens,
+            output_tokens: self.output_tokens,
+            cache_creation_input_tokens: self.cache_creation_input_tokens,
+            cache_read_input_tokens: self.cache_read_input_tokens,
+            input_tokens_available: self.input_tokens_available,
+            output_tokens_available: self.output_tokens_available,
+            cache_creation_input_tokens_available: self.cache_creation_input_tokens_available,
+            cache_read_input_tokens_available: self.cache_read_input_tokens_available,
         }
-        if !self.saw_start_cache_creation {
-            add_usage_field(
-                &mut self.cache_creation_input_tokens,
-                &mut self.cache_creation_input_tokens_available,
-                &mut self.cache_creation_overflowed,
-                usage.cache_creation_input_tokens,
-                usage.cache_creation_input_tokens_available,
-            );
-        }
-        if !self.saw_start_cache_read {
-            add_usage_field(
-                &mut self.cache_read_input_tokens,
-                &mut self.cache_read_input_tokens_available,
-                &mut self.cache_read_overflowed,
-                usage.cache_read_input_tokens,
-                usage.cache_read_input_tokens_available,
-            );
-        }
-        if !self.saw_start_input || !self.saw_start_cache_creation || !self.saw_start_cache_read {
-            add_context_delta(
-                &mut self.context_input_tokens,
-                &mut self.context_input_overflowed,
-                usage,
-                self.saw_start_input,
-                self.saw_start_cache_creation,
-                self.saw_start_cache_read,
-            );
-        }
-        add_usage_field(
-            &mut self.output_tokens,
-            &mut self.output_tokens_available,
-            &mut self.output_overflowed,
-            usage.output_tokens,
-            usage.output_tokens_available,
-        );
     }
 
     pub fn cache_tokens(&self) -> u64 {
@@ -148,38 +159,6 @@ fn add_usage_field(
             *overflowed = true;
         }
     }
-}
-
-fn add_context_delta(
-    total: &mut u64,
-    overflowed: &mut bool,
-    usage: &Usage,
-    saw_input: bool,
-    saw_cache_creation: bool,
-    saw_cache_read: bool,
-) {
-    let input = if !saw_input { usage.input_tokens } else { 0 };
-    let cache_creation = if !saw_cache_creation {
-        usage.cache_creation_input_tokens
-    } else {
-        0
-    };
-    let cache_read = if !saw_cache_read {
-        usage.cache_read_input_tokens
-    } else {
-        0
-    };
-    add_context_parts(total, overflowed, input, cache_creation, cache_read);
-}
-
-fn add_context_input(total: &mut u64, overflowed: &mut bool, usage: &Usage) {
-    add_context_parts(
-        total,
-        overflowed,
-        usage.input_tokens,
-        usage.cache_creation_input_tokens,
-        usage.cache_read_input_tokens,
-    );
 }
 
 fn add_context_parts(
@@ -242,6 +221,8 @@ mod tests {
             output_tokens_available: true,
             ..Default::default()
         });
+        // A second message: its count adds to the first's and overflows.
+        acc.record_start(&Usage::default());
         acc.record_delta(&Usage {
             output_tokens: 1,
             output_tokens_available: true,
@@ -282,5 +263,122 @@ mod tests {
         });
         assert_eq!(acc.context_input_tokens, 11);
         assert_eq!(acc.output_tokens, 4);
+    }
+
+    fn reported(input: Option<u64>, output: Option<u64>) -> Usage {
+        Usage {
+            input_tokens: input.unwrap_or(0),
+            output_tokens: output.unwrap_or(0),
+            input_tokens_available: input.is_some(),
+            output_tokens_available: output.is_some(),
+            ..Usage::default()
+        }
+    }
+
+    fn start_event(usage: Usage) -> StreamEvent {
+        StreamEvent::MessageStart {
+            id: "msg".into(),
+            model: "model".into(),
+            usage,
+        }
+    }
+
+    fn delta_event(usage: Usage) -> StreamEvent {
+        StreamEvent::MessageDelta {
+            stop_reason: Some("end_turn".into()),
+            usage: Some(usage),
+        }
+    }
+
+    // #424: message_delta usage is cumulative for the message (Anthropic
+    // streaming spec), so the delta replaces the start value; it is not added.
+    #[test]
+    fn delta_output_is_cumulative_with_start_output() {
+        let mut acc = UsageAccumulator::default();
+        acc.record_event(&start_event(reported(Some(25), Some(1))));
+        acc.record_event(&delta_event(reported(None, Some(15))));
+        acc.record_event(&StreamEvent::MessageStop);
+
+        assert_eq!(acc.output_tokens, 15);
+        assert!(acc.output_tokens_available);
+        assert_eq!(acc.billable_input_tokens, 25);
+        assert_eq!(acc.context_input_tokens, 25);
+    }
+
+    #[test]
+    fn delta_input_is_cumulative_with_start_input() {
+        // The spec's server-tool example: start input 2679, final delta 10682.
+        let mut acc = UsageAccumulator::default();
+        acc.record_event(&start_event(reported(Some(2679), Some(3))));
+        acc.record_event(&delta_event(reported(Some(10682), Some(510))));
+
+        assert_eq!(acc.billable_input_tokens, 10682);
+        assert_eq!(acc.context_input_tokens, 10682);
+        assert_eq!(acc.output_tokens, 510);
+    }
+
+    #[test]
+    fn repeated_cumulative_deltas_count_the_latest_value_once() {
+        let mut acc = UsageAccumulator::default();
+        acc.record_event(&delta_event(reported(Some(9), Some(3))));
+        acc.record_event(&delta_event(reported(Some(9), Some(7))));
+
+        assert_eq!(acc.billable_input_tokens, 9);
+        assert_eq!(acc.output_tokens, 7);
+    }
+
+    #[test]
+    fn output_reported_only_at_start_is_kept() {
+        let mut acc = UsageAccumulator::default();
+        acc.record_event(&start_event(reported(Some(5), Some(4))));
+        acc.record_event(&StreamEvent::MessageDelta {
+            stop_reason: Some("end_turn".into()),
+            usage: None,
+        });
+        acc.record_event(&StreamEvent::MessageStop);
+
+        assert_eq!(acc.output_tokens, 4);
+        assert!(acc.output_tokens_available);
+    }
+
+    #[test]
+    fn a_delta_that_omits_a_field_does_not_reset_it() {
+        let mut acc = UsageAccumulator::default();
+        acc.record_event(&start_event(reported(Some(12), Some(2))));
+        acc.record_event(&delta_event(reported(None, Some(6))));
+
+        assert_eq!(acc.billable_input_tokens, 12);
+        assert_eq!(acc.output_tokens, 6);
+    }
+
+    #[test]
+    fn separate_messages_are_summed() {
+        let mut acc = UsageAccumulator::default();
+        acc.record_event(&start_event(reported(Some(10), Some(1))));
+        acc.record_event(&delta_event(reported(None, Some(15))));
+        acc.record_event(&StreamEvent::MessageStop);
+        acc.record_event(&start_event(reported(Some(20), Some(1))));
+        acc.record_event(&delta_event(reported(None, Some(5))));
+        acc.record_event(&StreamEvent::MessageStop);
+        // A provider that sends no message_start: the stop still ends a message.
+        acc.record_event(&delta_event(reported(Some(3), Some(2))));
+        acc.record_event(&StreamEvent::MessageStop);
+
+        assert_eq!(acc.output_tokens, 22);
+        assert_eq!(acc.billable_input_tokens, 33);
+        assert_eq!(acc.context_input_tokens, 33);
+    }
+
+    #[test]
+    fn to_usage_reports_the_accumulated_totals() {
+        let mut acc = UsageAccumulator::default();
+        acc.record_event(&start_event(reported(Some(25), Some(1))));
+        acc.record_event(&delta_event(reported(None, Some(15))));
+
+        let usage = acc.to_usage();
+        assert_eq!(usage.input_tokens, 25);
+        assert_eq!(usage.output_tokens, 15);
+        assert!(usage.input_tokens_available);
+        assert!(usage.output_tokens_available);
     }
 }

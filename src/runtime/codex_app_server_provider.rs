@@ -86,22 +86,18 @@ impl LlmProvider for CodexAppServerProvider {
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
         let mut rx = self.stream(request).await?;
         let mut text = String::new();
-        let mut usage = Usage::default();
+        // Issue 424: delta usage is cumulative for its message, never added.
+        let mut usage = archon_llm::usage::UsageAccumulator::default();
         let mut stop_reason = String::new();
         while let Some(event) = rx.recv().await {
+            usage.record_event(&event);
             match event {
-                StreamEvent::MessageStart { usage: start, .. } => usage.merge(&start),
                 StreamEvent::TextDelta { text: delta, .. } => text.push_str(&delta),
                 StreamEvent::MessageDelta {
-                    usage: delta_usage,
-                    stop_reason: delta_stop,
+                    stop_reason: Some(delta_stop),
+                    ..
                 } => {
-                    if let Some(delta_usage) = delta_usage {
-                        usage.merge(&delta_usage);
-                    }
-                    if let Some(delta_stop) = delta_stop {
-                        stop_reason = delta_stop;
-                    }
+                    stop_reason = delta_stop;
                 }
                 StreamEvent::Error {
                     error_type,
@@ -126,7 +122,7 @@ impl LlmProvider for CodexAppServerProvider {
             } else {
                 vec![serde_json::json!({"type": "text", "text": text})]
             },
-            usage,
+            usage: usage.to_usage(),
             stop_reason,
         })
     }

@@ -16,7 +16,6 @@ use crate::providers::bedrock_wire::{
     convert_message_to_bedrock, decode_eventstream_frames, map_http_error,
 };
 use crate::streaming::StreamEvent;
-use crate::types::Usage;
 
 // Keeps the `providers::bedrock::parse_bedrock_event` path stable now that the
 // implementation lives in `bedrock_wire`.
@@ -475,32 +474,27 @@ impl LlmProvider for BedrockProvider {
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
         let mut rx = self.stream(request).await?;
         let mut text_parts: Vec<String> = Vec::new();
-        let mut usage = Usage::default();
+        // Issue 424: delta usage is cumulative for its message, never added.
+        let mut usage = crate::usage::UsageAccumulator::default();
         let mut stop_reason = String::new();
 
         while let Some(event) = rx.recv().await {
+            usage.record_event(&event);
             match event {
-                StreamEvent::MessageStart { usage: u, .. } => {
-                    usage.merge(&u);
-                }
                 StreamEvent::TextDelta { text, .. } => {
                     text_parts.push(text);
                 }
                 StreamEvent::MessageDelta {
                     stop_reason: Some(sr),
-                    usage: Some(u),
+                    usage: Some(_),
                 } => {
                     stop_reason = sr;
-                    usage.merge(&u);
                 }
                 StreamEvent::MessageDelta {
                     stop_reason: Some(sr),
                     ..
                 } => {
                     stop_reason = sr;
-                }
-                StreamEvent::MessageDelta { usage: Some(u), .. } => {
-                    usage.merge(&u);
                 }
                 _ => {}
             }
@@ -515,7 +509,7 @@ impl LlmProvider for BedrockProvider {
 
         Ok(LlmResponse {
             content,
-            usage,
+            usage: usage.to_usage(),
             stop_reason,
         })
     }
