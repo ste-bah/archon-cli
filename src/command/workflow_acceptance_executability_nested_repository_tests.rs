@@ -143,7 +143,10 @@ fn scratch_copy_skips_the_nested_repository_the_digest_skips() {
     assert_eq!(before, digest(&f), "the nested repository moved the key");
     write(&f.project.join("work/vendor/lib.txt"), b"edited vendored");
     let vendored = digest(&f);
-    assert_ne!(before, vendored, "a copied vendored file did not move the key");
+    assert_ne!(
+        before, vendored,
+        "a copied vendored file did not move the key"
+    );
     write(&f.project.join("work/data.txt"), b"edited data");
     assert_ne!(vendored, digest(&f), "a copied file did not move the key");
 }
@@ -177,7 +180,10 @@ fn a_repository_at_the_project_root_skips_only_the_whole_walk() {
     let same = archon_workflow::acceptance_scratch::nested_repository(&root, &root);
     assert_eq!(same, Some(PathBuf::new()));
     assert!(nested_repository_skipped(Path::new(""), same.as_deref()));
-    assert!(!nested_repository_skipped(Path::new("data"), same.as_deref()));
+    assert!(!nested_repository_skipped(
+        Path::new("data"),
+        same.as_deref()
+    ));
     assert_eq!(
         archon_workflow::acceptance_scratch::nested_repository(&root.join("project"), &root),
         None,
@@ -197,8 +203,14 @@ fn a_symlink_to_the_repository_is_never_followed() {
     let mut roots = ScratchRoots::prepare(&f.policy, &f.commit).unwrap();
     let copied = files(&roots.project().join("work"));
     roots.cleanup().unwrap();
-    assert!(!copied.iter().any(|path| path.starts_with("alias/")), "{copied:?}");
+    assert!(
+        !copied.iter().any(|path| path.starts_with("alias/")),
+        "{copied:?}"
+    );
     let before = digest(&f);
-    write(&f.repository.join("tracked.txt"), b"edited through the alias");
+    write(
+        &f.repository.join("tracked.txt"),
+        b"edited through the alias",
+    );
     assert_eq!(before, digest(&f));
 }

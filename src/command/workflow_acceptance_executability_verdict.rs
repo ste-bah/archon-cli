@@ -110,9 +110,9 @@ pub(crate) struct Context {
     host_path: Option<String>,
     /// How long a listing may print nothing before it is given up.
     list_stall: std::time::Duration,
-    /// Issue 420: how many levels of the tree the site keeps above a
-    /// check's working directory (its project inside its repository copy).
-    headroom: usize,
+    /// Issue 420: the copy a check ran in (`setup_path::SiteTree`); `None`
+    /// on the live tree, where no path is known to be outside the site.
+    tree: Option<setup_path::SiteTree>,
 }
 
 impl Context {
@@ -175,13 +175,13 @@ impl Context {
             environment,
             host_path: subcommand::host_path(),
             list_stall: subcommand::LIST_STALL,
-            headroom: 0,
+            tree: None,
         }
     }
 
-    /// This site with `levels` of its tree above a check's working directory.
-    pub(crate) fn with_headroom(mut self, levels: usize) -> Self {
-        self.headroom = levels;
+    /// Checks ran `depth` levels below the top of a copy holding `roots`.
+    pub(crate) fn within(mut self, depth: usize, roots: &[&str]) -> Self {
+        self.tree = Some(setup_path::SiteTree::new(depth, roots));
         self
     }
 
@@ -220,7 +220,7 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
     if let Some(reason) = shell_setup::refusal(code, command, &commands, &output(result)) {
         return Some(reason);
     }
-    if let Some(reason) = setup_path::refusal(code, &commands, &output(result), at.headroom) {
+    if let Some(reason) = setup_path::refusal(code, &commands, &output(result), at.tree.as_ref()) {
         return Some(reason);
     }
     if matches!(code, 126 | 127)

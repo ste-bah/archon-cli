@@ -36,7 +36,11 @@ async fn a_freeze_acceptance_bump_resumes_a_frozen_accepted_contract_by_verify_o
         "{output}"
     );
     let called = capabilities(&output);
-    assert_eq!(called.first().copied(), Some("verify-frozen-acceptance"), "{output}");
+    assert_eq!(
+        called.first().copied(),
+        Some("verify-frozen-acceptance"),
+        "{output}"
+    );
     assert!(
         !called.contains(&"freeze-acceptance"),
         "an accepted frozen contract is never frozen again: {output}"
@@ -58,5 +62,8 @@ async fn the_same_logic_replays_the_recorded_freeze_and_never_re_executes_it() {
         output.contains("frozen_chain_override acceptance=keep reason=judged attempt acceptance-judged replays under this build's logic"),
         "{output}"
     );
-    assert!(!capabilities(&output).contains(&"verify-frozen-acceptance"), "{output}");
+    assert!(
+        !capabilities(&output).contains(&"verify-frozen-acceptance"),
+        "{output}"
+    );
 }

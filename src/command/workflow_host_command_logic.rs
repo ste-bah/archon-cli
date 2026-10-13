@@ -234,10 +234,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // 16: #440 the scratch copy skips a repository nested inside a project input, as the probe digest does, so a check can no longer read that live tree and its verdict can change.
         // 17: #420 a pre-implementation failure at a setup path outside the probe's tree that the output reports absent (`cd X`, `--manifest-path X`) gives no verdict: unproven, then its author's, never a passability verdict.
+        // #420 review, same unreleased version 17: the rule applies only in a host-made copy (scratch, hermetic), never on the live tree, and a top-level name the copy holds (`../repo`) stays inside it.
         version: 17,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        sources_digest: "dc3d3496e062aa1f2574b70d222998f73716e523157c0afcf63b03efa0b09c1f",
+        sources_digest: "187e9ce4610b08538f369b842157b7b5909006b4b53a212e6f5b48acc2fa4003",
         build_bound: false,
     },
     CapabilityLogic {
@@ -254,7 +255,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #440 re-pin only: the skeleton freeze runs no check and copies no input.
         // #420 re-pin only: the skeleton freeze judges no check run, so the new no-verdict rule never applies.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
-        sources_digest: "dc3d3496e062aa1f2574b70d222998f73716e523157c0afcf63b03efa0b09c1f",
+        sources_digest: "187e9ce4610b08538f369b842157b7b5909006b4b53a212e6f5b48acc2fa4003",
         build_bound: false,
     },
     CapabilityLogic {
@@ -325,8 +326,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #440 re-pin only: frozen-chain verification runs no check and calls none of the changed copy, audit or digest walkers.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
+        // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
-        sources_digest: "45a1857d94ad0e4acded47b85489babb8b7179b6186e882608b883ebc64126d2",
+        sources_digest: "7049c4745e7d0d326dc87789253b8d25a20bbb6df90556e7ad779c59539ac82c",
         build_bound: true,
     },
     CapabilityLogic {
@@ -342,8 +344,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #440 re-pin only: frozen-chain verification runs no check and calls none of the changed copy, audit or digest walkers.
         // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
+        // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
-        sources_digest: "45a1857d94ad0e4acded47b85489babb8b7179b6186e882608b883ebc64126d2",
+        sources_digest: "7049c4745e7d0d326dc87789253b8d25a20bbb6df90556e7ad779c59539ac82c",
         build_bound: true,
     },
 ];

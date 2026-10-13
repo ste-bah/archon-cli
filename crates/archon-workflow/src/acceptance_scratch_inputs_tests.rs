@@ -412,7 +412,14 @@ fn copied_file_sets_match_digest_inputs_for_scratch_and_hermetic_scopes() {
     let excludes = project_excludes(&policy).unwrap();
     let digest_inputs = |scope: &Path| {
         let mut map = BTreeMap::new();
-        audit_path(&project, scope, (&excludes, None), Some(task_relative), &mut map).unwrap();
+        audit_path(
+            &project,
+            scope,
+            (&excludes, None),
+            Some(task_relative),
+            &mut map,
+        )
+        .unwrap();
         map.into_iter()
             .filter_map(|(path, digest)| {
                 (digest != "directory" && digest != "missing").then_some(PathBuf::from(path))

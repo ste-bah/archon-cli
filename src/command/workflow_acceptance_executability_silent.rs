@@ -34,24 +34,49 @@ const EVIDENCE_BYTES: usize = 800;
 /// Where `probe`'s checks run: its site's environment, and `contract`'s
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
-    Context::new(super::sites::listing_environment(probe), contract).with_headroom(headroom(probe))
+    let at = Context::new(super::sites::listing_environment(probe), contract);
+    match copy_tree(probe) {
+        Some((depth, roots)) => at.within(depth, roots),
+        None => at,
+    }
 }
 
-/// Issue 420: how many levels of the tree a check's site keeps above its
-/// working directory. A scratch site materialises the project and the
-/// repository as two roots (none). The probe's own copy keeps a project the
-/// repository tracks inside its clone, and the live site is the live tree:
-/// there a project inside the repository has the levels between them.
-fn headroom(probe: &HostProbe) -> usize {
-    if matches!(probe.site, Site::Scratch(_)) {
-        return 0;
-    }
-    let canonical = |path: &std::path::Path| archon_shell::paths::canonicalize(path).ok();
-    match (canonical(&probe.project), canonical(&probe.repository)) {
-        (Some(project), Some(repository)) => project
-            .strip_prefix(&repository)
-            .map_or(0, |inside| inside.components().count()),
-        _ => 0,
+/// Issue 420: the copy `probe`'s checks run in, as (depth of a check's
+/// working directory below the copy's top, the names the top holds). A
+/// scratch site holds `repo`, `project` and its own directories
+/// (`acceptance_scratch::ScratchRoots::prepare`); the probe's own copy
+/// holds `repo` and `project` (`HermeticCopy::at`), or keeps a project its
+/// repository tracks inside `repo`, at its depth there. The live tree is no
+/// copy (`None`): a path above a check's directory may be real there.
+fn copy_tree(probe: &HostProbe) -> Option<(usize, &'static [&'static str])> {
+    const SCRATCH: &[&str] = &[
+        "repo",
+        "project",
+        "home",
+        "tmp",
+        "cargo-home",
+        "target",
+        "project-baseline",
+    ];
+    const HERMETIC: &[&str] = &["repo", "project"];
+    match probe.site {
+        Site::Scratch(_) => Some((1, SCRATCH)),
+        Site::Direct | Site::Unavailable(_) => None,
+        Site::Hermetic => {
+            let canonical = |path: &std::path::Path| archon_shell::paths::canonicalize(path).ok();
+            let inside = canonical(&probe.project)
+                .zip(canonical(&probe.repository))
+                .and_then(|(project, repository)| {
+                    project
+                        .strip_prefix(&repository)
+                        .ok()
+                        .map(|inside| inside.components().count())
+                });
+            Some(match inside {
+                Some(levels) => (1 + levels, &HERMETIC[..1]),
+                None => (1, HERMETIC),
+            })
+        }
     }
 }
 

@@ -12,7 +12,10 @@ fn copy_and_audit_skip_exactly_the_nested_repository() {
     let temp = tempfile::tempdir().unwrap();
     let project = archon_shell::paths::canonicalize(temp.path()).unwrap();
     write(&project.join("work/repo/src.rs"), b"live tree");
-    write(&project.join("work/repo-notes.txt"), b"a sibling, not the repository");
+    write(
+        &project.join("work/repo-notes.txt"),
+        b"a sibling, not the repository",
+    );
     write(&project.join("work/vendor/lib.rs"), b"vendored");
     let nested = nested_repository(&project, &project.join("work/repo"));
     assert_eq!(nested.as_deref(), Some(Path::new("work/repo")));
@@ -42,7 +45,9 @@ fn copy_and_audit_skip_exactly_the_nested_repository() {
     )
     .unwrap();
     assert!(
-        !audited.keys().any(|key| key.starts_with("work/repo/") || key == "work/repo"),
+        !audited
+            .keys()
+            .any(|key| key.starts_with("work/repo/") || key == "work/repo"),
         "{audited:?}"
     );
     assert!(audited.contains_key("work/repo-notes.txt"));
@@ -85,7 +90,13 @@ fn an_input_named_inside_the_repository_is_walked_by_every_walker_alike() {
 fn a_repository_outside_the_project_skips_nothing() {
     let temp = tempfile::tempdir().unwrap();
     let base = archon_shell::paths::canonicalize(temp.path()).unwrap();
-    assert_eq!(nested_repository(&base.join("project"), &base.join("repo")), None);
-    assert_eq!(nested_repository(&base.join("repo/project"), &base.join("repo")), None);
+    assert_eq!(
+        nested_repository(&base.join("project"), &base.join("repo")),
+        None
+    );
+    assert_eq!(
+        nested_repository(&base.join("repo/project"), &base.join("repo")),
+        None
+    );
     assert!(!nested_repository_skipped(Path::new("repo"), None));
 }

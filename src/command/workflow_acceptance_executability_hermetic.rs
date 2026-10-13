@@ -493,8 +493,8 @@ pub(super) async fn run_in_copy(
 }
 
 #[cfg(test)]
-#[path = "workflow_acceptance_executability_hermetic_tests.rs"]
-mod tests;
-#[cfg(test)]
 #[path = "workflow_acceptance_executability_nested_repository_tests.rs"]
 mod nested_repository_tests;
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_hermetic_tests.rs"]
+mod tests;
