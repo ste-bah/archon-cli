@@ -1,49 +1,128 @@
 use std::path::{Path, PathBuf};
 
-use super::super::workflow_host_command_logic::CAPABILITY_LOGIC;
+use super::super::workflow_host_command_logic::{CAPABILITY_LOGIC, LOGIC_DENYLIST};
 use super::super::workflow_host_command_logic_closure::Workspace;
-use super::super::workflow_host_command_logic_source::hashed_text_for_file;
-use super::{Tree, sources_digest};
+use super::super::workflow_host_command_logic_source::{SourceTree, hashed_text_for_file};
+use super::{sources_digest, sources_digest_from};
+
+const REGISTRY: &str = "src/command/workflow_host_command_logic.rs";
+
+/// Changes exactly one character inside a named function body. The assertions
+/// deliberately name the expected mutations before the digest runs: pins are
+/// digest outputs, while these two bodies are executable reuse logic.
+fn change_function_character(source: &str, function: &str, from: &str, to: &str) -> String {
+    assert_eq!(from.len(), 1);
+    assert_eq!(to.len(), 1);
+    let start = source
+        .find(&format!("fn {function}"))
+        .unwrap_or_else(|| panic!("real registry is missing fn {function}"));
+    let open = source[start..]
+        .find('{')
+        .map(|at| start + at)
+        .unwrap_or_else(|| panic!("fn {function} has no body"));
+    let mut depth = 0usize;
+    let close = source.as_bytes()[open..]
+        .iter()
+        .position(|byte| {
+            match byte {
+                b'{' => depth += 1,
+                b'}' => depth -= 1,
+                _ => {}
+            }
+            depth == 0
+        })
+        .map(|at| open + at)
+        .unwrap_or_else(|| panic!("fn {function} has an unterminated body"));
+    let body = &source[open..=close];
+    let at = body
+        .find(from)
+        .unwrap_or_else(|| panic!("fn {function} body does not contain {from:?}"));
+    let mut changed = source.to_owned();
+    changed.replace_range(open + at..open + at + 1, to);
+    changed
+}
+
+fn dependent_capabilities(repo: &Path) -> Vec<&'static str> {
+    let registry = Path::new(REGISTRY);
+    let mut workspace = Workspace::new(repo);
+    CAPABILITY_LOGIC
+        .iter()
+        .filter_map(|logic| {
+            let roots = logic.sources.concat();
+            let hashed = sources_digest(&mut workspace, repo, &roots, LOGIC_DENYLIST);
+            hashed.closure.files.contains(registry).then_some(logic.id)
+        })
+        .collect()
+}
+
+fn capability_digests(repo: &Path, capabilities: &[&str], registry_text: String) -> Vec<String> {
+    capabilities
+        .iter()
+        .map(|id| {
+            let logic = CAPABILITY_LOGIC
+                .iter()
+                .find(|logic| logic.id == *id)
+                .unwrap();
+            let roots = logic.sources.concat();
+            let mut workspace = Workspace::new(repo);
+            let source =
+                SourceTree::checkout(repo).with_file(Path::new(REGISTRY), registry_text.clone());
+            let hashed = sources_digest_from(&mut workspace, &source, &roots, LOGIC_DENYLIST);
+            assert!(hashed.closure.files.contains(Path::new(REGISTRY)), "{id}");
+            hashed.digest
+        })
+        .collect()
+}
 
 #[test]
 fn logic_361_registry_pins_are_normalized_and_reuse_code_is_hashed() {
-    let tree = Tree::new();
-    tree.write(
-        "src/command/mod.rs",
-        "mod root;\nmod workflow_host_command_logic;\n",
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let real_registry = SourceTree::checkout(&repo).read_to_string(Path::new(REGISTRY));
+    let capabilities = dependent_capabilities(&repo);
+    assert!(
+        !capabilities.is_empty(),
+        "a capability must include {REGISTRY}"
     );
-    tree.write(
-        "src/command/root.rs",
-        "pub fn verdict() -> bool { super::workflow_host_command_logic::key_token() && \
-         super::workflow_host_command_logic::outcome_logic_holds() }\n",
-    );
-    let registry = |pin: char, key: bool, outcome: bool| {
-        format!(
-            "sources_digest: \"{}\",\n\
-             pub fn key_token() -> bool {{ {} }}\n\
-             pub fn outcome_logic_holds() -> bool {{ {} }}\n",
-            pin.to_string().repeat(64),
-            key,
-            outcome
-        )
+    for id in [
+        "freeze-acceptance",
+        "freeze-skeleton",
+        "verify-frozen-acceptance",
+        "verify-frozen-skeleton",
+    ] {
+        assert!(capabilities.contains(&id), "{id} must include {REGISTRY}");
+    }
+
+    // Expected: changing a real pin leaves every digest equal; changing one
+    // character in either real function body changes every dependent digest.
+    let original = capability_digests(&repo, &capabilities, real_registry.clone());
+    let pin_line = real_registry
+        .lines()
+        .find(|line| line.trim_start().starts_with("sources_digest: \""))
+        .expect("the real registry must contain a pin line");
+    let pin_at = real_registry.find(pin_line).unwrap() + pin_line.find('"').unwrap() + 1;
+    let mut changed_pin = real_registry.clone();
+    let changed_hex = if &changed_pin[pin_at..pin_at + 1] == "0" {
+        "1"
+    } else {
+        "0"
     };
-    let path = "src/command/workflow_host_command_logic.rs";
-    tree.write(path, &registry('a', true, true));
-    let original = tree.digest();
-    tree.write(path, &registry('b', true, true));
+    changed_pin.replace_range(pin_at..pin_at + 1, changed_hex);
     assert_eq!(
-        tree.digest(),
+        capability_digests(&repo, &capabilities, changed_pin),
         original,
-        "changing only a registry pin does not change the measured digest"
+        "changing one real sources_digest value preserves every dependent digest"
     );
-    tree.write(path, &registry('b', false, true));
-    assert_ne!(tree.digest(), original, "key_token is part of reuse logic");
-    tree.write(path, &registry('b', true, false));
-    assert_ne!(
-        tree.digest(),
-        original,
-        "outcome_logic_holds is part of reuse logic"
-    );
+
+    for (function, from, to) in [("key_token", "!", "="), ("outcome_logic_holds", "=", "!")] {
+        let changed = change_function_character(&real_registry, function, from, to);
+        let changed_digests = capability_digests(&repo, &capabilities, changed);
+        for (id, (actual, expected)) in capabilities
+            .iter()
+            .zip(changed_digests.iter().zip(&original))
+        {
+            assert_ne!(actual, expected, "{id}: {function} must be hashed");
+        }
+    }
     assert_ne!(
         hashed_text_for_file(
             "src/command/other.rs",
