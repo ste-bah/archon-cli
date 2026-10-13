@@ -72,9 +72,9 @@ impl StageContext {
         let (source_commit, dirty_worktree) = git_head(&self.repository);
         AcceptanceExecutionRecordV1 {
             mode: mode.to_string(),
-            repository: self.repository.display().to_string(),
-            project: self.project.display().to_string(),
-            task_root: self.task_root.display().to_string(),
+            repository: archon_shell::paths::stored_text(&self.repository),
+            project: archon_shell::paths::stored_text(&self.project),
+            task_root: archon_shell::paths::stored_text(&self.task_root),
             source_commit,
             dirty_worktree,
             environment,

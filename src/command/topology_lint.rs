@@ -428,9 +428,15 @@ pub(crate) fn evaluate_lint(
 
 fn describe(source: &LintSource) -> String {
     match source {
-        LintSource::TaskFile(path) => format!("task file {}", path.display()),
-        LintSource::Tasks(path) => format!("task directory {}", path.display()),
-        LintSource::Spec(path) => format!("workflow spec {}", path.display()),
+        LintSource::TaskFile(path) => {
+            format!("task file {}", archon_shell::paths::stored_text(path))
+        }
+        LintSource::Tasks(path) => {
+            format!("task directory {}", archon_shell::paths::stored_text(path))
+        }
+        LintSource::Spec(path) => {
+            format!("workflow spec {}", archon_shell::paths::stored_text(path))
+        }
         LintSource::Graph(id) => format!("recorded graph {id}"),
     }
 }

@@ -31,7 +31,7 @@ pub(super) fn final_report_result(
         ),
         artifacts: vec![WorkflowV2Artifact {
             id: execution.call.id.clone(),
-            path: report_path.display().to_string(),
+            path: archon_shell::paths::stored_text(&report_path),
             description: Some("workflow V2 final acceptance report".to_string()),
         }],
         ..WorkflowV2Result::default()

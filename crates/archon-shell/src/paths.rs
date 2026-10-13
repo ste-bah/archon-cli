@@ -41,9 +41,75 @@ pub fn canonicalize(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
     std::fs::canonicalize(path).map(plain)
 }
 
+/// `path` as a stored record spells it (Issue 438): its [`plain`] spelling
+/// with `/` between components, on a host whose separator is `\`. Records
+/// are then byte-comparable across platforms, and Windows reads the text back
+/// as the same path (`C:/a/b` and `//server/share/x` parse as their `\`
+/// twins). A verbatim device or volume path (`\\?\Volume{...}`) has no `/`
+/// spelling and is kept as it is. On a host whose separator is `/` the text
+/// is the path's own: `\` is an ordinary name character there.
+pub fn stored_text(path: &Path) -> String {
+    stored_text_for(&path.to_string_lossy(), std::path::MAIN_SEPARATOR == '\\')
+}
+
+/// [`stored_text`] for `text`, given whether the host separator is `\`.
+fn stored_text_for(text: &str, backslash_separator: bool) -> String {
+    if !backslash_separator {
+        return text.to_string();
+    }
+    let plain = plain(PathBuf::from(text));
+    let plain = plain.to_string_lossy();
+    if plain.starts_with(r"\\?\") || plain.starts_with(r"\\.\") {
+        return plain.into_owned();
+    }
+    plain.replace('\\', "/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_windows_stored_path_uses_forward_slashes_and_keeps_its_prefix() {
+        for (given, expected) in [
+            (r"C:\Users\runner\project\tasks\PRD-X", "C:/Users/runner/project/tasks/PRD-X"),
+            (r"\\?\C:\Users\a\project", "C:/Users/a/project"),
+            (r"\\?\UNC\server\share\x", "//server/share/x"),
+            (r"\\server\share\x", "//server/share/x"),
+            (r"\\?\Volume{1234}\x", r"\\?\Volume{1234}\x"),
+            (r"\\.\pipe\name", r"\\.\pipe\name"),
+            (r"C:/mixed\separators", "C:/mixed/separators"),
+            ("C:", "C:"),
+            ("", ""),
+            (r"tasks\PRD-X\TASK-1.md", "tasks/PRD-X/TASK-1.md"),
+        ] {
+            assert_eq!(stored_text_for(given, true), expected, "{given}");
+        }
+    }
+
+    #[test]
+    fn a_posix_stored_path_is_its_own_text_backslashes_included() {
+        for given in ["/tmp/project/tasks", r"/tmp/odd\name", r"\\?\C:\x", ""] {
+            assert_eq!(stored_text_for(given, false), given);
+        }
+        #[cfg(unix)]
+        assert_eq!(stored_text(Path::new(r"/tmp/odd\name")), r"/tmp/odd\name");
+    }
+
+    /// A pin written before Issue 438 (`\`) and one written after (`/`)
+    /// name the same directory when read back on Windows.
+    #[cfg(windows)]
+    #[test]
+    fn windows_reads_a_stored_path_back_as_the_same_path() {
+        let dir = std::env::temp_dir();
+        let canonical = canonicalize(&dir).unwrap();
+        let stored = stored_text(&canonical);
+        assert!(!stored.contains('\\'), "{stored}");
+        assert_eq!(PathBuf::from(&stored), canonical);
+        assert_eq!(canonicalize(PathBuf::from(&stored)).unwrap(), canonical);
+        let legacy = canonical.display().to_string();
+        assert_eq!(PathBuf::from(&legacy), PathBuf::from(&stored));
+    }
 
     #[test]
     fn a_verbatim_drive_or_unc_path_loses_its_prefix_and_nothing_else_changes() {

@@ -60,12 +60,12 @@ fn save_artifact_result(
     ));
     result.artifacts.push(WorkflowV2Artifact {
         id: execution.call.id.clone(),
-        path: artifact_path.display().to_string(),
+        path: archon_shell::paths::stored_text(&artifact_path),
         description: Some("workflow V2 saved artifact".to_string()),
     });
     result.data = serde_json::json!({
         "artifact_id": execution.call.id,
-        "path": artifact_path,
+        "path": archon_shell::paths::stored_text(&artifact_path),
     });
     Ok(result)
 }
@@ -132,10 +132,15 @@ fn require_artifact_result(
             .artifacts
             .extend(paths.iter().map(|path| WorkflowV2Artifact {
                 id: execution.call.id.clone(),
-                path: path.display().to_string(),
+                path: archon_shell::paths::stored_text(path),
                 description: Some("required workflow V2 artifact".to_string()),
             }));
-        result.data = serde_json::json!({ "paths": paths });
+        result.data = serde_json::json!({
+            "paths": paths
+                .iter()
+                .map(|path| archon_shell::paths::stored_text(path))
+                .collect::<Vec<_>>(),
+        });
         return Ok(result);
     }
 
