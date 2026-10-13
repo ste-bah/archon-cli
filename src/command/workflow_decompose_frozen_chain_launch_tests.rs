@@ -13,6 +13,10 @@ struct Fixture {
 /// A project whose acceptance contract is frozen, with `command(project)`
 /// as its one check.
 fn frozen(command: Option<fn(&Path) -> String>) -> Fixture {
+    frozen_with_prd(command, PRD)
+}
+
+fn frozen_with_prd(command: Option<fn(&Path) -> String>, prd_contents: &str) -> Fixture {
     let temp = tempfile::tempdir().unwrap();
     let project = temp
         .path()
@@ -23,7 +27,7 @@ fn frozen(command: Option<fn(&Path) -> String>) -> Fixture {
     let tasks = project.join("tasks/PRD-X");
     std::fs::create_dir_all(prd.parent().unwrap()).unwrap();
     std::fs::create_dir_all(&tasks).unwrap();
-    std::fs::write(&prd, PRD).unwrap();
+    std::fs::write(&prd, prd_contents).unwrap();
     // A (commitless) git checkout, so the project can serve as the
     // repository a launch is grounded in.
     assert!(

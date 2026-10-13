@@ -7,7 +7,10 @@ use std::sync::LazyLock;
 
 use crate::command::workflow_host_command_logic::{CAPABILITY_LOGIC, LOGIC_DENYLIST};
 use crate::command::workflow_host_command_logic_closure::{Closure, Workspace};
-use crate::command::workflow_host_command_logic_source::hashed_text;
+use crate::command::workflow_host_command_logic_source::hashed_text_for_file;
+
+#[path = "workflow_host_command_logic_digest_tests.rs"]
+mod digest_tests;
 
 /// A capability's hashed sources: the digest, the closure, and the
 /// references the walk could not resolve.
@@ -40,7 +43,7 @@ pub(crate) fn sources_digest(
             .join("/");
         let text = std::fs::read_to_string(base.join(file)).unwrap();
         let text = if name.ends_with(".rs") {
-            hashed_text(&text)
+            hashed_text_for_file(&name, &text)
         } else {
             text.replace("\r\n", "\n")
         };

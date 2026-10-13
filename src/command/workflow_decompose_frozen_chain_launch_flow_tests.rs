@@ -421,46 +421,8 @@ async fn a_refuted_launch_repair_is_logged_and_leaves_the_chain_for_the_run_repa
     );
 }
 
-#[tokio::test]
-async fn a_judge_refutation_routes_into_the_existing_in_run_acceptance_repair() {
-    let fixture = frozen(Some(names_live_root));
-    with_skeleton(&fixture);
-    crate::command::workflow_task_set::passability_tests_support::commit_project(&fixture.project);
-    let (factory, client) = scripted_factory(false);
-    let error = format!("{:#}", launch_with(&fixture, &factory).await);
-    assert!(
-        error.contains("barrier observed"),
-        "launch stopped before its run client: {error}"
-    );
-    assert!(!error.contains("reauthor_failed"), "{error}");
-    assert!(client.authored() >= 1, "launch re-author ran");
-    let origins = factory.origins.lock().unwrap().clone();
-    assert_eq!(
-        origins.first().map(String::as_str),
-        Some("workflow-decompose-launch-reauthor")
-    );
-    assert!(
-        origins
-            .iter()
-            .any(|origin| origin == "workflow_decompose_v1"),
-        "{origins:?}"
-    );
-    let log = std::fs::read_to_string(fixture.tasks.join(".decompose.log")).unwrap();
-    assert!(log.contains("acceptance=reauthor_refuted_routed"), "{log}");
-    assert!(!log.contains("acceptance=reauthor_failed"), "{log}");
-    let run = fixture.store.list_runs().unwrap().pop().unwrap();
-    let args: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(
-            fixture
-                .store
-                .run_dir(&run.id)
-                .join(crate::command::workflow_decompose::FIXED_ARGUMENTS_PATH),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(args["frozenChain"]["acceptance"], false, "{args}");
-}
+#[path = "workflow_decompose_frozen_chain_refutation_script_test.rs"]
+mod refutation_script_test;
 
 #[tokio::test]
 async fn a_publisher_failure_after_contract_rename_rolls_back_and_releases_the_claim() {

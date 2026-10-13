@@ -96,10 +96,6 @@ pub(crate) struct CapabilityLogic {
 #[cfg(test)]
 pub(crate) const LOGIC_DENYLIST: &[(&str, &str)] = &[
     (
-        "src/command/workflow_host_command_logic.rs",
-        "Capability identifiers, versions, and source digests are reuse metadata; the verdict implementations remain in each capability's hashed source closure.",
-    ),
-    (
         "crates/archon-llm/",
         "LLM provider transport and model catalogue. The catalogue resolves the critic's \
          model alias, so a remap changes which model judges task-set-lint: that is a \
@@ -243,7 +239,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #387 re-pin only: the launch and resume paths in this closure (frozen-contract launch decision, requirement inventory) do not change how a freeze judges.
         // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair, after it claims the task root; the freeze judges as before.
-        sources_digest: "ce7d1a08c099e6777f5afe1809883c02ff2330bc6ea84365dd3e30846b610460",
+        // digest machinery: registry pins are normalised before hashing
+        sources_digest: "639d32cffb60ed19888b9f72290e7cc361116db064f55ae8588857b6d0757d0c",
         build_bound: false,
     },
     CapabilityLogic {
@@ -261,7 +258,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
         // #387 re-pin only: the launch and resume paths in this closure (frozen-contract launch decision, requirement inventory) do not change how a freeze judges.
         // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair, after it claims the task root; the freeze judges as before.
-        sources_digest: "ce7d1a08c099e6777f5afe1809883c02ff2330bc6ea84365dd3e30846b610460",
+        // digest machinery: registry pins are normalised before hashing
+        sources_digest: "639d32cffb60ed19888b9f72290e7cc361116db064f55ae8588857b6d0757d0c",
         build_bound: false,
     },
     CapabilityLogic {
@@ -337,7 +335,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #386 re-pin only: stdin spill and progress-event spill code in this closure; verification takes no stdin and its verdicts are unchanged.
         // #387 re-pin only: the launch decision lives beside verify_frozen_stage, which is unchanged.
         // #387 re-pin only: the launch decision returns its routing instead of refusing; verify_frozen_stage is unchanged.
-        sources_digest: "0d0fe26aeba3ecf30b0fa8bd1c56551503d8cb4bfd9a2fcb46376cbf51db6a9a",
+        // digest machinery: registry pins are normalised before hashing
+        sources_digest: "f948a2e6b2d5f961eb16ab69321829c3ee3053ae6d106f4f4887c804eec5df88",
         build_bound: true,
     },
     CapabilityLogic {
@@ -354,7 +353,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #386 re-pin only: stdin spill and progress-event spill code in this closure; verification takes no stdin and its verdicts are unchanged.
         // #387 re-pin only: the launch decision lives beside verify_frozen_stage, which is unchanged.
         // #387 re-pin only: the launch decision returns its routing instead of refusing; verify_frozen_stage is unchanged.
-        sources_digest: "0d0fe26aeba3ecf30b0fa8bd1c56551503d8cb4bfd9a2fcb46376cbf51db6a9a",
+        // digest machinery: registry pins are normalised before hashing
+        sources_digest: "f948a2e6b2d5f961eb16ab69321829c3ee3053ae6d106f4f4887c804eec5df88",
         build_bound: true,
     },
 ];
