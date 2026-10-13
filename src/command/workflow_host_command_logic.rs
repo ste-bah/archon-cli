@@ -240,8 +240,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 18,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
-        // #446 re-pin only: the reviewed version-18 result handoff preserves layout through reuse.
-        sources_digest: "0ab49c499c4370687366ca8dbd448e3fa3dded72074e8008955dcbb215bfa282",
+        // #446 follow-up re-pin only: cache compatibility now keeps old evidence;
+        // Scratch schema-3 verdicts stay reusable, while Hermetic layoutless
+        // evidence reruns under the unchanged version-18 acceptance pin.
+        sources_digest: "712d76bf89e1af57927f275b45014d70343156b095aabc543115aba99f2ae091",
         build_bound: false,
     },
     CapabilityLogic {
@@ -259,8 +261,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 re-pin only: the skeleton freeze judges no check run, so the new no-verdict rule never applies.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // #446 re-pin only: the skeleton freeze judges no baseline run.
-        // #446 re-pin only: freeze-skeleton does not judge check runs; the shared source closure changed.
-        sources_digest: "0ab49c499c4370687366ca8dbd448e3fa3dded72074e8008955dcbb215bfa282",
+        // #446 follow-up re-pin only: the shared probe cache source changed;
+        // freeze-skeleton judges no check runs.
+        sources_digest: "712d76bf89e1af57927f275b45014d70343156b095aabc543115aba99f2ae091",
         build_bound: false,
     },
     CapabilityLogic {
@@ -334,8 +337,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
-        // #446 re-pin only: verification shares changed source files but reads no probe result layout.
-        sources_digest: "0f8496d2dcb12efec6dd4edbfb6ca442ebc66196b7a435ce8f4a2c6a06832ca5",
+        // #446 follow-up re-pin only: verification shares cache source files
+        // but reads no probe result layout or evidence.
+        sources_digest: "d9eee0149bfb6521548db9dbcaa8b3e9c53bd97b0e587c38f2c37dd921e21312",
         build_bound: true,
     },
     CapabilityLogic {
@@ -354,8 +358,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
-        // #446 re-pin only: verification shares changed source files but reads no probe result layout.
-        sources_digest: "0f8496d2dcb12efec6dd4edbfb6ca442ebc66196b7a435ce8f4a2c6a06832ca5",
+        // #446 follow-up re-pin only: verification shares cache source files
+        // but reads no probe result layout or evidence.
+        sources_digest: "d9eee0149bfb6521548db9dbcaa8b3e9c53bd97b0e587c38f2c37dd921e21312",
         build_bound: true,
     },
 ];

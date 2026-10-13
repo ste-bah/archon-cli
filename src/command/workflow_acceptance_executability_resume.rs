@@ -48,7 +48,8 @@ struct Saved {
 /// own credentials, and the names its policy forwards), and the file is
 /// readable by its owner only. The host computes classification from raw
 /// streams before redaction and persists it alongside the evidence. Reuse
-/// never reclassifies redacted output. Older raw-stream caches are discarded.
+/// never reclassifies redacted output. Incompatible or unreadable records
+/// remain on disk, but are not reused.
 #[derive(Clone)]
 pub(super) struct ResultStore {
     dir: PathBuf,
@@ -72,18 +73,17 @@ impl ResultStore {
         self.path(key).map(|path| path.display().to_string())
     }
 
-    /// The verdict saved under `key`; anything unreadable is no verdict.
-    pub(super) fn load(&self, key: &str) -> Option<CheckEvidence> {
-        let _ = std::fs::remove_file(self.path(key)?.with_extension("provisional"));
+    /// The verdict saved under `key`; incompatible evidence is a miss and is
+    /// left in place for investigation. Schema 3 is safe only at Scratch,
+    /// whose judging context supplies its fixed tree layout.
+    pub(super) fn load(&self, key: &str, allow_schema3: bool) -> Option<CheckEvidence> {
         let path = self.path(key)?;
-        // Schema 3 predates copy layouts; the schema guard below deletes it
-        // so the caller observes a miss and reruns the check.
         let saved = std::fs::read(&path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok());
         match saved {
             Some(saved)
-                if saved.schema == SCHEMA
+                if (saved.schema == SCHEMA || (allow_schema3 && saved.schema == 3))
                     && saved.key == key
                     && saved.result.operational_error.is_none()
                     && saved.result.classification.is_some()
@@ -94,10 +94,7 @@ impl ResultStore {
                     copy_layout: saved.copy_layout,
                 })
             }
-            _ => {
-                let _ = std::fs::remove_file(path);
-                None
-            }
+            _ => None,
         }
     }
 
@@ -143,9 +140,11 @@ impl ResultStore {
         };
         let path = path.with_extension("provisional");
         let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
+        let provisional = path.with_extension("provisional");
         let written = std::fs::create_dir_all(&self.dir).is_ok()
             && serde_json::to_vec(&saved).is_ok_and(|bytes| write_owner_only(&staging, &bytes))
-            && std::fs::rename(&staging, &path).is_ok();
+            && self.preserve_replaced(&provisional)
+            && std::fs::rename(&staging, &provisional).is_ok();
         if !written {
             let _ = std::fs::remove_file(&staging);
         }
@@ -175,10 +174,61 @@ impl ResultStore {
         }
     }
 
-    pub(super) fn discard(&self, key: &str) {
-        if let Some(path) = self.path(key) {
-            let _ = std::fs::remove_file(path.with_extension("provisional"));
+    /// Keep prior evidence before promotion atomically replaces the active key.
+    fn preserve_replaced(&self, path: &std::path::Path) -> bool {
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+            Err(_) => return false,
+        };
+        let suffix = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .ok()
+            .map(|value| {
+                if value["schema"] == 3 {
+                    "schema3"
+                } else if value["schema"] == SCHEMA && value["copy_layout"].is_null() {
+                    "schema4-layoutless"
+                } else {
+                    "previous"
+                }
+            })
+            .unwrap_or("previous");
+        for index in 0.. {
+            let ext = if index == 0 {
+                suffix.to_string()
+            } else {
+                format!("{suffix}.{index}")
+            };
+            let archive = path.with_extension(ext);
+            match std::fs::hard_link(path, &archive) {
+                Ok(()) => return true,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if std::fs::read(&archive).is_ok_and(|archived| archived == bytes) {
+                        return true;
+                    }
+                }
+                Err(_) if write_archive(&archive, &bytes) => return true,
+                Err(_) => return false,
+            }
+        }
+        false
+    }
+}
+
+fn write_archive(path: &std::path::Path, bytes: &[u8]) -> bool {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    match options
+        .open(path)
+        .and_then(|mut file| file.write_all(bytes))
+    {
+        Ok(()) => true,
+        Err(_) => {
             let _ = std::fs::remove_file(path);
+            false
         }
     }
 }
@@ -372,6 +422,7 @@ impl HostProbe {
         };
         for key in written.drain(..) {
             if let Some(path) = store.path(&key)
+                && store.preserve_replaced(&path)
                 && std::fs::rename(path.with_extension("provisional"), path).is_ok()
             {
                 self.resume.progress.saved(false);

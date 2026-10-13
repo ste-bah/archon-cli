@@ -160,9 +160,8 @@ pub(super) async fn run_at(
             let key = key.as_ref()?;
             // A saved verdict is reusable only with valid durable evidence.
             let store = store.as_ref()?;
-            let saved = store.load(key)?;
+            let saved = store.load(key, matches!(probe.site, Site::Scratch(_)))?;
             if matches!(probe.site, Site::Hermetic) && saved.copy_layout.is_none() {
-                store.discard(key);
                 return None;
             }
             let remembered = (probe.process_memo())
