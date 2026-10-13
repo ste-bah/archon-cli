@@ -97,7 +97,12 @@ fn a_command_invented_for_a_task_that_declares_none_is_removed() {
             "canonical_task_ids": ["TASK-B"], "work_type": "implementation",
             key: ["cargo test -p crate"],
         }));
-        for key in FOCUSED_KEYS {
+        assert_eq!(
+            item["focused_verification"],
+            serde_json::json!([]),
+            "the item runs the declared set, which is empty: {item}"
+        );
+        for key in ["focused_tests", "focusedTests"] {
             assert!(
                 item.get(key).is_none(),
                 "an invented command must not survive under {key}: {item}"

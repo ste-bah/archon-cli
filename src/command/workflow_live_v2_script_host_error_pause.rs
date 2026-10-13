@@ -67,12 +67,17 @@ impl WorkflowScriptHost {
         }
         if self.pauses_on_script_errors() {
             if let Some(stop) = self.pause_on_script_error(error).await {
-                return Err(stop);
+                // Issue-213 C5: what was in flight is recorded with the pause.
+                return Err(self.recorded_control_stop(stop, false).await);
             }
             if self.runner.raw_outcomes_allowed {
-                return Err(WorkflowError::SpecInvalid(format!(
-                    "workflow.js error: {error}; the host could not persist its script-error pause"
-                )));
+                // The fixed executor pauses for this error; what was in
+                // flight names it.
+                return Err(self
+                    .recorded_fault_stop(WorkflowError::SpecInvalid(format!(
+                        "workflow.js error: {error}; the host could not persist its script-error pause"
+                    )))
+                    .await);
             }
         }
         Ok(self.mark_script_failure(error).await)

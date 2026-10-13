@@ -125,13 +125,15 @@ impl WorkflowScriptHost {
         }
     }
 
-    /// Issue-213 C5: a pause or cancel ended the script while sibling calls
-    /// were still in flight. No future is polled once the script has
-    /// returned, so those calls would never reach their own interruption
-    /// record: each kept a `running` record and an in-flight marker, and the
-    /// next start recorded it as `host_process_ended` -- the wrong cause.
-    /// Record each one now, with the control stop as its cause. A record that
-    /// cannot be saved is logged, and its marker is left for the next start.
+    /// Issue-213 C5: a stop ended the script -- a pause or cancel, a
+    /// script-error or starved-thread pause, a host fault -- while calls were
+    /// still in flight. No future is polled once the script has returned, so
+    /// those calls would never reach their own interruption record: each kept
+    /// a `running` record and an in-flight marker, and the next start
+    /// recorded it as `host_process_ended`, the wrong cause. Each is recorded
+    /// with the stop as its cause. A record that cannot be saved is logged,
+    /// and its marker is left for the next start.
+    ///
     /// `control`, the stop that ended the script, after every call still in
     /// flight is recorded with it as the cause -- unless a terminal host
     /// stop (`terminal_stop`) came first and recorded them itself.
@@ -140,20 +142,22 @@ impl WorkflowScriptHost {
         control: WorkflowError,
         terminal_stop: bool,
     ) -> WorkflowError {
+        // The same reasons `control_interruption_reason` gives a call the
+        // stop reached itself.
+        let reason = match &control {
+            WorkflowError::ControlPaused(_) => "paused",
+            WorkflowError::ControlCancelled(_) => "cancelled",
+            _ => return control,
+        };
         if !terminal_stop {
-            self.interrupt_control_calls(&control).await;
+            self.record_pending_calls(reason, &control).await;
         }
         control
     }
 
-    async fn interrupt_control_calls(&self, control: &WorkflowError) {
-        // The same reasons `control_interruption_reason` gives a call the
-        // stop reached itself.
-        let reason = match control {
-            WorkflowError::ControlPaused(_) => "paused",
-            WorkflowError::ControlCancelled(_) => "cancelled",
-            _ => return,
-        };
+    /// Record every call still pending as interrupted for `reason`, with
+    /// `cause` as the error it names.
+    pub(super) async fn record_pending_calls(&self, reason: &str, cause: &WorkflowError) {
         let pending = match self.runner.pending_calls.lock() {
             Ok(calls) => calls.values().cloned().collect::<Vec<_>>(),
             Err(poisoned) => poisoned.into_inner().values().cloned().collect(),
@@ -168,7 +172,7 @@ impl WorkflowScriptHost {
                 .save_interrupted_call_record(
                     &call.execution,
                     reason,
-                    control,
+                    cause,
                     call.started.elapsed(),
                     call.attempt,
                     &call.input_hash,

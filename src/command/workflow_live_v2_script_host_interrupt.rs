@@ -270,6 +270,17 @@ impl WorkflowScriptHost {
 }
 
 impl WorkflowScriptHost {
+    /// Issue-213 C5: `fault`, the host fault that ended the script, after
+    /// every call still in flight is recorded with it as the cause (the run
+    /// is paused for it afterwards).
+    pub(in super::super) async fn recorded_fault_stop(
+        &self,
+        fault: WorkflowError,
+    ) -> WorkflowError {
+        self.record_pending_calls(HOST_FAULT_REASON, &fault).await;
+        fault
+    }
+
     /// Publish a dispatched call's answer (`publish_dispatched_call`).
     ///
     /// Issue-213 C5: when run control refuses the publication -- a pause or
@@ -301,6 +312,12 @@ impl WorkflowScriptHost {
             published => return published,
         };
         archon_tools::bash::end_process_groups_of(&self.runner.run_id);
+        // As a stop the dispatch saw itself: a prior terminal stop records
+        // the call, and a generation that cannot own the stop records none.
+        let terminal = self.accumulator.lock().await.terminal_host_stop;
+        if terminal || !self.fixed_generation_may_record_interruption(dispatch_generation) {
+            return Err(stop);
+        }
         // The answer took the call's sessions; the interrupted record names them.
         let sessions = if record.agent_session_ids.is_empty() {
             record.agent_session_id.iter().cloned().collect::<Vec<_>>()

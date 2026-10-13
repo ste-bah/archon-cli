@@ -11,9 +11,9 @@
 //! replaces it with the declared set -- recording the authored list beside
 //! it so the substitution is visible.
 //!
-//! A write item whose known tasks declare no command at all runs none: an
-//! authored copy is removed (and kept beside it under
-//! [`AUTHORED_FOCUSED_TESTS_KEY`]), because the declared set is empty and an
+//! A write item whose known tasks declare no command at all runs none: its
+//! list becomes empty, and the authored copy is kept beside it under
+//! [`AUTHORED_FOCUSED_TESTS_KEY`], because the declared set is empty and an
 //! invented command would otherwise reach the baseline and the branch.
 //!
 //! Left alone: an item with no task in the universe; a read-only item whose
@@ -104,6 +104,7 @@ fn reconcile(
             for key in FOCUSED_KEYS {
                 item.remove(key);
             }
+            item.insert("focused_verification".to_string(), serde_json::json!([]));
         }
         return;
     }

@@ -45,6 +45,35 @@ impl WorkflowLlmClient for StoppedBySessionControl {
     }
 }
 
+/// A trusted host command that refuses after a while, so the agent call the
+/// script started first is in flight when the script then throws.
+struct RefusesAfterAWhile;
+#[async_trait::async_trait]
+impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor
+    for RefusesAfterAWhile
+{
+    fn call_identity(
+        &self,
+        request: &archon_workflow::HostCommandRequest,
+    ) -> archon_workflow::WorkflowResult<String> {
+        Ok(format!("host-command:{}", request.command_id))
+    }
+    fn record_is_reusable(
+        &self,
+        _: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        Ok(false)
+    }
+    async fn execute(
+        &self,
+        _: archon_workflow::HostCommandRequest,
+        _: Option<u64>,
+    ) -> archon_workflow::WorkflowResult<archon_workflow::HostCommandResult> {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        Err(WorkflowError::SpecInvalid("host command refused".into()))
+    }
+}
+
 /// A trusted host command that is still running when the run stops.
 struct HangingHostCommand;
 #[async_trait::async_trait]
@@ -82,7 +111,7 @@ enum Llm {
 /// executor ended.
 async fn pause_with_calls_in_flight(
     script: &str,
-    in_flight: usize,
+    in_flight: Option<usize>,
     llm: Llm,
     executor: Arc<dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor>,
 ) -> (tempfile::TempDir, WorkflowStore, String) {
@@ -100,7 +129,10 @@ async fn pause_with_calls_in_flight(
     let operator_store = store.clone();
     let operator_run = run.id.clone();
     let operator = tokio::spawn(async move {
-        // The operator pauses once both calls are in flight.
+        // The operator pauses once the calls are in flight; `None`: never.
+        let Some(in_flight) = in_flight else {
+            return;
+        };
         while inflight_markers(&operator_store, &operator_run) < in_flight {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
@@ -177,7 +209,8 @@ const TWO_AGENTS: &str = r#"async function workflow(w) {
 #[tokio::test]
 async fn an_operator_pause_records_every_call_in_flight_as_paused() {
     let (_temp, store, run_id) =
-        pause_with_calls_in_flight(TWO_AGENTS, 2, Llm::Pending, Arc::new(NoHostCommands)).await;
+        pause_with_calls_in_flight(TWO_AGENTS, Some(2), Llm::Pending, Arc::new(NoHostCommands))
+            .await;
     assert_recorded_as_paused(&store, &run_id, &["slow-a", "slow-b"]);
 }
 
@@ -186,9 +219,13 @@ async fn an_operator_pause_records_every_call_in_flight_as_paused() {
 /// pause, not a lost result, is what each call records.
 #[tokio::test]
 async fn a_session_its_own_watcher_stopped_at_the_pause_is_recorded_as_paused() {
-    let (_temp, store, run_id) =
-        pause_with_calls_in_flight(TWO_AGENTS, 2, Llm::SessionStops, Arc::new(NoHostCommands))
-            .await;
+    let (_temp, store, run_id) = pause_with_calls_in_flight(
+        TWO_AGENTS,
+        Some(2),
+        Llm::SessionStops,
+        Arc::new(NoHostCommands),
+    )
+    .await;
     assert_recorded_as_paused(&store, &run_id, &["slow-a", "slow-b"]);
 }
 
@@ -204,7 +241,8 @@ async fn a_call_still_in_flight_when_the_script_ends_is_recorded_as_paused() {
         ]);
     }"#;
     let (_temp, store, run_id) =
-        pause_with_calls_in_flight(script, 2, Llm::Pending, Arc::new(HangingHostCommand)).await;
+        pause_with_calls_in_flight(script, Some(2), Llm::Pending, Arc::new(HangingHostCommand))
+            .await;
     let v2 = WorkflowV2ResultStore::new(store.run_dir(&run_id).join("v2"));
     let host = v2
         .load_call_records()
@@ -213,4 +251,18 @@ async fn a_call_still_in_flight_when_the_script_ends_is_recorded_as_paused() {
         .find(|record| record.call.method == archon_workflow::v2::WorkflowV2HostMethod::HostCommand)
         .expect("the host command keeps a record");
     assert_recorded_as_paused(&store, &run_id, &["slow-a", host.call.id.as_str()]);
+}
+
+/// A script error with a call in flight: the run pauses for the error, and
+/// the call in flight is recorded with that pause, not left `running`.
+#[tokio::test]
+async fn a_script_error_pause_records_the_call_in_flight() {
+    let script = r#"async function workflow(w) {
+        const slow = w.agent("slow-a", {role: "analysis", task: "Inspect the first area."});
+        await w.hostCommand("then-refuse", {stdin: "x"});
+        throw new Error("the script stops after its host command");
+    }"#;
+    let (_temp, store, run_id) =
+        pause_with_calls_in_flight(script, None, Llm::Pending, Arc::new(RefusesAfterAWhile)).await;
+    assert_recorded_as_paused(&store, &run_id, &["slow-a"]);
 }
