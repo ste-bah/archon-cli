@@ -267,3 +267,36 @@ fn phd_citation_quality_average() {
     // (0.8 + 0.6 + 0.9) / 3 ~ 0.7667
     assert!((avg - 0.7667).abs() < 0.01);
 }
+
+/// #284: an outcome recorded twice under one key is one episode, and the
+/// record runs no lookup a starting agent needs.
+#[test]
+fn a_recorded_outcome_is_one_episode_however_often_it_is_delivered() {
+    let db = Arc::new(DbInstance::new("mem", "", "").unwrap());
+    crate::learning::schema::initialize_learning_schemas(db.as_ref()).unwrap();
+    let mut integration =
+        LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None)
+            .with_desc_store(DescEpisodeStore::from_arc(Arc::clone(&db)));
+    let outcome = |task: &'static str| crate::learning::integration::RecordedOutcome {
+        episode_id: "workflow-lesson-1",
+        agent: "workflow",
+        phase: "decomposition_lesson",
+        task,
+        session_id: "run-1",
+        quality: 0.2,
+        summary: "fixed decomposition lesson: refuted check",
+    };
+    for task in ["first delivery", "second delivery", "third delivery"] {
+        assert!(integration.record_outcome(&outcome(task)).unwrap());
+    }
+    let episodes = DescEpisodeStore::from_arc(db)
+        .find_episodes(&EpisodeQuery {
+            task_type: Some("decomposition_lesson".into()),
+            min_quality: None,
+            limit: 10,
+        })
+        .unwrap();
+    assert_eq!(episodes.len(), 1, "{episodes:?}");
+    assert_eq!(episodes[0].episode_id, "workflow-lesson-1");
+    assert_eq!(episodes[0].description, "third delivery");
+}

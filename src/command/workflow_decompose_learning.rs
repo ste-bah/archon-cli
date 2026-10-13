@@ -8,6 +8,9 @@ use serde_json::Value;
 #[path = "workflow_decompose_learning_findings.rs"]
 mod findings;
 pub(crate) use findings::gate_finding_records;
+#[path = "workflow_decompose_learning_delivery.rs"]
+mod delivery;
+pub(super) use delivery::with_fold_lock;
 
 pub(crate) fn hooks(content: &str, config: &LearningConfig) -> Vec<String> {
     // This run has no embedding provider for SONA trajectories. DESC has a
@@ -236,14 +239,6 @@ pub(crate) fn fold(
     Ok(())
 }
 
-pub(super) fn with_fold_lock<T>(
-    store: &WorkflowStore,
-    run_id: &str,
-    operation: impl FnOnce(&WorkflowStore) -> archon_workflow::WorkflowResult<T>,
-) -> archon_workflow::WorkflowResult<T> {
-    store.with_run_lock(run_id, operation)
-}
-
 fn fold_locked(
     cwd: &Path,
     store: &WorkflowStore,
@@ -301,24 +296,7 @@ fn fold_locked(
     crate::command::topology_fold::fold_project_pending_blocking(
         cwd, run_id, &safe_task, "default",
     );
-    let outcome =
-        crate::command::topology_fold::workflow_learning::bridge_workflow_learning_with_records(
-            cwd, store, run_id, &records,
-        );
-    let delivered = !outcome.integration_unavailable && outcome.dispatched >= records.len();
-    if !records.is_empty() && !delivered {
-        tracing::warn!(
-            %run_id,
-            pending = records.len(),
-            dispatched = outcome.dispatched,
-            records_read = outcome.records_read,
-            integration_unavailable = outcome.integration_unavailable,
-            "fixed decomposition lessons were not all dispatched to the learning stack; they stay pending for the next fold"
-        );
-    }
-    finish_journal_dispatch(&pending_journal, delivered)?;
-    tracing::debug!(%run_id, dispatched = outcome.dispatched, records = records.len(), "fixed decomposition learning fold finished");
-    Ok(())
+    delivery::deliver_pending(cwd, store, run_id, &pending_journal, &records)
 }
 
 pub(super) fn read_journal(path: &Path) -> anyhow::Result<Vec<WorkflowLearningRecord>> {
@@ -418,6 +396,7 @@ pub(super) fn write_journal(path: &Path, records: &[WorkflowLearningRecord]) -> 
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn finish_journal_dispatch(path: &Path, dispatched: bool) -> anyhow::Result<()> {
     if dispatched {
         write_journal(path, &[])?;
