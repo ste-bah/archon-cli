@@ -151,7 +151,8 @@ pub(super) fn inactivity_failure(
 }
 
 /// A no-progress cut's error names the novel activity that last renewed the
-/// session's window; every other error is returned as it is. The text keeps
+/// session's window and the refused calls (Issue 382); every other error is
+/// returned as it is. The text keeps
 /// the cut's own words first, so every classifier still reads it.
 pub(super) fn name_last_progress(
     error: anyhow::Error,
@@ -163,7 +164,7 @@ pub(super) fn name_last_progress(
     }
     anyhow!(
         "{error} without progress (no-progress window; {})",
-        subagent_dispatch_clock::last_progress_text(clock.last_progress().as_deref())
+        clock.cut_text()
     )
 }
 

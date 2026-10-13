@@ -100,6 +100,9 @@ impl ProgressWindow {
         for call in calls {
             if call.refused {
                 self.refused_calls = self.refused_calls.saturating_add(1);
+                // The host's clocks count it too: their cut usually fires
+                // first and must carry the count (Issue 382).
+                archon_tools::subagent_dispatch_clock::refused();
                 continue;
             }
             let arguments = call.arguments();
@@ -135,11 +138,17 @@ impl ProgressWindow {
              no-progress window of {}s, which renews on novel activity only; {}",
             self.renewed_at.elapsed().as_secs(),
             self.window.map_or(0, |window| window.as_secs()),
-            format!(
-                "{}; refused tool calls: {}",
-                archon_tools::subagent_dispatch_clock::last_progress_text(self.last.as_deref()),
-                self.refused_calls
-            ),
+            self.progress_text(),
+        )
+    }
+
+    /// The last novel activity (which names its turn) and the refused calls,
+    /// in the words the host's cut uses (Issue 382).
+    pub(super) fn progress_text(&self) -> String {
+        format!(
+            "{}; refused tool calls: {}",
+            archon_tools::subagent_dispatch_clock::last_progress_text(self.last.as_deref()),
+            self.refused_calls
         )
     }
 }

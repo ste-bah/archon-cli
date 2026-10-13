@@ -327,6 +327,8 @@ async fn different_text_form_tool_calls_do_not_renew_the_window() {
 
 #[tokio::test(start_paused = true)]
 async fn refused_reads_do_not_renew_and_end_as_resumable_no_progress() {
+    // Every call refused by a typed guard refusal, with no inspection
+    // ceiling to withdraw the tools: only the window can end it.
     let mut turns = vec![(
         Some(r#"Read {"file_path":"/src/refused_0.rs"}"#),
         read("/src/refused_0.rs"),
@@ -336,7 +338,7 @@ async fn refused_reads_do_not_renew_and_end_as_resumable_no_progress() {
     }
     let clock = DispatchClock::new();
     clock.admit();
-    let runner = runner_with_read_ceiling(ScriptedProvider::new(turns), "pw-refused");
+    let runner = runner_with_read(ScriptedProvider::new(turns), "pw-refused", true);
     let started = tokio::time::Instant::now();
     let result = scope_session(
         "pw-refused",
@@ -346,12 +348,50 @@ async fn refused_reads_do_not_renew_and_end_as_resumable_no_progress() {
     .await;
     let elapsed = started.elapsed().as_secs();
     let error = stall_text(result);
-    // The first inspection is admitted at turn 1 (500s); every later hard
-    // ceiling refusal leaves the window anchored there.
-    assert_eq!(elapsed, 500 + WINDOW, "{error}");
+    // Nothing was ever admitted, and text that only echoes the call is not
+    // novel: the window never renewed. 14 rounds finished inside it.
+    assert_eq!(elapsed, WINDOW, "{error}");
     assert!(error.contains("refused tool calls: 14"), "{error}");
+    assert!(
+        error.contains("last novel activity: none since the window opened"),
+        "{error}"
+    );
+    // Issue 382: the host's clock carries the same count for its own cut.
+    assert_eq!(clock.refused_calls(), 14);
+    assert_eq!(
+        clock.cut_text(),
+        "last novel activity: none since the window opened; refused tool calls: 14"
+    );
     // The host timeout counts typed refusals as refusals, not novel activity,
     // so they do not renew the window. Their reason text stays on the tool result.
+}
+
+/// Past the hard ceiling the refused rounds no longer wait for the window:
+/// the no-progress stop ends the session with its count (Issue 382).
+#[tokio::test(start_paused = true)]
+async fn refused_reads_past_the_ceiling_end_as_no_progress_with_their_count() {
+    let mut turns = vec![(None, read("/src/refused_0.rs"))];
+    for offset in 1..20 {
+        turns.push((None, read(&format!("/src/refused_{offset}.rs"))));
+    }
+    let clock = DispatchClock::new();
+    clock.admit();
+    let runner = runner_with_read_ceiling(ScriptedProvider::new(turns), "pw-refused-ceiling");
+    let started = tokio::time::Instant::now();
+    let result = scope_session(
+        "pw-refused-ceiling",
+        vec![Arc::clone(&clock)],
+        scope(HostTimeout::Finite(WINDOW), runner.run("go")),
+    )
+    .await;
+    let elapsed = started.elapsed().as_secs();
+    let error = result.expect_err("refused rounds end the session").to_string();
+    assert!(error.starts_with(archon_tools::NO_PROGRESS_STOP_MARKER), "{error}");
+    assert!(error.contains("refused tool calls: 8"), "{error}");
+    assert!(error.contains("last novel activity: turn 1: new tool call Read"), "{error}");
+    // Turn 1 admitted, then 8 refused rounds: 9 turns of 500 s.
+    assert_eq!(elapsed, 9 * 500, "{error}");
+    assert_eq!(clock.refused_calls(), 8);
 }
 
 #[tokio::test]
