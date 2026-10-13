@@ -336,6 +336,7 @@ pub(crate) mod workflow_decompose_log;
 pub(crate) mod workflow_decompose_owner;
 pub(crate) mod workflow_decompose_progress;
 pub(crate) mod workflow_decompose_repository;
+pub(crate) mod workflow_decompose_requirement_inventory;
 pub(crate) mod workflow_decompose_seed;
 pub(crate) mod workflow_decompose_stale_owner;
 pub(crate) mod workflow_decompose_state;

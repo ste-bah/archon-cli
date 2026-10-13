@@ -16,6 +16,7 @@ use archon_workflow::{
     workflow_scaffold_hash,
 };
 
+use super::workflow_decompose_requirement_inventory as inventory;
 use super::workflow_host_command_catalog::fixed_decomposition_catalog;
 
 #[path = "workflow_decompose_provider_environment.rs"]
@@ -125,6 +126,13 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         &project_root,
         &prd_path,
         &task_root,
+    )?;
+    // Issue 387: a frozen contract is verified under this build's rules first.
+    let launch_lines = super::workflow_decompose_frozen_chain::launch_acceptance_decision(
+        frozen_chain.acceptance,
+        &WorkflowStore::project(&project_root),
+        (&project_root, &task_root, &repository.root),
+        &catalog,
     )?;
     // A task root that already records its repository must name this one; a
     // moved base commit is reported below, once the run exists to log it.
@@ -241,6 +249,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         }
         store.write_run_json(&run_id, FIXED_CATALOG_PATH, &catalog)?;
         store.write_run_json(&run_id, FIXED_ARGUMENTS_PATH, &arguments)?;
+        inventory::record_launch(&store, &run_id, &prd_digest, prd_text)?;
         store.write_run_json(&run_id, FIXED_PROVIDER_ROUTE_PATH, &route)?;
         crate::command::workflow_decompose_log::append_fixed_log_marker(
             &log_path,
@@ -284,6 +293,13 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             )))
             .await
             .map_err(|error| anyhow!("reporting persisted fixed decomposition run id: {error}"))?;
+        for line in &launch_lines {
+            crate::command::workflow_decompose_log::append_nofollow_line(&log_path, line)?;
+            let emitted = ui_sink
+                .emit(WorkflowUiEvent::Text(format!("{line}\n")))
+                .await;
+            emitted.map_err(|error| anyhow!("reporting {line}: {error}"))?;
+        }
 
         let client = factory
             .build_client(WorkflowLlmClientRequest {

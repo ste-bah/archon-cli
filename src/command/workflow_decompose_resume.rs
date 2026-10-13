@@ -349,7 +349,20 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             (&expected_arguments, prd_text),
             false,
         )?;
-    for line in resume_chain.lines.into_iter().chain([script_seed.line]) {
+    // Issue 387: name any requirement id a changed parser added or removed.
+    let inventory = super::super::workflow_decompose_requirement_inventory::check_on_resume(
+        &store,
+        run_id,
+        &log_path,
+        &prd_digest,
+        &prd_requirement_texts,
+    )?;
+    for line in resume_chain
+        .lines
+        .into_iter()
+        .chain([script_seed.line])
+        .chain(inventory)
+    {
         ui_sink
             .emit(WorkflowUiEvent::Text(line))
             .await
@@ -366,24 +379,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         calls,
         script_arguments,
     );
-    if cancellation_requested
-        .is_some_and(|requested| requested.load(std::sync::atomic::Ordering::SeqCst))
-    {
-        let current = store.load_state(run_id)?;
-        if !matches!(
-            current.status,
-            archon_workflow::RunStatus::Completed
-                | archon_workflow::RunStatus::Cancelled
-                | archon_workflow::RunStatus::Failed
-                | archon_workflow::RunStatus::Blocked
-        ) {
-            archon_workflow::LifecycleController::new(store.clone())
-                .apply(run_id, archon_workflow::LifecycleAction::Cancel)?;
-        }
-        return Err(anyhow!(
-            "fixed decomposition resume cancelled before provider construction"
-        ));
-    }
+    entry::cancel_if_requested(&store, run_id, cancellation_requested)?;
     let program = std::env::current_exe()
         .context("resolving the fixed decomposition binary")?
         .canonicalize()

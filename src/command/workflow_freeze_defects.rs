@@ -75,7 +75,7 @@ pub(crate) use shape::{
 
 #[path = "workflow_freeze_entry_validator.rs"]
 mod entry_validator;
-pub(crate) use entry_validator::install_entry_validator;
+pub(crate) use entry_validator::{entry_defects, install_entry_validator, refusal_text};
 
 /// Refuses the candidate with every element shape defect, or `None` when
 /// every element has the required shape.

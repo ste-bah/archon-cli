@@ -12,6 +12,10 @@ use archon_workflow::{
 pub(crate) struct OverrideDecision {
     pub(crate) verify: bool,
     pub(crate) reason: String,
+    /// Issue 387: what `recorded_logic_holds` answered for the judged
+    /// attempt, when the decision got that far (a clean, published attempt
+    /// that matches disk); `None` when an earlier condition decided.
+    pub(crate) logic_holds: Option<bool>,
 }
 
 impl OverrideDecision {
@@ -19,6 +23,7 @@ impl OverrideDecision {
         Self {
             verify: false,
             reason: reason.into(),
+            logic_holds: None,
         }
     }
 
@@ -26,6 +31,7 @@ impl OverrideDecision {
         Self {
             verify: true,
             reason: reason.into(),
+            logic_holds: Some(false),
         }
     }
 }
@@ -361,9 +367,12 @@ pub(super) fn freeze_outcome_decision(
         digests.get(capability).is_some_and(|(_, bound)| *bound)
     );
     Ok(if holds {
-        OverrideDecision::keep(format!(
-            "judged attempt {id} replays under this build's logic ({logic_text})"
-        ))
+        OverrideDecision {
+            logic_holds: Some(true),
+            ..OverrideDecision::keep(format!(
+                "judged attempt {id} replays under this build's logic ({logic_text})"
+            ))
+        }
     } else {
         OverrideDecision::verify(format!(
             "judged attempt {id} accepted with 0 findings, published, matches disk; this build's logic would not replay it ({logic_text})"

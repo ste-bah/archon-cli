@@ -29,6 +29,9 @@ use archon_workflow::task_skeleton::validate_full_chain;
 mod freeze_override;
 #[cfg(test)]
 use freeze_override::{freeze_outcome_decision, freeze_record_status_allows_override};
+#[path = "workflow_decompose_frozen_chain_launch.rs"]
+mod launch_chain;
+pub(crate) use launch_chain::launch_acceptance_decision;
 #[path = "workflow_decompose_frozen_chain_resume.rs"]
 mod resume_chain;
 #[cfg(test)]
