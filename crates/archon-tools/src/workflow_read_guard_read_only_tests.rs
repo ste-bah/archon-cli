@@ -315,11 +315,17 @@ fn withdrawing_inspection_refuses_reads_and_keeps_build_commands() {
             refusal.starts_with(super::INSPECTION_WITHDRAWN_MARKER),
             "{refusal}"
         );
-        assert!(refusal.contains("kept returning the same results"), "{refusal}");
+        assert!(
+            refusal.contains("kept returning the same results"),
+            "{refusal}"
+        );
         assert!(refusal.contains(super::ANSWER_IN_TASK_FORMAT), "{refusal}");
         assert!(!refusal.contains(READ_CEILING_MARKER), "{refusal}");
     }
-    assert_eq!(guard.before_tool("Bash", &bash_input("cargo test -p demo")), None);
+    assert_eq!(
+        guard.before_tool("Bash", &bash_input("cargo test -p demo")),
+        None
+    );
 }
 
 #[test]
@@ -336,7 +342,10 @@ fn a_write_capable_guard_never_withdraws_inspection() {
 fn a_call_past_its_hard_ceiling_is_not_withdrawn_again() {
     let guard = read_only(0, 1);
     assert_eq!(guard.before_tool("Read", &read_input()), None);
-    assert!(guard.inspection_withdrawn(), "the ceiling already withdrew it");
+    assert!(
+        guard.inspection_withdrawn(),
+        "the ceiling already withdrew it"
+    );
     assert!(!guard.withdraw_inspection("same results"));
     assert_eq!(guard.withdrawal_reason(), None);
 }
@@ -351,5 +360,8 @@ fn the_ceiling_refusal_names_the_task_format() {
     assert!(refusal.starts_with(READ_CEILING_MARKER), "{refusal}");
     assert!(refusal.contains(super::ANSWER_IN_TASK_FORMAT), "{refusal}");
     assert!(refusal.contains("reply with that file"), "{refusal}");
-    assert!(refusal.contains("Do not reply with a report about your reading"), "{refusal}");
+    assert!(
+        refusal.contains("Do not reply with a report about your reading"),
+        "{refusal}"
+    );
 }

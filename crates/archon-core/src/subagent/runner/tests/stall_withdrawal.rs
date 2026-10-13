@@ -73,7 +73,10 @@ async fn read_only_stall_withdraws_inspection_and_takes_the_answer() {
     assert!(names(&requests[ROUNDS_TO_STOP - 1]).contains(&"Read"));
     let offered = names(&requests[ROUNDS_TO_STOP]);
     for &tool in archon_tools::workflow_read_guard::READ_ONLY_INSPECTION_TOOLS {
-        assert!(!offered.contains(&tool), "{tool} still offered: {offered:?}");
+        assert!(
+            !offered.contains(&tool),
+            "{tool} still offered: {offered:?}"
+        );
     }
     let asked = serde_json::to_string(&requests[ROUNDS_TO_STOP].messages).unwrap();
     assert!(asked.contains("author the entry"), "{asked}");
@@ -89,7 +92,10 @@ async fn read_only_stall_withdraws_inspection_and_takes_the_answer() {
         asked.contains(archon_tools::workflow_read_guard::ANSWER_IN_TASK_FORMAT),
         "the note asks for the task's own deliverable format: {asked}"
     );
-    assert!(!asked.contains(archon_tools::NO_PROGRESS_STOP_MARKER), "{asked}");
+    assert!(
+        !asked.contains(archon_tools::NO_PROGRESS_STOP_MARKER),
+        "{asked}"
+    );
 }
 
 #[tokio::test]
@@ -112,7 +118,10 @@ async fn read_only_stall_still_fails_when_the_next_turn_calls_tools_again() {
         .expect_err("a second stall after the withdrawal ends the session")
         .to_string();
 
-    assert!(error.contains(archon_tools::NO_PROGRESS_STOP_MARKER), "{error}");
+    assert!(
+        error.contains(archon_tools::NO_PROGRESS_STOP_MARKER),
+        "{error}"
+    );
     assert_eq!(provider.requests().len(), ROUNDS_TO_STOP + 1);
 }
 
@@ -135,7 +144,10 @@ async fn write_capable_stall_keeps_the_immediate_stop() {
         .expect_err("a write-capable stall still stops")
         .to_string();
 
-    assert!(error.contains(archon_tools::NO_PROGRESS_STOP_MARKER), "{error}");
+    assert!(
+        error.contains(archon_tools::NO_PROGRESS_STOP_MARKER),
+        "{error}"
+    );
     assert_eq!(provider.requests().len(), ROUNDS_TO_STOP);
 }
 
@@ -180,7 +192,11 @@ async fn repeated_own_evidence_reads_are_withdrawn_before_the_ceiling() {
         "---\ntask_id: TASK-X-001\n---\n# Body"
     );
     let requests = provider.requests();
-    assert_eq!(requests.len(), ROUNDS_TO_STOP + 1, "withdrawn after {ROUNDS_TO_STOP} of 120");
+    assert_eq!(
+        requests.len(),
+        ROUNDS_TO_STOP + 1,
+        "withdrawn after {ROUNDS_TO_STOP} of 120"
+    );
     assert!(names(&requests[0]).contains(&"read-own-evidence"));
     assert!(!names(&requests[ROUNDS_TO_STOP]).contains(&"read-own-evidence"));
     let asked = serde_json::to_string(&requests[ROUNDS_TO_STOP].messages).unwrap();

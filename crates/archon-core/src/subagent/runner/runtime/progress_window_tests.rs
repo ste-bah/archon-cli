@@ -394,14 +394,23 @@ async fn refused_reads_past_the_ceiling_wait_for_the_window_with_their_count() {
     // ceiling refusal leaves the window anchored there.
     assert_eq!(elapsed, 500 + WINDOW, "{error}");
     assert!(error.contains("refused tool calls: 14"), "{error}");
-    assert!(error.contains("last novel activity: turn 1: new tool call Read"), "{error}");
+    assert!(
+        error.contains("last novel activity: turn 1: new tool call Read"),
+        "{error}"
+    );
     assert_eq!(clock.refused_calls(), 14);
     assert!(
-        clock.cut_text().starts_with("last novel activity: turn 1: new tool call Read"),
+        clock
+            .cut_text()
+            .starts_with("last novel activity: turn 1: new tool call Read"),
         "{}",
         clock.cut_text()
     );
-    assert!(clock.cut_text().ends_with("; refused tool calls: 14"), "{}", clock.cut_text());
+    assert!(
+        clock.cut_text().ends_with("; refused tool calls: 14"),
+        "{}",
+        clock.cut_text()
+    );
 }
 
 #[tokio::test]

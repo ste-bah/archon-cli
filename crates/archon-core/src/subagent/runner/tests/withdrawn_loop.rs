@@ -42,7 +42,10 @@ async fn eight_text_calls_after_the_withdrawal_then_the_deliverable_is_taken() {
     let runner = ceiling_runner(provider.clone(), "withdrawn-dl124-shape");
 
     assert_eq!(
-        runner.run("author the entry").await.expect("the ninth reply delivers"),
+        runner
+            .run("author the entry")
+            .await
+            .expect("the ninth reply delivers"),
         entry
     );
     let requests = provider.requests();

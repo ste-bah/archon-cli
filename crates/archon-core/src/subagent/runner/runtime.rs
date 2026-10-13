@@ -391,7 +391,9 @@ const STALL_WITHDRAWAL_REASON: &str =
 fn withdrawn_note(reason: Option<&str>) -> String {
     format!(
         "{}Inspection tools are no longer available in this call; answer now with your deliverable from what you have read. {}",
-        reason.map(|reason| format!("{reason} ")).unwrap_or_default(),
+        reason
+            .map(|reason| format!("{reason} "))
+            .unwrap_or_default(),
         archon_tools::workflow_read_guard::ANSWER_IN_TASK_FORMAT
     )
 }

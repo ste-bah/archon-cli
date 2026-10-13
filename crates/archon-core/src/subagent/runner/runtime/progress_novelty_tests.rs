@@ -392,11 +392,21 @@ fn replay_a_recorded_transcript() {
         }
     }
     println!("REPLAY {path}");
-    println!("REPLAY calls={calls} refused={refused} novel_by_arguments={old_novel} novel_by_content={new_novel}");
+    println!(
+        "REPLAY calls={calls} refused={refused} novel_by_arguments={old_novel} novel_by_content={new_novel}"
+    );
     println!("REPLAY longest_non_novel_run by_arguments={old_longest} by_content={new_longest}");
     for (tool, (count, old, new)) in by_tool {
-        println!("REPLAY tool={tool} calls={count} novel_by_arguments={old} novel_by_content={new}");
+        println!(
+            "REPLAY tool={tool} calls={count} novel_by_arguments={old} novel_by_content={new}"
+        );
     }
-    println!("REPLAY last_novel_by_arguments: {}", last_old.chars().take(240).collect::<String>());
-    println!("REPLAY last_novel_by_content: {}", last_new.chars().take(240).collect::<String>());
+    println!(
+        "REPLAY last_novel_by_arguments: {}",
+        last_old.chars().take(240).collect::<String>()
+    );
+    println!(
+        "REPLAY last_novel_by_content: {}",
+        last_new.chars().take(240).collect::<String>()
+    );
 }
