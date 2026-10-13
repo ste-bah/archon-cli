@@ -109,6 +109,10 @@ mod entry_validator_tests;
 mod entry_live_root_tests;
 
 #[cfg(test)]
+#[path = "workflow_decompose_redaction_tests.rs"]
+mod decompose_redaction_tests;
+
+#[cfg(test)]
 #[path = "workflow_freeze_round11_tests.rs"]
 mod round11_tests;
 

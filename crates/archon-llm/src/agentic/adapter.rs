@@ -74,7 +74,8 @@ struct AgenticTurnState {
     provider_id: String,
     model: String,
     text: String,
-    usage: Usage,
+    /// Issue 424: delta usage is cumulative for its message, never added.
+    usage: crate::usage::UsageAccumulator,
     stop_reason: Option<String>,
     reasoning_encrypted: Option<String>,
     active_tools: HashMap<u32, ActiveToolCall>,
@@ -87,7 +88,7 @@ impl AgenticTurnState {
             provider_id,
             model,
             text: String::new(),
-            usage: Usage::default(),
+            usage: crate::usage::UsageAccumulator::default(),
             stop_reason: None,
             reasoning_encrypted: None,
             active_tools: HashMap::new(),
@@ -100,9 +101,10 @@ impl AgenticTurnState {
         event: StreamEvent,
         sink: &TurnEventSink,
     ) -> Result<(), LlmError> {
+        self.usage.record_event(&event);
         match event {
-            StreamEvent::MessageStart { model, usage, .. } => {
-                self.message_start(model, usage, sink).await?;
+            StreamEvent::MessageStart { model, .. } => {
+                self.message_start(model, sink).await?;
             }
             StreamEvent::ContentBlockStart {
                 index,
@@ -153,16 +155,10 @@ impl AgenticTurnState {
         Ok(())
     }
 
-    async fn message_start(
-        &mut self,
-        model: String,
-        usage: Usage,
-        sink: &TurnEventSink,
-    ) -> Result<(), LlmError> {
+    async fn message_start(&mut self, model: String, sink: &TurnEventSink) -> Result<(), LlmError> {
         if !model.is_empty() {
             self.model = model;
         }
-        self.usage.merge(&usage);
         sink.emit(AgenticTurnEvent::MessageStarted {
             provider_id: self.provider_id.clone(),
             model: self.model.clone(),
@@ -230,10 +226,9 @@ impl AgenticTurnState {
         usage: Option<Usage>,
         sink: &TurnEventSink,
     ) -> Result<(), LlmError> {
-        if let Some(usage) = usage {
-            self.usage.merge(&usage);
+        if usage.is_some() {
             sink.emit(AgenticTurnEvent::UsageUpdated {
-                usage: self.usage.clone(),
+                usage: self.usage.to_usage(),
             })
             .await?;
         }
@@ -249,7 +244,7 @@ impl AgenticTurnState {
             model: self.model,
             text: self.text,
             tool_calls: self.tool_calls,
-            usage: self.usage,
+            usage: self.usage.to_usage(),
             stop_reason: self.stop_reason,
             reasoning_encrypted: self.reasoning_encrypted,
         }

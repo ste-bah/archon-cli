@@ -240,8 +240,8 @@ fn build_report_with_input_findings(
     if !input_findings.is_empty() {
         return Ok((
             TraceReport {
-                prd_path: prd_path.display().to_string(),
-                task_dir: task_dir.display().to_string(),
+                prd_path: archon_shell::paths::stored_text(&prd_path),
+                task_dir: archon_shell::paths::stored_text(&task_dir),
                 coverage,
                 rows: Vec::new(),
                 shared_anchors: Vec::new(),
@@ -299,8 +299,8 @@ fn build_report_with_input_findings(
     let shared_anchors = find_shared_anchors(&rows);
     Ok((
         TraceReport {
-            prd_path: prd_path.display().to_string(),
-            task_dir: task_dir.display().to_string(),
+            prd_path: archon_shell::paths::stored_text(&prd_path),
+            task_dir: archon_shell::paths::stored_text(&task_dir),
             coverage,
             rows,
             shared_anchors,

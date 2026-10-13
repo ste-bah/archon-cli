@@ -225,7 +225,8 @@ fn the_task_file_lint_names_text_before_the_frontmatter_once() {
         lint(&landed),
         vec![format!(
             "{}: the task file starts with text before its frontmatter (first line: \"{chat}\"); return only the task file, starting with its ```yaml frontmatter block",
-            path.display()
+            // Issue 438: lint text spells paths as stored ('/' on Windows).
+            archon_shell::paths::stored_text(&path)
         )]
     );
     assert_eq!(lint(&format!("```markdown\n{inner}```\n")), lint(inner));

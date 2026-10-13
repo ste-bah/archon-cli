@@ -72,15 +72,15 @@ pub(super) fn inspect(
     match std::fs::read_to_string(&path) {
         Ok(raw) => inspect_raw(cwd, &path, &raw, mode),
         Err(error) => {
-            let report = format!("# topology lint — task file {}\n", path.display());
+            let report = format!("# topology lint — task file {}\n", shown(&path));
             let (mut blockers, mut identities) = (Vec::new(), Identities::new());
             block(
                 &mut blockers,
                 &mut identities,
                 format!(
                     "{}: unreadable: {error}; restore the TASK file and re-run `workflow lint --task-file {}`",
-                    path.display(),
-                    path.display()
+                    shown(&path),
+                    shown(&path)
                 ),
                 DeterministicDefect::new("unreadable_task_file", "task_file", "file"),
             );
@@ -96,7 +96,7 @@ pub(super) fn inspect_raw(
     mode: archon_core::config::GateMode,
 ) -> TaskFileLint {
     let path = absolute(cwd, path);
-    let mut report = format!("# topology lint — task file {}\n", path.display());
+    let mut report = format!("# topology lint — task file {}\n", shown(&path));
     let mut blockers = Vec::new();
     let mut deterministic: BTreeMap<_, VecDeque<_>> = BTreeMap::new();
     let mut inherited_blockers = BTreeSet::new();
@@ -109,7 +109,7 @@ pub(super) fn inspect_raw(
         super::fences::TaskFileShape::TextBefore(first) => {
             let text = format!(
                 "{}: {}",
-                path.display(),
+                shown(&path),
                 super::fences::text_before_frontmatter_finding(first)
             );
             let defect =
@@ -127,8 +127,8 @@ pub(super) fn inspect_raw(
                 &mut deterministic,
                 format!(
                     "{}: {error}; make the exact parser-required edit and re-run `workflow lint --task-file {}`",
-                    path.display(),
-                    path.display()
+                    shown(&path),
+                    shown(&path)
                 ),
                 DeterministicDefect::new("unparseable_task_file", "task_file", "parse"),
             );
@@ -138,7 +138,7 @@ pub(super) fn inspect_raw(
     let id = task.canonical_task_id.clone();
     report.push_str(&format!(
         "\n## parser\n  {} parsed with runtime parse_task_file as {}\n",
-        path.display(),
+        shown(&path),
         task.canonical_task_id
     ));
     validate_declared_shape(&task, raw, &mut report, &mut blockers, &mut deterministic);
@@ -175,7 +175,7 @@ pub(super) fn inspect_raw(
             &mut deterministic,
             format!(
                 "{} has no parent task directory; move it under a task directory and re-run --task-file",
-                path.display()
+                shown(&path)
             ),
             DeterministicDefect::new("task_file_without_directory", &id, "path"),
         );
@@ -250,7 +250,7 @@ pub(super) fn inspect_raw(
                         block(&mut blockers, &mut deterministic, format!(
                             "{} is absent from {}; add its entry and re-run `workflow freeze-skeleton` before body writing",
                             task.canonical_task_id,
-                            skeleton_path.display()
+                            shown(&skeleton_path)
                         ), DeterministicDefect::new("task_absent_from_skeleton", &id, "skeleton"));
                         return finish(report, blockers, inherited_blockers, deterministic);
                     };
@@ -272,14 +272,14 @@ pub(super) fn inspect_raw(
             },
             _ => block(&mut blockers, &mut deterministic, format!(
                 "partial skeleton freeze beside {}: file={}, lock={}, pin={}; restore all three matching artifacts or re-run `workflow freeze-skeleton`",
-                path.display(), skeleton_present, lock_present, skeleton_pin_present
+                shown(&path), skeleton_present, lock_present, skeleton_pin_present
             ), DeterministicDefect::new("partial_skeleton_freeze", &id, "skeleton")),
         }
     }
 
     let universe = WorkflowV2TaskUniverse {
         schema_version: "v1".into(),
-        source_roots: vec![tasks_root.display().to_string()],
+        source_roots: vec![shown(tasks_root)],
         tasks: vec![task],
     };
     let contract_findings = audit_contracts(&universe);
@@ -367,14 +367,14 @@ fn validate_prd_identity(cwd: &Path, tasks_root: &Path) -> Result<BTreeSet<Strin
     let bytes = std::fs::read(&prd_path).map_err(|error| {
         format!(
             "PRD {} could not be read: {error}; restore it or re-run `workflow freeze-acceptance`",
-            prd_path.display()
+            shown(&prd_path)
         )
     })?;
     let actual = content_digest(&bytes);
     if actual != contract.prd.digest {
         return Err(format!(
             "PRD digest mismatch for {}: expected {}, actual {}; restore the frozen PRD or re-run `workflow freeze-acceptance`",
-            prd_path.display(),
+            shown(&prd_path),
             contract.prd.digest,
             actual
         ));
@@ -382,7 +382,7 @@ fn validate_prd_identity(cwd: &Path, tasks_root: &Path) -> Result<BTreeSet<Strin
     let text = String::from_utf8(bytes).map_err(|error| {
         format!(
             "PRD {} is not UTF-8: {error}; restore UTF-8 content and re-run `workflow freeze-acceptance`",
-            prd_path.display()
+            shown(&prd_path)
         )
     })?;
     Ok(acceptance_ids(&text))
@@ -415,13 +415,13 @@ fn read_json<T: for<'de> serde::Deserialize<'de>>(
     let bytes = std::fs::read(path).map_err(|error| {
         format!(
             "required {label} {} could not be read: {error}; run workflow {freeze}",
-            path.display()
+            shown(path)
         )
     })?;
     serde_json::from_slice(&bytes).map_err(|error| {
         format!(
             "{label} {} is malformed: {error}; re-run workflow {freeze}",
-            path.display()
+            shown(path)
         )
     })
 }
@@ -455,4 +455,9 @@ fn absolute(cwd: &Path, path: &Path) -> PathBuf {
     } else {
         cwd.join(path)
     }
+}
+
+/// A path as the lint report stores it: `/`-separated (Issue 438).
+fn shown(path: &Path) -> String {
+    archon_shell::paths::stored_text(path)
 }

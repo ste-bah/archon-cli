@@ -117,12 +117,92 @@ function stopReasonClass(reason) {
   return known.has(reason) ? `stop-${reason.replace(/_/g, "-")}` : "stop-other";
 }
 
+// Issue 383: the host's public-copy redaction (sanitize_value in
+// crates/archon-workflow/src/events.rs), word for word, held equal by
+// workflow_decompose_redaction_tests.rs. A word is a run between Unicode
+// whitespace (Rust's char::is_whitespace); a secret-shaped word, or the word
+// after a `Bearer` word, becomes REDACTION_MARKER.
+const REDACTION_MARKER = "<redacted>";
+const RUST_WHITESPACE = /[\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/;
+
+function asciiLower(text) {
+  return text.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+function utf8Length(text) {
+  let bytes = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0);
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+  }
+  return bytes;
+}
+
+function looksSecretLike(word) {
+  const trimmed = word.replace(/^["'`,;)(\[\]]+|["'`,;)(\[\]]+$/g, "");
+  const lower = asciiLower(trimmed);
+  return ["authorization:", "api_key=", "apikey=", "token=", "access_token=",
+    "refresh_token=", "password=", "secret=", "sk-ant-"].some((prefix) => lower.startsWith(prefix))
+    || (lower.startsWith("sk-") && utf8Length(trimmed) >= 20);
+}
+
+function isBearerWord(word) {
+  return asciiLower(word.replace(/^["'`]+|["'`]+$/g, "")) === "bearer";
+}
+
+// The words of `text` with their offsets and whether each is redacted.
+function redactionWords(text) {
+  const words = [];
+  let start = null;
+  let afterBearer = false;
+  const close = (end) => {
+    if (start === null) return;
+    const word = text.slice(start, end);
+    words.push({start, end, redacted: afterBearer || looksSecretLike(word)});
+    afterBearer = isBearerWord(word);
+    start = null;
+  };
+  for (let index = 0; index < text.length;) {
+    const ch = String.fromCodePoint(text.codePointAt(index));
+    if (RUST_WHITESPACE.test(ch)) close(index);
+    else if (start === null) start = index;
+    index += ch.length;
+  }
+  close(text.length);
+  return words;
+}
+
+function redactSecretShapedText(text) {
+  let out = "";
+  let at = 0;
+  for (const word of redactionWords(text)) {
+    out += text.slice(at, word.start) + (word.redacted ? REDACTION_MARKER : text.slice(word.start, word.end));
+    at = word.end;
+  }
+  return out + text.slice(at);
+}
+
+// `source[start, end)` with every secret-shaped word of the WHOLE source
+// replaced by the marker, so a word the window cuts is still found whole.
+function redactedWindow(source, start, end) {
+  let out = "";
+  let at = start;
+  for (const word of redactionWords(source)) {
+    if (word.end <= start || word.start >= end) continue;
+    if (!word.redacted) continue;
+    out += source.slice(at, Math.max(at, word.start)) + REDACTION_MARKER;
+    at = Math.min(end, word.end);
+  }
+  return out + source.slice(at, end);
+}
+
 // Keep malformed-reply refusals useful to the author without echoing the
 // whole reply. JSON.parse engines report positions in different forms; retain
 // their message and derive a nearby excerpt when a location is available.
+// Both are redacted (Issue 383): the refusal is prompt text the host stores.
 function acceptanceParseRefusal(id, source, error) {
-  const message = String(error && error.message || error || "invalid JSON")
-    .replace(/[\r\n\t]+/g, " ").slice(0, 240);
+  const message = redactSecretShapedText(String(error && error.message || error || "invalid JSON")
+    .replace(/[\r\n\t]+/g, " ")).slice(0, 240);
   let offset = null;
   let location = "";
   const lineColumn = /line\s+(\d+)\s+column\s+(\d+)/i.exec(message);
@@ -155,7 +235,9 @@ function acceptanceParseRefusal(id, source, error) {
   if (offset !== null) {
     const start = Math.max(0, Math.min(source.length - 158, offset - 79));
     const end = Math.min(source.length, start + 158);
-    excerpt = source.slice(start, end).replace(/[\r\n\t\x00-\x1f\x7f]/g, " ");
+    // Control characters become spaces first (one UTF-16 unit each, so
+    // offsets hold), as they read in the excerpt, then words are redacted.
+    excerpt = redactedWindow(source.replace(/[\r\n\t\x00-\x1f\x7f]/g, " "), start, end);
     if (start > 0) excerpt = `…${excerpt}`;
     if (end < source.length) excerpt = `${excerpt}…`;
   }
@@ -248,7 +330,7 @@ async function authorOne(w, prompt, round, id, text, prior, criteria, state) {
         return malformedAcceptanceFailure(id, error.message, "multiple-entries");
       }
       if (error && error.multipleJsonInvalid === true) {
-        return malformedAcceptanceFailure(id, error.message, parseErrorClass(error));
+        return malformedAcceptanceFailure(id, redactSecretShapedText(error.message), parseErrorClass(error));
       }
       return malformedAcceptanceFailure(id, acceptanceParseRefusal(id, json, error), parseErrorClass(error));
     }

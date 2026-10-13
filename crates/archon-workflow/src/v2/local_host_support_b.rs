@@ -117,9 +117,9 @@ pub(super) fn artifact_path_is_placeholder(path: &str) -> bool {
 pub(super) fn report_paths(v2_root: &Path) -> WorkflowV2ReportPaths {
     let run_root = v2_root.parent().unwrap_or(v2_root);
     WorkflowV2ReportPaths {
-        harness_path: crate::bundle::record_path(run_root).display().to_string(),
-        run_state_path: run_root.join("state.json").display().to_string(),
-        event_log_path: run_root.join("events.jsonl").display().to_string(),
+        harness_path: archon_shell::paths::stored_text(&crate::bundle::record_path(run_root)),
+        run_state_path: archon_shell::paths::stored_text(&run_root.join("state.json")),
+        event_log_path: archon_shell::paths::stored_text(&run_root.join("events.jsonl")),
     }
 }
 

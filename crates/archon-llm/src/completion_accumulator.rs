@@ -5,7 +5,7 @@ use tokio::sync::mpsc::Receiver;
 
 use crate::provider::{LlmError, LlmResponse};
 use crate::streaming::StreamEvent;
-use crate::types::{ContentBlockType, Usage};
+use crate::types::ContentBlockType;
 
 pub(crate) async fn collect_completion_response(
     mut rx: Receiver<StreamEvent>,
@@ -20,7 +20,8 @@ pub(crate) async fn collect_completion_response(
 #[derive(Default)]
 struct CompletionAccumulator {
     blocks: BTreeMap<u32, CompletionBlock>,
-    usage: Usage,
+    /// Issue 424: delta usage is cumulative for its message, never added.
+    usage: crate::usage::UsageAccumulator,
     stop_reason: String,
 }
 
@@ -36,8 +37,9 @@ enum CompletionBlock {
 
 impl CompletionAccumulator {
     fn process(&mut self, event: StreamEvent) -> Result<(), LlmError> {
+        self.usage.record_event(&event);
         match event {
-            StreamEvent::MessageStart { usage, .. } => self.usage.merge(&usage),
+            StreamEvent::MessageStart { .. } => {}
             StreamEvent::ContentBlockStart {
                 index,
                 block_type,
@@ -50,10 +52,7 @@ impl CompletionAccumulator {
                 index,
                 partial_json,
             } => self.input_json_delta(index, partial_json),
-            StreamEvent::MessageDelta { usage, stop_reason } => {
-                if let Some(usage) = usage {
-                    self.usage.merge(&usage);
-                }
+            StreamEvent::MessageDelta { stop_reason, .. } => {
                 if let Some(stop_reason) = stop_reason {
                     self.stop_reason = stop_reason;
                 }
@@ -163,7 +162,7 @@ impl CompletionAccumulator {
 
         Ok(LlmResponse {
             content,
-            usage: self.usage,
+            usage: self.usage.to_usage(),
             stop_reason: self.stop_reason,
         })
     }
@@ -187,6 +186,7 @@ fn parse_tool_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::Usage;
 
     fn rx_from(events: Vec<StreamEvent>) -> Receiver<StreamEvent> {
         let (tx, rx) = tokio::sync::mpsc::channel(events.len().max(1));
@@ -282,5 +282,39 @@ mod tests {
 
         assert!(err.to_string().contains("malformed tool arguments"));
         assert!(err.to_string().contains("toolu_bad"));
+    }
+
+    // #424: message_delta usage is cumulative, so it replaces the start value.
+    #[tokio::test]
+    async fn delta_usage_replaces_start_usage_for_the_same_message() {
+        let response = collect_completion_response(rx_from(vec![
+            StreamEvent::MessageStart {
+                id: "msg_1".into(),
+                model: "model".into(),
+                usage: Usage {
+                    input_tokens: 25,
+                    output_tokens: 1,
+                    input_tokens_available: true,
+                    output_tokens_available: true,
+                    ..Usage::default()
+                },
+            },
+            StreamEvent::MessageDelta {
+                stop_reason: Some("end_turn".into()),
+                usage: Some(Usage {
+                    input_tokens: 25,
+                    output_tokens: 15,
+                    input_tokens_available: true,
+                    output_tokens_available: true,
+                    ..Usage::default()
+                }),
+            },
+            StreamEvent::MessageStop,
+        ]))
+        .await
+        .expect("response");
+
+        assert_eq!(response.usage.input_tokens, 25);
+        assert_eq!(response.usage.output_tokens, 15);
     }
 }

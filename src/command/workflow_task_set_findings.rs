@@ -183,12 +183,12 @@ pub(super) fn acceptance_lock_and_pin(
     };
     let pin = AcceptancePin {
         check_sources_digest: None,
-        task_root: tasks_root
-            .canonicalize()
-            .map(archon_shell::paths::plain)
-            .unwrap_or_else(|_| tasks_root.to_path_buf())
-            .display()
-            .to_string(),
+        task_root: archon_shell::paths::stored_text(
+            &tasks_root
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .unwrap_or_else(|_| tasks_root.to_path_buf()),
+        ),
         acceptance_digest: digest.clone(),
         freeze_event_id: format!("acceptance-freeze-{}", &digest[..12]),
         acceptance_gate: stamp,

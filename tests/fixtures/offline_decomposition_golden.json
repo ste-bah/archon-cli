@@ -121,7 +121,7 @@
             "content": "{\"check\":{\"command\":\"python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\\\"ready\\\"] is True' .archon/proof/outcome.json\",\"cwd\":\"repo_root\",\"kind\":\"command\"},\"covers\":[],\"criterion\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\",\"gap_permitted\":false,\"id\":\"AC-X-001\",\"judgment\":{\"counterexample\":\"\",\"host_call_id\":\"\",\"reason\":\"\",\"verdict\":\"accepted\"}}",
             "stopReason": "end_turn",
             "tokensIn": 1,
-            "tokensOut": 2,
+            "tokensOut": 1,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -147,7 +147,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -179,7 +179,7 @@
             "content": "{\"check\":{\"command\":\"test -f src/alpha.txt && grep -qx 'alpha ready' src/alpha.txt\",\"cwd\":\"repo_root\",\"kind\":\"command\"},\"covers\":[\"REQ-X-001\"],\"criterion\":\"The first artifact contains the required line.\",\"gap_permitted\":false,\"id\":\"SUP-REQ-X-001\",\"judgment\":{\"counterexample\":\"\",\"host_call_id\":\"\",\"reason\":\"\",\"verdict\":\"accepted\"}}",
             "stopReason": "end_turn",
             "tokensIn": 1,
-            "tokensOut": 2,
+            "tokensOut": 1,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -205,7 +205,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -237,7 +237,7 @@
             "content": "{\"check\":{\"command\":\"python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\\\"ready\\\"] is True' src/beta.json\",\"cwd\":\"repo_root\",\"kind\":\"command\"},\"covers\":[\"REQ-X-002\"],\"criterion\":\"The second artifact is ready JSON.\",\"gap_permitted\":false,\"id\":\"SUP-REQ-X-002\",\"judgment\":{\"counterexample\":\"\",\"host_call_id\":\"\",\"reason\":\"\",\"verdict\":\"accepted\"}}",
             "stopReason": "end_turn",
             "tokensIn": 1,
-            "tokensOut": 2,
+            "tokensOut": 1,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -263,7 +263,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -295,7 +295,7 @@
             "content": "```yaml\ntask_id: TASK-X-010\ntitle: Create alpha data\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: [TASK-X-020]\nimplements: [REQ-X-001, AC-X-001]\nrequired_env_keys: []\nrequired_tools: [test, python3]\ndeliverable_contracts:\n  - kind: alpha_text\n    artifact_path: src/alpha.txt\n    artifact_format: text\n    min_instances: 1\n  - kind: generic_outcome\n    artifact_path: .archon/proof/outcome.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n",
             "stopReason": "end_turn",
             "tokensIn": 1,
-            "tokensOut": 2,
+            "tokensOut": 1,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -321,7 +321,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -353,7 +353,7 @@
             "content": "```yaml\ntask_id: TASK-X-020\ntitle: Create beta data\ncomplexity: low\nstatus: ready\ndepends_on: \n  - task_id: TASK-X-010\n    consumes:\n      - artifact_path: src/alpha.txt\n    ordering_only: false\nblocks: []\nimplements: [REQ-X-002]\nrequired_env_keys: []\nrequired_tools: [python3]\ndeliverable_contracts:\n  - kind: beta_json\n    artifact_path: src/beta.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n",
             "stopReason": "end_turn",
             "tokensIn": 1,
-            "tokensOut": 2,
+            "tokensOut": 1,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -379,7 +379,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -413,7 +413,7 @@
             "content": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"task_id\":\"TASK-X-020\"}]}",
             "stopReason": "end_turn",
             "tokensIn": 1,
-            "tokensOut": 2,
+            "tokensOut": 1,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -439,7 +439,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -521,7 +521,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "9bb39a6d54d9b3dd40cf3ccd0e650ef478fa3f2512eae65a236c9cd308814b51",
+            "logicDigest": "adfc025910c442d423aef97015e3a0e752892841d6d9fe6d2c7f018e7f128fec",
             "logicVersion": 18,
             "postcondition": {
               "satisfied": true,
@@ -733,7 +733,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "needs_review"
       }
@@ -788,7 +788,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "9bb39a6d54d9b3dd40cf3ccd0e650ef478fa3f2512eae65a236c9cd308814b51",
+            "logicDigest": "adfc025910c442d423aef97015e3a0e752892841d6d9fe6d2c7f018e7f128fec",
             "logicVersion": 18,
             "postcondition": {
               "satisfied": true,
@@ -976,7 +976,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1031,7 +1031,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "9bb39a6d54d9b3dd40cf3ccd0e650ef478fa3f2512eae65a236c9cd308814b51",
+            "logicDigest": "adfc025910c442d423aef97015e3a0e752892841d6d9fe6d2c7f018e7f128fec",
             "logicVersion": 3,
             "postcondition": {
               "satisfied": true,
@@ -1206,7 +1206,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1269,7 +1269,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
+            "logicDigest": "e9e54ffb7df22fed632dac763c5ac5e6343c250992e4b7aea5fc46181ba789f1",
             "logicVersion": 13,
             "postcondition": {
               "satisfied": true,
@@ -1326,7 +1326,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1389,7 +1389,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
+            "logicDigest": "e9e54ffb7df22fed632dac763c5ac5e6343c250992e4b7aea5fc46181ba789f1",
             "logicVersion": 13,
             "postcondition": {
               "satisfied": true,
@@ -1446,7 +1446,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1500,7 +1500,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "c7fc2f08a7e3a4133bde32d181154ffdb2c165c5627dbcdda2f8846a87e632f9",
+            "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
             "logicVersion": 4,
             "postcondition": {
               "satisfied": true,
@@ -1555,7 +1555,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1609,7 +1609,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
+            "logicDigest": "e9e54ffb7df22fed632dac763c5ac5e6343c250992e4b7aea5fc46181ba789f1",
             "logicVersion": 12,
             "postcondition": {
               "satisfied": true,
@@ -1664,7 +1664,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1695,7 +1695,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "9bb39a6d54d9b3dd40cf3ccd0e650ef478fa3f2512eae65a236c9cd308814b51",
+                  "logicDigest": "adfc025910c442d423aef97015e3a0e752892841d6d9fe6d2c7f018e7f128fec",
                   "logicVersion": 18,
                   "postcondition": {
                     "satisfied": true,
@@ -1758,7 +1758,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "9bb39a6d54d9b3dd40cf3ccd0e650ef478fa3f2512eae65a236c9cd308814b51",
+                      "logicDigest": "adfc025910c442d423aef97015e3a0e752892841d6d9fe6d2c7f018e7f128fec",
                       "logicVersion": 18,
                       "postcondition": {
                         "satisfied": true,
@@ -1841,7 +1841,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "9bb39a6d54d9b3dd40cf3ccd0e650ef478fa3f2512eae65a236c9cd308814b51",
+                  "logicDigest": "adfc025910c442d423aef97015e3a0e752892841d6d9fe6d2c7f018e7f128fec",
                   "logicVersion": 3,
                   "postcondition": {
                     "satisfied": true,
@@ -1902,7 +1902,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "9bb39a6d54d9b3dd40cf3ccd0e650ef478fa3f2512eae65a236c9cd308814b51",
+                      "logicDigest": "adfc025910c442d423aef97015e3a0e752892841d6d9fe6d2c7f018e7f128fec",
                       "logicVersion": 3,
                       "postcondition": {
                         "satisfied": true,
@@ -2003,7 +2003,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
+                  "logicDigest": "e9e54ffb7df22fed632dac763c5ac5e6343c250992e4b7aea5fc46181ba789f1",
                   "logicVersion": 13,
                   "postcondition": {
                     "satisfied": true,
@@ -2053,7 +2053,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
+                      "logicDigest": "e9e54ffb7df22fed632dac763c5ac5e6343c250992e4b7aea5fc46181ba789f1",
                       "logicVersion": 13,
                       "postcondition": {
                         "satisfied": true,
@@ -2135,7 +2135,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
+                  "logicDigest": "e9e54ffb7df22fed632dac763c5ac5e6343c250992e4b7aea5fc46181ba789f1",
                   "logicVersion": 13,
                   "postcondition": {
                     "satisfied": true,
@@ -2185,7 +2185,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
+                      "logicDigest": "e9e54ffb7df22fed632dac763c5ac5e6343c250992e4b7aea5fc46181ba789f1",
                       "logicVersion": 13,
                       "postcondition": {
                         "satisfied": true,
@@ -2267,7 +2267,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
+                  "logicDigest": "e9e54ffb7df22fed632dac763c5ac5e6343c250992e4b7aea5fc46181ba789f1",
                   "logicVersion": 12,
                   "postcondition": {
                     "satisfied": true,
@@ -2312,7 +2312,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
+                      "logicDigest": "e9e54ffb7df22fed632dac763c5ac5e6343c250992e4b7aea5fc46181ba789f1",
                       "logicVersion": 12,
                       "postcondition": {
                         "satisfied": true,
@@ -2397,7 +2397,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "c7fc2f08a7e3a4133bde32d181154ffdb2c165c5627dbcdda2f8846a87e632f9",
+                  "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
                   "logicVersion": 4,
                   "postcondition": {
                     "satisfied": true,
@@ -2442,7 +2442,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "c7fc2f08a7e3a4133bde32d181154ffdb2c165c5627dbcdda2f8846a87e632f9",
+                      "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
                       "logicVersion": 4,
                       "postcondition": {
                         "satisfied": true,
@@ -2611,7 +2611,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "7411a54b559954001c5458e777dd05f318db36435e4f2a648c06d1bcd278fb58",
+        "scaffold_hash": "61a1e8c68616db2cec5753d4e15525b2615452ae801b0a29b37111812a7e3af0",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
