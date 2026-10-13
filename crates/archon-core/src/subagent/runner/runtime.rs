@@ -6,6 +6,7 @@ mod context_fit;
 mod context_fit_tests;
 mod flatten_history;
 mod message_history;
+mod progress_novelty;
 mod progress_stop;
 mod progress_window;
 #[cfg(test)]
@@ -296,7 +297,7 @@ impl SubagentRunner {
                 stream.pending_tools.iter().map(|tool| tool.name.as_str()),
             );
             let activity = archon_tools::subagent_activity::tool_round();
-            let (round_end, refused_calls) = await_tool_round(
+            let (round_end, observed_calls) = await_tool_round(
                 replay_tool_round(
                     self,
                     &mut messages,
@@ -328,7 +329,7 @@ impl SubagentRunner {
                 turn.saturating_add(1),
                 &activity_text,
                 &activity_tools,
-                &refused_calls,
+                &observed_calls,
             );
             // The workflow read guard has refused this round terminally
             // (Issue-54): the agent thrashed past the read wall without
@@ -418,9 +419,9 @@ async fn await_tool_round<F>(
     session_id: &str,
     deadline: Option<tokio::time::Instant>,
     credit: &CargoCredit,
-) -> (RoundEnd, Vec<bool>)
+) -> (RoundEnd, Vec<progress_novelty::ObservedCall>)
 where
-    F: std::future::Future<Output = Vec<bool>>,
+    F: std::future::Future<Output = Vec<progress_novelty::ObservedCall>>,
 {
     tokio::pin!(future);
     loop {
