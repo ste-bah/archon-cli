@@ -209,3 +209,164 @@ async fn repeated_own_evidence_reads_are_withdrawn_before_the_ceiling() {
     assert_eq!(guard.read_only_inspections(), ROUNDS_TO_STOP as u32);
     assert!(!guard.read_only_ceiling_reached());
 }
+
+fn author_context_read(path: &std::path::Path) -> Vec<Vec<StreamEvent>> {
+    let input = serde_json::json!({ "file_path": path }).to_string();
+    (0..=ROUNDS_TO_STOP)
+        .map(|index| tool_use_response(&format!("context-{index}"), "Read", &input))
+        .collect()
+}
+
+fn read_only_context_guard() -> archon_tools::workflow_read_guard::WorkflowReadGuard {
+    archon_tools::workflow_read_guard::WorkflowReadGuard::shell_only(
+        &archon_tools::workflow_read_guard::WorkflowReadGuardSettings {
+            read_only_soft_call_ceiling: 80,
+            read_only_hard_call_ceiling: 120,
+            ..Default::default()
+        },
+    )
+}
+
+/// Expected before running: the repeated mistyped 64-hex author-context path
+/// produces the real Read tool's missing-file result. At the repeat stall,
+/// 16 admitted reads are still below the 120 ceiling; withdrawal must refuse
+/// another Read without renewing the turn-1 progress window.
+#[tokio::test]
+async fn repeated_mistyped_author_context_path_is_withdrawn_without_window_renewal() {
+    let dir = tempfile::tempdir().unwrap();
+    let context = dir.path().join("author-context");
+    std::fs::create_dir_all(&context).unwrap();
+    let valid = format!("{}.json", "b".repeat(64));
+    std::fs::write(context.join(&valid), "the actual author context").unwrap();
+    let mistyped = context.join(format!("{}.json", "a".repeat(64)));
+    let provider = Arc::new(MockProvider::new(author_context_read(&mistyped)));
+    let mut runner = make_runner(provider.clone(), 40);
+    runner.tool_context.working_dir = dir.path().to_path_buf();
+    runner.tool_context.session_id = "mistyped-context".into();
+    runner.tool_context.workflow_read_guard = Some(Arc::new(read_only_context_guard()));
+    let clock = archon_tools::subagent_dispatch_clock::DispatchClock::new();
+    clock.admit();
+
+    let result = archon_tools::subagent_dispatch_clock::scope_session(
+        "mistyped-context",
+        vec![Arc::clone(&clock)],
+        runner.run("read the author context"),
+    )
+    .await;
+
+    let error = result
+        .expect_err("the call after withdrawal remains refused")
+        .to_string();
+    assert!(
+        error.contains(archon_tools::NO_PROGRESS_STOP_MARKER),
+        "{error}"
+    );
+    let requests = provider.requests();
+    let first_tool_result = serde_json::to_string(&requests[1].messages).unwrap();
+    assert!(
+        first_tool_result.contains("File does not exist"),
+        "{first_tool_result}"
+    );
+    assert!(
+        first_tool_result.contains(&mistyped.to_string_lossy().to_string()),
+        "{first_tool_result}"
+    );
+    let guard = runner.tool_context.workflow_read_guard.as_ref().unwrap();
+    let before = format!(
+        "before the next refusal: reads={} ceiling={} last_progress={:?} refused_calls=0",
+        guard.read_only_inspections(),
+        120,
+        clock.last_progress()
+    );
+    assert_eq!(guard.read_only_inspections(), ROUNDS_TO_STOP as u32);
+    assert!(!guard.read_only_ceiling_reached());
+    assert!(guard.inspection_withdrawn());
+    let refusal = guard.before_tool("Read", &serde_json::json!({"file_path": mistyped}));
+    assert!(
+        refusal
+            .as_deref()
+            .is_some_and(|text| text.contains("inspection withdrawn:"))
+    );
+    let after = format!(
+        "reads={} ceiling={} withdrawn={} refusal=inspection withdrawn last_progress={:?} refused_calls={}",
+        guard.read_only_inspections(),
+        120,
+        guard.inspection_withdrawn(),
+        clock.last_progress(),
+        clock.refused_calls()
+    );
+    assert_eq!(requests.len(), ROUNDS_TO_STOP + 1);
+    eprintln!("EVIDENCE: #396 mistyped author-context BEFORE {before}; AFTER {after}");
+    assert!(
+        clock
+            .last_progress()
+            .as_deref()
+            .is_some_and(|last| last.starts_with("turn 1: new tool call Read"))
+    );
+    assert_eq!(guard.read_only_inspections(), ROUNDS_TO_STOP as u32);
+}
+
+/// Expected before running: a correctly named, existing 64-hex context file
+/// is read repeatedly by the same real Read path with its content intact;
+/// the pre-existing repeat-stall policy still withdraws after 16 reads and
+/// preserves the turn-1 window anchor.
+#[tokio::test]
+async fn repeated_correct_author_context_path_keeps_its_read_result_before_withdrawal() {
+    let dir = tempfile::tempdir().unwrap();
+    let context = dir.path().join("author-context");
+    std::fs::create_dir_all(&context).unwrap();
+    let path = context.join(format!("{}.json", "c".repeat(64)));
+    std::fs::write(&path, "the actual author context").unwrap();
+    let provider = Arc::new(MockProvider::new(author_context_read(&path)));
+    let mut runner = make_runner(provider.clone(), 40);
+    runner.tool_context.working_dir = dir.path().to_path_buf();
+    runner.tool_context.session_id = "correct-context".into();
+    runner.tool_context.workflow_read_guard = Some(Arc::new(read_only_context_guard()));
+    let clock = archon_tools::subagent_dispatch_clock::DispatchClock::new();
+    clock.admit();
+
+    let result = archon_tools::subagent_dispatch_clock::scope_session(
+        "correct-context",
+        vec![Arc::clone(&clock)],
+        runner.run("read the author context"),
+    )
+    .await;
+
+    let error = result
+        .expect_err("the call after withdrawal remains refused")
+        .to_string();
+    assert!(
+        error.contains(archon_tools::NO_PROGRESS_STOP_MARKER),
+        "{error}"
+    );
+    let requests = provider.requests();
+    let first_tool_result = serde_json::to_string(&requests[1].messages).unwrap();
+    assert!(
+        first_tool_result.contains("the actual author context"),
+        "{first_tool_result}"
+    );
+    let guard = runner.tool_context.workflow_read_guard.as_ref().unwrap();
+    let before = format!(
+        "reads={} ceiling={} result=author-context content present last_progress={:?}",
+        guard.read_only_inspections(),
+        120,
+        clock.last_progress()
+    );
+    assert_eq!(guard.read_only_inspections(), ROUNDS_TO_STOP as u32);
+    assert!(guard.inspection_withdrawn());
+    let after = format!(
+        "reads={} ceiling={} withdrawn={} result=author-context content present last_progress={:?}",
+        guard.read_only_inspections(),
+        120,
+        guard.inspection_withdrawn(),
+        clock.last_progress()
+    );
+    assert_eq!(requests.len(), ROUNDS_TO_STOP + 1);
+    eprintln!("EVIDENCE: #396 correct author-context reread BEFORE {before}; AFTER {after}");
+    assert!(
+        clock
+            .last_progress()
+            .as_deref()
+            .is_some_and(|last| last.starts_with("turn 1: new tool call Read"))
+    );
+}
