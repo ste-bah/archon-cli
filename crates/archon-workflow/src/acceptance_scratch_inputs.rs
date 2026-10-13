@@ -44,7 +44,7 @@ pub(crate) fn acceptance_input_excluded(
 /// and the probe digest -- skips exactly this path
 /// ([`nested_repository_skipped`]): each site materialises the repository
 /// from its commit, never from the live working tree inside the project.
-pub(crate) fn nested_repository(project: &Path, repository: &Path) -> Option<PathBuf> {
+pub fn nested_repository(project: &Path, repository: &Path) -> Option<PathBuf> {
     let project = archon_shell::paths::plain(project.to_path_buf());
     let repository = archon_shell::paths::plain(repository.to_path_buf());
     repository
@@ -55,7 +55,7 @@ pub(crate) fn nested_repository(project: &Path, repository: &Path) -> Option<Pat
 
 /// Whether the project-relative `path` is the nested repository
 /// ([`nested_repository`]); a walk that meets it does not enter it.
-pub(crate) fn nested_repository_skipped(path: &Path, nested: Option<&Path>) -> bool {
+pub fn nested_repository_skipped(path: &Path, nested: Option<&Path>) -> bool {
     nested.is_some_and(|nested| path == nested)
 }
 

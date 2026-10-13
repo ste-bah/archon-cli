@@ -35,18 +35,8 @@ pub fn acceptance_input_excluded(
     inputs::acceptance_input_excluded(path, excludes, task_root)
 }
 
-/// Issue 440: the run's repository relative to the project when it lies
-/// strictly inside it, the one path every project-input walk skips.
-pub fn nested_repository(project: &Path, repository: &Path) -> Option<PathBuf> {
-    inputs::nested_repository(project, repository)
-}
-
-/// Whether a project-relative path is the nested repository
-/// ([`nested_repository`]), which no project-input walk enters.
-pub fn nested_repository_skipped(path: &Path, nested: Option<&Path>) -> bool {
-    inputs::nested_repository_skipped(path, nested)
-}
-
+/// Issue 440: the one nested-repository rule of every project-input walk.
+pub use inputs::{nested_repository, nested_repository_skipped};
 /// Whether a project-relative path is host-owned run state excluded from
 /// acceptance inputs and their hermetic digest.
 pub fn harness_run_state_path(path: &Path) -> bool {
@@ -289,8 +279,7 @@ impl ScratchRoots {
                     .map_err(|e| WorkflowError::io(roots.project.join(".git"), e))?;
             }
             let project_excludes = inputs::project_excludes(policy)?;
-            // Issue 440: the run's repository comes from its commit (the
-            // worktree above), never from the live tree inside an input.
+            // Issue 440: the repository comes from its commit, never an input.
             let nested = inputs::nested_repository(&project, &roots.live_repository);
             let task_relative = tasks
                 .strip_prefix(&project)

@@ -16,10 +16,9 @@
 
 use std::path::{Path, PathBuf};
 
-use archon_workflow::acceptance_scratch::{
-    CHECK_DEFERRED, CHECK_TIMED_OUT, CheckAllowance, acceptance_input_excluded, nested_repository,
-    nested_repository_skipped, relative_key,
-};
+use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, CHECK_TIMED_OUT, CheckAllowance};
+use archon_workflow::acceptance_scratch::{acceptance_input_excluded, relative_key};
+use archon_workflow::acceptance_scratch::{nested_repository, nested_repository_skipped};
 
 use super::*;
 
@@ -316,12 +315,8 @@ fn copy_data(
         ))
     })?;
     let task_root = task_root_relative(&root, task_root)?;
-    let repository = archon_shell::paths::canonicalize(repository).map_err(|error| {
-        Unrun(format!(
-            "could not canonicalize repository root {}: {error}",
-            repository.display()
-        ))
-    })?;
+    let repository = archon_shell::paths::canonicalize(repository)
+        .map_err(|error| Unrun(format!("{}: {error}", repository.display())))?;
     copy_data_relative(
         &root,
         relative,
@@ -500,7 +495,6 @@ pub(super) async fn run_in_copy(
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_hermetic_tests.rs"]
 mod tests;
-
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_nested_repository_tests.rs"]
 mod nested_repository_tests;
