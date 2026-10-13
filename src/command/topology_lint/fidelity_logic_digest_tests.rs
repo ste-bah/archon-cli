@@ -97,8 +97,8 @@ fn fidelity_a_source_edit_without_a_re_pin_trips_the_guard() {
     assert_ne!(re_pinned, SOURCES_DIGEST);
     assert_eq!(pin_check(&re_pinned, edited), Ok(()));
     assert_eq!(
-        CRITIC_LOGIC_VERSION, 1,
-        "#434d keeps the meaning of every verdict"
+        CRITIC_LOGIC_VERSION, 2,
+        "#441 changes the question with PRD acceptance context and whole-set fallback"
     );
 }
 

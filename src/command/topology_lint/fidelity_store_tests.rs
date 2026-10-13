@@ -162,6 +162,29 @@ fn a_changed_critic_logic_version_reasks_new_schema_records() {
     );
 }
 
+#[test]
+fn critic_logic_version_two_does_not_reuse_version_one_verdicts() {
+    let temp = tempfile::tempdir().unwrap();
+    let prior = VerdictStore::new(
+        temp.path().join("verdicts"),
+        identity().with_critic_logic_version(1),
+    );
+    let asked = Asked::new(
+        obligation_with("The registry holds every entry."),
+        tasks(OBLIGES, "Second task."),
+    );
+    prior.save(asked.question(), &supported()).unwrap();
+    let next = VerdictStore::new(
+        prior.dir().into(),
+        identity().with_critic_logic_version(super::CRITIC_LOGIC_VERSION),
+    );
+    assert_eq!(
+        next.load(asked.question()),
+        None,
+        "version 2 must ask the new question again"
+    );
+}
+
 /// A true verdict stands only over the same tasks with byte-identical texts:
 /// any edit to any of them, a task joining or leaving the cluster, or a
 /// changed obligation text re-asks it — its quote being still present is

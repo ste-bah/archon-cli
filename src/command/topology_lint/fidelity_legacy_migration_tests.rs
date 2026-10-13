@@ -208,8 +208,8 @@ async fn unreviewed_critic_sources_read_migrate_and_write_no_record() {
     let reviewed = resolve_built_from(cwd, &critic, env!("ARCHON_FIDELITY_SOURCES_DIGEST")).await;
     assert_eq!(
         critic.calls(),
-        0,
-        "the reviewed build reuses and migrates them"
+        2,
+        "the reviewed v2 question does not reuse version-1 legacy verdicts"
     );
-    assert_eq!((reviewed.asked, reviewed.cached), (0, 6));
+    assert_eq!((reviewed.asked, reviewed.cached), (2, 4));
 }

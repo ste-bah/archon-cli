@@ -35,7 +35,8 @@
 /// `fidelity_store_legacy.rs`).
 ///
 /// 1: the logic of schema 4 and schema 5 (#434, #434c).
-pub const CRITIC_LOGIC_VERSION: u32 = 1;
+/// 2: PRD acceptance/gap context and whole-set candidate fallback change the question.
+pub const CRITIC_LOGIC_VERSION: u32 = 2;
 
 /// The digest of [`FILES`] as reviewed against [`CRITIC_LOGIC_VERSION`].
 ///
@@ -50,7 +51,9 @@ pub const CRITIC_LOGIC_VERSION: u32 = 1;
 ///   answered again in the same conversation with the other meaning is
 ///   logged, naming both meanings, and nothing is recorded; the kept
 ///   verdict stays final. No acceptance rule changed.
-pub const SOURCES_DIGEST: &str = "8558044b0a09b9665085f65be84237450894456539afbc40b6ef34ad23d6bee4";
+/// - Re-pinned for #441, version 2: PRD acceptance/gap context and the
+///   whole-set candidate fallback change what question a verdict answers.
+pub const SOURCES_DIGEST: &str = "54392cddd8a3d2c718e27c993d798b498a7488f75f407cc0db8407ae7ed92882";
 
 /// Hashed, sorted: the critic call, its prompt rendering, its reply reader
 /// and checks (the `#[path]` modules of `fidelity_audit.rs`).
@@ -59,6 +62,7 @@ pub const FILES: &[&str] = &[
     "crates/archon-workflow/src/fidelity_audit.rs",
     "crates/archon-workflow/src/fidelity_audit_check.rs",
     "crates/archon-workflow/src/fidelity_audit_reply.rs",
+    "src/command/topology_lint/fidelity_candidate_fallback.rs",
     "src/command/topology_lint/fidelity_critic.rs",
 ];
 

@@ -295,7 +295,9 @@ async fn standing_verdicts_that_contradict_each_other_are_one_finding_quoting_bo
         task_id: "TASK-WS-001".into(),
         text: std::fs::read_to_string(task_path(cwd, "TASK-WS-001")).unwrap(),
     }];
-    let skeleton = archon_workflow::fidelity_audit::SkeletonSummary::absent();
+    let prd = std::fs::read_to_string(cwd.join("tasks/PRD-WS-001.md")).unwrap();
+    let skeleton =
+        archon_workflow::fidelity_audit::SkeletonSummary::absent().with_prd_context(&prd);
     let request = crate::command::topology_lint::fidelity_critic::request(&[], &[], &skeleton);
     let store = VerdictStore::new(store_dir(cwd), StoreIdentity::of(critic.as_ref()))
         .for_request(critic.message_request_identity(&request));

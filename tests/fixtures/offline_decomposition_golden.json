@@ -1281,8 +1281,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-            "logicVersion": 13,
+            "logicDigest": "4b32ffb93ef8edad5232a267bdb0dbef927c9f5f3ad652497e0e5c732544a40e",
+            "logicVersion": 14,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1401,8 +1401,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-            "logicVersion": 13,
+            "logicDigest": "4b32ffb93ef8edad5232a267bdb0dbef927c9f5f3ad652497e0e5c732544a40e",
+            "logicVersion": 14,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1621,8 +1621,8 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-            "logicVersion": 12,
+            "logicDigest": "4b32ffb93ef8edad5232a267bdb0dbef927c9f5f3ad652497e0e5c732544a40e",
+            "logicVersion": 13,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative task-set-lint postcondition evaluated"
@@ -2015,8 +2015,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                  "logicVersion": 13,
+                  "logicDigest": "4b32ffb93ef8edad5232a267bdb0dbef927c9f5f3ad652497e0e5c732544a40e",
+                  "logicVersion": 14,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2065,8 +2065,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                      "logicVersion": 13,
+                      "logicDigest": "4b32ffb93ef8edad5232a267bdb0dbef927c9f5f3ad652497e0e5c732544a40e",
+                      "logicVersion": 14,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2147,8 +2147,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                  "logicVersion": 13,
+                  "logicDigest": "4b32ffb93ef8edad5232a267bdb0dbef927c9f5f3ad652497e0e5c732544a40e",
+                  "logicVersion": 14,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2197,8 +2197,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                      "logicVersion": 13,
+                      "logicDigest": "4b32ffb93ef8edad5232a267bdb0dbef927c9f5f3ad652497e0e5c732544a40e",
+                      "logicVersion": 14,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2279,8 +2279,8 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                  "logicVersion": 12,
+                  "logicDigest": "4b32ffb93ef8edad5232a267bdb0dbef927c9f5f3ad652497e0e5c732544a40e",
+                  "logicVersion": 13,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative task-set-lint postcondition evaluated"
@@ -2324,8 +2324,8 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                      "logicVersion": 12,
+                      "logicDigest": "4b32ffb93ef8edad5232a267bdb0dbef927c9f5f3ad652497e0e5c732544a40e",
+                      "logicVersion": 13,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative task-set-lint postcondition evaluated"

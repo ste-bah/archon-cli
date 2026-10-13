@@ -118,6 +118,17 @@ fn prompt_carries_the_typed_question_every_obligation_and_every_task_text() {
     assert!(prompt.contains("You are not shown the repository"));
 }
 
+#[test]
+fn prompt_judges_obligations_under_prd_acceptance_and_gap_context() {
+    let context = "# Done definition\nDone definition: required artifact exists.\n\n# Residual gap policy\nResidual gaps may be explicitly scoped and fail-closed.";
+    let summary = SkeletonSummary::absent().with_prd_context(context);
+    let prompt = fidelity_prompt(&obligations(), &tasks(), &summary);
+    assert!(prompt.contains("PRD ACCEPTANCE AND GAP CONTEXT"));
+    assert!(prompt.contains("Done definition: required artifact exists."));
+    assert!(prompt.contains("Residual gaps may be explicitly scoped and fail-closed."));
+    assert!(prompt.contains("judge it under any supplied PRD acceptance and residual-gap context"));
+}
+
 /// The skeleton section sits after the obligations and before the task
 /// texts, and the instruction says what it establishes.
 #[test]
