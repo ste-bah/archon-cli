@@ -15,6 +15,12 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     }
 
     fn record_is_reusable(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool>;
+    /// Whether a call of `request` publishes an artifact beyond its gate
+    /// envelope: a landing, whose superseded rounds a resume replays as
+    /// history and never runs again (`landing_lineage`).
+    fn publishes(&self, _request: &HostCommandRequest) -> WorkflowResult<bool> {
+        Ok(false)
+    }
     /// Whether the record's landed outcome is still exactly what is on disk,
     /// findings or not: identity, receipt, postcondition and terminal subject.
     /// Defaults to the stricter reuse test.

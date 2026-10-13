@@ -27,6 +27,14 @@ pub(crate) fn candidate_refused_before_staging(
         && command.declared_write_set.len() > 1
 }
 
+/// Whether the candidate's findings hold its publication back.
+///
+/// A body the land gate sends back is never written to the live task root,
+/// in any gate mode: the script authors it again either way, and a refused
+/// body on disk is what every sibling gate and the set gate then read, and
+/// what a later resume could take for the subject's body. Its bytes stay in
+/// the run's call record. Under observe the other capabilities still publish
+/// what carries findings.
 pub(crate) fn candidate_findings_prevent_publication(
     command_id: &str,
     mode: archon_core::config::GateMode,
@@ -39,7 +47,7 @@ pub(crate) fn candidate_findings_prevent_publication(
         ) {
             return true;
         }
-        if mode == archon_core::config::GateMode::Observe {
+        if mode == archon_core::config::GateMode::Observe && command_id != "land-task-body" {
             return false;
         }
         match command_id {
@@ -269,6 +277,59 @@ mod tests {
         assert!(!candidate_refused_before_staging(
             &prepared(&["gate-envelope.json"]),
             &declared
+        ));
+    }
+
+    fn envelope(scopes: &[RemediationScope]) -> GateEnvelopeV1 {
+        GateEnvelopeV1 {
+            schema_version: GATE_ENVELOPE_SCHEMA_VERSION,
+            report: serde_json::json!("report"),
+            policy_findings: scopes
+                .iter()
+                .map(|scope| GatePolicyFinding {
+                    deterministic_defect: None,
+                    text: "finding".into(),
+                    subject: "TASK-X-001".into(),
+                    source_path: None,
+                    remediation_scope: *scope,
+                })
+                .collect(),
+            operational_error: None,
+        }
+    }
+
+    /// A body the land gate sends back is not written to the live task
+    /// root under observe either; a body with predecessor notes only is.
+    #[test]
+    fn a_refused_body_is_never_published_in_any_gate_mode() {
+        use archon_core::config::GateMode;
+        for mode in [GateMode::Observe, GateMode::Enforce] {
+            for scope in [RemediationScope::Body, RemediationScope::CandidateArtifact] {
+                assert!(
+                    candidate_findings_prevent_publication(
+                        "land-task-body",
+                        mode,
+                        &envelope(&[scope])
+                    ),
+                    "{mode:?} {scope:?}"
+                );
+            }
+            assert!(!candidate_findings_prevent_publication(
+                "land-task-body",
+                mode,
+                &envelope(&[RemediationScope::InheritedPredecessor])
+            ));
+            assert!(!candidate_findings_prevent_publication(
+                "land-task-body",
+                mode,
+                &envelope(&[])
+            ));
+        }
+        // Other capabilities keep observe's publish-with-findings rule.
+        assert!(!candidate_findings_prevent_publication(
+            "freeze-skeleton",
+            GateMode::Observe,
+            &envelope(&[RemediationScope::Skeleton])
         ));
     }
 }

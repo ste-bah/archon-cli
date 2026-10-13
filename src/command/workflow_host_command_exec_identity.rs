@@ -165,6 +165,21 @@ impl FixedHostCommandExecutor {
         ))
     }
 
+    /// Whether `request`'s capability publishes beyond its gate envelope.
+    pub(super) fn publishes_for(&self, request: &HostCommandRequest) -> bool {
+        self.catalog
+            .capabilities
+            .get(&request.command_id)
+            .is_some_and(|capability| !logic::judges_only(capability))
+    }
+
+    /// The pinned source digest `request`'s capability is judged by.
+    pub(super) fn logic_digest_for(&self, request: &HostCommandRequest) -> Option<String> {
+        self.logic_digests
+            .get(&request.command_id)
+            .map(|(digest, _)| digest.clone())
+    }
+
     /// The logic version capability `id` is judged by in this build.
     pub(super) fn logic_version_for(&self, id: &str) -> WorkflowResult<u32> {
         self.logic

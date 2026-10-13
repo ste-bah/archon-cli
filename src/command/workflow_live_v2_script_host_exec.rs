@@ -122,7 +122,14 @@ impl WorkflowScriptHost {
         // round describes a tree that may no longer exist, so it is never
         // replayed, by any reuse path. Re-running costs one round of checks.
         let reusable_kind = !archon_workflow::v2::script::is_acceptance_stage_call(&execution.call);
-        // Issue 261: what a taken pause covers replays verbatim, first.
+        // Superseded landing rounds first, then pause coverage (Issue 261).
+        if reusable_kind
+            && let Some(view) = self
+                .replay_historic_landing(&execution, execution_generation)
+                .await?
+        {
+            return Ok(view);
+        }
         if reusable_kind
             && let Some(view) = self
                 .replay_covered_attempt(&execution, &input_hash, execution_generation)

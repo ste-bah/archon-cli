@@ -192,6 +192,9 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         self.record_is_reusable_live(record, false)
     }
 
+    fn publishes(&self, request: &HostCommandRequest) -> WorkflowResult<bool> {
+        Ok(self.publishes_for(request))
+    }
     fn judged_inputs(&self, request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
         self.judged_inputs_for(request)
     }
@@ -220,10 +223,7 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
     }
 
     fn logic_digest(&self, request: &HostCommandRequest) -> WorkflowResult<Option<String>> {
-        Ok(self
-            .logic_digests
-            .get(&request.command_id)
-            .map(|(digest, _)| digest.clone()))
+        Ok(self.logic_digest_for(request))
     }
 
     fn logic_build(&self, _request: &HostCommandRequest) -> WorkflowResult<Option<String>> {

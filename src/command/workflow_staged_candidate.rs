@@ -99,6 +99,14 @@ fn redacted_preview(text: &str) -> String {
     redacted.chars().take(200).collect()
 }
 
+/// The bytes the body gate lands for a stamped `candidate` bound to the task
+/// file at `path`: its task file, packaging removed. `Err` is the refusal
+/// finding the gate gives such an answer (the resume's landing
+/// reconciliation rebuilds a recorded landing with it).
+pub(crate) fn landed_task_file(candidate: Vec<u8>, path: &Path) -> Result<Vec<u8>, String> {
+    normalize_task_candidate(candidate, path).map(|landed| landed.bytes)
+}
+
 /// The task file in `candidate`; or the one finding text that refuses it.
 /// Bytes that are not UTF-8 pass through untouched for the mechanical checks
 /// to report. Whatever the host removes is recorded as [`Packaging`], and

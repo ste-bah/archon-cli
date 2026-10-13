@@ -332,6 +332,20 @@ pub(crate) async fn dry_run_fixed_decomposition(
             }
         ));
     }
+    // Read-only: the bodies a resume would restore, and what it does with
+    // every recorded landing request.
+    let reconciled = crate::command::workflow_decompose_landing_reconcile::reconcile_task_root(
+        &project_root,
+        &run_dir,
+        &task_root,
+        false,
+    )
+    .unwrap_or_else(|error| vec![format!("landing reconciliation: {error:#}")]);
+    let lineage = crate::command::workflow_decompose_landing_reconcile::landing_report(&run_dir)?;
+    for line in reconciled.iter().chain(&lineage) {
+        output.push_str(line);
+        output.push('\n');
+    }
     Ok(output)
 }
 

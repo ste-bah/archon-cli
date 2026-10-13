@@ -7,7 +7,7 @@ use anyhow::{Result, anyhow};
 use archon_workflow::WorkflowLlmClientFactory;
 
 #[path = "workflow_staged_candidate.rs"]
-mod candidate;
+pub(super) mod candidate;
 
 /// The decomposition's set gate: the point at which a task set with bodies is
 /// accepted, so the obligation fidelity audit runs here unconditionally.

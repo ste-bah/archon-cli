@@ -1,4 +1,5 @@
 use super::*;
+use crate::command::workflow_decompose_landing_reconcile as landing_reconcile;
 
 #[path = "workflow_decompose_resume_dry_run.rs"]
 mod dry_run;
@@ -304,6 +305,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     )?;
     // Verify readable execution state before any provider or lifecycle change.
     upgrade::validate_result_state(&store, run_id)?;
+    // Every body is its current landing before the task root is read.
+    landing_reconcile::resume(&project_root, &store.run_dir(run_id), &task_root, &ui_sink).await?;
     // Pin the live frozen-chain decision only after admission succeeds. The
     // record is independent of transitions and phase seeds, so every resume
     // generation gets the same deterministic decision on replay.

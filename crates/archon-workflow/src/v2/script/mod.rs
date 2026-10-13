@@ -54,6 +54,7 @@ pub mod history_replay;
 pub mod host_call_yield;
 mod host_command;
 pub mod js_cpu_clock;
+pub mod landing_lineage;
 pub mod refused_landings;
 pub mod remediation_dispositions;
 pub mod remediation_escalation;

@@ -283,7 +283,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
         // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
         // #443: the version bumps above; asserted runtime paths are no longer repository claims.
-        sources_digest: "3adb28e510b479d0f0edb08238b73b7a6199b86482450b50f744da985309628c",
+        // Re-pin only: the staged CLI exposes the body packaging step to the resume's landing
+        // reconciliation; no gate calls the new entry, so every verdict is unchanged.
+        sources_digest: "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
         build_bound: false,
     },
     CapabilityLogic {
@@ -308,7 +310,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
         // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
         // #443: the version bumps above; asserted runtime paths are no longer repository claims.
-        sources_digest: "3adb28e510b479d0f0edb08238b73b7a6199b86482450b50f744da985309628c",
+        // Re-pin only: the staged CLI exposes the body packaging step to the resume's landing
+        // reconciliation; no gate calls the new entry, so every verdict is unchanged.
+        sources_digest: "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
         build_bound: false,
     },
     CapabilityLogic {
@@ -343,7 +347,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
-        sources_digest: "df8a23a6a1574ca596e80a559bcc4a926a5ce46c994773090fe059ff7e8d5df6",
+        // Re-pin only: the executor names whether a capability publishes, and moved its digest
+        // lookup; the reuse rules a verification verdict is checked under are unchanged.
+        sources_digest: "094d580b7f3372c43a5ba8f0b7ed6517fe6a14390bdd6158a91d8d7f841c1641",
         build_bound: true,
     },
     CapabilityLogic {
@@ -359,7 +365,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
-        sources_digest: "df8a23a6a1574ca596e80a559bcc4a926a5ce46c994773090fe059ff7e8d5df6",
+        // Re-pin only: the executor names whether a capability publishes, and moved its digest
+        // lookup; the reuse rules a verification verdict is checked under are unchanged.
+        sources_digest: "094d580b7f3372c43a5ba8f0b7ed6517fe6a14390bdd6158a91d8d7f841c1641",
         build_bound: true,
     },
 ];

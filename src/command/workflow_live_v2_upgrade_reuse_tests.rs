@@ -314,6 +314,8 @@ async fn upgrade_358_catalog_environment_reruns_freeze_only() {
     catalog_upgrade("environment").await;
 }
 
+#[path = "workflow_live_v2_upgrade_landing_tests.rs"]
+mod landing_tests;
 #[path = "workflow_live_v2_upgrade_limit_tests.rs"]
 mod limit_tests;
 #[path = "workflow_live_v2_upgrade_logic_tests.rs"]
