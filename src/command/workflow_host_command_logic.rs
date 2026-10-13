@@ -243,7 +243,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #446 follow-up re-pin only: cache compatibility now keeps old evidence;
         // Scratch schema-3 verdicts stay reusable, while Hermetic layoutless
         // evidence reruns under the unchanged version-18 acceptance pin.
-        sources_digest: "712d76bf89e1af57927f275b45014d70343156b095aabc543115aba99f2ae091",
+        // #446 follow-up re-pin only: archive collisions keep both prior byte sets; verdicts are unchanged.
+        sources_digest: "7898dd39cc7c22138b308c28fdaf86f1207e0483e92020abd6639556d3ecfb3f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -263,7 +264,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #446 re-pin only: the skeleton freeze judges no baseline run.
         // #446 follow-up re-pin only: the shared probe cache source changed;
         // freeze-skeleton judges no check runs.
-        sources_digest: "712d76bf89e1af57927f275b45014d70343156b095aabc543115aba99f2ae091",
+        // #446 follow-up: archive collisions keep both prior byte sets.
+        sources_digest: "7898dd39cc7c22138b308c28fdaf86f1207e0483e92020abd6639556d3ecfb3f",
         build_bound: false,
     },
     CapabilityLogic {

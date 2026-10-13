@@ -347,3 +347,19 @@ async fn round2_hermetic_verdict_is_identical_on_disk_reuse() {
         "disk reuse changed verdict"
     );
 }
+#[test]
+fn archive_fallback_keeps_different_bytes_when_writers_interleave() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("result.previous");
+    let first = b"first prior result";
+    let second = b"second prior result";
+
+    assert!(super::write_archive(&archive, first));
+    assert!(super::write_archive(&archive, second));
+
+    assert_eq!(std::fs::read(&archive).unwrap(), first);
+    assert_eq!(
+        std::fs::read(dir.path().join("result.previous.1")).unwrap(),
+        second
+    );
+}

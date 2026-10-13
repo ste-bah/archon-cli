@@ -179,7 +179,14 @@ impl ResultStore {
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
-            Err(_) => return false,
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "could not read prior acceptance evidence for archival"
+                );
+                return false;
+            }
         };
         let suffix = serde_json::from_slice::<serde_json::Value>(&bytes)
             .ok()
@@ -193,6 +200,7 @@ impl ResultStore {
                 }
             })
             .unwrap_or("previous");
+        // Each distinct prior result adds one archive file; cleanup is intentionally absent so evidence is kept.
         for index in 0.. {
             let ext = if index == 0 {
                 suffix.to_string()
@@ -217,20 +225,38 @@ impl ResultStore {
 
 fn write_archive(path: &std::path::Path, bytes: &[u8]) -> bool {
     use std::io::Write;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    match options
-        .open(path)
-        .and_then(|mut file| file.write_all(bytes))
-    {
-        Ok(()) => true,
-        Err(_) => {
-            let _ = std::fs::remove_file(path);
-            false
+    for index in 0.. {
+        let candidate = if index == 0 {
+            path.to_path_buf()
+        } else {
+            let extension = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
+            path.with_extension(format!("{extension}.{index}"))
+        };
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        match options.open(&candidate) {
+            Ok(mut file) => {
+                if file.write_all(bytes).is_ok() {
+                    return true;
+                }
+                drop(file);
+                let _ = std::fs::remove_file(&candidate);
+                return false;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if std::fs::read(&candidate).is_ok_and(|archived| archived == bytes) {
+                    return true;
+                }
+            }
+            Err(_) => return false,
         }
     }
+    false
 }
 
 /// Write `bytes` to `path`, readable by its owner only (a stale file left
