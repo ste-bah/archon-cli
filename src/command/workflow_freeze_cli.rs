@@ -142,7 +142,10 @@ async fn stage_acceptance(
         ));
     }
     let resume = staged_freeze_resume(&mut std::io::stderr());
-    let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
+    let candidate = read_bounded_stdin(
+        archon_workflow::HostCommandRequest::MAX_STDIN_BYTES,
+        staged.staging_root,
+    )?;
     crate::command::workflow_freeze_candidate::record_candidate_extraction(
         &candidate,
         &mut std::io::stderr().lock(),
@@ -249,7 +252,10 @@ fn stage_skeleton(
             "gate_mode=off must return before staged skeleton preparation"
         ));
     }
-    let candidate = read_bounded_stdin(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES)?;
+    let candidate = read_bounded_stdin(
+        archon_workflow::HostCommandRequest::MAX_STDIN_BYTES,
+        staged.staging_root,
+    )?;
     crate::command::workflow_freeze_candidate::record_candidate_extraction(
         &candidate,
         &mut std::io::stderr().lock(),
@@ -335,7 +341,7 @@ fn exit_incomplete_resumable(
 
 #[path = "workflow_freeze_defects.rs"]
 mod defects;
-pub(crate) use defects::{install_entry_validator, skeleton_document};
+pub(crate) use defects::{entry_defects, install_entry_validator, refusal_text, skeleton_document};
 #[path = "workflow_freeze_staged_output.rs"]
 mod staged_output;
 use staged_output::{

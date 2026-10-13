@@ -340,6 +340,8 @@ pub(crate) mod passability_tests_support;
 mod tests;
 
 #[cfg(test)]
+pub(crate) use publish::fail_after_rename;
+#[cfg(test)]
 pub(crate) use publish::reader_test_step;
 #[cfg(test)]
 pub(crate) use publish::take_synced_dirs;

@@ -8,6 +8,7 @@ pub(crate) type StepHook = Option<Box<dyn Fn(&str)>>;
 thread_local! {
     pub(crate) static STEP: RefCell<StepHook> = RefCell::new(None);
     pub(crate) static SYNCS: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+    pub(crate) static FAIL_AFTER_RENAME: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 pub(crate) fn step(value: &str) {
     STEP.with(|hook| {
@@ -18,6 +19,19 @@ pub(crate) fn step(value: &str) {
 }
 pub(crate) fn synced(path: &Path) {
     SYNCS.with(|paths| paths.borrow_mut().push(path.to_path_buf()));
+}
+pub(crate) fn fail_after_rename(path: &Path) {
+    FAIL_AFTER_RENAME.with(|target| *target.borrow_mut() = Some(path.to_path_buf()));
+}
+pub(crate) fn take_rename_failure(path: &Path) -> bool {
+    FAIL_AFTER_RENAME.with(|target| {
+        if target.borrow().as_deref() == Some(path) {
+            target.borrow_mut().take();
+            true
+        } else {
+            false
+        }
+    })
 }
 
 /// Windows requires the named termination code as well as the step marker;

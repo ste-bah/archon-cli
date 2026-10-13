@@ -242,14 +242,19 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 18,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
+        // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
+        // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
+        // #387 re-pin only: the launch and resume paths in this closure (frozen-contract launch decision, requirement inventory) do not change how a freeze judges.
+        // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair, after it claims the task root; the freeze judges as before.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
         // #446 follow-up re-pin only: cache compatibility now keeps old evidence;
         // Scratch schema-3 verdicts stay reusable, while Hermetic layoutless
         // evidence reruns under the unchanged version-18 acceptance pin.
         // #446 follow-up re-pin only: archive collisions keep both prior byte sets; verdicts are unchanged.
-        // integration re-pin: merge of #447, #446 and misc2 sources; no logic change
-        sources_digest: "adfc025910c442d423aef97015e3a0e752892841d6d9fe6d2c7f018e7f128fec",
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        sources_digest: "01061442c20265717722fbd48fee3a33f3b6ed289055f51193ff16aa041cb4e3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -265,6 +270,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         version: 3,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
+        // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
+        // #386 re-pin only: a candidate past the inline stdin bound reaches the child whole through a run spill; a candidate that fits is read as before, and one past the bound never had a verdict.
+        // #387 re-pin only: the launch and resume paths in this closure (frozen-contract launch decision, requirement inventory) do not change how a freeze judges.
+        // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair, after it claims the task root; the freeze judges as before.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
         // #440 re-pin only: the skeleton freeze runs no check and copies no input.
@@ -274,8 +283,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #446 follow-up re-pin only: the shared probe cache source changed;
         // freeze-skeleton judges no check runs.
         // #446 follow-up: archive collisions keep both prior byte sets.
-        // integration re-pin: merge of #447, #446 and misc2 sources; no logic change
-        sources_digest: "adfc025910c442d423aef97015e3a0e752892841d6d9fe6d2c7f018e7f128fec",
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        sources_digest: "01061442c20265717722fbd48fee3a33f3b6ed289055f51193ff16aa041cb4e3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -301,6 +311,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // No version bump: refused candidates now stay unpublished in observe mode; only those refused candidates are affected, recorded results remain valid, and the lineage guard makes a future bump safe.
         version: 13,
         sources: &[GATE, CONTRACT, LINT],
+        // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
+        // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
+        // #387 re-pin only: launch routing of refused frozen checks; lint verdicts are unchanged.
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
@@ -308,8 +321,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
         // #443: the version bumps above; asserted runtime paths are no longer repository claims.
         // Re-pin only: observe-mode refused bodies now stay unpublished; refused candidates never publish, existing results remain valid, and lineage protects any future version bump.
-        // integration re-pin: merge of #447, #446 and misc2 sources; no logic change
-        sources_digest: "e9e54ffb7df22fed632dac763c5ac5e6343c250992e4b7aea5fc46181ba789f1",
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        sources_digest: "078341b7f9de27aefef85301990df3086b80755345d84ecb2c380ce665df849f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -329,6 +343,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 12: #443 re-review 3, same rule as land-task-body 13.
         version: 12,
         sources: &[GATE, CONTRACT, LINT],
+        // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
+        // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
+        // #387 re-pin only: launch routing of refused frozen checks; lint verdicts are unchanged.
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
         // #434d re-pin only: a fidelity reply is read verdict by verdict and each verdict kept passes every check a whole reply passes; the store keys on CRITIC_LOGIC_VERSION 1 and migrates schema-4/5 records, so no verdict changes meaning.
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
@@ -337,8 +354,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #443: the version bumps above; asserted runtime paths are no longer repository claims.
         // Re-pin only: the staged CLI exposes the body packaging step to the resume's landing
         // reconciliation; no gate calls the new entry, so every verdict is unchanged.
-        // integration re-pin: merge of #447, #446 and misc2 sources; no logic change
-        sources_digest: "e9e54ffb7df22fed632dac763c5ac5e6343c250992e4b7aea5fc46181ba789f1",
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        sources_digest: "078341b7f9de27aefef85301990df3086b80755345d84ecb2c380ce665df849f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -356,7 +374,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
         // #440 re-pin only: trace calls none of the scratch copy, audit or probe digest walkers that changed.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
-        // integration re-pin: merge of #447, #446 and misc2 sources; no logic change
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         sources_digest: "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
         build_bound: true,
     },
@@ -375,6 +393,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #425 re-pin only: the repository claim parser changed; acceptance verification verdicts do not read claims.
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
+        // #386 re-pin only: stdin spill and progress-event spill code in this closure; verification takes no stdin and its verdicts are unchanged.
+        // #387 re-pin only: the launch decision lives beside verify_frozen_stage, which is unchanged.
+        // #387 re-pin only: the launch decision returns its routing instead of refusing; verify_frozen_stage is unchanged.
         // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
@@ -387,8 +408,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
         // #446 follow-up re-pin only: verification shares cache source files
         // but reads no probe result layout or evidence.
-        // integration re-pin: merge of #447, #446 and misc2 sources; no logic change
-        sources_digest: "dcedfd35d1de3aae356c33a59ebafddd61264f09a5ea7dbc48494f992e5acb21",
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        sources_digest: "7d32c9b4134b260f1d375536b29786add4013b9e10e2e3cf4fe30fbea59c3b40",
         build_bound: true,
     },
     CapabilityLogic {
@@ -402,6 +424,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
         // #434d re-pin only: verification never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
+        // #386 re-pin only: stdin spill and progress-event spill code in this closure; verification takes no stdin and its verdicts are unchanged.
+        // #387 re-pin only: the launch decision lives beside verify_frozen_stage, which is unchanged.
+        // #387 re-pin only: the launch decision returns its routing instead of refusing; verify_frozen_stage is unchanged.
         // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
         // #442 re-pin only: requirements-trace's version bump in this table; verification verdicts are unchanged.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
@@ -414,8 +439,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
         // #446 follow-up re-pin only: verification shares cache source files
         // but reads no probe result layout or evidence.
-        // integration re-pin: merge of #447, #446 and misc2 sources; no logic change
-        sources_digest: "dcedfd35d1de3aae356c33a59ebafddd61264f09a5ea7dbc48494f992e5acb21",
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        sources_digest: "7d32c9b4134b260f1d375536b29786add4013b9e10e2e3cf4fe30fbea59c3b40",
         build_bound: true,
     },
 ];

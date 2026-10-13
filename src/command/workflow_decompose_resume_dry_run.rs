@@ -253,6 +253,17 @@ pub(crate) async fn dry_run_fixed_decomposition(
         output.push_str(line);
         output.push('\n');
     }
+    // Issue 387: the requirement-id inventory change a live resume would name.
+    let inventory = crate::command::workflow_decompose_requirement_inventory::compare(
+        &store,
+        run_id,
+        &prd_digest,
+        &requirement_texts,
+        true,
+    )?;
+    if let Some(change) = inventory {
+        output.push_str(&format!("{}\n", change.line()));
+    }
     if let Some(seed) = seed.as_ref() {
         for (subject, data) in &seed.subjects {
             match data {

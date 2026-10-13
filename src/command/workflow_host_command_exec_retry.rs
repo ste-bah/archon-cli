@@ -9,6 +9,44 @@ use crate::command::workflow_host_command_operational::{
 use crate::command::workflow_host_command_supervisor::HostCommandControlHandle;
 
 impl FixedHostCommandExecutor {
+    /// Issue 386 (item 3): a candidate longer than its capability takes
+    /// inline goes to the child through a spill in this attempt's directory,
+    /// and the child's stdin carries the bounded view that names it. A
+    /// command with no spill directory (no run) keeps the old refusal: there
+    /// is nowhere durable to put the candidate.
+    pub(super) fn spill_oversized_stdin(
+        &self,
+        command: &mut ResolvedHostCommand,
+    ) -> WorkflowResult<()> {
+        use crate::command::workflow_host_command_stdin_spill as spill;
+        let Some(stdin) = command.stdin.as_deref() else {
+            return Ok(());
+        };
+        let limit = self
+            .catalog
+            .capabilities
+            .get(&command.command_id)
+            .map(|capability| capability.max_stdin_bytes)
+            .ok_or_else(|| {
+                WorkflowError::SpecInvalid(format!(
+                    "undeclared host command capability '{}'",
+                    command.command_id
+                ))
+            })?;
+        if !spill::needs_spill(stdin, limit) {
+            return Ok(());
+        }
+        let Some(directory) = &command.spill_dir else {
+            return Err(WorkflowError::SpecInvalid(format!(
+                "host command capability '{}' stdin exceeds {limit} bytes and this call has no run directory to spill it to",
+                command.command_id
+            )));
+        };
+        let view = spill::spill(directory, stdin)?;
+        command.stdin = Some(view);
+        Ok(())
+    }
+
     async fn execute_process_with_run_control(
         &self,
         request: ResolvedHostCommand,
@@ -111,6 +149,7 @@ impl FixedHostCommandExecutor {
                 attempt_command.spill_dir =
                     Some(directory.join(format!("attempt-{attempt}-{execution_id}")));
             }
+            self.spill_oversized_stdin(&mut attempt_command)?;
             let observed = self
                 .execute_process_with_run_control(
                     attempt_command,

@@ -333,10 +333,12 @@ pub(crate) mod workflow_decompose_events;
 pub(crate) mod workflow_decompose_frozen_chain;
 pub(crate) mod workflow_decompose_identity;
 pub(crate) mod workflow_decompose_landing_reconcile;
+pub(crate) mod workflow_decompose_launch_repair;
 pub(crate) mod workflow_decompose_log;
 pub(crate) mod workflow_decompose_owner;
 pub(crate) mod workflow_decompose_progress;
 pub(crate) mod workflow_decompose_repository;
+pub(crate) mod workflow_decompose_requirement_inventory;
 pub(crate) mod workflow_decompose_seed;
 pub(crate) mod workflow_decompose_stale_owner;
 pub(crate) mod workflow_decompose_state;
@@ -393,6 +395,7 @@ pub(crate) mod workflow_host_command_postcondition;
 #[cfg(test)]
 mod workflow_host_command_publication_tests;
 pub(crate) mod workflow_host_command_publish;
+pub(crate) mod workflow_host_command_stdin_spill;
 pub(crate) mod workflow_host_command_supervisor;
 pub(crate) mod workflow_host_command_teardown_latch;
 #[cfg(test)]

@@ -7,7 +7,10 @@ use std::sync::LazyLock;
 
 use crate::command::workflow_host_command_logic::{CAPABILITY_LOGIC, LOGIC_DENYLIST};
 use crate::command::workflow_host_command_logic_closure::{Closure, Workspace};
-use crate::command::workflow_host_command_logic_source::hashed_text;
+use crate::command::workflow_host_command_logic_source::{SourceTree, hashed_text_for_file};
+
+#[path = "workflow_host_command_logic_digest_tests.rs"]
+mod digest_tests;
 
 /// A capability's hashed sources: the digest, the closure, and the
 /// references the walk could not resolve.
@@ -26,6 +29,16 @@ pub(crate) fn sources_digest(
     roots: &[&str],
     deny: &[(&str, &str)],
 ) -> Hashed {
+    sources_digest_from(workspace, &SourceTree::checkout(base), roots, deny)
+}
+
+/// The same digest as the guard, read through a checkout or a one-file overlay.
+pub(crate) fn sources_digest_from(
+    workspace: &mut Workspace,
+    source: &SourceTree<'_>,
+    roots: &[&str],
+    deny: &[(&str, &str)],
+) -> Hashed {
     let closure = workspace.closure(roots, deny);
     let mut framed = Vec::new();
     let mut frame = |part: &[u8]| {
@@ -38,9 +51,9 @@ pub(crate) fn sources_digest(
             .map(|part| part.as_os_str().to_string_lossy().into_owned())
             .collect::<Vec<_>>()
             .join("/");
-        let text = std::fs::read_to_string(base.join(file)).unwrap();
+        let text = source.read_to_string(file);
         let text = if name.ends_with(".rs") {
-            hashed_text(&text)
+            hashed_text_for_file(&name, &text)
         } else {
             text.replace("\r\n", "\n")
         };

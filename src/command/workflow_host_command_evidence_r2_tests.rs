@@ -22,12 +22,18 @@ fn before_invalidation_failure(phase: &str) {
     };
     assert!(failure.is_err());
     owner::release(&pending); // the executor crashed before keep()
-    let refused = require_no_running_groups(run.path(), "run");
-    drop(guard);
-    assert!(
-        refused.is_err(),
-        "{phase}: old evidence falsely healed after a write failed before invalidation"
-    );
+    // Issue 422: the failed write left the durable marker as it was, which
+    // a reader cannot tell from any other crash. The host proves the scope
+    // that marker records (its group, session and pinned identities): here
+    // it is empty, so the resume heals instead of asking for a manual
+    // check. A member the tracker adopted after the last durable pin and
+    // that also left the group and the session is outside what any record
+    // names; no probe can find it (the residual #422 accepts).
+    let healed = require_no_running_groups(run.path(), "run");
+    std::mem::forget(guard);
+    let ended = healed.unwrap_or_else(|error| panic!("{phase}: {error}"));
+    assert_eq!(ended.len(), 1, "{phase}: {ended:?}");
+    assert!(!ended[0].survivors_unknown, "{phase}: {:?}", ended[0]);
 }
 
 #[test]

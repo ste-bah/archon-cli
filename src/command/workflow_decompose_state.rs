@@ -129,23 +129,16 @@ pub(crate) fn project_fixed_call(
         "reused": projection.reused,
     });
     let sanitized = archon_workflow::events::sanitize_value(detail);
-    let encoded = serde_json::to_vec(&sanitized)?;
-    if encoded.len() > MAX_PROGRESS_EVENT_BYTES {
-        return Err(WorkflowError::StageFailed(format!(
-            "fixed decomposition progress event exceeds {MAX_PROGRESS_EVENT_BYTES} bytes"
-        )));
-    }
     // Decided before the kind is consumed by the emit below.
     let emit_completion = record.call.method == WorkflowV2HostMethod::HostCommand
         && !matches!(kind, FixedCallProjectionKind::Started)
         && projection.event_kind != WorkflowEventKind::HostCommandCompleted;
     let seq = store.next_event_seq(run_id)?;
-    WorkflowEventLog::new(store.clone()).emit(
-        run_id,
-        seq,
-        projection.event_kind,
-        sanitized.clone(),
-    )?;
+    // Issue 386: an event past the cap is spilled whole and logged as a
+    // bounded view naming the spill; the operator log and the UI below
+    // read the full detail.
+    let logged = spill::bounded_event(store, run_id, seq, &sanitized, MAX_PROGRESS_EVENT_BYTES)?;
+    WorkflowEventLog::new(store.clone()).emit(run_id, seq, projection.event_kind, logged)?;
     append_log(&log_path, seq, &sanitized, &projection.finding_texts)?;
     // A host command completing and what that completion meant are separate
     // events in the vocabulary. Folding them together left a healthy run with
@@ -412,6 +405,8 @@ fn projection(
     })
 }
 
+#[path = "workflow_decompose_state_spill.rs"]
+mod spill;
 #[path = "workflow_decompose_state_subjects.rs"]
 mod subjects;
 use subjects::{

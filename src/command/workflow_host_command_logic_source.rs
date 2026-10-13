@@ -2,7 +2,36 @@
 //! or a string literal never fakes or hides a reference, the token-level
 //! readers of its attributes, `use` trees and `impl` headers, and the text
 //! the logic digest is taken over.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+/// Reads the checkout, with optional in-memory replacements for selected files.
+/// The guard and mutation tests share this source-tree reader.
+pub(crate) struct SourceTree<'a> {
+    base: &'a Path,
+    replacements: BTreeMap<PathBuf, String>,
+}
+
+impl<'a> SourceTree<'a> {
+    pub(crate) fn checkout(base: &'a Path) -> Self {
+        Self {
+            base,
+            replacements: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn with_file(mut self, path: &Path, text: String) -> Self {
+        self.replacements.insert(path.to_path_buf(), text);
+        self
+    }
+
+    pub(crate) fn read_to_string(&self, file: &Path) -> String {
+        self.replacements
+            .get(file)
+            .cloned()
+            .unwrap_or_else(|| std::fs::read_to_string(self.base.join(file)).unwrap())
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Tok {
@@ -120,21 +149,6 @@ pub(crate) fn hashed_text(text: &str) -> String {
         let start = offset + (line.len() - line.trim_start().len());
         offset += line.len() + 1;
         if !comments.contains(&start) {
-            // The pin is the output of this digest. Hashing its current
-            // value would make every legitimate re-pin change the digest
-            // again, so keep the field and its shape while normalizing only
-            // the pinned bytes.
-            if line.trim_start().starts_with("sources_digest: ") {
-                if let (Some(open), Some(close)) = (line.find('"'), line.rfind('"')) {
-                    if close > open {
-                        let mut normalized = line[..=open].to_owned();
-                        normalized.push_str("<source-digest>");
-                        normalized.push_str(&line[close..]);
-                        kept.push(normalized);
-                        continue;
-                    }
-                }
-            }
             kept.push(line.to_owned());
         }
     }
@@ -155,6 +169,38 @@ pub(crate) fn hashed_text(text: &str) -> String {
     });
     kept.truncate(cut.unwrap_or(kept.len()));
     kept.join("\n")
+}
+
+/// The digest of the capability registry includes its executable logic and
+/// metadata, except for the pin values that are outputs of that digest.
+pub(crate) fn hashed_text_for_file(name: &str, text: &str) -> String {
+    if name != "src/command/workflow_host_command_logic.rs" {
+        return hashed_text(text);
+    }
+    // This matches only whole `sources_digest: "<64 hex>",` lines in this
+    // file; a multiline string containing such a line would be normalized too.
+    let normalized = text
+        .lines()
+        .map(|line| -> String {
+            let trimmed = line.trim_start();
+            let Some(value) = trimmed.strip_prefix("sources_digest: \"") else {
+                return line.to_owned();
+            };
+            let Some((digest, suffix)) = value.split_once('"') else {
+                return line.to_owned();
+            };
+            if digest.len() == 64
+                && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+                && suffix.trim() == ","
+            {
+                let indent = &line[..line.len() - trimmed.len()];
+                return format!("{indent}sources_digest: \"<pinned>\",");
+            }
+            line.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    hashed_text(&normalized)
 }
 
 pub(crate) const KEYWORDS: &[&str] = &[

@@ -464,3 +464,6 @@ async fn revision_only_resume_persists_live_frozen_chain_without_a_phase_seed() 
 
 #[path = "workflow_decomposition_upgrade_live_frozen_receipt_tests.rs"]
 mod receipt_chain;
+
+#[path = "workflow_decomposition_upgrade_accepted_chain_tests.rs"]
+mod accepted_chain;

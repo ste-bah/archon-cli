@@ -463,6 +463,11 @@ pub(crate) fn reader_test_step(step: &str) {
     crash_point(step);
 }
 
+#[cfg(test)]
+pub(crate) fn fail_after_rename(path: &Path) {
+    journal::test_hooks::fail_after_rename(path);
+}
+
 /// The directories flushed on this thread since the last call.
 #[cfg(test)]
 pub(crate) fn take_synced_dirs() -> Vec<std::path::PathBuf> {

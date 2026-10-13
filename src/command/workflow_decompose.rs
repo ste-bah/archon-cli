@@ -1,6 +1,5 @@
 //! First-class launcher for the immutable engine-native decomposition run.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -16,7 +15,12 @@ use archon_workflow::{
     workflow_scaffold_hash,
 };
 
+use super::workflow_decompose_launch_repair as launch_repair;
+#[path = "workflow_decompose_arguments.rs"]
+mod arguments;
+use super::workflow_decompose_requirement_inventory as inventory;
 use super::workflow_host_command_catalog::fixed_decomposition_catalog;
+pub(crate) use arguments::{fixed_launch_digest, fixed_script_arguments};
 
 #[path = "workflow_decompose_provider_environment.rs"]
 mod provider_environment;
@@ -119,18 +123,23 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     let starting_binary_revision = crate::command::workflow_test_seams::binary_revision();
     let catalog = fixed_decomposition_catalog(&starting_binary_revision)?;
     let script_digest = workflow_scaffold_hash(FIXED_SCRIPT_SOURCE);
-    // What the task root already holds of the frozen chain, verified now. A
-    // lock that does not verify stops the launch here, before a run exists.
-    let frozen_chain = crate::command::workflow_decompose_frozen_chain::frozen_chain_snapshot(
+    let store = WorkflowStore::project(&project_root);
+    let snapshot = crate::command::workflow_decompose_frozen_chain::prepare_launch_snapshot(
         &project_root,
         &prd_path,
         &task_root,
+        &store,
+        &repository.root,
+        &catalog,
     )?;
+    let deferred_frozen_chain = snapshot.deferred;
+    let mut frozen_chain = snapshot.frozen_chain;
+    let mut launch_decision = snapshot.decision;
     // A task root that already records its repository must name this one; a
     // moved base commit is reported below, once the run exists to log it.
     let existing_record =
         super::workflow_decompose_repository::verify_existing_record(&task_root, &repository)?;
-    let arguments = fixed_script_arguments(
+    let mut arguments = fixed_script_arguments(
         &project_root,
         &prd_path,
         &prd_digest,
@@ -140,7 +149,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         &repository.root,
         frozen_chain.to_argument(),
     );
-    let script_arguments =
+    let mut script_arguments =
         super::workflow_task_set::script_arguments_with_prd_requirement_texts(&arguments, prd_text);
     let log_path = task_root.join(".decompose.log");
     let identity = FixedRunIdentityV1 {
@@ -199,11 +208,10 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         spec,
         FIXED_SCRIPT_SOURCE,
         calls,
-        script_arguments,
+        script_arguments.clone(),
     );
     plan.check_policy = Some(check_policy);
 
-    let store = WorkflowStore::project(&project_root);
     let mut approval_spec = plan.approval_metadata_spec();
     approval_spec.permissions.insert(
         FIXED_LAUNCH_DIGEST_PERMISSION.to_string(),
@@ -218,6 +226,24 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
     // releases the task root it claimed (see `claim::settle_launch_failure`).
     let work_started = std::sync::atomic::AtomicBool::new(false);
     let launch = async {
+        if deferred_frozen_chain {
+            // Recovery is allowed only after this run owns the task root.
+            (frozen_chain, launch_decision) =
+                crate::command::workflow_decompose_frozen_chain::recover_deferred_launch_snapshot(
+                    &project_root,
+                    &prd_path,
+                    &task_root,
+                    &store,
+                    &repository.root,
+                    &catalog,
+                )?;
+            arguments["frozenChain"] = frozen_chain.to_argument();
+            script_arguments =
+                super::workflow_task_set::script_arguments_with_prd_requirement_texts(
+                    &arguments, prd_text,
+                );
+            plan.script_args = Some(script_arguments.clone());
+        }
         if let Some(slot) = persisted_run_id {
             *slot
                 .lock()
@@ -241,6 +267,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
         }
         store.write_run_json(&run_id, FIXED_CATALOG_PATH, &catalog)?;
         store.write_run_json(&run_id, FIXED_ARGUMENTS_PATH, &arguments)?;
+        inventory::record_launch(&store, &run_id, &prd_digest, prd_text)?;
         store.write_run_json(&run_id, FIXED_PROVIDER_ROUTE_PATH, &route)?;
         crate::command::workflow_decompose_log::append_fixed_log_marker(
             &log_path,
@@ -284,6 +311,27 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             )))
             .await
             .map_err(|error| anyhow!("reporting persisted fixed decomposition run id: {error}"))?;
+        // Issue 387: refused frozen checks are re-authored, only after the claim.
+        launch_repair::after_claim(
+            factory,
+            launch_decision,
+            &mut frozen_chain,
+            (&store, &run_id, &log_path, &ui_sink),
+            (&project_root, &prd_path, &task_root, &repository.root),
+        )
+        .await?;
+        if !frozen_chain.acceptance {
+            arguments["frozenChain"] = frozen_chain.to_argument();
+            script_arguments["frozenChain"] = frozen_chain.to_argument();
+            plan.script_args = Some(script_arguments.clone());
+            store.write_run_json(&run_id, FIXED_ARGUMENTS_PATH, &arguments)?;
+            super::workflow_live::save_fixed_decomposition_metadata(
+                &store,
+                &run_id,
+                &plan,
+                &state.identity,
+            )?;
+        }
 
         let client = factory
             .build_client(WorkflowLlmClientRequest {
@@ -366,48 +414,6 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             error,
         )
     })
-}
-
-/// Launch-bound script arguments; resume rebuilds and compares them to the
-/// persisted copy. The frozen chain is carried forward verbatim on resume.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn fixed_script_arguments(
-    project_root: &Path,
-    prd_path: &Path,
-    prd_digest: &str,
-    acceptance_criteria: BTreeMap<String, String>,
-    config: &ArchonConfig,
-    task_root: &Path,
-    repository_root: &Path,
-    frozen_chain: serde_json::Value,
-) -> serde_json::Value {
-    serde_json::json!({
-        "projectRoot": path_text(project_root),
-        // Authors and critics use repositoryRoot for code; projectRoot holds
-        // the PRD, task root and .mcp.json (Issue-55).
-        "repositoryRoot": path_text(repository_root),
-        "prdPath": path_text(prd_path),
-        "prdDigest": prd_digest,
-        "acceptanceCriteria": acceptance_criteria,
-        "authorMaxParallelism": config.subagent.max_concurrent.max(1),
-        "taskRoot": path_text(task_root),
-        "gateMode": gate_mode_text(config.workflow.gate_mode),
-        // Use the engine's canonical excluded directory list; broad reads of
-        // large .archon trees have stalled live acceptance authors.
-        "excludedDirs": archon_leann::language::default_exclude_patterns(),
-        "frozenChain": frozen_chain,
-    })
-}
-
-pub(crate) fn fixed_launch_digest(
-    identity: &FixedRunIdentityV1,
-    arguments: &serde_json::Value,
-    catalog: &archon_workflow::CommandCapabilityCatalog,
-    route: &super::workflow_provider_route::TrustedProviderRouteSnapshot,
-    check_policy: &Option<archon_workflow::acceptance_check_environment::CheckPolicy>,
-) -> Result<String> {
-    let bytes = serde_json::to_vec(&(identity, arguments, catalog, route, check_policy))?;
-    Ok(archon_workflow::task_set_contract::content_digest(&bytes))
 }
 
 fn canonical_project_path(project_root: &Path, path: &Path, label: &str) -> Result<PathBuf> {
