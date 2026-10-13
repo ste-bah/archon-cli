@@ -48,12 +48,27 @@ impl HostProbe {
             .collect()
     }
 
+    #[cfg(test)]
     pub(super) async fn run(
         &self,
         contract: &AcceptanceContract,
         digest: &str,
         refs: &[FrozenCommandRef],
     ) -> Vec<CheckResult> {
+        self.run_with_layout(contract, digest, refs)
+            .await
+            .results
+            .into_iter()
+            .map(|evidence| evidence.result)
+            .collect()
+    }
+
+    pub(super) async fn run_with_layout(
+        &self,
+        contract: &AcceptanceContract,
+        digest: &str,
+        refs: &[FrozenCommandRef],
+    ) -> sites::SiteRun {
         let ids = || {
             refs.iter()
                 .map(|r| r.acceptance_id.as_str())
@@ -61,7 +76,11 @@ impl HostProbe {
                 .join(", ")
         };
         match &self.site {
-            Site::Unavailable(_) => return Vec::new(),
+            Site::Unavailable(_) => {
+                return sites::SiteRun {
+                    results: Vec::new(),
+                };
+            }
             Site::Direct => {
                 let site = DirectSite {
                     repository: self.repository.clone(),
@@ -81,14 +100,17 @@ impl HostProbe {
                     match run_check_direct(&site, contract, digest, reference, cancel.clone())
                         .await
                     {
-                        Ok(result) => results.push(result),
+                    Ok(result) => results.push(super::hermetic::CheckEvidence {
+                        result,
+                        copy_layout: None,
+                    }),
                         Err(error) => self.note(format!(
                             "executability probe of '{}' could not run ({error}); it is proven on the hermetic trees instead",
                             reference.acceptance_id
                         )),
                     }
                 }
-                return results;
+                return sites::SiteRun { results };
             }
             Site::Scratch(_) | Site::Hermetic => {}
         }
@@ -98,16 +120,20 @@ impl HostProbe {
                 self.repository.display(),
                 ids()
             ));
-            return Vec::new();
+            return sites::SiteRun {
+                results: Vec::new(),
+            };
         };
         let tree = Baseline {
             commit: head,
             repository: self.repository.clone(),
         };
         let run = repairs::tree_results(self, &tree, contract, digest, refs, None, false).await;
-        (refs.iter())
-            .filter_map(|reference| run.results.get(&reference.acceptance_id).cloned())
-            .collect()
+        sites::SiteRun {
+            results: (refs.iter())
+                .filter_map(|reference| run.results.get(&reference.acceptance_id).cloned())
+                .collect(),
+        }
     }
 
     /// Run `ids` and hold them to every tree this probe proves on; with
@@ -146,13 +172,30 @@ impl HostProbe {
         let refs: Vec<FrozenCommandRef> = (all.into_iter())
             .filter(|reference| !findings.contains_key(&reference.acceptance_id))
             .collect();
-        let results = if refs.is_empty() {
-            Vec::new()
+        let run = if refs.is_empty() {
+            sites::SiteRun {
+                results: Vec::new(),
+            }
         } else {
-            self.run(contract, &digest, &refs).await
+            self.run_with_layout(contract, &digest, &refs).await
         };
         if hold {
-            let observed = originals(&self.check_site(contract), contract, results.clone()).await;
+            let at = silent::baseline_context(
+                self,
+                contract,
+                run.results
+                    .iter()
+                    .find_map(|evidence| evidence.copy_layout.as_ref()),
+            );
+            let observed = originals(
+                &at,
+                contract,
+                run.results
+                    .iter()
+                    .map(|evidence| evidence.result.clone())
+                    .collect(),
+            )
+            .await;
             let mut tree = self.failed_tree.lock().expect("failed tree lock");
             let held = tree.get_or_insert_with(|| FailedTree {
                 commit: self.site_commit(),
@@ -164,7 +207,11 @@ impl HostProbe {
             Site::Scratch(binding) => Some(binding.as_ref()),
             _ => None,
         };
-        findings.extend(crash_findings_at(contract, &results, binding));
+        findings.extend(crash_findings_at(
+            contract,
+            run.results.iter().map(|evidence| &evidence.result),
+            binding,
+        ));
         // A4/A5: what did not crash must also be able to fail, and a repair
         // must keep its original's verdict. A check the site could not run
         // is still proven on the hermetic trees: it is never published on
@@ -192,7 +239,7 @@ impl HostProbe {
                     contract,
                     &digest,
                     &sound,
-                    here.then_some(results.as_slice()),
+                    here.then_some(run.results.as_slice()),
                 )
                 .await,
             );
@@ -216,7 +263,7 @@ impl HostProbe {
         if let Some(baseline) = &self.baseline {
             // The site already observed its commit: when that commit is the
             // baseline (a freeze), its verdicts are the baseline's.
-            let known = on_site(&baseline.commit).then_some(results.as_slice());
+            let known = on_site(&baseline.commit).then_some(run.results.as_slice());
             let sound: Vec<FrozenCommandRef> = (sound.into_iter())
                 .filter(|reference| !findings.contains_key(&reference.acceptance_id))
                 .collect();

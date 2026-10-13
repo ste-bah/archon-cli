@@ -34,7 +34,53 @@ const EVIDENCE_BYTES: usize = 800;
 /// Where `probe`'s checks run: its site's environment, and `contract`'s
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
-    Context::new(super::sites::listing_environment(probe), contract)
+    let at = Context::new(super::sites::listing_environment(probe), contract);
+    match scratch_copy_tree(probe) {
+        Some((depth, roots)) => at.within(depth, roots),
+        None => at,
+    }
+}
+
+/// The pre-implementation tree is always checked in a copy for a direct
+/// site, even though that site's live checks have no copy layout.
+pub(super) fn baseline_context(
+    probe: &HostProbe,
+    contract: &AcceptanceContract,
+    layout: Option<&super::hermetic::CopyLayout>,
+) -> Context {
+    let at = Context::new(super::sites::listing_environment(probe), contract);
+    let tree = match probe.site {
+        Site::Direct | Site::Hermetic => layout.and_then(|layout| layout.site_tree()),
+        Site::Scratch(_) => scratch_copy_tree(probe),
+        Site::Unavailable(_) => None,
+    };
+    match tree {
+        Some((depth, roots)) => at.within(depth, roots),
+        None => at,
+    }
+}
+
+/// Issue 420: the copy `probe`'s checks run in, as (depth of a check's
+/// working directory below the copy's top, the names the top holds). A
+/// scratch site holds `repo`, `project` and its own directories
+/// (`acceptance_scratch::ScratchRoots::prepare`); the probe's own copy
+/// holds `repo` and `project` (`HermeticCopy::at`), or keeps a project its
+/// repository tracks inside `repo`, at its depth there. The live tree is no
+/// copy (`None`): a path above a check's directory may be real there.
+fn scratch_copy_tree(probe: &HostProbe) -> Option<(usize, &'static [&'static str])> {
+    const SCRATCH: &[&str] = &[
+        "repo",
+        "project",
+        "home",
+        "tmp",
+        "cargo-home",
+        "target",
+        "project-baseline",
+    ];
+    match probe.site {
+        Site::Scratch(_) => Some((1, SCRATCH)),
+        Site::Direct | Site::Hermetic | Site::Unavailable(_) => None,
+    }
 }
 
 impl HostProbe {
@@ -70,6 +116,29 @@ pub(super) fn silent_failure(
         .find(|entry| entry.id == result.acceptance_id)?;
     let (_, text) = executed_text(entry)?;
     no_verdict(text, result, at)
+}
+
+pub(super) async fn setup_path_failure_off_thread(
+    contract: &AcceptanceContract,
+    result: &CheckResult,
+    at: &Context,
+) -> Option<String> {
+    let (contract, result, at) = (contract.clone(), result.clone(), at.clone());
+    tokio::task::spawn_blocking(move || setup_path_failure(&contract, &result, &at))
+        .await
+        .unwrap_or_else(|error| Some(format!("deciding its setup-path verdict failed: {error}")))
+}
+
+fn setup_path_failure(
+    contract: &AcceptanceContract,
+    result: &CheckResult,
+    at: &Context,
+) -> Option<String> {
+    let entry = (contract.acceptance.iter())
+        .chain(&contract.supplementary)
+        .find(|entry| entry.id == result.acceptance_id)?;
+    let (_, text) = executed_text(entry)?;
+    super::verdict::setup_path::failure(text, result, at)
 }
 
 /// The strike file of check `id` of `contract` on `commit`.

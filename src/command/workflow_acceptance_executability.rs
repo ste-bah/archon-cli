@@ -189,7 +189,7 @@ pub(crate) struct HostProbe {
     /// The pre-implementation tree every probed check must fail on.
     baseline: Option<baseline::Baseline>,
     /// How each check that failed there failed (Issue 275).
-    baseline_failures: Mutex<BTreeMap<String, CheckResult>>,
+    baseline_failures: Mutex<BTreeMap<String, hermetic::CheckEvidence>>,
     reuse_audit: Mutex<BTreeMap<String, ReuseAudit>>,
     /// The tree the checks being repaired ran on, and how each fared there.
     failed_tree: Mutex<Option<baseline::FailedTree>>,
@@ -475,6 +475,9 @@ mod probe_tests_b;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_tests.rs"]
 pub(crate) mod tests;
+#[cfg(all(test, unix))]
+#[path = "workflow_acceptance_executability_verdict_probe_setup_tests.rs"]
+mod verdict_probe_setup_tests;
 #[cfg(all(test, unix))]
 #[path = "workflow_acceptance_executability_verdict_probe_tests.rs"]
 mod verdict_probe_tests;

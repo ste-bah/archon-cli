@@ -33,6 +33,8 @@
 //!    never sees the check's tree), or the host could not list them
 //!    (Issues 331, 333,
 //!    `workflow_acceptance_executability_verdict_subcommand`);
+//!    So is a setup path (`cd X`, `--manifest-path X`) outside the tree
+//!    that its output reports absent (Issue 420, `verdict_setup_path`);
 //! 2. no exit status: the run was killed before it reported anything;
 //! 3. the check crashed in its own code
 //!    ([`archon_workflow::acceptance_check_crash`]);
@@ -63,6 +65,9 @@ use super::verdict_shell::{Simple, expands, simple_commands};
 
 #[path = "workflow_acceptance_executability_verdict_shell_setup.rs"]
 mod shell_setup;
+
+#[path = "workflow_acceptance_executability_verdict_setup_path.rs"]
+pub(super) mod setup_path;
 
 #[path = "workflow_acceptance_executability_verdict_subcommand.rs"]
 mod subcommand;
@@ -105,6 +110,9 @@ pub(crate) struct Context {
     host_path: Option<String>,
     /// How long a listing may print nothing before it is given up.
     list_stall: std::time::Duration,
+    /// Issue 420: the copy a check ran in (`setup_path::SiteTree`); `None`
+    /// on the live tree, where no path is known to be outside the site.
+    tree: Option<setup_path::SiteTree>,
 }
 
 impl Context {
@@ -167,7 +175,14 @@ impl Context {
             environment,
             host_path: subcommand::host_path(),
             list_stall: subcommand::LIST_STALL,
+            tree: None,
         }
+    }
+
+    /// Checks ran `depth` levels below the top of a copy holding `roots`.
+    pub(crate) fn within(mut self, depth: usize, roots: &[&str]) -> Self {
+        self.tree = Some(setup_path::SiteTree::new(depth, roots));
+        self
     }
 
     /// Whether `name` is a program on the search path.
@@ -205,6 +220,9 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
     if let Some(reason) = shell_setup::refusal(code, command, &commands, &output(result)) {
         return Some(reason);
     }
+    if let Some(reason) = setup_path::failure(command, result, at) {
+        return Some(reason);
+    }
     if matches!(code, 126 | 127)
         && let Some(name) = missing_program(&commands, &output(result), at)
     {
@@ -237,6 +255,7 @@ pub(crate) fn no_verdict(command: &str, result: &CheckResult, at: &Context) -> O
     })
 }
 
+/// Whether a failed check stopped at a missing setup path outside its copy.
 /// Whether `result` may have failed for its host (rules 1, 2, 4 and a
 /// rejected subcommand, without the check's text): such a run is never remembered as a verdict, so a retry
 /// runs it again.

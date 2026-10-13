@@ -183,7 +183,7 @@ pub(crate) struct BaselineRuns {
     /// Per-check cache decision and original evidence reference.
     pub(crate) reuse: BTreeMap<String, ReuseAudit>,
     pub(crate) commit: String,
-    pub(crate) failures: BTreeMap<String, CheckResult>,
+    pub(crate) failures: BTreeMap<String, super::hermetic::CheckEvidence>,
     /// The environment the site gave each check: what its output could echo.
     pub(crate) environment: BTreeMap<String, String>,
     /// Names the site's policy forwards from the host: secret by declaration.
@@ -191,7 +191,7 @@ pub(crate) struct BaselineRuns {
 }
 
 impl HostProbe {
-    fn failed_on_baseline(&self, result: &CheckResult) {
+    fn failed_on_baseline(&self, result: &super::hermetic::CheckEvidence) {
         (self
             .baseline_failures
             .lock()
@@ -336,7 +336,7 @@ pub(super) async fn cannot_fail_findings(
     contract: &AcceptanceContract,
     digest: &str,
     refs: &[FrozenCommandRef],
-    known: Option<&[CheckResult]>,
+    known: Option<&[super::hermetic::CheckEvidence]>,
 ) -> BTreeMap<String, String> {
     let mut findings = BTreeMap::new();
     if refs.is_empty() {
@@ -344,12 +344,11 @@ pub(super) async fn cannot_fail_findings(
     }
     let short: String = baseline.commit.chars().take(12).collect();
     let run = tree_results(probe, baseline, contract, digest, refs, known, false).await;
-    let at = silent::context(probe, contract);
     let mut passing = Vec::new();
     for reference in refs {
         let id = &reference.acceptance_id;
         let result = run.results.get(id);
-        if result.is_some_and(timed_out) {
+        if result.is_some_and(|result| timed_out(&result.result)) {
             // #356: no progress for its window on the base: operational and
             // resumable the first time; so again after a resume, the author's.
             if let Some(finding) = silent::settle_timed_out(probe, &baseline.commit, contract, id) {
@@ -367,6 +366,7 @@ pub(super) async fn cannot_fail_findings(
         } else if let Some(result) = result {
             // It ran to an end on the base: any earlier stall was not its own.
             silent::ran(probe, &baseline.commit, contract, id);
+            let at = silent::baseline_context(probe, contract, result.copy_layout.as_ref());
             if let Some(why) = silent::silent_failure_off_thread(contract, result, &at).await {
                 // Issue 328: failing without a verdict proves nothing; failing
                 // so again on the same base goes to the author.
@@ -396,7 +396,7 @@ pub(super) async fn newly_passing_findings(
     contract: &AcceptanceContract,
     digest: &str,
     refs: &[FrozenCommandRef],
-    known: Option<&[CheckResult]>,
+    known: Option<&[super::hermetic::CheckEvidence]>,
 ) -> BTreeMap<String, String> {
     let held: Vec<FrozenCommandRef> = (refs.iter())
         .filter(|reference| tree.originals.get(&reference.acceptance_id) == Some(&Original::Failed))
@@ -430,13 +430,23 @@ pub(super) async fn newly_passing_findings(
                     "the repair could not be run on the tree its original failed on ({short}: {reason}), so it is not proven to keep that verdict"
                 ),
             );
-        } else if result.is_some_and(passed) {
-            findings.insert(
-                id.clone(),
-                format!(
-                    "check '{id}': the check it replaces failed its own assertion on the tree at {short}, and this repair passes there; a repair may fix how a check asserts its criterion, never turn a failing product green without a product change: keep every assertion the original made, so that it still fails on that tree"
-                ),
-            );
+        } else if let Some(result) = result {
+            let at = silent::baseline_context(probe, contract, result.copy_layout.as_ref());
+            if let Some(reason) = silent::silent_failure_off_thread(contract, result, &at).await {
+                probe.unproven(
+                    id,
+                    format!(
+                        "the repair gave no verdict on the tree its original failed on ({short}: {reason}), so it is not proven to keep that verdict"
+                    ),
+                );
+            } else if passed(result) {
+                findings.insert(
+                    id.clone(),
+                    format!(
+                        "check '{id}': the check it replaces failed its own assertion on the tree at {short}, and this repair passes there; a repair may fix how a check asserts its criterion, never turn a failing product green without a product change: keep every assertion the original made, so that it still fails on that tree"
+                    ),
+                );
+            }
         }
     }
     findings

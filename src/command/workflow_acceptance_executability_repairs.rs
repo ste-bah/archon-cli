@@ -23,13 +23,13 @@
 
 use archon_workflow::acceptance_scratch::CHECK_TIMED_OUT;
 
-use super::hermetic::Unrun;
+use super::hermetic::{CheckEvidence, Unrun};
 use super::sites::run_at;
 use super::*;
 
 /// Verdicts on one tree, and how the host got them.
 pub(super) struct TreeRun {
-    pub(super) results: BTreeMap<String, CheckResult>,
+    pub(super) results: BTreeMap<String, CheckEvidence>,
     /// Why the last attempt could not run at all.
     why: String,
     /// Every environment repair made, oldest first.
@@ -38,7 +38,7 @@ pub(super) struct TreeRun {
 
 impl TreeRun {
     /// Verdicts already observed, no run made.
-    pub(super) fn known(results: &[CheckResult], why: &str) -> Self {
+    pub(super) fn known(results: &[CheckEvidence], why: &str) -> Self {
         Self {
             results: (results.iter())
                 .map(|result| (result.acceptance_id.clone(), result.clone()))
@@ -110,7 +110,7 @@ pub(super) async fn tree_results(
     contract: &AcceptanceContract,
     digest: &str,
     refs: &[FrozenCommandRef],
-    known: Option<&[CheckResult]>,
+    known: Option<&[CheckEvidence]>,
     cold: bool,
 ) -> TreeRun {
     let mut run = TreeRun::known(&[], "");
@@ -123,7 +123,10 @@ pub(super) async fn tree_results(
     loop {
         let pending: Vec<FrozenCommandRef> = (refs.iter())
             .filter(|reference| run.error(&reference.acceptance_id).is_some())
-            .filter(|reference| !(run.results.get(&reference.acceptance_id)).is_some_and(timed_out))
+            .filter(|reference| {
+                !(run.results.get(&reference.acceptance_id))
+                    .is_some_and(|result| timed_out(&result.result))
+            })
             .cloned()
             .collect();
         if pending.is_empty() || probe.is_incomplete() {
@@ -151,7 +154,7 @@ pub(super) async fn tree_results(
         }
         match run_at(probe, tree, contract, digest, &pending, cold).await {
             Ok(ran) => {
-                for result in ran {
+                for result in ran.results {
                     run.results.insert(result.acceptance_id.clone(), result);
                 }
                 // A pending check the run returned nothing for gave no

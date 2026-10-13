@@ -53,7 +53,7 @@ pub(super) fn copy_task_root(
     dest: &Path,
     project_relative: &Path,
     task_root: &Path,
-    excludes: &[PathBuf],
+    (excludes, nested): (&[PathBuf], Option<&Path>),
     remaining: &mut u64,
 ) -> WorkflowResult<()> {
     copy_task_root_inner(
@@ -62,7 +62,7 @@ pub(super) fn copy_task_root(
         remaining,
         project_relative,
         task_root,
-        excludes,
+        (excludes, nested),
     )
 }
 
@@ -72,10 +72,12 @@ fn copy_task_root_inner(
     remaining: &mut u64,
     relative: &Path,
     task_root: &Path,
-    excludes: &[PathBuf],
+    (excludes, nested): (&[PathBuf], Option<&Path>),
 ) -> WorkflowResult<()> {
     control::check()?;
-    if super::acceptance_input_excluded(relative, excludes, Some(task_root)) {
+    if super::acceptance_input_excluded(relative, excludes, Some(task_root))
+        || super::inputs::nested_repository_skipped(relative, nested)
+    {
         return Ok(());
     }
     let meta = std::fs::symlink_metadata(source).map_err(|e| WorkflowError::io(source, e))?;
@@ -94,7 +96,7 @@ fn copy_task_root_inner(
                 remaining,
                 &relative.join(item.file_name()),
                 task_root,
-                excludes,
+                (excludes, nested),
             )?;
         }
     } else if meta.is_file() {
@@ -390,7 +392,7 @@ fn task_root_copy_omits_freeze_owned_contract_and_lock() {
         destination.path(),
         Path::new(""),
         Path::new(""),
-        &[],
+        (&[], None),
         &mut remaining,
     )
     .unwrap();

@@ -16,11 +16,15 @@
 
 use std::path::{Path, PathBuf};
 
-use archon_workflow::acceptance_scratch::{
-    CHECK_DEFERRED, CHECK_TIMED_OUT, CheckAllowance, acceptance_input_excluded, relative_key,
-};
+use archon_workflow::acceptance_scratch::{CHECK_DEFERRED, CHECK_TIMED_OUT, CheckAllowance};
+use archon_workflow::acceptance_scratch::{acceptance_input_excluded, relative_key};
+use archon_workflow::acceptance_scratch::{nested_repository, nested_repository_skipped};
 
 use super::*;
+
+#[path = "workflow_acceptance_executability_hermetic_layout.rs"]
+mod layout;
+pub(super) use layout::{CheckEvidence, CopyLayout, CopyRun, deferred, warm_target};
 
 /// The largest project copy a probe makes without a scratch policy naming
 /// what the checks read.
@@ -48,11 +52,6 @@ fn excluded(relative: &Path, task_root: Option<&Path>) -> bool {
     acceptance_input_excluded(relative, &[], task_root)
 }
 
-fn same_path(left: &Path, right: &Path) -> bool {
-    archon_shell::paths::plain(left.to_path_buf())
-        == archon_shell::paths::plain(right.to_path_buf())
-}
-
 /// The copy. [`HermeticCopy::remove`] removes it and says whether it could;
 /// dropping it removes it best-effort.
 pub(super) struct HermeticCopy {
@@ -60,6 +59,16 @@ pub(super) struct HermeticCopy {
     pub(super) repository: PathBuf,
     pub(super) project: PathBuf,
     removed: bool,
+}
+
+impl HermeticCopy {
+    fn layout(&self) -> CopyLayout {
+        CopyLayout {
+            root: self.root.clone(),
+            repository: self.repository.clone(),
+            project: self.project.clone(),
+        }
+    }
 }
 
 impl HermeticCopy {
@@ -150,6 +159,8 @@ pub(super) fn data_digest_scoped(
         ))
     })?;
     let task_root_relative = task_root_relative(&project, task_root)?;
+    // Issue 440: the one nested-repository rule the copies apply.
+    let nested = nested_repository(&project, &repository);
     let mut lines = Vec::new();
     let mut stack = vec![scope.to_path_buf()];
     while let Some(relative) = stack.pop() {
@@ -159,10 +170,10 @@ pub(super) fn data_digest_scoped(
         {
             continue;
         }
-        let path = project.join(&relative);
-        if same_path(&path, &repository) {
+        if nested_repository_skipped(&relative, nested.as_deref()) {
             continue;
         }
+        let path = project.join(&relative);
         let Ok(meta) = path.symlink_metadata() else {
             continue;
         };
@@ -318,11 +329,13 @@ fn copy_data(
         ))
     })?;
     let task_root = task_root_relative(&root, task_root)?;
+    let repository = archon_shell::paths::canonicalize(repository)
+        .map_err(|error| Unrun(format!("{}: {error}", repository.display())))?;
     copy_data_relative(
         &root,
         relative,
         dest,
-        repository,
+        nested_repository(&root, &repository).as_deref(),
         task_root.as_deref(),
         remaining,
     )
@@ -332,7 +345,7 @@ fn copy_data_relative(
     root: &Path,
     relative: &Path,
     dest: &Path,
-    repository: &Path,
+    nested: Option<&Path>,
     task_root: Option<&Path>,
     remaining: &mut u64,
 ) -> Result<(), Unrun> {
@@ -341,7 +354,7 @@ fn copy_data_relative(
     if !relative.as_os_str().is_empty() && excluded(relative, task_root) {
         return Ok(());
     }
-    if same_path(&source, repository) {
+    if nested_repository_skipped(relative, nested) {
         return Ok(());
     }
     let meta = source.symlink_metadata().map_err(|e| io(&source, e))?;
@@ -354,7 +367,7 @@ fn copy_data_relative(
                 root,
                 &relative.join(item.file_name()),
                 dest,
-                repository,
+                nested,
                 task_root,
                 remaining,
             )?;
@@ -372,30 +385,6 @@ fn copy_data_relative(
     Ok(())
 }
 
-/// The warm build directory for `repository`'s copies.
-pub(super) fn warm_target(parent: &Path, repository: &Path) -> PathBuf {
-    let key = content_digest(
-        (archon_shell::paths::canonicalize(repository))
-            .unwrap_or_else(|_| repository.to_path_buf())
-            .to_string_lossy()
-            .as_bytes(),
-    );
-    parent.join(WARM_TARGETS).join(&key[..16])
-}
-
-fn deferred(id: &str) -> CheckResult {
-    CheckResult {
-        classification: None,
-        acceptance_id: id.to_string(),
-        exit_code: None,
-        quota_walk_count: 0,
-        stdout: Vec::new(),
-        stderr: Vec::new(),
-        operational_error: Some(CHECK_DEFERRED.to_string()),
-        environment_note: None,
-    }
-}
-
 /// Run `refs` of `contract` in one hermetic copy of `repository` at
 /// `commit` (see the module docs).
 pub(super) async fn run_in_copy(
@@ -406,7 +395,8 @@ pub(super) async fn run_in_copy(
     digest: &str,
     refs: &[FrozenCommandRef],
     hooks: &archon_workflow::acceptance_scratch::ObserveHooks,
-) -> Result<Vec<CheckResult>, Unrun> {
+    observed_layout: &std::sync::Mutex<Option<CopyLayout>>,
+) -> Result<CopyRun, Unrun> {
     let parent = probe.copy_parent.clone();
     for failure in sweep(&parent) {
         probe.note(format!(
@@ -428,6 +418,8 @@ pub(super) async fn run_in_copy(
     })
     .await
     .map_err(|error| Unrun(format!("the copy task failed: {error}")))??;
+    let layout = copy.layout();
+    *observed_layout.lock().expect("observation layout lock") = Some(layout.clone());
     let target = warm_target(&probe.copy_parent, repository);
     let mut site = DirectSite {
         repository: copy.repository.clone(),
@@ -489,10 +481,13 @@ pub(super) async fn run_in_copy(
     }
     match failure {
         Some(error) => Err(Unrun(error)),
-        None => Ok(results),
+        None => Ok(CopyRun { results, layout }),
     }
 }
 
+#[cfg(test)]
+#[path = "workflow_acceptance_executability_nested_repository_tests.rs"]
+mod nested_repository_tests;
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_hermetic_tests.rs"]
 mod tests;

@@ -336,13 +336,14 @@ fn a_crash_before_validation_leaves_no_reusable_verdict() {
         }))
         .unwrap();
     assert!(store.save(&key, &result));
-    assert!(store.load(&key).is_none());
+    assert!(store.load(&key, false).is_none());
     assert!(
-        !store
+        store
             .path(&key)
             .unwrap()
             .with_extension("provisional")
-            .exists()
+            .exists(),
+        "a provisional record is retained as evidence"
     );
 }
 

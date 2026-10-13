@@ -23,19 +23,21 @@ use std::path::PathBuf;
 use archon_workflow::acceptance_scratch::{AllowanceHook, CheckHook, ObserveHooks};
 use serde::{Deserialize, Serialize};
 
+use super::hermetic::{CheckEvidence, CopyLayout};
 use super::*;
 use crate::command::workflow_freeze_budget::{
     FREEZE_CACHE_DIR, FreezeBudget, FreezeIncomplete, FreezeResume,
 };
 use crate::command::workflow_task_set::passability::evidence::Redactor;
 
-const SCHEMA: u32 = 3;
+const SCHEMA: u32 = 4;
 
 #[derive(Serialize, Deserialize)]
 struct Saved {
     schema: u32,
     key: String,
     result: CheckResult,
+    copy_layout: Option<CopyLayout>,
 }
 
 /// Saved verdicts, one file per memo key.
@@ -46,7 +48,8 @@ struct Saved {
 /// own credentials, and the names its policy forwards), and the file is
 /// readable by its owner only. The host computes classification from raw
 /// streams before redaction and persists it alongside the evidence. Reuse
-/// never reclassifies redacted output. Older raw-stream caches are discarded.
+/// never reclassifies redacted output. Incompatible or unreadable records
+/// remain on disk, but are not reused.
 #[derive(Clone)]
 pub(super) struct ResultStore {
     dir: PathBuf,
@@ -70,32 +73,43 @@ impl ResultStore {
         self.path(key).map(|path| path.display().to_string())
     }
 
-    /// The verdict saved under `key`; anything unreadable is no verdict.
-    pub(super) fn load(&self, key: &str) -> Option<CheckResult> {
-        let _ = std::fs::remove_file(self.path(key)?.with_extension("provisional"));
+    /// The verdict saved under `key`; incompatible evidence is a miss and is
+    /// left in place for investigation. Schema 3 is safe only at Scratch,
+    /// whose judging context supplies its fixed tree layout.
+    pub(super) fn load(&self, key: &str, allow_schema3: bool) -> Option<CheckEvidence> {
         let path = self.path(key)?;
         let saved = std::fs::read(&path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok());
         match saved {
             Some(saved)
-                if saved.schema == SCHEMA
+                if (saved.schema == SCHEMA || (allow_schema3 && saved.schema == 3))
                     && saved.key == key
                     && saved.result.operational_error.is_none()
                     && saved.result.classification.is_some()
                     && !super::verdict::may_be_host_failure(&saved.result) =>
             {
-                Some(saved.result)
+                Some(CheckEvidence {
+                    result: saved.result,
+                    copy_layout: saved.copy_layout,
+                })
             }
-            _ => {
-                let _ = std::fs::remove_file(path);
-                None
-            }
+            _ => None,
         }
     }
 
     /// Save `result` under `key`, atomically; false when it was not saved.
+    #[cfg(test)]
     pub(super) fn save(&self, key: &str, result: &CheckResult) -> bool {
+        self.save_evidence(key, result, None)
+    }
+
+    pub(super) fn save_evidence(
+        &self,
+        key: &str,
+        result: &CheckResult,
+        copy_layout: Option<CopyLayout>,
+    ) -> bool {
         let Some(path) = self.path(key) else {
             return false;
         };
@@ -122,12 +136,15 @@ impl ResultStore {
             schema: SCHEMA,
             key: key.to_string(),
             result,
+            copy_layout,
         };
         let path = path.with_extension("provisional");
         let staging = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
+        let provisional = path.with_extension("provisional");
         let written = std::fs::create_dir_all(&self.dir).is_ok()
             && serde_json::to_vec(&saved).is_ok_and(|bytes| write_owner_only(&staging, &bytes))
-            && std::fs::rename(&staging, &path).is_ok();
+            && self.preserve_replaced(&provisional)
+            && std::fs::rename(&staging, &provisional).is_ok();
         if !written {
             let _ = std::fs::remove_file(&staging);
         }
@@ -156,6 +173,90 @@ impl ResultStore {
             let _ = std::fs::remove_file(path.with_extension("provisional"));
         }
     }
+
+    /// Keep prior evidence before promotion atomically replaces the active key.
+    fn preserve_replaced(&self, path: &std::path::Path) -> bool {
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "could not read prior acceptance evidence for archival"
+                );
+                return false;
+            }
+        };
+        let suffix = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .ok()
+            .map(|value| {
+                if value["schema"] == 3 {
+                    "schema3"
+                } else if value["schema"] == SCHEMA && value["copy_layout"].is_null() {
+                    "schema4-layoutless"
+                } else {
+                    "previous"
+                }
+            })
+            .unwrap_or("previous");
+        // Each distinct prior result adds one archive file; cleanup is intentionally absent so evidence is kept.
+        for index in 0.. {
+            let ext = if index == 0 {
+                suffix.to_string()
+            } else {
+                format!("{suffix}.{index}")
+            };
+            let archive = path.with_extension(ext);
+            match std::fs::hard_link(path, &archive) {
+                Ok(()) => return true,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if std::fs::read(&archive).is_ok_and(|archived| archived == bytes) {
+                        return true;
+                    }
+                }
+                Err(_) if write_archive(&archive, &bytes) => return true,
+                Err(_) => return false,
+            }
+        }
+        false
+    }
+}
+
+fn write_archive(path: &std::path::Path, bytes: &[u8]) -> bool {
+    use std::io::Write;
+    for index in 0.. {
+        let candidate = if index == 0 {
+            path.to_path_buf()
+        } else {
+            let extension = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
+            path.with_extension(format!("{extension}.{index}"))
+        };
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        match options.open(&candidate) {
+            Ok(mut file) => {
+                if file.write_all(bytes).is_ok() {
+                    return true;
+                }
+                drop(file);
+                let _ = std::fs::remove_file(&candidate);
+                return false;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if std::fs::read(&candidate).is_ok_and(|archived| archived == bytes) {
+                    return true;
+                }
+            }
+            Err(_) => return false,
+        }
+    }
+    false
 }
 
 /// Write `bytes` to `path`, readable by its owner only (a stale file left
@@ -282,18 +383,38 @@ impl HostProbe {
     /// The hooks one observation (or copy) of `keys` (id to memo key) runs
     /// under: the budget's allowance per check, and each verdict saved as
     /// it finishes, its key pushed to `written`.
+    #[cfg(test)]
     pub(super) fn observe_hooks(
         &self,
         keys: &BTreeMap<String, String>,
         store: Option<&ResultStore>,
         written: &Arc<Mutex<Vec<String>>>,
     ) -> ObserveHooks {
+        self.observe_hooks_with_layout(keys, store, written, &Arc::new(Mutex::new(None)))
+    }
+
+    pub(super) fn observe_hooks_with_layout(
+        &self,
+        keys: &BTreeMap<String, String>,
+        store: Option<&ResultStore>,
+        written: &Arc<Mutex<Vec<String>>>,
+        copy_layout: &Arc<Mutex<Option<CopyLayout>>>,
+    ) -> ObserveHooks {
         let (budget, cap) = (self.resume.budget.clone(), self.check_bound_secs());
         let on_check = store.map(|store| {
-            let (store, keys, written) = (store.clone(), keys.clone(), written.clone());
+            let (store, keys, written, copy_layout) = (
+                store.clone(),
+                keys.clone(),
+                written.clone(),
+                copy_layout.clone(),
+            );
             Arc::new(move |result: &CheckResult| {
                 if let Some(key) = keys.get(&result.acceptance_id)
-                    && store.save(key, result)
+                    && store.save_evidence(
+                        key,
+                        result,
+                        copy_layout.lock().ok().and_then(|layout| layout.clone()),
+                    )
                 {
                     written.lock().expect("written lock").push(key.clone());
                 }
@@ -327,6 +448,7 @@ impl HostProbe {
         };
         for key in written.drain(..) {
             if let Some(path) = store.path(&key)
+                && store.preserve_replaced(&path)
                 && std::fs::rename(path.with_extension("provisional"), path).is_ok()
             {
                 self.resume.progress.saved(false);

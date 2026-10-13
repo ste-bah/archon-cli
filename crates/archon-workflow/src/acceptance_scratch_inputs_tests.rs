@@ -314,7 +314,7 @@ fn project_input_copy_keeps_archon_data_and_omits_harness_and_pipeline_outputs()
             &project,
             input,
             &destination,
-            &excludes,
+            (&excludes, None),
             Path::new("tasks/set"),
             &mut remaining,
         )
@@ -354,7 +354,7 @@ fn same_named_nested_project_data_is_included_and_digested() {
     let relative = Path::new("config/acceptance-contract.json");
     assert!(!excluded(relative, &[]));
     let mut map = BTreeMap::new();
-    audit_path(temp.path(), relative, &[], None, &mut map).unwrap();
+    audit_path(temp.path(), relative, (&[], None), None, &mut map).unwrap();
     assert_eq!(
         map.get("config/acceptance-contract.json"),
         Some(&file_digest(&file).unwrap())
@@ -412,7 +412,14 @@ fn copied_file_sets_match_digest_inputs_for_scratch_and_hermetic_scopes() {
     let excludes = project_excludes(&policy).unwrap();
     let digest_inputs = |scope: &Path| {
         let mut map = BTreeMap::new();
-        audit_path(&project, scope, &excludes, Some(task_relative), &mut map).unwrap();
+        audit_path(
+            &project,
+            scope,
+            (&excludes, None),
+            Some(task_relative),
+            &mut map,
+        )
+        .unwrap();
         map.into_iter()
             .filter_map(|(path, digest)| {
                 (digest != "directory" && digest != "missing").then_some(PathBuf::from(path))
@@ -444,7 +451,7 @@ fn copied_file_sets_match_digest_inputs_for_scratch_and_hermetic_scopes() {
         &project,
         Path::new(".archon"),
         &scratch,
-        &excludes,
+        (&excludes, None),
         task_relative,
         &mut remaining,
     )
@@ -454,7 +461,7 @@ fn copied_file_sets_match_digest_inputs_for_scratch_and_hermetic_scopes() {
         &scratch.join(task_relative),
         task_relative,
         task_relative,
-        &excludes,
+        (&excludes, None),
         &mut remaining,
     )
     .unwrap();

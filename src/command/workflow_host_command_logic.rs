@@ -229,15 +229,26 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 15: #417 Windows task-root paths normalize before containment checks, so probes can run and produce a different verdict.
         // #439 re-pin only: resume phase selection shares this closure; freeze verdicts are unchanged.
         // #417 re-pin only: the landing destination allowlist names the topology stores; freeze verdicts are unchanged.
+        // #425 re-pin only: the repository claim parser changed; freeze verdicts do not read claims.
         // #425 re-pin only: the repository claim parser changed; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        version: 15,
+        // 16: #440 the scratch copy skips a repository nested inside a project input, as the probe digest does, so a check can no longer read that live tree and its verdict can change.
+        // 17: #420 a pre-implementation failure at a setup path outside the probe's tree that the output reports absent (`cd X`, `--manifest-path X`) gives no verdict: unproven, then its author's, never a passability verdict.
+        // #420 review, same unreleased version 17: the rule applies only in a host-made copy (scratch, hermetic), never on the live tree, and a top-level name the copy holds (`../repo`) stays inside it.
+        // 18: #446 direct-site baseline runs use their hermetic copy's layout when applying that rule.
+        // #446 review 2, same unreleased version 18
+        version: 18,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
-        sources_digest: "035b8f9708bc8c2747eceec9c255f9ab8b3795da09f92aee8c3dcfd50efcf812",
+        // #446 follow-up re-pin only: cache compatibility now keeps old evidence;
+        // Scratch schema-3 verdicts stay reusable, while Hermetic layoutless
+        // evidence reruns under the unchanged version-18 acceptance pin.
+        // #446 follow-up re-pin only: archive collisions keep both prior byte sets; verdicts are unchanged.
+        // integration re-pin: merge of #447 and #446 sources; no logic change
+        sources_digest: "9bb39a6d54d9b3dd40cf3ccd0e650ef478fa3f2512eae65a236c9cd308814b51",
         build_bound: false,
     },
     CapabilityLogic {
@@ -245,6 +256,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // #434 and #417 re-pin only: harness input paths, pipeline outputs, and copy API normalization do not alter this verdict.
         // #439 re-pin only, as freeze-acceptance.
+        // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims.
         // #425 re-pin only: the repository claim parser changed; skeleton freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen verdicts.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
@@ -253,7 +265,15 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
-        sources_digest: "035b8f9708bc8c2747eceec9c255f9ab8b3795da09f92aee8c3dcfd50efcf812",
+        // #440 re-pin only: the skeleton freeze runs no check and copies no input.
+        // #420 re-pin only: the skeleton freeze judges no check run, so the new no-verdict rule never applies.
+        // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
+        // #446 re-pin only: the skeleton freeze judges no baseline run.
+        // #446 follow-up re-pin only: the shared probe cache source changed;
+        // freeze-skeleton judges no check runs.
+        // #446 follow-up: archive collisions keep both prior byte sets.
+        // integration re-pin: merge of #447 and #446 sources; no logic change
+        sources_digest: "9bb39a6d54d9b3dd40cf3ccd0e650ef478fa3f2512eae65a236c9cd308814b51",
         build_bound: false,
     },
     CapabilityLogic {
@@ -285,6 +305,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
         // #443: the version bumps above; asserted runtime paths are no longer repository claims.
         // Re-pin only: observe-mode refused bodies now stay unpublished; refused candidates never publish, existing results remain valid, and lineage protects any future version bump.
+        // integration re-pin: merge of #447 and #446 sources; no logic change
         sources_digest: "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
         build_bound: false,
     },
@@ -312,6 +333,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #443: the version bumps above; asserted runtime paths are no longer repository claims.
         // Re-pin only: the staged CLI exposes the body packaging step to the resume's landing
         // reconciliation; no gate calls the new entry, so every verdict is unchanged.
+        // integration re-pin: merge of #447 and #446 sources; no logic change
         sources_digest: "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
         build_bound: false,
     },
@@ -327,7 +349,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434 and #417 re-pin only: trace never reads the newly excluded run state.
         // #434d re-pin only: trace never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
-        sources_digest: "c7fc2f08a7e3a4133bde32d181154ffdb2c165c5627dbcdda2f8846a87e632f9",
+        // #440 re-pin only: trace calls none of the scratch copy, audit or probe digest walkers that changed.
+        // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
+        // integration re-pin: merge of #447 and #446 sources; no logic change
+        sources_digest: "9449f4adbf290e05e91c35c64f4b96abe5c79ca96fd5781cc723c1c1b0622637",
         build_bound: true,
     },
     CapabilityLogic {
@@ -349,7 +374,15 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
         // Re-pin only: the executor names whether a capability publishes, and moved its digest
         // lookup; the reuse rules a verification verdict is checked under are unchanged.
-        sources_digest: "094d580b7f3372c43a5ba8f0b7ed6517fe6a14390bdd6158a91d8d7f841c1641",
+        // #440 re-pin only: frozen-chain verification runs no check and calls none of the changed copy, audit or digest walkers.
+        // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
+        // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
+        // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
+        // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
+        // #446 follow-up re-pin only: verification shares cache source files
+        // but reads no probe result layout or evidence.
+        // integration re-pin: merge of #447 and #446 sources; no logic change
+        sources_digest: "7ac0f95cbf54090ace602cb2c3ef66ab445bbafee8da699c319a5cd36b87ae0d",
         build_bound: true,
     },
     CapabilityLogic {
@@ -367,7 +400,15 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
         // Re-pin only: the executor names whether a capability publishes, and moved its digest
         // lookup; the reuse rules a verification verdict is checked under are unchanged.
-        sources_digest: "094d580b7f3372c43a5ba8f0b7ed6517fe6a14390bdd6158a91d8d7f841c1641",
+        // #440 re-pin only: frozen-chain verification runs no check and calls none of the changed copy, audit or digest walkers.
+        // #420 re-pin only: frozen-chain verification judges no check run, so the new no-verdict rule never applies.
+        // #420 review re-pin only: rustfmt layout of the executability modules; no logic change.
+        // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
+        // #446 re-pin only: baseline judgment changes; frozen-artifact verification does not.
+        // #446 follow-up re-pin only: verification shares cache source files
+        // but reads no probe result layout or evidence.
+        // integration re-pin: merge of #447 and #446 sources; no logic change
+        sources_digest: "7ac0f95cbf54090ace602cb2c3ef66ab445bbafee8da699c319a5cd36b87ae0d",
         build_bound: true,
     },
 ];

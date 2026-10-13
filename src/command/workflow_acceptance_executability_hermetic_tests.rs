@@ -5,7 +5,8 @@ use std::io::Write;
 fn repository_path_comparison_normalizes_verbatim_and_plain_spellings() {
     let verbatim = Path::new(r"\\?\C:\work\repository");
     let plain = Path::new(r"C:\work\repository");
-    assert!(same_path(verbatim, plain));
+    // The repository is the project: the empty project-relative path.
+    assert_eq!(nested_repository(plain, verbatim), Some(PathBuf::new()));
 }
 
 #[test]
@@ -30,7 +31,7 @@ fn canonicalized_repository_path_compares_with_its_plain_spelling() {
     let directory = tempfile::tempdir().unwrap();
     let verbatim = std::fs::canonicalize(directory.path()).unwrap();
     let plain = archon_shell::paths::canonicalize(directory.path()).unwrap();
-    assert!(same_path(&verbatim, &plain));
+    assert_eq!(nested_repository(&plain, &verbatim), Some(PathBuf::new()));
 }
 
 #[cfg(windows)]
@@ -88,6 +89,87 @@ fn committed_repository(path: &Path) -> String {
     run(&["config", "user.name", "test"]);
     run(&["commit", "-q", "--allow-empty", "-m", "fixture"]);
     run(&["rev-parse", "HEAD"])
+}
+
+#[cfg(unix)]
+#[test]
+fn a_separate_project_copy_keeps_its_real_top_level_path_inside_the_tree() {
+    use archon_workflow::acceptance_scratch::CheckResult;
+
+    let source = tempfile::tempdir().unwrap();
+    let destination = tempfile::tempdir().unwrap();
+    let repository = repository(&source);
+    let commit = committed_repository(&repository);
+    let project = repository.join("nested/project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("Cargo.toml"),
+        "[package]\nname='live'\nversion='0.1.0'\nedition='2024'\n",
+    )
+    .unwrap();
+
+    let copy = HermeticCopy::at(&destination.path(), &repository, &project, None, &commit).unwrap();
+    assert_eq!(copy.project, copy.root.join("project"));
+    assert!(!copy.repository.join("nested/project").exists());
+    let layout = copy.layout();
+    let working = layout.repository.join("subdir");
+    std::fs::create_dir_all(&working).unwrap();
+    assert_eq!(
+        working.join("../../project").canonicalize().unwrap(),
+        layout.project.canonicalize().unwrap()
+    );
+    let command = "cargo metadata --no-deps --format-version 1 --manifest-path ../../project/missing/Cargo.toml";
+    let output = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(&working)
+        .output()
+        .unwrap();
+    assert_ne!(output.status.code(), Some(0));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("../../project/missing/Cargo.toml"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("does not exist"), "{stderr}");
+
+    let contract: archon_workflow::task_set_contract::AcceptanceContract =
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "prd": {"path": "p.md", "digest": "d"},
+            "gap_policy": {"permitted_acceptance_ids": [], "forbidden_phrases": [], "required_fields": []},
+            "acceptance": [{
+                "id": "AC-446", "criterion": "exists",
+                "check": {"kind": "command", "command": command, "cwd": "project_root"},
+                "judgment": {"verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": "test"}
+            }],
+            "supplementary": []
+        }))
+        .unwrap();
+    let result = CheckResult {
+        acceptance_id: "AC-446".into(),
+        exit_code: output.status.code(),
+        stdout: output.stdout,
+        stderr: output.stderr,
+        quota_walk_count: 0,
+        operational_error: None,
+        classification: None,
+        environment_note: None,
+    };
+    let (_, roots) = layout.site_tree().unwrap();
+    let context = super::super::verdict::Context::new(BTreeMap::new(), &contract).within(2, roots);
+    assert_eq!(
+        super::super::verdict::no_verdict(command, &result, &context),
+        None,
+        "the missing path is inside the actual copy and remains a verdict"
+    );
+    let inferred =
+        super::super::verdict::Context::new(BTreeMap::new(), &contract).within(2, &["repo"]);
+    assert!(
+        super::super::verdict::no_verdict(command, &result, &inferred).is_some(),
+        "the live nested project would infer away the separate top-level project"
+    );
+    copy.remove().unwrap();
 }
 
 #[test]

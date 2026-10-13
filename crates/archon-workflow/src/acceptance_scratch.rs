@@ -35,6 +35,8 @@ pub fn acceptance_input_excluded(
     inputs::acceptance_input_excluded(path, excludes, task_root)
 }
 
+/// Issue 440: the one nested-repository rule of every project-input walk.
+pub use inputs::{nested_repository, nested_repository_skipped};
 /// Whether a project-relative path is host-owned run state excluded from
 /// acceptance inputs and their hermetic digest.
 pub fn harness_run_state_path(path: &Path) -> bool {
@@ -277,6 +279,8 @@ impl ScratchRoots {
                     .map_err(|e| WorkflowError::io(roots.project.join(".git"), e))?;
             }
             let project_excludes = inputs::project_excludes(policy)?;
+            // Issue 440: the repository comes from its commit, never an input.
+            let nested = inputs::nested_repository(&project, &roots.live_repository);
             let task_relative = tasks
                 .strip_prefix(&project)
                 .map_err(|_| invalid("task root must belong to declared project"))?;
@@ -298,7 +302,7 @@ impl ScratchRoots {
                     &project,
                     input,
                     &roots.project,
-                    &project_excludes,
+                    (&project_excludes, nested.as_deref()),
                     task_relative,
                     &mut remaining,
                 )
@@ -309,7 +313,7 @@ impl ScratchRoots {
                 &roots.project.join(task_relative),
                 task_relative,
                 task_relative,
-                &project_excludes,
+                (&project_excludes, nested.as_deref()),
                 &mut remaining,
             )?;
             io::readonly(&roots.project.join(task_relative))?;

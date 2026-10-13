@@ -86,6 +86,7 @@ impl Bin {
             environment: site,
             host_path: Some(self.host_path()),
             list_stall: LIST_STALL,
+            tree: None,
         }
     }
 
