@@ -72,7 +72,10 @@ mod tests {
     #[test]
     fn a_windows_stored_path_uses_forward_slashes_and_keeps_its_prefix() {
         for (given, expected) in [
-            (r"C:\Users\runner\project\tasks\PRD-X", "C:/Users/runner/project/tasks/PRD-X"),
+            (
+                r"C:\Users\runner\project\tasks\PRD-X",
+                "C:/Users/runner/project/tasks/PRD-X",
+            ),
             (r"\\?\C:\Users\a\project", "C:/Users/a/project"),
             (r"\\?\UNC\server\share\x", "//server/share/x"),
             (r"\\server\share\x", "//server/share/x"),

@@ -223,7 +223,10 @@ data: {"type": "message_stop"}
     assert_eq!(runner.run("hello").await.unwrap(), "ok");
 
     let g = tracker.lock().unwrap();
-    assert_eq!(g.cumulative_input_tokens, 17256, "not the start placeholder 0");
+    assert_eq!(
+        g.cumulative_input_tokens, 17256,
+        "not the start placeholder 0"
+    );
     assert_eq!(g.cumulative_output_tokens, 27);
     assert!(g.input_tokens_available && g.output_tokens_available);
 }

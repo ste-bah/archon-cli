@@ -411,7 +411,10 @@ fn record_usage_growth(
         after.cache_creation_input_tokens,
         before.cache_creation_input_tokens,
     );
-    let cache_read = grew(after.cache_read_input_tokens, before.cache_read_input_tokens);
+    let cache_read = grew(
+        after.cache_read_input_tokens,
+        before.cache_read_input_tokens,
+    );
     let newly_available = (after.input_tokens_available && !before.input_tokens_available)
         || (after.output_tokens_available && !before.output_tokens_available);
     if input == 0 && output == 0 && cache_creation == 0 && cache_read == 0 && !newly_available {
