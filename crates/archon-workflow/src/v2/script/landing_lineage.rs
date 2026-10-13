@@ -107,6 +107,16 @@ fn slot_of(record: &WorkflowV2CallRecord) -> Slot<'_> {
     (request_of(record), occurrence_of(record))
 }
 
+/// Record order is stable even when clocks produce identical start times.
+/// `admission_sequence` is assigned in persisted admission order; call ID is
+/// the deterministic fallback for older records without one.
+pub fn record_order(a: &WorkflowV2CallRecord, b: &WorkflowV2CallRecord) -> std::cmp::Ordering {
+    a.started_at
+        .cmp(&b.started_at)
+        .then(a.admission_sequence.cmp(&b.admission_sequence))
+        .then(a.call.id.cmp(&b.call.id))
+}
+
 /// Every answer of one subject's landings, in start order, with its rerun
 /// flag.
 pub struct LandingLineage<'a> {
@@ -127,11 +137,7 @@ impl<'a> LandingLineage<'a> {
                 })
             })
             .collect();
-        answers.sort_by(|a, b| {
-            a.started_at
-                .cmp(&b.started_at)
-                .then(a.call.id.cmp(&b.call.id))
-        });
+        answers.sort_by(|a, b| record_order(a, b));
         // A rerun asks an evaluation already answered again, after a body of
         // another request was accepted since that first answer.
         let mut reruns = BTreeSet::new();
@@ -142,7 +148,7 @@ impl<'a> LandingLineage<'a> {
                 .position(|earlier| slot_of(earlier) == slot);
             let Some(first) = first else { continue };
             let moved_on = answers[first + 1..index].iter().any(|between| {
-                request_of(between) != slot.0
+                slot_of(between) != slot
                     && !reruns.contains(between.call.id.as_str())
                     && accepted_publication(between)
             });
@@ -182,26 +188,25 @@ impl<'a> LandingLineage<'a> {
         occurrence: u64,
         skip: impl Fn(&WorkflowV2CallRecord) -> bool,
     ) -> Option<&'a WorkflowV2CallRecord> {
+        let slot: Slot<'_> = (Some(request), occurrence);
         if self
             .current()
-            .is_some_and(|current| request_of(current) == Some(request))
+            .is_some_and(|current| slot_of(current) == slot)
         {
             return None;
         }
-        let slot: Slot<'_> = (Some(request), occurrence);
         let first = self
             .answers
             .iter()
             .position(|record| slot_of(record) == slot && !self.is_rerun(record))?;
-        let next = self.answers[first + 1..]
+        let end = self.answers[first + 1..]
             .iter()
-            .find(|record| slot_of(record) != slot && !self.is_rerun(record))
-            .map(|record| record.started_at.as_str());
-        self.answers[first..]
+            .position(|record| slot_of(record) != slot && !self.is_rerun(record))
+            .map_or(self.answers.len(), |offset| first + 1 + offset);
+        self.answers[first..end]
             .iter()
             .filter(|record| slot_of(record) == slot)
             .filter(|record| !self.is_rerun(record) && !skip(record))
-            .filter(|record| next.is_none_or(|next| record.started_at.as_str() < next))
             .last()
             .copied()
     }

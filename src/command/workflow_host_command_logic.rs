@@ -276,6 +276,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 12: #443 re-review: a blank line before an assertion list's first item keeps the list; a path an output
         // noun locates ("the report at `x`") stays exempt; a prefixed lead ("re-verify that") is a lead.
         // 13: #443 re-review 3: a relative clause right after the path ("`x`, which already exists") claims.
+        // No version bump: refused candidates now stay unpublished in observe mode; only those refused candidates are affected, recorded results remain valid, and the lineage guard makes a future bump safe.
         version: 13,
         sources: &[GATE, CONTRACT, LINT],
         // #425 re-pin only: unscoped negated bare names, filler before a scoped predicate, base-name, slashed and multi-directory scopes (each directory one reading); same version bump as above.
@@ -283,8 +284,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d review re-pin only: a build whose critic sources are not the pinned ones keeps no fidelity record and asks afresh; an opposite re-answer of a kept verdict is only logged. Verdict meaning is unchanged.
         // #442 re-pin only: scope resolution reads base-tree suffixes through RepositoryTree::paths_ending_with, the same paths as before; verdicts are unchanged.
         // #443: the version bumps above; asserted runtime paths are no longer repository claims.
-        // Re-pin only: the staged CLI exposes the body packaging step to the resume's landing
-        // reconciliation; no gate calls the new entry, so every verdict is unchanged.
+        // Re-pin only: observe-mode refused bodies now stay unpublished; refused candidates never publish, existing results remain valid, and lineage protects any future version bump.
         sources_digest: "9ad2c606c92cc7ac9e63415338fc1e1747fbe4523e2122cd145c2ae9c4bf1adf",
         build_bound: false,
     },

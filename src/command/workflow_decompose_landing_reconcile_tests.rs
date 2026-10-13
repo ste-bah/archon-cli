@@ -16,8 +16,8 @@ fn frozen() -> FrozenTask {
         task_id: TASK.into(),
         file_name: FILE.into(),
         depends_on: Vec::new(),
-        blocks: vec!["TASK-X-011".into()],
-        implements: vec!["AC-X-001".into()],
+        blocks: Vec::new(),
+        implements: Vec::new(),
         deliverable_contracts: Vec::new(),
     }
 }
@@ -265,4 +265,62 @@ fn a_newer_body_published_without_a_receipt_is_left_for_the_resume() {
     records.push(record("r0", "t0", "round-3", true, serde_json::Value::Null));
     let older = super::plan(&records, temp.path(), &skeleton()).unwrap();
     assert_eq!(older.restores.len(), 1);
+}
+
+#[test]
+fn reconcile_takes_the_chain_lock_before_planning_and_keeps_it_through_apply() {
+    let temp = tempfile::tempdir().unwrap();
+    let context = crate::command::workflow_host_command_exec_tests::context(temp.path());
+    let project = context.project_root.clone();
+    let task_root = context.task_root.clone();
+    let task_path = task_root.join(FILE);
+    crate::command::workflow_host_command_exec_tests::seed_frozen_chain(&context, &task_path);
+    std::fs::write(&task_path, landed("round-1")).unwrap();
+    let pin = crate::command::workflow_task_set::acceptance_pin_path(&project, &task_root);
+    let held = crate::command::workflow_task_set::ChainLock::acquire(&pin, &task_root).unwrap();
+    let run_dir = temp.path().join("run");
+    let store = archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2"));
+    let mut initial = damaged();
+    for record in &initial {
+        store.save_call_record(record).unwrap();
+    }
+
+    let project_for_thread = project.clone();
+    let task_root_for_thread = task_root.clone();
+    let run_dir_for_thread = run_dir.clone();
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        reconcile_task_root(
+            &project_for_thread,
+            &run_dir_for_thread,
+            &task_root_for_thread,
+            true,
+        )
+        .unwrap()
+    });
+    started_rx.recv().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(150));
+
+    // A publisher completes a newer landing while reconciliation is waiting
+    // for this same chain lock. Reconciliation must plan from this state.
+    std::fs::write(&task_path, landed("round-3")).unwrap();
+    initial.push(landing(
+        "r3",
+        "t4",
+        "round-3",
+        false,
+        &content_digest(&landed("round-3")),
+    ));
+    store.save_call_record(initial.last().unwrap()).unwrap();
+    drop(held);
+
+    let lines = worker.join().unwrap();
+    let actual = String::from_utf8(std::fs::read(&task_path).unwrap()).unwrap();
+    let expected = String::from_utf8(landed("round-3")).unwrap();
+    assert_eq!(
+        actual, expected,
+        "the completed newer landing must remain on disk"
+    );
+    assert!(lines[0].contains("restored 0 of 1"), "{lines:?}");
 }

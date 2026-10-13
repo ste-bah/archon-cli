@@ -245,3 +245,64 @@ fn a_later_identical_evaluation_is_a_round_of_its_own() {
         Some("f1:occurrence:2")
     );
 }
+
+#[test]
+fn only_the_current_occurrence_of_identical_request_text_is_exempt_from_replay() {
+    let mut second = landing(
+        "same:occurrence:2",
+        "t02",
+        "TASK-G",
+        "same body",
+        true,
+        false,
+    );
+    second
+        .call
+        .options
+        .extra
+        .insert(OCCURRENCE_KEY.into(), serde_json::json!(2));
+    let later_first = landing("same-again", "t03", "TASK-G", "same body", true, false);
+    let records = vec![
+        landing("same", "t01", "TASK-G", "same body", true, true),
+        second,
+        later_first,
+    ];
+    let lineage = LandingLineage::of(&records, "land", "TASK-G");
+    assert_eq!(
+        lineage.current().map(|r| r.call.id.as_str()),
+        Some("same:occurrence:2")
+    );
+    assert!(lineage.is_rerun(lineage.answers().last().unwrap()));
+    assert_eq!(
+        lineage
+            .superseded_answer(&request("TASK-G", "same body"), 1, none)
+            .map(|r| r.call.id.as_str()),
+        Some("same"),
+        "occurrence 1 must replay its answer even though occurrence 2 has identical text"
+    );
+    assert!(
+        lineage
+            .superseded_answer(&request("TASK-G", "same body"), 2, none)
+            .is_none()
+    );
+}
+
+#[test]
+fn timestamp_ties_use_the_same_total_order_for_replay_selection() {
+    let first = landing("a-old", "t01", "TASK-H", "old body", true, true);
+    let next = landing("m-next", "t01", "TASK-H", "next body", true, true);
+    let current = landing("z-current", "t02", "TASK-H", "current body", true, false);
+    let records = vec![first, next, current];
+    let lineage = LandingLineage::of(&records, "land", "TASK-H");
+    assert_eq!(
+        lineage.current().map(|r| r.call.id.as_str()),
+        Some("z-current")
+    );
+    assert_eq!(
+        lineage
+            .superseded_answer(&request("TASK-H", "old body"), 1, none)
+            .map(|r| r.call.id.as_str()),
+        Some("a-old"),
+        "a timestamp tie must not make a superseded answer fall through to execution"
+    );
+}

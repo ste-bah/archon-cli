@@ -143,9 +143,9 @@ impl Run {
     fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
         let spec = test_spec();
-        let store = WorkflowStore::new(temp.path().join("workflows"));
-        let run = store.create_run(spec.clone()).unwrap();
         let context = crate::command::workflow_host_command_exec_tests::context(temp.path());
+        let store = WorkflowStore::project(&context.project_root);
+        let run = store.create_run(spec.clone()).unwrap();
         Self {
             _temp: temp,
             spec,
@@ -168,9 +168,22 @@ impl Run {
         })
     }
 
-    async fn run(&self, host: Arc<LandingHost>, script: &str) -> serde_json::Value {
+    async fn run(
+        &self,
+        host: Arc<dyn WorkflowHostCommandExecutor>,
+        script: &str,
+    ) -> serde_json::Value {
+        self.run_with_lease(host, script, None).await
+    }
+
+    async fn run_with_lease(
+        &self,
+        host: Arc<dyn WorkflowHostCommandExecutor>,
+        script: &str,
+        lease: Option<Arc<crate::command::workflow_executor_lease::ExecutionLease>>,
+    ) -> serde_json::Value {
         let (sink, _rx) = default_workflow_ui_sink();
-        let summary = WorkflowV2ScriptRunner::new(
+        let runner = WorkflowV2ScriptRunner::new(
             "landing upgrade".into(),
             test_runtime(&self.spec),
             WorkflowV2AgentAdapter::new(),
@@ -191,55 +204,19 @@ impl Run {
             None,
         )
         .with_raw_outcomes(true)
-        .with_host_command_executor(host)
-        .run(script)
-        .await
-        .unwrap();
+        .with_host_command_executor(host);
+        let runner = if let Some(lease) = lease {
+            let generation = self.store.load_state(&self.run_id).unwrap().generation;
+            runner.with_executor_lease(lease, generation)
+        } else {
+            runner
+        };
+        let summary = runner.run(script).await.unwrap();
         let summary = summary;
         assert!(summary.script_error.is_none(), "{:?}", summary.script_error);
         serde_json::from_str(summary.script_result.as_deref().unwrap_or("null")).unwrap()
     }
 }
 
-#[tokio::test]
-async fn a_landing_bump_replays_superseded_rounds_and_rejudges_only_the_current_body() {
-    let run = Run::new();
-    let launch = run.build(9);
-    run.run(launch.clone(), SCRIPT).await;
-    assert_eq!(launch.executed.lock().unwrap().len(), 3);
-    // Version 13: every landing now has another key.
-    let bumped = run.build(13);
-    let output = run.run(bumped.clone(), SCRIPT).await;
-    assert_eq!(output, serde_json::json!("round 3"));
-    assert_eq!(
-        *bumped.executed.lock().unwrap(),
-        vec!["round 3".to_string()],
-        "only the current body is judged again; rounds 1 and 2 replay"
-    );
-    // A third resume under the same logic executes nothing.
-    let again = run.build(13);
-    run.run(again.clone(), SCRIPT).await;
-    assert!(again.executed.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn an_old_round_asked_alone_replays_and_never_runs_over_the_current_body() {
-    let run = Run::new();
-    run.run(run.build(9), SCRIPT).await;
-    let bumped = run.build(13);
-    let outcome = run.run(bumped.clone(), ROUND_ONE).await;
-    assert!(
-        bumped.executed.lock().unwrap().is_empty(),
-        "a superseded round must not run, so it publishes nothing"
-    );
-    assert_eq!(outcome["gateEnvelope"]["report"], "refused round 1");
-}
-
-#[tokio::test]
-async fn without_a_bump_the_current_body_is_not_judged_again() {
-    let run = Run::new();
-    run.run(run.build(9), SCRIPT).await;
-    let same = run.build(9);
-    run.run(same.clone(), SCRIPT).await;
-    assert!(same.executed.lock().unwrap().is_empty());
-}
+#[path = "workflow_live_v2_upgrade_landing_real_tests.rs"]
+mod real_host_tests;

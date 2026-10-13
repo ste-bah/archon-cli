@@ -199,7 +199,7 @@ fn unrecorded_landing<'a>(
         .filter(|record| {
             rebuild(record, frozen, path).is_ok_and(|bytes| content_digest(&bytes) == live)
         })
-        .max_by(|a, b| a.started_at.cmp(&b.started_at))
+        .max_by(|a, b| archon_workflow::v2::script::landing_lineage::record_order(a, b))
 }
 
 /// The latest current landing of `task_id` over every targeted command
@@ -222,7 +222,7 @@ fn current_landing<'a>(
     commands
         .into_iter()
         .filter_map(|command| LandingLineage::of(records, command, task_id).current())
-        .max_by(|a, b| a.started_at.cmp(&b.started_at))
+        .max_by(|a, b| archon_workflow::v2::script::landing_lineage::record_order(a, b))
 }
 
 /// The bytes `record`'s landing published: its recorded candidate with the
@@ -266,6 +266,31 @@ pub(crate) fn reconcile_task_root(
     write: bool,
 ) -> Result<Vec<String>> {
     let pin_path = crate::command::workflow_task_set::acceptance_pin_path(project_root, task_root);
+    // The plan depends on a single consistent view of both the recorded
+    // lineage and the live body. Hold the same chain lock through planning
+    // and publication so a newer landing cannot arrive between the two.
+    let _write_lock = if write {
+        Some(crate::command::workflow_task_set::ChainLock::acquire_waiting(&pin_path, task_root)?)
+    } else {
+        None
+    };
+    let _read_lock = if write {
+        None
+    } else {
+        let lock = archon_workflow::task_set_publish_lock::PublishLockFile::hold_shared_existing(
+            &pin_path,
+        )
+        .map_err(|error| anyhow!(error))?;
+        let [journal, journal_temp] =
+            archon_workflow::task_set_publish_lock::journal_paths(&pin_path);
+        if journal.exists() || journal_temp.exists() {
+            return Err(anyhow!(
+                "dry-run cannot inspect frozen task chain while publish recovery is pending at {}; run a live resume to settle it",
+                journal.display()
+            ));
+        }
+        lock
+    };
     let pin: archon_workflow::task_set_contract::AcceptancePin = match std::fs::read(&pin_path) {
         Ok(bytes) => serde_json::from_slice(&bytes)
             .with_context(|| format!("parsing acceptance pin {}", pin_path.display()))?,
@@ -301,7 +326,7 @@ pub(crate) fn reconcile_task_root(
         archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2")).load_call_records()?;
     let plan = plan(&records, task_root, &skeleton)?;
     if write {
-        apply(&pin_path, task_root, &plan)?;
+        apply_locked(&pin_path, task_root, &plan)?;
     }
     let verb = if write { "restored" } else { "would restore" };
     let mut lines = vec![format!(
@@ -352,6 +377,8 @@ pub(crate) fn landing_report(run_dir: &Path) -> Result<Vec<String>> {
     for (command, subject) in &subjects {
         let lineage = LandingLineage::of(&records, command, subject);
         let current = lineage.current();
+        let current_occurrence =
+            current.map(archon_workflow::v2::script::landing_lineage::occurrence_of);
         lines.push(format!(
             "landing lineage {command} {subject}: current body {}",
             current.map_or("none", |record| record.call.id.as_str())
@@ -364,9 +391,10 @@ pub(crate) fn landing_report(run_dir: &Path) -> Result<Vec<String>> {
             let replayed = lineage.superseded_answer(request, occurrence, |_| false);
             let role = if lineage.is_rerun(record) {
                 "rerun: neither history nor authority".to_string()
-            } else if current
-                .is_some_and(|current| current.call.options.host_command.as_ref() == Some(request))
-            {
+            } else if current.is_some_and(|current| {
+                current.call.options.host_command.as_ref() == Some(request)
+                    && current_occurrence == Some(occurrence)
+            }) {
                 "current body's request: the one request a resume may judge again".to_string()
             } else {
                 format!(
@@ -396,6 +424,15 @@ pub(crate) fn apply(pin_path: &Path, task_root: &Path, plan: &ReconcilePlan) -> 
     }
     let _chain_lock =
         crate::command::workflow_task_set::ChainLock::acquire_waiting(pin_path, task_root)?;
+    apply_locked(pin_path, task_root, plan)
+}
+
+/// Apply while the caller holds the chain lock from before it read records
+/// and task files.
+fn apply_locked(pin_path: &Path, task_root: &Path, plan: &ReconcilePlan) -> Result<()> {
+    if plan.restores.is_empty() {
+        return Ok(());
+    }
     let files: Vec<(PathBuf, Vec<u8>)> = plan
         .restores
         .iter()
