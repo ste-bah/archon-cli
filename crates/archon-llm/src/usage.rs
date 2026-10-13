@@ -369,6 +369,38 @@ mod tests {
         assert_eq!(acc.context_input_tokens, 33);
     }
 
+    /// Issue 369: the `message_start` and `message_delta` frames of one
+    /// response recorded from an OpenAI-compatible proxy (a live run's
+    /// transport evidence, `body_first_500` / `body_last_500`), verbatim but
+    /// for the id. The proxy sends a placeholder 0 for every count at start and
+    /// the real counts in the final delta.
+    const CAPTURED_PROXY_STREAM: &str = "event: message_start\n\
+data: {\"type\": \"message_start\", \"message\": {\"id\": \"msg_captured\", \"type\": \"message\", \"role\": \"assistant\", \"content\": [], \"model\": \"GLM-5.3-Flash-EXL3\", \"stop_reason\": null, \"stop_sequence\": null, \"usage\": {\"input_tokens\": 0, \"output_tokens\": 0, \"cache_creation_input_tokens\": 0, \"cache_read_input_tokens\": 0}}}\n\n\
+event: content_block_stop\n\
+data: {\"type\": \"content_block_stop\", \"index\": 0}\n\n\
+event: message_delta\n\
+data: {\"type\": \"message_delta\", \"delta\": {\"stop_reason\": \"tool_use\", \"stop_sequence\": null}, \"usage\": {\"input_tokens\": 17256, \"output_tokens\": 27}}\n\n\
+event: message_stop\n\
+data: {\"type\": \"message_stop\"}\n\n";
+
+    #[test]
+    fn a_placeholder_zero_at_start_takes_the_final_delta_counts() {
+        let mut acc = UsageAccumulator::default();
+        for (event, data) in crate::streaming::split_sse_lines(CAPTURED_PROXY_STREAM) {
+            acc.record_event(&crate::streaming::parse_sse_event(event, data).unwrap());
+        }
+        assert_eq!(acc.billable_input_tokens, 17256);
+        assert_eq!(acc.context_input_tokens, 17256);
+        assert_eq!(acc.output_tokens, 27);
+        assert!(acc.input_tokens_available && acc.output_tokens_available);
+        // Two such responses (two requests of one call): summed, once each.
+        for (event, data) in crate::streaming::split_sse_lines(CAPTURED_PROXY_STREAM) {
+            acc.record_event(&crate::streaming::parse_sse_event(event, data).unwrap());
+        }
+        assert_eq!(acc.billable_input_tokens, 2 * 17256);
+        assert_eq!(acc.output_tokens, 2 * 27);
+    }
+
     #[test]
     fn to_usage_reports_the_accumulated_totals() {
         let mut acc = UsageAccumulator::default();
