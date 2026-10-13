@@ -473,7 +473,14 @@ impl WorkflowScriptHost {
         .with_dispatched_items(dispatched_items)
         .with_agent_sessions(self.take_call_sessions(&call_id));
         if !self
-            .publish_dispatched_call(&record, call_generation, self.call_fenced(&execution))
+            .publish_or_record_stop(
+                &execution,
+                &record,
+                call_generation,
+                self.call_fenced(&execution),
+                dispatched_at.elapsed(),
+                execution_generation,
+            )
             .await?
         {
             return self

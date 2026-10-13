@@ -269,6 +269,70 @@ impl WorkflowScriptHost {
     }
 }
 
+impl WorkflowScriptHost {
+    /// Publish a dispatched call's answer (`publish_dispatched_call`).
+    ///
+    /// Issue-213 C5: when run control refuses the publication -- a pause or
+    /// cancel moved the generation while the call was in flight, including a
+    /// session its own run-control watcher ended first, which arrives here as
+    /// a failed transport rather than a typed stop -- the call is recorded as
+    /// interrupted by that stop, with the answer's sessions, and the stop is
+    /// the call's outcome. It is never left `running` with its marker, and a
+    /// resume runs it again as it does every interrupted call. A record that
+    /// cannot be saved is logged; the stop still stands and the marker is
+    /// left for the next start.
+    pub(in super::super) async fn publish_or_record_stop(
+        &self,
+        execution: &WorkflowV2CallExecution,
+        record: &WorkflowV2CallRecord,
+        call_generation: Option<u64>,
+        fenced: bool,
+        elapsed: std::time::Duration,
+        dispatch_generation: Option<u64>,
+    ) -> archon_workflow::WorkflowResult<bool> {
+        let (stop, reason) = match self
+            .publish_dispatched_call(record, call_generation, fenced)
+            .await
+        {
+            Err(stop) => match control_interruption_reason(&stop) {
+                Some(reason) => (stop, reason),
+                None => return Err(stop),
+            },
+            published => return published,
+        };
+        archon_tools::bash::end_process_groups_of(&self.runner.run_id);
+        // The answer took the call's sessions; the interrupted record names them.
+        let sessions = if record.agent_session_ids.is_empty() {
+            record.agent_session_id.iter().cloned().collect::<Vec<_>>()
+        } else {
+            record.agent_session_ids.clone()
+        };
+        for session in &sessions {
+            super::super::super::workflow_live_v2_client::call_sessions::note_session(
+                &self.runner.run_id,
+                &record.call.id,
+                session,
+            );
+        }
+        if let Err(save_err) = self
+            .save_interrupted_call_record(
+                execution,
+                reason,
+                &stop,
+                elapsed,
+                record.attempt,
+                &record.input_hash,
+                record.source_fingerprint.clone(),
+                dispatch_generation,
+            )
+            .await
+        {
+            tracing::warn!(call_id = %record.call.id, %save_err, "unpublished call's interruption record not saved");
+        }
+        Err(stop)
+    }
+}
+
 /// A result that committed: it carries a publication receipt, or its status
 /// is one a resume reuses.
 fn committed_result(record: &WorkflowV2CallRecord) -> bool {

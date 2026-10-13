@@ -227,3 +227,7 @@ async fn round8_fixed_terminal_fixture_is_realistic() {
     )
     .await;
 }
+
+// Issue-213 C5: a control stop with calls in flight records each of them.
+#[path = "workflow_live_v2_pause_inflight_tests.rs"]
+mod pause_inflight_tests;

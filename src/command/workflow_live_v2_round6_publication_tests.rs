@@ -110,11 +110,26 @@ async fn publication_edit(action: LifecycleAction, expected: RunStatus, dispatch
             "pre-edit result must never reach history"
         );
     } else {
-        let record = v2.load_call_record("inspect-one").expect("lookup");
-        assert!(
-            record.is_none(),
+        // The pre-stop answer is never published. Issue-213 C5: the call
+        // keeps a record of the stop instead, never the answer.
+        let record = v2
+            .load_call_record("inspect-one")
+            .expect("lookup")
+            .expect("the stopped call keeps a record of the stop");
+        assert_ne!(
+            record.result.summary, "dispatch 0",
             "pre-stop answer must not be published: {record:?}"
         );
+        assert!(
+            !record.is_reusable_for(&record.input_hash),
+            "pre-stop answer must not be published: {record:?}"
+        );
+        let reason = if expected == RunStatus::Paused {
+            "paused"
+        } else {
+            "cancelled"
+        };
+        assert_eq!(record.result.data["interrupted"], reason, "{record:?}");
     }
 }
 

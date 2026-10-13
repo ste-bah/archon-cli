@@ -124,4 +124,67 @@ impl WorkflowScriptHost {
             }
         }
     }
+
+    /// Issue-213 C5: a pause or cancel ended the script while sibling calls
+    /// were still in flight. No future is polled once the script has
+    /// returned, so those calls would never reach their own interruption
+    /// record: each kept a `running` record and an in-flight marker, and the
+    /// next start recorded it as `host_process_ended` -- the wrong cause.
+    /// Record each one now, with the control stop as its cause. A record that
+    /// cannot be saved is logged, and its marker is left for the next start.
+    /// `control`, the stop that ended the script, after every call still in
+    /// flight is recorded with it as the cause -- unless a terminal host
+    /// stop (`terminal_stop`) came first and recorded them itself.
+    pub(super) async fn recorded_control_stop(
+        &self,
+        control: WorkflowError,
+        terminal_stop: bool,
+    ) -> WorkflowError {
+        if !terminal_stop {
+            self.interrupt_control_calls(&control).await;
+        }
+        control
+    }
+
+    async fn interrupt_control_calls(&self, control: &WorkflowError) {
+        // The same reasons `control_interruption_reason` gives a call the
+        // stop reached itself.
+        let reason = match control {
+            WorkflowError::ControlPaused(_) => "paused",
+            WorkflowError::ControlCancelled(_) => "cancelled",
+            _ => return,
+        };
+        let pending = match self.runner.pending_calls.lock() {
+            Ok(calls) => calls.values().cloned().collect::<Vec<_>>(),
+            Err(poisoned) => poisoned.into_inner().values().cloned().collect(),
+        };
+        if pending.is_empty() {
+            return;
+        }
+        archon_tools::bash::end_process_groups_of(&self.runner.run_id);
+        for call in pending {
+            let id = call.execution.call.id.clone();
+            match self
+                .save_interrupted_call_record(
+                    &call.execution,
+                    reason,
+                    control,
+                    call.started.elapsed(),
+                    call.attempt,
+                    &call.input_hash,
+                    call.source_fingerprint,
+                    call.generation,
+                )
+                .await
+            {
+                Ok(()) => {
+                    tracing::info!(call_id = %id, reason, "in-flight call recorded at the control stop")
+                }
+                Err(err) => {
+                    tracing::warn!(call_id = %id, reason, %err, "control stop interruption record not saved; the next start records the call from its marker");
+                    self.forget_pending_call(&id);
+                }
+            }
+        }
+    }
 }

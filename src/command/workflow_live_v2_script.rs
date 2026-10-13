@@ -342,7 +342,7 @@ impl WorkflowV2ScriptRunner {
             observed.as_ref(),
             outcome.as_ref().err().map(String::as_str),
         ) {
-            return Err(control);
+            return Err(host.recorded_control_stop(control, terminal_stop).await);
         }
         // Issue 324: kept typed, whatever the script did with the rejection.
         if let Some(fault) = host_fault.lock().ok().and_then(|mut slot| slot.take()) {
