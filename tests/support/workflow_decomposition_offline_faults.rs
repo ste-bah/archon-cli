@@ -77,19 +77,14 @@ fault_matrix! {
     pause_before_skeleton_author: PauseAtBoundary "skeleton-author-" 1;
     #[cfg(unix)]
     pause_before_freeze_skeleton: PauseAtBoundary "freeze-skeleton" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     pause_before_body_author: PauseAtBoundary "body-" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     pause_before_land_task_body: PauseAtBoundary "land-task-body" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     pause_before_task_set_lint: PauseAtBoundary "task-set-lint" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     pause_before_requirements_trace: PauseAtBoundary "requirements-trace" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     pause_before_final_report: PauseAtBoundary "fixed-decomposition-final" 1;
     #[cfg(unix)]
@@ -100,19 +95,14 @@ fault_matrix! {
     kill_before_skeleton_author: KillAtBoundary "skeleton-author-" 1;
     #[cfg(unix)]
     kill_before_freeze_skeleton: KillAtBoundary "freeze-skeleton" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     kill_before_body_author: KillAtBoundary "body-" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     kill_before_land_task_body: KillAtBoundary "land-task-body" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     kill_before_task_set_lint: KillAtBoundary "task-set-lint" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     kill_before_requirements_trace: KillAtBoundary "requirements-trace" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     kill_before_final_report: KillAtBoundary "fixed-decomposition-final" 1;
     #[cfg(unix)]
@@ -120,13 +110,10 @@ fault_matrix! {
     #[cfg(unix)]
     pause_mid_freeze_acceptance_judge: PauseMidCall "judge" 1;
     pause_at_provider_call_boundary_resumes_only_interrupted_author: PauseMidCall "skeleton" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     pause_mid_body_author: PauseMidCall "body" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     pause_mid_body_gate_fidelity: PauseMidCall "fidelity" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     pause_mid_set_gate_fidelity: PauseMidCall "fidelity" 3;
     #[cfg(unix)]
@@ -136,7 +123,6 @@ fault_matrix! {
     kill_mid_freeze_acceptance_judge: KillMidCall "judge" 1;
     #[cfg(unix)]
     sigkill_mid_provider_call_resumes_only_interrupted_author: KillMidCall "skeleton" 1;
-    #[ignore = "defect #421: a resume after the skeleton freeze re-executes the accepted freeze-acceptance and freeze-skeleton calls (stale shared acceptance-pin receipt)"]
     #[cfg(unix)]
     kill_mid_body_author: KillMidCall "body" 1;
     #[ignore = "defect #422: SIGKILL of the run during a host command leaves survivors_unknown, so the resume refuses and asks for a manual step"]
