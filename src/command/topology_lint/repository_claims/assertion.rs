@@ -45,7 +45,25 @@ pub(super) use sentences::sentences;
 /// Is the claim on the path whose backtick opens at byte `at` of `sentence`
 /// what a test asserts at run time? `after` is the text after the path.
 pub(super) fn exempt(sentence: &str, carried: bool, at: usize, after: &str) -> bool {
-    asserted_at(sentence, carried, at) && !names_repository(after) && !plans_change(after)
+    asserted_at(sentence, carried, at)
+        && !relative_clause(after)
+        && !names_repository(after)
+        && !plans_change(after)
+}
+
+/// A relative clause right after the path ("`x`, which already exists",
+/// "`x` (that exists)") is the body's own statement about `x`, not what the
+/// test asserts.
+fn relative_clause(after: &str) -> bool {
+    let rest = after.trim_start();
+    let rest = rest
+        .strip_prefix([',', '('])
+        .map_or(rest, str::trim_start)
+        .to_ascii_lowercase();
+    ["which", "that"].iter().any(|word| {
+        rest.strip_prefix(word)
+            .is_some_and(|tail| tail.chars().next().is_none_or(|c| !c.is_alphanumeric()))
+    })
 }
 
 /// Plain words allowed between a lead (or an enumeration marker) and the

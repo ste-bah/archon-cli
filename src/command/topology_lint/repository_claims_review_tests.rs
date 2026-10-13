@@ -347,3 +347,30 @@ fn issue443_rereview_runtime_shapes_stay_exempt() {
         ["src/ghost.rs"]
     );
 }
+
+/// Re-review round 3 of #443: a relative clause right after the path is the
+/// body's own claim; a relative clause after the predicate is not.
+#[test]
+fn issue443_a_relative_clause_after_the_path_still_claims() {
+    for (text, path) in [
+        (
+            "Assert the loader reads `src/real.rs`, which already exists.",
+            "src/real.rs",
+        ),
+        (
+            "The test asserts the parser loads `config/default.toml`, which already exists.",
+            "config/default.toml",
+        ),
+        (
+            "Assert the file at `src/real.rs`, which already exists, is unchanged.",
+            "src/real.rs",
+        ),
+        (
+            "Assert the loader reads `src/real.rs` (which already exists).",
+            "src/real.rs",
+        ),
+    ] {
+        assert_eq!(claimed_paths(text), [path], "{text:?}");
+    }
+    assert!(claims("Assert `out/a.json` exists, which proves the run.").is_empty());
+}
