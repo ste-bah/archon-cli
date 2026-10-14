@@ -204,9 +204,7 @@ async fn evidence_377_timeout_without_child_status_is_stored_as_null() {
     let before = match &fixture.process.outcomes[0] {
         Scripted::TimedOut(progress) => format!(
             "timed_out={}, exit_code={:?}, reported_progress={:?}",
-            true,
-            None::<i32>,
-            progress
+            true, None::<i32>, progress
         ),
         _ => panic!("expected the timeout fixture outcome"),
     };
