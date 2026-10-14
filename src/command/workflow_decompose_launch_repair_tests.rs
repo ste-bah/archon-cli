@@ -49,8 +49,8 @@ fn check(
     compare_repaired_chain(
         &old,
         &new,
-        &old_skeleton,
-        &new_skeleton,
+        Some(&old_skeleton),
+        Some(&new_skeleton),
         "new-contract",
         &old_bodies,
         &new_bodies,
@@ -116,6 +116,42 @@ fn changed_task_body_is_rejected() {
         error.contains("old digest") && error.contains("new digest"),
         "{error}"
     );
+}
+
+#[test]
+fn acceptance_only_repair_skips_skeleton_and_body_comparisons() {
+    let mut launched = snapshot("body");
+    launched.skeleton = false;
+    launched.subjects.clear();
+    launched.bodies.clear();
+    launched.body_digests.clear();
+    let mut republished = launched.clone();
+
+    assert!(
+        compare_repaired_chain(
+            &launched,
+            &republished,
+            None,
+            None,
+            "new-contract",
+            &Default::default(),
+            &Default::default(),
+        )
+        .is_ok()
+    );
+
+    republished.skeleton = true;
+    let error = compare_repaired_chain(
+        &launched,
+        &republished,
+        None,
+        None,
+        "new-contract",
+        &Default::default(),
+        &Default::default(),
+    )
+    .unwrap_err();
+    assert!(error.contains("skeleton"), "{error}");
 }
 
 #[test]
