@@ -35,7 +35,7 @@
 /// `fidelity_store_legacy.rs`).
 ///
 /// 1: the logic of schema 4 and schema 5 (#434, #434c).
-/// 2: PRD acceptance/gap context and whole-set candidate fallback change the question.
+/// 2: PRD acceptance/gap context, whole-set attribution and weakening evidence change the question.
 pub const CRITIC_LOGIC_VERSION: u32 = 2;
 
 /// The digest of [`FILES`] as reviewed against [`CRITIC_LOGIC_VERSION`].
@@ -51,19 +51,28 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 ///   answered again in the same conversation with the other meaning is
 ///   logged, naming both meanings, and nothing is recorded; the kept
 ///   verdict stays final. No acceptance rule changed.
-/// - Re-pinned for #441, version 2: PRD acceptance/gap context and the
-///   whole-set candidate fallback change what question a verdict answers.
-pub const SOURCES_DIGEST: &str = "54392cddd8a3d2c718e27c993d798b498a7488f75f407cc0db8407ae7ed92882";
+/// - Re-pinned for #441 review, version 2: PRD source and policy context,
+///   whole-set attribution, and weakening-evidence quotes change what a
+///   verdict answers and when it blocks a body.
+/// - #441 review, same unreleased version: the extracted whole-task-set
+///   ownership lookup is included in the pinned logic files.
+pub const SOURCES_DIGEST: &str = "ba34d7d898af43ba3851b6c6b201e78bcc009b4ae39e0f3ef82ab5a46f22479e";
 
-/// Hashed, sorted: the critic call, its prompt rendering, its reply reader
-/// and checks (the `#[path]` modules of `fidelity_audit.rs`).
+/// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
+/// fallback, and task-text-specific verdict reuse rules.
 #[cfg_attr(not(test), allow(dead_code, reason = "read by the guard test"))]
 pub const FILES: &[&str] = &[
     "crates/archon-workflow/src/fidelity_audit.rs",
     "crates/archon-workflow/src/fidelity_audit_check.rs",
+    "crates/archon-workflow/src/fidelity_audit_context.rs",
     "crates/archon-workflow/src/fidelity_audit_reply.rs",
+    "crates/archon-workflow/src/obligation_continuations.rs",
+    "crates/archon-workflow/src/obligation_ids.rs",
+    "crates/archon-workflow/src/obligation_source_sections.rs",
     "src/command/topology_lint/fidelity_candidate_fallback.rs",
     "src/command/topology_lint/fidelity_critic.rs",
+    "src/command/topology_lint/fidelity_set_helpers.rs",
+    "src/command/topology_lint/fidelity_store.rs",
 ];
 
 /// Fidelity files beside [`FILES`] that are not hashed, each with the reason.
@@ -82,10 +91,6 @@ pub const EXCLUDED: &[(&str, &str)] = &[
         "src/command/topology_lint/fidelity_resume.rs",
         "chooses which obligations are asked and how they are batched; a record is per \
          obligation and deliberately does not name its batch partners",
-    ),
-    (
-        "src/command/topology_lint/fidelity_store.rs",
-        "the reuse rules themselves; a change to the record layout bumps STORE_SCHEMA",
     ),
     (
         "src/command/topology_lint/fidelity_store_legacy.rs",

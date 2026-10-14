@@ -28,6 +28,7 @@ fn relative(root: &Path, file: &Path) -> String {
 /// among `files`.
 fn unlisted_children(root: &Path, files: &[&str]) -> BTreeSet<String> {
     let listed: BTreeSet<&str> = files.iter().copied().collect();
+    let excluded: BTreeSet<&str> = EXCLUDED.iter().map(|(file, _)| *file).collect();
     let mut missing = BTreeSet::new();
     for file in files {
         let path = root.join(file);
@@ -49,7 +50,10 @@ fn unlisted_children(root: &Path, files: &[&str]) -> BTreeSet<String> {
         }
         for child in children {
             let child = relative(root, &child);
-            if !is_test_file(Path::new(&child)) && !listed.contains(child.as_str()) {
+            if !is_test_file(Path::new(&child))
+                && !listed.contains(child.as_str())
+                && !excluded.contains(child.as_str())
+            {
                 missing.insert(child);
             }
         }

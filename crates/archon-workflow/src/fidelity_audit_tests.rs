@@ -129,6 +129,27 @@ fn prompt_judges_obligations_under_prd_acceptance_and_gap_context() {
     assert!(prompt.contains("judge it under any supplied PRD acceptance and residual-gap context"));
 }
 
+#[test]
+fn context_uses_obligation_source_sections_and_filters_unrelated_acceptance_headings() {
+    let prd = "# Operational Contract\n\n- REQ-WS-009: The release manifest records each completed widget.\n\n# Acceptance of vendor contract\n\nVendor signatures are checked by procurement.\n\n# Residual Gap Policy\n\nUnavailable widgets are listed as scoped residual gaps.\n";
+    let ids = vec!["REQ-WS-009".to_string()];
+    let summary = SkeletonSummary::absent().with_prd_context_for(prd, &ids);
+    let prompt = fidelity_prompt(&obligations(), &tasks(), &summary);
+    assert!(prompt.contains("The release manifest records each completed widget."));
+    assert!(prompt.contains("Unavailable widgets are listed as scoped residual gaps."));
+    assert!(!prompt.contains("Vendor signatures are checked by procurement."));
+}
+
+#[test]
+fn context_names_when_only_obligation_source_sections_are_available() {
+    let prd = "# Miscellaneous Requirements\n\n- REQ-WS-009: The release manifest records each completed widget.\n";
+    let ids = vec!["REQ-WS-009".to_string()];
+    let summary = SkeletonSummary::absent().with_prd_context_for(prd, &ids);
+    let prompt = fidelity_prompt(&obligations(), &tasks(), &summary);
+    assert!(prompt.contains("No separately headed done definition, acceptance criteria, or residual/gap policy section was found"));
+    assert!(prompt.contains("The release manifest records each completed widget."));
+}
+
 /// The skeleton section sits after the obligations and before the task
 /// texts, and the instruction says what it establishes.
 #[test]
@@ -253,7 +274,7 @@ fn malformed_replies_are_errors_not_passes() {
 /// verdict type serializes.
 #[test]
 fn prompt_lists_the_exact_verdict_keys_and_parse_errors_name_their_path() {
-    let keys = "obligation_id, necessarily_true, weakest_task_id, reason, quoted_task_text, supporting_task_id, supporting_text";
+    let keys = "obligation_id, necessarily_true, weakest_task_id, reason, quoted_task_text, weakening_quotes, supporting_task_id, supporting_text";
     let prompt = fidelity_prompt(&obligations(), &tasks(), &SkeletonSummary::absent());
     assert!(
         prompt.contains(&format!(
@@ -267,6 +288,7 @@ fn prompt_lists_the_exact_verdict_keys_and_parse_errors_name_their_path() {
         weakest_task_id: String::new(),
         reason: String::new(),
         quoted_task_text: String::new(),
+        weakening_quotes: Vec::new(),
         supporting_task_id: String::new(),
         supporting_text: String::new(),
     };

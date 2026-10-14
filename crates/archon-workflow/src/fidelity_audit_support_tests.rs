@@ -231,6 +231,7 @@ fn a_contradiction_finding_quotes_both_verdicts() {
         weakest_task_id: "TASK-WS-005".into(),
         reason: "the root is temporary".into(),
         quoted_task_text: "the shared project root is untouched".into(),
+        weakening_quotes: Vec::new(),
         supporting_task_id: String::new(),
         supporting_text: String::new(),
     };
@@ -253,10 +254,7 @@ fn a_contradiction_finding_quotes_both_verdicts() {
 #[test]
 fn the_prompt_asks_a_true_verdict_for_its_verbatim_support() {
     let prompt = fidelity_prompt(&obligations(), &tasks(), &SkeletonSummary::absent());
-    assert!(prompt.contains(
-        "When necessarily_true is true, supporting_task_id names the listed task whose text obliges the result and supporting_text is an excerpt"
-    ));
-    assert!(prompt.contains("supporting_task_id and supporting_text are empty strings"));
+    assert!(prompt.contains("When necessarily_true is true, weakening_quotes is an empty list and supporting_task_id names the listed task"));
     assert!(prompt.contains(&format!(
         "at least {MIN_SUPPORT_WORDS} words of the task's prose that oblige the result and occur only once in that task, never a heading, a code block or an HTML comment"
     )));

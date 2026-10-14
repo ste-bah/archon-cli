@@ -40,7 +40,7 @@ pub(super) fn body_reply(necessarily_true: bool) -> String {
     let verdict = if necessarily_true {
         serde_json::json!({"obligation_id": "AC-WS-001", "necessarily_true": true, "weakest_task_id": "", "reason": "the task must write the entry", "quoted_task_text": "", "supporting_task_id": "TASK-WS-002", "supporting_text": REGISTERS})
     } else {
-        serde_json::json!({"obligation_id": "AC-WS-001", "necessarily_true": false, "weakest_task_id": "TASK-WS-002", "reason": "a fixture registry leaves the shared store empty", "quoted_task_text": HOLLOW})
+        serde_json::json!({"obligation_id": "AC-WS-001", "necessarily_true": false, "weakest_task_id": "TASK-WS-002", "reason": "a fixture registry leaves the shared store empty", "quoted_task_text": HOLLOW, "weakening_quotes": [HOLLOW]})
     };
     serde_json::json!({ "verdicts": [verdict] }).to_string()
 }
@@ -111,11 +111,12 @@ async fn a_cross_task_gap_is_a_note_in_the_body_gate_and_blocks_at_the_set_gate_
             "necessarily_true": false,
             "weakest_task_id": "TASK-WS-001",
             "reason": "the sibling leaves the shared store empty",
-            "quoted_task_text": LOOPHOLE
+            "quoted_task_text": LOOPHOLE,
+            "weakening_quotes": []
         }]
     })
     .to_string();
-    let body_critic = FakeCritic::new(vec![Ok(cross_task_false)]);
+    let body_critic = FakeCritic::new(vec![Ok(cross_task_false.clone())]);
     let (body_report, findings) = audit_candidate(cwd, &body, Ok(body_critic.clone()))
         .await
         .expect("cross-task verdict is recorded");
@@ -128,7 +129,7 @@ async fn a_cross_task_gap_is_a_note_in_the_body_gate_and_blocks_at_the_set_gate_
     assert_eq!(
         body_critic.calls(),
         1,
-        "the claimant cluster is already the whole set"
+        "the shared fallback asks every task body"
     );
     assert!(!body_report.contains(LOOPHOLE), "the note is redacted");
 
@@ -183,7 +184,8 @@ async fn a_remaining_whole_set_gap_does_not_become_a_finding_on_an_accurate_cand
             "necessarily_true": false,
             "weakest_task_id": "TASK-WS-002",
             "reason": "the claimant cluster is insufficient",
-            "quoted_task_text": candidate_claim
+            "quoted_task_text": candidate_claim,
+            "weakening_quotes": []
         }]
     })
     .to_string();
@@ -193,7 +195,8 @@ async fn a_remaining_whole_set_gap_does_not_become_a_finding_on_an_accurate_cand
             "necessarily_true": false,
             "weakest_task_id": "TASK-WS-001",
             "reason": "the set still permits an empty shared store",
-            "quoted_task_text": LOOPHOLE
+            "quoted_task_text": LOOPHOLE,
+            "weakening_quotes": []
         }]
     })
     .to_string();
@@ -202,7 +205,10 @@ async fn a_remaining_whole_set_gap_does_not_become_a_finding_on_an_accurate_cand
         .await
         .expect("a remaining gap belongs to the set gate");
     assert!(findings.is_empty(), "{report}");
-    assert!(report.contains("has a set-level gap"), "{report}");
+    assert!(
+        report.contains("cross-task gap assigned to TASK-WS-001"),
+        "{report}"
+    );
     assert_eq!(
         critic.calls(),
         2,
@@ -233,6 +239,7 @@ async fn a_true_verdict_on_the_candidate_adds_no_finding() {
         .await
         .expect("audit");
     assert!(findings.is_empty(), "{report}");
+    assert!(!record_files(cwd).is_empty(), "the body verdict was saved");
     assert!(
         report.contains("AC-WS-001: necessarily true given TASK-WS-002"),
         "{report}"
@@ -290,6 +297,10 @@ async fn a_co_claimant_on_disk_joins_the_candidates_cluster_and_the_set_gate_reu
         .await
         .expect("audit");
     assert!(findings.is_empty(), "{report}");
+    assert!(
+        !record_files(cwd).is_empty(),
+        "body verdict record missing: {report}"
+    );
     let prompt = critic.prompts.lock().unwrap()[0].clone();
     assert!(
         prompt.contains("===== BEGIN TASK TASK-WS-001 =====")
@@ -305,14 +316,20 @@ async fn a_co_claimant_on_disk_joins_the_candidates_cluster_and_the_set_gate_reu
     // only G-WS-001 (claimed by TASK-WS-001 alone) is a new question.
     std::fs::write(candidate_path(cwd), candidate_body(HOLLOW)).unwrap();
     let only_g = serde_json::json!({ "verdicts": [{"obligation_id": "G-WS-001", "necessarily_true": true, "reason": "obliged", "supporting_task_id": "TASK-WS-001", "supporting_text": SUPPORT}] });
-    let set_critic = FakeCritic::new(vec![Ok(only_g.to_string())]);
+    let set_critic = FakeCritic::new(vec![Ok(only_g.to_string()), Ok(body_reply(true))]);
     let evaluation = evaluate(cwd, Ok(set_critic.clone())).await;
     assert!(
         evaluation.operational_error().is_none(),
         "{:?}",
         evaluation.operational_error()
     );
-    assert_eq!(set_critic.calls(), 1);
+    assert_eq!(
+        set_critic.calls(),
+        1,
+        "set prompts: {:?}; body prompt: {}",
+        *set_critic.prompts.lock().unwrap(),
+        prompt
+    );
     assert!(
         evaluation.report.contains("1 asked of") && evaluation.report.contains("1 served from"),
         "{}",
@@ -366,3 +383,6 @@ fn the_decomposition_body_gate_carries_the_provider_and_the_freeze_clock() {
         "the same audit runs on the same clock"
     );
 }
+
+#[path = "fidelity_body_fallback_tests.rs"]
+mod fallback_tests;

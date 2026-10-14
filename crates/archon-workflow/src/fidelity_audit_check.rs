@@ -77,7 +77,19 @@ pub(super) fn check_verdict(
         "quoted_task_text",
         &verdict.quoted_task_text,
         weakest,
-    )
+    )?;
+    // The critic judges whether these sentences weaken the obligation; the
+    // host only verifies that each sentence came verbatim from this task.
+    for quote in &mut verdict.weakening_quotes {
+        cut_quote(quote);
+        verbatim(
+            &format!("false verdict for {id}"),
+            "weakening_quotes",
+            quote,
+            weakest,
+        )?;
+    }
+    Ok(())
 }
 
 /// Does `verdict`, as stored, still pass the check a fresh reply passes

@@ -202,7 +202,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
         // #441 re-pin only: shared source closure changed; freeze-acceptance does not run fidelity.
-        sources_digest: "7afd140835dad2bdd6b7810d42b8b19213f94d1360f85e7ec073b571a0ec0c5f",
+        sources_digest: "49b09587f2718027dcbdd173c97036b9843dd5625de65965bc886576114fb50f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -225,7 +225,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
         // #441 re-pin only: shared source closure changed; freeze-skeleton does not run fidelity.
-        sources_digest: "7afd140835dad2bdd6b7810d42b8b19213f94d1360f85e7ec073b571a0ec0c5f",
+        sources_digest: "49b09587f2718027dcbdd173c97036b9843dd5625de65965bc886576114fb50f",
         build_bound: false,
     },
     CapabilityLogic {
@@ -249,7 +249,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // noun locates ("the report at `x`") stays exempt; a prefixed lead ("re-verify that") is a lead.
         // 13: #443 re-review 3: a relative clause right after the path ("`x`, which already exists") claims.
         // No version bump: refused candidates now stay unpublished in observe mode; only those refused candidates are affected, recorded results remain valid, and the lineage guard makes a future bump safe.
-        // #441: PRD acceptance context and full-set candidate fallback can change body findings.
+        // #441 review, same unreleased version: PRD context, shared whole-set attribution and evidence-backed quotes change body findings.
         version: 14,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
@@ -263,7 +263,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #443: the version bumps above; asserted runtime paths are no longer repository claims.
         // Re-pin only: observe-mode refused bodies now stay unpublished; refused candidates never publish, existing results remain valid, and lineage protects any future version bump.
         // #441: this gate asks fidelity with PRD context and the candidate fallback.
-        sources_digest: "4b32ffb93ef8edad5232a267bdb0dbef927c9f5f3ad652497e0e5c732544a40e",
+        sources_digest: "47098c39d141842878543edd4d9ab203b26e4c3d579945fbe1f2f48945635936",
         build_bound: false,
     },
     CapabilityLogic {
@@ -281,7 +281,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 10: #443 review, same rule as land-task-body 11.
         // 11: #443 re-review, same rule as land-task-body 12.
         // 12: #443 re-review 3, same rule as land-task-body 13.
-        // #441: PRD acceptance context changes set-gate fidelity judgments.
+        // #441 review, same unreleased version: PRD context and shared whole-set attribution change set-gate findings.
         version: 13,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
@@ -296,7 +296,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the staged CLI exposes the body packaging step to the resume's landing
         // reconciliation; no gate calls the new entry, so every verdict is unchanged.
         // #441: this gate judges fidelity with PRD acceptance and gap context.
-        sources_digest: "4b32ffb93ef8edad5232a267bdb0dbef927c9f5f3ad652497e0e5c732544a40e",
+        sources_digest: "47098c39d141842878543edd4d9ab203b26e4c3d579945fbe1f2f48945635936",
         build_bound: false,
     },
     CapabilityLogic {
@@ -312,7 +312,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: trace never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #441 re-pin only: shared source closure changed; requirements-trace does not run fidelity.
-        sources_digest: "aeb37a5c0d00fac91a838913b94fcd4e0bde86ed502d0327f2dcc932e01d252f",
+        sources_digest: "d15245a4b1799aee0f36527673791d4ace7d9ec20e26bc18de17e85fc0b59e6b",
         build_bound: true,
     },
     CapabilityLogic {
@@ -339,7 +339,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the executor names whether a capability publishes, and moved its digest
         // lookup; the reuse rules a verification verdict is checked under are unchanged.
         // #441 re-pin only: shared source closure changed; frozen acceptance does not run fidelity.
-        sources_digest: "9056e83bb3c536fc982d7a1cf0c419d977d9277d47d6f67587879630056da37d",
+        sources_digest: "2d47a337a72a01f8031b1c8dfaae47dc2368ae9fb8cf540b32fc7325dc8617d3",
         build_bound: true,
     },
     CapabilityLogic {
@@ -362,7 +362,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the executor names whether a capability publishes, and moved its digest
         // lookup; the reuse rules a verification verdict is checked under are unchanged.
         // #441 re-pin only: shared source closure changed; frozen skeleton does not run fidelity.
-        sources_digest: "9056e83bb3c536fc982d7a1cf0c419d977d9277d47d6f67587879630056da37d",
+        sources_digest: "2d47a337a72a01f8031b1c8dfaae47dc2368ae9fb8cf540b32fc7325dc8617d3",
         build_bound: true,
     },
 ];

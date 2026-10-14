@@ -49,6 +49,7 @@ fn supported() -> FidelityVerdict {
         weakest_task_id: String::new(),
         reason: "the writer must store it".into(),
         quoted_task_text: String::new(),
+        weakening_quotes: Vec::new(),
         supporting_task_id: "TASK-A-001".into(),
         supporting_text: OBLIGES.into(),
     }
@@ -60,6 +61,7 @@ fn refuted() -> FidelityVerdict {
         weakest_task_id: "TASK-A-002".into(),
         reason: "a temporary registry is allowed".into(),
         quoted_task_text: LOOPHOLE.into(),
+        weakening_quotes: vec![LOOPHOLE.into()],
         supporting_task_id: String::new(),
         supporting_text: String::new(),
         ..supported()
@@ -267,6 +269,40 @@ fn a_false_verdict_stands_only_over_the_identical_cluster() {
         store.load(edited.question()),
         None,
         "another claimer's edit can close the loophole, so it is asked again"
+    );
+}
+
+#[test]
+fn claimant_and_whole_set_verdicts_are_kept_for_their_exact_task_texts() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = store(temp.path());
+    let obligation = obligation_with("The registry holds every entry.");
+    let claimant = Asked::new(obligation.clone(), tasks(OBLIGES, LOOPHOLE));
+    let whole_set = Asked::new(
+        obligation,
+        vec![
+            ClaimingTask {
+                task_id: "TASK-A-001".into(),
+                text: OBLIGES.into(),
+            },
+            ClaimingTask {
+                task_id: "TASK-A-002".into(),
+                text: format!(
+                    "{} The second task contributes its full implementation.",
+                    LOOPHOLE
+                ),
+            },
+        ],
+    );
+    store.save(claimant.question(), &refuted()).unwrap();
+    store.save(whole_set.question(), &refuted()).unwrap();
+    assert_eq!(
+        store.load(claimant.question()),
+        Some(Standing::Verdict(refuted()))
+    );
+    assert_eq!(
+        store.load(whole_set.question()),
+        Some(Standing::Verdict(refuted()))
     );
 }
 

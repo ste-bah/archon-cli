@@ -10,12 +10,13 @@
 
 use super::*;
 
-const VERDICT_KEYS: [&str; 7] = [
+const VERDICT_KEYS: [&str; 8] = [
     "obligation_id",
     "necessarily_true",
     "weakest_task_id",
     "reason",
     "quoted_task_text",
+    "weakening_quotes",
     "supporting_task_id",
     "supporting_text",
 ];

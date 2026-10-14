@@ -43,6 +43,9 @@ use super::fidelity_store::{Standing, StoreIdentity, VerdictStore, store_dir};
 use crate::command::topology_task_graph::task_requirement_claims_tolerant;
 use crate::command::workflow_freeze_budget::FreezeResume;
 use crate::command::workflow_gate::{GateEvaluation, GateFinding, GateId};
+#[cfg(test)]
+use set_helpers::mentions_whole;
+use set_helpers::named_set_tasks;
 
 pub(super) struct FidelityFinding {
     pub(super) text: String,
@@ -237,8 +240,6 @@ async fn audit_scoped(
         .ok_or_else(|| anyhow!("no PRD resolves for {}", tasks_root.display()))?;
     let prd = std::fs::read_to_string(&prd_path)
         .with_context(|| format!("reading PRD {}", prd_path.display()))?;
-    let skeleton = skeleton.with_prd_context(&prd);
-    let skeleton = &skeleton;
     let texts = obligation_texts(&prd);
     let mut task_texts = BTreeMap::new();
     let mut claiming: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -261,6 +262,9 @@ async fn audit_scoped(
             }
         }
     }
+    let claimed_ids: Vec<String> = claiming.keys().cloned().collect();
+    let skeleton = skeleton.with_prd_context_for(&prd, &claimed_ids);
+    let skeleton = &skeleton;
     drop(read);
     // Issue-43: each obligation is audited over its claimants plus the set
     // tasks a claimant names, so a result deferred to a sibling is read where
@@ -324,7 +328,7 @@ async fn audit_scoped(
         scope.resume.unwrap_or(&unlimited),
     )
     .await?;
-    let candidate_body_authorized = super::fidelity_candidate_fallback::authorize(
+    let whole_set_outcomes = super::fidelity_candidate_fallback::resolve_whole_set(
         client,
         &store,
         &inputs,
@@ -340,14 +344,41 @@ async fn audit_scoped(
     let mut findings = Vec::new();
     for ((_, tasks), standings) in inputs.iter().zip(resolved.standings) {
         let task_ids: Vec<String> = tasks.iter().map(|task| task.task_id.clone()).collect();
-        for standing in standings {
+        for original_standing in standings {
+            let obligation_id = match &original_standing {
+                Standing::Verdict(verdict) => &verdict.obligation_id,
+                Standing::Contradiction { refuted, .. } => &refuted.obligation_id,
+            };
+            let standing = whole_set_outcomes
+                .set_standings
+                .get(obligation_id)
+                .cloned()
+                .unwrap_or(original_standing);
             let (verdict, text) = match standing {
                 Standing::Verdict(verdict) if verdict.necessarily_true => {
-                    report.push_str(&format!(
-                        "  {}: necessarily true given {}\n",
-                        verdict.obligation_id,
-                        task_ids.join(", ")
-                    ));
+                    if scope.only_claimed_by.is_some()
+                        && whole_set_outcomes
+                            .set_established
+                            .contains(&verdict.obligation_id)
+                    {
+                        report.push_str(&format!(
+                            "  NOTE obligation {} is established by the whole task set\n",
+                            verdict.obligation_id
+                        ));
+                    } else {
+                        let tasks = if whole_set_outcomes
+                            .set_standings
+                            .contains_key(&verdict.obligation_id)
+                        {
+                            task_texts.keys().cloned().collect::<Vec<_>>().join(", ")
+                        } else {
+                            task_ids.join(", ")
+                        };
+                        report.push_str(&format!(
+                            "  {}: necessarily true given {}\n",
+                            verdict.obligation_id, tasks
+                        ));
+                    }
                     continue;
                 }
                 Standing::Verdict(verdict) => {
@@ -368,11 +399,11 @@ async fn audit_scoped(
                 && scope
                     .only_claimed_by
                     .is_some_and(|tasks| tasks.contains(&verdict.weakest_task_id))
-                && !candidate_body_authorized
+                && !whole_set_outcomes
                     .body_defect
                     .contains(&verdict.obligation_id)
             {
-                if candidate_body_authorized
+                if whole_set_outcomes
                     .set_established
                     .contains(&verdict.obligation_id)
                 {
@@ -461,29 +492,8 @@ fn read_skeleton_summary(tasks_root: &Path) -> Result<SkeletonSummary> {
     Ok(SkeletonSummary::from_skeleton(&skeleton))
 }
 
-/// The canonical ids of the other tasks in the set that `text` names — the
-/// one hop of the ownership chain (Issue-43). An id counts only whole: a text
-/// naming `TASK-A-0021` does not name `TASK-A-002`, and an id outside the set
-/// is not a task the audit can read, so it is never pulled in.
-fn named_set_tasks(
-    own_id: &str,
-    text: &str,
-    set: &BTreeMap<String, (String, PathBuf)>,
-) -> Vec<String> {
-    set.keys()
-        .filter(|id| id.as_str() != own_id && mentions_whole(text, id))
-        .cloned()
-        .collect()
-}
-
-fn mentions_whole(text: &str, id: &str) -> bool {
-    let bounded = |c: Option<char>| c.is_none_or(|c| !c.is_ascii_alphanumeric());
-    text.match_indices(id).any(|(start, _)| {
-        bounded(text[..start].chars().next_back())
-            && bounded(text[start + id.len()..].chars().next())
-    })
-}
-
+#[path = "fidelity_set_helpers.rs"]
+mod set_helpers;
 #[cfg(test)]
 #[path = "fidelity_tests.rs"]
 mod tests;

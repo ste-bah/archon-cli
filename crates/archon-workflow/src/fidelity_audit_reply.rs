@@ -20,6 +20,8 @@ pub(super) struct ReplyVerdict {
     pub(super) weakest_task_id: Option<String>,
     pub(super) reason: String,
     pub(super) quoted_task_text: Option<String>,
+    #[serde(default)]
+    pub(super) weakening_quotes: Vec<String>,
     pub(super) supporting_task_id: Option<String>,
     pub(super) supporting_text: Option<String>,
 }
@@ -210,6 +212,7 @@ pub(super) fn checked_verdict(
         weakest_task_id: reply.weakest_task_id.unwrap_or_default(),
         reason: reply.reason,
         quoted_task_text: reply.quoted_task_text.unwrap_or_default(),
+        weakening_quotes: reply.weakening_quotes,
         supporting_task_id: reply.supporting_task_id.unwrap_or_default(),
         supporting_text: reply.supporting_text.unwrap_or_default(),
     })
