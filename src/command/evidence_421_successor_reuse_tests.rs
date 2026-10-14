@@ -33,7 +33,7 @@ fn observed_after(
     receipt: &archon_workflow::PublicationReceiptV1,
     pin_path: &str,
     reused: bool,
-) -> String {
+) -> (String, bool) {
     let pin_path = std::path::Path::new(pin_path);
     let records = store.load_call_records().unwrap();
     let successor_prior = records
@@ -60,12 +60,14 @@ fn observed_after(
         .and_then(|entry| entry.get("prior_blake3"))
         .and_then(serde_json::Value::as_str);
     let receipt_digest = receipt.entries[0].blake3.as_str();
-    format!(
+    let successor_prior_equals_receipt_digest = successor_prior == Some(receipt_digest);
+    let evidence = format!(
         "reuse_decision={} successor_prior_blake3={} successor_prior_equals_receipt_digest={}",
         if reused { "reuse" } else { "re-run" },
         successor_prior.unwrap_or("absent"),
-        successor_prior == Some(receipt_digest)
-    )
+        successor_prior_equals_receipt_digest
+    );
+    (evidence, successor_prior_equals_receipt_digest)
 }
 
 #[test]
@@ -79,11 +81,11 @@ fn evidence_421_a_ordered_freeze_skeleton_publication_reuses_acceptance_receipt(
     let reused = executor
         .receipt_matches_live_with_successors(&original, Some(&receipt), false)
         .unwrap();
-    eprintln!(
-        "EVIDENCE #421 a BEFORE: {before} AFTER: {}",
-        observed_after(&store, &receipt, &pin_path, reused)
-    );
+    let (after, successor_prior_equals_receipt_digest) =
+        observed_after(&store, &receipt, &pin_path, reused);
+    eprintln!("EVIDENCE #421 a BEFORE: {before} AFTER: {after}");
     assert!(reused);
+    assert!(successor_prior_equals_receipt_digest);
 }
 
 #[test]
@@ -109,11 +111,11 @@ fn evidence_421_b_disk_edit_without_successor_publication_reruns_acceptance() {
     let reused = executor
         .receipt_matches_live_with_successors(&original, Some(&receipt), false)
         .unwrap();
-    eprintln!(
-        "EVIDENCE #421 b BEFORE: {before} AFTER: {}",
-        observed_after(&store, &receipt, &pin_path, reused)
-    );
+    let (after, successor_prior_equals_receipt_digest) =
+        observed_after(&store, &receipt, &pin_path, reused);
+    eprintln!("EVIDENCE #421 b BEFORE: {before} AFTER: {after}");
     assert!(!reused);
+    assert!(!successor_prior_equals_receipt_digest);
 }
 
 #[test]
@@ -140,11 +142,11 @@ fn evidence_421_c_invalidated_successor_publication_does_not_reuse_receipt() {
     let reused = executor
         .receipt_matches_live_with_successors(&original, Some(&receipt), false)
         .unwrap();
-    eprintln!(
-        "EVIDENCE #421 c BEFORE: {before} AFTER: {}",
-        observed_after(&store, &receipt, &pin_path, reused)
-    );
+    let (after, successor_prior_equals_receipt_digest) =
+        observed_after(&store, &receipt, &pin_path, reused);
+    eprintln!("EVIDENCE #421 c BEFORE: {before} AFTER: {after}");
     assert!(!reused);
+    assert!(successor_prior_equals_receipt_digest);
 }
 
 #[test]
@@ -174,11 +176,11 @@ fn evidence_421_d_successor_without_prior_digest_is_not_reused() {
     let reused = executor
         .receipt_matches_live_with_successors(&original, Some(&receipt), false)
         .unwrap();
-    eprintln!(
-        "EVIDENCE #421 d BEFORE: {before} AFTER: {}",
-        observed_after(&store, &receipt, &pin_path, reused)
-    );
+    let (after, successor_prior_equals_receipt_digest) =
+        observed_after(&store, &receipt, &pin_path, reused);
+    eprintln!("EVIDENCE #421 d BEFORE: {before} AFTER: {after}");
     assert!(!reused);
+    assert!(!successor_prior_equals_receipt_digest);
 }
 
 #[test]
@@ -206,9 +208,9 @@ fn evidence_421_e_successor_with_wrong_prior_digest_is_not_reused() {
     let reused = executor
         .receipt_matches_live_with_successors(&original, Some(&receipt), false)
         .unwrap();
-    eprintln!(
-        "EVIDENCE #421 e BEFORE: {before} AFTER: {}",
-        observed_after(&store, &receipt, &pin_path, reused)
-    );
+    let (after, successor_prior_equals_receipt_digest) =
+        observed_after(&store, &receipt, &pin_path, reused);
+    eprintln!("EVIDENCE #421 e BEFORE: {before} AFTER: {after}");
     assert!(!reused);
+    assert!(!successor_prior_equals_receipt_digest);
 }
