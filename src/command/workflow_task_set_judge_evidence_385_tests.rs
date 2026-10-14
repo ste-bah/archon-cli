@@ -56,11 +56,9 @@ async fn evidence_385_malformed_reply_carries_its_exact_parse_error_into_retry()
     );
     println!("EVIDENCE #385 judge-malformed-json BEFORE: {before} AFTER: {after}");
     assert_eq!(retry[1]["content"], rejected);
-    assert!(
-        retry[2]["content"]
-            .as_str()
-            .unwrap()
-            .contains("malformed batched JSON")
+    assert_eq!(
+        retry[2]["content"],
+        "Your reply was rejected: acceptance judge returned malformed batched JSON (expected ident at line 1 column 2; at the fault: n<HERE>ot-json); retry the full batch: expected ident at line 1 column 2\nReply again with the complete JSON document required by the first message."
     );
 }
 
