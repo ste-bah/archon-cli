@@ -29,6 +29,7 @@ fn workflow_task_set_commands_and_task_file_lint_parse() {
                     staging_root: None,
                     gate_envelope: None,
                     call_id: None,
+                    task_context_file: None,
                     fidelity: false,
                     waive_obligation,
                     waive_reason: None,

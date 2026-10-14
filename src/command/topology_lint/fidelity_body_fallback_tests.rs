@@ -75,6 +75,19 @@ async fn set_gate_routes_after_landing_to_the_whole_set_weakest_task() {
         .await
         .expect("body audit");
     assert!(body_findings.is_empty(), "{body_report}");
+    let persisted_body_verdicts = record_files(cwd);
+    assert_eq!(
+        persisted_body_verdicts.len(),
+        1,
+        "the body gate persisted the shared obligation record"
+    );
+    for path in &persisted_body_verdicts {
+        let record: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).expect("read saved critic record"))
+                .expect("parse saved critic record");
+        assert_eq!(record["schema"], 7, "saved critic record schema: {path:?}");
+        assert_eq!(record["entries"].as_array().unwrap().len(), 2);
+    }
     std::fs::write(candidate_path(cwd), candidate).expect("land candidate");
 
     let set_critic =

@@ -7,10 +7,11 @@ use archon_workflow::WorkflowLlmClientFactory;
 
 #[path = "workflow_staged_candidate.rs"]
 pub(super) mod candidate;
+#[path = "workflow_staged_gate_resume.rs"]
+mod gate_resume;
 
 /// The decomposition's set gate: the point at which a task set with bodies is
 /// accepted, so the obligation fidelity audit runs here unconditionally.
-///
 /// The critic client comes from the configured provider only — the child runs
 /// under the freeze provider environment the parent resolved, never an
 /// ambient one — and a client that cannot be built reaches the envelope as an
@@ -109,19 +110,7 @@ pub(super) async fn handle_staged_task_set_lint(
     Ok(())
 }
 
-/// The staged set gate's budget and progress (Issue 259): the host's wall
-/// clock for `task-set-lint`, counted from here, and a progress baseline on
-/// `stderr` before anything slow (the critic client, the lint) runs. Without
-/// it an attempt the host kills before its first saved batch reports no
-/// progress at all, and the executor then reads the next attempt's saved
-/// work as no evidence and pauses instead of retrying.
-pub(super) fn staged_set_gate_resume(
-    stderr: &mut dyn std::io::Write,
-) -> crate::command::workflow_freeze_budget::FreezeResume {
-    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("task-set-lint");
-    let _ = writeln!(stderr, "{}", resume.progress.line());
-    resume
-}
+pub(super) use gate_resume::staged_set_gate_resume;
 
 /// The decomposition's body gate (`land-task-body`).
 ///
@@ -140,6 +129,7 @@ pub(super) async fn handle_staged_task_file_lint(
     spec_file: Option<&Path>,
     graph: Option<&str>,
     candidate_stdin: bool,
+    task_context_file: Option<&Path>,
     staging_root: Option<&Path>,
     gate_envelope: Option<&Path>,
     call_id: Option<&str>,
@@ -171,17 +161,31 @@ pub(super) async fn handle_staged_task_file_lint(
     let call_id = call_id
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| anyhow!("trusted staged task-file lint requires --call-id <ID>"))?;
-    // Issue 386: stdin, or the run spill a bounded view on it names.
-    let candidate = crate::command::workflow_host_command_stdin_spill::read_candidate(
-        std::io::stdin(),
-        archon_workflow::HostCommandRequest::MAX_STDIN_BYTES,
-        staging_root,
-    )?;
-    let path = if task_file.is_absolute() {
+    let mut candidate = Vec::new();
+    std::io::stdin()
+        .take(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES as u64 + 1)
+        .read_to_end(&mut candidate)?;
+    if candidate.len() > archon_workflow::HostCommandRequest::MAX_STDIN_BYTES {
+        return Err(anyhow!(
+            "candidate stdin exceeds {} bytes",
+            archon_workflow::HostCommandRequest::MAX_STDIN_BYTES
+        ));
+    }
+    let staged_path = if task_file.is_absolute() {
         task_file.to_path_buf()
     } else {
         cwd.join(task_file)
     };
+    let path = task_context_file.map_or_else(
+        || staged_path.clone(),
+        |path| {
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                cwd.join(path)
+            }
+        },
+    );
     // Issue-61/367: the task file is the answer when it opens with its
     // frontmatter, or the inside of one outer fence; any other answer has
     // text before the task file and goes back to the author as one finding,
@@ -204,7 +208,7 @@ pub(super) async fn handle_staged_task_file_lint(
         bytes: candidate,
         packaging,
     } = normalized;
-    let file_name = path
+    let file_name = staged_path
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| anyhow!("candidate TASK path has no UTF-8 file name"))?

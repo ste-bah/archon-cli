@@ -3,6 +3,54 @@
 use super::*;
 use archon_workflow::v2::script::history_replay::{replayable_answer, replayable_history};
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct LandingRejudgeObservation {
+    schema_version: u32,
+    landing_call_id: String,
+    receipt_digest: String,
+    logic_version: Option<u32>,
+    logic_digest: Option<String>,
+    logic_build: Option<String>,
+    outcome: Option<archon_workflow::HostCommandResult>,
+}
+
+impl LandingRejudgeObservation {
+    fn key(
+        executor: &dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor,
+        record: &WorkflowV2CallRecord,
+    ) -> archon_workflow::WorkflowResult<(String, Self)> {
+        let request = record.call.options.host_command.as_ref().ok_or_else(|| {
+            WorkflowError::StateCorrupt("landing record has no host command request".into())
+        })?;
+        let outcome: archon_workflow::HostCommandResult =
+            serde_json::from_value(record.result.data.clone())?;
+        let receipt = outcome.publication_receipt.ok_or_else(|| {
+            WorkflowError::StateCorrupt("current landing has no publication receipt".into())
+        })?;
+        let receipt_bytes = serde_json::to_vec(&receipt)?;
+        let receipt_digest = archon_workflow::task_set_contract::content_digest(&receipt_bytes);
+        let observation = Self {
+            schema_version: 1,
+            landing_call_id: record.call.id.clone(),
+            receipt_digest,
+            logic_version: executor.logic_version(request)?,
+            logic_digest: executor.logic_digest(request)?,
+            logic_build: executor.logic_build(request)?,
+            outcome: None,
+        };
+        let key_data = serde_json::json!({
+            "landing_call_id": observation.landing_call_id,
+            "receipt_digest": observation.receipt_digest,
+            "logic_version": observation.logic_version,
+            "logic_digest": observation.logic_digest,
+            "logic_build": observation.logic_build,
+        });
+        let key =
+            archon_workflow::task_set_contract::content_digest(&serde_json::to_vec(&key_data)?);
+        Ok((key, observation))
+    }
+}
+
 impl WorkflowScriptHost {
     /// The recorded result of a call that a later call over the same subject
     /// has superseded, when this is a fixed run resuming and the call arrives
@@ -95,6 +143,195 @@ impl WorkflowScriptHost {
             return Ok(None);
         };
         let record = record.clone();
+        if matches!(
+            record.status,
+            WorkflowV2Status::Accepted | WorkflowV2Status::Noop
+        ) && !archon_workflow::v2::script::landing_lineage::landing_refused(&record)
+            && let Some(current) = lineage.current().cloned()
+        {
+            // Reconcile a displaced file under the frozen chain lock before
+            // deciding which bytes can receive a verdict.
+            let mut receipt_restore_used = false;
+            match executor.landing_receipt_matches_disk(&current) {
+                Ok(true) => {}
+                Ok(false) | Err(WorkflowError::HostOperational(_)) => {
+                    let (restored, candidate, superseded) = executor
+                        .repair_landing_mismatch(&current, generation, true)
+                        .await?;
+                    if superseded {
+                        let records = self.runner.v2_store.load_call_records()?;
+                        let latest =
+                            archon_workflow::v2::script::landing_lineage::LandingLineage::of(
+                                &records,
+                                &request.command_id,
+                                subject,
+                            )
+                            .current()
+                            .ok_or_else(|| {
+                                WorkflowError::StateCorrupt(format!(
+                                    "subject {subject} lost its current landing during repair"
+                                ))
+                            })?;
+                        return Ok(Some(match generation {
+                            Some(generation) => {
+                                self.result_view_in_generation(latest, generation)?
+                            }
+                            None => self.result_view(latest)?,
+                        }));
+                    }
+                    if let Some(outcome) = candidate {
+                        let answer = self.rejudged_answer(&current, outcome)?;
+                        let view = match generation {
+                            Some(generation) => {
+                                self.result_view_in_generation(&answer, generation)?
+                            }
+                            None => self.result_view(&answer)?,
+                        };
+                        return Ok(Some(view));
+                    }
+                    if !restored {
+                        // No disk bytes and no rebuildable receipt: let the
+                        // normal author path obtain a fresh body.
+                        return Ok(None);
+                    }
+                    receipt_restore_used = true;
+                }
+                Err(error) => return Err(error),
+            }
+            // The accepted historical answer is stale evidence for this
+            // subject. Reuse the current landing's verdict when its logic
+            // still holds; otherwise judge the receipt-verified disk bytes
+            // under this build without publishing them.
+            let current = current;
+            if !executor.outcome_logic_holds(&current)? {
+                let (observation_key, observation) =
+                    LandingRejudgeObservation::key(executor.as_ref(), &current)?;
+                if let Some(saved) = self
+                    .runner
+                    .v2_store
+                    .load_landing_rejudge_observation::<LandingRejudgeObservation>(
+                        &observation_key,
+                    )?
+                {
+                    if saved.schema_version != 1
+                        || saved.landing_call_id != observation.landing_call_id
+                        || saved.receipt_digest != observation.receipt_digest
+                        || saved.logic_version != observation.logic_version
+                        || saved.logic_digest != observation.logic_digest
+                        || saved.logic_build != observation.logic_build
+                    {
+                        return Err(WorkflowError::StateCorrupt(format!(
+                            "landing rejudge observation {observation_key} does not match its content key"
+                        )));
+                    }
+                    let mut outcome = saved.outcome.ok_or_else(|| {
+                        WorkflowError::StateCorrupt(format!(
+                            "landing rejudge observation {observation_key} has no judgement"
+                        ))
+                    })?;
+                    let landing_outcome: archon_workflow::HostCommandResult =
+                        serde_json::from_value(current.result.data.clone())?;
+                    outcome.publication_receipt = landing_outcome.publication_receipt;
+                    let answer = self.rejudged_answer(&current, outcome)?;
+                    tracing::info!(
+                        landing_call_id = %current.call.id,
+                        observation_key,
+                        "replayed current landing's judge-only observation"
+                    );
+                    return Ok(Some(match generation {
+                        Some(generation) => self.result_view_in_generation(&answer, generation)?,
+                        None => self.result_view(&answer)?,
+                    }));
+                }
+                let outcome = loop {
+                    let judged = executor
+                        .rejudge_landing(&current, generation, !receipt_restore_used)
+                        .await?;
+                    let Some(judged) = judged else {
+                        return Ok(None);
+                    };
+                    if judged.candidate {
+                        let answer = self.rejudged_answer(&current, judged.outcome)?;
+                        return Ok(Some(match generation {
+                            Some(generation) => {
+                                self.result_view_in_generation(&answer, generation)?
+                            }
+                            None => self.result_view(&answer)?,
+                        }));
+                    }
+                    let outcome = judged.outcome;
+                    let receipt_matches = match executor.landing_receipt_matches_disk(&current) {
+                        Ok(true) => true,
+                        Ok(false) | Err(WorkflowError::HostOperational(_)) => false,
+                        Err(error) => return Err(error),
+                    };
+                    if receipt_matches {
+                        break outcome;
+                    }
+                    let (_restored, candidate, superseded) = executor
+                        // A judge has already run in this pass. Treat any
+                        // newer bytes as its own candidate rather than
+                        // restoring the receipt and judging stale bytes.
+                        .repair_landing_mismatch(&current, generation, false)
+                        .await?;
+                    if superseded {
+                        let records = self.runner.v2_store.load_call_records()?;
+                        let latest =
+                            archon_workflow::v2::script::landing_lineage::LandingLineage::of(
+                                &records,
+                                &request.command_id,
+                                subject,
+                            )
+                            .current()
+                            .ok_or_else(|| {
+                                WorkflowError::StateCorrupt(format!(
+                                    "subject {subject} lost its current landing during repair"
+                                ))
+                            })?;
+                        return Ok(Some(match generation {
+                            Some(generation) => {
+                                self.result_view_in_generation(latest, generation)?
+                            }
+                            None => self.result_view(latest)?,
+                        }));
+                    }
+                    if let Some(outcome) = candidate {
+                        let answer = self.rejudged_answer(&current, outcome)?;
+                        return Ok(Some(match generation {
+                            Some(generation) => {
+                                self.result_view_in_generation(&answer, generation)?
+                            }
+                            None => self.result_view(&answer)?,
+                        }));
+                    }
+                    // Let ordinary execution route this subject back through
+                    // its author when no bytes exist and the receipt cannot
+                    // be rebuilt.
+                    return Ok(None);
+                };
+                let mut persisted_observation = observation;
+                persisted_observation.outcome = Some(outcome.clone());
+                if let Some(outcome_without_publication) = persisted_observation.outcome.as_mut() {
+                    outcome_without_publication.publication_receipt = None;
+                }
+                self.persist_landing_rejudge_observation(&observation_key, persisted_observation)?;
+                let answer = self.rejudged_answer(&current, outcome)?;
+                return Ok(Some(match generation {
+                    Some(generation) => self.result_view_in_generation(&answer, generation)?,
+                    None => self.result_view(&answer)?,
+                }));
+            }
+            tracing::info!(
+                call_id = %execution.call.id,
+                current_call_id = %current.call.id,
+                subject,
+                "accepted superseded landing answered with the current landing verdict"
+            );
+            return Ok(Some(match generation {
+                Some(generation) => self.result_view_in_generation(&current, generation)?,
+                None => self.result_view(&current)?,
+            }));
+        }
         tracing::info!(
             call_id = %execution.call.id,
             answered_by = %record.call.id,
@@ -106,6 +343,35 @@ impl WorkflowScriptHost {
             Some(generation) => self.result_view_in_generation(&record, generation)?,
             None => self.result_view(&record)?,
         }))
+    }
+
+    fn rejudged_answer(
+        &self,
+        landing: &WorkflowV2CallRecord,
+        outcome: archon_workflow::HostCommandResult,
+    ) -> archon_workflow::WorkflowResult<WorkflowV2CallRecord> {
+        let status = if outcome.reusable() {
+            WorkflowV2Status::Accepted
+        } else {
+            WorkflowV2Status::NeedsReview
+        };
+        let mut answer = landing.clone();
+        answer.status = status;
+        answer.result.status = status;
+        answer.result.data =
+            self.stamp_host_outcome(&landing.call, serde_json::to_value(outcome)?)?;
+        answer.result.summary = "current landing rejudged under this build".into();
+        Ok(answer)
+    }
+
+    fn persist_landing_rejudge_observation(
+        &self,
+        observation_key: &str,
+        observation: LandingRejudgeObservation,
+    ) -> archon_workflow::WorkflowResult<()> {
+        self.runner
+            .v2_store
+            .save_landing_rejudge_observation(observation_key, &observation)
     }
 
     /// Issue-250: a reused record read from the call's history (its last

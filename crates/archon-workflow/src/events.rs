@@ -71,6 +71,9 @@ pub enum WorkflowEventKind {
     /// gone, and the gate was rebuilt from the acceptance call's own result
     /// (Issue 262, round 9). Carries the record, why, and the call.
     AcceptanceGateRebuilt,
+    /// A live task body differed from its current landing receipt and was
+    /// preserved in the run directory before reconciliation repaired it.
+    LandingReceiptDisplaced,
     RunEndAcceptanceObserverStarted,
     RunEndAcceptanceShadowObserved,
     RunEndAcceptanceObserverFailed,

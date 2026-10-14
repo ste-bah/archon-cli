@@ -3,6 +3,9 @@
 //! rebuild hashes to its receipt; otherwise the resume is refused naming
 //! the receipt.
 use super::*;
+
+#[path = "workflow_decompose_landing_restore_temp_tests.rs"]
+mod restore_temp_tests;
 use archon_workflow::{
     HostCommandRequest, HostCommandSubject, WorkflowV2CallRecord, WorkflowV2HostCall,
     WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result, WorkflowV2Status,
@@ -142,7 +145,7 @@ fn a_body_a_rerun_overwrote_is_restored_to_its_current_landing() {
     assert_eq!(restore.call_id, "r2");
     assert_eq!(restore.bytes, landed("round-2"));
     assert_eq!(restore.receipt_blake3, content_digest(&landed("round-2")));
-    assert!(plan.lines[0].contains("RESTORE"), "{}", plan.lines[0]);
+    assert!(plan.lines[0].contains("SETTLE"), "{}", plan.lines[0]);
 }
 
 #[test]
@@ -163,19 +166,38 @@ fn a_missing_body_is_restored() {
 }
 
 #[test]
-fn a_receipt_its_candidate_does_not_rebuild_refuses_the_resume() {
+fn an_unrebuildable_receipt_leaves_existing_bytes_as_a_candidate() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(temp.path().join(FILE), landed("round-1")).unwrap();
     let mut records = damaged();
     // The receipt names bytes no stamping of its candidate gives.
     records[1].result.data["publicationReceipt"]["entries"][0]["blake3"] =
         serde_json::json!("0".repeat(64));
-    let error = plan(&records, temp.path(), &skeleton())
-        .unwrap_err()
-        .to_string();
-    assert!(error.starts_with("resume refused"), "{error}");
-    assert!(error.contains("call r2"), "{error}");
-    assert!(error.contains(&"0".repeat(64)), "{error}");
+    let candidate_bytes = b"outside candidate";
+    std::fs::write(temp.path().join(FILE), candidate_bytes).unwrap();
+    let plan = plan(&records, temp.path(), &skeleton()).unwrap();
+    assert!(plan.restores.is_empty());
+    assert!(plan.lines.iter().any(|line| line.contains("candidate")));
+    assert_eq!(
+        std::fs::read(temp.path().join(FILE)).unwrap(),
+        candidate_bytes
+    );
+}
+
+#[test]
+fn an_unrebuildable_missing_body_routes_to_the_author_path() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut records = damaged();
+    records[1].result.data["publicationReceipt"]["entries"][0]["blake3"] =
+        serde_json::json!("0".repeat(64));
+    let plan = plan(&records, temp.path(), &skeleton()).unwrap();
+    assert!(plan.restores.is_empty());
+    assert!(
+        plan.lines
+            .iter()
+            .any(|line| line.contains("route to the normal author path"))
+    );
+    assert!(!temp.path().join(FILE).exists());
 }
 
 #[test]
@@ -212,17 +234,16 @@ fn a_restore_is_written_atomically_and_hashes_to_its_receipt() {
 }
 
 #[test]
-fn a_live_body_no_landing_published_refuses_instead_of_being_overwritten() {
+fn a_live_body_no_landing_published_is_left_as_a_candidate() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(temp.path().join(FILE), b"edited by hand during the pause").unwrap();
-    let error = plan(&damaged(), temp.path(), &skeleton())
-        .unwrap_err()
-        .to_string();
+    let plan = plan(&damaged(), temp.path(), &skeleton()).unwrap();
+    assert!(plan.restores.is_empty());
     assert!(
-        error.contains("no body any landing of this run published"),
-        "{error}"
+        plan.lines
+            .iter()
+            .any(|line| line.contains("fresh candidate"))
     );
-    assert!(error.contains("call r2"), "{error}");
     assert_eq!(
         std::fs::read(temp.path().join(FILE)).unwrap(),
         b"edited by hand during the pause"
@@ -268,7 +289,7 @@ fn a_newer_body_published_without_a_receipt_is_left_for_the_resume() {
 }
 
 #[test]
-fn reconcile_takes_the_chain_lock_before_planning_and_keeps_it_through_apply() {
+fn reconcile_takes_the_chain_lock_before_planning_and_defers_to_live_settle() {
     let temp = tempfile::tempdir().unwrap();
     let context = crate::command::workflow_host_command_exec_tests::context(temp.path());
     let project = context.project_root.clone();
@@ -322,5 +343,5 @@ fn reconcile_takes_the_chain_lock_before_planning_and_keeps_it_through_apply() {
         actual, expected,
         "the completed newer landing must remain on disk"
     );
-    assert!(lines[0].contains("restored 0 of 1"), "{lines:?}");
+    assert!(lines[0].contains("queued 0 of 1"), "{lines:?}");
 }

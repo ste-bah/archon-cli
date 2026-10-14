@@ -211,7 +211,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
         // #441 re-pin only: capability logic versions changed; freeze-acceptance verdicts are unchanged.
-        sources_digest: "86adb061bcf4be130deadceff8f6b91e9fb938f862093a048189236acbcdddb8",
+        // #447 re-pin only: landing history replay and reconciliation changed; acceptance-freeze verdicts are unchanged.
+        // #447 round 9 re-pin only: atomic receipt-mismatch capture changes landing recovery, not frozen acceptance verdicts.
+        sources_digest: "7d42aa1f18e978dd11bbbbbf7f7c4972c95d3aff4e8f9eee60fea4f8f8be8cc7",
         build_bound: false,
     },
     CapabilityLogic {
@@ -234,7 +236,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
         // #441 re-pin only: capability logic versions changed; freeze-skeleton verdicts are unchanged.
-        sources_digest: "86adb061bcf4be130deadceff8f6b91e9fb938f862093a048189236acbcdddb8",
+        // #447 re-pin only: landing history replay and reconciliation changed; skeleton-freeze verdicts are unchanged.
+        // #447 round 9 re-pin only: atomic receipt-mismatch capture changes landing recovery, not frozen skeleton verdicts.
+        sources_digest: "7d42aa1f18e978dd11bbbbbf7f7c4972c95d3aff4e8f9eee60fea4f8f8be8cc7",
         build_bound: false,
     },
     CapabilityLogic {
@@ -259,7 +263,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 13: #443 re-review 3: a relative clause right after the path ("`x`, which already exists") claims.
         // No version bump: refused candidates now stay unpublished in observe mode; only those refused candidates are affected, recorded results remain valid, and the lineage guard makes a future bump safe.
         // #441 review, same unreleased version: PRD context, shared whole-set attribution and evidence-backed quotes change body findings.
-        version: 15,
+        // 16: #447 accepted superseded rounds now receive the current
+        // receipt-verified landing's verdict, rejudged without publication if
+        // that landing's recorded logic is stale.
+        version: 17,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -278,7 +285,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441 regression re-pin only: task ellipses are literal evidence when the whole quote matches; verdict meaning is unchanged.
         // #434d review re-pin: quote normaliser split into its own module; same unreleased versions
         // #441: task-shape checks now read focused test commands from the runtime task model.
-        sources_digest: "479fc238f5be58399e882941a3c91e02385b7506daf394613b595f7d4c8907b2",
+        // 17: #447 receipt-mismatch self-healing settles the newest durable task body before judging it.
+        sources_digest: "b04456a389acf1e9400d6bf6dc794cf484a303d572fa5d37cfa32967ff2ddce3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -318,7 +326,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441 regression re-pin only: task ellipses are literal evidence when the whole quote matches; verdict meaning is unchanged.
         // #434d review re-pin: quote normaliser split into its own module; same unreleased versions
         // #441: focused file ownership and declaration findings use the runtime command rule.
-        sources_digest: "479fc238f5be58399e882941a3c91e02385b7506daf394613b595f7d4c8907b2",
+        // #447 re-pin only: receipt mismatch repair stays outside the set lint verdict.
+        sources_digest: "b04456a389acf1e9400d6bf6dc794cf484a303d572fa5d37cfa32967ff2ddce3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -361,7 +370,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the executor names whether a capability publishes, and moved its digest
         // lookup; the reuse rules a verification verdict is checked under are unchanged.
         // #441 re-pin only: capability logic versions changed; frozen acceptance verdicts are unchanged.
-        sources_digest: "b939c383ff8f7878e78d9f33d26c17f3f7a5f8363eb6e156dfa914300eb2a70c",
+        // #447 re-pin only: landing history replay and reconciliation changed; frozen acceptance verdicts are unchanged.
+        // #447 round 9 re-pin only: atomic receipt-mismatch capture does not change frozen acceptance verification.
+        sources_digest: "acef5a097f1e2b64d47e02e0456f871e77580259eb1a695424e7f044cdd91c9f",
         build_bound: true,
     },
     CapabilityLogic {
@@ -384,7 +395,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the executor names whether a capability publishes, and moved its digest
         // lookup; the reuse rules a verification verdict is checked under are unchanged.
         // #441 re-pin only: capability logic versions changed; frozen skeleton verdicts are unchanged.
-        sources_digest: "b939c383ff8f7878e78d9f33d26c17f3f7a5f8363eb6e156dfa914300eb2a70c",
+        // #447 re-pin only: landing history replay and reconciliation changed; frozen skeleton verdicts are unchanged.
+        // #447 round 9 re-pin only: atomic receipt-mismatch capture does not change frozen skeleton verification.
+        sources_digest: "acef5a097f1e2b64d47e02e0456f871e77580259eb1a695424e7f044cdd91c9f",
         build_bound: true,
     },
 ];

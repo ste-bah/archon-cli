@@ -104,6 +104,13 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     let old_digest = "c59953c92b47b59b10c4b6b0cf19e6ae736c88aa037bef173cb141d25dd7b6c7";
     let mut old = catalog.clone();
     old.schema_version = 1;
+    let landing = old.capabilities.get_mut("land-task-body").unwrap();
+    let context_arg = landing
+        .argv_template
+        .windows(2)
+        .position(|pair| pair[0] == "--task-context-file")
+        .unwrap();
+    landing.argv_template.drain(context_arg..context_arg + 2);
     old.recompute_digest().unwrap();
     assert_eq!(old.digest, old_digest);
     assert_ne!(

@@ -31,6 +31,8 @@ pub struct WorkflowV2ResultStore {
     opened_restart_epoch: Option<u64>,
 }
 
+#[path = "result_store_landing_rejudge.rs"]
+mod landing_rejudge;
 #[path = "result_store_session.rs"]
 mod session;
 pub use session::ReplayedFix;
