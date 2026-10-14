@@ -12,7 +12,7 @@ use restart_run::{
     accepted, agent_call, generated_run, generated_run_with_stages, interrupted, v2_store,
 };
 
-#[path = "evidence_283_tests.rs"]
+#[path = "v2_restart_followups/evidence_283.rs"]
 mod evidence_283_tests;
 
 #[test]
