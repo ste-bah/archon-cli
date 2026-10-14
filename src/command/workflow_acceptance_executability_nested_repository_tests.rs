@@ -107,6 +107,9 @@ fn fixture() -> Fixture {
     }
 }
 
+#[path = "evidence_417_tests.rs"]
+mod evidence_417_tests;
+
 fn digest(f: &Fixture) -> String {
     data_digest_scoped(
         &f.project,

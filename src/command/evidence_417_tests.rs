@@ -21,7 +21,7 @@ fn evidence(case: &str, before: impl std::fmt::Display, after: impl std::fmt::Di
 // unchanged, while a normal project file changes it.
 #[test]
 fn evidence_417_published_outputs_and_harness_state_do_not_change_digest() {
-    let (source, _destination, project, repository) = roots();
+    let (source, destination, project, repository) = roots();
     let task = source.path().join("tasks/set");
     std::fs::create_dir_all(&task).unwrap();
     let freeze_files = [
@@ -45,17 +45,46 @@ fn evidence_417_published_outputs_and_harness_state_do_not_change_digest() {
     }
     let after_generated = digest(&project, &repository, Some(&task));
     assert_eq!(before, after_generated);
-    let source_read = std::fs::read(&project_data).unwrap();
-    assert_eq!(source_read, b"project-owned data");
+    let source_before_edit = std::fs::read(&project_data).unwrap();
+    let source_before_text = String::from_utf8(source_before_edit.clone()).unwrap();
+    let mut remaining = u64::MAX;
+    copy_data(
+        &project,
+        Path::new(""),
+        destination.path(),
+        &repository,
+        Some(&task),
+        &mut remaining,
+    )
+    .unwrap();
+    let omitted = [
+        task.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
+        task.join(archon_workflow::task_set_contract::ACCEPTANCE_LOCK_FILE),
+        project.join(".archon/task-set-pins/set.json"),
+        project.join(".archon/logs/workflow-gates-shadow.jsonl"),
+        project.join(".archon/learning-state.db"),
+    ];
+    for source_path in &omitted {
+        let relative = source_path.strip_prefix(&project).unwrap();
+        assert!(
+            source_path.exists(),
+            "source output is present: {relative:?}"
+        );
+        assert!(
+            !destination.path().join(relative).exists(),
+            "probe copy omits {relative:?}"
+        );
+    }
+    let copied_project_data =
+        std::fs::read(destination.path().join(".archon/project/decisions.json")).unwrap();
+    assert_eq!(copied_project_data, source_before_edit);
+    assert_eq!(source_before_edit, b"project-owned data");
     std::fs::write(&project_data, b"changed project-owned data").unwrap();
     let after_project_edit = digest(&project, &repository, Some(&task));
     assert_ne!(after_generated, after_project_edit);
     evidence(
         "generated-state-excluded-project-data-included",
-        format!(
-            "digest={before}; generated files present; project bytes={:?}",
-            source_read
-        ),
+        format!("digest={before}; generated files present; project bytes={source_before_text}"),
         format!(
             "after generated writes={after_generated}; after project edit={after_project_edit}"
         ),
@@ -70,6 +99,8 @@ fn evidence_417_changed_project_input_invalidates_digest_and_copy() {
     let input = project.join("config/check-input.json");
     std::fs::create_dir_all(input.parent().unwrap()).unwrap();
     std::fs::write(&input, br#"{"version":1}"#).unwrap();
+    let source_before_edit = std::fs::read(&input).unwrap();
+    let source_before_text = String::from_utf8(source_before_edit.clone()).unwrap();
     let before = digest(&project, &repository, None);
     std::fs::write(&input, br#"{"version":2}"#).unwrap();
     let after = digest(&project, &repository, None);
@@ -90,17 +121,18 @@ fn evidence_417_changed_project_input_invalidates_digest_and_copy() {
     assert_eq!(copied, separately_read);
     evidence(
         "changed-check-data-invalidates-and-copies",
-        format!("source={:?}; digest={before}", br#"{"version":1}"#),
+        format!("source={source_before_text}; digest={before}"),
         format!(
-            "source={:?}; copied={:?}; digest={after}",
-            separately_read, copied
+            "source={}; copied={}; digest={after}",
+            String::from_utf8(separately_read).unwrap(),
+            String::from_utf8(copied).unwrap()
         ),
     );
     drop(source);
 }
 
-// Expected before running: a probe copy omits the published contract, so an
-// actual command checking its path reports it absent.
+// Expected before running: a probe copy omits the published contract, so a
+// separate read of its copied path reports it absent.
 #[test]
 fn evidence_417_check_cannot_read_published_contract_from_probe_copy() {
     let (source, destination, project, repository) = roots();
@@ -123,25 +155,19 @@ fn evidence_417_check_cannot_read_published_contract_from_probe_copy() {
         .path()
         .join("tasks/set")
         .join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
-    let command = std::process::Command::new("/bin/sh")
-        .args(["-c", "test -e tasks/set/acceptance-contract.json"])
-        .current_dir(destination.path())
-        .status()
-        .unwrap();
     let source_bytes = std::fs::read(&contract).unwrap();
     let copy_exists = copied_contract.exists();
-    assert!(!command.success());
     assert!(!copy_exists);
     assert_eq!(source_bytes, b"published contract bytes");
     evidence(
         "probe-command-contract-visibility",
         format!(
-            "source bytes={:?}; copied exists={copy_exists}",
-            source_bytes
+            "source text={}; copied exists={copy_exists}",
+            String::from_utf8(source_bytes.clone()).unwrap()
         ),
         format!(
-            "command exit={:?}; copied exists={}",
-            command.code(),
+            "copied read={:?}; copied exists={}",
+            std::fs::read(&copied_contract).err(),
             copied_contract.exists()
         ),
     );

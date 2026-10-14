@@ -11,6 +11,7 @@ fn criterion() -> AcceptanceCriterion {
     .unwrap()
 }
 
+#[cfg(unix)]
 fn run(command: &str) -> archon_workflow::acceptance_scratch::CheckResult {
     let output = std::process::Command::new("/bin/sh")
         .args(["-c", command])
@@ -60,6 +61,7 @@ fn evidence(case: &str, before: impl std::fmt::Display, after: impl std::fmt::Di
 // temporary filename produce one stable passability key for the same inputs
 // and exit status.
 #[test]
+#[cfg(unix)]
 fn evidence_418_volatile_pid_and_temp_output_reuses_key() {
     let client = EvidenceJudge::default();
     let entry = criterion();
@@ -102,9 +104,10 @@ fn evidence_418_volatile_pid_and_temp_output_reuses_key() {
     );
 }
 
-// Expected before running: changing the criterion or probe input closure
+// Expected before running: changing the check text or probe input closure
 // changes the key even when command output is volatile.
 #[test]
+#[cfg(unix)]
 fn evidence_418_changed_check_or_input_changes_key() {
     let client = EvidenceJudge::default();
     let entry = criterion();
@@ -112,20 +115,21 @@ fn evidence_418_changed_check_or_input_changes_key() {
     let output = String::from_utf8(first.stdout.clone()).unwrap();
     let base = key(&client, &entry, &output, Some("input-closure-A"), &first);
     let mut changed = entry.clone();
-    changed.criterion.push_str(" after input revision");
+    if let archon_workflow::task_set_contract::AcceptanceCheck::Command { command, .. } =
+        &mut changed.check
+    {
+        command.push_str("; printf changed-check");
+    }
     let changed_check = key(&client, &changed, &output, Some("input-closure-A"), &first);
     let changed_input = key(&client, &entry, &output, Some("input-closure-B"), &first);
     assert_ne!(base, changed_check);
     assert_ne!(base, changed_input);
     evidence(
         "changed-check-and-probe-input",
+        format!("check={:?}; probe=input-closure-A; key={base}", entry.check),
         format!(
-            "criterion={}; probe=input-closure-A; key={base}",
-            entry.criterion
-        ),
-        format!(
-            "criterion={}; probe=input-closure-B; check-key={changed_check}; input-key={changed_input}",
-            changed.criterion
+            "check={:?}; probe=input-closure-B; check-key={changed_check}; input-key={changed_input}",
+            changed.check
         ),
     );
 }
@@ -133,6 +137,7 @@ fn evidence_418_changed_check_or_input_changes_key() {
 // Expected before running: a changed real command exit status changes the
 // key while retaining the same check and probe input closure.
 #[test]
+#[cfg(unix)]
 fn evidence_418_changed_exit_status_changes_key() {
     let client = EvidenceJudge::default();
     let entry = criterion();
