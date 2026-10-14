@@ -27,6 +27,140 @@ use crate::command::workflow_task_set::republish::{ReauthorRequest, reauthor_and
 /// The event detail that records a launch repair once the run exists.
 pub(crate) const REAUTHORED_EVENT: &str = "frozen_acceptance_checks_reauthored";
 
+#[cfg(test)]
+#[path = "workflow_decompose_launch_repair_tests.rs"]
+mod tests;
+
+fn compare_repaired_chain(
+    launched: &FrozenChainSnapshot,
+    republished: &FrozenChainSnapshot,
+    old_skeleton_bytes: &[u8],
+    new_skeleton_bytes: &[u8],
+    new_acceptance_digest: &str,
+    old_bodies: &std::collections::BTreeMap<String, Vec<u8>>,
+    new_bodies: &std::collections::BTreeMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    let old_files: std::collections::BTreeMap<_, _> =
+        launched.preserved_digests.iter().cloned().collect();
+    let new_files: std::collections::BTreeMap<_, _> =
+        republished.preserved_digests.iter().cloned().collect();
+    for (file, old_digest) in &old_files {
+        if file == archon_workflow::task_set_contract::TASK_SKELETON_LOCK_FILE
+            || file == archon_workflow::task_set_contract::TASK_SKELETON_FILE
+        {
+            continue;
+        }
+        let Some(new_digest) = new_files.get(file) else {
+            return Err(format!(
+                "{file} disappeared after repair (old digest {old_digest}, new missing)"
+            ));
+        };
+        if old_digest != new_digest {
+            return Err(format!(
+                "{file} changed after repair (old digest {old_digest}, new digest {new_digest})"
+            ));
+        }
+    }
+    for file in new_files.keys() {
+        if !old_files.contains_key(file) {
+            return Err(format!(
+                "{file} appeared after repair (old missing, new digest {})",
+                new_files[file]
+            ));
+        }
+    }
+    if old_bodies != new_bodies {
+        let file = old_bodies
+            .keys()
+            .chain(new_bodies.keys())
+            .find(|file| old_bodies.get(*file) != new_bodies.get(*file))
+            .cloned()
+            .unwrap_or_else(|| "<task body inventory>".to_string());
+        let old = old_bodies
+            .get(&file)
+            .map_or_else(|| "<missing>".to_string(), |bytes| diagnostic_digest(bytes));
+        let new = new_bodies
+            .get(&file)
+            .map_or_else(|| "<missing>".to_string(), |bytes| diagnostic_digest(bytes));
+        return Err(format!(
+            "{file} body digest changed after repair (old digest {old}, new digest {new})"
+        ));
+    }
+    let old_skeleton: serde_json::Value = serde_json::from_slice(old_skeleton_bytes)
+        .map_err(|error| format!("task-skeleton.json before repair is invalid: {error}"))?;
+    let new_skeleton: serde_json::Value = serde_json::from_slice(new_skeleton_bytes)
+        .map_err(|error| format!("task-skeleton.json after repair is invalid: {error}"))?;
+    let mut old_skeleton_fields = old_skeleton
+        .as_object()
+        .cloned()
+        .ok_or("task-skeleton.json before repair is not an object")?;
+    let mut new_skeleton_fields = new_skeleton
+        .as_object()
+        .cloned()
+        .ok_or("task-skeleton.json after repair is not an object")?;
+    let old_skeleton_binding = old_skeleton_fields
+        .get("acceptance_digest")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("<missing>");
+    let new_skeleton_binding = new_skeleton_fields
+        .get("acceptance_digest")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("<missing>");
+    if new_skeleton_binding != new_acceptance_digest {
+        return Err(format!(
+            "task-skeleton.json.acceptance_digest does not match the republished acceptance contract (old digest {}, new digest {})",
+            diagnostic_digest(old_skeleton_binding.as_bytes()),
+            diagnostic_digest(new_skeleton_binding.as_bytes())
+        ));
+    }
+    old_skeleton_fields.remove("acceptance_digest");
+    new_skeleton_fields.remove("acceptance_digest");
+    if old_skeleton_fields != new_skeleton_fields {
+        let field = old_skeleton_fields
+            .keys()
+            .chain(new_skeleton_fields.keys())
+            .find(|field| old_skeleton_fields.get(*field) != new_skeleton_fields.get(*field))
+            .map(String::as_str)
+            .unwrap_or("<structure>");
+        let old = old_skeleton_fields.get(field);
+        let new = new_skeleton_fields.get(field);
+        let old_text = old.map_or_else(|| "<missing>".into(), serde_json::Value::to_string);
+        let new_text = new.map_or_else(|| "<missing>".into(), serde_json::Value::to_string);
+        return Err(format!(
+            "task-skeleton.json.{field} changed after repair (old digest {}, new digest {})",
+            diagnostic_digest(old_text.as_bytes()),
+            diagnostic_digest(new_text.as_bytes())
+        ));
+    }
+    if launched.to_argument() != republished.to_argument() {
+        return Err(format!(
+            "frozenChain stages/subjects/bodies changed (old digest {}, new digest {})",
+            diagnostic_digest(launched.to_argument().to_string().as_bytes()),
+            diagnostic_digest(republished.to_argument().to_string().as_bytes())
+        ));
+    }
+    Ok(())
+}
+
+fn diagnostic_digest(value: &[u8]) -> String {
+    archon_workflow::task_set_contract::content_digest(value)
+}
+
+fn body_contents(
+    task_root: &Path,
+    snapshot: &FrozenChainSnapshot,
+) -> Result<std::collections::BTreeMap<String, Vec<u8>>> {
+    snapshot
+        .bodies
+        .iter()
+        .map(|file| {
+            std::fs::read(task_root.join(file))
+                .with_context(|| format!("reading frozen task body {file}"))
+                .map(|bytes| (file.clone(), bytes))
+        })
+        .collect()
+}
+
 /// Re-author every check `decision` routed, with `client` as author and
 /// judge and `probe` as the executability gate. Returns the line naming the
 /// republished chain, and the event detail recording the repair. A repair
@@ -116,6 +250,14 @@ pub(crate) async fn after_claim(
         log(line)?;
     }
     if !decision.reauthor.is_empty() {
+        let skeleton_path = task_root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE);
+        let old_skeleton_bytes = std::fs::read(&skeleton_path).with_context(|| {
+            format!(
+                "reading frozen task skeleton before repair at {}",
+                skeleton_path.display()
+            )
+        })?;
+        let old_bodies = body_contents(task_root, launched)?;
         let repaired = async {
             let client = factory
                 .build_client(archon_workflow::WorkflowLlmClientRequest {
@@ -193,15 +335,35 @@ pub(crate) async fn after_claim(
         lines.push(line);
         let republished = frozen_chain_snapshot(project_root, prd_path, task_root)
             .context("reading the frozen chain the launch republished")?;
-        if republished.to_argument() != launched.to_argument()
-            || republished.body_digests != launched.body_digests
-            || republished.preserved_digests != launched.preserved_digests
-        {
+        let new_skeleton_bytes = std::fs::read(&skeleton_path).with_context(|| {
+            format!(
+                "reading republished task skeleton at {}",
+                skeleton_path.display()
+            )
+        })?;
+        let acceptance_path =
+            task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE);
+        let acceptance_bytes = std::fs::read(&acceptance_path).with_context(|| {
+            format!(
+                "reading republished acceptance contract at {}",
+                acceptance_path.display()
+            )
+        })?;
+        let acceptance_digest =
+            archon_workflow::task_set_contract::content_digest(&acceptance_bytes);
+        let new_bodies = body_contents(task_root, &republished)?;
+        if let Err(difference) = compare_repaired_chain(
+            launched,
+            &republished,
+            &old_skeleton_bytes,
+            &new_skeleton_bytes,
+            &acceptance_digest,
+            &old_bodies,
+            &new_bodies,
+        ) {
             return Err(anyhow!(
-                "the per-check repair republished a frozen chain under {} that differs from the one this run was launched with ({} != {})",
+                "the per-check repair republished a frozen chain under {} that differs from the one this run was launched with: {difference}",
                 task_root.display(),
-                republished.to_argument(),
-                launched.to_argument()
             ));
         }
     }

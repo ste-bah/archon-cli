@@ -3,14 +3,20 @@
 //! `tests/fixtures/offline_decomposition_golden.json` and
 //! `tests/fixtures/offline_decomposition_golden_requests.json`. Every other
 //! cell compares against those fixtures.
+#[path = "support/workflow_decomposition_canonical_path_test.rs"]
+mod canonical_path_test;
 #[path = "support/workflow_decomposition_offline_deadline.rs"]
 mod deadline;
 #[path = "support/workflow_decomposition_offline_diagnostics.rs"]
 mod diagnostics;
 #[path = "support/workflow_decomposition_offline_faults.rs"]
 mod faults;
+#[path = "support/workflow_decomposition_offline_launch_repair.rs"]
+mod launch_repair;
 #[path = "support/workflow_decomposition_offline_project.rs"]
 mod project;
+#[path = "support/workflow_decomposition_offline_lifecycle_reauth.rs"]
+mod reauth_lifecycle;
 #[path = "support/workflow_decomposition_offline_server.rs"]
 mod server;
 #[path = "support/workflow_decomposition_offline_snapshot.rs"]

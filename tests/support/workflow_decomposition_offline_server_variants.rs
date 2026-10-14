@@ -32,11 +32,16 @@ pub enum Variant {
     HeredocCheck,
     /// The PRD has this many acceptance criteria (`large::prd`).
     Large(usize),
+    /// The three launch-repair judge requests refute AC-X-001; later calls use golden replies.
+    RefuteFirstJudge,
 }
 
 pub fn answer(prompt: &str, variant: Variant) -> (&'static str, String) {
     if let Variant::Large(n) = variant {
         return large::answer(prompt, n);
+    }
+    if is_reauthor_prompt(prompt) {
+        return reauthor_answer(prompt);
     }
     let (role, answer) = scripted_answer(prompt);
     if role != "acceptance" {
@@ -55,6 +60,80 @@ pub fn answer(prompt: &str, variant: Variant) -> (&'static str, String) {
         }
         _ => (role, answer),
     }
+}
+
+fn is_reauthor_prompt(prompt: &str) -> bool {
+    let text = user_prompt_text(prompt).unwrap_or_default();
+    text.contains("Agent: acceptance-reauthor")
+        && text.contains("Re-author exactly one acceptance entry of a frozen acceptance contract:")
+}
+
+fn reauthor_answer(prompt: &str) -> (&'static str, String) {
+    let text = user_prompt_text(prompt).unwrap_or_default();
+    let Some(id) = text
+        .split_once("Re-author exactly one acceptance entry of a frozen acceptance contract: ")
+        .and_then(|(_, rest)| rest.split_once('.').map(|(id, _)| id.trim()))
+    else {
+        return (
+            "unknown",
+            r#"{"error":"unscripted fake provider request"}"#.into(),
+        );
+    };
+    if id != "AC-X-001" {
+        return (
+            "unknown",
+            r#"{"error":"unscripted fake provider request"}"#.into(),
+        );
+    }
+    (
+        "reauthor",
+        serde_json::json!({
+            "id": "AC-X-001",
+            "criterion": "The repository records a JSON outcome artifact with ready set to true.",
+            "check": {
+                "kind": "command",
+                "command": "python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json",
+                "cwd": "project_root"
+            },
+            "gap_permitted": false,
+            "covers": [],
+            "judgment": {"verdict": "accepted", "counterexample": "", "reason": "", "host_call_id": ""}
+        })
+        .to_string(),
+    )
+}
+
+pub fn refute_first_judge_answer(
+    role: &str,
+    prompt: &str,
+    answer: String,
+    variant: Variant,
+    nth: usize,
+) -> String {
+    // After the second launch selects this variant, the first three judge
+    // requests are the three author-then-judge passes for launch repair.
+    // The script acceptance author and its judge run after repair stalls.
+    const REPAIR_JUDGE_ATTEMPTS: usize = 3;
+    let prompt_text = user_prompt_text(prompt).unwrap_or_default();
+    if variant != Variant::RefuteFirstJudge
+        || role != "judge"
+        || nth > REPAIR_JUDGE_ATTEMPTS
+        || !prompt_text.contains("Adversarially judge every acceptance check below.")
+        || !prompt_text.contains(r#""id":"AC-X-001""#)
+    {
+        return answer;
+    }
+    let mut reply: serde_json::Value = serde_json::from_str(&answer).unwrap();
+    for decision in reply["decisions"].as_array_mut().unwrap() {
+        if decision["id"] != "AC-X-001" {
+            continue;
+        }
+        decision["verdict"] = serde_json::Value::String("refuted".into());
+        decision["counterexample"] =
+            serde_json::Value::String("a passing state where the criterion is false".into());
+        decision["reason"] = serde_json::Value::String("the check admits that state".into());
+    }
+    reply.to_string()
 }
 
 /// The reply format the acceptance prompt asks for when a check is a script:
@@ -81,6 +160,13 @@ pub fn request_key(role: &str, prompt: &str) -> String {
     };
     match role {
         "acceptance" => format!("acceptance:{}", after("Author ONLY entry ", ':')),
+        "reauthor" => format!(
+            "reauthor:{}",
+            after(
+                "Re-author exactly one acceptance entry of a frozen acceptance contract: ",
+                '.'
+            )
+        ),
         "body" => format!(
             "body:{}",
             after(

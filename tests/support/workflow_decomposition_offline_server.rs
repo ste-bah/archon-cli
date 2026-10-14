@@ -1,9 +1,13 @@
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+#[path = "workflow_decomposition_offline_server_http.rs"]
+mod http;
+use http::next_request;
 
 #[derive(Clone, Debug, Default)]
 pub struct Counts(pub Arc<Mutex<BTreeMap<String, usize>>>);
@@ -57,6 +61,7 @@ pub struct FakeProvider {
     pub base_url: String,
     pub counts: Counts,
     pub requests: Requests,
+    variant: Arc<Mutex<Variant>>,
     blocked: Option<(String, usize)>,
     release: Arc<(Mutex<bool>, std::sync::Condvar)>,
     entered: Arc<(Mutex<bool>, std::sync::Condvar)>,
@@ -81,6 +86,8 @@ impl FakeProvider {
         let request_counts = counts.clone();
         let requests = Requests::default();
         let request_log = requests.clone();
+        let variant = Arc::new(Mutex::new(variant));
+        let thread_variant = variant.clone();
         let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         let entered = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         let thread_release = release.clone();
@@ -107,6 +114,7 @@ impl FakeProvider {
                         let counts = request_counts.clone();
                         let requests = request_log.clone();
                         let blocked = thread_blocked.clone();
+                        let variant = thread_variant.clone();
                         let release = thread_release.clone();
                         let entered = thread_entered.clone();
                         let stop = thread_stop.clone();
@@ -151,6 +159,7 @@ impl FakeProvider {
             base_url: format!("http://{address}/v1/messages"),
             counts,
             requests,
+            variant,
             blocked: block,
             release,
             entered,
@@ -176,104 +185,14 @@ impl FakeProvider {
         *self.release.0.lock().unwrap() = true;
         self.release.1.notify_all();
     }
-}
 
-struct HttpRequest {
-    method: String,
-    path: String,
-    version: String,
-    headers: Vec<(String, String)>,
-    body: Vec<u8>,
-}
-
-impl HttpRequest {
-    fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(header, _)| header.eq_ignore_ascii_case(name))
-            .map(|(_, value)| value.as_str())
+    /// Change the reply plan and restart per-role ordinals for a later CLI
+    /// launch against the same local provider.
+    pub fn set_variant(&self, variant: Variant) {
+        *self.variant.lock().unwrap() = variant;
+        self.counts.0.lock().unwrap().clear();
+        self.requests.0.lock().unwrap().clear();
     }
-
-    fn keep_alive(&self) -> bool {
-        match self.header("connection") {
-            Some(value) if value.eq_ignore_ascii_case("close") => false,
-            Some(value) if value.eq_ignore_ascii_case("keep-alive") => true,
-            _ => self.version == "HTTP/1.1",
-        }
-    }
-}
-
-fn next_request<R: Read>(
-    reader: &mut R,
-    pending: &mut Vec<u8>,
-) -> std::io::Result<Option<HttpRequest>> {
-    let head_end = loop {
-        if let Some(index) = pending.windows(4).position(|window| window == b"\r\n\r\n") {
-            break index + 4;
-        }
-        if pending.len() > 64 * 1024 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "HTTP request headers exceed 64 KiB",
-            ));
-        }
-        let mut chunk = [0u8; 8192];
-        match reader.read(&mut chunk)? {
-            0 if pending.is_empty() => return Ok(None),
-            0 => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "incomplete HTTP request headers",
-                ));
-            }
-            count => pending.extend_from_slice(&chunk[..count]),
-        }
-    };
-
-    let head = String::from_utf8_lossy(&pending[..head_end]);
-    let mut lines = head[..head.len().saturating_sub(4)].split("\r\n");
-    let mut request_line = lines.next().unwrap_or_default().split_whitespace();
-    let method = request_line.next().unwrap_or_default().to_string();
-    let path = request_line.next().unwrap_or_default().to_string();
-    let version = request_line.next().unwrap_or_default().to_string();
-    let headers = lines
-        .filter_map(|line| line.split_once(':'))
-        .map(|(name, value)| (name.trim().to_string(), value.trim().to_string()))
-        .collect::<Vec<_>>();
-    let length = headers
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-        .map(|(_, value)| value.parse::<usize>())
-        .transpose()
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?
-        .unwrap_or_default();
-    if length > 32 * 1024 * 1024 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "HTTP request body exceeds 32 MiB",
-        ));
-    }
-    let request_end = head_end + length;
-    while pending.len() < request_end {
-        let mut chunk = [0u8; 8192];
-        let count = reader.read(&mut chunk)?;
-        if count == 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                "incomplete HTTP request body",
-            ));
-        }
-        pending.extend_from_slice(&chunk[..count]);
-    }
-    let body = pending[head_end..request_end].to_vec();
-    pending.drain(..request_end);
-    Ok(Some(HttpRequest {
-        method,
-        path,
-        version,
-        headers,
-        body,
-    }))
 }
 
 fn serve_connection(
@@ -281,7 +200,7 @@ fn serve_connection(
     counts: &Counts,
     requests: &Requests,
     blocked: &Option<(String, usize)>,
-    variant: Variant,
+    variant: Arc<Mutex<Variant>>,
     release: &Arc<(Mutex<bool>, std::sync::Condvar)>,
     entered: &Arc<(Mutex<bool>, std::sync::Condvar)>,
     stop: &std::sync::atomic::AtomicBool,
@@ -311,24 +230,25 @@ fn serve_connection(
         let known_path = request.method == "POST" && request.path == "/v1/messages";
         let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap_or_default();
         let prompt = body.to_string();
+        let variant = *variant.lock().unwrap();
         let (role, answer) = variants::answer(&prompt, variant);
-        let key = variants::request_key(role, &prompt);
-        requests.0.lock().unwrap().push(RequestRecord {
-            method: request.method,
-            path: request.path,
-            auth_present,
-            known_path,
-            role: role.to_string(),
-            key,
-            prompt,
-            answer: answer.clone(),
-        });
         let nth = {
             let mut counts = counts.0.lock().unwrap();
             let count = counts.entry(role.to_string()).or_default();
             *count += 1;
             *count
         };
+        let answer = variants::refute_first_judge_answer(role, &prompt, answer, variant, nth);
+        requests.0.lock().unwrap().push(RequestRecord {
+            method: request.method,
+            path: request.path,
+            auth_present,
+            known_path,
+            role: role.to_string(),
+            key: variants::request_key(role, &prompt),
+            prompt,
+            answer: answer.clone(),
+        });
         if blocked
             .as_ref()
             .is_some_and(|(blocked_role, blocked_nth)| blocked_role == role && *blocked_nth == nth)
