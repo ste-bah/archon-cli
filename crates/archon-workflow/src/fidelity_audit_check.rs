@@ -143,14 +143,17 @@ fn verbatim(
 /// a heading line, where words can stand without obliging anything.
 fn anchored(what: &str, quote: &str, task: &ClaimingTask) -> Result<(), (RefusalKind, String)> {
     let weak = |message: String| Err((RefusalKind::WeakAnchor, message));
-    let quote = normalized_quote_for_anchor(quote);
-    let (words, chars) = (quote.split(' ').count(), quote.chars().count());
+    let normalized = normalized_quote_for_anchor(quote);
+    let (words, chars) = (normalized.split(' ').count(), normalized.chars().count());
     if words < MIN_SUPPORT_WORDS && chars < MIN_SUPPORT_CHARS {
         return weak(format!(
             "{what} quotes {words} words ({chars} characters) in `supporting_text`; it needs at least {MIN_SUPPORT_WORDS} words or {MIN_SUPPORT_CHARS} characters of the task's prose"
         ));
     }
-    let found = quote_occurrences(&task.text, quote.as_str()).unwrap_or(0);
+    // Keep the critic's original quote for provenance matching. Re-matching
+    // its normalized form can change an exact excerpt cut inside Markdown
+    // (for example, midway through an inline-code span) into unmatched syntax.
+    let found = quote_occurrences(&task.text, quote).unwrap_or(0);
     if found != 1 {
         return weak(format!(
             "{what} quotes text in `supporting_text` that appears {found} times in task '{}'; quote a passage that appears exactly once",
@@ -158,9 +161,7 @@ fn anchored(what: &str, quote: &str, task: &ClaimingTask) -> Result<(), (Refusal
         ));
     }
     for region in [Region::Fence, Region::Comment, Region::Heading] {
-        if !quote_occurrences(&masked(&task.text, region), quote.as_str())
-            .is_some_and(|count| count > 0)
-        {
+        if !quote_occurrences(&masked(&task.text, region), quote).is_some_and(|count| count > 0) {
             return weak(format!(
                 "{what} quotes text in `supporting_text` that lies in or across {} of task '{}'; quote the task's prose",
                 region.name(),

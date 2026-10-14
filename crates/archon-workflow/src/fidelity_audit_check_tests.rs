@@ -63,6 +63,21 @@ fn quote_marks_dashes_and_wrapped_whitespace_are_normalized() {
 }
 
 #[test]
+fn exact_anchor_cut_inside_inline_code_is_not_rejected_by_markdown_normalization() {
+    let body = task(
+        "Write the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.",
+    );
+    let mut answer = verdict(
+        true,
+        "Write the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys;",
+    );
+    assert!(
+        check_verdict(&mut answer, &[body]).is_ok(),
+        "the quote is copied verbatim and has enough prose words even though its cut ends inside a code span"
+    );
+}
+
+#[test]
 fn elided_pieces_must_appear_in_order() {
     let body = task("First the registry is written; later the report is emitted.");
     let mut answer = verdict(false, "report is emitted … registry is written");

@@ -65,7 +65,10 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 /// - #434d, same unreleased version 2: quote provenance uses bounded text
 ///   normalization, elision expansion with critic confirmation, and rejection
 ///   of elided evidence in all other quote fields.
-pub const SOURCES_DIGEST: &str = "67a7939619dd0bd336cb03cdbcc7e8546246408c69331b27385154c588356b5b";
+/// - #441 regression fix, version unchanged: exact supporting excerpts retain
+///   their original quote for provenance matching, so a quote cut inside an
+///   inline-code span is not rejected by re-normalizing unmatched Markdown.
+pub const SOURCES_DIGEST: &str = "782613d9c5a4ba9f550773c77394fdde15bdff58cb27ed6accbd21a5321200af";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.

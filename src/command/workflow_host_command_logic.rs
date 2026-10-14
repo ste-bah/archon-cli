@@ -266,7 +266,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441 review 2, same unreleased version: Acceptance policy headings reach the body critic.
         // #441 review 3, same unreleased version: the complete PRD reaches the body critic.
         // #434d, same unreleased version 14: task quote provenance accepts bounded normalization and ordered elisions.
-        sources_digest: "6b1e44087a53cb79b3c8b3653c167e5cceb883033748fab5679016db46175ece",
+        // #441 regression re-pin only: preserving the original quote during anchor counting restores valid exact excerpts cut inside inline code; verdict meaning is unchanged.
+        sources_digest: "fa1a7ccffb5311e2d271f4a326e7a495b28955c8e83935a1c63b7484ce96f012",
         build_bound: false,
     },
     CapabilityLogic {
@@ -302,7 +303,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441 review 2, same unreleased version: Acceptance policy headings reach the set critic.
         // #441 review 3, same unreleased version: the complete PRD reaches the set critic.
         // #434d, same unreleased version 13: the set gate shares the updated quote provenance check.
-        sources_digest: "6b1e44087a53cb79b3c8b3653c167e5cceb883033748fab5679016db46175ece",
+        // #441 regression re-pin only: preserving the original quote during anchor counting restores valid exact excerpts cut inside inline code; verdict meaning is unchanged.
+        sources_digest: "fa1a7ccffb5311e2d271f4a326e7a495b28955c8e83935a1c63b7484ce96f012",
         build_bound: false,
     },
     CapabilityLogic {
