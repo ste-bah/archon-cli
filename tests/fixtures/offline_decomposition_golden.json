@@ -533,8 +533,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "186d8542e3aea5690d3faa80321917088f2f07aa0cd0bf9cc7a131c94e044992",
-            "logicVersion": 20,
+            "logicDigest": "49b09587f2718027dcbdd173c97036b9843dd5625de65965bc886576114fb50f",
+            "logicVersion": 15,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -800,8 +800,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "186d8542e3aea5690d3faa80321917088f2f07aa0cd0bf9cc7a131c94e044992",
-            "logicVersion": 20,
+            "logicDigest": "49b09587f2718027dcbdd173c97036b9843dd5625de65965bc886576114fb50f",
+            "logicVersion": 15,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1043,7 +1043,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "186d8542e3aea5690d3faa80321917088f2f07aa0cd0bf9cc7a131c94e044992",
+            "logicDigest": "49b09587f2718027dcbdd173c97036b9843dd5625de65965bc886576114fb50f",
             "logicVersion": 3,
             "postcondition": {
               "satisfied": true,
@@ -1512,7 +1512,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
+            "logicDigest": "d15245a4b1799aee0f36527673791d4ace7d9ec20e26bc18de17e85fc0b59e6b",
             "logicVersion": 4,
             "postcondition": {
               "satisfied": true,
@@ -1707,8 +1707,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "186d8542e3aea5690d3faa80321917088f2f07aa0cd0bf9cc7a131c94e044992",
-                  "logicVersion": 20,
+                  "logicDigest": "49b09587f2718027dcbdd173c97036b9843dd5625de65965bc886576114fb50f",
+                  "logicVersion": 15,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1770,8 +1770,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "186d8542e3aea5690d3faa80321917088f2f07aa0cd0bf9cc7a131c94e044992",
-                      "logicVersion": 20,
+                      "logicDigest": "49b09587f2718027dcbdd173c97036b9843dd5625de65965bc886576114fb50f",
+                      "logicVersion": 15,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1853,7 +1853,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "186d8542e3aea5690d3faa80321917088f2f07aa0cd0bf9cc7a131c94e044992",
+                  "logicDigest": "49b09587f2718027dcbdd173c97036b9843dd5625de65965bc886576114fb50f",
                   "logicVersion": 3,
                   "postcondition": {
                     "satisfied": true,
@@ -1914,7 +1914,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "186d8542e3aea5690d3faa80321917088f2f07aa0cd0bf9cc7a131c94e044992",
+                      "logicDigest": "49b09587f2718027dcbdd173c97036b9843dd5625de65965bc886576114fb50f",
                       "logicVersion": 3,
                       "postcondition": {
                         "satisfied": true,
@@ -2409,7 +2409,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
+                  "logicDigest": "d15245a4b1799aee0f36527673791d4ace7d9ec20e26bc18de17e85fc0b59e6b",
                   "logicVersion": 4,
                   "postcondition": {
                     "satisfied": true,
@@ -2454,7 +2454,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
+                      "logicDigest": "d15245a4b1799aee0f36527673791d4ace7d9ec20e26bc18de17e85fc0b59e6b",
                       "logicVersion": 4,
                       "postcondition": {
                         "satisfied": true,
