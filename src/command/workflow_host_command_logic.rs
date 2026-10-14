@@ -267,7 +267,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441 review 3, same unreleased version: the complete PRD reaches the body critic.
         // #434d, same unreleased version 14: task quote provenance accepts bounded normalization and ordered elisions.
         // #441 regression re-pin only: task ellipses are literal evidence when the whole quote matches; verdict meaning is unchanged.
-        sources_digest: "81e477194a9dd417dc1919d020f1dcc731f3a1b7798b1c704cf12710d22dc1d6",
+        // #434d review re-pin: quote normaliser split into its own module; same unreleased versions
+        sources_digest: "c46152c2f0e6edcfcaf5d050af480b0c764fd1b5e0f82b05b4fffbaedca6a4da",
         build_bound: false,
     },
     CapabilityLogic {
@@ -304,7 +305,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441 review 3, same unreleased version: the complete PRD reaches the set critic.
         // #434d, same unreleased version 13: the set gate shares the updated quote provenance check.
         // #441 regression re-pin only: task ellipses are literal evidence when the whole quote matches; verdict meaning is unchanged.
-        sources_digest: "81e477194a9dd417dc1919d020f1dcc731f3a1b7798b1c704cf12710d22dc1d6",
+        // #434d review re-pin: quote normaliser split into its own module; same unreleased versions
+        sources_digest: "c46152c2f0e6edcfcaf5d050af480b0c764fd1b5e0f82b05b4fffbaedca6a4da",
         build_bound: false,
     },
     CapabilityLogic {
