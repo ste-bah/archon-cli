@@ -123,30 +123,31 @@ fn prompt_judges_obligations_under_prd_acceptance_and_gap_context() {
     let context = "# Done definition\nDone definition: required artifact exists.\n\n# Residual gap policy\nResidual gaps may be explicitly scoped and fail-closed.";
     let summary = SkeletonSummary::absent().with_prd_context(context);
     let prompt = fidelity_prompt(&obligations(), &tasks(), &summary);
-    assert!(prompt.contains("PRD ACCEPTANCE AND GAP CONTEXT"));
+    assert!(prompt.contains("FULL PRD CONTEXT"));
     assert!(prompt.contains("Done definition: required artifact exists."));
     assert!(prompt.contains("Residual gaps may be explicitly scoped and fail-closed."));
-    assert!(prompt.contains("judge it under any supplied PRD acceptance and residual-gap context"));
+    assert!(prompt.contains("judge it under the PRD's own definition of done and any scope, gap, or acceptance policy anywhere in the full PRD"));
 }
 
 #[test]
-fn context_uses_obligation_source_sections_and_filters_unrelated_acceptance_headings() {
+fn context_contains_the_whole_prd_and_points_to_each_obligation_source_section() {
     let prd = "# Operational Contract\n\n- REQ-WS-009: The release manifest records each completed widget.\n\n# Acceptance of vendor contract\n\nVendor signatures are checked by procurement.\n\n# Residual Gap Policy\n\nUnavailable widgets are listed as scoped residual gaps.\n";
     let ids = vec!["REQ-WS-009".to_string()];
     let summary = SkeletonSummary::absent().with_prd_context_for(prd, &ids);
     let prompt = fidelity_prompt(&obligations(), &tasks(), &summary);
     assert!(prompt.contains("The release manifest records each completed widget."));
+    assert!(prompt.contains("Vendor signatures are checked by procurement."));
     assert!(prompt.contains("Unavailable widgets are listed as scoped residual gaps."));
-    assert!(!prompt.contains("Vendor signatures are checked by procurement."));
+    assert!(prompt.contains("REQ-WS-009: # Operational Contract"));
 }
 
 #[test]
-fn context_names_when_only_obligation_source_sections_are_available() {
-    let prd = "# Miscellaneous Requirements\n\n- REQ-WS-009: The release manifest records each completed widget.\n";
+fn policy_under_permitted_scope_heading_reaches_the_critic() {
+    let prd = "# Miscellaneous Requirements\n\n- REQ-WS-009: The release manifest records each completed widget.\n\n## Permitted scope\n\nA scoped subset is acceptable only when named in the release manifest.\n";
     let ids = vec!["REQ-WS-009".to_string()];
     let summary = SkeletonSummary::absent().with_prd_context_for(prd, &ids);
     let prompt = fidelity_prompt(&obligations(), &tasks(), &summary);
-    assert!(prompt.contains("No separately headed done definition, acceptance criteria, or residual/gap policy section was found"));
+    assert!(prompt.contains("## Permitted scope\n\nA scoped subset is acceptable only when named in the release manifest."));
     assert!(prompt.contains("The release manifest records each completed widget."));
 }
 
@@ -463,6 +464,13 @@ fn cluster_digest_changes_with_any_text_or_the_skeleton_and_nothing_else() {
         base,
         fidelity_cluster_digest(&obligations(), &tasks(), &SkeletonSummary::absent())
     );
+    let prd = SkeletonSummary::absent().with_prd_context("# Permitted scope\nScope is limited.\n");
+    let changed_prd =
+        SkeletonSummary::absent().with_prd_context("# Permitted scope\nScope is unrestricted.\n");
+    assert_ne!(
+        fidelity_cluster_digest(&obligations(), &tasks(), &prd),
+        fidelity_cluster_digest(&obligations(), &tasks(), &changed_prd)
+    );
 }
 
 #[path = "fidelity_audit_reply_tests.rs"]
@@ -480,14 +488,4 @@ fn context_includes_acceptance_heading_and_acceptance_criteria_subheading() {
 
     assert!(acceptance.contains("## Acceptance\nPolicy applies."));
     assert!(criteria.contains("### Acceptance Criteria\nAll checks pass."));
-}
-
-#[test]
-fn context_excludes_acceptance_of_vendor_contract_heading() {
-    let context = super::context::prd_acceptance_context(
-        "# Acceptance of vendor contract\nVendor signatures are checked by procurement.\n",
-        &[],
-    );
-
-    assert!(!context.contains("Vendor signatures are checked by procurement."));
 }

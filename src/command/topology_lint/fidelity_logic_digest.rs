@@ -58,7 +58,9 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 ///   ownership lookup is included in the pinned logic files.
 /// - #441 review 2, same unreleased version: Acceptance policy headings now
 ///   reach the critic question; vendor-contract acceptance headings remain excluded.
-pub const SOURCES_DIGEST: &str = "d46eb11365f0c1c19ca016ad483049d3cb39f2748d0fd45874112955b01d1415";
+/// - #441 review 3, same unreleased version: the critic receives the complete PRD,
+///   applies any policy anywhere in it, and sees each obligation's source heading.
+pub const SOURCES_DIGEST: &str = "d22e08a3522f095c45a684ecd70056a556467c52df08aef399b3a2e023130b2d";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.

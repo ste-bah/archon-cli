@@ -1,61 +1,32 @@
 //! Generic PRD Markdown context sent with each obligation question.
 
-/// Include obligation source sections and separately headed policy sections.
+/// Include the full PRD and point each obligation at its source section.
 pub(super) fn prd_acceptance_context(markdown: &str, obligation_ids: &[String]) -> String {
-    let mut selected = crate::obligation_ids::obligation_source_sections(markdown, obligation_ids);
-    let policy = policy_sections(markdown);
-    for section in &policy {
-        if !selected.contains(section) {
-            selected.push(section.clone());
-        }
+    let mut context = String::from("Obligation source sections:\n");
+    for id in obligation_ids {
+        let sections =
+            crate::obligation_ids::obligation_source_sections(markdown, std::slice::from_ref(id));
+        let pointers = sections
+            .iter()
+            .map(|section| section_heading(section))
+            .collect::<Vec<_>>();
+        let pointer = if pointers.is_empty() {
+            "(source section not located)".to_string()
+        } else {
+            pointers.join("; ")
+        };
+        context.push_str(&format!("- {id}: {pointer}\n"));
     }
-    let mut context = selected.join("\n\n");
-    if policy.is_empty() {
-        if !context.is_empty() {
-            context.push_str("\n\n");
-        }
-        context.push_str("No separately headed done definition, acceptance criteria, or residual/gap policy section was found; only sections containing extracted obligations are supplied.");
-    }
+    context.push_str("\nComplete PRD text:\n");
+    context.push_str(markdown);
     context
 }
 
-fn policy_sections(markdown: &str) -> Vec<String> {
-    let mut selected = Vec::new();
-    let mut current = Vec::new();
-    let mut include = false;
-    for line in markdown.lines() {
-        if line.trim_start().starts_with('#') {
-            if include && !current.is_empty() {
-                selected.push(current.join("\n"));
-            }
-            current.clear();
-            let heading = line.trim_start_matches('#').trim().to_ascii_lowercase();
-            // Policy context stays unbounded; the house rule forbids adding size limits.
-            include = is_acceptance_heading(&heading)
-                || heading.contains("done")
-                || heading.contains("criteria")
-                || heading.contains("residual")
-                || heading.contains("gap");
-        }
-        if include {
-            current.push(line);
-        }
-    }
-    if include && !current.is_empty() {
-        selected.push(current.join("\n"));
-    }
-    selected
-}
-
-fn is_acceptance_heading(heading: &str) -> bool {
-    heading == "acceptance"
-        || [
-            "acceptance criteria",
-            "acceptance tests",
-            "acceptance checks",
-        ]
-        .iter()
-        .any(|phrase| heading == *phrase || heading.starts_with(&format!("{phrase} ")))
-        || heading.contains("acceptance criteria")
-        || heading.contains("acceptance tests")
+fn section_heading(section: &str) -> String {
+    section
+        .lines()
+        .find(|line| line.trim_start().starts_with('#'))
+        .map(str::trim)
+        .map(str::to_string)
+        .unwrap_or_else(|| "(PRD preamble)".to_string())
 }
