@@ -17,6 +17,8 @@ pub(super) fn prd_acceptance_context(markdown: &str, obligation_ids: &[String]) 
         };
         context.push_str(&format!("- {id}: {pointer}\n"));
     }
+    // Keep the complete source text without a local size cap; provider size
+    // rejection propagates as a clear operational error from the request.
     context.push_str("\nComplete PRD text:\n");
     context.push_str(markdown);
     context

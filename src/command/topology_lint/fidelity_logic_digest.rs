@@ -72,7 +72,9 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 ///   matches are checked before treating a task's literal ellipsis as elision.
 /// - #441 follow-up, version unchanged: literal matches do not create elision
 ///   confirmation candidates before exact and normalized matching fails.
-pub const SOURCES_DIGEST: &str = "75a39298f5aba44b1c8dd9165b50337ddcf878789abdb4c73ca1a1c1c37f694a";
+/// - #441 review, version 2 unchanged: quote normalization changes prose only;
+///   Markdown code contents retain their bytes and cannot pass after alteration.
+pub const SOURCES_DIGEST: &str = "7ba773e2950be80f0f0dabdd3d5e9a30b01e2b93e9c6154957649050761d2f84";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.
@@ -81,6 +83,7 @@ pub const FILES: &[&str] = &[
     "crates/archon-workflow/src/fidelity_audit.rs",
     "crates/archon-workflow/src/fidelity_audit_check.rs",
     "crates/archon-workflow/src/fidelity_audit_context.rs",
+    "crates/archon-workflow/src/fidelity_audit_normalize.rs",
     "crates/archon-workflow/src/fidelity_audit_reply.rs",
     "crates/archon-workflow/src/obligation_continuations.rs",
     "crates/archon-workflow/src/obligation_ids.rs",

@@ -118,7 +118,11 @@ fn fixture_reply(id: &str, is_true: bool, quote: &str) -> String {
 #[tokio::test]
 async fn an_elided_true_is_reasked_with_the_negation_and_a_changed_verdict_is_not_kept() {
     let temp = fixture_corpus();
-    let calls = 3 + FIDELITY_NO_PROGRESS_WINDOW;
+    // The first elided reply introduces NotVerbatim(supporting_text). The
+    // changed confirmation and each repeated invalid supporting quote have
+    // that same class, so the first call plus the no-progress window is all
+    // the loop requests.
+    let calls = 1 + FIDELITY_NO_PROGRESS_WINDOW;
     let critic = FakeCritic::new(
         std::iter::once(Ok(serde_json::json!({"verdicts": [
             {"obligation_id":"REQ-DL-092","necessarily_true":true,"weakest_task_id":"","reason":"atomic writes preserve the registry","quoted_task_text":"","supporting_task_id":"TASK-WS-001","supporting_text":ELIDED_FIXTURE_SUPPORT},
@@ -130,7 +134,7 @@ async fn an_elided_true_is_reasked_with_the_negation_and_a_changed_verdict_is_no
             FULL_FIXTURE_SUPPORT,
         ))))
         .chain(std::iter::repeat_n(
-            Ok(fixture_reply("REQ-DL-092", false, "quote not present in the task")),
+            Ok(fixture_reply("REQ-DL-092", true, "quote not present in the task")),
             calls - 2,
         ))
         .collect(),

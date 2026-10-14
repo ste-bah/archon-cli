@@ -4,6 +4,10 @@
 //! size budget; a stored verdict passes exactly this check again before it
 //! is reused (#434).
 
+#[path = "fidelity_audit_normalize.rs"]
+mod normalize;
+use normalize::normalize_text;
+
 use super::{
     ClaimingTask, FidelityVerdict, MAX_QUOTE_CHARS, MAX_REASON_CHARS, MIN_SUPPORT_CHARS,
     MIN_SUPPORT_WORDS, RefusalKind,
@@ -301,133 +305,6 @@ fn normalized_quote_for_anchor(quote: &str) -> String {
         .filter(|piece| !piece.is_empty())
         .collect::<Vec<_>>()
         .join(" … ")
-}
-
-/// Normalize quote punctuation and Markdown wrappers. NFKC is omitted because
-/// this crate has no direct or workspace normalization dependency; quote and
-/// dash forms, whitespace and formatting remain deliberately bounded.
-fn normalize_text(text: &str, is_quote: bool) -> String {
-    let mut normalized = String::with_capacity(text.len());
-    let chars = text.replace("\\n", " ").chars().collect::<Vec<_>>();
-    let paired_emphasis = paired_emphasis_markers(&chars);
-    let mut index = 0;
-    while index < chars.len() {
-        match chars[index] {
-            '‘' | '’' | '“' | '”' | '«' | '»' | '‹' | '›' => normalized.push('"'),
-            '–' | '—' | '‑' | '−' => normalized.push('-'),
-            '`' => {
-                let mut end = index + 1;
-                while chars.get(end) == Some(&'`') {
-                    end += 1;
-                }
-                let run = end - index;
-                let mut search = end;
-                let mut close = None;
-                while search < chars.len() {
-                    if chars[search] != '`' {
-                        search += 1;
-                        continue;
-                    }
-                    let mut run_end = search + 1;
-                    while chars.get(run_end) == Some(&'`') {
-                        run_end += 1;
-                    }
-                    if run_end - search == run {
-                        close = Some(search);
-                        break;
-                    }
-                    search = run_end;
-                }
-                if let Some(close) = close {
-                    normalized.extend(chars[end..close].iter());
-                    index = close + run;
-                    continue;
-                }
-                normalized.extend(chars[index..end].iter());
-                index = end;
-                continue;
-            }
-            '*' | '_' => {
-                let marker = chars[index];
-                let mut end = index + 1;
-                while chars.get(end) == Some(&marker) {
-                    end += 1;
-                }
-                let previous = index.checked_sub(1).and_then(|i| chars.get(i)).copied();
-                let next = chars.get(end).copied();
-                let can_open = next.is_some_and(|ch| !ch.is_whitespace());
-                let can_close = previous.is_some_and(|ch| !ch.is_whitespace());
-                let boundary_emphasis = previous
-                    .is_none_or(|ch| ch.is_whitespace() || ch.is_ascii_punctuation())
-                    || next.is_none_or(|ch| ch.is_whitespace() || ch.is_ascii_punctuation());
-                if paired_emphasis[index]
-                    && (can_open || can_close)
-                    && (marker == '*' || boundary_emphasis)
-                {
-                    index = end;
-                } else {
-                    normalized.extend(chars[index..end].iter());
-                    index = end;
-                }
-                continue;
-            }
-            ch => normalized.push(ch),
-        }
-        index += 1;
-    }
-    let mut collapsed = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
-    if is_quote {
-        let opens = collapsed.matches('[').count();
-        let closes = collapsed.matches(']').count();
-        if closes > opens {
-            collapsed.retain(|ch| ch != ']');
-        } else if opens > closes {
-            collapsed.retain(|ch| ch != '[');
-        }
-        collapsed = collapsed
-            .trim_matches(|ch: char| {
-                ch.is_ascii_punctuation() || matches!(ch, '…' | '“' | '”' | '’' | '‘')
-            })
-            .to_string();
-    }
-    collapsed
-}
-
-fn paired_emphasis_markers(chars: &[char]) -> Vec<bool> {
-    let mut paired = vec![false; chars.len()];
-    let mut openings = Vec::<(char, usize, usize)>::new();
-    let mut index = 0;
-    while index < chars.len() {
-        let marker = chars[index];
-        if !matches!(marker, '*' | '_') {
-            index += 1;
-            continue;
-        }
-        let mut end = index + 1;
-        while chars.get(end) == Some(&marker) {
-            end += 1;
-        }
-        let previous = index.checked_sub(1).and_then(|i| chars.get(i)).copied();
-        let next = chars.get(end).copied();
-        let can_open = next.is_some_and(|ch| !ch.is_whitespace());
-        let can_close = previous.is_some_and(|ch| !ch.is_whitespace());
-        let opening = openings
-            .iter()
-            .rposition(|(open_marker, run, _)| *open_marker == marker && *run == end - index);
-        if can_close {
-            if let Some(open_index) = opening {
-                let (_, _, open_start) = openings.remove(open_index);
-                paired[open_start..open_start + (end - index)].fill(true);
-                paired[index..end].fill(true);
-            } else if can_open {
-                openings.push((marker, end - index, index));
-            }
-        } else if can_open {
-            openings.push((marker, end - index, index));
-        }
-        index = end;
-    }
-    paired
 }
 
 /// A part of a task text where words are not prose a result rests on.

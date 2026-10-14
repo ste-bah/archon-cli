@@ -1,5 +1,5 @@
 use super::super::{ClaimingTask, FidelityVerdict};
-use super::{check_verdict, expand_supporting_quote};
+use super::{check_verdict, expand_supporting_quote, same_normalized_quote, task_contains_quote};
 
 const TASK: &str = include_str!("fixtures/TASK-DL-002.md");
 const TASK_WITH_LITERAL_ELLIPSIS: &str = include_str!("fixtures/TASK-DL-001.md");
@@ -102,6 +102,38 @@ fn quote_marks_dashes_and_wrapped_whitespace_are_normalized() {
     let body = task("**“One”** — two\nlines remain here.");
     let mut answer = verdict(false, "‘One’ - two lines");
     assert!(check_verdict(&mut answer, &[body]).is_ok());
+}
+
+#[test]
+fn normalization_changes_prose_but_preserves_inline_and_fenced_code_bytes() {
+    assert!(!task_contains_quote(
+        "Run `tool --no-cache` now.",
+        "Run `tool —no-cache` now."
+    ));
+    assert!(same_normalized_quote(
+        "it’s ready — now",
+        "it's ready - now"
+    ));
+    assert!(!task_contains_quote(
+        "The value is `\"ready\"`.",
+        "The value is `“ready”`."
+    ));
+    assert!(!task_contains_quote(
+        "Run `tool  --no-cache` now.",
+        "Run `tool --no-cache` now."
+    ));
+    assert!(!task_contains_quote(
+        "Run `tool\\n--no-cache` now.",
+        "Run `tool --no-cache` now."
+    ));
+    assert!(!task_contains_quote(
+        "```sh\ntool --no-cache\n```",
+        "```sh\ntool —no-cache\n```"
+    ));
+    assert!(!task_contains_quote(
+        "```text\n```literal --no-cache```\n```",
+        "```text\n```literal —no-cache```\n```"
+    ));
 }
 
 #[test]
