@@ -126,3 +126,104 @@ async fn a_missing_child_exit_status_is_stored_as_null() {
     let attempt = pauses[0]["detail"]["attempts"].as_array().unwrap()[0].clone();
     assert!(attempt["exit_code"].is_null(), "{attempt}");
 }
+
+#[tokio::test]
+async fn evidence_377_configured_secret_is_redacted_in_the_stored_attempt() {
+    let secret = "configured-secret-evidence";
+    let stderr = format!("provider failed with {secret}; final diagnostic");
+    let before = format!("exit_code={EXIT_INCOMPLETE_RESUMABLE}, stderr={stderr:?}");
+    let fixture = fixture_with_secret(
+        vec![
+            Scripted::Stderr(EXIT_INCOMPLETE_RESUMABLE, "first attempt".into()),
+            Scripted::Stderr(EXIT_INCOMPLETE_RESUMABLE, stderr),
+        ],
+        secret,
+    );
+    let _ = fixture
+        .executor
+        .execute(lint(), Some(fixture.generation))
+        .await
+        .unwrap_err();
+
+    // Re-open the persisted event file; this is the source of truth.
+    let stored_events = events(&fixture);
+    let pause = events_named(&stored_events, "host_command_operational_pause")[0];
+    let stored_attempt = pause["detail"]["attempts"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap();
+    let after = format!(
+        "exit_code={}, stderr_tail={:?}",
+        stored_attempt["exit_code"],
+        stored_attempt["stderr_tail"].as_str().unwrap()
+    );
+    println!("EVIDENCE #377 configured-secret BEFORE: {before} AFTER: {after}");
+    assert_eq!(stored_attempt["exit_code"], EXIT_INCOMPLETE_RESUMABLE);
+    assert!(!after.contains(secret));
+    assert!(after.contains("[REDACTED]"));
+    assert!(after.contains("final diagnostic"));
+}
+
+#[tokio::test]
+async fn evidence_377_credential_shape_is_redacted_in_the_stored_attempt() {
+    let token = "sk-ant-abcdefghijklmnopqrstuvwxyz0123456789";
+    let stderr = format!("provider rejected {token}");
+    let before = format!("exit_code={EXIT_INCOMPLETE_RESUMABLE}, stderr={stderr:?}");
+    let fixture = fixture(vec![
+        Scripted::Stderr(EXIT_INCOMPLETE_RESUMABLE, "first attempt".into()),
+        Scripted::Stderr(EXIT_INCOMPLETE_RESUMABLE, stderr),
+    ]);
+    let _ = fixture
+        .executor
+        .execute(lint(), Some(fixture.generation))
+        .await
+        .unwrap_err();
+
+    let stored_events = events(&fixture);
+    let pause = events_named(&stored_events, "host_command_operational_pause")[0];
+    let stored_attempt = pause["detail"]["attempts"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap();
+    let after = format!(
+        "exit_code={}, stderr_tail={:?}",
+        stored_attempt["exit_code"],
+        stored_attempt["stderr_tail"].as_str().unwrap()
+    );
+    println!("EVIDENCE #377 credential-shape BEFORE: {before} AFTER: {after}");
+    assert_eq!(stored_attempt["exit_code"], EXIT_INCOMPLETE_RESUMABLE);
+    assert!(!after.contains(token));
+    assert!(after.contains("REDACTED"));
+}
+
+#[tokio::test]
+async fn evidence_377_timeout_without_child_status_is_stored_as_null() {
+    let fixture = fixture(vec![Scripted::TimedOut(None)]);
+    let before = match &fixture.process.outcomes[0] {
+        Scripted::TimedOut(progress) => format!(
+            "timed_out={}, exit_code={:?}, reported_progress={:?}",
+            true,
+            None::<i32>,
+            progress
+        ),
+        _ => panic!("expected the timeout fixture outcome"),
+    };
+    let _ = fixture
+        .executor
+        .execute(lint(), Some(fixture.generation))
+        .await
+        .unwrap_err();
+
+    let stored_events = events(&fixture);
+    let pause = events_named(&stored_events, "host_command_operational_pause")[0];
+    let attempt = &pause["detail"]["attempts"][0];
+    let after = format!(
+        "exit_code={}, stderr_tail={:?}",
+        attempt["exit_code"], attempt["stderr_tail"]
+    );
+    println!("EVIDENCE #377 timeout-no-status BEFORE: {before} AFTER: {after}");
+    assert!(attempt["exit_code"].is_null());
+    assert_eq!(attempt["stderr_tail"], "");
+}

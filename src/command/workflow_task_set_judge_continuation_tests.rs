@@ -414,59 +414,8 @@ async fn an_incremental_subset_can_contain_only_supplementary_checks() {
     );
 }
 
-#[test]
-fn an_incremental_subset_with_a_missing_supplementary_id_is_rejected() {
-    let mut subset = supplementary_subset();
-    let error = apply_judgments(&mut subset, r#"{"decisions":[]}"#).unwrap_err();
-
-    assert!(
-        format!("{error:#}").contains("missing=[\"SUP-1\"]"),
-        "{error:#}"
-    );
-}
-
-#[test]
-fn a_full_contract_with_no_acceptance_checks_is_still_rejected() {
-    let mut empty = contract();
-    empty.acceptance.clear();
-    let error = archon_workflow::task_set_contract::validate_acceptance_structure(
-        &empty,
-        &BTreeSet::new(),
-        true,
-    )
-    .unwrap_err();
-
-    assert!(
-        error
-            .to_string()
-            .contains("examined zero acceptance checks")
-    );
-}
-
-#[tokio::test]
-async fn a_mixed_incremental_subset_accepts_all_its_decisions() {
-    let mut subset = contract();
-    let mut supplementary = subset.acceptance[0].clone();
-    supplementary.id = "SUP-1".into();
-    subset.supplementary.push(supplementary);
-    let client = Scripted::new(vec![Ok((
-        r#"{"decisions":[{"id":"AC-X-001","verdict":"accepted","counterexample":"none","reason":"valid"},{"id":"SUP-1","verdict":"accepted","counterexample":"none","reason":"valid"}]}"#,
-        Some("end_turn"),
-    ))]);
-
-    let judged = judge_contract_subset_resumable(&client, subset, None)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        judged.acceptance[0].judgment.verdict,
-        JudgeDecision::Accepted
-    );
-    assert_eq!(
-        judged.supplementary[0].judgment.verdict,
-        JudgeDecision::Accepted
-    );
-}
+#[path = "workflow_task_set_judge_evidence_385_tests.rs"]
+mod evidence_385;
 
 #[path = "workflow_task_set_judge_idle_tests.rs"]
 mod idle;
