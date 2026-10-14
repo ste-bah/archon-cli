@@ -51,3 +51,6 @@ fn shell_option_refusal_wordings_are_classified_without_running_a_shell() {
         );
     }
 }
+
+#[path = "evidence_423_shell_tests.rs"]
+mod evidence_423;

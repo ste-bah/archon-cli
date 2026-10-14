@@ -233,6 +233,9 @@ fn recorded_live_replies_use_the_shared_expected_outcomes() {
     }
 }
 
+#[path = "evidence_423_line_endings_tests.rs"]
+mod evidence_423;
+
 #[test]
 fn non_entry_json_replies_are_unreadable_without_panicking() {
     let replies: Vec<String> =

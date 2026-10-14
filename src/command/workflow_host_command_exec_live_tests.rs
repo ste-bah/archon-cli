@@ -161,7 +161,7 @@ mod successor_reuse_tests {
         assert!(!executor.outcome_logic_holds_for(&record).unwrap());
     }
 
-    fn successor_fixture(
+    pub(super) fn successor_fixture(
         original_command: &str,
         successor_command: &str,
         declares_path: bool,
@@ -414,3 +414,6 @@ mod successor_reuse_tests {
         assert_eq!(pipeline_order(&catalog, "verify-frozen-skeleton"), Some(1));
     }
 }
+
+#[path = "evidence_421_successor_reuse_tests.rs"]
+mod evidence_421;
