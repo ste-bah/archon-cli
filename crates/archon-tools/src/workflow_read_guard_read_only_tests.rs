@@ -342,12 +342,31 @@ fn a_write_capable_guard_never_withdraws_inspection() {
 fn a_call_past_its_hard_ceiling_is_not_withdrawn_again() {
     let guard = read_only(0, 1);
     assert_eq!(guard.before_tool("Read", &read_input()), None);
+    // Expected before running: the first admitted Read is already at the
+    // ceiling (1/1), so the runner's subsequent withdrawal attempt must leave
+    // the ceiling state and read count unchanged and must not mark a repeat
+    // withdrawal.
+    let before = format!(
+        "inspection_withdrawn={} reads={} ceiling_reached={}",
+        guard.inspection_withdrawn(),
+        guard.read_only_inspections(),
+        guard.read_only_ceiling_reached()
+    );
     assert!(
         guard.inspection_withdrawn(),
         "the ceiling already withdrew it"
     );
     assert!(!guard.withdraw_inspection("same results"));
     assert_eq!(guard.withdrawal_reason(), None);
+    let after = format!(
+        "inspection_withdrawn={} reads={} ceiling_reached={} withdrawal_attempt_accepted=false",
+        guard.inspection_withdrawn(),
+        guard.read_only_inspections(),
+        guard.read_only_ceiling_reached()
+    );
+    eprintln!("EVIDENCE: #396 past-ceiling BEFORE {before}; AFTER {after}");
+    assert_eq!(guard.read_only_inspections(), 1);
+    assert!(guard.read_only_ceiling_reached());
 }
 
 /// The hard-ceiling refusal asks for the task's own deliverable in its own

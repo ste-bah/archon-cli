@@ -300,3 +300,76 @@ async fn the_host_cut_names_the_refused_calls_and_the_last_novel_turn() {
         "last novel activity: turn 7: new tool call Read a.rs; refused tool calls: 10"
     );
 }
+
+/// Expected before running: with no refusals, the last-progress turn remains
+/// turn 3 through a full no-progress window and the count remains zero.
+#[tokio::test(start_paused = true)]
+async fn zero_refusals_leave_the_window_anchored_to_its_last_progress_turn() {
+    let clock = DispatchClock::new();
+    host_progress_scope("evidence-zero", Arc::clone(&clock), async {
+        clock.admit();
+        progress("turn 3: new tool call Read /src/known.rs");
+        let before = clock.cut_text();
+        assert_eq!(clock.refused_calls(), 0);
+        let cut = clock.cut(secs(100)).await;
+        assert_eq!(cut, DispatchCut::Execution(secs(100)));
+        let after = clock.cut_text();
+        eprintln!("EVIDENCE: #382 zero refusals BEFORE {before}; AFTER {after}");
+        assert_eq!(before, after);
+    })
+    .await;
+}
+
+/// Expected before running: one refusal increments only the refusal count;
+/// the old last-progress turn stays turn 1 until a genuinely novel turn 3
+/// renews the window. That progress must preserve the refusal count.
+#[tokio::test(start_paused = true)]
+async fn one_refusal_then_novel_progress_moves_only_the_progress_anchor() {
+    let clock = DispatchClock::new();
+    host_progress_scope("evidence-one", Arc::clone(&clock), async {
+        clock.admit();
+        progress("turn 1: new tool call Read /src/first.rs");
+        refused();
+        let before = clock.cut_text();
+        assert_eq!(
+            before,
+            "last novel activity: turn 1: new tool call Read /src/first.rs; refused tool calls: 1"
+        );
+        tokio::time::sleep(secs(10)).await;
+        progress("turn 3: new tool call Read /src/novel.rs");
+        let after = clock.cut_text();
+        eprintln!("EVIDENCE: #382 one refusal then novel call BEFORE {before}; AFTER {after}");
+        assert_eq!(
+            after,
+            "last novel activity: turn 3: new tool call Read /src/novel.rs; refused tool calls: 1"
+        );
+        assert_eq!(clock.elapsed(), Duration::ZERO);
+    })
+    .await;
+}
+
+/// Expected before running: repeated refusals raise the count but never reset
+/// turn 1's window; the ordinary window cut still fires at 100 seconds.
+#[tokio::test(start_paused = true)]
+async fn many_refusals_do_not_renew_the_window_before_it_ends() {
+    let clock = DispatchClock::new();
+    host_progress_scope("evidence-many", Arc::clone(&clock), async {
+        clock.admit();
+        progress("turn 1: new tool call Read /src/first.rs");
+        for _ in 0..12 {
+            tokio::time::sleep(secs(5)).await;
+            refused();
+        }
+        let before = clock.cut_text();
+        assert_eq!(
+            before,
+            "last novel activity: turn 1: new tool call Read /src/first.rs; refused tool calls: 12"
+        );
+        let cut = clock.cut(secs(100)).await;
+        assert_eq!(cut, DispatchCut::Execution(secs(100)));
+        let after = clock.cut_text();
+        eprintln!("EVIDENCE: #382 many refusals BEFORE {before}; AFTER {after}");
+        assert_eq!(before, after);
+    })
+    .await;
+}
