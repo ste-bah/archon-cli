@@ -2,6 +2,22 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[derive(Default)]
+struct NoopExecutabilityProbe;
+
+#[async_trait]
+impl crate::command::workflow_task_set::executability::ExecutabilityProbe
+    for NoopExecutabilityProbe
+{
+    async fn script_defects(
+        &self,
+        _contract: &AcceptanceContract,
+        _ids: &std::collections::BTreeSet<String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        std::collections::BTreeMap::new()
+    }
+}
+
 async fn reject_check(check: serde_json::Value, expected: &[&str]) {
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, bytes) = seed(&temp);
@@ -100,7 +116,7 @@ async fn missing_ids_and_example_ids_never_reach_the_judge() {
 }
 
 #[tokio::test]
-async fn later_refutation_keeps_the_previously_accepted_check_at_the_freeze_call_site() {
+async fn changed_check_refutation_is_retained_for_the_acceptance_author() {
     let temp = tempfile::tempdir().unwrap();
     let (tasks, prd, original) = seed(&temp);
     freeze_acceptance(temp.path(), &tasks, &prd, Arc::new(JudgeClient {
@@ -116,6 +132,106 @@ async fn later_refutation_keeps_the_previously_accepted_check_at_the_freeze_call
             result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"refuted","counterexample":"stale output passes","reason":"does not exercise the program"}]}"#.into()),
         })).await.unwrap();
     let restored: AcceptanceContract = serde_json::from_slice(&next.contract_bytes).unwrap();
-    assert_eq!(restored.acceptance[0], first.acceptance[0]);
-    assert!(next.findings.is_empty(), "{:?}", next.findings);
+    println!(
+        "EVIDENCE #419 changed-check BEFORE: published check={:?}; verdict={:?}; candidate check={:?}",
+        first.acceptance[0].check,
+        first.acceptance[0].judgment.verdict,
+        candidate["acceptance"][0]["check"]
+    );
+    assert_ne!(restored.acceptance[0].check, first.acceptance[0].check);
+    assert_eq!(
+        restored.acceptance[0].judgment.verdict,
+        archon_workflow::task_set_contract::JudgeDecision::Refuted
+    );
+    assert_eq!(
+        restored.acceptance[0].judgment.counterexample,
+        "stale output passes"
+    );
+    assert!(next.non_accepted_ids().contains("AC-X-001"));
+    assert!(
+        next.findings.iter().any(|finding| {
+            finding.subject == "AC-X-001"
+                && finding.text.contains("stale output passes")
+                && finding.text.contains("does not exercise the program")
+        }),
+        "the fresh refutation must reach the acceptance author: {:?}",
+        next.findings
+    );
+
+    let scope = crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set(
+        temp.path(),
+        &tasks,
+        &prd,
+    )
+    .unwrap();
+    let author = Arc::new(
+        crate::command::workflow_task_set::reauthor::test_client::ScriptedAuthorJudge::new(
+            |entry, _| {
+                crate::command::workflow_task_set::reauthor::test_client::command_entry(
+                    entry,
+                    "jq -e '.valid == true and .rows > 0' out.json",
+                )
+            },
+            |_, _| true,
+        ),
+    );
+    let probe = NoopExecutabilityProbe;
+    let seeds = std::collections::BTreeMap::new();
+    let repaired = crate::command::workflow_task_set::reauthor::reauthor(
+        author.as_ref(),
+        &restored,
+        &std::collections::BTreeSet::from(["AC-X-001".to_string()]),
+        &scope,
+        "sonnet",
+        &crate::command::workflow_task_set::reauthor::ReauthorGate {
+            probe: &probe,
+            seeds: &seeds,
+        },
+    )
+    .await
+    .unwrap();
+    let prompt = author.prompts.lock().unwrap()[0].clone();
+    assert!(
+        prompt.contains("stale output passes"),
+        "author prompt omitted the refutation: {prompt}"
+    );
+    assert!(
+        prompt.contains("does not exercise the program"),
+        "author prompt omitted the reason: {prompt}"
+    );
+    assert_eq!(author.authored(), 1);
+    assert_eq!(
+        repaired.acceptance[0].judgment.verdict,
+        archon_workflow::task_set_contract::JudgeDecision::Accepted
+    );
+    println!(
+        "EVIDENCE #419 changed-check AFTER: fresh verdict={:?}; routed_to_author={}; feedback_has_counterexample={}; feedback_has_reason={}; repaired verdict={:?}",
+        restored.acceptance[0].judgment.verdict,
+        author.authored() == 1,
+        prompt.contains("stale output passes"),
+        prompt.contains("does not exercise the program"),
+        repaired.acceptance[0].judgment.verdict
+    );
+
+    let unchanged = prepare_acceptance_freeze_from_candidate(
+        temp.path(),
+        &tasks,
+        &prd,
+        GateMode::Observe,
+        original,
+        Arc::new(JudgeClient {
+            result: Ok(r#"{"decisions":[{"id":"AC-X-001","verdict":"refuted","counterexample":"stale output passes","reason":"does not exercise the program"}]}"#.into()),
+        }),
+    ).await.unwrap();
+    let unchanged: AcceptanceContract = serde_json::from_slice(&unchanged.contract_bytes).unwrap();
+    println!(
+        "EVIDENCE #419 unchanged-check BEFORE/AFTER: pinned verdict={:?}; prepared verdict={:?}; entry_equal={}",
+        first.acceptance[0].judgment.verdict,
+        unchanged.acceptance[0].judgment.verdict,
+        unchanged.acceptance[0] == first.acceptance[0]
+    );
+    assert_eq!(
+        unchanged.acceptance[0], first.acceptance[0],
+        "unchanged check and covers restore the accepted judgment"
+    );
 }

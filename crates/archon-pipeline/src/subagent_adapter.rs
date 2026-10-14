@@ -402,12 +402,9 @@ impl LlmClient for SubagentPipelineClient {
 
 /// Map a terminal [`SubagentOutcome`] onto the pipeline's response type.
 ///
-/// `Completed` is the runner's own typed statement that it finished normally —
-/// every other ending has its own variant and becomes an error here — so it is
-/// reported as `end_turn` rather than as an absent stop reason. Callers that
-/// require a typed terminal reason (the fixed decomposition author) can then
-/// tell a finished turn from one that never produced one, which a hardcoded
-/// `None` made impossible for every subagent-backed provider.
+/// `Completed` says the runner returned content, but it does not establish a
+/// provider stop reason. Preserve the provider's value so callers that require
+/// a complete author reply can refuse an absent reason.
 pub(crate) fn llm_response_for_subagent_outcome(
     outcome: SubagentOutcome,
     timed_out: bool,
@@ -419,11 +416,7 @@ pub(crate) fn llm_response_for_subagent_outcome(
             tool_uses: Vec::new(),
             tokens_in: completion.tokens_in,
             tokens_out: completion.tokens_out,
-            stop_reason: Some(
-                completion
-                    .stop_reason
-                    .unwrap_or_else(|| "end_turn".to_string()),
-            ),
+            stop_reason: completion.stop_reason,
         }),
         SubagentOutcome::Failed(error) => Err(anyhow!("subagent failed: {error}")),
         SubagentOutcome::Cancelled if timed_out => Err(anyhow!(

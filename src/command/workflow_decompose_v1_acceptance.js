@@ -103,12 +103,20 @@ function parseErrorClass(error) {
   // Match a finite set of parser kinds. The message itself is diagnostic
   // text and must never become a progress key.
   const message = String(error && error.message || error || "").toLowerCase();
-  if (/unterminated string/.test(message)) return "parse-error:unterminated-string";
-  if (/unexpected end|end of json|unexpected eof/.test(message)) return "parse-error:unexpected-end";
-  if (/expected property name|property name enclosed/.test(message)) return "parse-error:property-name";
-  if (/expected .*after property|expected colon/.test(message)) return "parse-error:property-separator";
-  if (/unexpected token|unexpected character/.test(message)) return "parse-error:unexpected-token";
-  return "parse-error:other";
+  let kind = "other";
+  if (/unterminated string/.test(message)) kind = "unterminated-string";
+  else if (/unexpected end|end of json|unexpected eof/.test(message)) kind = "unexpected-end";
+  else if (/expected property name|property name enclosed/.test(message)) kind = "property-name";
+  else if (/expected .*after property|expected colon/.test(message)) kind = "property-separator";
+  else if (/unexpected token|unexpected character|invalid \\escape/.test(message)) kind = "unexpected-token";
+  // Retain numeric source coordinates so repair tracking can compare how far
+  // the reply parses. Do not let provider-controlled diagnostic text enter
+  // progress state.
+  const lineColumn = message.match(/line\s+(\d+)\s+column\s+(\d+)/);
+  const position = message.match(/(?:position|offset|char)\s+(\d+)/);
+  const location = lineColumn ? `line-${lineColumn[1]}-column-${lineColumn[2]}`
+    : position ? `position-${position[1]}` : "location-unknown";
+  return `parse-error:${kind}:${location}`;
 }
 
 function stopReasonClass(reason) {

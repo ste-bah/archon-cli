@@ -145,7 +145,13 @@ function newProgress(_seed) {
 }
 
 function newRepairEpisode(stalled) {
-  return { bests: new Map(), malformedClasses: new Map(), stalled };
+  return {
+    bests: new Map(),
+    malformedClasses: new Map(),
+    malformedParseFurthest: new Map(),
+    malformedParseKinds: new Map(),
+    stalled
+  };
 }
 
 // Opens the repair episode that follows a measured candidate.
@@ -267,7 +273,36 @@ function recordRepairs(progress, call, refusals, round = NO_ROUND, answered = tr
     if (typeof malformedClass === "string") {
       let classes = episode.malformedClasses.get(entryId);
       if (!classes) episode.malformedClasses.set(entryId, classes = new Set());
-      const improved = !classes.has(malformedClass);
+      const parseLocation = malformedClass.match(/^parse-error:([^:]+):line-(\d+)-column-(\d+)$/)
+        || malformedClass.match(/^parse-error:([^:]+):position-(\d+)$/);
+      const unknownParseKind = malformedClass.match(/^parse-error:([^:]+):location-unknown$/);
+      const parseKind = parseLocation ? parseLocation[1] : unknownParseKind && unknownParseKind[1];
+      let parseKinds;
+      if (parseKind) {
+        parseKinds = episode.malformedParseKinds.get(entryId);
+        if (!parseKinds) episode.malformedParseKinds.set(entryId, parseKinds = new Set());
+      }
+      let improved;
+      if (parseLocation && malformedClass.includes(":line-")) {
+        const current = { scheme: "line-column", line: Number(parseLocation[2]), column: Number(parseLocation[3]) };
+        const furthest = episode.malformedParseFurthest.get(entryId);
+        improved = !furthest || (furthest.scheme === current.scheme
+          && (current.line > furthest.line || (current.line === furthest.line && current.column > furthest.column)));
+        if (improved) episode.malformedParseFurthest.set(entryId, current);
+        parseKinds.add(parseKind);
+      } else if (parseLocation) {
+        const current = { scheme: "offset", offset: Number(parseLocation[2]) };
+        const furthest = episode.malformedParseFurthest.get(entryId);
+        improved = !furthest || (furthest.scheme === current.scheme && current.offset > furthest.offset);
+        if (improved) episode.malformedParseFurthest.set(entryId, current);
+        parseKinds.add(parseKind);
+      } else if (unknownParseKind) {
+        improved = !parseKinds.has(parseKind);
+        parseKinds.add(parseKind);
+      } else {
+        // Other malformed classes retain their existing one-time novelty rule.
+        improved = !classes.has(malformedClass);
+      }
       classes.add(malformedClass);
       better = better || improved;
       malformedCount += 1;
@@ -299,8 +334,10 @@ function recordRepairs(progress, call, refusals, round = NO_ROUND, answered = tr
 }
 
 // Malformed replies have stable refusal classes (wrong id, missing end_turn,
-// parse-error kind). A new class is progress once per entry and episode;
-// repeating it is not. Offsets and diagnostic wording are never keys.
+// parse-error kind and source location). Parse errors with known locations
+// progress only when their source position moves beyond this entry's furthest
+// position in the episode. Unknown locations and other malformed classes keep
+// the one-time novelty rule. Arbitrary diagnostic wording is not a key.
 // A round whose failures measured nothing (an unparseable reply, a call that
 // failed in transport) still credits the entries that passed in it.
 function creditedRound(progress, entry, round, advanced) {

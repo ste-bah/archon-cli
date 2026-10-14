@@ -187,8 +187,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 17: #420 a pre-implementation failure at a setup path outside the probe's tree that the output reports absent (`cd X`, `--manifest-path X`) gives no verdict: unproven, then its author's, never a passability verdict.
         // #420 review, same unreleased version 17: the rule applies only in a host-made copy (scratch, hermetic), never on the live tree, and a top-level name the copy holds (`../repo`) stays inside it.
         // 18: #446 direct-site baseline runs use their hermetic copy's layout when applying that rule.
+        // 19: #402 missing provider stop reasons cannot complete acceptance authoring; #419 pinned restoration requires identical check and covers fields after a fresh refusal.
         // #446 review 2, same unreleased version 18
-        version: 18,
+        version: 19,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -197,14 +198,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair, after it claims the task root; the freeze judges as before.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
-        // #446 follow-up re-pin only: cache compatibility now keeps old evidence;
+        // #446 follow-up re-pin only (version 18 at the time): cache compatibility now keeps old evidence;
         // Scratch schema-3 verdicts stay reusable, while Hermetic layoutless
-        // evidence reruns under the unchanged version-18 acceptance pin.
+        // evidence reruns under the version-18 acceptance pin. Version 19 records #402/#419 changes.
         // #446 follow-up re-pin only: archive collisions keep both prior byte sets; verdicts are unchanged.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
-        sources_digest: "4076e0756b00e9a487c4c36b68eb0b5e40e5dba626d4050e50215606e0f13a60",
+        sources_digest: "790d628da43e34271c9310bedd0d4e29df3009c7f60b639382b05b3b1d1e5d21",
         build_bound: false,
     },
     CapabilityLogic {
@@ -236,7 +237,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
-        sources_digest: "4076e0756b00e9a487c4c36b68eb0b5e40e5dba626d4050e50215606e0f13a60",
+        sources_digest: "790d628da43e34271c9310bedd0d4e29df3009c7f60b639382b05b3b1d1e5d21",
         build_bound: false,
     },
     CapabilityLogic {
@@ -275,7 +276,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
-        sources_digest: "2960c4a0cbea12cf5b3dc87541c695444cc20fb456a093d9b7cb1f053f40616d",
+        sources_digest: "24d392be1377f689c65837346a8eb7f84181a701efd6c0ec595306ee4f6ff3fb",
         build_bound: false,
     },
     CapabilityLogic {
@@ -309,7 +310,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
-        sources_digest: "2960c4a0cbea12cf5b3dc87541c695444cc20fb456a093d9b7cb1f053f40616d",
+        sources_digest: "24d392be1377f689c65837346a8eb7f84181a701efd6c0ec595306ee4f6ff3fb",
         build_bound: false,
     },
     CapabilityLogic {
@@ -364,7 +365,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
-        sources_digest: "e20f189dcdcd95c7ee0b3da1e9cdcf77b31e7b4a98d1514bada5d56aa1cdea85",
+        sources_digest: "d19681d892573f5982bfa08b9bb78af9d01c75bfcd46c3cb75c10909bf2ad8bd",
         build_bound: true,
     },
     CapabilityLogic {
@@ -396,7 +397,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
-        sources_digest: "e20f189dcdcd95c7ee0b3da1e9cdcf77b31e7b4a98d1514bada5d56aa1cdea85",
+        sources_digest: "d19681d892573f5982bfa08b9bb78af9d01c75bfcd46c3cb75c10909bf2ad8bd",
         build_bound: true,
     },
 ];

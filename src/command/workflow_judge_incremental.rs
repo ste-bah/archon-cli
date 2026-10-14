@@ -69,6 +69,8 @@ pub(super) fn keep_pinned_entries(
         };
         if old.judgment.verdict == JudgeDecision::Accepted
             && old.criterion == entry.criterion
+            && old.check == entry.check
+            && old.covers == entry.covers
             && old.gap_permitted == entry.gap_permitted
             && sampling_matches(client, old)
         {

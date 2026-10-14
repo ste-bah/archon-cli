@@ -3,6 +3,9 @@ use archon_workflow::task_set_contract::JudgeDecision;
 use std::collections::BTreeSet;
 use std::sync::Mutex;
 
+#[path = "workflow_judge_reuse_restore_tests.rs"]
+mod restore_tests;
+
 fn cache_contract() -> AcceptanceContract {
     serde_json::from_value(serde_json::json!({
         "schema_version": 1,

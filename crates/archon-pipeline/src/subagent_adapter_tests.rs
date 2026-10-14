@@ -337,80 +337,11 @@ fn exact_tool_policy_marker_is_not_exposed_in_agent_prompt() {
     assert!(prompt.contains("Read, Grep"));
 }
 
-#[test]
-fn completed_subagent_reports_a_typed_end_turn_stop_reason() {
-    let response = llm_response_for_subagent_outcome(
-        SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion {
-            content: "body".into(),
-            stop_reason: None,
-            tokens_in: None,
-            tokens_out: None,
-        }),
-        false,
-        None,
-    )
-    .expect("a completed subagent is a successful turn");
-
-    assert_eq!(response.content, "body");
-    assert_eq!(response.stop_reason.as_deref(), Some("end_turn"));
-}
-
-#[test]
-fn completed_subagent_preserves_provider_usage_and_stop_reason() {
-    let response = llm_response_for_subagent_outcome(
-        SubagentOutcome::Completed(archon_tools::subagent_executor::SubagentCompletion {
-            content: "partial body".into(),
-            stop_reason: Some("max_tokens".into()),
-            tokens_in: Some(321),
-            tokens_out: Some(54),
-        }),
-        false,
-        None,
-    )
-    .unwrap();
-    assert_eq!(response.content, "partial body");
-    assert_eq!(response.stop_reason.as_deref(), Some("max_tokens"));
-    assert_eq!(response.tokens_in, Some(321));
-    assert_eq!(response.tokens_out, Some(54));
-}
-
-#[test]
-fn abnormal_subagent_endings_stay_errors_rather_than_typed_turns() {
-    for (outcome, timed_out, needle) in [
-        (
-            SubagentOutcome::Failed("boom".into()),
-            false,
-            "subagent failed",
-        ),
-        (SubagentOutcome::Cancelled, true, "timed out"),
-        (SubagentOutcome::Cancelled, false, "cancelled"),
-        (
-            SubagentOutcome::AutoBackgrounded,
-            false,
-            "auto-backgrounded",
-        ),
-    ] {
-        let error = llm_response_for_subagent_outcome(outcome, timed_out, Some(7))
-            .expect_err("an abnormal ending is not a turn");
-        assert!(error.to_string().contains(needle), "{error}");
-    }
-}
-
 #[path = "subagent_adapter_usage_tests.rs"]
 mod usage_tests;
 
-#[test]
-fn run_agent_returns_the_mapped_outcome_rather_than_building_a_response_inline() {
-    let source = include_str!("subagent_adapter.rs");
-    let execution = include_str!("subagent_adapter/continuation.rs");
-    assert!(source.contains("self.execute_session(request, false).await"));
-    assert!(
-        execution.contains(
-            "llm_response_for_subagent_outcome(outcome, timed_out, request.timeout_secs)"
-        )
-    );
-    assert_eq!(execution.matches("stop_reason: None").count(), 0);
-}
+#[path = "subagent_adapter_outcome_tests.rs"]
+mod outcome_tests;
 
 #[test]
 fn repository_audit_exact_read_only_policy_confines_assessor_to_its_snapshot() {

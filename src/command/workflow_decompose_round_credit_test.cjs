@@ -121,8 +121,8 @@ async function malformedClassesCreditOnceAndBoundAlternation() {
   assert.deepEqual(out.flags, [true, true, false, true, false, false, false]);
   const malformed = out.history.slice(1);
   assert.deepEqual(malformed.map(step => step.entries[0].malformed_class),
-    ['parse-error:unexpected-token', 'parse-error:unexpected-token', 'wrong-id', 'wrong-id',
-      'parse-error:unexpected-token', 'wrong-id']);
+    ['parse-error:unexpected-token:location-unknown', 'parse-error:unexpected-token:location-unknown', 'wrong-id', 'wrong-id',
+      'parse-error:unexpected-token:location-unknown', 'wrong-id']);
   assert.deepEqual(malformed.map(step => step.entries[0].progress), [true, false, true, false, false, false]);
 }
 
@@ -131,7 +131,7 @@ async function unknownClassesRepeatWithoutProgress() {
   assert.equal(out.error, 'paused');
   assert.deepEqual(out.flags, [true, false, false, false]);
   assert.deepEqual(out.history.map(step => step.entries[0].malformed_class),
-    ['parse-error:other', 'parse-error:other', 'parse-error:other', 'parse-error:other']);
+    ['parse-error:other:location-unknown', 'parse-error:other:location-unknown', 'parse-error:other:location-unknown', 'parse-error:other:location-unknown']);
   assert.deepEqual(out.history.map(step => step.entries[0].progress), [true, false, false, false]);
 }
 
@@ -149,7 +149,7 @@ async function mixedMalformedAndValidatorRefusalsKeepBothProgress() {
   assert.equal(out.error, 'paused');
   const mixed = out.history[0];
   assert.deepEqual(credited(mixed), [['A', true], ['B', true]]);
-  assert.equal(mixed.entries[0].malformed_class, 'parse-error:unexpected-token');
+  assert.equal(mixed.entries[0].malformed_class, 'parse-error:unexpected-token:location-unknown');
   assert.equal(mixed.entries[1].findings, 1);
 }
 

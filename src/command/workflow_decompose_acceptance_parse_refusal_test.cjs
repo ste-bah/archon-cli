@@ -132,10 +132,12 @@ async function refusal(reply, stopReason = 'end_turn') {
     'check block present but check.command_block is not true — put the script only in the block and set command_block true, or remove the block');
   await exact('```check\n```\n{"id":"A","check":{"kind":"command","command_block":true}}',
     'acceptance entry A check block is empty');
-  const malformed = `{"id":"A","check":{"kind":"command","command":"${'x'.repeat(190)}${'\\q'}${'y'.repeat(190)}"}}`;
+  const malformed = `{"id":"A","check":{"kind":"command","command":"${'x'.repeat(90)}${'\\q'}${'y'.repeat(290)}"}}`;
   const first = await refusal(malformed);
   const repeated = await refusal(malformed);
-  const changed = await refusal(`{"id":"A","check":{"kind":"command","command":"${'x'.repeat(90)}${'\\q'}${'y'.repeat(290)}"}}`);
+  const changed = await refusal(`{"id":"A","check":{"kind":"command","command":"${'x'.repeat(190)}${'\\q'}${'y'.repeat(190)}"}}`);
+  const backward = await refusal(`{"id":"A","check":{"kind":"command","command":"${'x'.repeat(140)}${'\\q'}${'y'.repeat(240)}"}}`);
+  const farther = await refusal(`{"id":"A","check":{"kind":"command","command":"${'x'.repeat(290)}${'\\q'}${'y'.repeat(90)}"}}`);
   const unknownParser = await refusal('opaque parser fixture');
   const unknownParserRepeat = await refusal('opaque parser fixture');
   const unknownStop = await refusal(JSON.stringify({id:'A'}), 'future_provider_stop');
@@ -146,15 +148,58 @@ async function refusal(reply, stopReason = 'end_turn') {
   assert.match(first.summary, /Use inline check\.command only for one short line without quotes or backslashes/);
   assert.ok(first.summary.includes('put the whole script in one block that opens with a line that is exactly ```check (set check.command_block true, or omit it when the command check has no command field); never write a script inside a JSON string.'));
   assert.equal(first.summary, repeated.summary, 'identical malformed replies have identical refusal text');
-  assert.equal(first.malformedClass, changed.malformedClass, 'a changed parse position is the same progress class');
+  assert.notEqual(first.malformedClass, changed.malformedClass, 'a changed parse position has a distinct diagnostic key');
   const excerpt = first.summary.match(/; excerpt: ("(?:\\.|[^"\\])*")/);
   assert.ok(excerpt, first);
   assert.ok(JSON.parse(excerpt[1]).length <= 160, 'excerpt is bounded to 160 characters');
   assert.match(first.malformedClass, /^parse-error:/);
-  assert.equal(unknownParser.malformedClass, 'parse-error:other');
+  assert.equal(unknownParser.malformedClass, 'parse-error:other:location-unknown');
   assert.equal(unknownParserRepeat.malformedClass, unknownParser.malformedClass);
   assert.equal(unknownStop.malformedClass, 'stop-other');
   assert.equal(unknownStopRepeat.malformedClass, unknownStop.malformedClass);
+  const progressContext = ctxForBlocks();
+  const repairProgress = progressContext.newProgress();
+  const progressFor = (malformedClass, call, entryId = 'A') => {
+    progressContext.recordRepairs(repairProgress, call, [{entryId, findings:[], malformedClass}]);
+    return repairProgress.history.at(-1).entries[0].progress;
+  };
+  const firstProgress = progressFor(first.malformedClass, 1);
+  const repeatedProgress = progressFor(repeated.malformedClass, 2);
+  const forwardProgress = progressFor(changed.malformedClass, 3);
+  const backwardProgress = progressFor(backward.malformedClass, 4);
+  const stalledAfterBackward = repairProgress.stalled;
+  const sameFurthestProgress = progressFor(changed.malformedClass, 5);
+  const stalledAfterSameFurthest = repairProgress.stalled;
+  const fartherProgress = progressFor(farther.malformedClass, 6);
+  const unknownProgress = progressFor(unknownParser.malformedClass, 7, 'B');
+  const unknownRepeatProgress = progressFor(unknownParserRepeat.malformedClass, 8, 'B');
+  const unknownKindProgress = progressFor('parse-error:unexpected-token:location-unknown', 9, 'B');
+  const unknownAfterKnownProgress = progressFor(unknownParser.malformedClass, 10);
+  const unknownChangedKindAfterKnownProgress = progressFor('parse-error:unexpected-token:location-unknown', 11);
+  console.log(`EVIDENCE #383 same-position BEFORE: first progress=${firstProgress}`);
+  console.log(`EVIDENCE #383 same-position AFTER: repeated progress=${repeatedProgress}`);
+  console.log(`EVIDENCE #383 forward-position AFTER: progress=${forwardProgress}; key=${changed.malformedClass}`);
+  console.log(`EVIDENCE #383 backward-position AFTER: progress=${backwardProgress}; stalled=${stalledAfterBackward}; key=${backward.malformedClass}`);
+  console.log(`EVIDENCE #383 same-furthest AFTER: progress=${sameFurthestProgress}; stalled=${stalledAfterSameFurthest}`);
+  console.log(`EVIDENCE #383 farther-position AFTER: progress=${fartherProgress}; key=${farther.malformedClass}`);
+  console.log(`EVIDENCE #383 unknown-location BEFORE: first progress=${unknownProgress}`);
+  console.log(`EVIDENCE #383 unknown-location AFTER: repeated progress=${unknownRepeatProgress}`);
+  console.log(`EVIDENCE #383 unknown-kind-change AFTER: progress=${unknownKindProgress}`);
+  console.log(`EVIDENCE #383 unknown-after-known-same-kind AFTER: progress=${unknownAfterKnownProgress}`);
+  console.log(`EVIDENCE #383 unknown-after-known-new-kind AFTER: progress=${unknownChangedKindAfterKnownProgress}`);
+  assert.equal(firstProgress, true);
+  assert.equal(repeatedProgress, false);
+  assert.equal(forwardProgress, true);
+  assert.equal(backwardProgress, false);
+  assert.equal(stalledAfterBackward, 1);
+  assert.equal(sameFurthestProgress, false);
+  assert.equal(stalledAfterSameFurthest, 2);
+  assert.equal(fartherProgress, true);
+  assert.equal(unknownProgress, true);
+  assert.equal(unknownRepeatProgress, false);
+  assert.equal(unknownKindProgress, true);
+  assert.equal(unknownAfterKnownProgress, false);
+  assert.equal(unknownChangedKindAfterKnownProgress, true);
   const unclosed = '```check\nrun\n{"id":"A"}';
   const fenceMessage = 'the ```check block opened at line 1 is never closed (the reply may have been cut off); close every block with a line that is exactly ```';
   assert.throws(() => json.extractJsonObject(unclosed), error => error.message === fenceMessage);
@@ -168,6 +213,9 @@ async function refusal(reply, stopReason = 'end_turn') {
   const maxTokenRefusal = await refusal('{"id":"A"}', 'max_tokens');
   assert.match(maxTokenRefusal.summary, /cut off the reply at its output limit; make the check shorter/);
   assert.equal(maxTokenRefusal.malformedClass, 'stop-max-tokens');
+  const missingStopRefusal = await refusal('{"id":"A"}', null);
+  assert.match(missingStopRefusal.summary, /expected stop reason end_turn, got missing/);
+  assert.equal(missingStopRefusal.malformedClass, 'stop-missing');
   // #383: the excerpt and the engine message are redacted with the host's
   // public-copy rule (events.rs sanitize_value): a secret-shaped word becomes
   // <redacted>, whole, even where the excerpt window cuts it.
