@@ -118,14 +118,13 @@ fn verbatim(
     quote: &str,
     task: &ClaimingTask,
 ) -> Result<(), (RefusalKind, String)> {
-    let quote = collapse_whitespace(quote);
-    if quote.is_empty() {
+    if quote.trim().is_empty() {
         return Err((
             RefusalKind::BlankRequired(key),
             format!("{what} quotes nothing from the task in `{key}`"),
         ));
     }
-    if !collapse_whitespace(&task.text).contains(&quote) {
+    if !quote_occurrences(&task.text, quote).is_some_and(|count| count > 0) {
         return Err((
             RefusalKind::NotVerbatim(key),
             format!(
@@ -144,16 +143,14 @@ fn verbatim(
 /// a heading line, where words can stand without obliging anything.
 fn anchored(what: &str, quote: &str, task: &ClaimingTask) -> Result<(), (RefusalKind, String)> {
     let weak = |message: String| Err((RefusalKind::WeakAnchor, message));
-    let quote = collapse_whitespace(quote);
+    let quote = normalized_quote_for_anchor(quote);
     let (words, chars) = (quote.split(' ').count(), quote.chars().count());
     if words < MIN_SUPPORT_WORDS && chars < MIN_SUPPORT_CHARS {
         return weak(format!(
             "{what} quotes {words} words ({chars} characters) in `supporting_text`; it needs at least {MIN_SUPPORT_WORDS} words or {MIN_SUPPORT_CHARS} characters of the task's prose"
         ));
     }
-    let found = collapse_whitespace(&task.text)
-        .matches(quote.as_str())
-        .count();
+    let found = quote_occurrences(&task.text, quote.as_str()).unwrap_or(0);
     if found != 1 {
         return weak(format!(
             "{what} quotes text in `supporting_text` that appears {found} times in task '{}'; quote a passage that appears exactly once",
@@ -161,7 +158,9 @@ fn anchored(what: &str, quote: &str, task: &ClaimingTask) -> Result<(), (Refusal
         ));
     }
     for region in [Region::Fence, Region::Comment, Region::Heading] {
-        if !collapse_whitespace(&masked(&task.text, region)).contains(quote.as_str()) {
+        if !quote_occurrences(&masked(&task.text, region), quote.as_str())
+            .is_some_and(|count| count > 0)
+        {
             return weak(format!(
                 "{what} quotes text in `supporting_text` that lies in or across {} of task '{}'; quote the task's prose",
                 region.name(),
@@ -170,6 +169,146 @@ fn anchored(what: &str, quote: &str, task: &ClaimingTask) -> Result<(), (Refusal
         }
     }
     Ok(())
+}
+
+/// Count quote matches after the byte-for-byte check. The fallback is a
+/// bounded text normalization, not a similarity score. For ellipses, every
+/// piece must contain a complete word token also present in the task, then
+/// each piece is located after the previous one so pieces are ordered and do
+/// not overlap.
+fn quote_occurrences(task: &str, quote: &str) -> Option<usize> {
+    if task.contains(quote) {
+        return Some(task.matches(quote).count());
+    }
+    let elisions = quote.replace("...", "…");
+    let pieces = elisions.split('…').collect::<Vec<_>>();
+    let elided = pieces.len() > 1;
+    let task = normalize_text(task, false);
+    let pieces = pieces
+        .into_iter()
+        .map(|piece| normalize_text(piece, true))
+        .filter(|piece| !piece.is_empty())
+        .collect::<Vec<_>>();
+    if pieces.is_empty() {
+        return Some(0);
+    }
+    if elided && pieces.iter().any(|piece| !has_word_token_in(piece, &task)) {
+        return Some(0);
+    }
+    if elided {
+        let mut found_chains = 0;
+        for (start, first) in task.match_indices(&pieces[0]) {
+            let mut cursor = start + first.len();
+            let mut complete = true;
+            for piece in &pieces[1..] {
+                let Some(offset) = task[cursor..].find(piece) else {
+                    complete = false;
+                    break;
+                };
+                cursor += offset + piece.len();
+            }
+            if complete {
+                found_chains += 1;
+            }
+        }
+        return Some(found_chains);
+    }
+    Some(task.matches(&pieces[0]).count())
+}
+
+/// At least one complete Unicode alphanumeric token from a piece must occur
+/// in the task. This keeps an ellipsis from passing on punctuation or a
+/// fragment such as a single boundary mark, without an arbitrary size cap.
+fn has_word_token_in(piece: &str, task: &str) -> bool {
+    word_tokens(piece).any(|token| word_tokens(task).any(|candidate| candidate == token))
+}
+
+fn word_tokens(text: &str) -> impl Iterator<Item = &str> {
+    let mut starts = Vec::new();
+    let mut start = None;
+    for (index, ch) in text.char_indices() {
+        if ch.is_alphanumeric() {
+            start.get_or_insert(index);
+        } else if let Some(begin) = start.take() {
+            starts.push((begin, index));
+        }
+    }
+    if let Some(begin) = start {
+        starts.push((begin, text.len()));
+    }
+    starts.into_iter().map(|(begin, end)| &text[begin..end])
+}
+
+fn normalized_quote_for_anchor(quote: &str) -> String {
+    quote
+        .replace("...", "…")
+        .split('…')
+        .map(|piece| normalize_text(piece, true))
+        .filter(|piece| !piece.is_empty())
+        .collect::<Vec<_>>()
+        .join(" … ")
+}
+
+/// Normalize quote punctuation and Markdown wrappers. NFKC is omitted because
+/// this crate has no direct or workspace normalization dependency; quote and
+/// dash forms, whitespace and formatting remain deliberately bounded.
+fn normalize_text(text: &str, is_quote: bool) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let chars = text.replace("\\n", " ").chars().collect::<Vec<_>>();
+    let mut index = 0;
+    while index < chars.len() {
+        match chars[index] {
+            '‘' | '’' | '“' | '”' | '«' | '»' | '‹' | '›' => normalized.push('"'),
+            '–' | '—' | '‑' | '−' => normalized.push('-'),
+            '`' => {}
+            '*' | '_' => {
+                let marker = chars[index];
+                let mut end = index + 1;
+                while chars.get(end) == Some(&marker) {
+                    end += 1;
+                }
+                let run = end - index;
+                let previous = index.checked_sub(1).and_then(|i| chars.get(i)).copied();
+                let next = chars.get(end).copied();
+                let can_open = next.is_some_and(|ch| !ch.is_whitespace());
+                let can_close = previous.is_some_and(|ch| !ch.is_whitespace());
+                let paired = chars[end..]
+                    .windows(run)
+                    .any(|window| window.iter().all(|ch| *ch == marker))
+                    || chars[..index]
+                        .windows(run)
+                        .any(|window| window.iter().all(|ch| *ch == marker));
+                let boundary_emphasis = previous
+                    .is_none_or(|ch| ch.is_whitespace() || ch.is_ascii_punctuation())
+                    || next.is_none_or(|ch| ch.is_whitespace() || ch.is_ascii_punctuation());
+                if paired && (can_open || can_close) && (marker == '*' || boundary_emphasis) {
+                    index = end;
+                } else {
+                    normalized.extend(chars[index..end].iter());
+                    index = end;
+                }
+                continue;
+            }
+            ch => normalized.push(ch),
+        }
+        index += 1;
+    }
+    let mut collapsed = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+    if is_quote {
+        let opens = collapsed.matches('[').count();
+        let closes = collapsed.matches(']').count();
+        if closes > opens {
+            collapsed.retain(|ch| ch != ']');
+        } else if opens > closes {
+            collapsed.retain(|ch| ch != '[');
+        }
+        collapsed = collapsed
+            .trim_matches(|ch: char| {
+                ch.is_ascii_punctuation() || matches!(ch, '…' | '“' | '”' | '’' | '‘')
+            })
+            .to_string();
+    }
+    collapsed
 }
 
 /// A part of a task text where words are not prose a result rests on.
@@ -233,14 +372,6 @@ fn masked(text: &str, region: Region) -> String {
     }
 }
 
-/// Whitespace-insensitive comparison: a model that re-wraps a line has still
-/// quoted it, while one that paraphrases has not. A literal two-character
-/// `\n` counts as whitespace too — asked to escape newlines, a critic that
-/// escapes them twice has still copied the line, and the decoded backslash-n
-/// is packaging, not a change to the words.
-fn collapse_whitespace(text: &str) -> String {
-    text.replace("\\n", " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+#[cfg(test)]
+#[path = "fidelity_audit_check_tests.rs"]
+mod tests;

@@ -265,7 +265,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441: this gate asks fidelity with PRD context and the candidate fallback.
         // #441 review 2, same unreleased version: Acceptance policy headings reach the body critic.
         // #441 review 3, same unreleased version: the complete PRD reaches the body critic.
-        sources_digest: "4b9749cc3d86c62f5fbd03212c949f95a00858352c2a6e6e057ac7f1e36802f5",
+        // #434d, same unreleased version 14: task quote provenance accepts bounded normalization and ordered elisions.
+        sources_digest: "df568c496caede8ee70abf18801dbfdb9505be09dd09218a0971ae556db565c3",
         build_bound: false,
     },
     CapabilityLogic {
@@ -300,7 +301,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441: this gate judges fidelity with PRD acceptance and gap context.
         // #441 review 2, same unreleased version: Acceptance policy headings reach the set critic.
         // #441 review 3, same unreleased version: the complete PRD reaches the set critic.
-        sources_digest: "4b9749cc3d86c62f5fbd03212c949f95a00858352c2a6e6e057ac7f1e36802f5",
+        // #434d, same unreleased version 13: the set gate shares the updated quote provenance check.
+        sources_digest: "df568c496caede8ee70abf18801dbfdb9505be09dd09218a0971ae556db565c3",
         build_bound: false,
     },
     CapabilityLogic {

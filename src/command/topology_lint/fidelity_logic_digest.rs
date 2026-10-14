@@ -36,6 +36,7 @@
 ///
 /// 1: the logic of schema 4 and schema 5 (#434, #434c).
 /// 2: PRD acceptance/gap context, whole-set attribution and weakening evidence change the question.
+/// #434d, same unreleased version 2: bounded quote normalization and ordered elision matching keep provenance checks literal.
 pub const CRITIC_LOGIC_VERSION: u32 = 2;
 
 /// The digest of [`FILES`] as reviewed against [`CRITIC_LOGIC_VERSION`].
@@ -60,7 +61,9 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 ///   reach the critic question; vendor-contract acceptance headings remain excluded.
 /// - #441 review 3, same unreleased version: the critic receives the complete PRD,
 ///   applies any policy anywhere in it, and sees each obligation's source heading.
-pub const SOURCES_DIGEST: &str = "d22e08a3522f095c45a684ecd70056a556467c52df08aef399b3a2e023130b2d";
+/// - #434d, same unreleased version 2: quote provenance uses bounded text
+///   normalization and ordered, non-overlapping elision pieces.
+pub const SOURCES_DIGEST: &str = "c868ba57df91e3a475cb056b9e65867e1a1e465e26ad280fb63c4e4319ea8c89";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.
