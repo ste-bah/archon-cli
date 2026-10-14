@@ -401,3 +401,5 @@ async fn the_reauthoring_freeze_shows_the_output_and_accepts_the_correction() {
 
 #[path = "workflow_acceptance_passability_tests_b.rs"]
 mod b;
+#[path = "evidence_418_tests.rs"]
+mod evidence_418_tests;

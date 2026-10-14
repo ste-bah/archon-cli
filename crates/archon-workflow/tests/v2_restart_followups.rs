@@ -12,6 +12,9 @@ use restart_run::{
     accepted, agent_call, generated_run, generated_run_with_stages, interrupted, v2_store,
 };
 
+#[path = "evidence_283_tests.rs"]
+mod evidence_283_tests;
+
 #[test]
 fn branch_archive_is_partitioned_by_item_and_migrates_flat_entries_on_save() {
     let temp = tempfile::tempdir().unwrap();
