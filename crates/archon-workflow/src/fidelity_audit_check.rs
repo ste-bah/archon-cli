@@ -171,72 +171,122 @@ fn anchored(what: &str, quote: &str, task: &ClaimingTask) -> Result<(), (Refusal
     Ok(())
 }
 
-/// Count quote matches after the byte-for-byte check. The fallback is a
-/// bounded text normalization, not a similarity score. For ellipses, every
-/// piece must contain a complete word token also present in the task, then
-/// each piece is located after the previous one so pieces are ordered and do
-/// not overlap.
+/// Count exact or whole-quote normalized matches. An ellipsis is never
+/// provenance: only the critic confirmation path may expand one.
 fn quote_occurrences(task: &str, quote: &str) -> Option<usize> {
+    if quote.contains('…') || quote.contains("...") {
+        return Some(0);
+    }
     if task.contains(quote) {
         return Some(task.matches(quote).count());
     }
-    let elisions = quote.replace("...", "…");
-    let pieces = elisions.split('…').collect::<Vec<_>>();
-    let elided = pieces.len() > 1;
     let task = normalize_text(task, false);
-    let pieces = pieces
-        .into_iter()
+    let quote = normalize_text(quote, true);
+    if quote.is_empty() {
+        return Some(0);
+    }
+    Some(task.matches(&quote).count())
+}
+
+/// Expand an elided supporting quote to its one contiguous task passage.
+/// Matches must be unique, word bounded and contained in one paragraph.
+pub fn expand_supporting_quote(task: &str, quote: &str) -> Option<String> {
+    let quote = quote.replace("...", "…");
+    let pieces = quote
+        .split('…')
         .map(|piece| normalize_text(piece, true))
         .filter(|piece| !piece.is_empty())
         .collect::<Vec<_>>();
+    if pieces.len() < 2 {
+        return None;
+    }
+    let mut chains = Vec::new();
+    for paragraph in paragraphs(task) {
+        let normalized = normalize_text(paragraph, false);
+        for (start, first) in word_bounded_matches(&normalized, &pieces[0]) {
+            let ends = chain_ends(&normalized, &pieces[1..], start + first.len());
+            for end in ends {
+                chains.push((paragraph, start, end));
+                if chains.len() > 1 {
+                    return None;
+                }
+            }
+        }
+    }
+    if chains.len() != 1 {
+        return None;
+    }
+    let (paragraph, start, end) = chains.pop()?;
+    let raw_start = raw_offset_for_normalized(paragraph, start)?;
+    let raw_end = raw_offset_for_normalized(paragraph, end)?;
+    Some(paragraph.get(raw_start..raw_end)?.trim_end().to_string())
+}
+
+fn paragraphs(text: &str) -> Vec<&str> {
+    let mut paragraphs = Vec::new();
+    let mut paragraph_start = 0;
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        if line.trim().is_empty() {
+            if paragraph_start < offset {
+                paragraphs.push(&text[paragraph_start..offset]);
+            }
+            paragraph_start = offset + line.len();
+        }
+        offset += line.len();
+    }
+    if paragraph_start < text.len() {
+        paragraphs.push(&text[paragraph_start..]);
+    }
+    paragraphs
+}
+
+fn chain_ends(text: &str, pieces: &[String], cursor: usize) -> Vec<usize> {
     if pieces.is_empty() {
-        return Some(0);
+        return vec![cursor];
     }
-    if elided && pieces.iter().any(|piece| !has_word_token_in(piece, &task)) {
-        return Some(0);
-    }
-    if elided {
-        let mut found_chains = 0;
-        for (start, first) in task.match_indices(&pieces[0]) {
-            let mut cursor = start + first.len();
-            let mut complete = true;
-            for piece in &pieces[1..] {
-                let Some(offset) = task[cursor..].find(piece) else {
-                    complete = false;
-                    break;
-                };
-                cursor += offset + piece.len();
-            }
-            if complete {
-                found_chains += 1;
-            }
-        }
-        return Some(found_chains);
-    }
-    Some(task.matches(&pieces[0]).count())
-}
-
-/// At least one complete Unicode alphanumeric token from a piece must occur
-/// in the task. This keeps an ellipsis from passing on punctuation or a
-/// fragment such as a single boundary mark, without an arbitrary size cap.
-fn has_word_token_in(piece: &str, task: &str) -> bool {
-    word_tokens(piece).any(|token| word_tokens(task).any(|candidate| candidate == token))
-}
-
-fn word_tokens(text: &str) -> impl Iterator<Item = &str> {
-    let mut starts = Vec::new();
-    let mut start = None;
-    for (index, ch) in text.char_indices() {
-        if ch.is_alphanumeric() {
-            start.get_or_insert(index);
-        } else if let Some(begin) = start.take() {
-            starts.push((begin, index));
+    let mut ends = Vec::new();
+    for (offset, matched) in word_bounded_matches(&text[cursor..], &pieces[0]) {
+        ends.extend(chain_ends(
+            text,
+            &pieces[1..],
+            cursor + offset + matched.len(),
+        ));
+        if ends.len() > 1 {
+            ends.truncate(2);
+            break;
         }
     }
-    if let Some(begin) = start {
-        starts.push((begin, text.len()));
+    ends
+}
+
+/// Compare two complete quote strings under the provenance normalization.
+pub fn same_normalized_quote(left: &str, right: &str) -> bool {
+    normalize_text(left, true) == normalize_text(right, true)
+}
+
+fn word_bounded_matches<'a>(text: &'a str, piece: &str) -> Vec<(usize, &'a str)> {
+    text.match_indices(piece)
+        .filter(|(start, matched)| {
+            let before = text[..*start].chars().next_back();
+            let after = text[*start + matched.len()..].chars().next();
+            !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+        })
+        .collect()
+}
+
+fn raw_offset_for_normalized(text: &str, target: usize) -> Option<usize> {
+    let mut previous = 0;
+    for (offset, _) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), '\0')))
+    {
+        if normalize_text(&text[..offset], false).len() > target {
+            return Some(previous);
+        }
+        previous = offset;
     }
-    starts.into_iter().map(|(begin, end)| &text[begin..end])
+    Some(text.len())
 }
 
 fn normalized_quote_for_anchor(quote: &str) -> String {
@@ -255,33 +305,61 @@ fn normalized_quote_for_anchor(quote: &str) -> String {
 fn normalize_text(text: &str, is_quote: bool) -> String {
     let mut normalized = String::with_capacity(text.len());
     let chars = text.replace("\\n", " ").chars().collect::<Vec<_>>();
+    let paired_emphasis = paired_emphasis_markers(&chars);
     let mut index = 0;
     while index < chars.len() {
         match chars[index] {
             '‘' | '’' | '“' | '”' | '«' | '»' | '‹' | '›' => normalized.push('"'),
             '–' | '—' | '‑' | '−' => normalized.push('-'),
-            '`' => {}
+            '`' => {
+                let mut end = index + 1;
+                while chars.get(end) == Some(&'`') {
+                    end += 1;
+                }
+                let run = end - index;
+                let mut search = end;
+                let mut close = None;
+                while search < chars.len() {
+                    if chars[search] != '`' {
+                        search += 1;
+                        continue;
+                    }
+                    let mut run_end = search + 1;
+                    while chars.get(run_end) == Some(&'`') {
+                        run_end += 1;
+                    }
+                    if run_end - search == run {
+                        close = Some(search);
+                        break;
+                    }
+                    search = run_end;
+                }
+                if let Some(close) = close {
+                    normalized.extend(chars[end..close].iter());
+                    index = close + run;
+                    continue;
+                }
+                normalized.extend(chars[index..end].iter());
+                index = end;
+                continue;
+            }
             '*' | '_' => {
                 let marker = chars[index];
                 let mut end = index + 1;
                 while chars.get(end) == Some(&marker) {
                     end += 1;
                 }
-                let run = end - index;
                 let previous = index.checked_sub(1).and_then(|i| chars.get(i)).copied();
                 let next = chars.get(end).copied();
                 let can_open = next.is_some_and(|ch| !ch.is_whitespace());
                 let can_close = previous.is_some_and(|ch| !ch.is_whitespace());
-                let paired = chars[end..]
-                    .windows(run)
-                    .any(|window| window.iter().all(|ch| *ch == marker))
-                    || chars[..index]
-                        .windows(run)
-                        .any(|window| window.iter().all(|ch| *ch == marker));
                 let boundary_emphasis = previous
                     .is_none_or(|ch| ch.is_whitespace() || ch.is_ascii_punctuation())
                     || next.is_none_or(|ch| ch.is_whitespace() || ch.is_ascii_punctuation());
-                if paired && (can_open || can_close) && (marker == '*' || boundary_emphasis) {
+                if paired_emphasis[index]
+                    && (can_open || can_close)
+                    && (marker == '*' || boundary_emphasis)
+                {
                     index = end;
                 } else {
                     normalized.extend(chars[index..end].iter());
@@ -309,6 +387,43 @@ fn normalize_text(text: &str, is_quote: bool) -> String {
             .to_string();
     }
     collapsed
+}
+
+fn paired_emphasis_markers(chars: &[char]) -> Vec<bool> {
+    let mut paired = vec![false; chars.len()];
+    let mut openings = Vec::<(char, usize, usize)>::new();
+    let mut index = 0;
+    while index < chars.len() {
+        let marker = chars[index];
+        if !matches!(marker, '*' | '_') {
+            index += 1;
+            continue;
+        }
+        let mut end = index + 1;
+        while chars.get(end) == Some(&marker) {
+            end += 1;
+        }
+        let previous = index.checked_sub(1).and_then(|i| chars.get(i)).copied();
+        let next = chars.get(end).copied();
+        let can_open = next.is_some_and(|ch| !ch.is_whitespace());
+        let can_close = previous.is_some_and(|ch| !ch.is_whitespace());
+        let opening = openings
+            .iter()
+            .rposition(|(open_marker, run, _)| *open_marker == marker && *run == end - index);
+        if can_close {
+            if let Some(open_index) = opening {
+                let (_, _, open_start) = openings.remove(open_index);
+                paired[open_start..open_start + (end - index)].fill(true);
+                paired[index..end].fill(true);
+            } else if can_open {
+                openings.push((marker, end - index, index));
+            }
+        } else if can_open {
+            openings.push((marker, end - index, index));
+        }
+        index = end;
+    }
+    paired
 }
 
 /// A part of a task text where words are not prose a result rests on.

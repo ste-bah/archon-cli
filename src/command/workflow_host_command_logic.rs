@@ -202,7 +202,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
         // #441 re-pin only: shared source closure changed; freeze-acceptance does not run fidelity.
-        sources_digest: "522f3003b23b318b96708fc83a4e6093a0b88a47971f80727ed66d3578f78c1f",
+        sources_digest: "a31834592d1dc46dca049318e5fa07097fb6e8e2e50d56852808d3656c082408",
         build_bound: false,
     },
     CapabilityLogic {
@@ -225,7 +225,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
         // #441 re-pin only: shared source closure changed; freeze-skeleton does not run fidelity.
-        sources_digest: "522f3003b23b318b96708fc83a4e6093a0b88a47971f80727ed66d3578f78c1f",
+        sources_digest: "a31834592d1dc46dca049318e5fa07097fb6e8e2e50d56852808d3656c082408",
         build_bound: false,
     },
     CapabilityLogic {
@@ -266,7 +266,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441 review 2, same unreleased version: Acceptance policy headings reach the body critic.
         // #441 review 3, same unreleased version: the complete PRD reaches the body critic.
         // #434d, same unreleased version 14: task quote provenance accepts bounded normalization and ordered elisions.
-        sources_digest: "df568c496caede8ee70abf18801dbfdb9505be09dd09218a0971ae556db565c3",
+        sources_digest: "6b1e44087a53cb79b3c8b3653c167e5cceb883033748fab5679016db46175ece",
         build_bound: false,
     },
     CapabilityLogic {
@@ -302,7 +302,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441 review 2, same unreleased version: Acceptance policy headings reach the set critic.
         // #441 review 3, same unreleased version: the complete PRD reaches the set critic.
         // #434d, same unreleased version 13: the set gate shares the updated quote provenance check.
-        sources_digest: "df568c496caede8ee70abf18801dbfdb9505be09dd09218a0971ae556db565c3",
+        sources_digest: "6b1e44087a53cb79b3c8b3653c167e5cceb883033748fab5679016db46175ece",
         build_bound: false,
     },
     CapabilityLogic {
@@ -318,7 +318,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d re-pin only: trace never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #441 re-pin only: shared source closure changed; requirements-trace does not run fidelity.
-        sources_digest: "90c38bbb2630b87d8da16b131df1b68101eeb7d8d774373a444cc7f1cb613552",
+        sources_digest: "9fc213fcfbca2cba2383a9b9f62a0af548557b9716f880deaad8e0ba805dc054",
         build_bound: true,
     },
     CapabilityLogic {
@@ -345,7 +345,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the executor names whether a capability publishes, and moved its digest
         // lookup; the reuse rules a verification verdict is checked under are unchanged.
         // #441 re-pin only: shared source closure changed; frozen acceptance does not run fidelity.
-        sources_digest: "3a39fbb2319a96f0dd23deb5b458686d8e02d5b344a7d2021f04090ca62b406f",
+        sources_digest: "e3ee202530a15bd544c7998a72de2cfaacbf95399a74c3cd780e83e4084dedbc",
         build_bound: true,
     },
     CapabilityLogic {
@@ -368,7 +368,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the executor names whether a capability publishes, and moved its digest
         // lookup; the reuse rules a verification verdict is checked under are unchanged.
         // #441 re-pin only: shared source closure changed; frozen skeleton does not run fidelity.
-        sources_digest: "3a39fbb2319a96f0dd23deb5b458686d8e02d5b344a7d2021f04090ca62b406f",
+        sources_digest: "e3ee202530a15bd544c7998a72de2cfaacbf95399a74c3cd780e83e4084dedbc",
         build_bound: true,
     },
 ];

@@ -83,6 +83,113 @@ fn no_verdict_cached(cwd: &Path) {
     assert_eq!(entries, vec!["rejected"], "no verdict is cached");
 }
 
+const FIXTURE_TASK: &str =
+    include_str!("../../../crates/archon-workflow/src/fixtures/TASK-DL-002.md");
+const ELIDED_FIXTURE_SUPPORT: &str =
+    "Make dataset writes atomic … registry entry pointing at missing artifacts";
+const FULL_FIXTURE_SUPPORT: &str = "Make dataset writes atomic: an interrupted ingest never leaves a healthy\n  registry entry pointing at missing artifacts";
+
+fn fixture_corpus() -> tempfile::TempDir {
+    let temp = corpus();
+    let prd = temp.path().join("tasks/PRD-WS-001.md");
+    let prd_text = std::fs::read_to_string(&prd)
+        .expect("base PRD")
+        .replace("AC-WS-001", "REQ-DL-092");
+    std::fs::write(prd, prd_text).expect("fixture PRD");
+    let task = temp.path().join("tasks/PRD-WS-001/TASK-WS-001.md");
+    let mut body = std::fs::read_to_string(&task)
+        .expect("base task")
+        .replace("AC-WS-001", "REQ-DL-092");
+    body.push_str("\n\n");
+    body.push_str(FIXTURE_TASK);
+    std::fs::write(task, body).expect("fixture task body");
+    temp
+}
+
+fn fixture_reply(id: &str, is_true: bool, quote: &str) -> String {
+    let verdict = if is_true {
+        serde_json::json!({"obligation_id": id, "necessarily_true": true, "weakest_task_id": "", "reason": "atomic writes preserve the registry", "quoted_task_text": "", "supporting_task_id": "TASK-WS-001", "supporting_text": quote})
+    } else {
+        serde_json::json!({"obligation_id": id, "necessarily_true": false, "weakest_task_id": "TASK-WS-001", "reason": "the task has a loophole", "quoted_task_text": quote, "weakening_quotes": [], "supporting_task_id": "", "supporting_text": ""})
+    };
+    serde_json::json!({"verdicts": [verdict]}).to_string()
+}
+
+#[tokio::test]
+async fn an_elided_true_is_reasked_with_the_negation_and_a_changed_verdict_is_not_kept() {
+    let temp = fixture_corpus();
+    let calls = 3 + FIDELITY_NO_PROGRESS_WINDOW;
+    let critic = FakeCritic::new(
+        std::iter::once(Ok(serde_json::json!({"verdicts": [
+            {"obligation_id":"REQ-DL-092","necessarily_true":true,"weakest_task_id":"","reason":"atomic writes preserve the registry","quoted_task_text":"","supporting_task_id":"TASK-WS-001","supporting_text":ELIDED_FIXTURE_SUPPORT},
+            {"obligation_id":"G-WS-001","necessarily_true":true,"weakest_task_id":"","reason":"every registry entry is written","quoted_task_text":"","supporting_task_id":"TASK-WS-001","supporting_text":SUPPORT},
+        ]}).to_string()))
+        .chain(std::iter::once(Ok(fixture_reply(
+            "REQ-DL-092",
+            false,
+            FULL_FIXTURE_SUPPORT,
+        ))))
+        .chain(std::iter::repeat_n(
+            Ok(fixture_reply("REQ-DL-092", false, "quote not present in the task")),
+            calls - 2,
+        ))
+        .collect(),
+    );
+    let evaluation = evaluate(temp.path(), Ok(critic.clone())).await;
+    assert_eq!(critic.calls(), calls);
+    assert!(evaluation.operational_error().is_some());
+    let conversations = critic.conversations.lock().unwrap();
+    let feedback = conversations[1][2]["content"].as_str().unwrap();
+    assert!(
+        feedback.contains("in full, reads") && feedback.contains("never"),
+        "{feedback}"
+    );
+    drop(conversations);
+    let saved = record_files(temp.path());
+    assert!(saved.iter().all(|path| {
+        let stored: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        stored["obligation_id"] != "REQ-DL-092"
+    }));
+    assert!(
+        !evaluation
+            .findings
+            .iter()
+            .any(|finding| finding.subject == "REQ-DL-092")
+    );
+}
+
+#[tokio::test]
+async fn an_elided_true_is_accepted_only_after_full_fixture_quote_confirmation() {
+    let temp = fixture_corpus();
+    let critic = FakeCritic::new(vec![
+        Ok(serde_json::json!({"verdicts": [
+            {"obligation_id":"REQ-DL-092","necessarily_true":true,"weakest_task_id":"","reason":"atomic writes preserve the registry","quoted_task_text":"","supporting_task_id":"TASK-WS-001","supporting_text":ELIDED_FIXTURE_SUPPORT},
+            {"obligation_id":"G-WS-001","necessarily_true":true,"weakest_task_id":"","reason":"every registry entry is written","quoted_task_text":"","supporting_task_id":"TASK-WS-001","supporting_text":SUPPORT}
+        ]}).to_string()),
+        Ok(fixture_reply("REQ-DL-092", true, FULL_FIXTURE_SUPPORT)),
+    ]);
+    let evaluation = evaluate(temp.path(), Ok(critic.clone())).await;
+    assert!(
+        evaluation.operational_error().is_none(),
+        "{:?}",
+        evaluation.operational_error()
+    );
+    assert_eq!(critic.calls(), 2);
+    let conversations = critic.conversations.lock().unwrap();
+    let turn = conversations[1][2]["content"].as_str().unwrap();
+    assert!(
+        turn.contains("in full, reads") && turn.contains("never"),
+        "{turn}"
+    );
+    assert!(
+        !evaluation
+            .findings
+            .iter()
+            .any(|finding| finding.subject == "REQ-DL-092")
+    );
+}
+
 #[tokio::test]
 async fn a_stray_key_reply_is_re_asked_with_its_parse_error_and_the_allowed_keys() {
     let temp = corpus();

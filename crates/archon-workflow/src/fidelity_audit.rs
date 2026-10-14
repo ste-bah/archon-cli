@@ -222,6 +222,8 @@ use reply::{ReplyVerdict, checked_verdict, json_kind, shape_class};
 #[path = "fidelity_audit_check.rs"]
 mod check;
 use check::check_verdict;
+pub use check::expand_supporting_quote;
+pub use check::same_normalized_quote;
 pub use check::verdict_holds;
 
 #[derive(Debug, Deserialize)]
