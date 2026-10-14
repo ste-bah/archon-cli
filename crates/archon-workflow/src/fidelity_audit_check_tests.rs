@@ -214,11 +214,15 @@ fn elision_expansion_returns_the_unique_contiguous_fixture_span() {
         "Make dataset writes atomic … registry entry pointing at missing artifacts",
     )
     .expect("the fixture chain is unique in one paragraph");
-    assert_eq!(
-        expanded,
-        "Make dataset writes atomic: an interrupted ingest never leaves a healthy\n  registry entry pointing at missing artifacts"
-    );
+    assert_eq!(expanded, fixture_supporting_span());
     assert!(expanded.contains("never"));
+}
+
+fn fixture_supporting_span() -> &'static str {
+    let start = TASK.find("Make dataset writes atomic:").unwrap();
+    let ending = "registry entry pointing at missing artifacts";
+    let end = start + TASK[start..].find(ending).unwrap() + ending.len();
+    &TASK[start..end]
 }
 
 #[test]

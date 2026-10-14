@@ -87,7 +87,13 @@ const FIXTURE_TASK: &str =
     include_str!("../../../crates/archon-workflow/src/fixtures/TASK-DL-002.md");
 const ELIDED_FIXTURE_SUPPORT: &str =
     "Make dataset writes atomic … registry entry pointing at missing artifacts";
-const FULL_FIXTURE_SUPPORT: &str = "Make dataset writes atomic: an interrupted ingest never leaves a healthy\n  registry entry pointing at missing artifacts";
+
+fn full_fixture_support() -> &'static str {
+    let start = FIXTURE_TASK.find("Make dataset writes atomic:").unwrap();
+    let ending = "registry entry pointing at missing artifacts";
+    let end = start + FIXTURE_TASK[start..].find(ending).unwrap() + ending.len();
+    &FIXTURE_TASK[start..end]
+}
 
 fn fixture_corpus() -> tempfile::TempDir {
     let temp = corpus();
@@ -131,7 +137,7 @@ async fn an_elided_true_is_reasked_with_the_negation_and_a_changed_verdict_is_no
         .chain(std::iter::once(Ok(fixture_reply(
             "REQ-DL-092",
             false,
-            FULL_FIXTURE_SUPPORT,
+            full_fixture_support(),
         ))))
         .chain(std::iter::repeat_n(
             Ok(fixture_reply("REQ-DL-092", true, "quote not present in the task")),
@@ -171,7 +177,7 @@ async fn an_elided_true_is_accepted_only_after_full_fixture_quote_confirmation()
             {"obligation_id":"REQ-DL-092","necessarily_true":true,"weakest_task_id":"","reason":"atomic writes preserve the registry","quoted_task_text":"","supporting_task_id":"TASK-WS-001","supporting_text":ELIDED_FIXTURE_SUPPORT},
             {"obligation_id":"G-WS-001","necessarily_true":true,"weakest_task_id":"","reason":"every registry entry is written","quoted_task_text":"","supporting_task_id":"TASK-WS-001","supporting_text":SUPPORT}
         ]}).to_string()),
-        Ok(fixture_reply("REQ-DL-092", true, FULL_FIXTURE_SUPPORT)),
+        Ok(fixture_reply("REQ-DL-092", true, full_fixture_support())),
     ]);
     let evaluation = evaluate(temp.path(), Ok(critic.clone())).await;
     assert!(
