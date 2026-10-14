@@ -263,7 +263,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #443: the version bumps above; asserted runtime paths are no longer repository claims.
         // Re-pin only: observe-mode refused bodies now stay unpublished; refused candidates never publish, existing results remain valid, and lineage protects any future version bump.
         // #441: this gate asks fidelity with PRD context and the candidate fallback.
-        sources_digest: "47098c39d141842878543edd4d9ab203b26e4c3d579945fbe1f2f48945635936",
+        // #441 review 2, same unreleased version: Acceptance policy headings reach the body critic.
+        sources_digest: "d554c9be378f03a035393a573169c2120d01378ce60a69f82de161d03d9929e1",
         build_bound: false,
     },
     CapabilityLogic {
@@ -296,7 +297,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: the staged CLI exposes the body packaging step to the resume's landing
         // reconciliation; no gate calls the new entry, so every verdict is unchanged.
         // #441: this gate judges fidelity with PRD acceptance and gap context.
-        sources_digest: "47098c39d141842878543edd4d9ab203b26e4c3d579945fbe1f2f48945635936",
+        // #441 review 2, same unreleased version: Acceptance policy headings reach the set critic.
+        sources_digest: "d554c9be378f03a035393a573169c2120d01378ce60a69f82de161d03d9929e1",
         build_bound: false,
     },
     CapabilityLogic {

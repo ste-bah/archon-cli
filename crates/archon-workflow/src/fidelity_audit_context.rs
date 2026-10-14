@@ -30,7 +30,9 @@ fn policy_sections(markdown: &str) -> Vec<String> {
             }
             current.clear();
             let heading = line.trim_start_matches('#').trim().to_ascii_lowercase();
-            include = heading.contains("done")
+            // Policy context stays unbounded; the house rule forbids adding size limits.
+            include = is_acceptance_heading(&heading)
+                || heading.contains("done")
                 || heading.contains("criteria")
                 || heading.contains("residual")
                 || heading.contains("gap");
@@ -43,4 +45,17 @@ fn policy_sections(markdown: &str) -> Vec<String> {
         selected.push(current.join("\n"));
     }
     selected
+}
+
+fn is_acceptance_heading(heading: &str) -> bool {
+    heading == "acceptance"
+        || [
+            "acceptance criteria",
+            "acceptance tests",
+            "acceptance checks",
+        ]
+        .iter()
+        .any(|phrase| heading == *phrase || heading.starts_with(&format!("{phrase} ")))
+        || heading.contains("acceptance criteria")
+        || heading.contains("acceptance tests")
 }

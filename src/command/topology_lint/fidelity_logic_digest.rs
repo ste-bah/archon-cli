@@ -56,7 +56,9 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 ///   verdict answers and when it blocks a body.
 /// - #441 review, same unreleased version: the extracted whole-task-set
 ///   ownership lookup is included in the pinned logic files.
-pub const SOURCES_DIGEST: &str = "ba34d7d898af43ba3851b6c6b201e78bcc009b4ae39e0f3ef82ab5a46f22479e";
+/// - #441 review 2, same unreleased version: Acceptance policy headings now
+///   reach the critic question; vendor-contract acceptance headings remain excluded.
+pub const SOURCES_DIGEST: &str = "d46eb11365f0c1c19ca016ad483049d3cb39f2748d0fd45874112955b01d1415";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.

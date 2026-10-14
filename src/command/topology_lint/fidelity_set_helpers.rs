@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 /// The canonical ids of the other tasks in the set that `text` names — the
 /// one hop of the ownership chain. An id counts only whole: a text naming
-/// `TASK-A-0021` does not name `TASK-A-002`, and an id outside the set is
+/// `<task-id>1` does not name `<task-id>`, and an id outside the set is
 /// never pulled in.
 pub(super) fn named_set_tasks(
     own_id: &str,

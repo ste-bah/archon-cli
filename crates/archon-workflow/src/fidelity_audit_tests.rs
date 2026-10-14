@@ -469,3 +469,25 @@ fn cluster_digest_changes_with_any_text_or_the_skeleton_and_nothing_else() {
 mod reply;
 #[path = "fidelity_audit_support_tests.rs"]
 mod support;
+
+#[test]
+fn context_includes_acceptance_heading_and_acceptance_criteria_subheading() {
+    let ids = Vec::new();
+    let acceptance =
+        super::context::prd_acceptance_context("## Acceptance\nPolicy applies.\n", &ids);
+    let criteria =
+        super::context::prd_acceptance_context("### Acceptance Criteria\nAll checks pass.\n", &ids);
+
+    assert!(acceptance.contains("## Acceptance\nPolicy applies."));
+    assert!(criteria.contains("### Acceptance Criteria\nAll checks pass."));
+}
+
+#[test]
+fn context_excludes_acceptance_of_vendor_contract_heading() {
+    let context = super::context::prd_acceptance_context(
+        "# Acceptance of vendor contract\nVendor signatures are checked by procurement.\n",
+        &[],
+    );
+
+    assert!(!context.contains("Vendor signatures are checked by procurement."));
+}
