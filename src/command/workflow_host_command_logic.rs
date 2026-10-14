@@ -201,8 +201,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair, after it claims the task root; the freeze judges as before.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
-        // #441 re-pin only: shared source closure changed; freeze-acceptance does not run fidelity.
-        sources_digest: "93f2ebde41bc7218554a85d1e741dbb66385e3bbbaa3292536939bd188db2964",
+        // #441 re-pin only: capability logic versions changed; freeze-acceptance verdicts are unchanged.
+        sources_digest: "86adb061bcf4be130deadceff8f6b91e9fb938f862093a048189236acbcdddb8",
         build_bound: false,
     },
     CapabilityLogic {
@@ -224,8 +224,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair, after it claims the task root; the freeze judges as before.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
-        // #441 re-pin only: shared source closure changed; freeze-skeleton does not run fidelity.
-        sources_digest: "93f2ebde41bc7218554a85d1e741dbb66385e3bbbaa3292536939bd188db2964",
+        // #441 re-pin only: capability logic versions changed; freeze-skeleton verdicts are unchanged.
+        sources_digest: "86adb061bcf4be130deadceff8f6b91e9fb938f862093a048189236acbcdddb8",
         build_bound: false,
     },
     CapabilityLogic {
@@ -250,7 +250,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 13: #443 re-review 3: a relative clause right after the path ("`x`, which already exists") claims.
         // No version bump: refused candidates now stay unpublished in observe mode; only those refused candidates are affected, recorded results remain valid, and the lineage guard makes a future bump safe.
         // #441 review, same unreleased version: PRD context, shared whole-set attribution and evidence-backed quotes change body findings.
-        version: 14,
+        version: 15,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -268,7 +268,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d, same unreleased version 14: task quote provenance accepts bounded normalization and ordered elisions.
         // #441 regression re-pin only: task ellipses are literal evidence when the whole quote matches; verdict meaning is unchanged.
         // #434d review re-pin: quote normaliser split into its own module; same unreleased versions
-        sources_digest: "c46152c2f0e6edcfcaf5d050af480b0c764fd1b5e0f82b05b4fffbaedca6a4da",
+        // #441: task-shape checks now read focused test commands from the runtime task model.
+        sources_digest: "479fc238f5be58399e882941a3c91e02385b7506daf394613b595f7d4c8907b2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -287,7 +288,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 11: #443 re-review, same rule as land-task-body 12.
         // 12: #443 re-review 3, same rule as land-task-body 13.
         // #441 review, same unreleased version: PRD context and shared whole-set attribution change set-gate findings.
-        version: 13,
+        // #441: the set gate checks exactly the focused test commands the runtime records.
+        version: 14,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -306,7 +308,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d, same unreleased version 13: the set gate shares the updated quote provenance check.
         // #441 regression re-pin only: task ellipses are literal evidence when the whole quote matches; verdict meaning is unchanged.
         // #434d review re-pin: quote normaliser split into its own module; same unreleased versions
-        sources_digest: "c46152c2f0e6edcfcaf5d050af480b0c764fd1b5e0f82b05b4fffbaedca6a4da",
+        // #441: focused file ownership and declaration findings use the runtime command rule.
+        sources_digest: "479fc238f5be58399e882941a3c91e02385b7506daf394613b595f7d4c8907b2",
         build_bound: false,
     },
     CapabilityLogic {
@@ -348,8 +351,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
         // Re-pin only: the executor names whether a capability publishes, and moved its digest
         // lookup; the reuse rules a verification verdict is checked under are unchanged.
-        // #441 re-pin only: shared source closure changed; frozen acceptance does not run fidelity.
-        sources_digest: "8d2866a48d89532dc0938e02ed6b3350636a0dc524ccb074b00a79a94a139583",
+        // #441 re-pin only: capability logic versions changed; frozen acceptance verdicts are unchanged.
+        sources_digest: "b939c383ff8f7878e78d9f33d26c17f3f7a5f8363eb6e156dfa914300eb2a70c",
         build_bound: true,
     },
     CapabilityLogic {
@@ -371,8 +374,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; verification verdicts do not read claims.
         // Re-pin only: the executor names whether a capability publishes, and moved its digest
         // lookup; the reuse rules a verification verdict is checked under are unchanged.
-        // #441 re-pin only: shared source closure changed; frozen skeleton does not run fidelity.
-        sources_digest: "8d2866a48d89532dc0938e02ed6b3350636a0dc524ccb074b00a79a94a139583",
+        // #441 re-pin only: capability logic versions changed; frozen skeleton verdicts are unchanged.
+        sources_digest: "b939c383ff8f7878e78d9f33d26c17f3f7a5f8363eb6e156dfa914300eb2a70c",
         build_bound: true,
     },
 ];

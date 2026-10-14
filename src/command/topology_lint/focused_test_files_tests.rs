@@ -3,6 +3,7 @@
 
 use super::*;
 use archon_workflow::repository_record::{RepositoryRecordV1, git_head, write_repository_record};
+use std::path::PathBuf;
 
 fn paths(list: &[&str]) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
@@ -118,13 +119,132 @@ fn git(repo: &Path, args: &[&str]) {
 }
 
 fn task(tasks: &Path, id: &str, owns: &str, focused: &str) {
+    let focused = if focused.starts_with('`') {
+        focused.to_string()
+    } else {
+        format!("`{focused}`")
+    };
     std::fs::write(
         tasks.join(format!("{id}.md")),
         format!(
-            "# {id}\n\n```yaml\ntask_id: {id}\ntitle: T\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [\"AC-X-001\"]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- `{owns}` — exists\n\n## Focused Tests\n\n- `{focused}`\n"
+            "# {id}\n\n```yaml\ntask_id: {id}\ntitle: T\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: []\nimplements: [\"AC-X-001\"]\nrequired_env_keys: []\nrequired_tools: []\ndeliverable_contracts: []\n```\n\n## Files Expected to Change\n\n- `{owns}` — exists\n\n## Focused Tests\n\n- {focused}\n"
         ),
     )
     .unwrap();
+}
+
+fn recorded_repo() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    for (file, text) in [
+        ("Cargo.toml", "[workspace]\nmembers = [\"crates/engine\"]\n"),
+        ("crates/engine/Cargo.toml", "[package]\nname = \"engine\"\n"),
+        ("crates/engine/src/lib.rs", "pub fn f() {}\n"),
+        ("crates/engine/tests/owned.rs", "#[test] fn t() {}\n"),
+        ("crates/engine/tests/gates.rs", "#[test] fn t() {}\n"),
+        ("tests/x.rs", "#[test] fn t() {}\n"),
+        ("tests/x.py", "def test_x(): pass\n"),
+        ("file.rs", "// fixture\n"),
+    ] {
+        let path = repo.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["config", "user.email", "t@example.invalid"]);
+    git(&repo, &["config", "user.name", "t"]);
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "initial"]);
+    let tasks = temp.path().join("project/tasks/PRD-X");
+    std::fs::create_dir_all(&tasks).unwrap();
+    write_repository_record(
+        &tasks,
+        &RepositoryRecordV1 {
+            schema_version: 1,
+            repository_root: repo
+                .canonicalize()
+                .map(archon_shell::paths::plain)
+                .unwrap()
+                .display()
+                .to_string(),
+            base_commit: git_head(&repo).unwrap(),
+            decomposition_run_id: "wf-test".into(),
+            recorded_at: "now".into(),
+        },
+    )
+    .unwrap();
+    (temp, repo, tasks)
+}
+
+#[test]
+fn only_the_runtime_command_is_checked_for_unowned_files() {
+    let (_temp, _repo, tasks) = recorded_repo();
+    task(
+        &tasks,
+        "TASK-X-001",
+        "crates/engine/tests/owned.rs",
+        "`cargo test -p engine --test owned` verifies `tests/` and `tests/x.rs`, with evidence at `file.rs:8–9`",
+    );
+    assert!(set_findings(&tasks).unwrap().is_empty());
+
+    // A real shell command selecting an unowned Cargo target keeps its finding.
+    task(
+        &tasks,
+        "TASK-X-003",
+        "crates/engine/src/lib.rs",
+        "`cargo test -p engine --test gates`",
+    );
+    let findings = set_findings(&tasks).unwrap();
+    let finding = findings
+        .iter()
+        .find(|finding| finding.subject == "TASK-X-003")
+        .unwrap_or_else(|| panic!("TASK-X-003 finding missing: {findings:?}"));
+    assert_eq!(
+        finding.text,
+        "task TASK-X-003: focused test `cargo test -p engine --test gates` runs `crates/engine/tests/gates.rs`, which no task declares, so no task owns it and a failure or regression in it can be routed to nobody; declare it in the Files Expected to Change of the task that owns that test (this one, when it writes it), or run a test file a task declares"
+    );
+    std::fs::remove_file(tasks.join("TASK-X-003.md")).unwrap();
+
+    // A pytest path is also a real command input and must retain the finding.
+    task(
+        &tasks,
+        "TASK-X-004",
+        "crates/engine/src/lib.rs",
+        "`pytest tests/x.py`",
+    );
+    let findings = set_findings(&tasks).unwrap();
+    assert!(findings.iter().any(|finding| {
+        finding.subject == "TASK-X-004"
+            && finding
+                .text
+                .contains("focused test `pytest tests/x.py` runs `tests/x.py`")
+    }));
+    std::fs::remove_file(tasks.join("TASK-X-004.md")).unwrap();
+
+    // With no span the runtime judges the whole item as a command.
+    task(
+        &tasks,
+        "TASK-X-005",
+        "crates/engine/src/lib.rs",
+        "pytest tests/x.py",
+    );
+    let findings = set_findings(&tasks).unwrap();
+    assert!(findings.iter().any(|finding| {
+        finding.subject == "TASK-X-005"
+            && finding
+                .text
+                .contains("focused test `pytest tests/x.py` runs `tests/x.py`")
+    }));
+    std::fs::remove_file(tasks.join("TASK-X-005.md")).unwrap();
+
+    // A first span that is a label is not a command; a later span is ignored.
+    task(
+        &tasks,
+        "TASK-X-006",
+        "crates/engine/src/lib.rs",
+        "`notes.rs`: rationale, then `pytest tests/x.py`",
+    );
+    assert!(set_findings(&tasks).unwrap().is_empty());
 }
 
 #[test]
