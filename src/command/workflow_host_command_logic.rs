@@ -27,9 +27,18 @@
 //!   Any binary change re-runs them, whatever the version and the pinned
 //!   digest say, and a record without a build stamp never replays one. This
 //!   is the backstop for a logic change the version guard missed, and for a
-//!   build that shipped a stale pin. task-set-lint (its critic run is
-//!   costly) and the landings keep version-only reuse; whether they also
-//!   bind to the build is Steven's decision.
+//!   build that shipped a stale pin. #387 item 5 (2026-10-14) keeps the #361
+//!   rule: task-set-lint and landings reuse by logic version only. The source
+//!   digest guard requires a reviewed bump or re-pin on every source change.
+//!   Rejected option 2: compare the recorded `logicDigest` with this build's
+//!   `sources_digest` on replay, so any source change re-runs every saved verdict
+//!   for that capability without human judgement. Not now: nearly every deploy
+//!   would re-judge body landings and set gates with critic calls. Unchanged text
+//!   could flip on another call (#434), causing re-authors and loops; freeze and
+//!   verify already bind to the build. Revisit if a wrong re-pin lets a stale
+//!   verdict through, or critic verdicts become stable across re-judgement. The
+//!   replay change point is `recorded_logic_holds` in
+//!   `workflow_host_command_exec_identity.rs`.
 //!
 //! A developer cannot change a capability's logic and forget the version:
 //! `sources_digest` pins every source file its verdict is built from (the
