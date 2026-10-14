@@ -224,6 +224,7 @@ mod check;
 use check::check_verdict;
 pub use check::expand_supporting_quote;
 pub use check::same_normalized_quote;
+pub use check::task_contains_quote;
 pub use check::verdict_holds;
 
 #[derive(Debug, Deserialize)]

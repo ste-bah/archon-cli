@@ -2,6 +2,7 @@ use super::super::{ClaimingTask, FidelityVerdict};
 use super::{check_verdict, expand_supporting_quote};
 
 const TASK: &str = include_str!("fixtures/TASK-DL-002.md");
+const TASK_WITH_LITERAL_ELLIPSIS: &str = include_str!("fixtures/TASK-DL-001.md");
 
 fn verdict(necessarily_true: bool, quote: &str) -> FidelityVerdict {
     FidelityVerdict {
@@ -22,6 +23,47 @@ fn verdict(necessarily_true: bool, quote: &str) -> FidelityVerdict {
             String::new()
         },
     }
+}
+
+#[test]
+fn ellipsis_inside_exact_task_quote_is_matched_before_elision_for_every_quote_field() {
+    let quote = "**DONE-3:** dataset metadata carries the native/provenance fields (REQ-DL-010…013, REQ-DL-080…085): fail-closed flag defaults";
+    let body = ClaimingTask {
+        task_id: "TASK-DL-001".into(),
+        text: TASK_WITH_LITERAL_ELLIPSIS.into(),
+    };
+
+    let mut supporting = verdict(true, quote);
+    supporting.obligation_id = "DONE-3".into();
+    supporting.weakest_task_id.clear();
+    supporting.supporting_task_id = "TASK-DL-001".into();
+    assert!(
+        check_verdict(&mut supporting, std::slice::from_ref(&body)).is_ok(),
+        "the exact quote occurs once, so it is valid supporting evidence"
+    );
+
+    let mut quoted = verdict(false, quote);
+    quoted.obligation_id = "DONE-3".into();
+    quoted.weakest_task_id = "TASK-DL-001".into();
+    quoted.weakening_quotes.push(quote.into());
+    assert!(check_verdict(&mut quoted, &[body]).is_ok());
+}
+
+#[test]
+fn literal_ellipsis_with_normalized_whole_supporting_quote_counts_once() {
+    let quote = "DONE-3: dataset metadata carries the native/provenance fields (REQ-DL-010…013, REQ-DL-080…085): fail-closed flag defaults";
+    let body = ClaimingTask {
+        task_id: "TASK-DL-001".into(),
+        text: TASK_WITH_LITERAL_ELLIPSIS.into(),
+    };
+    let mut answer = verdict(true, quote);
+    answer.obligation_id = "DONE-3".into();
+    answer.weakest_task_id.clear();
+    answer.supporting_task_id = "TASK-DL-001".into();
+    assert!(
+        check_verdict(&mut answer, &[body]).is_ok(),
+        "normalizing the complete quote should find its one task occurrence before elision"
+    );
 }
 
 fn task(text: &str) -> ClaimingTask {
@@ -166,10 +208,10 @@ fn elision_expansion_rejects_cross_sentence_or_ambiguous_chains() {
 }
 
 #[test]
-fn literal_ellipsis_is_not_evidence_and_unpaired_emphasis_is_preserved() {
+fn literal_ellipsis_is_exact_evidence_and_unpaired_emphasis_is_preserved() {
     let body = task("A written … pause is literal. An unpaired marker * remains.");
     let mut ellipsis = verdict(false, "written … pause");
-    assert!(check_verdict(&mut ellipsis, std::slice::from_ref(&body)).is_err());
+    assert!(check_verdict(&mut ellipsis, std::slice::from_ref(&body)).is_ok());
 
     let mut emphasis = verdict(false, "An unpaired marker remains.");
     assert!(check_verdict(&mut emphasis, &[body]).is_err());

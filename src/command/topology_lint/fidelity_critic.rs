@@ -12,7 +12,7 @@ use anyhow::{Result, anyhow};
 use archon_workflow::fidelity_audit::{
     ClaimedObligation, ClaimingTask, DOCUMENT_KEYS, FidelityRefusal, FidelityVerdict, RefusalKind,
     SkeletonSummary, VERDICT_KEYS, expand_supporting_quote, fidelity_prompt,
-    parse_fidelity_verdicts, same_normalized_quote,
+    parse_fidelity_verdicts, same_normalized_quote, task_contains_quote,
 };
 use archon_workflow::llm_client_port::{WorkflowAgentOutcome, WorkflowLlmClient};
 
@@ -343,6 +343,9 @@ fn expanded_supports(
             }
             let task_id = verdict["supporting_task_id"].as_str()?;
             let task = tasks.iter().find(|task| task.task_id == task_id)?;
+            if task_contains_quote(&task.text, quote) {
+                return None;
+            }
             Some((id.to_string(), expand_supporting_quote(&task.text, quote)?))
         })
         .collect()

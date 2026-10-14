@@ -68,7 +68,11 @@ pub const CRITIC_LOGIC_VERSION: u32 = 2;
 /// - #441 regression fix, version unchanged: exact supporting excerpts retain
 ///   their original quote for provenance matching, so a quote cut inside an
 ///   inline-code span is not rejected by re-normalizing unmatched Markdown.
-pub const SOURCES_DIGEST: &str = "782613d9c5a4ba9f550773c77394fdde15bdff58cb27ed6accbd21a5321200af";
+/// - #441 regression fix, version unchanged: exact and whole-quote normalized
+///   matches are checked before treating a task's literal ellipsis as elision.
+/// - #441 follow-up, version unchanged: literal matches do not create elision
+///   confirmation candidates before exact and normalized matching fails.
+pub const SOURCES_DIGEST: &str = "75a39298f5aba44b1c8dd9165b50337ddcf878789abdb4c73ca1a1c1c37f694a";
 
 /// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
 /// fallback, and task-text-specific verdict reuse rules.

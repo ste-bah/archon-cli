@@ -172,12 +172,9 @@ fn anchored(what: &str, quote: &str, task: &ClaimingTask) -> Result<(), (Refusal
     Ok(())
 }
 
-/// Count exact or whole-quote normalized matches. An ellipsis is never
-/// provenance: only the critic confirmation path may expand one.
+/// Count exact matches before whole-quote normalized matches. Only when
+/// neither matches can the critic confirmation path expand an ellipsis.
 fn quote_occurrences(task: &str, quote: &str) -> Option<usize> {
-    if quote.contains('…') || quote.contains("...") {
-        return Some(0);
-    }
     if task.contains(quote) {
         return Some(task.matches(quote).count());
     }
@@ -264,6 +261,12 @@ fn chain_ends(text: &str, pieces: &[String], cursor: usize) -> Vec<usize> {
 /// Compare two complete quote strings under the provenance normalization.
 pub fn same_normalized_quote(left: &str, right: &str) -> bool {
     normalize_text(left, true) == normalize_text(right, true)
+}
+
+/// Whether a quote already matches the task exactly or under whole-quote
+/// provenance normalization.
+pub fn task_contains_quote(task: &str, quote: &str) -> bool {
+    !quote.trim().is_empty() && quote_occurrences(task, quote).is_some_and(|count| count > 0)
 }
 
 fn word_bounded_matches<'a>(text: &'a str, piece: &str) -> Vec<(usize, &'a str)> {
