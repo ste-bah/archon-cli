@@ -77,6 +77,8 @@ impl PipelineBundleStore {
             completed_agent_count: 0,
             total_tokens_in: 0,
             total_tokens_out: 0,
+            tokens_in_unknown_agents: 0,
+            tokens_out_unknown_agents: 0,
             total_cost_usd: 0.0,
             started_at: Utc::now(),
             updated_at: Utc::now(),

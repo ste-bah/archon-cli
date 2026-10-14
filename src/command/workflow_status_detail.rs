@@ -293,7 +293,7 @@ pub(super) fn status_detail_text(store: &WorkflowStore, run_id: &str) -> Result<
             out.push_str("\nagent outputs:\n");
             for agent in detail.agents {
                 out.push_str(&format!(
-                    "- stage={} item={} status={} provider={} model={} tokens={}/{} cost=${:.6} output={}",
+                    "- stage={} item={} status={} provider={} model={} tokens={:?}/{:?} cost={} output={}",
                     agent.stage_id,
                     agent.item_id,
                     agent.status,
@@ -301,7 +301,10 @@ pub(super) fn status_detail_text(store: &WorkflowStore, run_id: &str) -> Result<
                     agent.model.unwrap_or_else(|| "unknown".to_string()),
                     agent.tokens_in,
                     agent.tokens_out,
-                    agent.cost_usd,
+                    agent
+                        .cost_usd
+                        .map(|cost| format!("${cost:.6}"))
+                        .unwrap_or_else(|| "unknown".to_string()),
                     agent.output_path
                 ));
                 if let Some(artifact_id) = agent.artifact_id {

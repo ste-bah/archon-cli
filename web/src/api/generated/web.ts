@@ -352,7 +352,7 @@ export type WorkflowBundleView = { workflowPath: string, compiledSpecPath: strin
 
 export type WorkflowApprovalView = { workflowHash: string, projectRoot: string, workflowName: string, phaseCount: number, maxAgents: number, maxParallelism: number, writeCapableStages: Array<string>, externalRequirements: Array<string>, costWarning: string, rawScriptPath: string, compiledSpecPath: string, decision: string | null, decidedAt: string | null, decidedBy: string | null, };
 
-export type WorkflowAgentView = { stageId: string, itemId: string, status: string, promptPath: string | null, inputHash: string | null, promptHash: string | null, promptCreatedAt: string | null, provider: string | null, model: string | null, tokensIn: number, tokensOut: number, costUsd: number, artifactId: string | null, artifactPath: string | null, resultPreview: string | null, error: string | null, recentPublicToolCalls: Array<WorkflowToolCallPreview>, outputPath: string, };
+export type WorkflowAgentView = { stageId: string, itemId: string, status: string, promptPath: string | null, inputHash: string | null, promptHash: string | null, promptCreatedAt: string | null, provider: string | null, model: string | null, tokensIn: number | null, tokensOut: number | null, costUsd: number | null, artifactId: string | null, artifactPath: string | null, resultPreview: string | null, error: string | null, recentPublicToolCalls: Array<WorkflowToolCallPreview>, outputPath: string, };
 
 export type WorkflowToolCallPreview = { toolName: string, inputPreview: string | null, outputPreview: string | null, };
 

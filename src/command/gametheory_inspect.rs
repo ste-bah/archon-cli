@@ -38,7 +38,10 @@ pub(crate) fn render_list_runs(db: &DbInstance) -> Result<String> {
         let started = str_col(row, 1);
         let status = str_col(row, 2);
         let cost = str_col(row, 3);
-        out.push_str(&format!("  {run_id}  {started}  {status}  ${cost}\n"));
+        out.push_str(&format!(
+            "  {run_id}  {started}  {status}  {}\n",
+            display_cost(&cost)
+        ));
     }
     out.push_str(&format!("{} run(s)\n", rows.rows.len()));
     Ok(out)
@@ -82,7 +85,7 @@ pub(crate) fn render_show(db: &DbInstance, run_id: &str) -> Result<String> {
         blank_dash(&run.completed_at)
     ));
     out.push_str(&format!("Status:       {}\n", run.status));
-    out.push_str(&format!("Cost USD:     ${}\n", run.cost_usd));
+    out.push_str(&format!("Cost USD:     {}\n", display_cost(&run.cost_usd)));
     out.push_str(&format!(
         "Fingerprint:  {}\n",
         fingerprint_family(db, run_id)?
@@ -227,12 +230,12 @@ fn render_one_status(db: &DbInstance, run_id: &str) -> Result<String> {
         return Ok(format!("Run '{run_id}' not found.\n"));
     };
     Ok(format!(
-        "Game-Theory Run Status\n======================\nRun ID:    {}\nStatus:    {}\nStarted:   {}\nCompleted: {}\nCost USD:  ${}\n",
+        "Game-Theory Run Status\n======================\nRun ID:    {}\nStatus:    {}\nStarted:   {}\nCompleted: {}\nCost USD:  {}\n",
         run.run_id,
         run.status,
         run.started_at,
         blank_dash(&run.completed_at),
-        run.cost_usd
+        display_cost(&run.cost_usd)
     ))
 }
 
@@ -289,12 +292,12 @@ fn render_specialist(db: &DbInstance, run_id: &str, agent_key: &str) -> Result<S
     }
     let row = &rows.rows[0];
     Ok(format!(
-        "Specialist Output\n=================\nRun ID:     {run_id}\nAgent:      {agent_key}\nStatus:     {}\nStarted:    {}\nCompleted:  {}\nDurationMs: {}\nCost USD:   ${}\n\n{}\n",
+        "Specialist Output\n=================\nRun ID:     {run_id}\nAgent:      {agent_key}\nStatus:     {}\nStarted:    {}\nCompleted:  {}\nDurationMs: {}\nCost USD:   {}\n\n{}\n",
         str_col(row, 1),
         blank_dash(&str_col(row, 2)),
         blank_dash(&str_col(row, 3)),
         str_col(row, 4),
-        str_col(row, 5),
+        display_cost(&str_col(row, 5)),
         str_col(row, 0)
     ))
 }
@@ -337,13 +340,21 @@ fn render_final_report(db: &DbInstance, run_id: &str) -> Result<String> {
     }
     let row = &rows.rows[0];
     Ok(format!(
-        "Final Report Artifact\n=====================\nRun ID:     {run_id}\nCreated:    {}\nCost USD:   ${}\nDurationMs: {}\nWords:      {}\n\n{}\n",
+        "Final Report Artifact\n=====================\nRun ID:     {run_id}\nCreated:    {}\nCost USD:   {}\nDurationMs: {}\nWords:      {}\n\n{}\n",
         str_col(row, 1),
-        str_col(row, 2),
+        display_cost(&str_col(row, 2)),
         str_col(row, 3),
         str_col(row, 0).split_whitespace().count(),
         str_col(row, 0)
     ))
+}
+
+fn display_cost(value: &str) -> String {
+    if value.starts_with("at least ") || value == "unknown" {
+        value.to_string()
+    } else {
+        format!("${value}")
+    }
 }
 
 fn fingerprint_family(db: &DbInstance, run_id: &str) -> Result<String> {

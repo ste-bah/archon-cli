@@ -7,6 +7,7 @@ struct FakeProvider {
     name: &'static str,
     model: &'static str,
     context_window: u32,
+    report_usage: bool,
     seen_model: std::sync::Mutex<Option<String>>,
     seen_messages: std::sync::Mutex<Vec<serde_json::Value>>,
     seen_extra: std::sync::Mutex<Option<serde_json::Value>>,
@@ -39,15 +40,21 @@ impl LlmProvider for FakeProvider {
             .seen_messages
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = request.messages;
+        let report_usage = self.report_usage;
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         tokio::spawn(async move {
             let _ = tx
                 .send(StreamEvent::MessageStart {
                     id: "msg_fake".into(),
                     model: "gpt-5.4".into(),
-                    usage: Usage {
-                        input_tokens: 7,
-                        ..Default::default()
+                    usage: if report_usage {
+                        Usage {
+                            input_tokens: 7,
+                            input_tokens_available: true,
+                            ..Default::default()
+                        }
+                    } else {
+                        Usage::default()
                     },
                 })
                 .await;
@@ -80,6 +87,7 @@ async fn provider_adapter_rounds_are_distinct_within_one_scope() {
         name: "openai-codex",
         model: "gpt-5.4",
         context_window: 123_456,
+        report_usage: true,
         seen_model: std::sync::Mutex::new(None),
         seen_messages: std::sync::Mutex::new(Vec::new()),
         seen_extra: std::sync::Mutex::new(None),
@@ -103,6 +111,7 @@ async fn provider_adapter_uses_agent_execution_session_scope() {
         name: "openai-codex",
         model: "gpt-5.4",
         context_window: 123_456,
+        report_usage: true,
         seen_model: std::sync::Mutex::new(None),
         seen_messages: std::sync::Mutex::new(Vec::new()),
         seen_extra: std::sync::Mutex::new(None),
@@ -159,6 +168,7 @@ async fn provider_adapter_attaches_pipeline_attribution() {
         name: "openai-codex",
         model: "gpt-5.4",
         context_window: 123_456,
+        report_usage: true,
         seen_model: std::sync::Mutex::new(None),
         seen_messages: std::sync::Mutex::new(Vec::new()),
         seen_extra: std::sync::Mutex::new(None),
@@ -217,6 +227,7 @@ async fn provider_adapter_collects_text_from_generic_provider() {
         name: "openai-codex",
         model: "gpt-5.4",
         context_window: 123_456,
+        report_usage: true,
         seen_model: std::sync::Mutex::new(None),
         seen_messages: std::sync::Mutex::new(Vec::new()),
         seen_extra: std::sync::Mutex::new(None),
@@ -233,11 +244,34 @@ async fn provider_adapter_collects_text_from_generic_provider() {
 }
 
 #[tokio::test]
+async fn provider_adapter_leaves_unreported_generic_usage_unavailable() {
+    let provider = Arc::new(FakeProvider {
+        name: "openai-codex",
+        model: "gpt-5.4",
+        context_window: 123_456,
+        report_usage: false,
+        seen_model: std::sync::Mutex::new(None),
+        seen_messages: std::sync::Mutex::new(Vec::new()),
+        seen_extra: std::sync::Mutex::new(None),
+    });
+    let adapter = ProviderLlmAdapter::new(provider);
+
+    let response = adapter
+        .send_message(Vec::new(), Vec::new(), Vec::new(), "gpt-5.4")
+        .await
+        .expect("fake provider response");
+
+    assert_eq!(response.content, "pipeline-ok");
+    assert_eq!(response.tokens_in, None);
+}
+
+#[tokio::test]
 async fn provider_adapter_rejects_cwd_bound_agent_requests() {
     let provider = Arc::new(FakeProvider {
         name: "openai-codex",
         model: "gpt-5.4",
         context_window: 123_456,
+        report_usage: true,
         seen_model: std::sync::Mutex::new(None),
         seen_messages: std::sync::Mutex::new(Vec::new()),
         seen_extra: std::sync::Mutex::new(None),
@@ -288,6 +322,7 @@ async fn provider_adapter_remaps_claude_agent_model_to_provider_default() {
         name: "openai-codex",
         model: "gpt-5.4",
         context_window: 123_456,
+        report_usage: true,
         seen_model: std::sync::Mutex::new(None),
         seen_messages: std::sync::Mutex::new(Vec::new()),
         seen_extra: std::sync::Mutex::new(None),
@@ -314,6 +349,7 @@ async fn provider_adapter_resolves_tier_alias_to_provider_default() {
         name: "deepseek",
         model: "deepseek-chat",
         context_window: 123_456,
+        report_usage: true,
         seen_model: std::sync::Mutex::new(None),
         seen_messages: std::sync::Mutex::new(Vec::new()),
         seen_extra: std::sync::Mutex::new(None),
@@ -342,6 +378,7 @@ async fn provider_adapter_keeps_prompt_budgeting_out_of_adapter() {
         name: "openai-codex",
         model: "gpt-5.4",
         context_window: 128,
+        report_usage: true,
         seen_model: std::sync::Mutex::new(None),
         seen_messages: std::sync::Mutex::new(Vec::new()),
         seen_extra: std::sync::Mutex::new(None),
@@ -370,6 +407,7 @@ fn ceiling_provider() -> Arc<FakeProvider> {
         name: "openai-codex",
         model: "gpt-5.4",
         context_window: 123_456,
+        report_usage: true,
         seen_model: std::sync::Mutex::new(None),
         seen_messages: std::sync::Mutex::new(Vec::new()),
         seen_extra: std::sync::Mutex::new(None),

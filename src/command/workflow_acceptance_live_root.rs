@@ -249,6 +249,32 @@ fn names_by_identity(path: &Path, root: &Path) -> bool {
         .any(|ancestor| ancestor == root_handle)
 }
 
+/// Windows paths that cannot be opened still refer to the live root if they
+/// are absolute and name the same known volume. Inaccessible or not-yet-made
+/// paths on that volume must fail closed (Issue 374).
+#[cfg(windows)]
+fn unresolved_on_known_volume(path: &Path, root: &Path) -> bool {
+    if path.exists() {
+        return false;
+    }
+    let volume = |path: &Path| match path.components().next() {
+        Some(Component::Prefix(prefix)) => Some(
+            prefix
+                .as_os_str()
+                .to_string_lossy()
+                .to_lowercase()
+                .replace('/', "\\"),
+        ),
+        _ => None,
+    };
+    matches!((volume(path), volume(root)), (Some(path_volume), Some(root_volume)) if path_volume == root_volume)
+}
+
+#[cfg(not(windows))]
+fn unresolved_on_known_volume(_path: &Path, _root: &Path) -> bool {
+    false
+}
+
 /// The first of `forms` (from [`root_forms`]) that `text` names, in the
 /// host's [`Spelling`].
 pub(crate) fn named_root<'a>(text: &str, forms: &'a [PathBuf]) -> Option<&'a PathBuf> {
@@ -276,9 +302,11 @@ fn named_root_in<'a>(spelling: Spelling, text: &str, forms: &'a [PathBuf]) -> Op
                 || paths.iter().any(|path| path.starts_with(form)))
     });
     textual.or_else(|| {
-        forms
-            .iter()
-            .find(|form| paths.iter().any(|path| names_by_identity(path, form)))
+        forms.iter().find(|form| {
+            paths
+                .iter()
+                .any(|path| names_by_identity(path, form) || unresolved_on_known_volume(path, form))
+        })
     })
 }
 

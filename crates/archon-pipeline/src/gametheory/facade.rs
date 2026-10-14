@@ -20,6 +20,7 @@ use super::spec::build_specialist_spec;
 use crate::learning::integration::LearningIntegration;
 use crate::runner::LlmClient;
 
+mod classification;
 mod costs;
 mod fallback;
 mod kb_context;
@@ -32,6 +33,8 @@ mod specialists;
 mod tier1;
 mod types;
 
+use classification::classify_internal;
+pub use classification::{classify, classify_with_learning};
 use fallback::keyword_fallback_fingerprint;
 use kb_context::{load_kb_run_context, situation_with_kb_context};
 pub use memory_context::{GameTheoryMemoryContext, MemoryRecallAudit};
@@ -69,131 +72,6 @@ fn require_llm<'a>(
     llm.ok_or_else(|| GameTheoryError::LlmUnavailable {
         operation: operation.to_string(),
     })
-}
-
-/// Run Tier 1 classification on a situation and persist the fingerprint.
-///
-/// When `llm` is provided, attempts real LLM-backed classification first.
-/// Classify-only calls may use a labelled keyword fingerprint when LLM auth is
-/// unavailable; full pipeline calls disable that fallback.
-///
-/// Returns the generated fingerprint after persistence.
-pub async fn classify(
-    db: &DbInstance,
-    situation: &str,
-    llm: Option<&dyn LlmClient>,
-) -> Result<GameTheoryFingerprint, GameTheoryError> {
-    classify_with_learning(db, situation, llm, None).await
-}
-
-pub async fn classify_with_learning(
-    db: &DbInstance,
-    situation: &str,
-    llm: Option<&dyn LlmClient>,
-    learning: Option<&mut LearningIntegration>,
-) -> Result<GameTheoryFingerprint, GameTheoryError> {
-    let (fingerprint, _) = classify_internal(
-        db,
-        situation,
-        llm,
-        &GameTheoryMemoryContext::default(),
-        true,
-        learning,
-    )
-    .await?;
-    Ok(fingerprint)
-}
-
-async fn classify_internal(
-    db: &DbInstance,
-    situation: &str,
-    llm: Option<&dyn LlmClient>,
-    memory_ctx: &GameTheoryMemoryContext,
-    allow_keyword_fallback: bool,
-    learning: Option<&mut LearningIntegration>,
-) -> Result<(GameTheoryFingerprint, Vec<MemoryRecallAudit>), GameTheoryError> {
-    let situation = situation.trim();
-    if situation.is_empty() {
-        return Err(GameTheoryError::EmptySituation);
-    }
-
-    ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
-        message: e.to_string(),
-    })?;
-
-    let run_id = format!(
-        "gt-{}",
-        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
-    );
-    let now = Utc::now().to_rfc3339();
-
-    // Insert run with status "running"
-    insert_gt_run(db, &run_id, situation, &now, "running").map_err(|e| {
-        GameTheoryError::Storage {
-            message: e.to_string(),
-        }
-    })?;
-
-    // Attempt real Tier 1 classification, fall back to keyword analysis
-    let mut memory_audits = Vec::new();
-    let fingerprint = if let Some(llm_client) = llm {
-        match execute_tier1_real(llm_client, &run_id, situation, &now, memory_ctx, learning).await {
-            Ok((fp, audits)) => {
-                memory_audits.extend(audits);
-                fp
-            }
-            Err(e) => {
-                if allow_keyword_fallback {
-                    tracing::warn!(run_id = %run_id, error = %e, "Tier 1 LLM classification failed, falling back to keyword");
-                    keyword_fallback_fingerprint(&run_id, situation, &now)
-                } else {
-                    return Err(GameTheoryError::Tier1Execution {
-                        message: e.to_string(),
-                    });
-                }
-            }
-        }
-    } else if allow_keyword_fallback {
-        keyword_fallback_fingerprint(&run_id, situation, &now)
-    } else {
-        return Err(GameTheoryError::LlmUnavailable {
-            operation: "gametheory Tier 1 classification".to_string(),
-        });
-    };
-
-    // Persist fingerprint
-    let fingerprint_json =
-        serde_json::to_string(&fingerprint).map_err(|e| GameTheoryError::FingerprintParse {
-            message: e.to_string(),
-        })?;
-
-    insert_gt_fingerprint(
-        db,
-        &run_id,
-        &fingerprint_json,
-        &fingerprint.primary_family,
-        &now,
-    )
-    .map_err(|e| GameTheoryError::Storage {
-        message: e.to_string(),
-    })?;
-
-    // Update run status to completed
-    let completed_at = Utc::now().to_rfc3339();
-    update_gt_run_status(
-        db,
-        &run_id,
-        situation,
-        &now,
-        &completed_at,
-        "completed",
-        0.0,
-    )
-    .map_err(|e| GameTheoryError::Storage {
-        message: e.to_string(),
-    })?;
-
-    Ok((fingerprint, memory_audits))
 }
 
 /// Run the full Phase 4 pipeline: classify → route → specialist spec → final report.
@@ -286,6 +164,7 @@ pub async fn run_full_pipeline_with_learning_options(
         "",
         "InProgress",
         0.0,
+        0,
     )
     .map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
@@ -409,6 +288,17 @@ pub async fn run_full_pipeline_with_learning_options(
     } else {
         final_result.report.clone()
     };
+    let report = if specialist_outcome.unknown_cost_count > 0 {
+        format!(
+            "Estimated specialist cost: at least ${:.6} ({} specialists unknown).\n\n{}",
+            specialist_outcome.total_cost_usd, specialist_outcome.unknown_cost_count, report
+        )
+    } else {
+        format!(
+            "Estimated specialist cost: ${:.6}.\n\n{}",
+            specialist_outcome.total_cost_usd, report
+        )
+    };
 
     // 11. Persist sections and final report
     persist_sections(db, &routing_decision.run_id, &final_result.sections).map_err(|e| {
@@ -421,6 +311,7 @@ pub async fn run_full_pipeline_with_learning_options(
         &routing_decision.run_id,
         &report,
         specialist_outcome.total_cost_usd,
+        specialist_outcome.unknown_cost_count,
     )
     .map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
@@ -462,6 +353,7 @@ pub async fn run_full_pipeline_with_learning_options(
         &completed_at,
         &status,
         specialist_outcome.total_cost_usd,
+        specialist_outcome.unknown_cost_count,
     )
     .map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
@@ -476,6 +368,7 @@ pub async fn run_full_pipeline_with_learning_options(
         failed_specialists: specialist_outcome.failed,
         memory_recall,
         total_cost_usd: specialist_outcome.total_cost_usd,
+        unknown_cost_count: specialist_outcome.unknown_cost_count,
         specialist_costs_usd: specialist_outcome.costs_usd,
         tier_costs_usd: specialist_outcome.tier_costs_usd,
         max_observed_concurrent: specialist_outcome.max_observed_concurrent,
@@ -484,4 +377,4 @@ pub async fn run_full_pipeline_with_learning_options(
 }
 
 #[cfg(test)]
-mod tests;
+include!("facade/tests_decl.rs");

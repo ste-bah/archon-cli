@@ -75,7 +75,7 @@ fn unrecorded_control_stop(
     tracing::error!(run_id = %run.id, %error, "control stop not fully recorded");
     // `error` names the file that refused the write (`io error at <path>`).
     WorkflowError::port(format!(
-        "{saved}, but its run-end record was not fully written: {error}\n{message}\nResume with: archon workflow resume --live --yes {}",
+        "{saved}, but no durable run-end record could be saved: {error}\n{message}\nResume with: archon workflow resume --live --yes {}",
         run.id
     ))
 }
@@ -166,6 +166,11 @@ mod tests {
         assert_eq!(record.terminal_status, status);
         assert!(record.terminal_event_committed);
         assert_eq!(store.load_state(&run.id).unwrap().status, status);
+        println!(
+            "EVIDENCE #289 writable-control-stop BEFORE: state=running; AFTER: state={:?}, terminal_event_committed={}",
+            store.load_state(&run.id).unwrap().status,
+            record.terminal_event_committed
+        );
         let events = std::fs::read_to_string(store.events_path(&run.id)).unwrap();
         assert_eq!(events.matches("terminal_status").count(), 1);
         finalize_generated_control(
@@ -218,7 +223,7 @@ mod tests {
             "is paused".to_string(),
             store.state_path(&run.id).display().to_string(),
             events.display().to_string(),
-            "run-end record was not fully written".to_string(),
+            "no durable run-end record could be saved".to_string(),
             "pause 'p-1' was saved, but its evidence event was not recorded".to_string(),
             format!("archon workflow resume --live --yes {}", run.id),
         ] {
@@ -227,6 +232,11 @@ mod tests {
                 "missing {needle:?} in: {message}"
             );
         }
+        println!(
+            "EVIDENCE #289 unwritable-run-end BEFORE: state=paused, terminal event absent, failed file={}; AFTER: CLI error={message:?}; state readback={:?}",
+            events.display(),
+            store.load_state(&run.id).unwrap().status
+        );
         assert_eq!(store.load_state(&run.id).unwrap().status, RunStatus::Paused);
     }
 
@@ -275,6 +285,14 @@ mod tests {
                 .all(|event| !event.contains("\"paused\"")),
             "{:?}",
             terminal_events(&store, &run)
+        );
+        println!(
+            "EVIDENCE #289 stale-pause-after-cancel BEFORE: state=paused; AFTER: state={:?}, paused_terminal_event_count={}",
+            store.load_state(&run.id).unwrap().status,
+            terminal_events(&store, &run)
+                .iter()
+                .filter(|event| event.contains("\"paused\""))
+                .count()
         );
     }
 

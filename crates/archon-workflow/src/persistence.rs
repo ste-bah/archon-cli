@@ -127,9 +127,9 @@ fn record_agent_output_with_status(
         "accepted": accepted,
         "provider": output.and_then(|o| o.provider_id.as_deref()),
         "model": output.and_then(|o| o.resolved_model.as_deref()),
-        "tokens_in": output.map_or(0, |o| o.tokens_in),
-        "tokens_out": output.map_or(0, |o| o.tokens_out),
-        "cost_usd": output.map_or(0.0, |o| o.cost_usd),
+        "tokens_in": output.and_then(|o| o.tokens_in),
+        "tokens_out": output.and_then(|o| o.tokens_out),
+        "cost_usd": output.and_then(|o| o.cost_usd),
         "recent_public_tool_calls": output
             .map(|o| o.tool_uses.iter().take(20).cloned().collect::<Vec<_>>())
             .unwrap_or_default(),

@@ -25,4 +25,6 @@ mod fixed_decomposition_host_tests;
 mod workflow_tests_a;
 #[path = "workflow_tests_b.rs"]
 mod workflow_tests_b;
+#[path = "workflow_tests_usage.rs"]
+mod workflow_tests_usage;
 use workflow_tests_b::*;

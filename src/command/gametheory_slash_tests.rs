@@ -100,6 +100,54 @@ fn test_gametheory_list_agents_uses_real_registry() {
 }
 
 #[test]
+fn test_gametheory_view_formats_persisted_incomplete_costs() {
+    if crate::test_environment::isolated() {
+        return;
+    }
+    with_temp_data_home(|| {
+        let db = open_db().unwrap();
+        gametheory::schema::ensure_gametheory_schema(&db).unwrap();
+        seed_gt_run(&db, "gt-known", "known cost", "completed", "0.250000");
+        seed_gt_run(&db, "gt-unknown", "unknown cost", "completed", "unknown");
+        seed_gt_run(
+            &db,
+            "gt-incomplete",
+            "incomplete cost",
+            "completed",
+            "at least 0.250000 (2 specialists unknown)",
+        );
+
+        // Read the persisted rows independently before exercising the TUI query.
+        let persisted = db
+            .run_script(
+                "?[run_id, cost] := *gt_runs{run_id, cost_usd: cost}",
+                Default::default(),
+                ScriptMutability::Immutable,
+            )
+            .unwrap();
+        assert_eq!(persisted.rows.len(), 3);
+
+        let TuiEvent::OpenViewRows { rows, .. } = open_gametheory_rows_event(&db).unwrap() else {
+            panic!("expected GameTheory view rows");
+        };
+        let row = |id: &str| rows.iter().find(|row| row.id == id).unwrap();
+        let known = row("gt-known").detail.clone();
+        let unknown = row("gt-unknown").detail.clone();
+        let incomplete = row("gt-incomplete").detail.clone();
+        assert!(known.ends_with("$0.250000"), "{known}");
+        assert!(unknown.ends_with("unknown"), "{unknown}");
+        assert!(
+            incomplete.ends_with("at least $0.250000 (2 specialists unknown)"),
+            "{incomplete}"
+        );
+        eprintln!(
+            "EVIDENCE #369 GameTheory persisted SOURCE READ: {} Cozo gt_runs rows; ACTION: opened the TUI view; EXPECTED/ACTUAL details: {known}; {unknown}; {incomplete}",
+            persisted.rows.len()
+        );
+    });
+}
+
+#[test]
 fn test_gametheory_status_reads_cozo_source_of_truth() {
     if crate::test_environment::isolated() {
         return;

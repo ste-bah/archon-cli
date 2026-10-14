@@ -1,6 +1,5 @@
 use futures_util::future::join_all;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
 use crate::learning::integration::{LearningContext, LearningIntegration};
 use crate::runner::{AgentExecutionRequest, AgentInfo, LlmClient, PipelineType, ToolAccessLevel};
@@ -14,9 +13,31 @@ use super::super::routing::RoutingDecision;
 #[cfg(test)]
 use super::MemoryRecallAudit;
 use super::costs::{agent_tier, estimate_llm_cost_usd};
+mod prompt;
 use super::memory_context::recall_prior_context_for_agent;
 use super::types::{SpecialistCallOutput, SpecialistExecutionOutcome};
 use super::{GameTheoryMemoryContext, GameTheoryRunOptions};
+pub(super) use prompt::load_agent_prompt_body;
+
+#[cfg(test)]
+#[test]
+fn unknown_specialist_usage_keeps_estimated_cost_unknown() {
+    // Expected: either missing direction makes the estimate unknown, never $0.0.
+    assert_eq!(estimate_cost_for_usage("sonnet", None, Some(12)), None);
+    assert_eq!(estimate_cost_for_usage("sonnet", Some(12), None), None);
+    assert_eq!(
+        estimate_cost_for_usage("sonnet", Some(0), Some(0)),
+        Some(0.0)
+    );
+}
+
+fn estimate_cost_for_usage(
+    model: &str,
+    tokens_in: Option<u64>,
+    tokens_out: Option<u64>,
+) -> Option<f64> {
+    Some(estimate_llm_cost_usd(model, tokens_in?, tokens_out?))
+}
 
 #[cfg(test)]
 type SpecialistFixtureParts = (
@@ -72,7 +93,7 @@ fn execute_test_specialist_fixture_with_options(
         match result {
             Ok(output) => {
                 outcome.outputs.insert(agent_key.clone(), output);
-                outcome.costs_usd.insert(agent_key.clone(), 0.0);
+                outcome.costs_usd.insert(agent_key.clone(), Some(0.0));
             }
             Err(err_msg) => {
                 outcome.failed.push((agent_key.clone(), err_msg));
@@ -229,13 +250,18 @@ pub(super) async fn execute_specialists_real_with_options(
             }
             outcome.memory_audits.push(result.audit);
             if let Some(output) = result.output {
-                if let Some(tier) = agent_tier(&result.agent_key) {
-                    *outcome.tier_costs_usd.entry(tier).or_insert(0.0) += result.cost_usd;
+                if let Some(cost) = result.cost_usd {
+                    if let Some(tier) = agent_tier(&result.agent_key) {
+                        *outcome.tier_costs_usd.entry(tier).or_insert(0.0) += cost;
+                    }
+                    outcome.total_cost_usd += cost;
+                    outcome
+                        .costs_usd
+                        .insert(result.agent_key.clone(), Some(cost));
+                } else {
+                    outcome.unknown_cost_count += 1;
+                    outcome.costs_usd.insert(result.agent_key.clone(), None);
                 }
-                outcome.total_cost_usd += result.cost_usd;
-                outcome
-                    .costs_usd
-                    .insert(result.agent_key.clone(), result.cost_usd);
                 outcome.outputs.insert(result.agent_key, output);
             } else if let Some(error) = result.error {
                 outcome.failed.push((result.agent_key, error));
@@ -269,7 +295,7 @@ async fn execute_specialist_call(
                     output: None,
                     error: Some(error.to_string()),
                     audit: recalled.audit,
-                    cost_usd: 0.0,
+                    cost_usd: None,
                 };
             }
         },
@@ -293,7 +319,7 @@ async fn execute_specialist_call(
             output: None,
             error: Some(format!("forced failure for test: {agent_key}")),
             audit: recalled.audit,
-            cost_usd: 0.0,
+            cost_usd: None,
         };
     }
 
@@ -372,18 +398,15 @@ async fn execute_specialist_call(
             output: Some(response.content),
             error: None,
             audit: recalled.audit,
-            cost_usd: estimate_llm_cost_usd(
-                model,
-                response.tokens_in.unwrap_or_default(),
-                response.tokens_out.unwrap_or_default(),
-            ),
+            // Missing counts make the estimate unknown instead of assigning them a zero cost.
+            cost_usd: estimate_cost_for_usage(model, response.tokens_in, response.tokens_out),
         },
         Err(e) => SpecialistCallOutput {
             agent_key: agent_key.to_string(),
             output: None,
             error: Some(format!("LLM error: {e}")),
             audit: recalled.audit,
-            cost_usd: 0.0,
+            cost_usd: None,
         },
     }
 }
@@ -417,65 +440,4 @@ fn registry_agent(agent_key: &str) -> Option<&'static GameTheoryAgent> {
     GAMETHEORY_AGENTS
         .iter()
         .find(|agent| agent.key == agent_key)
-}
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")))
-        .to_path_buf()
-}
-
-fn load_agent_prompt_body(agent: &GameTheoryAgent) -> Result<String, GameTheoryError> {
-    let path = workspace_root().join(agent.prompt_source_path);
-    if !path.is_file() {
-        return Err(GameTheoryError::MissingAgentFile {
-            path: path.display().to_string(),
-        });
-    }
-    let content = std::fs::read_to_string(&path).map_err(|error| GameTheoryError::Io {
-        message: format!("read {} failed: {error}", path.display()),
-    })?;
-    let (_frontmatter, body) =
-        crate::agent_loader::parse_frontmatter(&content).map_err(|error| {
-            GameTheoryError::Validation {
-                message: format!("parse {} failed: {error}", path.display()),
-            }
-        })?;
-    if body.trim().is_empty() {
-        return Err(GameTheoryError::Validation {
-            message: format!("agent source file has empty body: {}", path.display()),
-        });
-    }
-    Ok(body)
-}
-
-#[cfg(test)]
-mod prompt_source_tests {
-    use super::*;
-
-    #[test]
-    fn load_agent_prompt_body_fails_when_declared_source_file_is_missing() {
-        static ACCESS: &[super::super::super::agents::GameTheoryToolAccess] = &[];
-        let agent = GameTheoryAgent {
-            key: "missing-source-agent",
-            display_name: "Missing Source Agent",
-            tier: 1,
-            file: "missing-source-agent.md",
-            memory_keys: &[],
-            output_artifacts: &[],
-            prompt_source_path: ".archon/agents/gametheory/does-not-exist-for-test.md",
-            tool_access: ACCESS,
-            model: "opus",
-            condition: None,
-            depends_on: &[],
-            mandatory: false,
-        };
-
-        assert!(matches!(
-            load_agent_prompt_body(&agent),
-            Err(GameTheoryError::MissingAgentFile { .. })
-        ));
-    }
 }

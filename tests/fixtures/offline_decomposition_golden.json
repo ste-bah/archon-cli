@@ -121,7 +121,9 @@
             "content": "{\"check\":{\"command\":\"python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\\\"ready\\\"] is True' .archon/proof/outcome.json\",\"cwd\":\"repo_root\",\"kind\":\"command\"},\"covers\":[],\"criterion\":\"The repository records a JSON outcome artifact at `.archon/proof/outcome.json` with the boolean field `ready` set to true.\",\"gap_permitted\":false,\"id\":\"AC-X-001\",\"judgment\":{\"counterexample\":\"\",\"host_call_id\":\"\",\"reason\":\"\",\"verdict\":\"accepted\"}}",
             "stopReason": "end_turn",
             "tokensIn": 1,
+            "tokensInUnknownReason": null,
             "tokensOut": 1,
+            "tokensOutUnknownReason": null,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -179,7 +181,9 @@
             "content": "{\"check\":{\"command\":\"test -f src/alpha.txt && grep -qx 'alpha ready' src/alpha.txt\",\"cwd\":\"repo_root\",\"kind\":\"command\"},\"covers\":[\"REQ-X-001\"],\"criterion\":\"The first artifact contains the required line.\",\"gap_permitted\":false,\"id\":\"SUP-REQ-X-001\",\"judgment\":{\"counterexample\":\"\",\"host_call_id\":\"\",\"reason\":\"\",\"verdict\":\"accepted\"}}",
             "stopReason": "end_turn",
             "tokensIn": 1,
+            "tokensInUnknownReason": null,
             "tokensOut": 1,
+            "tokensOutUnknownReason": null,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -237,7 +241,9 @@
             "content": "{\"check\":{\"command\":\"python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\\\"ready\\\"] is True' src/beta.json\",\"cwd\":\"repo_root\",\"kind\":\"command\"},\"covers\":[\"REQ-X-002\"],\"criterion\":\"The second artifact is ready JSON.\",\"gap_permitted\":false,\"id\":\"SUP-REQ-X-002\",\"judgment\":{\"counterexample\":\"\",\"host_call_id\":\"\",\"reason\":\"\",\"verdict\":\"accepted\"}}",
             "stopReason": "end_turn",
             "tokensIn": 1,
+            "tokensInUnknownReason": null,
             "tokensOut": 1,
+            "tokensOutUnknownReason": null,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -295,7 +301,9 @@
             "content": "```yaml\ntask_id: TASK-X-010\ntitle: Create alpha data\ncomplexity: low\nstatus: ready\ndepends_on: []\nblocks: [TASK-X-020]\nimplements: [REQ-X-001, AC-X-001]\nrequired_env_keys: []\nrequired_tools: [test, python3]\ndeliverable_contracts:\n  - kind: alpha_text\n    artifact_path: src/alpha.txt\n    artifact_format: text\n    min_instances: 1\n  - kind: generic_outcome\n    artifact_path: .archon/proof/outcome.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite the nonempty line alpha ready and create the JSON outcome artifact with ready set to true. REQ-X-001 is verified by `test -s src/alpha.txt`. AC-X-001 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`.\n\n## Files Expected to Change\n`src/alpha.txt` — absent\n`.archon/proof/outcome.json` — absent\n\n## Focused Tests\n- `test -s src/alpha.txt`\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' .archon/proof/outcome.json`\n",
             "stopReason": "end_turn",
             "tokensIn": 1,
+            "tokensInUnknownReason": null,
             "tokensOut": 1,
+            "tokensOutUnknownReason": null,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -353,7 +361,9 @@
             "content": "```yaml\ntask_id: TASK-X-020\ntitle: Create beta data\ncomplexity: low\nstatus: ready\ndepends_on: \n  - task_id: TASK-X-010\n    consumes:\n      - artifact_path: src/alpha.txt\n    ordering_only: false\nblocks: []\nimplements: [REQ-X-002]\nrequired_env_keys: []\nrequired_tools: [python3]\ndeliverable_contracts:\n  - kind: beta_json\n    artifact_path: src/beta.json\n    artifact_format: json\n    required_true_fields: [ready]\n    min_instances: 1\n```\n\n## Objective\nWrite a JSON object with ready set to true. REQ-X-002 is verified by `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`.\n\n## Files Expected to Change\n`src/beta.json` — absent\n\n## Focused Tests\n- `python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))[\"ready\"] is True' src/beta.json`\n",
             "stopReason": "end_turn",
             "tokensIn": 1,
+            "tokensInUnknownReason": null,
             "tokensOut": 1,
+            "tokensOutUnknownReason": null,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -413,7 +423,9 @@
             "content": "{\"acceptance_digest\":\"\",\"schema_version\":1,\"tasks\":[{\"blocks\":[\"TASK-X-020\"],\"deliverable_contracts\":[{\"artifact_format\":\"text\",\"artifact_path\":\"src/alpha.txt\",\"kind\":\"alpha_text\",\"min_instances\":1},{\"artifact_format\":\"json\",\"artifact_path\":\".archon/proof/outcome.json\",\"kind\":\"generic_outcome\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[],\"file_name\":\"TASK-X-010.md\",\"implements\":[\"REQ-X-001\",\"AC-X-001\"],\"task_id\":\"TASK-X-010\"},{\"blocks\":[],\"deliverable_contracts\":[{\"artifact_format\":\"json\",\"artifact_path\":\"src/beta.json\",\"kind\":\"beta_json\",\"min_instances\":1,\"required_true_fields\":[\"ready\"]}],\"depends_on\":[{\"consumes\":[{\"artifact_path\":\"src/alpha.txt\"}],\"ordering_only\":false,\"task_id\":\"TASK-X-010\"}],\"file_name\":\"TASK-X-020.md\",\"implements\":[\"REQ-X-002\"],\"task_id\":\"TASK-X-020\"}]}",
             "stopReason": "end_turn",
             "tokensIn": 1,
+            "tokensInUnknownReason": null,
             "tokensOut": 1,
+            "tokensOutUnknownReason": null,
             "toolTrace": {
               "complete": true,
               "dropped": 0,
@@ -521,8 +533,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "790d628da43e34271c9310bedd0d4e29df3009c7f60b639382b05b3b1d1e5d21",
-            "logicVersion": 19,
+            "logicDigest": "9aa3ea0f6c9ab23b734d03be0a97aec4dcd3b0794e9b81fa979c22cf7212989f",
+            "logicVersion": 20,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -788,8 +800,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "790d628da43e34271c9310bedd0d4e29df3009c7f60b639382b05b3b1d1e5d21",
-            "logicVersion": 19,
+            "logicDigest": "9aa3ea0f6c9ab23b734d03be0a97aec4dcd3b0794e9b81fa979c22cf7212989f",
+            "logicVersion": 20,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1031,7 +1043,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "790d628da43e34271c9310bedd0d4e29df3009c7f60b639382b05b3b1d1e5d21",
+            "logicDigest": "9aa3ea0f6c9ab23b734d03be0a97aec4dcd3b0794e9b81fa979c22cf7212989f",
             "logicVersion": 3,
             "postcondition": {
               "satisfied": true,
@@ -1269,7 +1281,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "24d392be1377f689c65837346a8eb7f84181a701efd6c0ec595306ee4f6ff3fb",
+            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
             "logicVersion": 13,
             "postcondition": {
               "satisfied": true,
@@ -1389,7 +1401,7 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "24d392be1377f689c65837346a8eb7f84181a701efd6c0ec595306ee4f6ff3fb",
+            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
             "logicVersion": 13,
             "postcondition": {
               "satisfied": true,
@@ -1609,7 +1621,7 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "24d392be1377f689c65837346a8eb7f84181a701efd6c0ec595306ee4f6ff3fb",
+            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
             "logicVersion": 12,
             "postcondition": {
               "satisfied": true,
@@ -1695,8 +1707,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "790d628da43e34271c9310bedd0d4e29df3009c7f60b639382b05b3b1d1e5d21",
-                  "logicVersion": 19,
+                  "logicDigest": "9aa3ea0f6c9ab23b734d03be0a97aec4dcd3b0794e9b81fa979c22cf7212989f",
+                  "logicVersion": 20,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1758,8 +1770,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "790d628da43e34271c9310bedd0d4e29df3009c7f60b639382b05b3b1d1e5d21",
-                      "logicVersion": 19,
+                      "logicDigest": "9aa3ea0f6c9ab23b734d03be0a97aec4dcd3b0794e9b81fa979c22cf7212989f",
+                      "logicVersion": 20,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1841,7 +1853,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "790d628da43e34271c9310bedd0d4e29df3009c7f60b639382b05b3b1d1e5d21",
+                  "logicDigest": "9aa3ea0f6c9ab23b734d03be0a97aec4dcd3b0794e9b81fa979c22cf7212989f",
                   "logicVersion": 3,
                   "postcondition": {
                     "satisfied": true,
@@ -1902,7 +1914,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "790d628da43e34271c9310bedd0d4e29df3009c7f60b639382b05b3b1d1e5d21",
+                      "logicDigest": "9aa3ea0f6c9ab23b734d03be0a97aec4dcd3b0794e9b81fa979c22cf7212989f",
                       "logicVersion": 3,
                       "postcondition": {
                         "satisfied": true,
@@ -2003,7 +2015,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "24d392be1377f689c65837346a8eb7f84181a701efd6c0ec595306ee4f6ff3fb",
+                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
                   "logicVersion": 13,
                   "postcondition": {
                     "satisfied": true,
@@ -2053,7 +2065,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "24d392be1377f689c65837346a8eb7f84181a701efd6c0ec595306ee4f6ff3fb",
+                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
                       "logicVersion": 13,
                       "postcondition": {
                         "satisfied": true,
@@ -2135,7 +2147,7 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "24d392be1377f689c65837346a8eb7f84181a701efd6c0ec595306ee4f6ff3fb",
+                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
                   "logicVersion": 13,
                   "postcondition": {
                     "satisfied": true,
@@ -2185,7 +2197,7 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "24d392be1377f689c65837346a8eb7f84181a701efd6c0ec595306ee4f6ff3fb",
+                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
                       "logicVersion": 13,
                       "postcondition": {
                         "satisfied": true,
@@ -2267,7 +2279,7 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "24d392be1377f689c65837346a8eb7f84181a701efd6c0ec595306ee4f6ff3fb",
+                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
                   "logicVersion": 12,
                   "postcondition": {
                     "satisfied": true,
@@ -2312,7 +2324,7 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "24d392be1377f689c65837346a8eb7f84181a701efd6c0ec595306ee4f6ff3fb",
+                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
                       "logicVersion": 12,
                       "postcondition": {
                         "satisfied": true,

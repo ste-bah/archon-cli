@@ -382,6 +382,40 @@ jobs:
           df -h / "$GITHUB_WORKSPACE" "$RUNNER_TEMP" || true
           exit "$status"
 
+      - name: Require 8.3 names on the Windows test volume
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $testRoot = $env:RUNNER_TEMP
+          $volume = [System.IO.Path]::GetPathRoot($testRoot).TrimEnd('\')
+          $probePath = Join-Path $testRoot 'archon-8dot3-probe-long-directory-name'
+          $probeCreated = $false
+          $shortPath = ''
+          $probeError = $null
+          try {
+            New-Item -ItemType Directory -Path $probePath | Out-Null
+            $probeCreated = $true
+            try {
+              $shortPath = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($probePath).ShortPath
+            } catch {
+              $probeError = $_
+            }
+            Write-Output "8.3 probe long path: $probePath"
+            Write-Output "8.3 probe short path: $shortPath"
+            if ([string]::IsNullOrWhiteSpace($shortPath) -or $shortPath -eq $probePath) {
+              $message = "8.3 short names are not created on $volume; the #374 alias test needs them"
+              if ($null -ne $probeError) {
+                $message += " (ShortPath lookup failed: $($probeError.Exception.Message))"
+              }
+              throw $message
+            }
+          } finally {
+            if ($probeCreated) {
+              Remove-Item -LiteralPath $probePath -Recurse -Force
+            }
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "ARCHON_8DOT3_TEST_ROOT=$testRoot"
+
       - name: Run tests (nextest, Windows)
         if: runner.os == 'Windows'
         shell: pwsh

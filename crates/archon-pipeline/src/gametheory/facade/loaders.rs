@@ -205,7 +205,7 @@ pub(super) fn load_completed_specialist_outputs(
 pub(super) fn load_specialist_cost_total(
     db: &DbInstance,
     run_id: &str,
-) -> Result<f64, GameTheoryError> {
+) -> Result<(f64, usize), GameTheoryError> {
     ensure_gametheory_schema(db).map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
     })?;
@@ -220,14 +220,21 @@ pub(super) fn load_specialist_cost_total(
         .map_err(|e| GameTheoryError::Storage {
             message: format!("query specialist costs failed: {e}"),
         })?;
-    rows.rows.iter().try_fold(0.0, |total, row| {
-        let cost = row[0].get_str().unwrap_or("0");
-        cost.parse::<f64>()
-            .map(|parsed| total + parsed)
-            .map_err(|e| GameTheoryError::Storage {
-                message: format!("parse specialist cost '{cost}' failed: {e}"),
-            })
-    })
+    rows.rows
+        .iter()
+        .try_fold((0.0, 0usize), |(total, unknown), row| {
+            let cost = row[0].get_str().unwrap_or("unknown");
+            // Legacy numeric zeroes remain recorded as zero; unknown legacy costs have no marker to recover.
+            if cost == "unknown" {
+                Ok((total, unknown + 1))
+            } else {
+                cost.parse::<f64>()
+                    .map(|parsed| (total + parsed, unknown))
+                    .map_err(|e| GameTheoryError::Storage {
+                        message: format!("parse specialist cost '{cost}' failed: {e}"),
+                    })
+            }
+        })
 }
 
 pub(super) fn summarize_output(output: &str) -> String {

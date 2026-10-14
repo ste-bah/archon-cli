@@ -1,4 +1,3 @@
-use super::*;
 pub(super) use crate::gametheory::fingerprint::{
     AmbiguityNote, AxisVerdict, GameTheoryFingerprint, HiddenGameDetection,
 };
@@ -12,6 +11,7 @@ use std::sync::Mutex;
 mod classification;
 mod execution_memory;
 mod pipeline;
+mod prompt_source;
 mod replay_resume;
 
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
@@ -56,6 +56,7 @@ impl LlmClient for MockLlmClient {
 struct CapturingLlmClient {
     canned_response: String,
     classification_response: Option<String>,
+    usage: (Option<u64>, Option<u64>),
     prompts: Mutex<Vec<String>>,
     models: Mutex<Vec<String>>,
 }
@@ -65,6 +66,7 @@ impl CapturingLlmClient {
         Self {
             canned_response: canned.to_string(),
             classification_response: None,
+            usage: (Some(100), Some(200)),
             prompts: Mutex::new(Vec::new()),
             models: Mutex::new(Vec::new()),
         }
@@ -74,6 +76,17 @@ impl CapturingLlmClient {
         Self {
             canned_response: canned.to_string(),
             classification_response: Some(classification),
+            usage: (Some(100), Some(200)),
+            prompts: Mutex::new(Vec::new()),
+            models: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn with_unknown_usage(canned: &str) -> Self {
+        Self {
+            canned_response: canned.to_string(),
+            classification_response: None,
+            usage: (None, Some(12)),
             prompts: Mutex::new(Vec::new()),
             models: Mutex::new(Vec::new()),
         }
@@ -115,8 +128,8 @@ impl LlmClient for CapturingLlmClient {
         Ok(LlmResponse {
             content,
             tool_uses: vec![],
-            tokens_in: Some(100),
-            tokens_out: Some(200),
+            tokens_in: self.usage.0,
+            tokens_out: self.usage.1,
             stop_reason: None,
         })
     }

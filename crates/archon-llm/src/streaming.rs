@@ -109,8 +109,17 @@ fn parse_message_start(data: &str) -> Result<StreamEvent, StreamError> {
         usage: Usage,
     }
 
-    let outer: Outer = serde_json::from_str(data)
+    let mut outer: Outer = serde_json::from_str(data)
         .map_err(|e| StreamError::ParseError(format!("message_start: {e}")))?;
+
+    // Anthropic-style SSE sends zero input and output counts in message_start
+    // as placeholders; measured counts arrive in message_delta.
+    if outer.message.usage.input_tokens == 0 {
+        outer.message.usage.input_tokens_available = false;
+    }
+    if outer.message.usage.output_tokens == 0 {
+        outer.message.usage.output_tokens_available = false;
+    }
 
     Ok(StreamEvent::MessageStart {
         id: outer.message.id,

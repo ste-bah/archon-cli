@@ -56,11 +56,18 @@ impl GameTheoryExecutor for PipelineGameTheoryExecutor {
         .await?;
         let persisted_status = gametheory_inspect::render_status(&db, Some(&result.run_id))?;
         Ok(format!(
-            "GameTheoryRun persisted run_id={} status={} specialists={} cost=${:.6}\n\n{}",
+            "GameTheoryRun persisted run_id={} status={} specialists={} cost={}\n\n{}",
             result.run_id,
             result.status,
             result.specialist_count,
-            result.total_cost_usd,
+            if result.unknown_cost_count == 0 {
+                format!("${:.6}", result.total_cost_usd)
+            } else {
+                format!(
+                    "at least ${:.6} ({} specialists unknown)",
+                    result.total_cost_usd, result.unknown_cost_count
+                )
+            },
             persisted_status
         ))
     }
@@ -177,7 +184,14 @@ impl PipelineGameTheoryExecutor {
         let persisted = gametheory_inspect::render_inspect_artifact(&db, &artifact_id)?;
         Ok(format!(
             "GameTheoryCallSpecialist persisted run_id={} agent={} status={} cost=${:.6}\n\n{}",
-            result.run_id, result.agent_key, result.status, result.cost_usd, persisted
+            result.run_id,
+            result.agent_key,
+            result.status,
+            result
+                .cost_usd
+                .map(|value| format!("${value:.6}"))
+                .unwrap_or_else(|| "unknown".to_string()),
+            persisted
         ))
     }
 }

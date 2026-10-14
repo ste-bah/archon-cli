@@ -49,7 +49,7 @@ pub(super) fn persist_specialist_outputs(
     db: &DbInstance,
     run_id: &str,
     outputs: &HashMap<String, String>,
-    costs_usd: &HashMap<String, f64>,
+    costs_usd: &HashMap<String, Option<f64>>,
 ) -> Result<()> {
     ensure_gametheory_schema(db)?;
     let now = Utc::now().to_rfc3339();
@@ -63,7 +63,10 @@ pub(super) fn persist_specialist_outputs(
         params.insert("started".into(), cozo::DataValue::from(now.as_str()));
         params.insert("completed".into(), cozo::DataValue::from(now.as_str()));
         params.insert("duration".into(), cozo::DataValue::from("0"));
-        let cost = format!("{:.6}", costs_usd.get(agent_key).copied().unwrap_or(0.0));
+        let cost = match costs_usd.get(agent_key).copied().flatten() {
+            Some(value) => format!("{value:.6}"),
+            None => "unknown".to_string(),
+        };
         params.insert("cost".into(), cozo::DataValue::from(cost.as_str()));
 
         run_script_guarded(
@@ -218,6 +221,7 @@ pub(super) fn persist_final_report(
     run_id: &str,
     report: &str,
     total_cost_usd: f64,
+    unknown_cost_count: usize,
 ) -> Result<()> {
     ensure_gametheory_schema(db)?;
 
@@ -227,7 +231,11 @@ pub(super) fn persist_final_report(
     params.insert("rid".into(), cozo::DataValue::from(run_id));
     params.insert("rep".into(), cozo::DataValue::from(report));
     params.insert("ca".into(), cozo::DataValue::from(now.as_str()));
-    let cost = format!("{total_cost_usd:.6}");
+    let cost = if unknown_cost_count == 0 {
+        format!("{total_cost_usd:.6}")
+    } else {
+        format!("at least {total_cost_usd:.6} ({unknown_cost_count} specialists unknown)")
+    };
     params.insert("cost".into(), cozo::DataValue::from(cost.as_str()));
 
     run_script_guarded(
@@ -410,6 +418,7 @@ pub(super) fn update_gt_run_status(
     completed_at: &str,
     status: &str,
     cost_usd: f64,
+    unknown_cost_count: usize,
 ) -> Result<()> {
     let mut params = BTreeMap::new();
     params.insert("rid".into(), cozo::DataValue::from(run_id));
@@ -417,7 +426,11 @@ pub(super) fn update_gt_run_status(
     params.insert("sa".into(), cozo::DataValue::from(started_at));
     params.insert("ca".into(), cozo::DataValue::from(completed_at));
     params.insert("st".into(), cozo::DataValue::from(status));
-    let cost = format!("{cost_usd:.6}");
+    let cost = if unknown_cost_count == 0 {
+        format!("{cost_usd:.6}")
+    } else {
+        format!("at least {cost_usd:.6} ({unknown_cost_count} specialists unknown)")
+    };
     params.insert("cost".into(), cozo::DataValue::from(cost.as_str()));
 
     run_script_guarded(

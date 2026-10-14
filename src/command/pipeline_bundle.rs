@@ -23,8 +23,12 @@ pub(crate) async fn handle_status(cwd: &Path, session_id: &str) -> Result<()> {
         println!("Status: {:?}", state.status);
         println!("Completed agents: {}", state.completed_agent_count);
         println!(
-            "Total tokens: {} in / {} out",
-            state.total_tokens_in, state.total_tokens_out
+            "Total tokens in: {}",
+            token_total_label(state.total_tokens_in, state.tokens_in_unknown_agents)
+        );
+        println!(
+            "Total tokens out: {}",
+            token_total_label(state.total_tokens_out, state.tokens_out_unknown_agents)
         );
         println!("Total cost: ${:.4}", state.total_cost_usd);
         println!("Started: {}", state.started_at);
@@ -38,6 +42,14 @@ pub(crate) async fn handle_status(cwd: &Path, session_id: &str) -> Result<()> {
         return Ok(());
     }
     handle_legacy_status(cwd, session_id)
+}
+
+fn token_total_label(known: u64, unknown_agents: u64) -> String {
+    if unknown_agents == 0 {
+        known.to_string()
+    } else {
+        format!("at least {known} ({unknown_agents} agents unknown)")
+    }
 }
 
 pub(crate) async fn handle_resume(

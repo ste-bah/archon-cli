@@ -193,8 +193,8 @@
         archon_pipeline::runner::AgentResult {
             output: "checked".into(),
             tool_use_log,
-            tokens_in: 10,
-            tokens_out: 20,
+            tokens_in: Some(10),
+            tokens_out: Some(20),
             cost_usd: 0.0,
             duration: std::time::Duration::from_millis(25),
             quality: Some(archon_pipeline::runner::QualityScore {

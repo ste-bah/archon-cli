@@ -32,7 +32,7 @@ fn pipeline_step_outcome_summary(
         .map(|quality| format!("{:.2}", quality.overall))
         .unwrap_or_else(|| "unscored".into());
     format!(
-        "pipeline agent {} completed; quality={quality}; duration_ms={}; tokens_in={}; tokens_out={}",
+        "pipeline agent {} completed; quality={quality}; duration_ms={}; tokens_in={:?}; tokens_out={:?}",
         agent.key,
         result.duration.as_millis(),
         result.tokens_in,
@@ -350,4 +350,3 @@ pub(crate) fn record_guardrail_provider_incident_for_session(
     entry.evidence_refs.dedup();
     true
 }
-

@@ -372,7 +372,9 @@ fn sanitize_map(map: Map<String, Value>) -> Map<String, Value> {
     let mut cleaned = Map::new();
     for (key, value) in map {
         let lower = key.to_ascii_lowercase();
-        if FORBIDDEN_FIELDS.iter().any(|field| lower.contains(field)) {
+        // Numeric usage counts are measurements, not token credentials.
+        let usage_count = is_usage_count_field(&lower, &value);
+        if !usage_count && FORBIDDEN_FIELDS.iter().any(|field| lower.contains(field)) {
             continue;
         }
         cleaned.insert(key, sanitize_value(value));
@@ -384,12 +386,18 @@ pub fn contains_forbidden_field(value: &Value) -> bool {
     match value {
         Value::Object(map) => map.iter().any(|(key, value)| {
             let lower = key.to_ascii_lowercase();
-            FORBIDDEN_FIELDS.iter().any(|field| lower.contains(field))
+            (!is_usage_count_field(&lower, value)
+                && FORBIDDEN_FIELDS.iter().any(|field| lower.contains(field)))
                 || contains_forbidden_field(value)
         }),
         Value::Array(items) => items.iter().any(contains_forbidden_field),
         _ => false,
     }
+}
+
+fn is_usage_count_field(lower: &str, value: &Value) -> bool {
+    matches!(lower, "tokens_in" | "tokens_out" | "tokensin" | "tokensout")
+        && (value.is_number() || value.is_null())
 }
 
 /// What [`sanitize_value`] writes in place of a secret-shaped word.

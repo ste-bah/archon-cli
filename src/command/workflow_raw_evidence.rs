@@ -108,7 +108,9 @@ pub(super) fn raw_outcome_result(
         "content": outcome.content,
         "stopReason": stop_reason,
         "tokensIn": outcome.tokens_in,
+        "tokensInUnknownReason": outcome.tokens_in.is_none().then_some("provider did not report a confirmed input token count"),
         "tokensOut": outcome.tokens_out,
+        "tokensOutUnknownReason": outcome.tokens_out.is_none().then_some("provider did not report an output token count"),
     });
     archon_workflow::v2::tool_trace::record_tool_trace(&mut result, &outcome.tool_uses);
     result
@@ -172,7 +174,15 @@ mod tests {
             "end_turn".into(),
         );
         assert!(absent.data["tokensIn"].is_null());
+        assert_eq!(
+            absent.data["tokensInUnknownReason"],
+            json!("provider did not report a confirmed input token count")
+        );
         assert!(absent.data["tokensOut"].is_null());
+        assert_eq!(
+            absent.data["tokensOutUnknownReason"],
+            json!("provider did not report an output token count")
+        );
 
         let reported = raw_outcome_result(
             WorkflowAgentOutcome {
@@ -183,7 +193,9 @@ mod tests {
             "end_turn".into(),
         );
         assert_eq!(reported.data["tokensIn"], json!(123));
+        assert!(reported.data["tokensInUnknownReason"].is_null());
         assert_eq!(reported.data["tokensOut"], json!(45));
+        assert!(reported.data["tokensOutUnknownReason"].is_null());
 
         let reported_zero = raw_outcome_result(
             WorkflowAgentOutcome {
@@ -194,6 +206,32 @@ mod tests {
             "end_turn".into(),
         );
         assert_eq!(reported_zero.data["tokensIn"], json!(0));
+        assert!(reported_zero.data["tokensInUnknownReason"].is_null());
         assert_eq!(reported_zero.data["tokensOut"], json!(0));
+        assert!(reported_zero.data["tokensOutUnknownReason"].is_null());
+        let read_back = |result: &WorkflowV2Result| {
+            serde_json::from_slice::<Value>(&serde_json::to_vec(result).unwrap()).unwrap()
+        };
+        let absent_read_back = read_back(&absent);
+        let reported_read_back = read_back(&reported);
+        let reported_zero_read_back = read_back(&reported_zero);
+        assert_eq!(
+            absent_read_back["data"]["tokensInUnknownReason"],
+            json!("provider did not report a confirmed input token count")
+        );
+        assert_eq!(reported_read_back["data"]["tokensIn"], json!(123));
+        assert_eq!(reported_zero_read_back["data"]["tokensIn"], json!(0));
+        println!(
+            "EVIDENCE #369 rawOutcome-usage BEFORE: absent input serialized as null without explanation; AFTER separate JSON read: {}",
+            absent_read_back["data"]
+        );
+        println!(
+            "EVIDENCE #369 rawOutcome-reported-zero BEFORE: Some(0) may be a measured count; AFTER separate JSON read: {}",
+            reported_zero_read_back["data"]
+        );
+        println!(
+            "EVIDENCE #369 rawOutcome-positive-count BEFORE: Some(123) had no availability marker; AFTER separate JSON read: {}",
+            reported_read_back["data"]
+        );
     }
 }

@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) async fn collect_stream(rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
+pub async fn collect_stream(rx: Receiver<StreamEvent>) -> Result<LlmResponse> {
     collect_stream_into(rx, None, None).await
 }
 
@@ -120,11 +120,14 @@ pub(super) async fn collect_stream_into(
         }
     }
 
+    let input_tokens_available = usage.input_tokens_available
+        || usage.cache_creation_input_tokens_available
+        || usage.cache_read_input_tokens_available;
     Ok(LlmResponse {
         content: text_parts.join(""),
         tool_uses,
-        tokens_in: Some(usage.context_input_tokens),
-        tokens_out: Some(usage.output_tokens),
+        tokens_in: input_tokens_available.then_some(usage.context_input_tokens),
+        tokens_out: usage.output_tokens_available.then_some(usage.output_tokens),
         stop_reason,
     })
 }

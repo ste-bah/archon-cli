@@ -1,5 +1,8 @@
 #[path = "workflow_raw_evidence.rs"]
 mod raw_evidence;
+#[cfg(test)]
+#[path = "pipeline_workflow_llm_usage_tests.rs"]
+mod usage_persistence_tests;
 use super::workflow_live_v2_host_dispatch_contract::*;
 use super::*;
 #[path = "workflow_live_v2_local_tools.rs"]

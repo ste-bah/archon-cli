@@ -196,8 +196,14 @@ fn start_async_replay(
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
             Ok(format!(
-                "Replay specialist for {}: agent={} status={} cost=${:.6}\n",
-                result.run_id, result.agent_key, result.status, result.cost_usd
+                "Replay specialist for {}: agent={} status={} cost={}\n",
+                result.run_id,
+                result.agent_key,
+                result.status,
+                result
+                    .cost_usd
+                    .map(|value| format!("${value:.6}"))
+                    .unwrap_or_else(|| "unknown".to_string())
             ))
         }
         .await;

@@ -1,6 +1,33 @@
-use super::super::loaders::load_stored_routing;
+use super::super::loaders::{load_specialist_cost_total, load_stored_routing};
 use super::super::*;
 use super::*;
+
+#[test]
+fn unknown_specialist_cost_persists_unknown_and_reloads_incomplete_total() {
+    // Expected: an unknown successful specialist persists as "unknown" and
+    // reloads as one unknown cost, while the known subtotal remains zero.
+    let db = test_db();
+    let mut outputs = HashMap::new();
+    outputs.insert("specialist".to_string(), "completed output".to_string());
+    let mut costs = HashMap::new();
+    costs.insert("specialist".to_string(), None);
+    persist_specialist_outputs(&db, "unknown-cost-run", &outputs, &costs).unwrap();
+
+    let (known_total, unknown_count) = load_specialist_cost_total(&db, "unknown-cost-run").unwrap();
+    assert_eq!(known_total, 0.0);
+    assert_eq!(unknown_count, 1);
+    let rows = db
+        .run_script(
+            "?[cost] := *gt_specialist_outputs{run_id, agent_key, cost_usd: cost}, run_id = 'unknown-cost-run'",
+            Default::default(),
+            cozo::ScriptMutability::Immutable,
+        )
+        .unwrap();
+    assert_eq!(rows.rows[0][0].get_str(), Some("unknown"));
+    eprintln!(
+        "EVIDENCE #369 specialist BEFORE: usage unknown and prior default stored 0.0; AFTER: persisted cost=unknown, reloaded known_total={known_total}, unknown_specialists={unknown_count}"
+    );
+}
 
 #[test]
 fn test_replay_determinism() {
@@ -220,7 +247,7 @@ fn test_resume_run_completes_missing_specialists_from_checkpoint() {
         "already completed".to_string(),
     );
     let mut costs = HashMap::new();
-    costs.insert("nash-equilibrium-finder".to_string(), 1.25);
+    costs.insert("nash-equilibrium-finder".to_string(), Some(1.25));
     persist_specialist_outputs(&db, &fp.run_id, &completed, &costs).unwrap();
     update_gt_run_status(
         &db,
@@ -230,6 +257,7 @@ fn test_resume_run_completes_missing_specialists_from_checkpoint() {
         "",
         "InProgress",
         0.0,
+        0,
     )
     .unwrap();
 
@@ -315,6 +343,7 @@ fn test_resume_failure_marks_run_partial_in_source_of_truth() {
         "",
         "InProgress",
         0.0,
+        0,
     )
     .unwrap();
 
@@ -381,6 +410,7 @@ fn test_resume_fallback_routing_applies_tier11_policy_gate() {
         "",
         "InProgress",
         0.0,
+        0,
     )
     .unwrap();
 

@@ -97,6 +97,8 @@ pub mod ui_sink_port;
 pub mod v2;
 pub mod verifier_strength;
 pub mod web_api;
+#[cfg(test)]
+include!("web_api_tests.rs");
 mod work_unit_coverage;
 mod work_unit_gate;
 pub mod write_coordinator;

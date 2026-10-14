@@ -296,8 +296,8 @@ async fn execute_prepared_wave_agent(
     let mut result = AgentResult {
         output: response.content,
         tool_use_log: response.tool_uses,
-        tokens_in: response.tokens_in.unwrap_or_default(),
-        tokens_out: response.tokens_out.unwrap_or_default(),
+        tokens_in: response.tokens_in,
+        tokens_out: response.tokens_out,
         cost_usd: 0.0,
         duration: start.elapsed(),
         quality: None,
@@ -446,8 +446,8 @@ async fn run_wave_attempt(
     let mut result = AgentResult {
         output: response.content,
         tool_use_log: response.tool_uses,
-        tokens_in: response.tokens_in.unwrap_or_default(),
-        tokens_out: response.tokens_out.unwrap_or_default(),
+        tokens_in: response.tokens_in,
+        tokens_out: response.tokens_out,
         cost_usd: 0.0,
         duration: start.elapsed(),
         quality: None,

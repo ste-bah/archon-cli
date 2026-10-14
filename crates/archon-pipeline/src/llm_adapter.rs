@@ -399,7 +399,8 @@ impl QaSynthesizer for KbProviderClient {
 
 #[path = "llm_adapter_stream.rs"]
 mod stream;
-use stream::{collect_stream, collect_stream_into};
+pub use stream::collect_stream;
+use stream::collect_stream_into;
 
 #[cfg(test)]
 #[path = "llm_adapter_tests.rs"]

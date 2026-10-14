@@ -22,12 +22,125 @@ fn result(output: &str) -> AgentResult {
     AgentResult {
         output: output.to_string(),
         tool_use_log: Vec::new(),
-        tokens_in: 10,
-        tokens_out: 20,
+        tokens_in: Some(10),
+        tokens_out: Some(20),
         cost_usd: 0.01,
         duration: Duration::from_millis(1),
         quality: None,
     }
+}
+
+#[test]
+fn pipeline_audit_persists_unknown_usage_as_null_and_keeps_reported_zero() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut audit = PipelineAuditRun::start(
+        temp.path(),
+        "session-usage",
+        PipelineType::Research,
+        "usage persistence",
+    )
+    .unwrap();
+
+    let unknown_agent = agent("unknown");
+    let unknown_prompt = audit
+        .record_prompt(0, &unknown_agent, &[], &[], &[])
+        .unwrap();
+    let unknown = AgentResult {
+        tokens_in: None,
+        tokens_out: None,
+        ..result("unknown")
+    };
+    audit
+        .record_agent_completed(0, &unknown_agent, &unknown, Vec::new(), unknown_prompt)
+        .unwrap();
+
+    let zero_agent = agent("zero");
+    let zero_prompt = audit.record_prompt(1, &zero_agent, &[], &[], &[]).unwrap();
+    let zero = AgentResult {
+        tokens_in: Some(0),
+        tokens_out: Some(0),
+        ..result("zero")
+    };
+    audit
+        .record_agent_completed(1, &zero_agent, &zero, Vec::new(), zero_prompt)
+        .unwrap();
+
+    let unknown_record = audit.store().list_agent_records("session-usage").unwrap()[0].clone();
+    let zero_record = audit.store().list_agent_records("session-usage").unwrap()[1].clone();
+    let unknown_json = serde_json::to_value(unknown_record).unwrap();
+    let zero_json = serde_json::to_value(zero_record).unwrap();
+    assert!(unknown_json["tokens_in"].is_null());
+    assert!(unknown_json["tokens_out"].is_null());
+    assert_eq!(zero_json["tokens_in"], 0);
+    assert_eq!(zero_json["tokens_out"], 0);
+}
+
+#[test]
+fn bundle_totals_keep_unknown_agent_counts_separate_from_known_sums() {
+    // Expected: known sums stay numeric, while unknown usage increments the
+    // direction-specific count so consumers can label each sum incomplete.
+    let temp = tempfile::tempdir().unwrap();
+    let mut audit = PipelineAuditRun::start(
+        temp.path(),
+        "session-incomplete-totals",
+        PipelineType::Research,
+        "usage totals",
+    )
+    .unwrap();
+    let mut before_unknown = None;
+    for (ordinal, key, tokens_in, tokens_out) in
+        [(0, "known", Some(7), Some(3)), (1, "unknown", None, None)]
+    {
+        let info = agent(key);
+        let prompt = audit.record_prompt(ordinal, &info, &[], &[], &[]).unwrap();
+        let usage = AgentResult {
+            tokens_in,
+            tokens_out,
+            ..result(key)
+        };
+        audit
+            .record_agent_completed(ordinal, &info, &usage, Vec::new(), prompt)
+            .unwrap();
+        if ordinal == 0 {
+            let known_only = audit
+                .store()
+                .load_state("session-incomplete-totals")
+                .unwrap();
+            assert_eq!(known_only.total_tokens_in, 7);
+            assert_eq!(known_only.total_tokens_out, 3);
+            assert_eq!(known_only.tokens_in_unknown_agents, 0);
+            assert_eq!(known_only.tokens_out_unknown_agents, 0);
+            before_unknown = Some(known_only);
+        }
+    }
+
+    let state = audit
+        .store()
+        .load_state("session-incomplete-totals")
+        .unwrap();
+    assert_eq!(state.total_tokens_in, 7);
+    assert_eq!(state.total_tokens_out, 3);
+    assert_eq!(state.tokens_in_unknown_agents, 1);
+    assert_eq!(state.tokens_out_unknown_agents, 1);
+    let persisted = std::fs::read_to_string(
+        audit
+            .store()
+            .bundle_dir("session-incomplete-totals")
+            .join("state.json"),
+    )
+    .unwrap();
+    let before_unknown = before_unknown.unwrap();
+    eprintln!(
+        "EVIDENCE #369 total BEFORE: persisted known sums in={}/out={} with unknown counts in={}/out={}; ACTION: completed an agent whose counts are unknown; EXPECTED: sums unchanged and both unknown counts increase; AFTER: persisted in={} ({} unknown), out={} ({} unknown). SOURCE: state.json={persisted}",
+        before_unknown.total_tokens_in,
+        before_unknown.total_tokens_out,
+        before_unknown.tokens_in_unknown_agents,
+        before_unknown.tokens_out_unknown_agents,
+        state.total_tokens_in,
+        state.tokens_in_unknown_agents,
+        state.total_tokens_out,
+        state.tokens_out_unknown_agents
+    );
 }
 
 #[test]
@@ -91,6 +204,71 @@ fn rewind_quarantines_stale_agents_and_keeps_bundle_verifiable() {
 
     let verification = verify_bundle(&store, "session-1", false).unwrap();
     assert!(verification.valid, "{:?}", verification.findings);
+}
+
+#[test]
+fn rewind_recomputes_known_sums_and_unknown_counts_from_kept_records() {
+    // Expected: after keeping records 0 and 1, each known sum and each
+    // direction-specific unknown count matches those kept records exactly.
+    let temp = tempfile::tempdir().unwrap();
+    let store = PipelineBundleStore::new(temp.path());
+    store
+        .create(
+            "session-unknown-rewind",
+            PipelineType::Research,
+            "rewind usage",
+        )
+        .unwrap();
+    let mut audit = PipelineAuditRun::resume(temp.path(), "session-unknown-rewind").unwrap();
+
+    for (ordinal, key, tokens_in, tokens_out) in [
+        (0, "in-unknown", None, Some(5)),
+        (1, "out-unknown", Some(7), None),
+        (2, "stale", Some(100), Some(200)),
+    ] {
+        let info = agent(key);
+        let prompt = audit.record_prompt(ordinal, &info, &[], &[], &[]).unwrap();
+        let usage = AgentResult {
+            tokens_in,
+            tokens_out,
+            ..result(key)
+        };
+        audit
+            .record_agent_completed(ordinal, &info, &usage, Vec::new(), prompt)
+            .unwrap();
+    }
+    audit.fail("rewind after partial usage").unwrap();
+
+    rewind_bundle(&store, "session-unknown-rewind", 2, "keep partial usage").unwrap();
+
+    let kept = store.list_agent_records("session-unknown-rewind").unwrap();
+    let state = store.load_state("session-unknown-rewind").unwrap();
+    let expected_tokens_in: u64 = kept.iter().filter_map(|record| record.tokens_in).sum();
+    let expected_tokens_out: u64 = kept.iter().filter_map(|record| record.tokens_out).sum();
+    let expected_unknown_in = kept
+        .iter()
+        .filter(|record| record.tokens_in.is_none())
+        .count() as u64;
+    let expected_unknown_out = kept
+        .iter()
+        .filter(|record| record.tokens_out.is_none())
+        .count() as u64;
+    assert_eq!(state.total_tokens_in, expected_tokens_in);
+    assert_eq!(state.total_tokens_out, expected_tokens_out);
+    assert_eq!(state.tokens_in_unknown_agents, expected_unknown_in);
+    assert_eq!(state.tokens_out_unknown_agents, expected_unknown_out);
+    eprintln!(
+        "EVIDENCE #369 rewind ACTION: kept {} records; EXPECTED sums in={} out={} and unknown counts in={} out={}; ACTUAL state sums in={} out={} and unknown counts in={} out={}; SOURCE: kept agent records",
+        kept.len(),
+        expected_tokens_in,
+        expected_tokens_out,
+        expected_unknown_in,
+        expected_unknown_out,
+        state.total_tokens_in,
+        state.total_tokens_out,
+        state.tokens_in_unknown_agents,
+        state.tokens_out_unknown_agents
+    );
 }
 
 #[test]

@@ -56,7 +56,7 @@ fn parse_message_start() {
             assert_eq!(usage.input_tokens, 100);
             assert_eq!(usage.output_tokens, 0);
             assert!(usage.input_tokens_available);
-            assert!(usage.output_tokens_available);
+            assert!(!usage.output_tokens_available);
             assert!(!usage.cache_creation_input_tokens_available);
             assert!(!usage.cache_read_input_tokens_available);
         }

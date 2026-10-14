@@ -25,9 +25,10 @@ pub struct StageRunOutput {
     pub extension: String,
     pub provider_id: Option<String>,
     pub resolved_model: Option<String>,
-    pub tokens_in: u64,
-    pub tokens_out: u64,
-    pub cost_usd: f64,
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
     #[serde(default)]
     pub tool_uses: Vec<Value>,
 }
@@ -39,11 +40,55 @@ impl StageRunOutput {
             extension: "md".into(),
             provider_id: None,
             resolved_model: None,
-            tokens_in: 0,
-            tokens_out: 0,
-            cost_usd: 0.0,
+            tokens_in: None,
+            tokens_out: None,
+            cost_usd: None,
             tool_uses: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod usage_serialization_tests {
+    use super::StageRunOutput;
+
+    #[test]
+    fn unknown_stage_usage_serializes_as_null() {
+        let value = serde_json::to_value(StageRunOutput::markdown("result"))
+            .expect("stage output serializes");
+
+        assert!(value["tokens_in"].is_null());
+        assert!(value["tokens_out"].is_null());
+        assert!(value["cost_usd"].is_null());
+    }
+
+    #[test]
+    fn legacy_stage_outputs_with_numeric_or_missing_usage_deserialize() {
+        let numeric: StageRunOutput = serde_json::from_value(serde_json::json!({
+            "body": "result",
+            "extension": "md",
+            "provider_id": null,
+            "resolved_model": null,
+            "tokens_in": 12,
+            "tokens_out": 3,
+            "cost_usd": 0.0,
+            "tool_uses": []
+        }))
+        .expect("legacy numeric usage");
+        assert_eq!(numeric.tokens_in, Some(12));
+        assert_eq!(numeric.tokens_out, Some(3));
+
+        let missing: StageRunOutput = serde_json::from_value(serde_json::json!({
+            "body": "result",
+            "extension": "md",
+            "provider_id": null,
+            "resolved_model": null,
+            "tool_uses": []
+        }))
+        .expect("legacy missing usage");
+        assert_eq!(missing.tokens_in, None);
+        assert_eq!(missing.tokens_out, None);
+        assert_eq!(missing.cost_usd, None);
     }
 }
 

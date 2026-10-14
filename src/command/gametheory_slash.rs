@@ -150,9 +150,9 @@ fn open_gametheory_rows_event(db: &DbInstance) -> Result<TuiEvent> {
             title: row[1].get_str().unwrap_or("").to_string(),
             status: row[3].get_str().unwrap_or("").to_string(),
             detail: format!(
-                "{} ${}",
+                "{} {}",
                 row[2].get_str().unwrap_or(""),
-                row[4].get_str().unwrap_or("0.0")
+                format_persisted_cost(row[4].get_str().unwrap_or("unknown"))
             ),
         })
         .collect();
@@ -160,6 +160,41 @@ fn open_gametheory_rows_event(db: &DbInstance) -> Result<TuiEvent> {
         view_id: ViewId::GameTheory,
         rows,
     })
+}
+
+fn format_persisted_cost(value: &str) -> String {
+    if value == "unknown" {
+        value.to_string()
+    } else if let Some(incomplete) = value.strip_prefix("at least ") {
+        let (amount, suffix) = incomplete.split_once(' ').unwrap_or((incomplete, ""));
+        match amount.parse::<f64>() {
+            Ok(amount) if suffix.is_empty() => format!("at least ${amount:.6}"),
+            Ok(amount) => format!("at least ${amount:.6} {suffix}"),
+            Err(_) => value.to_string(),
+        }
+    } else if let Ok(amount) = value.parse::<f64>() {
+        format!("${amount:.6}")
+    } else {
+        value.to_string()
+    }
+}
+
+#[cfg(test)]
+mod persisted_cost_tests {
+    use super::format_persisted_cost;
+
+    #[test]
+    fn persisted_cost_text_keeps_unknown_and_formats_known_or_incomplete_values() {
+        let known = format_persisted_cost("0.250000");
+        let unknown = format_persisted_cost("unknown");
+        let incomplete = format_persisted_cost("at least 0.250000 (2 specialists unknown)");
+        assert_eq!(known, "$0.250000");
+        assert_eq!(unknown, "unknown");
+        assert_eq!(incomplete, "at least $0.250000 (2 specialists unknown)");
+        eprintln!(
+            "EVIDENCE #369 GameTheory cost ACTION: format persisted known, unknown, incomplete values; EXPECTED/ACTUAL: {known}; {unknown}; {incomplete}"
+        );
+    }
 }
 
 fn emit(ctx: &mut CommandContext, msg: String) -> Result<()> {

@@ -290,7 +290,10 @@ async fn run_full(
                 result.routing_decision.skipped_specialists.len()
             );
             println!("Specialist Count:  {}", result.specialist_count);
-            println!("Estimated Cost:    ${:.6}", result.total_cost_usd);
+            println!(
+                "Estimated Cost:    {}",
+                specialist_cost_label(result.total_cost_usd, result.unknown_cost_count)
+            );
             println!("Budget Cap:        ${budget:.2}");
             if let Some(kb) = kb {
                 println!("Knowledge Pack:    {kb}");
@@ -469,7 +472,13 @@ async fn handle_replay(
         println!("==============================");
         println!("Agent:    {}", result.agent_key);
         println!("Status:   {}", result.status);
-        println!("Cost USD: ${:.6}", result.cost_usd);
+        println!(
+            "Cost USD: {}",
+            result
+                .cost_usd
+                .map(|value| format!("${value:.6}"))
+                .unwrap_or_else(|| "unknown".to_string())
+        );
         println!("Output:   {}", result.output_summary);
         return Ok(());
     }
@@ -527,7 +536,10 @@ async fn handle_resume(
         "Skipped Completed:         {}",
         result.skipped_completed_specialists
     );
-    println!("Total Cost USD:             ${:.6}", result.total_cost_usd);
+    println!(
+        "Total Cost USD:             {}",
+        specialist_cost_label(result.total_cost_usd, result.unknown_cost_count)
+    );
     println!("Report Length:              {} words", result.report_words);
     Ok(())
 }
@@ -538,6 +550,14 @@ fn truncate(value: &str, max_chars: usize) -> String {
         truncated.push_str("...");
     }
     truncated
+}
+
+fn specialist_cost_label(known: f64, unknown_specialists: usize) -> String {
+    if unknown_specialists == 0 {
+        format!("${known:.6}")
+    } else {
+        format!("at least ${known:.6} ({unknown_specialists} specialists unknown)")
+    }
 }
 
 fn resolve_tier11_policy(requested: bool) -> Result<bool> {

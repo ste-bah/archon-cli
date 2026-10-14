@@ -324,8 +324,17 @@ impl PipelineAuditRun {
         };
         self.store.write_agent(&self.state.session_id, &record)?;
         self.state.completed_agent_count = ordinal + 1;
-        self.state.total_tokens_in += result.tokens_in;
-        self.state.total_tokens_out += result.tokens_out;
+        // Keep known sums separate from counts of agents with unavailable usage.
+        if let Some(tokens_in) = result.tokens_in {
+            self.state.total_tokens_in += tokens_in;
+        } else {
+            self.state.tokens_in_unknown_agents += 1;
+        }
+        if let Some(tokens_out) = result.tokens_out {
+            self.state.total_tokens_out += tokens_out;
+        } else {
+            self.state.tokens_out_unknown_agents += 1;
+        }
         self.state.total_cost_usd += result.cost_usd;
         self.state.current_agent_key = None;
         self.state.updated_at = Utc::now();

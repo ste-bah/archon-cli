@@ -66,8 +66,8 @@ struct RawTraceExportRow {
     failure_reason: Option<String>,
     prompt_hash: String,
     output_hash: String,
-    tokens_in: u64,
-    tokens_out: u64,
+    tokens_in: Option<u64>,
+    tokens_out: Option<u64>,
     quality_overall: Option<f64>,
     verifier_status: String,
 }
@@ -278,8 +278,8 @@ fn normalize_trace_export_row(trace: RawTraceExportRow) -> WorldTraceRow {
     row.agent = Some(trace.agent_key);
     row.scalar_features = ScalarFeatures {
         attempt_index: Some(trace.attempt as u32),
-        tokens_in: Some(trace.tokens_in),
-        tokens_out: Some(trace.tokens_out),
+        tokens_in: trace.tokens_in,
+        tokens_out: trace.tokens_out,
         quality_overall: trace.quality_overall,
         ..ScalarFeatures::default()
     };
@@ -413,6 +413,17 @@ mod tests {
         assert_eq!(row.scalar_features.tokens_in, Some(10));
         assert!(row.labels.retry);
         assert!(row.labels.verification_needed);
+    }
+
+    #[test]
+    fn trace_export_unknown_counts_remain_unknown() {
+        let input = r#"{"session_id":"s1","agent_key":"implementer","ordinal":2,"phase":1,"action":"agent_attempt","attempt":2,"accepted":false,"failure_reason":"tests failed","prompt_hash":"ph","output_hash":"oh","tokens_in":null,"tokens_out":null,"quality_overall":null,"verifier_status":"unverified"}"#;
+        let summary = normalize_trace_export_jsonl(input);
+
+        assert_eq!(summary.row_count(), 1);
+        let row = &summary.rows[0];
+        assert_eq!(row.scalar_features.tokens_in, None);
+        assert_eq!(row.scalar_features.tokens_out, None);
     }
 
     #[test]

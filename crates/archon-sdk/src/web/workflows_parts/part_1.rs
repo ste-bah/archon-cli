@@ -155,9 +155,9 @@ pub struct WorkflowAgentView {
     pub prompt_created_at: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
-    pub tokens_in: u64,
-    pub tokens_out: u64,
-    pub cost_usd: f64,
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
+    pub cost_usd: Option<f64>,
     pub artifact_id: Option<String>,
     pub artifact_path: Option<String>,
     pub result_preview: Option<String>,
@@ -165,6 +165,47 @@ pub struct WorkflowAgentView {
     #[serde(default)]
     pub recent_public_tool_calls: Vec<WorkflowToolCallPreview>,
     pub output_path: String,
+}
+
+#[cfg(test)]
+mod usage_compatibility_tests {
+    use super::WorkflowAgentView;
+
+    fn legacy_agent_view() -> serde_json::Value {
+        serde_json::json!({
+            "stageId": "stage",
+            "itemId": "item",
+            "status": "completed",
+            "promptPath": null,
+            "inputHash": null,
+            "promptHash": null,
+            "promptCreatedAt": null,
+            "provider": null,
+            "model": null,
+            "costUsd": 0.0,
+            "artifactId": null,
+            "artifactPath": null,
+            "resultPreview": null,
+            "error": null,
+            "recentPublicToolCalls": [],
+            "outputPath": "output.md"
+        })
+    }
+
+    #[test]
+    fn legacy_sdk_views_with_numeric_or_missing_usage_deserialize() {
+        let mut numeric = legacy_agent_view();
+        numeric["tokensIn"] = serde_json::json!(12);
+        numeric["tokensOut"] = serde_json::json!(3);
+        let numeric: WorkflowAgentView = serde_json::from_value(numeric).expect("numeric usage");
+        assert_eq!(numeric.tokens_in, Some(12));
+        assert_eq!(numeric.tokens_out, Some(3));
+
+        let missing: WorkflowAgentView =
+            serde_json::from_value(legacy_agent_view()).expect("missing usage");
+        assert_eq!(missing.tokens_in, None);
+        assert_eq!(missing.tokens_out, None);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

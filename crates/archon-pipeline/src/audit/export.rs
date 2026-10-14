@@ -16,8 +16,8 @@ pub struct TraceExportRow {
     pub failure_reason: Option<String>,
     pub prompt_hash: String,
     pub output_hash: String,
-    pub tokens_in: u64,
-    pub tokens_out: u64,
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
     pub quality_overall: Option<f64>,
     pub verifier_status: String,
 }

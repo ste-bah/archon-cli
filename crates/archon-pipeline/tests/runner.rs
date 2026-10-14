@@ -335,8 +335,8 @@ async fn progress_facades_keep_concurrent_run_channels_isolated() {
     let result = AgentResult {
         output: "done".into(),
         tool_use_log: Vec::new(),
-        tokens_in: 0,
-        tokens_out: 0,
+        tokens_in: Some(0),
+        tokens_out: Some(0),
         cost_usd: 0.0,
         duration: Duration::ZERO,
         quality: None,
@@ -1099,12 +1099,14 @@ async fn test_quality_score_stored() {
 
         // Token counts should reflect what our mock returned.
         assert_eq!(
-            agent_result.tokens_in, 100,
+            agent_result.tokens_in,
+            Some(100),
             "Agent {} tokens_in mismatch",
             agent_info.key,
         );
         assert_eq!(
-            agent_result.tokens_out, 50,
+            agent_result.tokens_out,
+            Some(50),
             "Agent {} tokens_out mismatch",
             agent_info.key,
         );

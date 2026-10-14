@@ -1,5 +1,126 @@
 use super::*;
 
+#[test]
+fn agent_output_keeps_unknown_usage_null_and_reported_zero_zero() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = WorkflowStore::new(temp.path());
+    let run = store
+        .create_run(crate::WorkflowSpec {
+            schema: crate::spec::WORKFLOW_SCHEMA.into(),
+            name: "usage-persistence".into(),
+            task: "usage-persistence".into(),
+            target_repository_root: None,
+            max_parallelism: 1,
+            max_agents: 1,
+            stages: Vec::new(),
+            permissions: Default::default(),
+            learning_hooks: Vec::new(),
+        })
+        .unwrap();
+    let run_id = run.id.as_str();
+    let output = StageRunOutput::markdown("result");
+    record_agent_output(
+        &store,
+        run_id,
+        "stage",
+        "unknown",
+        Some(&output),
+        None,
+        true,
+        None,
+    )
+    .unwrap();
+
+    let unknown: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            store
+                .run_dir(run_id)
+                .join("agent-outputs/stage/unknown.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(unknown["tokens_in"].is_null());
+    assert!(unknown["tokens_out"].is_null());
+    assert!(unknown["cost_usd"].is_null());
+    assert!(!crate::events::contains_forbidden_field(&unknown));
+
+    let mut zero = output;
+    zero.tokens_in = Some(0);
+    zero.tokens_out = Some(0);
+    record_agent_output(
+        &store,
+        run_id,
+        "stage",
+        "zero",
+        Some(&zero),
+        None,
+        true,
+        None,
+    )
+    .unwrap();
+    let reported_zero: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(store.run_dir(run_id).join("agent-outputs/stage/zero.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reported_zero["tokens_in"], 0);
+    assert_eq!(reported_zero["tokens_out"], 0);
+    assert!(!crate::events::contains_forbidden_field(&reported_zero));
+
+    let mut mixed = StageRunOutput::markdown("mixed usage");
+    mixed.tokens_in = Some(19);
+    mixed.tokens_out = None;
+    record_agent_output(
+        &store,
+        run_id,
+        "stage",
+        "mixed",
+        Some(&mixed),
+        None,
+        true,
+        None,
+    )
+    .unwrap();
+    // Read the persisted public record independently of the serializer input:
+    // this covers the complete sanitize + redaction + write path.
+    let mixed_record: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(store.run_dir(run_id).join("agent-outputs/stage/mixed.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(mixed_record["tokens_in"], 19);
+    assert!(mixed_record["tokens_out"].is_null());
+    assert!(!crate::events::contains_forbidden_field(&mixed_record));
+
+    let string_usage = crate::events::sanitize_value(serde_json::json!({
+        "tokens_in": "credential-shaped value",
+        "tokens_out": null
+    }));
+    assert!(string_usage.get("tokens_in").is_none());
+    assert!(string_usage["tokens_out"].is_null());
+    println!(
+        "EVIDENCE #369 sanitize-redact BEFORE: mixed public output tokens_in=19/tokens_out=null and string tokens_in; AFTER: persisted tokens_in={}, tokens_out={}, string-key-present={}",
+        mixed_record["tokens_in"],
+        mixed_record["tokens_out"],
+        string_usage.get("tokens_in").is_some()
+    );
+
+    let detail = crate::web_api::detail(&store, run_id).unwrap();
+    let unknown_view = detail
+        .agents
+        .iter()
+        .find(|agent| agent.item_id == "unknown")
+        .expect("unknown usage record remains visible");
+    assert_eq!(unknown_view.tokens_in, None);
+    assert_eq!(unknown_view.tokens_out, None);
+    let zero_view = detail
+        .agents
+        .iter()
+        .find(|agent| agent.item_id == "zero")
+        .expect("reported zero record remains visible");
+    assert_eq!(zero_view.tokens_in, Some(0));
+    assert_eq!(zero_view.tokens_out, Some(0));
+}
+
 #[cfg(unix)]
 fn mode(path: &std::path::Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;

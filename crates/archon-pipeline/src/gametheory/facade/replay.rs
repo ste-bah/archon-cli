@@ -110,7 +110,7 @@ pub async fn replay_single_specialist_with_learning(
                 message: e.to_string(),
             },
         )?;
-        let cost = outcome.costs_usd.get(agent_key).copied().unwrap_or(0.0);
+        let cost = outcome.costs_usd.get(agent_key).copied().flatten();
         return Ok(ReplaySpecialistResult {
             run_id: run_id.to_string(),
             agent_key: agent_key.to_string(),
@@ -137,7 +137,7 @@ pub async fn replay_single_specialist_with_learning(
         agent_key: agent_key.to_string(),
         status: "failed".to_string(),
         output_summary: summarize_output(&message),
-        cost_usd: 0.0,
+        cost_usd: None,
         memory_recall: outcome.memory_audits,
     })
 }
@@ -279,7 +279,18 @@ pub async fn resume_run_from_checkpoint(
     persist_sections(db, run_id, &final_result.sections).map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
     })?;
-    let total_cost_usd = load_specialist_cost_total(db, run_id)?;
+    let (total_cost_usd, unknown_cost_count) = load_specialist_cost_total(db, run_id)?;
+    let report = if unknown_cost_count > 0 {
+        format!(
+            "Estimated specialist cost: at least ${total_cost_usd:.6} ({unknown_cost_count} specialists unknown).\n\n{}",
+            final_result.report
+        )
+    } else {
+        format!(
+            "Estimated specialist cost: ${total_cost_usd:.6}.\n\n{}",
+            final_result.report
+        )
+    };
     let status = if outcome.budget_exceeded {
         "BudgetExceeded"
     } else if outcome.failed.is_empty() {
@@ -287,7 +298,7 @@ pub async fn resume_run_from_checkpoint(
     } else {
         "partial"
     };
-    persist_final_report(db, run_id, &final_result.report, total_cost_usd).map_err(|e| {
+    persist_final_report(db, run_id, &report, total_cost_usd, unknown_cost_count).map_err(|e| {
         GameTheoryError::Storage {
             message: e.to_string(),
         }
@@ -304,6 +315,7 @@ pub async fn resume_run_from_checkpoint(
         &Utc::now().to_rfc3339(),
         status,
         total_cost_usd,
+        unknown_cost_count,
     )
     .map_err(|e| GameTheoryError::Storage {
         message: e.to_string(),
@@ -318,6 +330,7 @@ pub async fn resume_run_from_checkpoint(
             "resumed": outcome.outputs.len(),
             "failed": outcome.failed.len(),
             "total_cost_usd": total_cost_usd,
+            "unknown_cost_count": unknown_cost_count,
         }),
     )
     .map_err(|e| GameTheoryError::Storage {
@@ -331,6 +344,7 @@ pub async fn resume_run_from_checkpoint(
         failed_specialists: outcome.failed.len(),
         status: status.to_string(),
         total_cost_usd,
+        unknown_cost_count,
         report_words: final_result.report.split_whitespace().count(),
     })
 }

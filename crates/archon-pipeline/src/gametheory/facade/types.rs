@@ -31,8 +31,9 @@ pub(super) struct SpecialistExecutionOutcome {
     pub(super) outputs: HashMap<String, String>,
     pub(super) failed: Vec<(String, String)>,
     pub(super) memory_audits: Vec<MemoryRecallAudit>,
-    pub(super) costs_usd: HashMap<String, f64>,
+    pub(super) costs_usd: HashMap<String, Option<f64>>,
     pub(super) total_cost_usd: f64,
+    pub(super) unknown_cost_count: usize,
     pub(super) tier_costs_usd: BTreeMap<u8, f64>,
     pub(super) budget_exceeded: bool,
     pub(super) max_observed_concurrent: usize,
@@ -50,7 +51,7 @@ pub(super) struct SpecialistCallOutput {
     pub(super) output: Option<String>,
     pub(super) error: Option<String>,
     pub(super) audit: MemoryRecallAudit,
-    pub(super) cost_usd: f64,
+    pub(super) cost_usd: Option<f64>,
 }
 
 /// Result of a full pipeline run.
@@ -67,8 +68,10 @@ pub struct FullPipelineResult {
     pub memory_recall: Vec<MemoryRecallAudit>,
     /// Total estimated model cost for successful specialist calls.
     pub total_cost_usd: f64,
+    /// Number of successful specialist calls whose usage was incomplete, making cost totals lower bounds.
+    pub unknown_cost_count: usize,
     /// Per-specialist estimated model cost.
-    pub specialist_costs_usd: HashMap<String, f64>,
+    pub specialist_costs_usd: HashMap<String, Option<f64>>,
     /// Per-tier estimated model cost, keyed by game-theory tier.
     pub tier_costs_usd: BTreeMap<u8, f64>,
     /// Maximum observed specialist concurrency for this run.
@@ -84,7 +87,7 @@ pub struct ReplaySpecialistResult {
     pub agent_key: String,
     pub status: String,
     pub output_summary: String,
-    pub cost_usd: f64,
+    pub cost_usd: Option<f64>,
     pub memory_recall: Vec<MemoryRecallAudit>,
 }
 
@@ -103,6 +106,7 @@ pub struct ResumeRunResult {
     pub failed_specialists: usize,
     pub status: String,
     pub total_cost_usd: f64,
+    pub unknown_cost_count: usize,
     pub report_words: usize,
 }
 

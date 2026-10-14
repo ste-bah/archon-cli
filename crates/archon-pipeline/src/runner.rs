@@ -89,8 +89,8 @@ pub struct ToolUseEntry {
 pub struct AgentResult {
     pub output: String,
     pub tool_use_log: Vec<ToolUseEntry>,
-    pub tokens_in: u64,
-    pub tokens_out: u64,
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
     pub cost_usd: f64,
     pub duration: Duration,
     pub quality: Option<QualityScore>,

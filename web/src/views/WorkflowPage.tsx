@@ -363,11 +363,19 @@ function AgentRow({ agent, onAction }: { agent: WorkflowAgentView; onAction: (ac
     agent.promptHash ? `prompt ${shortHash(agent.promptHash)}` : null,
     agent.promptPath ?? null,
   ].filter(Boolean).join(" · ");
+  const tokenLabel =
+    agent.tokensIn == null || agent.tokensOut == null
+      ? "unknown tokens"
+      : `${agent.tokensIn + agent.tokensOut} tokens`;
+  const costLabel =
+    agent.costUsd == null ? "unknown cost" : `$${agent.costUsd.toFixed(4)}`;
   return (
     <div className="pipeline-row">
       <div>
         <strong>{agent.stageId} / {agent.itemId}</strong>
-        <span>{agent.provider ?? "provider"} · {agent.model ?? "model"} · {agent.tokensIn + agent.tokensOut} tokens</span>
+        <span>
+          {agent.provider ?? "provider"} · {agent.model ?? "model"} · {tokenLabel} · {costLabel}
+        </span>
         {promptMeta && <small>{promptMeta}</small>}
         {agent.resultPreview && <small>{agent.resultPreview}</small>}
         {agent.error && <small>{agent.error}</small>}

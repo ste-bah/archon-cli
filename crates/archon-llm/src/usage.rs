@@ -209,6 +209,40 @@ mod tests {
     }
 
     #[test]
+    fn explicit_zero_start_remains_available() {
+        let mut acc = UsageAccumulator::default();
+        acc.record_start(&Usage {
+            input_tokens: 0,
+            input_tokens_available: true,
+            ..Default::default()
+        });
+
+        println!(
+            "EVIDENCE #369 generic-explicit-zero BEFORE: usage input=0 available=true; AFTER: accumulated input={} available={}",
+            acc.billable_input_tokens, acc.input_tokens_available
+        );
+        assert_eq!(acc.billable_input_tokens, 0);
+        assert!(acc.input_tokens_available);
+    }
+
+    #[test]
+    fn positive_reported_count_is_measured() {
+        let mut acc = UsageAccumulator::default();
+        acc.record_delta(&Usage {
+            input_tokens: 7,
+            input_tokens_available: true,
+            ..Default::default()
+        });
+
+        println!(
+            "EVIDENCE #369 positive-count BEFORE: usage input=7 available=true; AFTER: accumulated input={} available={}",
+            acc.billable_input_tokens, acc.input_tokens_available
+        );
+        assert_eq!(acc.billable_input_tokens, 7);
+        assert!(acc.input_tokens_available);
+    }
+
+    #[test]
     fn accumulator_marks_overflowed_totals_unavailable() {
         let mut acc = UsageAccumulator::default();
         acc.record_start(&Usage {
@@ -399,6 +433,56 @@ data: {\"type\": \"message_stop\"}\n\n";
         }
         assert_eq!(acc.billable_input_tokens, 2 * 17256);
         assert_eq!(acc.output_tokens, 2 * 27);
+    }
+
+    #[test]
+    fn a_zero_only_start_is_unknown_until_a_later_count_arrives() {
+        let mut acc = UsageAccumulator::default();
+        const ZERO_ONLY_STREAM: &str = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_zero\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"proxy\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+        for (event, data) in crate::streaming::split_sse_lines(ZERO_ONLY_STREAM) {
+            acc.record_event(&crate::streaming::parse_sse_event(event, data).unwrap());
+        }
+        println!(
+            "EVIDENCE #369 start-zero-only BEFORE: Anthropic-style message_start wire input_tokens=0; AFTER: parser+accumulator input={} available={}",
+            acc.billable_input_tokens, acc.input_tokens_available
+        );
+        assert_eq!(acc.billable_input_tokens, 0);
+        assert!(!acc.input_tokens_available);
+
+        for (event, data) in crate::streaming::split_sse_lines(CAPTURED_PROXY_STREAM) {
+            acc.record_event(&crate::streaming::parse_sse_event(event, data).unwrap());
+        }
+        println!(
+            "EVIDENCE #369 start-zero-then-delta BEFORE: input unknown; AFTER: accumulated input={} available={}",
+            acc.billable_input_tokens, acc.input_tokens_available
+        );
+        assert_eq!(acc.billable_input_tokens, 17256);
+        assert!(acc.input_tokens_available);
+    }
+
+    #[test]
+    fn a_placeholder_output_zero_at_start_is_unknown_without_a_delta() {
+        const OUTPUT_ZERO_ONLY_STREAM: &str = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_zero\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"proxy\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":12,\"output_tokens\":0}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+        let mut acc = UsageAccumulator::default();
+        for (event, data) in crate::streaming::split_sse_lines(OUTPUT_ZERO_ONLY_STREAM) {
+            acc.record_event(&crate::streaming::parse_sse_event(event, data).unwrap());
+        }
+
+        println!(
+            "EVIDENCE #369 output-start-zero BEFORE: message_start output_tokens=0 with no message_delta; AFTER: accumulated output={} available={}",
+            acc.output_tokens, acc.output_tokens_available
+        );
+        assert_eq!(acc.output_tokens, 0);
+        assert!(!acc.output_tokens_available);
+
+        // A later delta explicitly reporting zero is measured usage.
+        const REPORTED_OUTPUT_ZERO_STREAM: &str = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_zero\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"proxy\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":12,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":12,\"output_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+        let mut measured_zero = UsageAccumulator::default();
+        for (event, data) in crate::streaming::split_sse_lines(REPORTED_OUTPUT_ZERO_STREAM) {
+            measured_zero.record_event(&crate::streaming::parse_sse_event(event, data).unwrap());
+        }
+        assert_eq!(measured_zero.output_tokens, 0);
+        assert!(measured_zero.output_tokens_available);
     }
 
     #[test]

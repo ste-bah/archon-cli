@@ -60,8 +60,8 @@ fn make_agent_result(output: &str) -> AgentResult {
     AgentResult {
         output: output.to_string(),
         tool_use_log: Vec::new(),
-        tokens_in: 100,
-        tokens_out: 200,
+        tokens_in: Some(100),
+        tokens_out: Some(200),
         cost_usd: 0.01,
         duration: Duration::from_millis(500),
         quality: None,

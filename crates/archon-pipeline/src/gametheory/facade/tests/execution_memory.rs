@@ -2,6 +2,38 @@ use super::super::*;
 use super::*;
 
 #[test]
+fn real_specialist_execution_keeps_unknown_usage_cost_unknown() {
+    // Expected: real specialist execution with one unavailable usage direction
+    // yields no cost estimate and records an unknown cost instead of $0.0.
+    let llm = CapturingLlmClient::with_unknown_usage("specialist output");
+    let routing = RoutingDecision {
+        run_id: "run-unknown-cost".into(),
+        fingerprint_id: "fp-unknown-cost".into(),
+        enabled_specialists: vec!["nash-equilibrium-finder".into()],
+        skipped_specialists: vec![],
+        evaluated_conditions: vec![],
+        created_at: "2026-01-01T00:00:00Z".into(),
+    };
+    let outcome = block_on(execute_specialists_real_with_options(
+        &llm,
+        &routing,
+        &test_fingerprint("fp-unknown-cost"),
+        "Two firms choose prices.",
+        &GameTheoryMemoryContext::default(),
+        &GameTheoryRunOptions::default(),
+        None,
+    ))
+    .unwrap();
+    assert_eq!(outcome.costs_usd["nash-equilibrium-finder"], None);
+    assert_eq!(outcome.unknown_cost_count, 1);
+    assert_eq!(outcome.total_cost_usd, 0.0);
+    eprintln!(
+        "EVIDENCE #369 specialist ACTION: executed a successful specialist with tokens_in=None and tokens_out=Some(12); EXPECTED: unknown estimate; ACTUAL: cost=None, known subtotal={}, unknown specialists={}",
+        outcome.total_cost_usd, outcome.unknown_cost_count
+    );
+}
+
+#[test]
 fn test_specialist_fixture_outputs_non_empty() {
     let db = test_db();
     let fp = block_on(classify(
@@ -277,7 +309,7 @@ fn test_cost_tracked_per_specialist() {
     ))
     .unwrap();
 
-    let cost = outcome.costs_usd["nash-equilibrium-finder"];
+    let cost = outcome.costs_usd["nash-equilibrium-finder"].unwrap();
     assert!(cost > 0.0);
     assert!((outcome.total_cost_usd - cost).abs() < f64::EPSILON);
     assert!((outcome.tier_costs_usd[&2] - cost).abs() < f64::EPSILON);

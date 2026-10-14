@@ -70,8 +70,17 @@ pub fn rewind_bundle(
         .filter(|record| record.ordinal < keep_count)
         .collect::<Vec<_>>();
     state.completed_agent_count = kept.len();
-    state.total_tokens_in = kept.iter().map(|record| record.tokens_in).sum();
-    state.total_tokens_out = kept.iter().map(|record| record.tokens_out).sum();
+    // Recompute known sums and unknown-agent counts together for the kept records.
+    state.total_tokens_in = kept.iter().filter_map(|record| record.tokens_in).sum();
+    state.total_tokens_out = kept.iter().filter_map(|record| record.tokens_out).sum();
+    state.tokens_in_unknown_agents = kept
+        .iter()
+        .filter(|record| record.tokens_in.is_none())
+        .count() as u64;
+    state.tokens_out_unknown_agents = kept
+        .iter()
+        .filter(|record| record.tokens_out.is_none())
+        .count() as u64;
     state.total_cost_usd = kept.iter().map(|record| record.cost_usd).sum();
     state.status = BundleStatus::Failed;
     state.current_agent_key = None;

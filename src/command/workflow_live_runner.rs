@@ -217,8 +217,8 @@ impl WorkflowStageRunner for PipelineWorkflowRunner {
         let mut output = StageRunOutput::markdown(response.content);
         output.provider_id = Some(provider_id);
         output.resolved_model = Some(resolved_model);
-        output.tokens_in = response.tokens_in.unwrap_or_default();
-        output.tokens_out = response.tokens_out.unwrap_or_default();
+        output.tokens_in = response.tokens_in;
+        output.tokens_out = response.tokens_out;
         output.tool_uses = response
             .tool_uses
             .into_iter()

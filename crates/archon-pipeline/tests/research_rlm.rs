@@ -34,8 +34,8 @@ fn agent_result(output: &str) -> AgentResult {
     AgentResult {
         output: output.to_string(),
         tool_use_log: Vec::new(),
-        tokens_in: 0,
-        tokens_out: 0,
+        tokens_in: Some(0),
+        tokens_out: Some(0),
         cost_usd: 0.0,
         duration: Duration::from_millis(1),
         quality: None,
