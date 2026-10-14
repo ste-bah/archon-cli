@@ -267,8 +267,10 @@ async fn repeated_mistyped_author_context_path_is_withdrawn_without_window_renew
         first_tool_result.contains("File does not exist"),
         "{first_tool_result}"
     );
+    let mistyped_json = serde_json::to_string(&mistyped.to_string_lossy().to_string()).unwrap();
+    let mistyped_json_contents = &mistyped_json[1..mistyped_json.len() - 1];
     assert!(
-        first_tool_result.contains(&mistyped.to_string_lossy().to_string()),
+        first_tool_result.contains(mistyped_json_contents),
         "{first_tool_result}"
     );
     let guard = runner.tool_context.workflow_read_guard.as_ref().unwrap();
