@@ -85,11 +85,20 @@ async fn run_unwatched(
 ) -> CommandRun {
     let started = Instant::now();
     let env = dispatch.host_command_env(worktree).await;
+    let resource_limits = env.resource_limits.clone();
     let environment =
         match crate::acceptance_check_environment::CommandEnvironment::capture_with_dispatch(
             policy, &env.vars,
         ) {
-            Ok(environment) => environment.with_remedy(remedy),
+            Ok(environment) => {
+                let environment = environment.with_remedy(remedy);
+                match resource_limits.as_ref() {
+                    Some(limits) => {
+                        environment.with_workflow_resource_limits(limits, command, worktree)
+                    }
+                    None => environment,
+                }
+            }
             Err(error) => {
                 return CommandRun {
                     error: Some(error),

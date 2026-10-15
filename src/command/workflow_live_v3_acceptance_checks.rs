@@ -64,6 +64,7 @@ fn direct_site(context: &StageContext) -> DirectSite {
         policy: context.binding.as_ref().map(|binding| {
             archon_workflow::acceptance_check_environment::CheckPolicy::configured(&binding.policy)
         }),
+        resource_limits: Some(context.cargo_limits.clone()),
         target: None,
         fresh_home: false,
         timeout_secs: context.binding.as_ref().map_or(

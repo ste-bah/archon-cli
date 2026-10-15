@@ -1,7 +1,7 @@
 //! Owned observation subprocess. Parent keeps stdin open as a liveness pipe.
 use archon_workflow::acceptance_scratch::{
-    OBSERVATION_STALLED, ObservationResult, ScratchPolicy, observation_stall,
-    observe_commands_cancellable,
+    OBSERVATION_STALLED, ObservationResult, ObserveHooks, ScratchPolicy, observation_stall,
+    observe_commands_hooked,
 };
 use archon_workflow::acceptance_world::{AcceptanceCommandKind, FrozenCommandRef};
 use archon_workflow::task_set_contract::{
@@ -44,6 +44,9 @@ pub(crate) struct Request {
     pub pin_path: PathBuf,
     pub expected_pin_digest: String,
     pub evidence: PathBuf,
+    /// The run's resolved tool resource limits, separate from the allowlist.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource_limits: Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
 }
 pub(crate) fn validate_selected(
     request: &Request,
@@ -154,7 +157,13 @@ async fn serve() -> WorkflowResult<()> {
         .map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?;
     let _lease = acquire_lease(&lock_root, &identity.to_string_lossy())?;
     let (contract, digest, refs) = validate_selected(&request, &selection)?;
-    let result = observe_commands_cancellable(
+    let hooks = request
+        .resource_limits
+        .clone()
+        .map_or_else(ObserveHooks::default, |limits| {
+            ObserveHooks::default().with_resource_limits(limits)
+        });
+    let result = observe_commands_hooked(
         &request.policy,
         &request.source_commit,
         &contract,
@@ -162,6 +171,7 @@ async fn serve() -> WorkflowResult<()> {
         &refs,
         &request.evidence,
         cancel,
+        &hooks,
     )
     .await?;
     // #356: a phase or git child that made no progress is the host's, and

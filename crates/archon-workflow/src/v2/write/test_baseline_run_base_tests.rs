@@ -14,6 +14,7 @@ use crate::{WorkflowError, WorkflowResult, WorkflowV2Result};
 /// A host whose runner environment puts a fake `cargo` first on `PATH`.
 pub(crate) struct FakeCargo {
     pub(crate) bin: PathBuf,
+    pub(crate) resource_limits: Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
 }
 
 #[async_trait::async_trait]
@@ -25,6 +26,7 @@ impl WorkflowAgentDispatch for FakeCargo {
         let path = std::env::var("PATH").unwrap_or_default();
         HostCommandEnv {
             vars: vec![("PATH".into(), format!("{}:{path}", self.bin.display()))],
+            resource_limits: self.resource_limits.clone(),
             hold: None,
         }
     }
@@ -118,7 +120,15 @@ pub(crate) fn world(dir: &Path) -> (PathBuf, String, FakeCargo, PathBuf) {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    (repo, base, FakeCargo { bin }, counter)
+    (
+        repo,
+        base,
+        FakeCargo {
+            bin,
+            resource_limits: None,
+        },
+        counter,
+    )
 }
 
 pub(crate) fn runs(counter: &Path) -> usize {

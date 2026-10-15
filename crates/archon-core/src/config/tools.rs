@@ -281,7 +281,11 @@ mod tests {
     fn auto_build_jobs_resolves_to_at_least_one() {
         let cfg = CargoResourceConfig::default();
         assert_eq!(cfg.build_jobs, 0, "0 is the auto sentinel");
-        assert!(cfg.resolved_build_jobs() >= 1, "cargo rejects a jobs of 0");
+        assert_eq!(
+            cfg.to_limits().build_jobs,
+            archon_tools::workflow_resource_env::CargoResourceLimits::default().build_jobs,
+            "the zero sentinel must resolve through the same auto calculation as Bash",
+        );
     }
 
     #[test]

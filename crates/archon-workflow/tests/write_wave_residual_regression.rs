@@ -43,6 +43,7 @@ impl WorkflowAgentDispatch for Shell {
     async fn host_command_env(&self, _: &Path) -> HostCommandEnv {
         HostCommandEnv {
             vars: Vec::new(),
+            resource_limits: None,
             hold: None,
         }
     }

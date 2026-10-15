@@ -107,6 +107,7 @@ fn running_run(root: &Path) -> (WorkflowStore, String) {
                 script_args: None,
                 governed_learning_context: Vec::new(),
                 generated_config: None,
+                cargo_resource_limits: None,
                 tuning_decisions: Vec::new(),
                 shape_decisions: Vec::new(),
                 script_lifecycle: Some(false),

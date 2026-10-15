@@ -107,19 +107,21 @@ pub(super) fn skeleton_check_findings(
 /// leaves a check unproven, the freeze is
 /// [`FreezeIncomplete`](crate::command::workflow_freeze_budget::FreezeIncomplete)
 /// instead: no finding of a partial probe is final.
-pub(super) async fn pre_implementation_findings(
+pub(super) async fn pre_implementation_findings_with_limits(
     project_root: &Path,
     tasks_root: &Path,
     prd_path: &Path,
     contract: &AcceptanceContract,
     resume: &crate::command::workflow_freeze_budget::FreezeResume,
+    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<PreImplementation> {
     use super::executability::{ExecutabilityProbe, HostProbe};
     use archon_workflow::task_set_contract::JudgeDecision;
     let _ = prd_path;
     // The freeze-time probe carries the task set's own baseline; when there
     // is none it says so among its diagnostics, printed below.
-    let probe = HostProbe::for_task_set(project_root, tasks_root).with_resume(resume);
+    let probe = HostProbe::for_task_set_with_limits(project_root, tasks_root, resource_limits)
+        .with_resume(resume);
     let accepted: BTreeSet<String> = (contract.acceptance.iter())
         .chain(&contract.supplementary)
         .filter(|entry| entry.judgment.verdict == JudgeDecision::Accepted)
@@ -188,6 +190,25 @@ pub(super) async fn pre_implementation_findings(
 pub(crate) struct PreImplementation {
     pub(crate) findings: Vec<GateFinding>,
     pub(crate) baseline: Option<super::executability::BaselineRuns>,
+}
+
+#[cfg(test)]
+pub(super) async fn pre_implementation_findings(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    contract: &AcceptanceContract,
+    resume: &crate::command::workflow_freeze_budget::FreezeResume,
+) -> Result<PreImplementation> {
+    pre_implementation_findings_with_limits(
+        project_root,
+        tasks_root,
+        prd_path,
+        contract,
+        resume,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
 }
 
 #[cfg(test)]

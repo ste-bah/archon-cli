@@ -44,6 +44,8 @@ pub struct DirectSite {
     /// The configured policy, when a section is configured (a floor at a
     /// scratch stage); `None` is the default policy of a site with none.
     pub policy: Option<CheckPolicy>,
+    /// Resolved run configuration applied at the process boundary.
+    pub resource_limits: Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
     /// The site's own build directory, when it has one (a probe's copy).
     pub target: Option<PathBuf>,
     /// A fresh HOME per check (a probe's copy), else the host's (the live
@@ -155,6 +157,7 @@ impl DirectSite {
             project: &self.project,
             repository: &self.repository,
             environment,
+            resource_limits: self.resource_limits.clone(),
             audit_root: None,
             audit_target: None,
             scratch_bytes: u64::MAX,
@@ -317,6 +320,7 @@ mod tests {
             project: project.to_path_buf(),
             host: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
             policy: None,
+            resource_limits: None,
             target: None,
             fresh_home: false,
             timeout_secs: 20,

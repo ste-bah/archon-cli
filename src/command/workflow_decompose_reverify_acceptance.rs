@@ -174,10 +174,12 @@ pub(super) async fn reverify_checks(
         &std::fs::read(task_root.join(TASK_SKELETON_FILE))
             .with_context(|| format!("reading {}", task_root.join(TASK_SKELETON_FILE).display()))?,
     )?;
-    let probe = crate::command::workflow_task_set::executability::HostProbe::for_task_set(
-        project_root,
-        task_root,
-    );
+    let probe =
+        crate::command::workflow_task_set::executability::HostProbe::for_task_set_with_limits(
+            project_root,
+            task_root,
+            config.tools.cargo.to_limits(),
+        );
     let (evidence, commit, missing, mut baseline_findings) = if accepted_ids.is_empty() {
         (Vec::new(), None, BTreeMap::new(), BTreeMap::new())
     } else {

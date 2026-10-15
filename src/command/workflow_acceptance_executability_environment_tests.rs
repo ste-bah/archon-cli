@@ -106,3 +106,42 @@ async fn a_direct_check_gets_the_allowlist_and_no_operator_secret() {
     }
     assert_eq!(listed["PATH"], host()["PATH"]);
 }
+
+#[tokio::test]
+async fn project_cargo_limits_reach_the_host_probe_check_spawn() {
+    let trees = trees(&[(
+        "AC-E-003",
+        "test \"$CARGO_BUILD_JOBS\" = 3",
+        TrustedCwd::RepoRoot,
+    )]);
+    std::fs::write(
+        trees.repo.join("Cargo.toml"),
+        "[package]\nname='fixture'\nversion='0.1.0'\nedition='2021'\n",
+    )
+    .unwrap();
+    let user = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(user.path(), "[tools.cargo]\nbuild_jobs = 5\n").unwrap();
+    let archon_dir = trees.set.project.path().join(".archon");
+    std::fs::create_dir_all(&archon_dir).unwrap();
+    std::fs::write(
+        archon_dir.join("config.toml"),
+        "[tools.cargo]\nbuild_jobs = 3\n",
+    )
+    .unwrap();
+    let resolved = archon_core::config_layers::load_layered_config(
+        Some(user.path()),
+        trees.set.project.path(),
+        None,
+        None,
+    )
+    .unwrap();
+    let probe = HostProbe::at_with_limits(
+        trees.set.project.path().to_path_buf(),
+        trees.repo.clone(),
+        None,
+        resolved.tools.cargo.to_limits(),
+    );
+    let results = run_env(&probe, &trees).await;
+    assert_eq!(results.len(), 1, "{results:?}");
+    assert_eq!(results[0].exit_code, Some(0), "{results:?}");
+}

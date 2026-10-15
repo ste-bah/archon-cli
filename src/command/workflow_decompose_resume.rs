@@ -440,6 +440,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         run.spec.target_repository_root.as_deref().map(Path::new),
         ledger.as_ref(),
         client.as_ref(),
+        config.tools.cargo.to_limits(),
     )
     .await?;
     execution_lease.record_executor()?;

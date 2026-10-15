@@ -1,11 +1,3 @@
-use std::{
-    collections::BTreeMap,
-    fs::{self, OpenOptions},
-    io::Write,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
-
 use anyhow::Result;
 use archon_core::config::GeneratedWorkflowConfig;
 use archon_workflow::{
@@ -17,6 +9,13 @@ use archon_workflow::{
     WorkflowV2EvidenceKind, WorkflowV2FanoutReport, WorkflowV2HostCall, WorkflowV2HostMethod,
     WorkflowV2RejectedOutput, WorkflowV2ResidualGap, WorkflowV2Result, WorkflowV2ResultStore,
     WorkflowV2Scheduler, WorkflowV2SchedulerConfig, WorkflowV2Status, workflow_scaffold_hash,
+};
+use std::{
+    collections::BTreeMap,
+    fs::{self, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 
 // Host side of `archon_workflow::agent_dispatch_port`; not `workflow_*`: see module doc.
@@ -67,6 +66,7 @@ use workflow_live_v2_metadata::{
 pub(super) struct WorkflowV2ScriptRuntime {
     pub(super) target_repository_root: Option<String>,
     pub(super) generated_config: GeneratedWorkflowConfig,
+    pub(super) cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 }
 
 #[cfg(test)]
@@ -241,6 +241,7 @@ export default async function workflow(w) {
                     script_args: None,
                     governed_learning_context: Vec::new(),
                     generated_config: None,
+                    cargo_resource_limits: None,
                     tuning_decisions: Vec::new(),
                     shape_decisions: Vec::new(),
                     script_lifecycle: Some(true),
@@ -439,62 +440,8 @@ mod branch_cache_tests {
 }
 
 #[cfg(test)]
-mod local_tool_tests {
-    use super::*;
-    use archon_workflow::{WorkflowV2HostCall, WorkflowV2HostOptions};
-
-    #[test]
-    fn declared_checkpoint_tool_delegates_to_local_host_api() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
-        let execution = tool_execution("checkpoint-tool", "checkpoint");
-
-        let result =
-            execute_declared_local_tool(execution, &store, None).expect("checkpoint tool result");
-
-        assert_eq!(result.status, WorkflowV2Status::Accepted);
-        assert!(result.summary.contains("checkpoint-tool"));
-    }
-
-    #[test]
-    fn undeclared_tool_fails_closed_before_execution() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let store = WorkflowV2ResultStore::new(temp.path().join("v2"));
-        let execution = tool_execution("mystery-tool", "shell");
-
-        let err = execute_declared_local_tool(execution, &store, None)
-            .expect_err("unknown tools must fail closed");
-
-        assert!(err.to_string().contains("unknown local tool"));
-    }
-
-    fn tool_execution(id: &str, tool: &str) -> WorkflowV2CallExecution {
-        let mut options = WorkflowV2HostOptions::default();
-        options
-            .extra
-            .insert("tool".to_string(), serde_json::json!(tool));
-        WorkflowV2CallExecution {
-            call: WorkflowV2HostCall {
-                id: id.to_string(),
-                method: WorkflowV2HostMethod::Tool,
-                write_mode: None,
-                options,
-            },
-            input: serde_json::json!({
-                "options": {
-                    "tool": tool,
-                    "inputs": {
-                        "payload": id
-                    }
-                },
-                "source_data": {
-                    "payload": id
-                }
-            }),
-            depends_on: Vec::new(),
-        }
-    }
-}
+#[path = "workflow_live_v2_local_tool_tests.rs"]
+mod local_tool_tests;
 
 #[path = "workflow_run_end_native.rs"]
 mod workflow_run_end_native;

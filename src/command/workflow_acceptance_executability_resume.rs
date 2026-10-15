@@ -428,6 +428,7 @@ impl HostProbe {
         ObserveHooks {
             allowance,
             on_check,
+            resource_limits: Some(self.resource_limits.clone()),
         }
     }
 

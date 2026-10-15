@@ -211,6 +211,7 @@ async fn evaluate(
         run_id,
         runtime.target_repository_root.as_deref(),
         task_universe,
+        runtime.cargo_limits.clone(),
     ) {
         Ok(context) => context,
         Err(error) => {

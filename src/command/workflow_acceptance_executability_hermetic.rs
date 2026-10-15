@@ -438,6 +438,7 @@ pub(super) async fn run_in_copy(
         project: copy.project.clone(),
         host: probe.host.clone(),
         policy: None,
+        resource_limits: Some(probe.resource_limits.clone()),
         target: Some(target),
         fresh_home: true,
         timeout_secs: probe.check_bound_secs(),
@@ -491,7 +492,6 @@ pub(super) async fn run_in_copy(
         None => Ok(CopyRun { results, layout }),
     }
 }
-
 #[cfg(test)]
 #[path = "workflow_acceptance_executability_nested_repository_tests.rs"]
 mod nested_repository_tests;

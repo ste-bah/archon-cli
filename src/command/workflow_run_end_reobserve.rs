@@ -46,6 +46,8 @@ pub(crate) async fn observe_run_end(project: &Path, run_id: &str) -> Result<Stri
     let terminal_status = record
         .terminal_v2_status
         .ok_or_else(|| anyhow!("run {run_id} has no terminal v2 status to observe"))?;
+    let cargo_limits = crate::command::workflow_live::workflow_live_v2::workflow_live_v2_metadata::load_cargo_resource_limits(&store, run_id)?
+        .ok_or_else(|| anyhow!("run {run_id} has no launch-resolved cargo resource limits"))?;
     // Refuse an unproven chain before anything is written.
     if let Some(launch) = &snapshot.portable_acceptance_identity {
         let task_root = PathBuf::from(&snapshot.canonical_task_root_identity);
@@ -107,6 +109,7 @@ pub(crate) async fn observe_run_end(project: &Path, run_id: &str) -> Result<Stri
         terminal_status,
         snapshot: &snapshot,
         pre_commit: false,
+        cargo_limits,
     };
     let outcome = observer.observe_async(&context).await;
     store.with_run_lock(run_id, |locked| {

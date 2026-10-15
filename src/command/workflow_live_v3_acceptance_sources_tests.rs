@@ -163,6 +163,7 @@ async fn unreadable_pins_make_every_check_a_defect() {
         task_root: tasks,
         repository: dir.path().to_path_buf(),
         binding: None,
+        cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         launch: None,
         launch_lineage: archon_workflow::task_set_lineage::LaunchLineage::Predates,
         run_id: "run".into(),

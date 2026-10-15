@@ -28,6 +28,7 @@ pub(super) async fn run_live_action(
         workspace_boundary_supported,
         approval_mode,
         captured,
+        archon_core::config::CargoResourceConfig::default().to_limits(),
     )
     .await
 }
@@ -42,6 +43,7 @@ pub(super) async fn run_live_action_with_policy(
     workspace_boundary_supported: bool,
     approval_mode: LiveApprovalMode,
     captured_policy: Option<Option<archon_workflow::acceptance_check_environment::CheckPolicy>>,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<String> {
     let store = WorkflowStore::project(cwd);
     // Every new production launch supplies the startup-resolved binding.
@@ -135,7 +137,7 @@ pub(super) async fn run_live_action_with_policy(
         CommandAction::PlanSpec { path } => Ok(load_spec_file(cwd, &path)?.to_yaml()?),
         CommandAction::Run { task, decomposed } => {
             let plan = capped_live_plan(&task).await?;
-            return workflow_live_v2::run_generated_v2_workflow(
+            return workflow_live_v2::run_generated_v2_workflow_with_limits(
                 cwd,
                 &store,
                 plan,
@@ -151,6 +153,7 @@ pub(super) async fn run_live_action_with_policy(
                     workflow_live_v2::script_lifecycle_from_env()
                 },
                 &learning,
+                cargo_limits.clone(),
             )
             .await;
         }
@@ -184,11 +187,12 @@ pub(super) async fn run_live_action_with_policy(
                 approval_mode,
                 workspace_boundary_supported,
                 &learning,
+                cargo_limits.clone(),
             )
             .await;
         }
         CommandAction::Resume { run_id } | CommandAction::Continue { run_id } => {
-            if let Some(output) = workflow_live_v2::resume_generated_v2_workflow(
+            if let Some(output) = workflow_live_v2::resume_generated_v2_workflow_with_limits(
                 cwd,
                 &store,
                 &run_id,
@@ -198,6 +202,7 @@ pub(super) async fn run_live_action_with_policy(
                 approval_mode,
                 workspace_boundary_supported,
                 &learning,
+                cargo_limits.clone(),
             )
             .await?
             {

@@ -206,37 +206,39 @@ async fn stage_acceptance(
             &reason,
         );
     }
-    let prepared = match crate::command::workflow_task_set::prepare_acceptance_freeze_resumable(
-        cwd,
-        &tasks_root,
-        &prd_path,
-        config.workflow.gate_mode,
-        candidate_document(&candidate).into_owned(),
-        client,
-        &resume,
-    )
-    .await
-    {
-        Ok(prepared) => prepared,
-        Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
-            return defects::refuse_candidate_error(
-                cwd,
-                staged,
-                "freeze-acceptance",
-                crate::command::workflow_gate::GateId::FreezeAcceptance,
-                "acceptance",
-                &error,
-            );
-        }
-        Err(error) => {
-            if let Some(incomplete) =
-                crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
-            {
-                exit_incomplete_resumable(incomplete);
+    let prepared =
+        match crate::command::workflow_task_set::prepare_acceptance_freeze_resumable_with_limits(
+            cwd,
+            &tasks_root,
+            &prd_path,
+            config.workflow.gate_mode,
+            candidate_document(&candidate).into_owned(),
+            client,
+            &resume,
+            config.tools.cargo.to_limits(),
+        )
+        .await
+        {
+            Ok(prepared) => prepared,
+            Err(error) if crate::command::workflow_task_set::CandidateRejected::caused(&error) => {
+                return defects::refuse_candidate_error(
+                    cwd,
+                    staged,
+                    "freeze-acceptance",
+                    crate::command::workflow_gate::GateId::FreezeAcceptance,
+                    "acceptance",
+                    &error,
+                );
             }
-            return report_operational_failure(cwd, staged, "freeze-acceptance", &error);
-        }
-    };
+            Err(error) => {
+                if let Some(incomplete) =
+                    crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
+                {
+                    exit_incomplete_resumable(incomplete);
+                }
+                return report_operational_failure(cwd, staged, "freeze-acceptance", &error);
+            }
+        };
     let (evaluation, outputs) = prepared.into_staged_parts();
     write_staged_manifest(cwd, staged, "freeze-acceptance", evaluation, outputs)
 }

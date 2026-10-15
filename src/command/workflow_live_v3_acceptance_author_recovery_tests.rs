@@ -27,6 +27,7 @@ fn setup(state: &str) -> (Run, StageContext, StageWriter, Vec<u8>) {
         &run.run_id,
         run.runtime.target_repository_root.as_deref(),
         Some(&run.universe),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .unwrap();
     let pin = run.set.pin_path();

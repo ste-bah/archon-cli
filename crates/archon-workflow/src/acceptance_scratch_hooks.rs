@@ -39,6 +39,20 @@ pub struct ObserveHooks {
     /// observation (its teardown or its live-root audit); the caller must
     /// then discard it.
     pub on_check: Option<CheckHook>,
+    /// Resolved run configuration, applied by archon at every spawned check.
+    pub resource_limits: Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
+}
+
+impl ObserveHooks {
+    /// Apply the run's already-resolved cargo resource configuration to each
+    /// command this observation spawns.
+    pub fn with_resource_limits(
+        mut self,
+        limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    ) -> Self {
+        self.resource_limits = Some(limits);
+        self
+    }
 }
 
 impl ObserveHooks {

@@ -57,6 +57,7 @@ async fn attribution_replay_of_a_recorded_round() {
         task_root,
         repository: binding.policy.repository.clone(),
         binding: Some(binding),
+        cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         launch: None,
         launch_lineage: archon_workflow::task_set_lineage::LaunchLineage::Predates,
         run_id: record.run_id.clone(),

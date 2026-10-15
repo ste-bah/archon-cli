@@ -88,6 +88,7 @@ pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFix
     );
     let runtime = WorkflowV2ScriptRuntime {
         target_repository_root: spec.target_repository_root.clone(),
+        cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         generated_config: archon_core::config::GeneratedWorkflowConfig {
             max_repair_iterations: 1,
             max_investigation_iterations: 1,
@@ -331,6 +332,7 @@ async fn failed_final_report_emits_host_built_fallback() {
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,
         WorkflowV2ScriptRuntime {
+            cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
             target_repository_root: None,
             generated_config: generated_config.clone(),
         },

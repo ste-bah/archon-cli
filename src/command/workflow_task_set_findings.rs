@@ -330,6 +330,7 @@ pub(crate) fn prepare_from_judged(
 /// Prepare a whole-set freeze, returning every check the judge did not accept
 /// to its author — with the judge's reason and counterexample — bounded, before
 /// anything can publish. A check still not accepted fails the freeze.
+#[cfg(test)]
 pub(crate) async fn prepare_acceptance_freeze_reauthoring(
     project_root: &Path,
     tasks_root: &Path,
@@ -338,9 +339,37 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
     client: Arc<dyn WorkflowLlmClient>,
     scope: &super::reauthor::AuthorScope,
 ) -> Result<PreparedAcceptanceFreeze> {
+    prepare_acceptance_freeze_reauthoring_with_limits(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        client,
+        scope,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+}
+
+pub(crate) async fn prepare_acceptance_freeze_reauthoring_with_limits(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    mode: GateMode,
+    client: Arc<dyn WorkflowLlmClient>,
+    scope: &super::reauthor::AuthorScope,
+    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+) -> Result<PreparedAcceptanceFreeze> {
     use super::executability::ExecutabilityProbe;
-    let prepared =
-        prepare_acceptance_freeze(project_root, tasks_root, prd_path, mode, client.clone()).await?;
+    let prepared = prepare_acceptance_freeze_with_limits(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        client.clone(),
+        resource_limits.clone(),
+    )
+    .await?;
     let contract = prepared.contract()?;
     // A newly authored check the judge accepted is run once in a hermetic
     // copy (the scratch site, else the probe's own) before it may be
@@ -349,7 +378,11 @@ pub(crate) async fn prepare_acceptance_freeze_reauthoring(
     // fail on the task set's pre-implementation tree; one that cannot is
     // re-authored like a crash. Verdicts the freeze's own gate already
     // observed on the same tree are reused, not run again.
-    let probe = super::executability::HostProbe::for_task_set(project_root, tasks_root);
+    let probe = super::executability::HostProbe::for_task_set_with_limits(
+        project_root,
+        tasks_root,
+        resource_limits,
+    );
     let accepted: BTreeSet<String> = contract
         .acceptance
         .iter()

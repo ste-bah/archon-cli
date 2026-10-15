@@ -63,6 +63,40 @@ fn the_default_policy_binds_only_the_allowlist() {
     assert!(!withheld.contains("PATH") && !withheld.contains("LANG"));
 }
 
+#[test]
+fn configured_cargo_limits_are_archon_defaults_and_shell_overrides_remain_possible() {
+    let host = host(&[("PATH", "/usr/bin:/bin"), ("CARGO_BUILD_JOBS", "99")]);
+    let limits = archon_tools::workflow_resource_env::CargoResourceLimits {
+        build_jobs: 3,
+        incremental: true,
+        resource_class: "balanced".into(),
+    };
+    let environment = CommandEnvironment::from_host(&host, None)
+        .unwrap()
+        .with_workflow_resource_limits(&limits, "cargo test", Path::new("."));
+    let child = environment.command("check");
+    let child: BTreeMap<_, _> = child
+        .get_envs()
+        .filter_map(|(name, value)| {
+            Some((
+                name.to_string_lossy().into_owned(),
+                value?.to_string_lossy().into_owned(),
+            ))
+        })
+        .collect();
+    assert_eq!(child.get("CARGO_BUILD_JOBS").map(String::as_str), Some("3"));
+    assert_eq!(
+        child.get("CARGO_INCREMENTAL").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        child
+            .get("ARCHON_WORKFLOW_RESOURCE_CLASS")
+            .map(String::as_str),
+        Some("balanced")
+    );
+}
+
 /// The toolchain homes a tool would find under the host's home are named
 /// outright: the check is given a fresh one.
 #[test]

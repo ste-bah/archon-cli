@@ -180,6 +180,7 @@ pub(super) fn fixture() -> Fixture {
         runtime: WorkflowV2ScriptRuntime {
             target_repository_root: Some(repo.path().display().to_string()),
             generated_config: Default::default(),
+            cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         },
         repo,
         task_root,

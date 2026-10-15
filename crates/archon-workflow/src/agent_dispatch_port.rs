@@ -254,6 +254,9 @@ pub fn forbidden_path_roots(input: &serde_json::Value, working_root: Option<&str
 #[derive(Default)]
 pub struct HostCommandEnv {
     pub vars: Vec<(String, String)>,
+    /// The run's resolved cargo limits, kept separate from policy-forwarded
+    /// host values so archon, not the operator environment, owns them.
+    pub resource_limits: Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
     pub hold: Option<Box<dyn std::any::Any + Send>>,
 }
 

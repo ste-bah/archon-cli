@@ -72,7 +72,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not acceptance verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; its freeze verdicts are unchanged.
-        sources_digest: "d4eb3e9cfe9fff6818958dcd4a9b33a3c7aac2699eebc378c36b8404fa8ce92e",
+        // # resource defaults re-pin only: configured build parallelism changes scheduling, not check verdicts.
+        // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
+        sources_digest: "f1fcec7926043ec6c4c5d1a9d52db674041c9c78d625912c8232a011766c229e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -112,7 +114,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not skeleton verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; skeleton freeze verdicts are unchanged.
-        sources_digest: "d4eb3e9cfe9fff6818958dcd4a9b33a3c7aac2699eebc378c36b8404fa8ce92e",
+        // # resource defaults re-pin only: skeleton freeze does not judge checks.
+        // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
+        sources_digest: "f1fcec7926043ec6c4c5d1a9d52db674041c9c78d625912c8232a011766c229e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -167,7 +171,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not body landing verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
-        sources_digest: "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
+        // # resource defaults re-pin only: configured build parallelism changes scheduling, not body verdicts.
+        sources_digest: "4c085d85b868d7ce83e82dd559165199a4ed4118f726e6f9afea0e3b19917586",
         build_bound: false,
     },
     CapabilityLogic {
@@ -215,7 +220,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not lint verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
-        sources_digest: "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
+        // # resource defaults re-pin only: configured build parallelism changes scheduling, not lint verdicts.
+        sources_digest: "4c085d85b868d7ce83e82dd559165199a4ed4118f726e6f9afea0e3b19917586",
         build_bound: false,
     },
     CapabilityLogic {
@@ -236,7 +242,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #440 re-pin only: trace calls none of the scratch copy, audit or probe digest walkers that changed.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        sources_digest: "e6d84542fd686d2025abb1ba5b3752734ad1e2ace070e42da38fde7a3041bc29",
+        // # resource defaults re-pin only: configured build parallelism changes scheduling, not trace verdicts.
+        sources_digest: "4a0de226b48627b910bce4d1badecda7a9fe736735176bc1693627fb9ea6e178",
         build_bound: true,
     },
     CapabilityLogic {
@@ -280,7 +287,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: file split, no logic change
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain acceptance verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen acceptance verification is unchanged.
-        sources_digest: "02f0c324f88c183ea290eff800c6e05c8ecb2615788338523368485547b23f1f",
+        // # resource defaults re-pin only: frozen verification's check execution is scheduling-only.
+        sources_digest: "49f6188fe4e8041c960267bc5750b15c3effeba9398cc3bfa56a3ea2c5c12dbe",
         build_bound: true,
     },
     CapabilityLogic {
@@ -320,7 +328,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: file split, no logic change
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain skeleton verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen skeleton verification is unchanged.
-        sources_digest: "02f0c324f88c183ea290eff800c6e05c8ecb2615788338523368485547b23f1f",
+        // # resource defaults re-pin only: frozen skeleton verification runs no checks.
+        sources_digest: "49f6188fe4e8041c960267bc5750b15c3effeba9398cc3bfa56a3ea2c5c12dbe",
         build_bound: true,
     },
 ];

@@ -209,6 +209,7 @@ pub(super) fn fixture_with(freeze: bool, req_2: &str) -> Fixture {
     let runtime = WorkflowV2ScriptRuntime {
         target_repository_root: Some(repo.path().display().to_string()),
         generated_config: Default::default(),
+        cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     };
     Fixture {
         run_id: run.id,
@@ -439,6 +440,7 @@ fn the_scratch_guardian_narrows_an_observation_to_the_requested_checks() {
         pin_path: pin_path.clone(),
         expected_pin_digest: content_digest(&std::fs::read(&pin_path).unwrap()),
         evidence: scratch.path().join("evidence"),
+        resource_limits: None,
     };
     let ids = |refs: &[archon_workflow::acceptance_world::FrozenCommandRef]| {
         refs.iter()

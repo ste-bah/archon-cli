@@ -73,6 +73,16 @@ async fn observe_run_end_refuses_an_unproven_chain_then_reobserves_once_the_laun
     let launch_contract = read(&tasks.join(ACCEPTANCE_CONTRACT_FILE));
     let launch_skeleton = read(&tasks.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE));
     let run = fixture.store.create_run(finalizer_spec()).unwrap();
+    fixture
+        .store
+        .write_run_json(
+            &run.id,
+            "v2/generated-metadata.json",
+            &serde_json::json!({"cargo_resource_limits": {
+                "build_jobs": 7, "incremental": true, "resource_class": "configured-test"
+            }}),
+        )
+        .unwrap();
     let v2_store = WorkflowV2ResultStore::new(fixture.store.run_dir(&run.id).join("v2"));
     seed_finalizer_call(&v2_store);
     move_pin_without_lineage(&fixture, "AC-X-001", floor("missing-too.json"));

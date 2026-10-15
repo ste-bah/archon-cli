@@ -72,6 +72,7 @@ fn request(
         expected_pin_digest: content_digest(&std::fs::read(&pin_path).unwrap()),
         pin_path,
         evidence,
+        resource_limits: None,
     }
 }
 

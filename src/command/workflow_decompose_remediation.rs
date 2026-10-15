@@ -44,6 +44,7 @@ pub(crate) async fn reauthor_unowned_checks_on_resume(
     (project_root, prd_path, task_root, run_dir): (&Path, &Path, &Path, &Path),
     ledger: Option<&Ledger>,
     client: &dyn archon_workflow::WorkflowLlmClient,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<()> {
     let Some(ledger) = ledger else {
         return Ok(());
@@ -105,10 +106,12 @@ pub(crate) async fn reauthor_unowned_checks_on_resume(
         prd_path,
     )
     .map_err(|error| anyhow::anyhow!(error))?;
-    let probe = crate::command::workflow_task_set::executability::HostProbe::for_task_set(
-        project_root,
-        task_root,
-    );
+    let probe =
+        crate::command::workflow_task_set::executability::HostProbe::for_task_set_with_limits(
+            project_root,
+            task_root,
+            cargo_limits,
+        );
     crate::command::workflow_task_set::republish::reauthor_and_republish(
         client,
         crate::command::workflow_task_set::republish::ReauthorRequest {
@@ -133,6 +136,7 @@ pub(crate) async fn prepare_resume_checks(
     target_root: Option<&Path>,
     ledger: Option<&Ledger>,
     client: &dyn archon_workflow::WorkflowLlmClient,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<()> {
     crate::command::workflow_read_scope::require_author_reads(
         client,
@@ -140,8 +144,13 @@ pub(crate) async fn prepare_resume_checks(
         target_root,
         run_dir,
     )?;
-    reauthor_unowned_checks_on_resume((project_root, prd_path, task_root, run_dir), ledger, client)
-        .await
+    reauthor_unowned_checks_on_resume(
+        (project_root, prd_path, task_root, run_dir),
+        ledger,
+        client,
+        cargo_limits,
+    )
+    .await
 }
 
 fn advance_forced_author_ordinals(

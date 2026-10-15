@@ -57,6 +57,7 @@ pub(super) struct PreCommit<'a> {
     pub(super) expected_generation: Option<u64>,
     pub(super) observer: &'a dyn WorkflowRunEndObserver,
     pub(super) reopen: Option<&'a dyn RunEndReopen>,
+    pub(super) cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 }
 
 /// The call id a failure the observation still names is blocked under.
@@ -114,6 +115,7 @@ pub(super) async fn observe_before_commit(
             terminal_status: summary.status,
             snapshot: &snapshot,
             pre_commit: true,
+            cargo_limits: pc.cargo_limits.clone(),
         };
         let refusal = match pc.observer.observe_async(&context).await {
             // Findings never commit a finishing outcome (B2): the failing

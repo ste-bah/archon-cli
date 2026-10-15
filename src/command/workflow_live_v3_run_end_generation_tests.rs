@@ -33,6 +33,7 @@ async fn finalize_owned(
         observer,
         Some((&fixture.runtime, None, Some(&fixture.universe))),
         Some(launch),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
 }

@@ -1,11 +1,18 @@
 //! POSIX shells, SIGKILL-reaped groups and libc ESRCH: Unix-only, like the feature.
+#![cfg(unix)]
 use super::*;
+#[path = "workflow_run_end_native_test_support.rs"]
+mod test_support;
+use test_support::persist_native_terminal;
 
 #[tokio::test]
 async fn enabled_native_observer_executes_pinned_command_in_scratch() {
     let mut fixture = frozen_fixture(vec![criterion(
         "AC-X-001",
-        command("test -f input && printf checked > result".into()),
+        command(
+            "echo cargo >/dev/null; test -f input && printf '%s:%s' \"$CARGO_BUILD_JOBS\" \"$ARCHON_WORKFLOW_RESOURCE_CLASS\""
+                .into(),
+        ),
     )]);
     let repo = tempfile::tempdir().unwrap();
     let git = |args: &[&str]| {
@@ -34,10 +41,13 @@ async fn enabled_native_observer_executes_pinned_command_in_scratch() {
     let run = fixture.store.create_run(finalizer_spec()).unwrap();
     persist_native_terminal(&fixture, &run.id);
     let observer = FixedRunEndAcceptanceObserver::new(fixture.store.clone());
-    let outcome = observer
-        .observe_async(&context(&fixture, &run.id))
-        .await
-        .unwrap();
+    let mut observer_context = context(&fixture, &run.id);
+    observer_context.cargo_limits = archon_tools::workflow_resource_env::CargoResourceLimits {
+        build_jobs: 7,
+        incremental: true,
+        resource_class: "configured-test".into(),
+    };
+    let outcome = observer.observe_async(&observer_context).await.unwrap();
     assert_eq!(outcome.operational_deferral_count, 0);
     assert_eq!(outcome.policy_finding_count, 0);
     assert!(!fixture.project.path().join("result").exists());
@@ -48,6 +58,8 @@ async fn enabled_native_observer_executes_pinned_command_in_scratch() {
     let evidence: serde_json::Value =
         serde_json::from_slice(&std::fs::read(evidence).unwrap()).unwrap();
     assert_eq!(evidence["checks"][0]["exit_code"], 0);
+    let stdout: Vec<u8> = serde_json::from_value(evidence["checks"][0]["stdout"].clone()).unwrap();
+    assert_eq!(String::from_utf8(stdout).unwrap(), "7:configured-test");
     assert_eq!(evidence["teardown_verified"], true);
 }
 
@@ -164,6 +176,7 @@ fn killed_observer_parent_leaves_no_managed_group_or_worktree() {
         expected_pin_digest: content_digest(&std::fs::read(&pin_path).unwrap()),
         pin_path,
         evidence: evidence.clone(),
+        resource_limits: None,
     };
     let request_path = signals.path().join("request.json");
     std::fs::write(&request_path, serde_json::to_vec(&request).unwrap()).unwrap();
@@ -263,22 +276,6 @@ async fn native_dispatch_refuses_before_terminal_persistence() {
         .await
         .unwrap_err();
     assert!(error.to_string().contains("terminal"), "{error}");
-}
-
-fn persist_native_terminal(fixture: &FrozenFixture, run_id: &str) {
-    let mut run = fixture.store.load_state(run_id).unwrap();
-    run.status = RunStatus::Completed;
-    fixture.store.save_state(&run).unwrap();
-    let mut record = archon_workflow::FinalizationRecordV1::new(
-        WorkflowRunKind::AuthoredTaskWorkflow,
-        WorkflowV2Status::Accepted,
-        Some(fixture.snapshot.clone()),
-    );
-    record.mark_terminal_event_committed();
-    fixture
-        .store
-        .write_run_json(run_id, FINALIZATION_RECORD_PATH, &record)
-        .unwrap();
 }
 
 #[test]
@@ -492,7 +489,6 @@ async fn voided_native_observation_retains_run_evidence() {
 
 #[path = "workflow_native_environment_tests.rs"]
 mod environment_tests;
-
 #[path = "workflow_native_guardian_diagnostics_tests.rs"]
 mod guardian_diagnostics_tests;
 

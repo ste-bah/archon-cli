@@ -62,16 +62,18 @@ pub(super) async fn freeze_acceptance(
     let prd_path = required_path(cwd, prd, "--prd")?;
     let scope = author_scope(cwd, &tasks_root, &prd_path)?;
     let client = client(config, env_vars, cwd, "workflow-freeze-acceptance", &scope).await?;
-    let prepared = crate::command::workflow_task_set::prepare_acceptance_freeze_reauthoring(
-        cwd,
-        &tasks_root,
-        &prd_path,
-        config.workflow.gate_mode,
-        client,
-        &scope,
-    )
-    .await
-    .map_err(exit_if_incomplete)?;
+    let prepared =
+        crate::command::workflow_task_set::prepare_acceptance_freeze_reauthoring_with_limits(
+            cwd,
+            &tasks_root,
+            &prd_path,
+            config.workflow.gate_mode,
+            client,
+            &scope,
+            config.tools.cargo.to_limits(),
+        )
+        .await
+        .map_err(exit_if_incomplete)?;
     let findings = prepared.findings.clone();
     let publication_identity = prepared.publication_identity();
     let mut disposition = crate::command::workflow_gate::run_sync_gate(
@@ -133,7 +135,8 @@ pub(super) async fn reauthor_acceptance(
     .await?;
     // Each re-authored check is run once in the hermetic scratch site before
     // it may be published.
-    let probe = HostProbe::for_task_set(cwd, &tasks_root);
+    let probe =
+        HostProbe::for_task_set_with_limits(cwd, &tasks_root, config.tools.cargo.to_limits());
     let result = reauthor_and_republish(
         client.as_ref(),
         ReauthorRequest {

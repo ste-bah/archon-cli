@@ -36,6 +36,7 @@ async fn a_slot_check_that_cannot_be_recorded_is_an_error() {
     };
     let cargo = FakeCargo {
         bin: dir.path().join("bin"),
+        resource_limits: None,
     };
     let outcome = prepare_slot(&store, &cargo, Some(&universe), dir.path(), &call).await;
     assert!(outcome.is_err(), "{outcome:?}");

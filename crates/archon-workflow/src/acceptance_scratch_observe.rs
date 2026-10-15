@@ -202,7 +202,13 @@ pub async fn observe_commands_hooked(
             let project_before = phase().run(|| inventory(roots.project()))?;
             let cache_before = phase().run(|| cargo_home.digest(&cargo_home_path))?;
             let target = roots.target();
-            let site = check_site(roots, policy, &target, timeout_secs);
+            let site = check_site(
+                roots,
+                policy,
+                &target,
+                timeout_secs,
+                hooks.resource_limits.clone(),
+            );
             let attempt =
                 execute_check_at(&site, contract, reference, &command, cancel.clone()).await;
             let mut check =
@@ -376,11 +382,13 @@ fn check_site<'a>(
     policy: &ScratchPolicy,
     target: &'a Path,
     timeout_secs: u64,
+    resource_limits: Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
 ) -> super::process::CommandSite<'a> {
     super::process::CommandSite {
         project: roots.project(),
         repository: roots.repository(),
         environment: roots.command_environment(policy),
+        resource_limits,
         audit_root: Some(roots.root()),
         audit_target: Some(target),
         scratch_bytes: policy.scratch_bytes,

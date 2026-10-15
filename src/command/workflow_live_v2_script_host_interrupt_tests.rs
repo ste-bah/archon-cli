@@ -118,6 +118,7 @@ async fn a_cancelled_call_leaves_a_readable_record() {
     let runner = WorkflowV2ScriptRunner::new(
         "interrupted call".to_string(),
         WorkflowV2ScriptRuntime {
+            cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
             target_repository_root: None,
             generated_config: archon_core::config::GeneratedWorkflowConfig::default(),
         },
@@ -234,6 +235,7 @@ async fn stale_notification_failure_in_flight_preserves_a_fresh_first_attempt() 
         runner: WorkflowV2ScriptRunner::new(
             "interruption".into(),
             WorkflowV2ScriptRuntime {
+                cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
                 target_repository_root: None,
                 generated_config: archon_core::config::GeneratedWorkflowConfig::default(),
             },

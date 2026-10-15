@@ -277,6 +277,7 @@ mod declaration_tests {
         let runner = WorkflowV2ScriptRunner::new(
             "audit".into(),
             WorkflowV2ScriptRuntime {
+                cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
                 target_repository_root: Some(repo.display().to_string()),
                 ..Default::default()
             },
