@@ -404,7 +404,11 @@ fn the_windows_spelling_matches_without_case_and_either_separator() {
     }
     // The POSIX spelling keeps case and reads `\` as shell syntax.
     let posix = |text: &str| named_root_in(Spelling::Posix, text, &forms);
+    #[cfg(not(windows))]
     assert_eq!(posix("test -f c:/users/runner/repo/x"), None);
+    #[cfg(windows)]
+    // The identity layer sees the host's case-insensitive volume.
+    assert_eq!(posix("test -f c:/users/runner/repo/x"), Some(&forms[0]));
     assert_eq!(
         Spelling::Windows.fold(r"C:/Users\X"),
         r"c:\users\x".to_string()
