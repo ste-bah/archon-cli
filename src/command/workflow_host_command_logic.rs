@@ -193,6 +193,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // same-volume path fails closed. Sibling paths can now pass.
         // 21: #366 joins shell-word paths and carries shell assignments into
         // later commands when detecting live-root acceptance checks.
+        // #366 Windows fix: POSIX path comparison stays case-sensitive on Windows.
         // #446 review 2, same unreleased version 18
         version: 21,
         sources: &[GATE, CONTRACT, FREEZE],
@@ -212,7 +213,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not acceptance verdicts.
         // re-pin only: verdicts are unchanged.
-        sources_digest: "c227304be5b24eebea4453112f2837bb2a6febf263dca39fceb8ce7515b7f84a",
+        sources_digest: "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
         build_bound: false,
     },
     CapabilityLogic {
@@ -244,11 +245,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #374 re-pin only: skeleton freeze performs no check path classification.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        // #366 re-pin only: acceptance-root detection does not judge skeleton output.
+        // #366 re-pin only: skeleton freeze performs no check path classification.
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not skeleton verdicts.
         // re-pin only: verdicts are unchanged.
-        sources_digest: "c227304be5b24eebea4453112f2837bb2a6febf263dca39fceb8ce7515b7f84a",
+        sources_digest: "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
         build_bound: false,
     },
     CapabilityLogic {
@@ -353,7 +354,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 6: #417 copied task-root inputs now match the digest exclusions, which can change a check verdict.
         // #417 re-pin only: the direct copy API now shares the production caller's root normalization.
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
-        // 8: #366 rechecks frozen acceptance paths using shell assignment scope when locating live roots.
+        // 8: #366 rechecks frozen acceptance paths using shell assignment scope when locating live roots (POSIX spelling case-sensitive on Windows too).
         version: 8,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
@@ -382,7 +383,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: file split, no logic change
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain acceptance verdicts.
         // re-pin only: verdicts are unchanged.
-        sources_digest: "71c8f3ae5ea9829dd21ba269af393d4643325a66f0b8dfd955cdb97d6cc4ac5a",
+        sources_digest: "d4b326e487dd61c36b66722411055c238e9f872eff0be0810974ef952cbc02b5",
         build_bound: true,
     },
     CapabilityLogic {
@@ -416,9 +417,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain skeleton verdicts.
-        // #366 re-pin only: the detector change never judges a skeleton verification.
+        // #366 re-pin only: frozen skeleton verification does not classify check paths.
         // re-pin only: verdicts are unchanged.
-        sources_digest: "71c8f3ae5ea9829dd21ba269af393d4643325a66f0b8dfd955cdb97d6cc4ac5a",
+        sources_digest: "d4b326e487dd61c36b66722411055c238e9f872eff0be0810974ef952cbc02b5",
         build_bound: true,
     },
 ];

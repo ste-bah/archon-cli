@@ -90,9 +90,10 @@ pub(super) fn named_root_in<'a>(
         .collect();
     let textual = forms.iter().find(|form| {
         let root = spelling.fold(&form.to_string_lossy());
-        let form = Path::new(&root);
         !root.is_empty()
-            && (paths.iter().any(|path| path.starts_with(form))
+            && (paths
+                .iter()
+                .any(|path| path_lexically_below(path, &root, spelling))
                 || spelling == Spelling::Posix
                     && expanded_words.iter().any(|word| {
                         word.strip_prefix(&root).is_some_and(|suffix| {
@@ -115,6 +116,24 @@ pub(super) fn named_root_in<'a>(
                     || super::unresolved_on_known_volume(path, form)
             })
         })
+    })
+}
+
+/// Compare normalized path text using the requested spelling. `Path` uses
+/// the machine's native comparison rules, which are wrong when tests model a
+/// different spelling (and can silently case-fold a POSIX comparison on
+/// Windows).
+fn path_lexically_below(path: &Path, root: &str, spelling: Spelling) -> bool {
+    let path = spelling.fold(&path.to_string_lossy());
+    path.strip_prefix(root).is_some_and(|suffix| {
+        suffix.is_empty()
+            || suffix.chars().next().is_some_and(|next| {
+                next == if spelling == Spelling::Windows {
+                    '\\'
+                } else {
+                    '/'
+                }
+            })
     })
 }
 

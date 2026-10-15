@@ -121,14 +121,15 @@ fn windows_unresolved_under_root_is_refused_and_sibling_is_allowed() {
     };
     let other_volume = PathBuf::from(format!(r"{other_drive}\unrelated-missing\child"));
     let unresolved_before = names_by_identity(&unresolved, &root);
-    let unresolved_after = named_root(&format!("type {}", unresolved.display()), &forms).is_some();
+    let unresolved_after =
+        named_root(&format!("type \"{}\"", unresolved.display()), &forms).is_some();
     println!(
         "EVIDENCE #374 unresolved-under-root BEFORE: identity={} and path unresolved; AFTER: reconstructed live-root verdict={}",
         unresolved_before, unresolved_after
     );
     assert!(unresolved_after);
 
-    let sibling_after = named_root(&format!("type {}", sibling.display()), &forms).is_some();
+    let sibling_after = named_root(&format!("type \"{}\"", sibling.display()), &forms).is_some();
     println!(
         "EVIDENCE #374 unrelated-sibling BEFORE: path unresolved on live volume; AFTER: ancestor reconstruction verdict={}",
         sibling_after
@@ -136,7 +137,7 @@ fn windows_unresolved_under_root_is_refused_and_sibling_is_allowed() {
     assert!(!sibling_after);
 
     let other_volume_after =
-        named_root(&format!("type {}", other_volume.display()), &forms).is_some();
+        named_root(&format!("type \"{}\"", other_volume.display()), &forms).is_some();
     println!(
         "EVIDENCE #374 different-volume-control BEFORE: unresolved path on another volume; AFTER: fail-closed verdict={}",
         other_volume_after

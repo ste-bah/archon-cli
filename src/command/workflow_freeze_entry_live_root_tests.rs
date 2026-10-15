@@ -104,17 +104,23 @@ fn a_check_naming_the_project_root_itself_is_refused() {
 #[test]
 fn a_quoted_live_root_path_is_refused() {
     let roots = roots();
-    let repository = roots.repository.display().to_string();
-    let split = repository.rfind('/').unwrap();
+    let repository_parent = roots.repository.parent().unwrap();
+    let repository_name = roots.repository.file_name().unwrap();
+    let repository_prefix = format!(
+        "{}{}",
+        repository_parent.display(),
+        std::path::MAIN_SEPARATOR
+    );
     for text in [
-        format!("cat \"{}/a b.txt\"", roots.repository.display()),
+        format!("cat \"{}\"", roots.repository.join("a b.txt").display()),
         format!(
-            "cat \"{}\"\"{}\"/out.txt",
-            &repository[..split],
-            &repository[split..]
+            "cat \"{}\"\"{}\"{}out.txt",
+            repository_prefix,
+            repository_name.to_string_lossy(),
+            std::path::MAIN_SEPARATOR
         ),
         format!("cd '{}' && test -f x", roots.project.display()),
-        format!("ls {}/*.json", roots.project.display()),
+        format!("ls {}", roots.project.join("*.json").display()),
     ] {
         let found = refusals(&roots, &command(&text));
         assert_eq!(live_root_texts(&found).len(), 1, "{text}: {found:?}");
@@ -194,12 +200,14 @@ fn without_roots_only_the_shape_is_validated() {
 #[test]
 fn the_author_step_refuses_a_live_root_check_in_the_same_call() {
     let roots = roots();
-    let repository = roots.repository.display().to_string();
-    let split = repository.rfind('/').unwrap();
+    let repository_parent = roots.repository.parent().unwrap();
+    let repository_name = roots.repository.file_name().unwrap();
     let text = format!(
-        "test -f \"{}\"\"{}\"/out.json",
-        &repository[..split],
-        &repository[split..]
+        "test -f \"{}\"\"{}{}\"{}out.json",
+        repository_parent.display(),
+        std::path::MAIN_SEPARATOR,
+        repository_name.to_string_lossy(),
+        std::path::MAIN_SEPARATOR
     );
     let reply = serde_json::to_string(&command(&text).to_string()).unwrap();
     let body = format!(
