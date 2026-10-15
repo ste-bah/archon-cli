@@ -115,6 +115,59 @@ async fn reverify_records_and_report_subjects_carry_the_judging_logic_stamp() {
 }
 
 #[tokio::test]
+async fn reverify_report_contains_per_check_execution_evidence() {
+    // EXPECTED BEFORE RUN: a reverify report always contains a checks array;
+    // each accepted frozen check records identity, execution and copy evidence.
+    let fixture = fixture();
+    let output = invoke_reverify(&archon_binary(), &fixture);
+    println!(
+        "EVIDENCE check_report COMMAND: success={} stderr={}",
+        output.status.success(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let latest = super::super::workflow_decompose_latest_report::latest_report(
+        &fixture.store,
+        &fixture.run_id,
+    )
+    .unwrap()
+    .unwrap();
+    let report_path = fixture
+        .store
+        .run_dir(&fixture.run_id)
+        .join(format!("decomposition/reverify/reports/{}.json", latest.id));
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&report_path).unwrap()).unwrap();
+    assert!(
+        report["checks"].is_array(),
+        "checks evidence missing: {report}"
+    );
+    let checks = report["checks"].as_array().unwrap();
+    assert!(
+        !checks.is_empty(),
+        "frozen accepted checks missing: {report}"
+    );
+    for check in checks {
+        assert!(check["check_id"].as_str().is_some());
+        assert!(check["verdict"].as_str().is_some());
+        assert!(check["really_ran"].is_boolean());
+        assert_eq!(check["really_ran"], true, "check failed to run: {check}");
+        assert!(check["setup_failure"].is_boolean());
+        assert!(check["real_failure"].is_boolean());
+        assert!(check["sibling_paths"].is_array());
+        assert!(check["findings"].is_array());
+        for sibling in check["sibling_paths"].as_array().unwrap() {
+            assert!(sibling["path"].as_str().is_some());
+            assert!(sibling.get("commit").is_some());
+        }
+    }
+    println!(
+        "EVIDENCE check_report AFTER: report={} checks={} required_fields=true",
+        latest.id,
+        checks.len()
+    );
+}
+
+#[tokio::test]
 async fn invalid_utf8_body_is_persisted_as_remediation_finding() {
     // EXPECTED BEFORE RUN: invalid UTF-8 in a frozen task body is an input
     // finding for that subject, with its decoding cause in the persisted report.

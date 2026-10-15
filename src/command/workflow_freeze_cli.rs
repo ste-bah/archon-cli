@@ -13,6 +13,7 @@ use crate::command::workflow_freeze_candidate::{candidate_document, candidate_re
 
 #[path = "workflow_freeze_acceptance_cli.rs"]
 mod acceptance;
+pub(crate) use acceptance::client as reverify_acceptance_client;
 
 pub(super) async fn handle(
     action: &WorkflowAction,

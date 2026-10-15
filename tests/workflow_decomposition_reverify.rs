@@ -20,7 +20,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use deadline::run;
-use project::{decompose_args, one_run, project};
+use project::{decompose_args, one_run, project_with};
+use server::{Plan, Variant};
 
 fn record_bytes(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     let directory = root.join("v2/results");
@@ -60,11 +61,16 @@ fn tree_bytes(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 #[test]
 fn reverify_uses_local_provider_for_accepted_and_real_finding_paths() {
     // EXPECTED BEFORE RUN: the real offline lifecycle reaches Completed using
-    // the local provider. Reverify accepts disk bytes with fresh digests,
+    // the local provider; its frozen copy contains `../shared-check` and the
+    // reverify report records that sibling's source HEAD. Reverify accepts
+    // disk bytes with fresh digests,
     // current stamps, a superseding report, and byte-identical old records.
     // Two defects pause the run; dry-run is read-only; resume reauthors only
     // the ledger subjects and returns an ordinary accepted final report.
-    let project = project();
+    let project = project_with(Plan {
+        variant: Variant::SiblingCheck,
+        block: None,
+    });
     let root = project.path();
     let completed = run(root, &decompose_args());
     assert!(
@@ -125,6 +131,37 @@ fn reverify_uses_local_provider_for_accepted_and_real_finding_paths() {
     }
     let (accepted_path, accepted_report) = newest_report(&run_dir);
     assert_eq!(accepted_report["outcome"], "accepted");
+    let checks = accepted_report["checks"].as_array().unwrap();
+    assert!(
+        !checks.is_empty(),
+        "frozen checks were not re-run: {accepted_report}"
+    );
+    let sibling_check = checks
+        .iter()
+        .find(|check| check["check_id"] == "AC-X-001")
+        .unwrap();
+    assert_eq!(sibling_check["verdict"], "accepted");
+    assert_eq!(sibling_check["really_ran"], true);
+    let sibling = sibling_check["sibling_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|sibling| sibling["path"].as_str().unwrap().contains("shared-check"))
+        .expect("the freeze copy records the named sibling");
+    assert_eq!(sibling["path"], "../shared-check");
+    let source_sibling = root.parent().unwrap().join("shared-check");
+    assert!(source_sibling.join("marker.txt").is_file());
+    let source_head = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&source_sibling)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(source_head.status.success());
+    assert_eq!(
+        sibling["commit"].as_str(),
+        Some(String::from_utf8_lossy(&source_head.stdout).trim())
+    );
     assert_eq!(
         accepted_report["supersedes_id"], "fixed-decomposition-final",
         "reverify must supersede the completed lifecycle report"

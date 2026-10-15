@@ -5,10 +5,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use archon_core::{config::ArchonConfig, env_vars::ArchonEnvVars};
 use archon_workflow::{
-    DecompositionPhase, FixedDecompositionStateV1, HostCommandRequest, HostCommandResult,
-    RunStatus, WorkflowEventKind, WorkflowEventLog, WorkflowStore, WorkflowV2CallRecord,
-    WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result,
-    WorkflowV2ResultStore, WorkflowV2Status, task_set_contract::content_digest,
+    DecompositionPhase, FixedDecompositionStateV1, HostCommandRequest, RunStatus,
+    WorkflowEventKind, WorkflowEventLog, WorkflowStore, WorkflowV2CallRecord, WorkflowV2HostCall,
+    WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result, WorkflowV2ResultStore,
+    WorkflowV2Status, task_set_contract::content_digest,
 };
 
 use super::workflow_decompose_reverify_assessment::executor_error_result;
@@ -19,6 +19,10 @@ use crate::command::workflow_host_command_exec::FixedHostCommandExecutor;
 
 const REPORT_PATH: &str = "decomposition/reverify/reports";
 const STATE_PATH: &str = "decomposition/state.json";
+
+#[path = "workflow_decompose_reverify_persist_call.rs"]
+mod persist;
+pub(super) use persist::persist_call;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ReverifyReport {
@@ -31,7 +35,11 @@ struct ReverifyReport {
     subjects: Vec<SubjectResult>,
     set_gates: Vec<GateResult>,
     frozen_gates: Vec<GateResult>,
+    checks: Vec<acceptance::CheckResult>,
 }
+
+#[path = "workflow_decompose_reverify_acceptance.rs"]
+mod acceptance;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct SubjectResult {
@@ -169,6 +177,13 @@ pub(crate) async fn reverify(
     let mut failed_subjects = Vec::new();
     let mut all_accepted = true;
     let mut operational_failure = false;
+
+    let acceptance =
+        acceptance::reverify_checks(&project_root, &prd_path, &task_root, config, env_vars).await?;
+    let checks = acceptance.checks;
+    operational_failure |= acceptance.operational_failure;
+    failed_subjects.extend(acceptance.task_subjects);
+    all_accepted &= acceptance.accepted;
 
     for (index, frozen) in skeleton.tasks.iter().enumerate() {
         let path = task_root.join(&frozen.file_name);
@@ -331,6 +346,7 @@ pub(crate) async fn reverify(
         subjects,
         set_gates,
         frozen_gates,
+        checks,
     };
     let report_bytes = serde_json::to_vec_pretty(&report)?;
     if v2.result_path(&report_id).exists()
@@ -412,6 +428,7 @@ pub(crate) async fn reverify(
                     .chain(&report.frozen_gates)
                     .flat_map(|gate| gate.findings.iter()),
             )
+            .chain(report.checks.iter().flat_map(|check| check.findings.iter()))
             .cloned()
             .collect::<Vec<_>>();
         let cause = causes
@@ -429,62 +446,15 @@ pub(crate) async fn reverify(
         .subjects
         .iter()
         .map(|subject| format!("{}={}", subject.task_id, subject.verdict))
+        .chain(
+            report
+                .checks
+                .iter()
+                .map(|check| format!("{}={}", check.check_id, check.verdict)),
+        )
         .collect::<Vec<_>>()
         .join(", ");
     Ok(format!(
         "Reverify report: {report_id}\nOutcome: {outcome}\nSubjects: {verdicts}\nResume: archon workflow resume --live --yes {run_id}"
     ))
-}
-
-pub(super) fn persist_call(
-    executor: &dyn crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor,
-    v2: &WorkflowV2ResultStore,
-    run_id: &str,
-    call_id: &str,
-    request: HostCommandRequest,
-    result: &HostCommandResult,
-    stdin: &[u8],
-    depends_on: &[String],
-) -> Result<serde_json::Value> {
-    let accepted = result.reusable();
-    let call = WorkflowV2HostCall {
-        id: call_id.to_string(),
-        method: WorkflowV2HostMethod::HostCommand,
-        write_mode: None,
-        options: WorkflowV2HostOptions {
-            host_command: Some(request),
-            ..Default::default()
-        },
-    };
-    let mut typed = WorkflowV2Result::default();
-    typed.status = if accepted {
-        WorkflowV2Status::Accepted
-    } else {
-        WorkflowV2Status::NeedsReview
-    };
-    typed.summary = if accepted {
-        "reverify gate accepted".to_string()
-    } else {
-        let (verdict, findings) = gate_assessment(result);
-        format!("reverify gate {verdict}: {}", findings.join("; "))
-    };
-    typed.data = crate::command::workflow_host_command_outcome_stamp::stamp_host_outcome(
-        Some(executor),
-        &call,
-        serde_json::to_value(result)?,
-    )?;
-    let stamped_data = typed.data.clone();
-    let record = WorkflowV2CallRecord::new(
-        run_id,
-        call,
-        1,
-        content_digest(stdin),
-        typed,
-        depends_on.to_vec(),
-    );
-    if v2.result_path(call_id).exists() {
-        return Err(anyhow!("reverify call record already exists: {call_id}"));
-    }
-    v2.save_call_record(&record)?;
-    Ok(stamped_data)
 }

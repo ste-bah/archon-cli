@@ -43,7 +43,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 21: #420 copies named sibling inputs into each temporary check site;
         // absent named siblings are refused at author time and copied paths
         // are inside the setup-path tree, changing passability verdicts.
-        version: 21,
+        // 21, reverify acceptance: finished runs execute this frozen check set
+        // in the same copy and judge setup failures with freeze's passability rule.
+        // 22: reverify follows freeze's baseline classification, accepting a
+        // missing-implementation failure while preserving setup findings.
+        version: 22,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -63,7 +67,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not acceptance verdicts.
-        sources_digest: "f5579305f8f73ddbe36b91b903f168f0dc3081d30b7ac963f6161c0fe3af60b9",
+        sources_digest: "b468e0ab37e7362884c5eaa6afe9bc1871d650fca5c7f1a6829946a156dda666",
         build_bound: false,
     },
     CapabilityLogic {
@@ -100,7 +104,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not skeleton verdicts.
-        sources_digest: "f5579305f8f73ddbe36b91b903f168f0dc3081d30b7ac963f6161c0fe3af60b9",
+        sources_digest: "b468e0ab37e7362884c5eaa6afe9bc1871d650fca5c7f1a6829946a156dda666",
         build_bound: false,
     },
     CapabilityLogic {
@@ -155,7 +159,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not body landing verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
-        sources_digest: "205af39263c4b7b19f699a75e9e7231325dd8178ee86df16146375f17a2f0df8",
+        sources_digest: "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
         build_bound: false,
     },
     CapabilityLogic {
@@ -203,7 +207,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not lint verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
-        sources_digest: "205af39263c4b7b19f699a75e9e7231325dd8178ee86df16146375f17a2f0df8",
+        sources_digest: "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
         build_bound: false,
     },
     CapabilityLogic {
@@ -224,7 +228,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #440 re-pin only: trace calls none of the scratch copy, audit or probe digest walkers that changed.
         // #440 #420 re-pin only: line-ceiling layout of the scratch and hermetic modules (imports, a re-export); no logic change.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
-        sources_digest: "d45f45822184295a0689a53bfc8be1b310ca0393d1938d5ad5b2f4a8600320ea",
+        sources_digest: "e6d84542fd686d2025abb1ba5b3752734ad1e2ace070e42da38fde7a3041bc29",
         build_bound: true,
     },
     CapabilityLogic {
@@ -265,7 +269,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain acceptance verdicts.
-        sources_digest: "e4121a5a5d0b5992a9450252f8ee5b06bfaea6ae71c76bc96c3b325f4194700a",
+        sources_digest: "763f3df5ee89664109879b88d01b3ad66dad2adc0182a6545b6a42a892efa724",
         build_bound: true,
     },
     CapabilityLogic {
@@ -302,7 +306,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain skeleton verdicts.
-        sources_digest: "e4121a5a5d0b5992a9450252f8ee5b06bfaea6ae71c76bc96c3b325f4194700a",
+        sources_digest: "763f3df5ee89664109879b88d01b3ad66dad2adc0182a6545b6a42a892efa724",
         build_bound: true,
     },
 ];

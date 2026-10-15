@@ -13,7 +13,7 @@ use crate::command::workflow_task_set::executability::HostProbe;
 use crate::command::workflow_task_set::reauthor::{AuthorScope, ReauthorGate};
 use crate::command::workflow_task_set::republish::{ReauthorRequest, reauthor_and_republish};
 
-async fn client(
+pub(crate) async fn client(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
     cwd: &Path,

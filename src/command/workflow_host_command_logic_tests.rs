@@ -236,8 +236,8 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     let baseline = executor(None);
     assert!(!holds(&baseline, "freeze-skeleton", &unstamped));
     assert!(!holds(&baseline, "land-task-body", &unstamped));
-    // freeze-acceptance is at unreleased version 21: #420 changes sibling
-    // setup-path verdicts by materializing existing check inputs.
+    // freeze-acceptance is at unreleased version 22: reverify uses the same
+    // pre-implementation verdict rules as the freeze probe.
     assert!(!holds(&baseline, "freeze-acceptance", &unstamped));
     let acceptance = HostCommandRequest::new("freeze-acceptance", Some("c".into())).unwrap();
     let current_acceptance_version = CAPABILITY_LOGIC
@@ -245,7 +245,7 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
         .find(|logic| logic.id == "freeze-acceptance")
         .expect("freeze-acceptance catalog entry")
         .version;
-    assert_eq!(current_acceptance_version, 21);
+    assert_eq!(current_acceptance_version, 22);
     assert_eq!(
         baseline.logic_version(&acceptance).unwrap(),
         Some(current_acceptance_version)

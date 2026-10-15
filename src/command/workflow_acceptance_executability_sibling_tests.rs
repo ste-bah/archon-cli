@@ -76,6 +76,8 @@ fn probe_copy_materializes_tracked_sibling_at_the_same_relative_path() {
 
 #[test]
 fn a_missing_sibling_is_an_author_finding_with_path_and_check_id() {
+    // EXPECTED before running: the absent sibling is refused during author
+    // validation, with both its path and acceptance check id in the finding.
     let project = tempfile::tempdir().unwrap();
     let command = "cargo test --manifest-path ../absent/Cargo.toml";
     let contract: AcceptanceContract = serde_json::from_value(serde_json::json!({

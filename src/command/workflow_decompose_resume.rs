@@ -395,9 +395,9 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             crate::command::workflow_host_command_catalog::HostCommandResolutionContext {
                 program,
                 project_root: project_root.clone(),
-                prd_path,
+                prd_path: prd_path.clone(),
                 prd_digest,
-                task_root,
+                task_root: task_root.clone(),
                 run_staging_root: store.run_dir(run_id).join("host-command-staging"),
                 frozen_task_id: None,
                 frozen_task_file: None,
@@ -434,13 +434,14 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         })
         .await
         .context("building the fixed decomposition resume provider client")?;
-    crate::command::workflow_read_scope::require_author_reads(
-        client.as_ref(),
-        "the decomposition authors",
-        run.spec.target_repository_root.as_deref().map(Path::new),
-        &store.run_dir(&run.id),
-    )?;
     super::claim::reclaim_released_task_root(&store, run_id)?;
+    crate::command::workflow_decompose_remediation::prepare_resume_checks(
+        (&project_root, &prd_path, &task_root, &store.run_dir(run_id)),
+        run.spec.target_repository_root.as_deref().map(Path::new),
+        ledger.as_ref(),
+        client.as_ref(),
+    )
+    .await?;
     execution_lease.record_executor()?;
     upgrade::mark_started(&store, run_id)?;
     let lifecycle = archon_workflow::LifecycleController::new(store.clone());

@@ -1,5 +1,7 @@
 //! End-to-end tests for the reverify command. Expected state is recorded
 //! before invoking the real entry point; assertions read its persisted output.
+#[path = "workflow_decompose_reverify_fixture_repository.rs"]
+mod fixture_repository;
 use super::*;
 use archon_workflow::{
     DecompositionPhase, FixedDecompositionStateV1, FixedRunIdentityV1, RunStatus, WorkflowRunKind,
@@ -169,6 +171,7 @@ pub(super) fn fixture() -> Fixture {
         std::fs::write(&path, body).unwrap();
         path
     }).collect::<Vec<_>>();
+    fixture_repository::record(&project, &task_root);
     let store = archon_workflow::WorkflowStore::project(&project);
     let run = store
         .create_run(WorkflowSpec {

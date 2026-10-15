@@ -50,7 +50,8 @@ mod workflow_decompose_reverify_tests;
 #[path = "workflow_freeze_cli.rs"]
 mod workflow_freeze_cli;
 pub(crate) use workflow_freeze_cli::{
-    entry_defects, install_entry_validator, refusal_text, skeleton_document,
+    entry_defects, install_entry_validator, refusal_text, reverify_acceptance_client,
+    skeleton_document,
 };
 #[path = "workflow_staged_cli.rs"]
 mod workflow_staged_cli;

@@ -5,6 +5,57 @@ use super::*;
 use crate::command::workflow_task_set::live_root;
 
 impl HostProbe {
+    /// Run frozen accepted checks against the probe's current hermetic site.
+    /// Reverification deliberately does not reuse the pre-implementation run:
+    /// it needs the finished tree and the copy layout that actually ran it.
+    pub(crate) async fn run_reverify_copy(
+        &self,
+        contract: &AcceptanceContract,
+        ids: &BTreeSet<String>,
+    ) -> std::result::Result<
+        (
+            Vec<CheckEvidence>,
+            Option<String>,
+            BTreeMap<String, String>,
+            BTreeMap<String, String>,
+        ),
+        String,
+    > {
+        let digest = contract_digest(contract)?;
+        let refs = refs_for(contract, &digest, ids);
+        let Some(commit) = self.site_commit() else {
+            let reason = match &self.site {
+                Site::Unavailable(reason) => reason.clone(),
+                _ => format!("{} has no commit to copy", self.repository.display()),
+            };
+            return Ok((
+                Vec::new(),
+                None,
+                refs.into_iter()
+                    .map(|reference| (reference.acceptance_id, reason.clone()))
+                    .collect(),
+                BTreeMap::new(),
+            ));
+        };
+        let tree = Baseline {
+            commit: commit.clone(),
+            repository: self.repository.clone(),
+        };
+        let run = repairs::tree_results(self, &tree, contract, &digest, &refs, None, true).await;
+        let missing = refs
+            .iter()
+            .filter_map(|reference| {
+                run.unrun(&reference.acceptance_id)
+                    .map(|why| (reference.acceptance_id.clone(), why))
+            })
+            .collect();
+        let evidence = run.results.into_values().collect::<Vec<_>>();
+        let baseline_findings =
+            baseline::cannot_fail_findings(self, &tree, contract, &digest, &refs, Some(&evidence))
+                .await;
+        Ok((evidence, Some(commit), missing, baseline_findings))
+    }
+
     /// The commit the site observes, when it observes one.
     pub(super) fn site_commit(&self) -> Option<String> {
         match &self.site {

@@ -40,6 +40,110 @@ pub(crate) fn force_subjects(arguments: &mut serde_json::Value, ledger: Option<&
     }
 }
 
+pub(crate) async fn reauthor_unowned_checks_on_resume(
+    (project_root, prd_path, task_root, run_dir): (&Path, &Path, &Path, &Path),
+    ledger: Option<&Ledger>,
+    client: &dyn archon_workflow::WorkflowLlmClient,
+) -> Result<()> {
+    let Some(ledger) = ledger else {
+        return Ok(());
+    };
+    let contract: archon_workflow::task_set_contract::AcceptanceContract =
+        serde_json::from_slice(&std::fs::read(
+            task_root.join(archon_workflow::task_set_contract::ACCEPTANCE_CONTRACT_FILE),
+        )?)?;
+    let skeleton: archon_workflow::task_skeleton::TaskSkeleton = serde_json::from_slice(
+        &std::fs::read(task_root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE))?,
+    )?;
+    let ids = ledger
+        .subjects
+        .iter()
+        .filter(|subject| {
+            contract
+                .acceptance
+                .iter()
+                .chain(&contract.supplementary)
+                .find(|entry| &entry.id == *subject)
+                .is_some_and(|entry| {
+                    !skeleton.tasks.iter().any(|task| {
+                        entry
+                            .covers
+                            .iter()
+                            .chain(std::iter::once(&entry.id))
+                            .any(|obligation| task.implements.contains(obligation))
+                    })
+                })
+        })
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let report_path = run_dir.join(format!(
+        "decomposition/reverify/reports/{}.json",
+        ledger.report_id
+    ));
+    let report: serde_json::Value = serde_json::from_slice(&std::fs::read(report_path)?)?;
+    let seeds = ids
+        .iter()
+        .map(|id| {
+            let finding = report["checks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|check| check["check_id"].as_str() == Some(id.as_str()))
+                .and_then(|check| check["findings"].as_array())
+                .and_then(|findings| findings.first())
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("the frozen check failed on the current tree");
+            (id.clone(), finding.to_string())
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let scope = crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set(
+        project_root,
+        task_root,
+        prd_path,
+    )
+    .map_err(|error| anyhow::anyhow!(error))?;
+    let probe = crate::command::workflow_task_set::executability::HostProbe::for_task_set(
+        project_root,
+        task_root,
+    );
+    crate::command::workflow_task_set::republish::reauthor_and_republish(
+        client,
+        crate::command::workflow_task_set::republish::ReauthorRequest {
+            project_root,
+            tasks_root: task_root,
+            prd_path,
+            ids: &ids,
+            gate: crate::command::workflow_task_set::reauthor::ReauthorGate {
+                probe: &probe,
+                seeds: &seeds,
+            },
+            trigger: "workflow resume: reverify routed a failed check with no implementing task",
+        },
+        &scope,
+    )
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn prepare_resume_checks(
+    (project_root, prd_path, task_root, run_dir): (&Path, &Path, &Path, &Path),
+    target_root: Option<&Path>,
+    ledger: Option<&Ledger>,
+    client: &dyn archon_workflow::WorkflowLlmClient,
+) -> Result<()> {
+    crate::command::workflow_read_scope::require_author_reads(
+        client,
+        "the decomposition authors",
+        target_root,
+        run_dir,
+    )?;
+    reauthor_unowned_checks_on_resume((project_root, prd_path, task_root, run_dir), ledger, client)
+        .await
+}
+
 fn advance_forced_author_ordinals(
     run_dir: &Path,
     arguments: &mut serde_json::Value,

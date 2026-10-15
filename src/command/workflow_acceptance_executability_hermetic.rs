@@ -27,7 +27,7 @@ pub(super) mod siblings;
 
 #[path = "workflow_acceptance_executability_hermetic_layout.rs"]
 mod layout;
-pub(super) use layout::{
+pub(crate) use layout::{
     CheckEvidence, CopyLayout, CopyRun, SiblingRevision, deferred, warm_target,
 };
 
