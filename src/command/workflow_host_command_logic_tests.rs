@@ -236,13 +236,19 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     let baseline = executor(None);
     assert!(!holds(&baseline, "freeze-skeleton", &unstamped));
     assert!(!holds(&baseline, "land-task-body", &unstamped));
-    // #402 and #419 changed acceptance reply completeness and restoration;
-    // the current version is read from the capability catalog below.
+    // freeze-acceptance is at version 21: #374 changes live-root path verdicts
+    // at version 20, and #366 adds joined shell-word and assignment carry rules.
     assert!(!holds(&baseline, "freeze-acceptance", &unstamped));
     let acceptance = HostCommandRequest::new("freeze-acceptance", Some("c".into())).unwrap();
+    let current_acceptance_version = CAPABILITY_LOGIC
+        .iter()
+        .find(|logic| logic.id == "freeze-acceptance")
+        .expect("freeze-acceptance catalog entry")
+        .version;
+    assert_eq!(current_acceptance_version, 21);
     assert_eq!(
         baseline.logic_version(&acceptance).unwrap(),
-        Some(crate::command::workflow_host_command_logic::versions()["freeze-acceptance"])
+        Some(current_acceptance_version)
     );
     for command in [
         "verify-frozen-acceptance",

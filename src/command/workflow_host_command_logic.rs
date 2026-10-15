@@ -188,7 +188,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #420 review, same unreleased version 17: the rule applies only in a host-made copy (scratch, hermetic), never on the live tree, and a top-level name the copy holds (`../repo`) stays inside it.
         // 18: #446 direct-site baseline runs use their hermetic copy's layout when applying that rule.
         // 19: #402 missing provider stop reasons cannot complete acceptance authoring; #419 pinned restoration requires identical check and covers fields after a fresh refusal.
-        // 21: #366 shell assignment scope catches live-root acceptance checks whose root is assigned before use.
+        // 20: #374 reconstructs unresolved paths from the longest existing
+        // ancestor before comparing with the live root; only an unresolvable
+        // same-volume path fails closed. Sibling paths can now pass.
+        // 21: #366 joins shell-word paths and carries shell assignments into
+        // later commands when detecting live-root acceptance checks.
         // #446 review 2, same unreleased version 18
         version: 21,
         sources: &[GATE, CONTRACT, FREEZE],
@@ -204,9 +208,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // evidence reruns under the version-18 acceptance pin. Version 19 records #402/#419 changes.
         // #446 follow-up re-pin only: archive collisions keep both prior byte sets; verdicts are unchanged.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
+        // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not acceptance verdicts.
         // re-pin only: verdicts are unchanged.
-        sources_digest: "45607e1be8c69a80ecf8963fe81a0f4c17dbaaab9a4c742b0ba4dad1e6c2e651",
+        sources_digest: "c227304be5b24eebea4453112f2837bb2a6febf263dca39fceb8ce7515b7f84a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -237,10 +243,12 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #446 follow-up: archive collisions keep both prior byte sets.
         // #374 re-pin only: skeleton freeze performs no check path classification.
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
+        // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // #366 re-pin only: acceptance-root detection does not judge skeleton output.
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
+        // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not skeleton verdicts.
         // re-pin only: verdicts are unchanged.
-        sources_digest: "45607e1be8c69a80ecf8963fe81a0f4c17dbaaab9a4c742b0ba4dad1e6c2e651",
+        sources_digest: "c227304be5b24eebea4453112f2837bb2a6febf263dca39fceb8ce7515b7f84a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -372,8 +380,9 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
+        // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain acceptance verdicts.
         // re-pin only: verdicts are unchanged.
-        sources_digest: "3a5174480a1a82f336bc9018aebeb49d093b9e5ca9be1657199d9cbdc847428f",
+        sources_digest: "71c8f3ae5ea9829dd21ba269af393d4643325a66f0b8dfd955cdb97d6cc4ac5a",
         build_bound: true,
     },
     CapabilityLogic {
@@ -406,9 +415,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
+        // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain skeleton verdicts.
         // #366 re-pin only: the detector change never judges a skeleton verification.
         // re-pin only: verdicts are unchanged.
-        sources_digest: "3a5174480a1a82f336bc9018aebeb49d093b9e5ca9be1657199d9cbdc847428f",
+        sources_digest: "71c8f3ae5ea9829dd21ba269af393d4643325a66f0b8dfd955cdb97d6cc4ac5a",
         build_bound: true,
     },
 ];

@@ -109,9 +109,12 @@ pub(super) fn named_root_in<'a>(
                         .any(|word| windows_path_word_names(word, &root)))
     });
     textual.or_else(|| {
-        forms
-            .iter()
-            .find(|form| paths.iter().any(|path| names_by_identity(path, form)))
+        forms.iter().find(|form| {
+            paths.iter().any(|path| {
+                super::names_by_identity(path, form)
+                    || super::unresolved_on_known_volume(path, form)
+            })
+        })
     })
 }
 

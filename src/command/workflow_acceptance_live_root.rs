@@ -241,6 +241,71 @@ fn lexical(token: &str) -> Option<PathBuf> {
     Some(resolved)
 }
 
+#[cfg(any(windows, test))]
+fn reconstruct_from_longest_existing_ancestor(
+    path: &Path,
+    mut canonicalize: impl FnMut(&Path) -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    path.ancestors().find_map(|ancestor| {
+        let canonical = canonicalize(ancestor)?;
+        let remainder = path.strip_prefix(ancestor).ok()?;
+        Some(canonical.join(remainder))
+    })
+}
+
+#[cfg(any(windows, test))]
+fn path_starts_with(path: &Path, root: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let mut path = path.components();
+        root.components().all(|root_component| {
+            path.next().is_some_and(|path_component| {
+                path_component
+                    .as_os_str()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&root_component.as_os_str().to_string_lossy())
+            })
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        path.starts_with(root)
+    }
+}
+
+/// Reconstruct unresolved Windows paths from their longest existing ancestor
+/// before comparing them with the canonical live root. This expands aliases
+/// that the OS resolves, while a sibling stays outside the root. Only fail
+/// closed when no ancestor resolves and the path names the root's known volume.
+#[cfg(windows)]
+fn unresolved_on_known_volume(path: &Path, root: &Path) -> bool {
+    if path.exists() {
+        return false;
+    }
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if let Some(reconstructed) =
+        reconstruct_from_longest_existing_ancestor(path, |ancestor| ancestor.canonicalize().ok())
+    {
+        return path_starts_with(&reconstructed, &canonical_root);
+    }
+    let volume = |path: &Path| match path.components().next() {
+        Some(Component::Prefix(prefix)) => Some(
+            prefix
+                .as_os_str()
+                .to_string_lossy()
+                .to_lowercase()
+                .replace('/', "\\"),
+        ),
+        _ => None,
+    };
+    matches!((volume(path), volume(root)), (Some(path_volume), Some(root_volume)) if path_volume == root_volume)
+}
+
+#[cfg(not(windows))]
+fn unresolved_on_known_volume(_path: &Path, _root: &Path) -> bool {
+    false
+}
+
 fn names_by_identity(path: &Path, root: &Path) -> bool {
     let Ok(root_handle) = same_file::Handle::from_path(root) else {
         return false;
