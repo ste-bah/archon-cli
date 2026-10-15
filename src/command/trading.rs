@@ -22,11 +22,13 @@ pub(crate) fn render_trading_command(action: &TradingCliAction) -> Result<String
         TradingCliAction::Setup(TradingCliSetupArgs {
             target,
             check,
+            dry_run,
             skip_tradingview,
             skip_openbb,
         }) => crate::command::trading_tools::run_setup_script(
             target.as_ref(),
             *check,
+            *dry_run,
             *skip_tradingview,
             *skip_openbb,
         ),

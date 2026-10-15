@@ -1,0 +1,157 @@
+name: Trading tools setup
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  setup-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check POSIX installer without writes
+        if: runner.os != 'Windows'
+        run: sh scripts/tests/test-setup-trading-tools.sh
+      - name: Check Windows installer without writes
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $target = Join-Path $env:RUNNER_TEMP 'trading setup with spaces'
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          & scripts/setup-trading-tools.ps1 -Target $target -Check -SkipTradingView -SkipOpenBB
+          & scripts/setup-trading-tools.ps1 -Target $target -DryRun -SkipTradingView -SkipOpenBB
+          if (Test-Path (Join-Path $target '.archon/tools')) { throw 'check/dry-run changed the target' }
+
+          $fakeBin = Join-Path $env:RUNNER_TEMP 'trading setup fake tools'
+          New-Item -ItemType Directory -Force -Path $fakeBin | Out-Null
+          @'
+          @echo off
+          setlocal EnableDelayedExpansion
+          if "%1"=="clone" (
+            set "DEST=%~3"
+            mkdir "!DEST!\src\cli" "!DEST!\scripts" 2>nul
+            type nul > "!DEST!\src\server.js"
+            type nul > "!DEST!\src\cli\index.js"
+          )
+          exit /b 0
+          '@ | Set-Content -LiteralPath (Join-Path $fakeBin 'git.cmd') -Encoding ascii
+          '@echo off
+          exit /b 0' | Set-Content -LiteralPath (Join-Path $fakeBin 'npm.cmd') -Encoding ascii
+          '@echo off
+          exit /b 0' | Set-Content -LiteralPath (Join-Path $fakeBin 'node.cmd') -Encoding ascii
+          $env:PATH = "$fakeBin;$env:PATH"
+          & scripts/setup-trading-tools.ps1 -Target $target -SkipOpenBB
+          $launcher = Join-Path $target 'scripts/start-tradingview-cdp.ps1'
+          if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw 'Windows TradingView start script was not generated' }
+          $launcherText = Get-Content -LiteralPath $launcher -Raw
+          if ($launcherText -notmatch '9222') { throw 'Windows TradingView default port is missing' }
+          try { & $launcher 9223; throw 'missing external launcher did not fail' }
+          catch { if ($_.Exception.Message -notmatch 'Install the external TradingView launcher project') { throw } }
+
+          $setupScript = (Resolve-Path 'scripts/setup-trading-tools.ps1').Path
+          $pythonLog = Join-Path $env:RUNNER_TEMP 'trading setup interpreter log'
+          $interpreterBin = Join-Path $env:RUNNER_TEMP 'trading setup interpreter mocks'
+          New-Item -ItemType Directory -Force -Path $interpreterBin | Out-Null
+          @'
+          @echo off
+          echo py %*>>"%TRADING_PYTHON_LOG%"
+          exit /b 0
+          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'py.cmd') -Encoding ascii
+          $env:TRADING_PYTHON_LOG = $pythonLog
+          $env:PATH = "$interpreterBin;$env:SystemRoot\System32;$env:SystemRoot"
+          $pyOnlyTarget = Join-Path $env:RUNNER_TEMP 'trading setup py-only'
+          $pyOnlyVenv = Join-Path $pyOnlyTarget '.archon/tools/openbb-venv'
+          New-Item -ItemType Directory -Force -Path $pyOnlyVenv | Out-Null
+          Set-Content -LiteralPath (Join-Path $pyOnlyVenv 'keep.txt') -Value 'keep'
+          try { & $setupScript -Target $pyOnlyTarget -SkipTradingView; throw 'py-only non-venv was not refused' }
+          catch { if ($_.Exception.Message -notmatch 'non-venv directory') { throw } }
+          if ((Get-Content -LiteralPath $pythonLog -Raw) -notmatch 'py -3 -c') { throw 'py -3 was not selected in py-only PATH case' }
+          if (-not (Test-Path -LiteralPath (Join-Path $pyOnlyVenv 'keep.txt') -PathType Leaf)) { throw 'py-only sentinel was removed' }
+          $junctionTarget = Join-Path $env:RUNNER_TEMP 'trading setup junction target'
+          $junctionProject = Join-Path $env:RUNNER_TEMP 'trading setup junction project'
+          $junctionVenv = Join-Path $junctionProject '.archon/tools/openbb-venv'
+          New-Item -ItemType Directory -Force -Path $junctionTarget, (Split-Path -Parent $junctionVenv) | Out-Null
+          Set-Content -LiteralPath (Join-Path $junctionTarget 'keep.txt') -Value 'keep'
+          New-Item -ItemType Junction -Path $junctionVenv -Target $junctionTarget | Out-Null
+          try { & $setupScript -Target $junctionProject -SkipTradingView; throw 'junctioned venv was not refused' }
+          catch { if ($_.Exception.Message -notmatch 'reparse-point OpenBB venv') { throw } }
+          if (-not (Test-Path -LiteralPath (Join-Path $junctionTarget 'keep.txt') -PathType Leaf)) { throw 'junction target file was removed' }
+
+          Remove-Item -LiteralPath $pythonLog -Force
+          Remove-Item -LiteralPath (Join-Path $interpreterBin 'py.cmd') -Force
+          @'
+          @echo off
+          echo python %*>>"%TRADING_PYTHON_LOG%"
+          exit /b 1
+          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python.cmd') -Encoding ascii
+          @'
+          @echo off
+          echo python3 %*>>"%TRADING_PYTHON_LOG%"
+          exit /b 0
+          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python3.cmd') -Encoding ascii
+          $storeTarget = Join-Path $env:RUNNER_TEMP 'trading setup Store stub'
+          $storeVenv = Join-Path $storeTarget '.archon/tools/openbb-venv'
+          New-Item -ItemType Directory -Force -Path $storeVenv | Out-Null
+          Set-Content -LiteralPath (Join-Path $storeVenv 'keep.txt') -Value 'keep'
+          try { & $setupScript -Target $storeTarget -SkipTradingView; throw 'Store-stub non-venv was not refused' }
+          catch { if ($_.Exception.Message -notmatch 'non-venv directory') { throw } }
+          $storeLog = Get-Content -LiteralPath $pythonLog -Raw
+          if ($storeLog -notmatch 'python -c' -or $storeLog -notmatch 'python3 -c') { throw 'Store stub was not rejected before python3 fallback' }
+          if (-not (Test-Path -LiteralPath (Join-Path $storeVenv 'keep.txt') -PathType Leaf)) { throw 'Store-stub sentinel was removed' }
+
+          @'
+          @echo off
+          echo py spec="%~4">>"%TRADING_PYTHON_LOG%"
+          if "%TRADING_PYTHON_ACCEPT%"=="1" exit /b 0
+          exit /b 1
+          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'py.cmd') -Encoding ascii
+          @'
+          @echo off
+          echo python spec="%~3">>"%TRADING_PYTHON_LOG%"
+          if "%TRADING_PYTHON_ACCEPT%"=="1" exit /b 0
+          exit /b 1
+          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python.cmd') -Encoding ascii
+          @'
+          @echo off
+          echo python3 spec="%~3">>"%TRADING_PYTHON_LOG%"
+          if "%TRADING_PYTHON_ACCEPT%"=="1" exit /b 0
+          exit /b 1
+          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python3.cmd') -Encoding ascii
+          $specifierCases = @(
+            @{ Specifier = '>=3.10,<3.13'; Version = '3.12'; Accept = $true },
+            @{ Specifier = '>=3.10,<3.13'; Version = '3.13'; Accept = $false },
+            @{ Specifier = '>=3.11.17'; Version = '3.11.0'; Accept = $false },
+            @{ Specifier = '>=3.11.17'; Version = '3.11.17'; Accept = $true },
+            @{ Specifier = '!=3.12.*'; Version = '3.12.4'; Accept = $false },
+            @{ Specifier = '>=3.13'; Version = '3.13.0rc1'; Accept = $false }
+          )
+          foreach ($case in $specifierCases) {
+            $caseName = ($case.Specifier + '-' + $case.Version) -replace '[^A-Za-z0-9]', '_'
+            $caseTarget = Join-Path $env:RUNNER_TEMP "trading setup spec $caseName"
+            $caseVenv = Join-Path $caseTarget '.archon/tools/openbb-venv'
+            $metadataDir = Join-Path $caseVenv 'Lib/site-packages/openbb-99.dist-info'
+            New-Item -ItemType Directory -Force -Path $metadataDir | Out-Null
+            Set-Content -LiteralPath (Join-Path $metadataDir 'METADATA') -Value @("Metadata-Version: 2.1", "Name: openbb", "Requires-Python: $($case.Specifier)")
+            Set-Content -LiteralPath (Join-Path $caseVenv 'keep.txt') -Value 'keep'
+            Remove-Item -LiteralPath $pythonLog -Force -ErrorAction SilentlyContinue
+            $env:TRADING_PYTHON_ACCEPT = if ($case.Accept) { '1' } else { '0' }
+            try {
+              & $setupScript -Target $caseTarget -SkipTradingView
+              throw "specifier case unexpectedly passed setup: $($case.Specifier) $($case.Version)"
+            } catch {
+              if ($case.Accept -and $_.Exception.Message -notmatch 'non-venv directory with contents') { throw }
+              if (-not $case.Accept -and $_.Exception.Message -notmatch [regex]::Escape("specifier '$($case.Specifier)'")) { throw }
+            }
+            if ((Get-Content -LiteralPath $pythonLog -Raw) -notmatch [regex]::Escape("spec=`"$($case.Specifier)`"")) { throw "venv Requires-Python was not passed to the interpreter for $($case.Specifier)" }
+            if ((Get-Content -LiteralPath (Join-Path $caseVenv 'keep.txt') -Raw).Trim() -ne 'keep') { throw 'specifier probe changed its venv sentinel' }
+          }

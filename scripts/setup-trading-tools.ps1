@@ -1,0 +1,184 @@
+param(
+    [string]$Target = (Get-Location).Path,
+    [switch]$Check,
+    [switch]$DryRun,
+    [switch]$SkipTradingView,
+    [switch]$SkipOpenBB
+)
+$ErrorActionPreference = 'Stop'
+$Target = [IO.Path]::GetFullPath($Target)
+$ToolsDir = Join-Path $Target '.archon/tools'
+$TvDir = Join-Path $ToolsDir 'tradingview-mcp'
+$Venv = Join-Path $ToolsDir 'openbb-venv'
+$Python = Join-Path $Venv 'Scripts/python.exe'
+$Api = Join-Path $Venv 'Scripts/openbb-api.exe'
+$McpFile = Join-Path $Target '.mcp.json'
+
+function Get-OpenBBState {
+    if (-not (Test-Path -LiteralPath $Venv -PathType Container)) { return "missing ($Venv)" }
+    if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) { return "broken (missing interpreter: $Python)" }
+    & $Python -c 'import openbb' 2>$null
+    if ($LASTEXITCODE -eq 0) { return "healthy ($Python)" }
+    return "broken ($Python)"
+}
+function Show-Status {
+    Write-Output "setup-trading-tools: target=$Target"
+    foreach ($bin in @('node', 'npm', 'python', 'git')) {
+        $found = Get-Command $bin -ErrorAction SilentlyContinue
+        if ($found) { & $bin --version } else { Write-Output "${bin}: missing" }
+    }
+    foreach ($path in @((Join-Path $TvDir 'src/server.js'), (Join-Path $TvDir 'src/cli/index.js'), $Api, $McpFile)) {
+        if (Test-Path -LiteralPath $path) { Write-Output "present: $path" } else { Write-Output "missing: $path" }
+    }
+    Write-Output "OpenBB venv: $(Get-OpenBBState)"
+}
+function Invoke-External([string]$Program, [string[]]$Arguments) {
+    if ($DryRun) { Write-Output "[dry-run] $Program $($Arguments -join ' ')"; return }
+    & $Program @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "$Program failed with exit $LASTEXITCODE" }
+}
+function Get-OpenBBSpecifier {
+    $metadata = Get-ChildItem -LiteralPath $Venv -Filter 'openbb-*.dist-info' -Directory -Recurse -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'METADATA' } |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Select-Object -First 1
+    if ($metadata) {
+        $line = Get-Content -LiteralPath $metadata | Where-Object { $_ -like 'Requires-Python: *' } | Select-Object -First 1
+        if ($line) { return $line.Substring('Requires-Python: '.Length) }
+    }
+    return '>=3.10,<4'
+}
+function Test-PythonCandidate([string]$Program, [string[]]$Prefix, [string]$Specifier) {
+    $probe = @'
+import re, sys
+spec = sys.argv[1]
+version = sys.version_info
+release = tuple(version[:3])
+pre = {"alpha": (0, version.serial), "beta": (1, version.serial), "candidate": (2, version.serial)}.get(version.releaselevel, (3, 0))
+def compare(left, right):
+    a, a_pre = left
+    b, b_pre = right
+    a = tuple(a[:next((i for i in range(len(a) - 1, -1, -1) if a[i] != 0), -1) + 1])
+    b = tuple(b[:next((i for i in range(len(b) - 1, -1, -1) if b[i] != 0), -1) + 1])
+    width = max(len(a), len(b))
+    a, b = a + (0,) * (width - len(a)), b + (0,) * (width - len(b))
+    if a != b: return (a > b) - (a < b)
+    return (a_pre > b_pre) - (a_pre < b_pre)
+def check_clause(clause):
+    match = re.fullmatch(r"(>=|<=|==|!=|~=|>|<)\s*(\d+(?:\.\d+)*)(a|b|rc)?(\d+)?(\.\*)?", clause.strip(), re.I)
+    if not match:
+        op = re.match(r"([^\s\d]+)", clause.strip())
+        return False, "unknown operator %s" % (op.group(1) if op else "(invalid clause)")
+    op, raw, pre_label, pre_serial, wildcard = match.groups()
+    if pre_label and pre_serial is None: return False, "invalid pre-release clause"
+    wanted_pre = (({"a": 0, "b": 1, "rc": 2}[(pre_label or "").lower()], int(pre_serial)) if pre_label else (3, 0))
+    wanted = (tuple(map(int, raw.split("."))), wanted_pre)
+    order = compare((release, pre), wanted)
+    if wildcard and op in ("==", "!="):
+        equal = release[:len(wanted[0])] == wanted[0]
+        return (equal if op == "==" else not equal), None
+    if wildcard: return False, "wildcard is only valid with == or !="
+    if op == ">=": return order >= 0, None
+    if op == ">": return order > 0, None
+    if op == "<=": return order <= 0, None
+    if op == "<": return order < 0, None
+    if op == "==": return order == 0, None
+    if op == "!=": return order != 0, None
+    if op == "~=":
+        if len(wanted[0]) < 2: return False, "invalid compatible-release clause"
+        upper = list(wanted[0][:-1]); upper[-1] += 1
+        return order >= 0 and compare((release, pre), (tuple(upper), (3, 0))) < 0, None
+clauses = spec.split(",")
+for clause in clauses:
+    _, error = check_clause(clause)
+    if error:
+        print("%s (treated as unsatisfied)" % error)
+        raise SystemExit(2)
+for clause in clauses:
+    passed, _ = check_clause(clause)
+    if not passed: raise SystemExit(1)
+raise SystemExit(0)
+'@
+    try {
+        $script:PythonProbeError = (& $Program @Prefix -c $probe $Specifier 2>&1 | Out-String).Trim()
+        return $LASTEXITCODE -eq 0
+    } catch { return $false }
+}
+function Resolve-BasePython([string]$Specifier) {
+    $script:PythonProbeError = ''
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        if (Test-PythonCandidate 'py' @('-3') $Specifier) { return @{ Program = 'py'; Prefix = @('-3') } }
+    }
+    foreach ($candidate in @('python', 'python3')) {
+        if ((Get-Command $candidate -ErrorAction SilentlyContinue) -and (Test-PythonCandidate $candidate @() $Specifier)) {
+            return @{ Program = $candidate; Prefix = @() }
+        }
+    }
+    $detail = if ($script:PythonProbeError) { " $script:PythonProbeError" } else { '' }
+    throw "No runnable Python interpreter satisfies OpenBB Requires-Python specifier '$Specifier'.$detail"
+}
+function Assert-SafeVenvRebuild {
+    if (Test-Path -LiteralPath $Venv) {
+        $item = Get-Item -Force -LiteralPath $Venv
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $linkTarget = if ($item.Target) { $item.Target -join ', ' } else { 'unknown target' }
+            throw "Refusing to rebuild symlinked or reparse-point OpenBB venv: $Venv -> $linkTarget"
+        }
+        if (-not $item.PSIsContainer) { throw "Refusing to rebuild non-venv file path: $Venv (missing pyvenv.cfg)" }
+        if (-not (Test-Path -LiteralPath (Join-Path $Venv 'pyvenv.cfg') -PathType Leaf)) {
+            $contents = @(Get-ChildItem -Force -LiteralPath $Venv -ErrorAction SilentlyContinue)
+            if ($contents.Count -gt 0) { throw "Refusing to rebuild non-venv directory with contents: $Venv (missing pyvenv.cfg)" }
+        }
+    }
+}
+
+if ($Check -or $DryRun) { Show-Status; exit 0 }
+New-Item -ItemType Directory -Force -Path $ToolsDir, (Join-Path $Target 'scripts') | Out-Null
+if (-not $SkipTradingView) {
+    foreach ($bin in @('git', 'node', 'npm')) { if (-not (Get-Command $bin -ErrorAction SilentlyContinue)) { throw "Missing required binary: $bin. Run scripts/install-system-deps.ps1 -WithTradingTools." } }
+    if (Test-Path -LiteralPath (Join-Path $TvDir '.git')) { Invoke-External git @('-C', $TvDir, 'pull', '--ff-only') }
+    else { Invoke-External git @('clone', 'https://github.com/tradesdontlie/tradingview-mcp.git', $TvDir) }
+    Invoke-External npm @('--prefix', $TvDir, 'install', '--omit=dev')
+    $configScript = @'
+const fs=require('fs'), file=process.argv[2], server=process.argv[3];
+let c={}; if(fs.existsSync(file)) c=JSON.parse(fs.readFileSync(file,'utf8'));
+c.mcpServers=c.mcpServers||{}; c.mcpServers.tradingview={command:'node',args:[server],env:{TV_CDP_HOST:'localhost',TV_CDP_PORT:'9222'},toolPolicy:{trustServerHints:false,toolPermissions:{tv_health_check:'safe',tv_discover:'safe',tv_ui_state:'safe',chart_get_state:'safe',quote_get:'safe',data_get_ohlcv:'safe',data_get_study_values:'safe',data_get_pine_lines:'safe',data_get_pine_labels:'safe',data_get_pine_tables:'safe',capture_screenshot:'safe',pine_analyze:'safe',pine_check:'safe',pine_get_errors:'safe',pine_get_console:'safe',pine_get_source:'risky',pine_set_source:'risky',pine_compile:'risky',pine_smart_compile:'risky',pine_save:'risky',alert_create:'risky',alert_delete:'risky',replay_trade:'risky',tv_launch:'risky'}}};
+fs.writeFileSync(file,JSON.stringify(c,null,2)+'\n');
+'@
+    if ($DryRun) { Write-Output '[dry-run] write TradingView MCP config' }
+    else { $configScript | node - $McpFile (Join-Path $TvDir 'src/server.js'); if ($LASTEXITCODE -ne 0) { throw 'Failed to write TradingView MCP config' } }
+    @'
+$ErrorActionPreference='Stop'
+$Root=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$Port=if($args.Count -gt 0){$args[0]}else{'9222'}
+$Launcher=Join-Path $Root '.archon/tools/tradingview-mcp/scripts/launch_tv_debug_windows.ps1'
+if(-not(Test-Path -LiteralPath $Launcher -PathType Leaf)){throw "TradingView CDP launcher is missing: $Launcher. Install the external TradingView launcher project."}
+& $Launcher $Port
+exit $LASTEXITCODE
+'@ | Set-Content -LiteralPath (Join-Path $Target 'scripts/start-tradingview-cdp.ps1') -Encoding utf8
+}
+if (-not $SkipOpenBB) {
+    if ((Get-OpenBBState) -notlike 'healthy*') {
+        $specifier = Get-OpenBBSpecifier
+        $basePython = Resolve-BasePython $specifier
+        Assert-SafeVenvRebuild
+        Invoke-External $basePython.Program ($basePython.Prefix + @('-m', 'venv', '--clear', $Venv))
+    }
+    Invoke-External $Python @('-m', 'pip', 'install', '--upgrade', 'pip')
+    Invoke-External $Python @('-m', 'pip', 'install', 'openbb', 'openbb-platform-api')
+    if ((Get-OpenBBState) -notlike 'healthy*') { throw "OpenBB environment remains broken after installation: $Venv" }
+    @'
+$ErrorActionPreference='Stop'
+$Root=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$HostName=if($env:OPENBB_HOST){$env:OPENBB_HOST}else{'127.0.0.1'}
+$Port=if($env:OPENBB_PORT){$env:OPENBB_PORT}else{'6900'}
+$Python=Join-Path $Root '.archon/tools/openbb-venv/Scripts/python.exe'
+$Api=Join-Path $Root '.archon/tools/openbb-venv/Scripts/openbb-api.exe'
+if(-not(Test-Path -LiteralPath $Python -PathType Leaf)){throw "OpenBB interpreter is missing: $Python. Run archon trading setup to repair the environment."}
+& $Python -c 'import openbb'; if($LASTEXITCODE -ne 0){throw 'OpenBB environment is broken. Run archon trading setup to recreate it.'}
+if(-not(Test-Path -LiteralPath $Api -PathType Leaf)){throw "OpenBB API launcher is missing: $Api. Run archon trading setup to install packages."}
+& $Api --host $HostName --port $Port; exit $LASTEXITCODE
+'@ | Set-Content -LiteralPath (Join-Path $Target 'scripts/start-openbb-api.ps1') -Encoding utf8
+}
+Write-Output 'setup-trading-tools: complete'
+Show-Status

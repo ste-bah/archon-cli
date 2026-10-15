@@ -113,6 +113,10 @@ if [ -n "$ARCHON_CLI_REPO" ]; then
         cp "$ARCHON_CLI_REPO/scripts/setup-trading-tools.sh" "$TARGET/scripts/setup-trading-tools.sh" 2>/dev/null || true
         chmod +x "$TARGET/scripts/setup-trading-tools.sh" 2>/dev/null || true
     fi
+    if [ -f "$ARCHON_CLI_REPO/scripts/setup-trading-tools.ps1" ]; then
+        mkdir -p "$TARGET/scripts"
+        cp "$ARCHON_CLI_REPO/scripts/setup-trading-tools.ps1" "$TARGET/scripts/setup-trading-tools.ps1" 2>/dev/null || true
+    fi
 fi
 
 # ---------------------------------------------------------------------------

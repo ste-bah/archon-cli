@@ -17,7 +17,9 @@ use std::time::Instant;
 
 use crate::cli_args::TradingCliPaperAction;
 use crate::command::trading_io::{read_json, write_or_render};
-use crate::command::trading_tools::{join_output, project_root, run_node_script, tv_cli};
+use crate::command::trading_tools::{
+    join_output, project_root, run_node_script, setup_command, tv_cli,
+};
 
 #[derive(Debug, Clone, Serialize)]
 struct PaperSubmitReport {
@@ -229,9 +231,9 @@ impl TradingViewCliTransport {
         let cli = tv_cli(&root);
         if !cli.is_file() {
             return Err(anyhow!(
-                "TradingView MCP CLI missing at {}; run scripts/setup-trading-tools.sh --target {}",
+                "TradingView MCP CLI missing at {}; run {}",
                 cli.display(),
-                root.display()
+                setup_command(&root)
             ));
         }
         Ok(Self { root, cli })

@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use crate::cli_args::{TradingCliOhlcvFormat, TradingCliOpenBbAction, TradingCliOpenBbMode};
 use crate::command::trading_io::{read_json, write_or_render};
 
-use super::trading_tools::{openbb_bin, openbb_venv_dir, project_root};
+use super::trading_tools::{openbb_bin, openbb_health, openbb_venv_dir, project_root};
 
 pub(crate) fn render_openbb(action: &TradingCliOpenBbAction) -> Result<String> {
     match action {
@@ -49,7 +49,7 @@ fn render_status(target: Option<&PathBuf>) -> Result<String> {
     Ok([
         "OpenBB runtime".to_string(),
         format!("  project: {}", root.display()),
-        format!("  venv: {}", path_state(&venv)),
+        format!("  venv: {}", openbb_health(&venv)),
         format!("  python: {}", path_state(&py_bin)),
         format!("  openbb-api: {}", path_state(&api_bin)),
         format!("  OPENBB_API_URL: {api_url}"),
