@@ -219,3 +219,132 @@ fn resume_from_a_different_build_id_preserves_the_golden_result() {
     );
     progress("different-build", "passed");
 }
+
+#[test]
+fn reasoning_bank_rows_are_written_at_pause_and_remain_after_resume() {
+    let project = project_with_provider(Some("skeleton"));
+    let root = project.path();
+    for path in [root.join("config.toml"), root.join(".archon/config.toml")] {
+        let mut config = fs::read_to_string(&path).unwrap();
+        config.push_str(
+            "\n[learning.reasoning_bank]\nenabled = true\n[learning.desc]\nenabled = true\n",
+        );
+        fs::write(path, config).unwrap();
+    }
+
+    let mut child = spawn_decompose(root, &[]);
+    await_provider_boundary(&project.provider, root, &mut child, "reasoning-bank pause");
+    let run_dir = one_run(root);
+    let run_id = run_dir.file_name().unwrap().to_string_lossy().into_owned();
+    let launch_state: serde_json::Value =
+        serde_json::from_slice(&fs::read(run_dir.join("decomposition/state.json")).unwrap())
+            .unwrap();
+    let launch_script_digest = launch_state["identity"]["script_digest"].clone();
+    assert!(launch_script_digest.as_str().is_some());
+    let pause = run(root, &["workflow", "pause", &run_id]);
+    assert!(
+        pause.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pause.stderr)
+    );
+    project.provider.release();
+    assert!(
+        wait_for_child(
+            &mut child,
+            &deadline::harness_root(root).join("decompose.stdout"),
+            &deadline::harness_root(root).join("decompose.stderr"),
+            "reasoning-bank pause",
+        )
+        .success()
+    );
+
+    let paused = read_reasoning_patterns(root);
+    assert!(
+        !paused.is_empty(),
+        "pause fold persisted no ReasoningBank rows"
+    );
+    let paused_state: serde_json::Value =
+        serde_json::from_slice(&fs::read(run_dir.join("decomposition/state.json")).unwrap())
+            .unwrap();
+    let script_digest = paused_state["identity"]["script_digest"].clone();
+    assert_eq!(script_digest, launch_script_digest);
+    let resumed = resume(root, &run_id);
+    assert!(
+        resumed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resumed.stderr)
+    );
+    let ended = read_reasoning_patterns(root);
+    assert!(
+        paused.iter().all(|row| ended.contains(row)),
+        "resume changed or removed a paused ReasoningBank row"
+    );
+    assert!(
+        ended.len() > paused.len(),
+        "end fold added no ReasoningBank lessons"
+    );
+    let ended_ids: std::collections::HashSet<_> = ended.iter().map(|(id, _)| id).collect();
+    assert_eq!(
+        ended_ids.len(),
+        ended.len(),
+        "end fold wrote duplicate ReasoningBank row ids"
+    );
+    let ended_state: serde_json::Value =
+        serde_json::from_slice(&fs::read(run_dir.join("state.json")).unwrap()).unwrap();
+    let ended_decomposition_state: serde_json::Value =
+        serde_json::from_slice(&fs::read(run_dir.join("decomposition/state.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        ended_state["status"], "completed",
+        "resumed run must end: {ended_state}"
+    );
+    assert_eq!(
+        ended_decomposition_state["identity"]["script_digest"],
+        script_digest
+    );
+    let interrupted_key = project
+        .provider
+        .requests
+        .snapshot()
+        .into_iter()
+        .filter(|request| request.role == "skeleton")
+        .nth(0)
+        .expect("the interrupted skeleton request is logged")
+        .key;
+    let mut expected_requests = project::read_golden_requests();
+    *expected_requests.entry(interrupted_key).or_default() += 1;
+    assert_eq!(
+        project.provider.requests.per_call(),
+        expected_requests,
+        "resumed provider requests per call differ from golden (+1 only for the interrupted request)"
+    );
+}
+
+fn read_reasoning_patterns(root: &std::path::Path) -> Vec<(String, String)> {
+    let path = root
+        .join(".archon/learning-state.db")
+        .to_string_lossy()
+        .to_string();
+    let db = archon_cozo::open_sqlite_guarded_instance(
+        &path,
+        "read lifecycle ReasoningBank rows",
+        archon_cozo::CozoGuardConfig::for_db_path(&path),
+    )
+    .unwrap()
+    .db_arc();
+    db.run_script(
+        "?[pattern_id, description] := *patterns{pattern_id, description}",
+        Default::default(),
+        cozo::ScriptMutability::Immutable,
+    )
+    .unwrap()
+    .rows
+    .iter()
+    .map(|row| {
+        (
+            row[0].get_str().unwrap().to_string(),
+            row[1].get_str().unwrap().to_string(),
+        )
+    })
+    .collect()
+}

@@ -5,6 +5,10 @@ use archon_core::config::LearningConfig;
 use archon_workflow::{StageStatus, Verification, WorkflowLearningRecord, WorkflowStore};
 use serde_json::Value;
 
+#[path = "workflow_decompose_learning_classifier.rs"]
+mod classifier;
+use classifier::is_acceptance_evaluation_call;
+
 #[path = "workflow_decompose_learning_findings.rs"]
 mod findings;
 pub(crate) use findings::gate_finding_records;
@@ -12,25 +16,15 @@ pub(crate) use findings::gate_finding_records;
 mod delivery;
 pub(super) use delivery::with_fold_lock;
 
+#[cfg(test)]
 pub(crate) fn hooks(content: &str, config: &LearningConfig) -> Vec<String> {
-    // This fold has a DESC episode-store sink, but no ReasoningBank write
-    // sink. Do not select a hook whose lessons would be silently discarded.
     crate::command::learning_workflow_hooks::derive_learning_hooks(content, None, config)
-        .into_iter()
-        .filter(|hook| hook == "desc")
-        .collect()
 }
 
 pub(crate) fn unavailable_hook_warning(
-    configured: &[String],
+    _configured: &[String],
     selected: &[String],
 ) -> Option<(String, String)> {
-    if configured.iter().any(|hook| hook == "reasoning_bank") {
-        return Some((
-            "reasoning_bank".into(),
-            "this fold has no write sink".into(),
-        ));
-    }
     if selected.is_empty() {
         return Some((
             "none".into(),
@@ -290,6 +284,14 @@ fn fold_locked(
     let classifier_content = calls.iter().fold(safe_task.clone(), |mut content, call| {
         content.push(' ');
         content.push_str(&call.call.id);
+        if let Some(role) = call.call.options.role.as_deref() {
+            content.push(' ');
+            content.push_str(role);
+        }
+        if let Some(command) = call.call.options.host_command.as_ref() {
+            content.push(' ');
+            content.push_str(&command.command_id);
+        }
         content.push(' ');
         content.push_str(&call.result.data.to_string());
         content
@@ -299,7 +301,17 @@ fn fold_locked(
         None,
         config,
     );
-    let hooks = hooks(&classifier_content, config);
+    let mut hooks = configured_hooks.clone();
+    if config.reasoning_bank.enabled
+        && calls.iter().any(is_acceptance_evaluation_call)
+        && !hooks.iter().any(|hook| hook == "reasoning_bank")
+    {
+        let position = hooks
+            .iter()
+            .position(|hook| hook == "desc")
+            .unwrap_or(hooks.len());
+        hooks.insert(position, "reasoning_bank".into());
+    }
     if let Some((hook, reason)) = unavailable_hook_warning(&configured_hooks, &hooks) {
         tracing::warn!(%run_id, hook = %hook, reason = %reason, "learning hook unavailable");
     }

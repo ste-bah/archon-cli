@@ -66,15 +66,75 @@ fn desc_episodes(root: &std::path::Path) -> Vec<String> {
     .collect()
 }
 
-/// A run with one freeze-acceptance call that reported three findings.
+fn reasoning_patterns(root: &std::path::Path) -> Vec<(String, String, String)> {
+    let path = root
+        .join(".archon/learning-state.db")
+        .to_string_lossy()
+        .to_string();
+    let db = archon_cozo::open_sqlite_guarded_instance(
+        &path,
+        "read learning test store",
+        archon_cozo::CozoGuardConfig::for_db_path(&path),
+    )
+    .unwrap()
+    .db_arc();
+    db.run_script(
+        "?[pattern_id, pattern_type, description] := *patterns{pattern_id, pattern_type, description}",
+        Default::default(),
+        cozo::ScriptMutability::Immutable,
+    )
+    .unwrap()
+    .rows
+    .iter()
+    .map(|row| {
+        (
+            row[0].get_str().unwrap().to_string(),
+            row[1].get_str().unwrap().to_string(),
+            row[2].get_str().unwrap().to_string(),
+        )
+    })
+    .collect()
+}
+
+fn reasoning_embeddings_are_empty(root: &std::path::Path) -> bool {
+    let path = root
+        .join(".archon/learning-state.db")
+        .to_string_lossy()
+        .to_string();
+    let db = archon_cozo::open_sqlite_guarded_instance(
+        &path,
+        "read learning test store",
+        archon_cozo::CozoGuardConfig::for_db_path(&path),
+    )
+    .unwrap()
+    .db_arc();
+    db.run_script(
+        "?[embedding] := *patterns{embedding}",
+        Default::default(),
+        cozo::ScriptMutability::Immutable,
+    )
+    .unwrap()
+    .rows
+    .iter()
+    .all(|row| matches!(&row[0], cozo::DataValue::List(embedding) if embedding.is_empty()))
+}
+
+/// A run with one freeze-acceptance call that reported representative findings.
 fn run_with_findings(root: &std::path::Path) -> (archon_workflow::WorkflowStore, String) {
+    run_with_task_and_findings(root, "review and judge acceptance checks")
+}
+
+fn run_with_task_and_findings(
+    root: &std::path::Path,
+    task: &str,
+) -> (archon_workflow::WorkflowStore, String) {
     std::fs::create_dir_all(root.join(".archon")).unwrap();
     let store = archon_workflow::WorkflowStore::project(root);
     let run = store
         .create_run(archon_workflow::WorkflowSpec {
             schema: archon_workflow::spec::WORKFLOW_SCHEMA.to_string(),
             name: "fold-test".to_string(),
-            task: "review and judge acceptance checks".to_string(),
+            task: task.to_string(),
             target_repository_root: None,
             max_parallelism: 1,
             max_agents: 1,
@@ -83,9 +143,13 @@ fn run_with_findings(root: &std::path::Path) -> (archon_workflow::WorkflowStore,
             learning_hooks: Vec::new(),
         })
         .unwrap();
-    let findings: Vec<serde_json::Value> = (1..=3)
-        .map(|n| serde_json::json!({"subject": format!("AC-X-00{n}"), "text": format!("check 'AC-X-00{n}' was refuted by the host judge; reason: \"R{n}\"; counterexample: \"C{n}\"")}))
-        .collect();
+    let findings = vec![
+        serde_json::json!({"subject": "AC-X-001", "text": "check 'AC-X-001' was refuted by the host judge; reason: \"judge reason\"; counterexample: \"failing output\""}),
+        serde_json::json!({"subject": "AC-X-002", "text": "Claim was refuted: required file is absent"}),
+        serde_json::json!({"subject": "AC-X-003", "text": "cannot pass as written: missing test evidence"}),
+        serde_json::json!({"subject": "AC-X-004", "text": "accepted correction: use the checked-in test name"}),
+        serde_json::json!({"subject": "AC-X-005", "text": "set-gate finding: gate must reject an empty result"}),
+    ];
     let record: archon_workflow::WorkflowV2CallRecord = serde_json::from_value(serde_json::json!({
         "run_id": run.id,
         "call": {"id": "3f2a", "method": "hostCommand",
@@ -111,6 +175,137 @@ fn desc_only() -> archon_core::config::LearningConfig {
     config
 }
 
+fn reasoning_and_desc() -> archon_core::config::LearningConfig {
+    let mut config = desc_only();
+    config.reasoning_bank.enabled = true;
+    config
+}
+
+#[test]
+fn enabled_reasoning_bank_fold_persists_gate_findings() {
+    let _guard = crate::command::topology_trace::test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run_id) = run_with_findings(temp.path());
+    super::workflow_decompose_learning::fold(temp.path(), &store, &run_id, &reasoning_and_desc())
+        .unwrap();
+
+    let rows = reasoning_patterns(temp.path());
+    assert_eq!(rows.len(), 5, "{rows:?}");
+    assert!(reasoning_embeddings_are_empty(temp.path()));
+    assert!(rows.iter().all(|(key, kind, description)| {
+        key.starts_with("workflow-")
+            && kind == "workflow_lesson"
+            && description.contains("\"run_id\"")
+            && description.contains("\"stage_id\"")
+            && description.contains("\"quality\"")
+    }));
+    let content = rows
+        .iter()
+        .map(|(_, _, description)| description.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        content.contains("reason: \\\"judge reason\\\""),
+        "{content}"
+    );
+    assert!(
+        content.contains("counterexample: \\\"failing output\\\""),
+        "{content}"
+    );
+    assert!(content.contains("required file is absent"), "{content}");
+    assert!(content.contains("cannot pass as written"), "{content}");
+    assert!(content.contains("accepted correction"), "{content}");
+    assert!(content.contains("set-gate finding"), "{content}");
+}
+
+#[test]
+fn decomposition_fold_routes_structured_gate_findings_to_enabled_reasoning_bank() {
+    let _guard = crate::command::topology_trace::test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run_id) =
+        run_with_task_and_findings(temp.path(), "Decompose PRD into staged deliverables");
+    let config = reasoning_and_desc();
+
+    // EXPECTED: the enabled bank hook is selected for structured gate findings,
+    // even when the generated run's top-level task text has no Review marker.
+    super::workflow_decompose_learning::fold(temp.path(), &store, &run_id, &config).unwrap();
+
+    let rows = reasoning_patterns(temp.path());
+    assert_eq!(
+        rows.len(),
+        5,
+        "gate findings must reach the enabled bank: {rows:?}"
+    );
+}
+
+#[test]
+fn disabled_reasoning_bank_fold_writes_no_patterns() {
+    let _guard = crate::command::topology_trace::test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let (store, enabled_run) = run_with_findings(temp.path());
+    super::workflow_decompose_learning::fold(
+        temp.path(),
+        &store,
+        &enabled_run,
+        &reasoning_and_desc(),
+    )
+    .unwrap();
+    let before = reasoning_patterns(temp.path());
+    assert_eq!(before.len(), 5, "enabled toggle must persist its rows");
+
+    let (store, disabled_run) = run_with_findings(temp.path());
+    super::workflow_decompose_learning::fold(temp.path(), &store, &disabled_run, &desc_only())
+        .unwrap();
+    let after = reasoning_patterns(temp.path());
+    assert_eq!(after, before, "disabled toggle added ReasoningBank rows");
+}
+
+#[test]
+fn repeated_reasoning_bank_fold_replaces_the_same_rows() {
+    let _guard = crate::command::topology_trace::test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run_id) = run_with_findings(temp.path());
+    let config = reasoning_and_desc();
+    super::workflow_decompose_learning::fold(temp.path(), &store, &run_id, &config).unwrap();
+    let mut before = reasoning_patterns(temp.path());
+    before.sort();
+    super::workflow_decompose_learning::fold(temp.path(), &store, &run_id, &config).unwrap();
+    let mut after = reasoning_patterns(temp.path());
+    after.sort();
+
+    assert_eq!(after.len(), 5);
+    assert_eq!(after, before);
+}
+
+#[test]
+fn unavailable_learning_store_keeps_the_workflow_report_and_resume_state() {
+    let _guard = crate::command::topology_trace::test_lock();
+    let temp = tempfile::tempdir().unwrap();
+    let (store, run_id) = run_with_findings(temp.path());
+    let before = store.load_state(&run_id).unwrap();
+    std::fs::create_dir(temp.path().join(".archon/learning-state.db")).unwrap();
+
+    let result = super::workflow_decompose_learning::fold(
+        temp.path(),
+        &store,
+        &run_id,
+        &reasoning_and_desc(),
+    );
+
+    assert!(
+        result.is_ok(),
+        "best-effort sink failure changed the fold: {result:?}"
+    );
+    let after = store.load_state(&run_id).unwrap();
+    assert_eq!(after.status, before.status);
+    assert_eq!(after.spec, before.spec);
+    assert_eq!(after.stages, before.stages);
+    assert!(
+        store.load_state(&run_id).is_ok(),
+        "run remains available for resume"
+    );
+}
+
 /// A fold killed after delivering part of the spool (its spool kept, one
 /// lesson's key recorded) delivers the rest on the next fold, never a second
 /// episode for a lesson already stored, and empties the spool.
@@ -122,17 +317,19 @@ fn a_fold_killed_half_way_resumes_without_duplicate_episodes() {
     let fold = super::workflow_decompose_learning::fold;
     fold(temp.path(), &store, &run_id, &desc_only()).unwrap();
     let complete = desc_episodes(temp.path());
-    assert_eq!(complete.len(), 3, "{complete:?}");
+    assert_eq!(complete.len(), 5, "{complete:?}");
 
     // The state a kill leaves after the first lesson landed: the spool still
-    // holds all three, the progress file names the first.
+    // holds all five, the progress file names the first.
     let (_, pending) = super::workflow_decompose_learning::journal_paths(&store.run_dir(&run_id));
     let lessons = super::workflow_decompose_learning::gate_finding_records(
         &run_id,
         "freeze-acceptance",
-        &serde_json::json!({"gateEnvelope": {"policy_findings": (1..=3)
-            .map(|n| serde_json::json!({"subject": format!("AC-X-00{n}"), "text": format!("check 'AC-X-00{n}' was refuted by the host judge; reason: \"R{n}\"; counterexample: \"C{n}\"")}))
-            .collect::<Vec<_>>()}}),
+        &serde_json::json!({"gateEnvelope": {"policy_findings": [
+            {"subject": "AC-X-001", "text": "check 'AC-X-001' was refuted by the host judge; reason: \"judge reason\"; counterexample: \"failing output\""},
+            {"subject": "AC-X-002", "text": "Claim was refuted: required file is absent"},
+            {"subject": "AC-X-003", "text": "cannot pass as written: missing test evidence"}
+        ]}}),
         &["desc".into()],
     );
     super::workflow_decompose_learning::write_journal(&pending, &lessons).unwrap();

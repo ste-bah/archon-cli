@@ -41,7 +41,7 @@ fn hashed_call_ids_use_record_role_and_capability_for_author_and_probe_lessons()
 }
 
 #[test]
-fn reasoning_bank_hook_is_not_selected_without_a_write_sink() {
+fn reasoning_bank_hook_is_selected_for_the_fold_write_sink() {
     let mut config = archon_core::config::LearningConfig::default();
     config.reasoning_bank.enabled = true;
     config.desc.enabled = false;
@@ -54,17 +54,11 @@ fn reasoning_bank_hook_is_not_selected_without_a_write_sink() {
     .filter(|hook| hook == "reasoning_bank")
     .collect();
     let hooks = super::super::workflow_decompose_learning::hooks("review acceptance", &config);
-    println!("EVIDENCE #284 no-bank-sink BEFORE: {before:?} AFTER: {hooks:?}");
-    assert!(!hooks.iter().any(|hook| hook == "reasoning_bank"));
+    println!("EVIDENCE #284 bank-sink BEFORE: {before:?} AFTER: {hooks:?}");
+    assert!(hooks.iter().any(|hook| hook == "reasoning_bank"));
     let warning =
         super::super::workflow_decompose_learning::unavailable_hook_warning(&before, &hooks);
-    assert_eq!(
-        warning,
-        Some((
-            "reasoning_bank".into(),
-            "this fold has no write sink".into()
-        ))
-    );
+    assert_eq!(warning, None);
 }
 
 #[test]
