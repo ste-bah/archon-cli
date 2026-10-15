@@ -104,14 +104,27 @@ raise SystemExit(0)
         return $LASTEXITCODE -eq 0
     } catch { return $false }
 }
+function Get-PathApplications([string]$Name) {
+    $extensions = @($env:PATHEXT -split ';' | Where-Object { $_ -match '^\.(COM|EXE|BAT|CMD)$' })
+    if ($extensions.Count -eq 0) { $extensions = @('.COM', '.EXE', '.BAT', '.CMD') }
+    foreach ($directory in ($env:PATH -split [IO.Path]::PathSeparator)) {
+        if (-not $directory) { $directory = (Get-Location).Path }
+        foreach ($extension in $extensions) {
+            $path = Join-Path $directory ($Name + $extension)
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+            $command = Get-Command -Name $path -CommandType Application -ErrorAction SilentlyContinue
+            if ($command) { Write-Output $path }
+        }
+    }
+}
 function Resolve-BasePython([string]$Specifier) {
     $script:PythonProbeError = ''
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        if (Test-PythonCandidate 'py' @('-3') $Specifier) { return @{ Program = 'py'; Prefix = @('-3') } }
-    }
-    foreach ($candidate in @('python', 'python3')) {
-        if ((Get-Command $candidate -ErrorAction SilentlyContinue) -and (Test-PythonCandidate $candidate @() $Specifier)) {
-            return @{ Program = $candidate; Prefix = @() }
+    foreach ($candidate in @('py', 'python', 'python3')) {
+        foreach ($program in @(Get-PathApplications $candidate)) {
+            $prefix = if ($candidate -eq 'py') { @('-3') } else { @() }
+            if (Test-PythonCandidate $program $prefix $Specifier) {
+                return @{ Program = $program; Prefix = $prefix }
+            }
         }
     }
     $detail = if ($script:PythonProbeError) { " $script:PythonProbeError" } else { '' }
