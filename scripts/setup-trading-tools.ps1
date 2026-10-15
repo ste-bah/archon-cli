@@ -50,8 +50,8 @@ function Get-OpenBBSpecifier {
 }
 function Test-PythonCandidate([string]$Program, [string[]]$Prefix, [string]$Specifier) {
     $probe = @'
-import re, sys
-spec = sys.argv[1]
+import os, re, sys
+spec = os.environ['ARCHON_SETUP_PYTHON_SPECIFIER']
 version = sys.version_info
 release = tuple(version[:3])
 pre = {"alpha": (0, version.serial), "beta": (1, version.serial), "candidate": (2, version.serial)}.get(version.releaselevel, (3, 0))
@@ -99,10 +99,21 @@ for clause in clauses:
     if not passed: raise SystemExit(1)
 raise SystemExit(0)
 '@
+    $probeTemp = New-TemporaryFile
+    $probeFile = "$($probeTemp.FullName).py"
+    $previousSpecifier = $env:ARCHON_SETUP_PYTHON_SPECIFIER
     try {
-        $script:PythonProbeError = (& $Program @Prefix -c $probe $Specifier 2>&1 | Out-String).Trim()
+        Move-Item -LiteralPath $probeTemp.FullName -Destination $probeFile
+        Set-Content -LiteralPath $probeFile -Value $probe -Encoding utf8
+        $env:ARCHON_SETUP_PYTHON_SPECIFIER = $Specifier
+        $script:PythonProbeError = (& $Program @Prefix $probeFile 2>&1 | Out-String).Trim()
         return $LASTEXITCODE -eq 0
     } catch { return $false }
+    finally {
+        if ($null -eq $previousSpecifier) { Remove-Item Env:ARCHON_SETUP_PYTHON_SPECIFIER -ErrorAction SilentlyContinue }
+        else { $env:ARCHON_SETUP_PYTHON_SPECIFIER = $previousSpecifier }
+        Remove-Item -LiteralPath $probeFile, $probeTemp.FullName -Force -ErrorAction SilentlyContinue
+    }
 }
 function Get-PathApplications([string]$Name) {
     $extensions = @($env:PATHEXT -split ';' | Where-Object { $_ -match '^\.(COM|EXE|BAT|CMD)$' })

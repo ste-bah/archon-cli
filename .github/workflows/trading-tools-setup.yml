@@ -63,15 +63,24 @@ jobs:
           $pythonLog = Join-Path $env:RUNNER_TEMP 'trading setup interpreter log'
           $interpreterBin = Join-Path $env:RUNNER_TEMP 'trading setup interpreter mocks'
           New-Item -ItemType Directory -Force -Path $interpreterBin | Out-Null
+          function Show-WindowsPythonDiagnostics {
+            Write-Output "PATH=$env:PATH"
+            Write-Output "PATHEXT=$env:PATHEXT"
+            Get-ChildItem -Force -LiteralPath $interpreterBin -ErrorAction SilentlyContinue | Select-Object Name, Length
+            Get-Command -All py,python,python3 -ErrorAction SilentlyContinue | Format-Table Name,CommandType,Source
+          }
+          trap { Show-WindowsPythonDiagnostics; break }
           function Assert-PythonCommands([string[]]$Expected) {
-            $actual = @((Get-Content -LiteralPath $pythonLog | ForEach-Object { ($_ -split ' ')[0] }))
+            Show-WindowsPythonDiagnostics
+            $actual = @((Get-Content -LiteralPath $pythonLog | Where-Object { $_ -match '^(py|python|python3) ' } | ForEach-Object { ($_ -split ' ')[0] }))
             if (($actual -join ',') -ne ($Expected -join ',')) {
               throw "Expected interpreter calls '$($Expected -join ',')', got '$($actual -join ',')'"
             }
           }
           @'
           @echo off
-          echo py %*>>"%TRADING_PYTHON_LOG%"
+          echo py %1 %2>>"%TRADING_PYTHON_LOG%"
+          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
           exit /b 0
           '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'py.cmd') -Encoding ascii
           $env:TRADING_PYTHON_LOG = $pythonLog
@@ -81,10 +90,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path $pyOnlyVenv | Out-Null
           Set-Content -LiteralPath (Join-Path $pyOnlyVenv 'keep.txt') -Value 'keep'
           Remove-Item -LiteralPath $pythonLog -Force -ErrorAction SilentlyContinue
+          Show-WindowsPythonDiagnostics
           try { & $setupScript -Target $pyOnlyTarget -SkipTradingView; throw 'py-only non-venv was not refused' }
           catch { if ($_.Exception.Message -notmatch 'non-venv directory') { throw } }
           Assert-PythonCommands @('py')
-          if ((Get-Content -LiteralPath $pythonLog -Raw) -notmatch 'py -3 -c') { throw 'py -3 was not selected in py-only PATH case' }
+          if ((Get-Content -LiteralPath $pythonLog -Raw) -notmatch 'py -3 .*\.py') { throw 'py -3 was not selected with a probe file in py-only PATH case' }
           if (-not (Test-Path -LiteralPath (Join-Path $pyOnlyVenv 'keep.txt') -PathType Leaf)) { throw 'py-only sentinel was removed' }
           $junctionTarget = Join-Path $env:RUNNER_TEMP 'trading setup junction target'
           $junctionProject = Join-Path $env:RUNNER_TEMP 'trading setup junction project'
@@ -92,6 +102,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $junctionTarget, (Split-Path -Parent $junctionVenv) | Out-Null
           Set-Content -LiteralPath (Join-Path $junctionTarget 'keep.txt') -Value 'keep'
           New-Item -ItemType Junction -Path $junctionVenv -Target $junctionTarget | Out-Null
+          Show-WindowsPythonDiagnostics
           try { & $setupScript -Target $junctionProject -SkipTradingView; throw 'junctioned venv was not refused' }
           catch { if ($_.Exception.Message -notmatch 'reparse-point OpenBB venv') { throw } }
           if (-not (Test-Path -LiteralPath (Join-Path $junctionTarget 'keep.txt') -PathType Leaf)) { throw 'junction target file was removed' }
@@ -100,40 +111,46 @@ jobs:
           Remove-Item -LiteralPath (Join-Path $interpreterBin 'py.cmd') -Force
           @'
           @echo off
-          echo python %*>>"%TRADING_PYTHON_LOG%"
+          echo python %1>>"%TRADING_PYTHON_LOG%"
+          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
           exit /b 1
           '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python.cmd') -Encoding ascii
           @'
           @echo off
-          echo python3 %*>>"%TRADING_PYTHON_LOG%"
+          echo python3 %1>>"%TRADING_PYTHON_LOG%"
+          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
           exit /b 0
           '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python3.cmd') -Encoding ascii
           $storeTarget = Join-Path $env:RUNNER_TEMP 'trading setup Store stub'
           $storeVenv = Join-Path $storeTarget '.archon/tools/openbb-venv'
           New-Item -ItemType Directory -Force -Path $storeVenv | Out-Null
           Set-Content -LiteralPath (Join-Path $storeVenv 'keep.txt') -Value 'keep'
+          Show-WindowsPythonDiagnostics
           try { & $setupScript -Target $storeTarget -SkipTradingView; throw 'Store-stub non-venv was not refused' }
           catch { if ($_.Exception.Message -notmatch 'non-venv directory') { throw } }
           $storeLog = Get-Content -LiteralPath $pythonLog -Raw
           Assert-PythonCommands @('python', 'python3')
-          if ($storeLog -notmatch 'python -c' -or $storeLog -notmatch 'python3 -c') { throw 'Store stub was not rejected before python3 fallback' }
+          if ($storeLog -notmatch 'python .*\.py' -or $storeLog -notmatch 'python3 .*\.py') { throw 'Store stub was not rejected before python3 fallback' }
           if (-not (Test-Path -LiteralPath (Join-Path $storeVenv 'keep.txt') -PathType Leaf)) { throw 'Store-stub sentinel was removed' }
 
           @'
           @echo off
-          echo py spec="%~4">>"%TRADING_PYTHON_LOG%"
+          echo py %1 %2>>"%TRADING_PYTHON_LOG%"
+          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
           if "%TRADING_PYTHON_ACCEPT%"=="1" exit /b 0
           exit /b 1
           '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'py.cmd') -Encoding ascii
           @'
           @echo off
-          echo python spec="%~3">>"%TRADING_PYTHON_LOG%"
+          echo python %1>>"%TRADING_PYTHON_LOG%"
+          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
           if "%TRADING_PYTHON_ACCEPT%"=="1" exit /b 0
           exit /b 1
           '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python.cmd') -Encoding ascii
           @'
           @echo off
-          echo python3 spec="%~3">>"%TRADING_PYTHON_LOG%"
+          echo python3 %1>>"%TRADING_PYTHON_LOG%"
+          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
           if "%TRADING_PYTHON_ACCEPT%"=="1" exit /b 0
           exit /b 1
           '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python3.cmd') -Encoding ascii
@@ -155,6 +172,7 @@ jobs:
             Set-Content -LiteralPath (Join-Path $caseVenv 'keep.txt') -Value 'keep'
             Remove-Item -LiteralPath $pythonLog -Force -ErrorAction SilentlyContinue
             $env:TRADING_PYTHON_ACCEPT = if ($case.Accept) { '1' } else { '0' }
+            Show-WindowsPythonDiagnostics
             try {
               & $setupScript -Target $caseTarget -SkipTradingView
               throw "specifier case unexpectedly passed setup: $($case.Specifier) $($case.Version)"
@@ -162,7 +180,9 @@ jobs:
               if ($case.Accept -and $_.Exception.Message -notmatch 'non-venv directory with contents') { throw }
               if (-not $case.Accept -and $_.Exception.Message -notmatch [regex]::Escape("specifier '$($case.Specifier)'")) { throw }
             }
-            if ((Get-Content -LiteralPath $pythonLog -Raw) -notmatch [regex]::Escape("spec=`"$($case.Specifier)`"")) { throw "venv Requires-Python was not passed to the interpreter for $($case.Specifier)" }
+            $caseLog = Get-Content -LiteralPath $pythonLog -Raw
+            if ($caseLog -notmatch [regex]::Escape("ARCHON_SETUP_PYTHON_SPECIFIER=$($case.Specifier)")) { throw "venv Requires-Python was not passed to the interpreter for $($case.Specifier)" }
+            if ($caseLog -notmatch '\.py') { throw "specifier probe did not use a Python file for $($case.Specifier)" }
             if ($case.Accept) { Assert-PythonCommands @('py') }
             else { Assert-PythonCommands @('py', 'python', 'python3') }
             if ((Get-Content -LiteralPath (Join-Path $caseVenv 'keep.txt') -Raw).Trim() -ne 'keep') { throw 'specifier probe changed its venv sentinel' }

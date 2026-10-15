@@ -95,11 +95,15 @@ load_openbb_specifier() {
     fi
 }
 
-python_satisfies_specifier() {
+python_satisfies_specifier() (
     candidate=$1
-    "$candidate" -c '
-import re, sys
-spec = sys.argv[1]
+    probe_base=$(mktemp "${TMPDIR:-/tmp}/setup-trading-tools-python-probe.XXXXXX")
+    probe_file="$probe_base.py"
+    mv "$probe_base" "$probe_file"
+    trap 'rm -f "$probe_file"' EXIT
+    cat > "$probe_file" <<'PYTHON'
+import os, re, sys
+spec = os.environ["ARCHON_SETUP_PYTHON_SPECIFIER"]
 version = sys.version_info
 release = tuple(version[:3])
 pre = {"alpha": (0, version.serial), "beta": (1, version.serial), "candidate": (2, version.serial)}.get(version.releaselevel, (3, 0))
@@ -155,8 +159,9 @@ for clause in clauses:
     if not passed:
         raise SystemExit(1)
 raise SystemExit(0)
-' "$REQUIRES_PYTHON" 2>&1
-}
+PYTHON
+    ARCHON_SETUP_PYTHON_SPECIFIER="$REQUIRES_PYTHON" "$candidate" "$probe_file" 2>&1
+)
 
 find_python() {
     unknown_operator=''

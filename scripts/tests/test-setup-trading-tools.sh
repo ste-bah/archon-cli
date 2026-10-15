@@ -61,6 +61,7 @@ mkdir -p "$FAKE_BIN"
 cat > "$FAKE_BIN/python3" <<'EOF'
 #!/bin/sh
 if [ "$1" = --version ]; then echo 'Python 3.12.1'; exit 0; fi
+if [ -f "$1" ] && [ -n "$ARCHON_SETUP_PYTHON_SPECIFIER" ]; then exit 0; fi
 if [ "$1" = -c ]; then exit 0; fi
 if [ "$1" = -m ] && [ "$2" = venv ]; then
     [ "$3" = --clear ] || exit 9
@@ -170,8 +171,8 @@ SPEC_BIN="$TEMP_ROOT/spec interpreters"
 mkdir -p "$SPEC_BIN"
 cat > "$SPEC_BIN/python-mock" <<'PYTHON'
 #!/bin/sh
-if [ "$1" = -c ]; then
-    exec "$REAL_PYTHON" -c 'import os,sys,collections; p=os.environ["MOCK_PYTHON_INFO"].split(","); v=collections.namedtuple("VersionInfo","major minor micro releaselevel serial"); sys.version_info=v(*([int(x) for x in p[:3]]+[p[3],int(p[4])])); code,spec=sys.argv[1:3]; sys.argv=[sys.argv[0],spec]; exec(code)' "$2" "$3"
+if [ -f "$1" ] && [ -n "$ARCHON_SETUP_PYTHON_SPECIFIER" ]; then
+    exec "$REAL_PYTHON" -c 'import os,sys,collections; p=os.environ["MOCK_PYTHON_INFO"].split(","); v=collections.namedtuple("VersionInfo","major minor micro releaselevel serial"); sys.version_info=v(*([int(x) for x in p[:3]]+[p[3],int(p[4])])); probe=sys.argv[1]; sys.argv=[probe]; exec(compile(open(probe).read(),probe,"exec"))' "$1"
 fi
 exit 8
 PYTHON
