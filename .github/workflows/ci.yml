@@ -388,6 +388,25 @@ jobs:
         run: |
           $testRoot = $env:RUNNER_TEMP
           $volume = [System.IO.Path]::GetPathRoot($testRoot).TrimEnd('\')
+          Write-Output "System-wide 8.3 state before enable on ${volume}:"
+          & fsutil 8dot3name query
+          & fsutil 8dot3name set 2
+          $enableOutput = & fsutil 8dot3name set $volume 0 2>&1
+          $enableExitCode = $LASTEXITCODE
+          $enableOutput | ForEach-Object { Write-Output $_ }
+          if ($enableExitCode -ne 0) {
+            $testRoot = Join-Path $env:SystemDrive 'archon-8dot3-test'
+            New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+            $volume = [System.IO.Path]::GetPathRoot($testRoot).TrimEnd('\')
+            Write-Output "System-wide 8.3 state before enable on fallback volume ${volume}:"
+            & fsutil 8dot3name query
+            & fsutil 8dot3name set 2
+            $fallbackEnableOutput = & fsutil 8dot3name set $volume 0 2>&1
+            $fallbackEnableExitCode = $LASTEXITCODE
+            $fallbackEnableOutput | ForEach-Object { Write-Output $_ }
+          }
+          Write-Output "System-wide 8.3 state after enable on ${volume}:"
+          & fsutil 8dot3name query
           $probePath = Join-Path $testRoot 'archon-8dot3-probe-long-directory-name'
           $probeCreated = $false
           $shortPath = ''
@@ -403,7 +422,7 @@ jobs:
             Write-Output "8.3 probe long path: $probePath"
             Write-Output "8.3 probe short path: $shortPath"
             if ([string]::IsNullOrWhiteSpace($shortPath) -or $shortPath -eq $probePath) {
-              $message = "8.3 short names are not created on $volume; the #374 alias test needs them"
+              $message = "8.3 short names are not created on $volume; the alias test requires them"
               if ($null -ne $probeError) {
                 $message += " (ShortPath lookup failed: $($probeError.Exception.Message))"
               }
