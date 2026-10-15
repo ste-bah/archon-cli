@@ -1,7 +1,9 @@
 //! Build the committed tree the reverify fixture's check probe copies.
 
+#[cfg(test)]
 use std::path::Path;
 
+#[cfg(test)]
 pub(super) fn record(project: &Path, task_root: &Path) {
     for args in [
         vec!["add", "prds", "tasks"],

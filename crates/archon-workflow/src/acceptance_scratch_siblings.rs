@@ -75,7 +75,7 @@ pub(super) fn copy_external(
                     std::fs::create_dir_all(parent)
                         .map_err(|error| WorkflowError::io(parent, error))?;
                 }
-                let output = std::process::Command::new("git")
+                let output = archon_shell::spawn::command("git")
                     .args([
                         "-c",
                         "core.hooksPath=/dev/null",
@@ -137,7 +137,7 @@ pub(super) fn copy_external(
 }
 
 fn git_head(path: &Path) -> WorkflowResult<String> {
-    let output = std::process::Command::new("git")
+    let output = archon_shell::spawn::command("git")
         .args(["-C"])
         .arg(path)
         .args(["rev-parse", "HEAD"])

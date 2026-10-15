@@ -71,7 +71,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not acceptance verdicts.
-        sources_digest: "e72535275375f3c5cae0d07414ad55f23274efc75d666661524dd9d966a4c81e",
+        // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; its freeze verdicts are unchanged.
+        sources_digest: "d4eb3e9cfe9fff6818958dcd4a9b33a3c7aac2699eebc378c36b8404fa8ce92e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -110,7 +111,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not skeleton verdicts.
-        sources_digest: "e72535275375f3c5cae0d07414ad55f23274efc75d666661524dd9d966a4c81e",
+        // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; skeleton freeze verdicts are unchanged.
+        sources_digest: "d4eb3e9cfe9fff6818958dcd4a9b33a3c7aac2699eebc378c36b8404fa8ce92e",
         build_bound: false,
     },
     CapabilityLogic {
@@ -277,7 +279,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain acceptance verdicts.
-        sources_digest: "bbb964fd698a664ba478c5f73e56e9c80de3939133cc9baf9d531061793d4e33",
+        // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen acceptance verification is unchanged.
+        sources_digest: "02f0c324f88c183ea290eff800c6e05c8ecb2615788338523368485547b23f1f",
         build_bound: true,
     },
     CapabilityLogic {
@@ -316,7 +319,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain skeleton verdicts.
-        sources_digest: "bbb964fd698a664ba478c5f73e56e9c80de3939133cc9baf9d531061793d4e33",
+        // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen skeleton verification is unchanged.
+        sources_digest: "02f0c324f88c183ea290eff800c6e05c8ecb2615788338523368485547b23f1f",
         build_bound: true,
     },
 ];
