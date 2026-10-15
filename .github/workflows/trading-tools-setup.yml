@@ -50,7 +50,7 @@ jobs:
           exit /b 0' | Set-Content -LiteralPath (Join-Path $fakeBin 'npm.cmd') -Encoding ascii
           '@echo off
           exit /b 0' | Set-Content -LiteralPath (Join-Path $fakeBin 'node.cmd') -Encoding ascii
-          $env:PATH = "$fakeBin;$env:SystemRoot\System32;$env:SystemRoot"
+          $env:PATH = "$fakeBin;$env:SystemRoot\System32"
           & scripts/setup-trading-tools.ps1 -Target $target -SkipOpenBB
           $launcher = Join-Path $target 'scripts/start-tradingview-cdp.ps1'
           if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw 'Windows TradingView start script was not generated' }
@@ -72,7 +72,10 @@ jobs:
           trap { Show-WindowsPythonDiagnostics; break }
           function Assert-PythonCommands([string[]]$Expected) {
             Show-WindowsPythonDiagnostics
-            $actual = @((Get-Content -LiteralPath $pythonLog | Where-Object { $_ -match '^(py|python|python3) ' } | ForEach-Object { ($_ -split ' ')[0] }))
+            $actual = @()
+            if (Test-Path -LiteralPath $pythonLog -PathType Leaf) {
+              $actual = @((Get-Content -LiteralPath $pythonLog | Where-Object { $_ -match '^(py|python|python3) ' } | ForEach-Object { ($_ -split ' ')[0] }))
+            }
             if (($actual -join ',') -ne ($Expected -join ',')) {
               throw "Expected interpreter calls '$($Expected -join ',')', got '$($actual -join ',')'"
             }
@@ -84,7 +87,7 @@ jobs:
           exit /b 0
           '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'py.cmd') -Encoding ascii
           $env:TRADING_PYTHON_LOG = $pythonLog
-          $env:PATH = "$interpreterBin;$env:SystemRoot\System32;$env:SystemRoot"
+          $env:PATH = "$interpreterBin;$env:SystemRoot\System32"
           $pyOnlyTarget = Join-Path $env:RUNNER_TEMP 'trading setup py-only'
           $pyOnlyVenv = Join-Path $pyOnlyTarget '.archon/tools/openbb-venv'
           New-Item -ItemType Directory -Force -Path $pyOnlyVenv | Out-Null
@@ -102,9 +105,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path $junctionTarget, (Split-Path -Parent $junctionVenv) | Out-Null
           Set-Content -LiteralPath (Join-Path $junctionTarget 'keep.txt') -Value 'keep'
           New-Item -ItemType Junction -Path $junctionVenv -Target $junctionTarget | Out-Null
+          Remove-Item -LiteralPath $pythonLog -Force -ErrorAction SilentlyContinue
           Show-WindowsPythonDiagnostics
           try { & $setupScript -Target $junctionProject -SkipTradingView; throw 'junctioned venv was not refused' }
           catch { if ($_.Exception.Message -notmatch 'reparse-point OpenBB venv') { throw } }
+          Assert-PythonCommands @()
           if (-not (Test-Path -LiteralPath (Join-Path $junctionTarget 'keep.txt') -PathType Leaf)) { throw 'junction target file was removed' }
 
           Remove-Item -LiteralPath $pythonLog -Force
@@ -128,8 +133,8 @@ jobs:
           Show-WindowsPythonDiagnostics
           try { & $setupScript -Target $storeTarget -SkipTradingView; throw 'Store-stub non-venv was not refused' }
           catch { if ($_.Exception.Message -notmatch 'non-venv directory') { throw } }
-          $storeLog = Get-Content -LiteralPath $pythonLog -Raw
           Assert-PythonCommands @('python', 'python3')
+          $storeLog = Get-Content -LiteralPath $pythonLog -Raw
           if ($storeLog -notmatch 'python .*\.py' -or $storeLog -notmatch 'python3 .*\.py') { throw 'Store stub was not rejected before python3 fallback' }
           if (-not (Test-Path -LiteralPath (Join-Path $storeVenv 'keep.txt') -PathType Leaf)) { throw 'Store-stub sentinel was removed' }
 
