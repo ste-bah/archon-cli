@@ -6,6 +6,7 @@ use super::super::workflow_host_command_logic_source::{SourceTree, hashed_text_f
 use super::{sources_digest, sources_digest_from};
 
 const REGISTRY: &str = "src/command/workflow_host_command_logic.rs";
+const CATALOG: &str = "src/command/workflow_host_command_logic_catalog.rs";
 
 /// Changes exactly one character inside a named function body. The assertions
 /// deliberately name the expected mutations before the digest runs: pins are
@@ -56,6 +57,16 @@ fn dependent_capabilities(repo: &Path) -> Vec<&'static str> {
 }
 
 fn capability_digests(repo: &Path, capabilities: &[&str], registry_text: String) -> Vec<String> {
+    let catalog_text = SourceTree::checkout(repo).read_to_string(Path::new(CATALOG));
+    capability_digests_with_catalog(repo, capabilities, registry_text, catalog_text)
+}
+
+fn capability_digests_with_catalog(
+    repo: &Path,
+    capabilities: &[&str],
+    registry_text: String,
+    catalog_text: String,
+) -> Vec<String> {
     capabilities
         .iter()
         .map(|id| {
@@ -65,8 +76,9 @@ fn capability_digests(repo: &Path, capabilities: &[&str], registry_text: String)
                 .unwrap();
             let roots = logic.sources.concat();
             let mut workspace = Workspace::new(repo);
-            let source =
-                SourceTree::checkout(repo).with_file(Path::new(REGISTRY), registry_text.clone());
+            let source = SourceTree::checkout(repo)
+                .with_file(Path::new(REGISTRY), registry_text.clone())
+                .with_file(Path::new(CATALOG), catalog_text.clone());
             let hashed = sources_digest_from(&mut workspace, &source, &roots, LOGIC_DENYLIST);
             assert!(hashed.closure.files.contains(Path::new(REGISTRY)), "{id}");
             hashed.digest
@@ -92,15 +104,16 @@ fn logic_361_registry_pins_are_normalized_and_reuse_code_is_hashed() {
         assert!(capabilities.contains(&id), "{id} must include {REGISTRY}");
     }
 
-    // Expected: changing a real pin leaves every digest equal; changing one
+    // Expected: changing a real catalog pin leaves every digest equal; changing one
     // character in either real function body changes every dependent digest.
     let original = capability_digests(&repo, &capabilities, real_registry.clone());
-    let pin_line = real_registry
+    let real_catalog = SourceTree::checkout(&repo).read_to_string(Path::new(CATALOG));
+    let pin_line = real_catalog
         .lines()
         .find(|line| line.trim_start().starts_with("sources_digest: \""))
-        .expect("the real registry must contain a pin line");
-    let pin_at = real_registry.find(pin_line).unwrap() + pin_line.find('"').unwrap() + 1;
-    let mut changed_pin = real_registry.clone();
+        .expect("the real capability catalog must contain a pin line");
+    let pin_at = real_catalog.find(pin_line).unwrap() + pin_line.find('"').unwrap() + 1;
+    let mut changed_pin = real_catalog.clone();
     let changed_hex = if &changed_pin[pin_at..pin_at + 1] == "0" {
         "1"
     } else {
@@ -108,7 +121,7 @@ fn logic_361_registry_pins_are_normalized_and_reuse_code_is_hashed() {
     };
     changed_pin.replace_range(pin_at..pin_at + 1, changed_hex);
     assert_eq!(
-        capability_digests(&repo, &capabilities, changed_pin),
+        capability_digests_with_catalog(&repo, &capabilities, real_registry.clone(), changed_pin,),
         original,
         "changing one real sources_digest value preserves every dependent digest"
     );
@@ -133,6 +146,17 @@ fn logic_361_registry_pins_are_normalized_and_reuse_code_is_hashed() {
             "sources_digest: \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n",
         ),
         "the normalization is keyed only to the registry path"
+    );
+    assert_eq!(
+        hashed_text_for_file(
+            CATALOG,
+            "sources_digest: \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n",
+        ),
+        hashed_text_for_file(
+            CATALOG,
+            "sources_digest: \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n",
+        ),
+        "catalog digest values are normalized as well"
     );
 }
 

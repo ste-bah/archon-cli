@@ -155,16 +155,12 @@ pub(super) async fn handle_staged_task_file_lint(
     let call_id = call_id
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| anyhow!("trusted staged task-file lint requires --call-id <ID>"))?;
-    let mut candidate = Vec::new();
-    std::io::stdin()
-        .take(archon_workflow::HostCommandRequest::MAX_STDIN_BYTES as u64 + 1)
-        .read_to_end(&mut candidate)?;
-    if candidate.len() > archon_workflow::HostCommandRequest::MAX_STDIN_BYTES {
-        return Err(anyhow!(
-            "candidate stdin exceeds {} bytes",
-            archon_workflow::HostCommandRequest::MAX_STDIN_BYTES
-        ));
-    }
+    // Issue 386: stdin, or the run spill a bounded view on it names.
+    let candidate = crate::command::workflow_host_command_stdin_spill::read_candidate(
+        std::io::stdin(),
+        archon_workflow::HostCommandRequest::MAX_STDIN_BYTES,
+        staging_root,
+    )?;
     let staged_path = if task_file.is_absolute() {
         task_file.to_path_buf()
     } else {

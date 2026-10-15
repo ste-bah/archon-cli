@@ -353,7 +353,20 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &criteria,
         &prd_requirement_texts,
     )?;
-    for line in resume_chain.lines.into_iter().chain([script_seed.line]) {
+    // Issue 387: name any requirement id a changed parser added or removed.
+    let inventory = super::super::workflow_decompose_requirement_inventory::check_on_resume(
+        &store,
+        run_id,
+        &log_path,
+        &prd_digest,
+        &prd_requirement_texts,
+    )?;
+    for line in resume_chain
+        .lines
+        .into_iter()
+        .chain([script_seed.line])
+        .chain(inventory)
+    {
         ui_sink
             .emit(WorkflowUiEvent::Text(line))
             .await
