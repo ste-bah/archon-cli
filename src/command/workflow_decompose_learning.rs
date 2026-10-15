@@ -247,7 +247,10 @@ fn fold_locked(
 ) -> anyhow::Result<()> {
     let run = store.load_state(run_id)?;
     let v2 = archon_workflow::WorkflowV2ResultStore::new(store.run_dir(run_id).join("v2"));
-    let calls = v2.load_call_records()?;
+    let mut calls = v2.load_call_records()?;
+    // Judge-only reverify observations describe existing bytes; they are not
+    // author attempts and must not produce author-attempt lessons.
+    calls.retain(|call| includes_learning_observation(&call.call.id));
     let safe_task = safe_fold_context(&run.spec.task);
     let classifier_content = calls.iter().fold(safe_task.clone(), |mut content, call| {
         content.push(' ');
@@ -297,6 +300,24 @@ fn fold_locked(
         cwd, run_id, &safe_task, "default",
     );
     delivery::deliver_pending(cwd, store, run_id, &pending_journal, &records)
+}
+
+fn includes_learning_observation(call_id: &str) -> bool {
+    !call_id.starts_with("reverify-")
+}
+
+#[cfg(test)]
+mod reverify_observation_tests {
+    use super::includes_learning_observation;
+
+    #[test]
+    fn judge_only_reverify_calls_are_not_learning_attempts() {
+        assert!(!includes_learning_observation("reverify-4-body-0"));
+        assert!(!includes_learning_observation(
+            "reverify-4-gate-0-task-set-lint"
+        ));
+        assert!(includes_learning_observation("body-TASK-X-010-author-2"));
+    }
 }
 
 pub(super) fn read_journal(path: &Path) -> anyhow::Result<Vec<WorkflowLearningRecord>> {

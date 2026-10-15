@@ -22,6 +22,8 @@ pub enum WorkflowAction {
     Status(WorkflowStatusArgs),
     /// Resume a paused or failed workflow
     Resume(WorkflowResumeArgs),
+    /// Re-judge the current bodies of a completed fixed decomposition run
+    Reverify(WorkflowStatusArgs),
     /// Continue a workflow using the high-level recovery/resume surface
     Continue(WorkflowContinueArgs),
     /// Prepare repair from the first failed or blocked stage
@@ -173,6 +175,21 @@ mod audit_parse_tests {
                 "--yes must not authorize an audit mutation"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod reverify_parse_tests {
+    use crate::cli_args::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn workflow_reverify_accepts_a_run_id() {
+        let parsed = Cli::try_parse_from(["archon", "workflow", "reverify", "run-123"]);
+        assert!(
+            parsed.is_ok(),
+            "workflow reverify syntax rejected: {parsed:?}"
+        );
     }
 }
 

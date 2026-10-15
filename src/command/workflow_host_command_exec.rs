@@ -150,6 +150,29 @@ impl FixedHostCommandExecutor {
     ) -> WorkflowResult<ResolvedHostCommand> {
         resolve_host_command(request, &self.catalog, context, call_id)
     }
+
+    pub(crate) async fn execute_judge_only(
+        &self,
+        request: HostCommandRequest,
+        expected_generation: Option<u64>,
+    ) -> WorkflowResult<HostCommandResult> {
+        if request.command_id != "land-task-body" {
+            return Err(WorkflowError::SpecInvalid(
+                "judge-only body execution requires land-task-body".into(),
+            ));
+        }
+        self.execute_observed_only(request, expected_generation)
+            .await
+    }
+
+    pub(crate) async fn execute_observed_only(
+        &self,
+        request: HostCommandRequest,
+        expected_generation: Option<u64>,
+    ) -> WorkflowResult<HostCommandResult> {
+        self.execute_inner(request, expected_generation, None, true)
+            .await
+    }
 }
 
 #[path = "workflow_host_command_exec_destinations.rs"]
@@ -260,7 +283,8 @@ impl WorkflowHostCommandExecutor for FixedHostCommandExecutor {
         request: HostCommandRequest,
         expected_generation: Option<u64>,
     ) -> WorkflowResult<HostCommandResult> {
-        self.execute_inner(request, expected_generation, None).await
+        self.execute_inner(request, expected_generation, None, false)
+            .await
     }
 }
 #[path = "workflow_host_command_exec_identity.rs"]

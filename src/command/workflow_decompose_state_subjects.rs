@@ -215,6 +215,7 @@ pub(super) fn empty_outcome() -> HostCommandResult {
         publication_receipt: None,
         subjects: Vec::new(),
         postcondition: None,
+        observed_only: false,
     }
 }
 

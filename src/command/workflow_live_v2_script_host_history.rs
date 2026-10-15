@@ -359,7 +359,11 @@ impl WorkflowScriptHost {
         answer.status = status;
         answer.result.status = status;
         answer.result.data =
-            self.stamp_host_outcome(&landing.call, serde_json::to_value(outcome)?)?;
+            crate::command::workflow_host_command_outcome_stamp::stamp_host_outcome(
+                self.runner.host_command_executor.as_deref(),
+                &landing.call,
+                serde_json::to_value(outcome)?,
+            )?;
         answer.result.summary = "current landing rejudged under this build".into();
         Ok(answer)
     }

@@ -6,6 +6,7 @@ impl FixedHostCommandExecutor {
         mut request: HostCommandRequest,
         expected_generation: Option<u64>,
         existing_receipt: Option<archon_workflow::PublicationReceiptV1>,
+        judge_only: bool,
     ) -> WorkflowResult<HostCommandResult> {
         let expected_generation = expected_generation.ok_or_else(|| {
             WorkflowError::StateCorrupt(
@@ -44,7 +45,7 @@ impl FixedHostCommandExecutor {
         // A receipt-backed body has already been stamped at landing. Its stdin
         // is the live body whose exact bytes were checked against that receipt;
         // stamping again could change those bytes before private staging.
-        let stamped_fields = if existing_receipt.is_some() {
+        let stamped_fields = if existing_receipt.is_some() || judge_only {
             Vec::new()
         } else {
             match stamp::stamp_request(&mut request, &context)? {
@@ -62,12 +63,33 @@ impl FixedHostCommandExecutor {
         // Stale staging a cancelled call left is cleared, or the run pauses (#297).
         let staging = pause.prepare(&self.run_root)?;
         let mut command = self.resolved(&request, &context, &call_id)?;
-        if existing_receipt.is_some()
+        if judge_only
+            && matches!(
+                command.command_id.as_str(),
+                "verify-frozen-acceptance" | "verify-frozen-skeleton"
+            )
+        {
+            command.args.push("--read-only".into());
+        }
+        // What the call records never holds a secret value the child was given.
+        let secrets = Arc::new(HostSecrets::of(&context, &command.environment));
+        let pause = Arc::new(pause);
+        let teardown = TeardownLatch::default();
+        let staged_envelope = staging.root.join(ENVELOPE_FILE);
+        let mut cleanup = EnvelopeCleanup {
+            anchor: staging.anchor.clone(),
+            secrets: secrets.clone(),
+            pause: pause.clone(),
+            teardown: teardown.clone(),
+            remove_after_teardown: Vec::new(),
+            armed: true,
+        };
+        if (existing_receipt.is_some() || judge_only)
             && command.args.windows(2).any(|pair| pair[0] == "--task-file")
         {
             let task_file = context.frozen_task_file.as_ref().ok_or_else(|| {
                 WorkflowError::StateCorrupt(
-                    "receipt-backed body re-judge has no frozen task file".into(),
+                    "judge-only body execution has no frozen task file".into(),
                 )
             })?;
             let file_name = task_file
@@ -80,23 +102,36 @@ impl FixedHostCommandExecutor {
                 })?;
             let task_bytes = request.stdin.as_deref().ok_or_else(|| {
                 WorkflowError::StateCorrupt(
-                    "receipt-backed body re-judge has no candidate bytes".into(),
+                    "judge-only body execution has no candidate bytes".into(),
                 )
             })?;
-            staging
-                .anchor
-                .write_file(file_name, task_bytes.as_bytes())
-                .map_err(|source| WorkflowError::Io {
+            if let Err(source) = staging.anchor.write_file(file_name, task_bytes.as_bytes()) {
+                if let Err(cleanup_error) =
+                    staging.anchor.remove_file(std::path::Path::new(file_name))
+                    && cleanup_error.kind() != std::io::ErrorKind::NotFound
+                {
+                    return Err(pause.pause(
+                        &staging.root.join(file_name),
+                        "temporary task body staging could not be removed after write failure",
+                        &cleanup_error.to_string(),
+                        true,
+                    ));
+                }
+                return Err(WorkflowError::Io {
                     path: staging.root.join(file_name),
                     source,
-                })?;
+                });
+            }
+            cleanup
+                .remove_after_teardown
+                .push(std::path::PathBuf::from(file_name));
             let task_file_arg = command
                 .args
                 .windows(2)
                 .position(|pair| pair[0] == "--task-file")
                 .ok_or_else(|| {
                     WorkflowError::StateCorrupt(
-                        "receipt-backed body re-judge catalog has no --task-file argument".into(),
+                        "judge-only body catalog has no --task-file argument".into(),
                     )
                 })?;
             command.args[task_file_arg + 1] =
@@ -115,18 +150,6 @@ impl FixedHostCommandExecutor {
         let sentinels =
             LiveMutationSentinels::capture(&destinations.values().cloned().collect::<Vec<_>>())
                 .map_err(|error| WorkflowError::StageFailed(error.to_string()))?;
-        // What the call records never holds a secret value the child was given.
-        let secrets = Arc::new(HostSecrets::of(&context, &command.environment));
-        let pause = Arc::new(pause);
-        let teardown = TeardownLatch::default();
-        let staged_envelope = staging.root.join(ENVELOPE_FILE);
-        let cleanup = EnvelopeCleanup {
-            anchor: staging.anchor.clone(),
-            secrets: secrets.clone(),
-            pause: pause.clone(),
-            teardown: teardown.clone(),
-            armed: true,
-        };
         let result = async {
             // Issue #255: an operational ending is retried or pauses the run.
             let sealed = self
@@ -165,6 +188,7 @@ impl FixedHostCommandExecutor {
                     publication_receipt: None,
                     subjects: Vec::new(),
                     postcondition: None,
+                    observed_only: false,
                 });
             }
             let Some(prepared) = prepared else {
@@ -213,7 +237,7 @@ impl FixedHostCommandExecutor {
                     "host gate reported an operational failure",
                 ));
             }
-            if let Some(receipt) = existing_receipt.as_ref() {
+            if judge_only || existing_receipt.is_some() {
                 // The current landing is already on disk. Rejudging it must
                 // never publish or rewrite that artifact, even when the new
                 // verdict contains findings.
@@ -232,9 +256,10 @@ impl FixedHostCommandExecutor {
                     stdout_truncated: truncated.0,
                     stderr_truncated: truncated.1,
                     gate_envelope: Some(envelope),
-                    publication_receipt: Some(receipt.clone()),
+                    publication_receipt: existing_receipt.clone(),
                     subjects,
                     postcondition: Some(postcondition),
+                    observed_only: judge_only,
                 });
             }
             if candidate_refused_before_staging(&prepared, &command) {
@@ -331,6 +356,7 @@ impl FixedHostCommandExecutor {
                 publication_receipt: Some(receipt),
                 subjects,
                 postcondition: Some(postcondition),
+                observed_only: false,
             })
         }
         .await;

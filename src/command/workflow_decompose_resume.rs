@@ -36,7 +36,6 @@ pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
     .await
 }
 
-/// Resume with the running build's revision, overridable in tests.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
     cwd: &Path,
@@ -217,7 +216,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         frozen_chain.clone(),
         "decomposition/arguments.json.frozenChain",
     )?;
-    // Replay the launch's repository root from the task-root record.
     let repository_root = archon_workflow::repository_record::read_repository_record(&task_root)?
         .map(|record| PathBuf::from(record.repository_root))
         .ok_or_else(|| {
@@ -303,13 +301,8 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &persisted_route,
         anchored_digest,
     )?;
-    // Verify readable execution state before any provider or lifecycle change.
     upgrade::validate_result_state(&store, run_id)?;
-    // Every body is its current landing before the task root is read.
     landing_reconcile::resume(&project_root, &store.run_dir(run_id), &task_root, &ui_sink).await?;
-    // Pin the live frozen-chain decision only after admission succeeds. The
-    // record is independent of transitions and phase seeds, so every resume
-    // generation gets the same deterministic decision on replay.
     let resume_chain = crate::command::workflow_decompose_frozen_chain::resume_chain_decision(
         &store,
         run_id,
@@ -331,7 +324,6 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             .await
             .map_err(|error| anyhow!("reporting the runtime transition: {error}"))?;
     }
-    // Host-owned criteria and requirement text are stamped by the script.
     let criteria = crate::command::workflow_decompose_seed::host_criteria(&expected_arguments);
     let seed = crate::command::workflow_decompose_seed::current_seed_with_requirement_texts(
         &store,
@@ -341,7 +333,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         &prd_requirement_texts,
         Some(&resume_chain.argument),
     )?;
-    let (script_arguments, script_seed) =
+    let (mut script_arguments, script_seed) =
         crate::command::workflow_decompose_seed::resume_script_arguments(
             &store,
             run_id,
@@ -352,20 +344,16 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             (&expected_arguments, prd_text),
             false,
         )?;
-    // Issue 387: name any requirement id a changed parser added or removed.
-    let inventory = super::super::workflow_decompose_requirement_inventory::check_on_resume(
+    let ledger = crate::command::workflow_decompose_remediation::prepare(
         &store,
         run_id,
-        &log_path,
-        &prd_digest,
+        &store.run_dir(run_id),
+        &mut script_arguments,
+        &current_identity,
+        &criteria,
         &prd_requirement_texts,
     )?;
-    for line in resume_chain
-        .lines
-        .into_iter()
-        .chain([script_seed.line])
-        .chain(inventory)
-    {
+    for line in resume_chain.lines.into_iter().chain([script_seed.line]) {
         ui_sink
             .emit(WorkflowUiEvent::Text(line))
             .await
@@ -439,10 +427,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         run.spec.target_repository_root.as_deref().map(Path::new),
         &store.run_dir(&run.id),
     )?;
-    // A run whose launch failed before any work gave its task root back;
-    // it takes the root again here, unless another run has claimed it since.
     super::claim::reclaim_released_task_root(&store, run_id)?;
-    // Every check has passed: from here this process executes the run.
     execution_lease.record_executor()?;
     upgrade::mark_started(&store, run_id)?;
     let lifecycle = archon_workflow::LifecycleController::new(store.clone());
@@ -477,7 +462,7 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
             )),
         };
     }
-    super::super::workflow_live::execute_fixed_decomposition_v2_run(
+    let result = super::super::workflow_live::execute_fixed_decomposition_v2_run(
         &store,
         run,
         plan,
@@ -486,7 +471,10 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         agent_names,
         executor,
     )
-    .await
+    .await?;
+    crate::command::workflow_decompose_remediation::finish_resume_for_store(
+        &store, run_id, ledger, result,
+    )
 }
 
 #[path = "workflow_decompose_resume_policy.rs"]

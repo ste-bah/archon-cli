@@ -162,7 +162,42 @@ pub(super) fn refuse_unaccepted_launch(
     let Some(task_root) = canonical_task_root(project, universe) else {
         return Ok(());
     };
+    refuse_reverify_remediation(store, &task_root)?;
     crate::command::workflow_task_set::republish::refuse_unaccepted_launch(project, &task_root)
+}
+
+fn refuse_reverify_remediation(store: &WorkflowStore, task_root: &Path) -> anyhow::Result<()> {
+    for run in store.list_runs()? {
+        let state_path = store
+            .run_dir(&run.id)
+            .join(crate::command::workflow_decompose_state::FIXED_STATE_PATH);
+        let Ok(bytes) = std::fs::read(&state_path) else {
+            continue;
+        };
+        let Ok(state) =
+            serde_json::from_slice::<archon_workflow::FixedDecompositionStateV1>(&bytes)
+        else {
+            continue;
+        };
+        let Ok(root) = std::fs::canonicalize(&state.identity.task_root_identity) else {
+            continue;
+        };
+        if root != task_root {
+            continue;
+        }
+        if let Some(report) =
+            crate::command::workflow_decompose_latest_report::latest_report(store, &run.id)?
+            && report.outcome == "needs_remediation"
+        {
+            anyhow::bail!(
+                "implementation launch refused: task root belongs to fixed decomposition {} whose latest report {} needs_remediation; resume it with `archon workflow resume --live --yes {}`",
+                run.id,
+                report.id,
+                run.id
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Resume settles any publish of the bound task set a crash interrupted

@@ -116,6 +116,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
                 satisfied: true,
                 summary: "fixture postcondition".into(),
             }),
+            observed_only: false,
         })
     }
 }
@@ -318,6 +319,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
                 satisfied: has_receipt,
                 summary: "fixture".into(),
             }),
+            observed_only: false,
         })
     }
 }

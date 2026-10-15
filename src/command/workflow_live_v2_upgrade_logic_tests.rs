@@ -237,8 +237,12 @@ async fn logic_361_unversioned_checks_and_landing_run_again_then_reuse() {
     ] {
         let expected = match check {
             "verify-frozen-acceptance" => 6,
-            "requirements-trace" => 4,
+            // This test's fixture catalog deliberately pins the same set-lint
+            // version for both builds so unrelated bumps remain isolated.
             "task-set-lint" => 4,
+            "requirements-trace" => {
+                u64::from(crate::command::workflow_host_command_logic::versions()[check])
+            }
             _ => unreachable!(),
         };
         assert_eq!(run.stamps(check), vec![Some(expected)], "{check}");

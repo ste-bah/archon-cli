@@ -284,6 +284,9 @@ pub struct WorkflowVerifyFrozenChainArgs {
     /// Parent-owned canonical host-call identity
     #[arg(long, value_name = "ID")]
     pub call_id: Option<String>,
+    /// Hidden CLI flag; caller-settable but refuses to proceed while publish recovery is pending.
+    #[arg(long, hide = true)]
+    pub read_only: bool,
 }
 
 #[derive(Args, Debug)]

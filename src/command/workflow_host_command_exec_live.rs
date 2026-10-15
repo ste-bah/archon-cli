@@ -272,7 +272,7 @@ impl FixedHostCommandExecutor {
                 });
         }
         let outcome = self
-            .execute_inner(request, expected_generation, Some(receipt))
+            .execute_inner(request, expected_generation, Some(receipt), true)
             .await?;
         #[cfg(test)]
         crate::command::workflow_test_seams::apply_after_landing_rejudge(&record.call.id).map_err(

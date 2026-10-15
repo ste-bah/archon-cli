@@ -201,8 +201,7 @@ struct ShadowRecord<'a> {
 }
 
 pub(crate) fn finding_subject(text: &str, fallback: &str) -> String {
-    text.split(|ch: char| ch.is_whitespace() || matches!(ch, ':' | ',' | ';'))
-        .map(|token| token.trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-'))
+    text.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-')
         .find(|token| {
             ["TASK-", "REQ-", "AC-", "SUP-"]
                 .iter()
@@ -211,6 +210,34 @@ pub(crate) fn finding_subject(text: &str, fallback: &str) -> String {
         .filter(|token| !token.is_empty())
         .unwrap_or(fallback)
         .to_string()
+}
+
+/// A malformed published task body is an author-owned defect in staged
+/// gates. Keep other parser and infrastructure errors on their existing
+/// operational path.
+pub(crate) fn task_body_input_finding(
+    error: &anyhow::Error,
+    gate_id: GateId,
+    fallback_subject: &str,
+) -> Option<GateEvaluation> {
+    if !matches!(
+        error.downcast_ref::<archon_workflow::WorkflowError>(),
+        Some(archon_workflow::WorkflowError::TaskBodyInvalid(_))
+    ) {
+        return None;
+    }
+    let text = error.to_string();
+    let subject = finding_subject(&text, fallback_subject);
+    Some(GateEvaluation::new(
+        "",
+        vec![GateFinding::new(
+            gate_id,
+            text,
+            subject,
+            None,
+            archon_workflow::RemediationScope::Body,
+        )],
+    ))
 }
 
 pub(crate) fn shadow_log_path(cwd: &Path) -> PathBuf {

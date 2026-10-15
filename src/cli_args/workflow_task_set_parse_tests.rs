@@ -253,6 +253,7 @@ fn verify_frozen_chain_parses_the_staged_child_form_only() {
                     prd,
                     gate_envelope,
                     call_id,
+                    read_only,
                 }),
         } => {
             assert_eq!(stage, "skeleton");
@@ -263,6 +264,7 @@ fn verify_frozen_chain_parses_the_staged_child_form_only() {
                 Some(std::path::PathBuf::from("staging/gate-envelope.json"))
             );
             assert_eq!(call_id.as_deref(), Some("call-1"));
+            assert!(!read_only);
         }
         other => panic!("unexpected action {other:?}"),
     }

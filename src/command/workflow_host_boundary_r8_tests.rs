@@ -404,6 +404,7 @@ mod finish {
             publication_receipt: receipt,
             subjects: Vec::new(),
             postcondition: None,
+            observed_only: false,
         }
     }
 

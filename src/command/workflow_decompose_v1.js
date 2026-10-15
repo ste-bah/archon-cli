@@ -117,9 +117,10 @@ async function workflow(w) {
   // with the rest, and send it back here if they find it wanting.
   const bodies = new Map();
   const unauthored = [];
+  const forceBodySubjects = new Set(Array.isArray(args.forceBodySubjects) ? args.forceBodySubjects : []);
   for (const subject of skeleton.subjects) {
     requireSubject(subject);
-    if (frozen.bodies.has(subject.fileName)) continue;
+    if (frozen.bodies.has(subject.fileName) && !forceBodySubjects.has(subject.taskId)) continue;
     unauthored.push([subject, []]);
   }
   await authorBodies(w, unauthored, bodies);

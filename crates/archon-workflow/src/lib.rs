@@ -36,6 +36,8 @@ pub mod defect;
 pub(crate) mod durable_io;
 pub mod error;
 pub mod events;
+mod events_kind;
+mod events_read;
 mod executor_output;
 pub mod failure_evidence;
 pub mod fanout;

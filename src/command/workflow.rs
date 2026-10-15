@@ -29,6 +29,24 @@ use crate::command::workflow_live::{run_live_cli_action, should_spawn_live, spaw
 mod workflow_cli_lint;
 #[path = "workflow_decompose_cli.rs"]
 mod workflow_decompose_cli;
+#[path = "workflow_decompose_reverify.rs"]
+mod workflow_decompose_reverify;
+#[path = "workflow_decompose_reverify_assessment.rs"]
+mod workflow_decompose_reverify_assessment;
+#[cfg(test)]
+#[path = "workflow_decompose_reverify_edge_tests.rs"]
+mod workflow_decompose_reverify_edge_tests;
+#[cfg(test)]
+#[path = "workflow_decompose_reverify_executor_tests.rs"]
+mod workflow_decompose_reverify_executor_tests;
+#[path = "workflow_decompose_reverify_gates.rs"]
+mod workflow_decompose_reverify_gates;
+#[cfg(test)]
+#[path = "workflow_decompose_reverify_persistence_tests.rs"]
+mod workflow_decompose_reverify_persistence_tests;
+#[cfg(test)]
+#[path = "workflow_decompose_reverify_tests.rs"]
+mod workflow_decompose_reverify_tests;
 #[path = "workflow_freeze_cli.rs"]
 mod workflow_freeze_cli;
 pub(crate) use workflow_freeze_cli::{
@@ -436,6 +454,7 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
         }
         WorkflowAction::Decompose(WorkflowDecomposeArgs { .. })
         | WorkflowAction::DecompositionIdentity
+        | WorkflowAction::Reverify(WorkflowStatusArgs { .. })
         | WorkflowAction::ReclaimTaskRoot(WorkflowReclaimTaskRootArgs { .. })
         | WorkflowAction::VerifyFrozenChain(WorkflowVerifyFrozenChainArgs { .. }) => {
             return Err(anyhow!(

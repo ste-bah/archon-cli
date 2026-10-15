@@ -302,6 +302,7 @@ mod successor_reuse_tests {
                 satisfied: true,
                 summary: "published".into(),
             }),
+            observed_only: false,
         };
         let mut data = serde_json::to_value(&outcome).unwrap();
         let logic_version = executor.logic_version_for(successor_command).unwrap();
@@ -405,6 +406,7 @@ mod successor_reuse_tests {
             publication_receipt: Some(receipt.clone()),
             subjects: vec![],
             postcondition: None,
+            observed_only: false,
         };
         let mut result = archon_workflow::WorkflowV2Result::accepted("earlier landing");
         result.data = serde_json::to_value(outcome).unwrap();

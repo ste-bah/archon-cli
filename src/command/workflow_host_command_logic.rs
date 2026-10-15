@@ -210,10 +210,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair, after it claims the task root; the freeze judges as before.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
-        // #441 re-pin only: capability logic versions changed; freeze-acceptance verdicts are unchanged.
+        // #441 re-pin only: tolerant event-log reads changed; freeze-acceptance verdicts are unchanged.
         // #447 re-pin only: landing history replay and reconciliation changed; acceptance-freeze verdicts are unchanged.
         // #447 round 9 re-pin only: atomic receipt-mismatch capture changes landing recovery, not frozen acceptance verdicts.
-        sources_digest: "7d42aa1f18e978dd11bbbbbf7f7c4972c95d3aff4e8f9eee60fea4f8f8be8cc7",
+        sources_digest: "81b433502e93f4b985f2770919a961645012c0b49cdd3855d403d4a58012c37d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -235,10 +235,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #387 re-pin only: a launch routes a frozen check this build's entry rules refuse to the existing per-check repair, after it claims the task root; the freeze judges as before.
         // #442 re-pin only: the base-tree suffix lookup moved into RepositoryTree::paths_ending_with; freeze verdicts do not read claims, and requirements-trace's version bump in this table does not change them.
         // #443 re-pin only: the repository claim parser reads assertion clauses and the lint versions moved; freeze verdicts do not read claims.
-        // #441 re-pin only: capability logic versions changed; freeze-skeleton verdicts are unchanged.
+        // #441 re-pin only: tolerant event-log reads changed; freeze-skeleton verdicts are unchanged.
         // #447 re-pin only: landing history replay and reconciliation changed; skeleton-freeze verdicts are unchanged.
         // #447 round 9 re-pin only: atomic receipt-mismatch capture changes landing recovery, not frozen skeleton verdicts.
-        sources_digest: "7d42aa1f18e978dd11bbbbbf7f7c4972c95d3aff4e8f9eee60fea4f8f8be8cc7",
+        sources_digest: "81b433502e93f4b985f2770919a961645012c0b49cdd3855d403d4a58012c37d",
         build_bound: false,
     },
     CapabilityLogic {
@@ -266,7 +266,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 16: #447 accepted superseded rounds now receive the current
         // receipt-verified landing's verdict, rejudged without publication if
         // that landing's recorded logic is stale.
-        version: 17,
+        // 18: malformed task-body parse failures are now classified as body findings, changing landing verdicts.
+        version: 18,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -286,7 +287,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d review re-pin: quote normaliser split into its own module; same unreleased versions
         // #441: task-shape checks now read focused test commands from the runtime task model.
         // 17: #447 receipt-mismatch self-healing settles the newest durable task body before judging it.
-        sources_digest: "b04456a389acf1e9400d6bf6dc794cf484a303d572fa5d37cfa32967ff2ddce3",
+        // A12 re-pin only: A9 already bumped this version for malformed-body verdicts.
+        sources_digest: "6f3aae7ba977cf03a0d434f79ef98ecdba74181a28c4696b184813197fda836c",
         build_bound: false,
     },
     CapabilityLogic {
@@ -306,7 +308,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 12: #443 re-review 3, same rule as land-task-body 13.
         // #441 review, same unreleased version: PRD context and shared whole-set attribution change set-gate findings.
         // #441: the set gate checks exactly the focused test commands the runtime records.
-        version: 14,
+        // 15: malformed task-body parse failures are now body findings, changing task-set lint verdicts.
+        version: 15,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -327,7 +330,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434d review re-pin: quote normaliser split into its own module; same unreleased versions
         // #441: focused file ownership and declaration findings use the runtime command rule.
         // #447 re-pin only: receipt mismatch repair stays outside the set lint verdict.
-        sources_digest: "b04456a389acf1e9400d6bf6dc794cf484a303d572fa5d37cfa32967ff2ddce3",
+        // A12 re-pin only: A9 already bumped this version for malformed-body verdicts.
+        sources_digest: "6f3aae7ba977cf03a0d434f79ef98ecdba74181a28c4696b184813197fda836c",
         build_bound: false,
     },
     CapabilityLogic {
@@ -337,13 +341,14 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // package-relative path is read against every base path it is a suffix of (the claiming task's
         // own packages first) and refuted only when every reading refutes; a placeholder cargo target
         // is no observable; a bare name that is a Cargo target exists (or is derived when declared).
-        version: 4,
+        // 5: typed malformed-body errors change task-universe parsing in requirements trace.
+        version: 5,
         sources: &[GATE, CONTRACT, TRACE],
         // #434 and #417 re-pin only: trace never reads the newly excluded run state.
         // #434d re-pin only: trace never asks the fidelity critic or reads its store.
         // #438 re-pin only: relative path keys use '/' on every OS; macOS/Linux keys and verdicts are unchanged.
         // #441 re-pin only: shared source closure changed; requirements-trace does not run fidelity.
-        sources_digest: "860d9696431a809ee6313177ccf982a390ef5de1e81edbd70c5ce62a644eb89d",
+        sources_digest: "36f0f0dd45ef74c8e5a9a028edc54c5d9601fde21a786ecfab181dcbcd5994f0",
         build_bound: true,
     },
     CapabilityLogic {
@@ -372,7 +377,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441 re-pin only: capability logic versions changed; frozen acceptance verdicts are unchanged.
         // #447 re-pin only: landing history replay and reconciliation changed; frozen acceptance verdicts are unchanged.
         // #447 round 9 re-pin only: atomic receipt-mismatch capture does not change frozen acceptance verification.
-        sources_digest: "acef5a097f1e2b64d47e02e0456f871e77580259eb1a695424e7f044cdd91c9f",
+        sources_digest: "9e7d405cd36ebe6b8d6e310437b2b5074c682837560dbf52b910d45f7d90bc4b",
         build_bound: true,
     },
     CapabilityLogic {
@@ -397,7 +402,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441 re-pin only: capability logic versions changed; frozen skeleton verdicts are unchanged.
         // #447 re-pin only: landing history replay and reconciliation changed; frozen skeleton verdicts are unchanged.
         // #447 round 9 re-pin only: atomic receipt-mismatch capture does not change frozen skeleton verification.
-        sources_digest: "acef5a097f1e2b64d47e02e0456f871e77580259eb1a695424e7f044cdd91c9f",
+        sources_digest: "9e7d405cd36ebe6b8d6e310437b2b5074c682837560dbf52b910d45f7d90bc4b",
         build_bound: true,
     },
 ];

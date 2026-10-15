@@ -40,6 +40,7 @@ impl super::workflow_host_command_exec::HostCommandProcessAdapter for InProcessV
             Path::new(arg_after(&request.args, "--prd")),
             Some(Path::new(arg_after(&request.args, "--gate-envelope"))),
             Some(arg_after(&request.args, "--call-id")),
+            request.args.iter().any(|arg| arg == "--read-only"),
         )
         .unwrap();
         let stdout = serde_json::to_vec(&manifest).unwrap();
@@ -171,6 +172,58 @@ async fn the_executor_publishes_a_verified_frozen_chain_with_the_skeleton_subjec
     assert_eq!(names.len(), 4, "{names:?}");
 }
 
+#[tokio::test]
+async fn observed_frozen_verification_uses_read_only_chain_access() {
+    let temp = tempfile::tempdir().unwrap();
+    let (mut context, task_root) = frozen_context(temp.path());
+    super::workflow_decompose_frozen_chain::test_support::freeze_chain(
+        &context.project_root,
+        &context.prd_path,
+        &task_root,
+        &["TASK-X-010"],
+    );
+    let pin = super::workflow_task_set::acceptance_pin_path(&context.project_root, &task_root);
+    std::fs::write(archon_workflow::task_set_publish_lock::lock_path(&pin), b"").unwrap();
+    let shared =
+        archon_workflow::task_set_publish_lock::PublishLockFile::hold_shared_existing(&pin)
+            .unwrap()
+            .expect("frozen chain has a publish lock");
+    let store = archon_workflow::WorkflowStore::project(&context.project_root);
+    let run = store
+        .create_run(archon_workflow::WorkflowSpec {
+            schema: archon_workflow::spec::WORKFLOW_SCHEMA.into(),
+            name: "verify-frozen-observed".into(),
+            task: "verify a frozen chain without publishing".into(),
+            target_repository_root: None,
+            max_parallelism: 1,
+            max_agents: 1,
+            stages: Vec::new(),
+            permissions: Default::default(),
+            learning_hooks: Vec::new(),
+        })
+        .unwrap();
+    let run_root = store.run_dir(&run.id);
+    context.run_staging_root = run_root.join("host-command-staging");
+    let executor = FixedHostCommandExecutor::with_process(
+        fixed_decomposition_catalog("rev-1").unwrap(),
+        context,
+        run_root,
+        std::sync::Arc::new(InProcessVerifyChild),
+    );
+
+    let result = executor
+        .execute_observed_only(
+            HostCommandRequest::new("verify-frozen-acceptance", None).unwrap(),
+            Some(run.generation),
+        )
+        .await
+        .unwrap();
+    assert!(result.reusable(), "{result:?}");
+    assert!(result.observed_only);
+    assert!(result.publication_receipt.is_none());
+    drop(shared);
+}
+
 /// A chain the launcher would have refused is reported operationally through
 /// the envelope; the parent publishes nothing and the outcome is not reusable.
 #[tokio::test]
@@ -182,6 +235,17 @@ async fn a_frozen_chain_that_no_longer_verifies_is_an_operational_outcome_not_a_
         &context.prd_path,
         &task_root,
         &["TASK-X-010"],
+    );
+    let body_path = task_root.join("TASK-X-010.md");
+    std::fs::write(&body_path, "# TASK-X-010\n\nA frozen body fixture.\n").unwrap();
+    let body_bytes = std::fs::read(&body_path).unwrap();
+    let before_skeleton_digest = archon_workflow::task_set_contract::content_digest(
+        &std::fs::read(task_root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE))
+            .unwrap(),
+    );
+    println!(
+        "EVIDENCE reverify frozen_artifact BEFORE: skeleton_digest={before_skeleton_digest} body_digest={}",
+        archon_workflow::task_set_contract::content_digest(&body_bytes)
     );
     std::fs::write(
         task_root.join(archon_workflow::task_set_contract::TASK_SKELETON_FILE),
@@ -223,4 +287,11 @@ async fn a_frozen_chain_that_no_longer_verifies_is_an_operational_outcome_not_a_
         .operational_error
         .expect("operational error");
     assert!(error.text.contains("does not verify"), "{}", error.text);
+    let after_body_bytes = std::fs::read(&body_path).unwrap();
+    assert_eq!(body_bytes, after_body_bytes);
+    println!(
+        "EVIDENCE reverify frozen_artifact AFTER: finding={} body_unchanged={}",
+        error.text,
+        body_bytes == after_body_bytes
+    );
 }
