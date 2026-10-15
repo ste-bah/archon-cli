@@ -229,6 +229,7 @@ pub(crate) use baseline::{
 use sites::git_head;
 #[path = "workflow_acceptance_executability_hermetic.rs"]
 mod hermetic;
+pub(crate) use hermetic::CheckEvidence;
 #[path = "workflow_acceptance_executability_mutation.rs"]
 mod mutation;
 #[path = "workflow_acceptance_executability_probe.rs"]

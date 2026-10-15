@@ -22,6 +22,16 @@ fn task(id: &str, tools: &str, env: &str, tail: &str) -> String {
     )
 }
 
+fn has_runnable_test(raw: &str) -> bool {
+    let id = raw
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("task_id:"))
+        .map(str::trim)
+        .unwrap_or("TASK-X-010");
+    let task = parse_task_file(&PathBuf::from(format!("{id}.md")), raw).unwrap();
+    task_has_runnable_test(&task)
+}
+
 /// Lints the files in memory: what is under test is the analysis of each
 /// file's text, and a temp directory only added an OS dependency (Issue 327).
 fn lint(files: &[String]) -> String {
@@ -59,6 +69,22 @@ fn a_declared_runner_is_not_reported() {
         "## Focused Tests\n\n- `cargo test -p thing`\n",
     )]);
     assert!(out.contains("every runner and environment key"), "{out}");
+}
+
+#[test]
+fn only_the_runtime_focused_command_supplies_capability_declarations() {
+    let out = lint(&[task(
+        "TASK-X-001",
+        "[cargo]",
+        "[]",
+        "## Focused Tests\n\n- `cargo test -p thing` documents `pytest tests/x.py` and `$UNDECLARED_TOKEN`\n",
+    )]);
+    assert!(
+        out.contains("every runner and environment key"),
+        "the prose spans are not commands: {out}"
+    );
+    assert!(!out.contains("pytest"), "{out}");
+    assert!(!out.contains("UNDECLARED_TOKEN"), "{out}");
 }
 
 /// A backticked span that is prose about a CLI, not an invocation, must not be
@@ -211,7 +237,7 @@ fn fixed_success_and_version_only_commands_are_not_focused_tests() {
             "[]",
             &format!("## Focused Tests\n\n- `{command}`\n"),
         );
-        assert!(!task_has_runnable_test(&raw), "{command}");
+        assert!(!has_runnable_test(&raw), "{command}");
     }
     let raw = task(
         "TASK-X-001",
@@ -219,7 +245,7 @@ fn fixed_success_and_version_only_commands_are_not_focused_tests() {
         "[]",
         "## Focused Tests\n\n- `sh -c 'grep -q required out.json'`\n",
     );
-    assert!(task_has_runnable_test(&raw));
+    assert!(has_runnable_test(&raw));
 }
 
 /// Portable POSIX checks are runnable focused tests.
@@ -233,17 +259,14 @@ fn fixed_success_and_version_only_commands_are_not_focused_tests() {
 /// ever clear it.
 #[test]
 fn posix_shell_checks_count_as_runnable_focused_tests() {
-    let body = "\
-# TASK-X-010
-
-## Focused Tests
-
-- `test -s src/alpha.txt`
-- `grep -qx 'alpha ready' src/alpha.txt`
-- `! grep -q 'CANARY' src/alpha.txt`
-";
+    let body = task(
+        "TASK-X-010",
+        "[test, grep]",
+        "[]",
+        "## Focused Tests\n\n- `test -s src/alpha.txt`\n- `grep -qx 'alpha ready' src/alpha.txt`\n- `! grep -q 'CANARY' src/alpha.txt`\n",
+    );
     assert!(
-        super::task_has_runnable_test(body),
+        has_runnable_test(&body),
         "a portable POSIX check that can exit non-zero is a runnable focused test"
     );
 }
@@ -251,16 +274,14 @@ fn posix_shell_checks_count_as_runnable_focused_tests() {
 /// The runner list still has to reject prose about a command.
 #[test]
 fn prose_about_a_command_is_still_not_a_runnable_focused_test() {
-    let body = "\
-# TASK-X-010
-
-## Focused Tests
-
-- `data list --json` shows the registered dataset
-- the operator confirms the output looks right
-";
+    let body = task(
+        "TASK-X-010",
+        "[]",
+        "[]",
+        "## Focused Tests\n\n- `data list --json` shows the registered dataset\n- the operator confirms the output looks right\n",
+    );
     assert!(
-        !super::task_has_runnable_test(body),
+        !has_runnable_test(&body),
         "a backticked CLI fragment in prose is not a runnable command"
     );
 }
@@ -268,26 +289,25 @@ fn prose_about_a_command_is_still_not_a_runnable_focused_test() {
 /// A check that cannot fail is not a test, whatever it starts with.
 #[test]
 fn a_fixed_success_posix_command_is_not_a_runnable_focused_test() {
-    let body = "\
-# TASK-X-010
-
-## Focused Tests
-
-- `true`
-";
+    let body = task("TASK-X-010", "[]", "[]", "## Focused Tests\n\n- `true`\n");
     assert!(
-        !super::task_has_runnable_test(body),
+        !has_runnable_test(&body),
         "a command that always exits zero proves nothing"
     );
 }
 
 #[test]
 fn focused_subsections_reach_lint_without_sibling_commands() {
-    let raw = "## Focused Tests\n### Tool calls\n- `mcp__example__fetch` with `{}`\n### Build\n```sh\ncargo build\ncargo nextest run\n```\n#### Content\n- `grep -q expected result.txt`\n## Other\n```sh\nexit 99\n```\n- `wrong_command`\n";
-    assert!(task_has_runnable_test(raw));
-    let commands = focused_test_commands(raw);
+    let raw = task(
+        "TASK-X-010",
+        "[cargo, grep]",
+        "[]",
+        "## Focused Tests\n### Tool calls\n- `mcp__example__fetch` with `{}`\n### Build\n```sh\ncargo build\ncargo nextest run\n```\n#### Content\n- `grep -q expected result.txt`\n## Other\n```sh\nexit 99\n```\n- `wrong_command`\n",
+    );
+    let task = parse_task_file(&PathBuf::from("TASK-X-010.md"), &raw).unwrap();
+    assert!(task_has_runnable_test(&task));
+    let commands = task.declared_focused_test_commands();
     for expected in [
-        "mcp__example__fetch",
         "cargo build",
         "cargo nextest run",
         "grep -q expected result.txt",
@@ -297,6 +317,7 @@ fn focused_subsections_reach_lint_without_sibling_commands() {
             "missing {expected}: {commands:?}"
         );
     }
+    assert!(!commands.iter().any(|s| s.contains("mcp__example__fetch")));
     assert!(
         !commands
             .iter()

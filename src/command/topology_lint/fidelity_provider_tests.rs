@@ -3,8 +3,19 @@
 //! second request must carry that reply and its error as real wire turns.
 use super::*;
 use crate::runtime::llm::transport_tests::{PING, answer};
+use archon_workflow::fidelity_audit::ClaimingTask;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+#[test]
+fn literal_ellipsis_support_quote_does_not_create_an_expansion_candidate() {
+    let task = ClaimingTask {
+        task_id: "TASK-X".into(),
+        text: "Alpha … Omega".into(),
+    };
+    let document = r#"{"verdicts":[{"necessarily_true":true,"obligation_id":"REQ-X-001","supporting_task_id":"TASK-X","supporting_text":"Alpha … Omega"}]}"#;
+    assert!(expanded_supports(document, &[task]).is_empty());
+}
 
 /// Serve one scripted SSE reply per POST, in order, recording each body.
 async fn serve(replies: Vec<String>) -> (String, Arc<Mutex<Vec<serde_json::Value>>>) {

@@ -97,6 +97,156 @@ pub(crate) async fn hold_before_call(call_id: &str, command_id: Option<&str>) {
     let _ = (call_id, command_id);
 }
 
+#[cfg(test)]
+static AFTER_REJUDGE_MUTATIONS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, (std::path::PathBuf, Vec<u8>)>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn mutate_after_landing_rejudge(
+    call_id: &str,
+    path: std::path::PathBuf,
+    bytes: Vec<u8>,
+) {
+    AFTER_REJUDGE_MUTATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .insert(call_id.to_owned(), (path, bytes));
+}
+
+#[cfg(test)]
+pub(crate) fn apply_after_landing_rejudge(call_id: &str) -> std::io::Result<()> {
+    let mutation = AFTER_REJUDGE_MUTATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .remove(call_id);
+    if let Some((path, bytes)) = mutation {
+        std::fs::write(path, bytes)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+static AFTER_LANDING_RESTORE_MUTATIONS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, (std::path::PathBuf, Vec<u8>)>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+static BEFORE_LANDING_REJUDGE_MUTATIONS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, (std::path::PathBuf, Vec<u8>)>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+static BEFORE_LANDING_RESTORE_CHECKS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, std::path::PathBuf>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+static BEFORE_LANDING_RESTORE_MUTATIONS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, (std::path::PathBuf, Vec<u8>)>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn assert_evidence_before_landing_restore(call_id: &str, path: std::path::PathBuf) {
+    BEFORE_LANDING_RESTORE_CHECKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .insert(call_id.to_owned(), path);
+}
+
+#[cfg(test)]
+pub(crate) fn mutate_before_landing_restore(
+    call_id: &str,
+    path: std::path::PathBuf,
+    bytes: Vec<u8>,
+) {
+    BEFORE_LANDING_RESTORE_MUTATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .insert(call_id.to_owned(), (path, bytes));
+}
+
+#[cfg(test)]
+pub(crate) fn apply_before_landing_restore(call_id: &str) -> std::io::Result<()> {
+    let mutation = BEFORE_LANDING_RESTORE_MUTATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .remove(call_id);
+    if let Some((path, bytes)) = mutation {
+        std::fs::write(path, bytes)?;
+    }
+    let expected = BEFORE_LANDING_RESTORE_CHECKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .remove(call_id);
+    if let Some(path) = expected {
+        assert!(
+            path.is_file(),
+            "durable evidence file is absent before restore: {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn mutate_before_landing_rejudge(
+    call_id: &str,
+    path: std::path::PathBuf,
+    bytes: Vec<u8>,
+) {
+    BEFORE_LANDING_REJUDGE_MUTATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .insert(call_id.to_owned(), (path, bytes));
+}
+
+#[cfg(test)]
+pub(crate) fn apply_before_landing_rejudge(call_id: &str) -> std::io::Result<()> {
+    let mutation = BEFORE_LANDING_REJUDGE_MUTATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .remove(call_id);
+    if let Some((path, bytes)) = mutation {
+        std::fs::write(path, bytes)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn mutate_after_landing_restore(
+    call_id: &str,
+    path: std::path::PathBuf,
+    bytes: Vec<u8>,
+) {
+    AFTER_LANDING_RESTORE_MUTATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .insert(call_id.to_owned(), (path, bytes));
+}
+
+#[cfg(test)]
+pub(crate) fn apply_after_landing_restore(call_id: &str) -> std::io::Result<()> {
+    let mutation = AFTER_LANDING_RESTORE_MUTATIONS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .remove(call_id);
+    if let Some((path, bytes)) = mutation {
+        std::fs::write(path, bytes)?;
+    }
+    Ok(())
+}
+
 #[cfg(debug_assertions)]
 static TIMEOUT_FIRED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 #[cfg(debug_assertions)]

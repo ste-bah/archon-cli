@@ -222,3 +222,97 @@ fn a_launch_snapshot_settles_a_left_publish_or_stops_with_the_reason() {
         assert!(!pin_path.with_extension("publish-journal").exists());
     }
 }
+
+#[test]
+fn implementation_admission_routes_a_needs_remediation_reverify_to_resume() {
+    let project = tempfile::tempdir().expect("project");
+    let task_root = project.path().join("tasks/set");
+    std::fs::create_dir_all(&task_root).unwrap();
+    std::fs::write(task_root.join("TASK-EX-001.md"), "task").unwrap();
+    // EXPECTED BEFORE admission: persisted fixture identities use the same
+    // plain canonical spelling as production, including on Windows where
+    // std::fs::canonicalize otherwise adds the verbatim prefix.
+    let plain_task_root = archon_shell::paths::canonicalize(&task_root).unwrap();
+    let store = WorkflowStore::project(project.path());
+    let run = store
+        .create_run(plan(task_universe(&task_root)).approval_metadata_spec())
+        .unwrap();
+    let run_dir = store.run_dir(&run.id);
+    store
+        .write_run_json(
+            &run.id,
+            "decomposition/state.json",
+            &archon_workflow::FixedDecompositionStateV1 {
+                schema_version: 1,
+                run_kind: archon_workflow::WorkflowRunKind::FixedDecompositionV1,
+                identity: archon_workflow::FixedRunIdentityV1 {
+                    template_version: "fixed-decomposition-v1".into(),
+                    starting_binary_revision: "revision".into(),
+                    script_digest: "script".into(),
+                    catalog_digest: "catalog".into(),
+                    project_root_identity: project
+                        .path()
+                        .canonicalize()
+                        .unwrap()
+                        .display()
+                        .to_string(),
+                    prd_identity: project.path().join("prd.md").display().to_string(),
+                    task_root_identity: plain_task_root.display().to_string(),
+                },
+                phase: archon_workflow::DecompositionPhase::Completed,
+                attempts: Default::default(),
+                dispositions: Default::default(),
+                log_path: run_dir.join("decomposition.log").display().to_string(),
+            },
+        )
+        .unwrap();
+    let v2 = WorkflowV2ResultStore::new(run_dir.join("v2"));
+    let mut original = WorkflowV2Result::default();
+    original.status = WorkflowV2Status::Accepted;
+    original.data = serde_json::json!({"outcome":"accepted"});
+    v2.save_call_record(&WorkflowV2CallRecord::new(
+        &run.id,
+        WorkflowV2HostCall {
+            id: "original-report".into(),
+            method: WorkflowV2HostMethod::FinalReport,
+            write_mode: None,
+            options: Default::default(),
+        },
+        1,
+        "hash".into(),
+        original,
+        Vec::new(),
+    ))
+    .unwrap();
+    let mut review = WorkflowV2Result::default();
+    review.status = WorkflowV2Status::NeedsReview;
+    review.data = serde_json::json!({"id":"reverify-2-report", "outcome":"needs_remediation",
+        "supersedes_id":"original-report", "subjects":[{"task_id":"TASK-EX-001"}]});
+    v2.save_call_record(&WorkflowV2CallRecord::new(
+        &run.id,
+        WorkflowV2HostCall {
+            id: "reverify-2-report".into(),
+            method: WorkflowV2HostMethod::FinalReport,
+            write_mode: None,
+            options: Default::default(),
+        },
+        1,
+        "hash".into(),
+        review,
+        Vec::new(),
+    ))
+    .unwrap();
+    WorkflowEventLog::new(store.clone()).emit(&run.id, 1, WorkflowEventKind::DecompositionReverified,
+        serde_json::json!({"report_id":"reverify-2-report", "supersedes_id":"original-report", "outcome":"needs_remediation"})).unwrap();
+    let error = super::workflow_run_end_snapshot::refuse_unaccepted_launch(
+        &store,
+        Some(&task_universe(&task_root)),
+    )
+    .unwrap_err();
+    let text = format!("{error:#}");
+    assert!(
+        text.contains(&format!("resume --live --yes {}", run.id)),
+        "{text}"
+    );
+    assert!(text.contains("reverify-2-report"), "{text}");
+}

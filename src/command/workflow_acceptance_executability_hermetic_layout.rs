@@ -9,6 +9,14 @@ pub struct CopyLayout {
     pub root: PathBuf,
     pub repository: PathBuf,
     pub project: PathBuf,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub siblings: Vec<SiblingRevision>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SiblingRevision {
+    pub path: PathBuf,
+    pub commit: Option<String>,
 }
 
 /// One check result and the copy whose paths gave that result meaning.
@@ -41,19 +49,22 @@ impl CheckEvidence {
 
 impl CopyLayout {
     /// Issue 420's tree as the constructed copy actually placed it.
-    pub fn site_tree(&self) -> Option<(usize, &'static [&'static str])> {
-        const HERMETIC: &[&str] = &["repo", "project"];
+    pub fn site_tree(&self) -> Option<(usize, Vec<String>)> {
         let depth = self
             .project
             .strip_prefix(&self.root)
             .ok()?
             .components()
             .count();
-        let roots = if self.project.starts_with(&self.repository) {
-            &HERMETIC[..1]
-        } else {
-            HERMETIC
-        };
+        let roots = std::fs::read_dir(&self.root)
+            .ok()?
+            .flatten()
+            .filter_map(|entry| {
+                let kind = entry.file_type().ok()?;
+                (kind.is_dir() || kind.is_file())
+                    .then(|| entry.file_name().to_string_lossy().into_owned())
+            })
+            .collect();
         Some((depth, roots))
     }
 }

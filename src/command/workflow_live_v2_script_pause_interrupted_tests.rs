@@ -60,6 +60,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
             publication_receipt: None,
             subjects: Vec::new(),
             postcondition: None,
+            observed_only: false,
         })
     }
 }
@@ -268,6 +269,7 @@ impl crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor for
                 satisfied: true,
                 summary: "fixture postcondition".into(),
             }),
+            observed_only: false,
         })
     }
 }

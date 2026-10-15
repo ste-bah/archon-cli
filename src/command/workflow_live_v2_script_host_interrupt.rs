@@ -158,7 +158,11 @@ impl WorkflowScriptHost {
                 if let (Some(data), Some(progress)) = (data.as_object_mut(), progress.as_object()) {
                     data.extend(progress.clone());
                 }
-                self.stamp_host_outcome(&execution.call, data)?
+                crate::command::workflow_host_command_outcome_stamp::stamp_host_outcome(
+                    self.runner.host_command_executor.as_deref(),
+                    &execution.call,
+                    data,
+                )?
             },
             ..WorkflowV2Result::default()
         };

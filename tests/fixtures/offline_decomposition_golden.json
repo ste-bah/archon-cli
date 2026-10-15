@@ -149,7 +149,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -209,7 +209,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -269,7 +269,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -329,7 +329,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -389,7 +389,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -451,7 +451,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -533,8 +533,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
-            "logicVersion": 21,
+            "logicDigest": "b468e0ab37e7362884c5eaa6afe9bc1871d650fca5c7f1a6829946a156dda666",
+            "logicVersion": 22,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -745,7 +745,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "needs_review"
       }
@@ -800,8 +800,8 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
-            "logicVersion": 21,
+            "logicDigest": "b468e0ab37e7362884c5eaa6afe9bc1871d650fca5c7f1a6829946a156dda666",
+            "logicVersion": 22,
             "postcondition": {
               "satisfied": true,
               "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -988,7 +988,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1043,7 +1043,7 @@
               2097152
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
+            "logicDigest": "b468e0ab37e7362884c5eaa6afe9bc1871d650fca5c7f1a6829946a156dda666",
             "logicVersion": 3,
             "postcondition": {
               "satisfied": true,
@@ -1218,7 +1218,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1281,8 +1281,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-            "logicVersion": 13,
+            "logicDigest": "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
+            "logicVersion": 18,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1338,7 +1338,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1401,8 +1401,8 @@
               1048576
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-            "logicVersion": 13,
+            "logicDigest": "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
+            "logicVersion": 18,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative landed body postcondition evaluated"
@@ -1458,7 +1458,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1512,8 +1512,8 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
-            "logicVersion": 4,
+            "logicDigest": "e6d84542fd686d2025abb1ba5b3752734ad1e2ace070e42da38fde7a3041bc29",
+            "logicVersion": 5,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative requirements-trace postcondition evaluated"
@@ -1567,7 +1567,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1621,8 +1621,8 @@
               4194304
             ],
             "logicBuild": "<build-fingerprint>",
-            "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-            "logicVersion": 12,
+            "logicDigest": "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
+            "logicVersion": 15,
             "postcondition": {
               "satisfied": true,
               "summary": "authoritative task-set-lint postcondition evaluated"
@@ -1676,7 +1676,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }
@@ -1707,8 +1707,8 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
-                  "logicVersion": 21,
+                  "logicDigest": "b468e0ab37e7362884c5eaa6afe9bc1871d650fca5c7f1a6829946a156dda666",
+                  "logicVersion": 22,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1770,8 +1770,8 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
-                      "logicVersion": 21,
+                      "logicDigest": "b468e0ab37e7362884c5eaa6afe9bc1871d650fca5c7f1a6829946a156dda666",
+                      "logicVersion": 22,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "acceptance contract, lock, PRD digest, and host pin evaluated"
@@ -1853,7 +1853,7 @@
                     2097152
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
+                  "logicDigest": "b468e0ab37e7362884c5eaa6afe9bc1871d650fca5c7f1a6829946a156dda666",
                   "logicVersion": 3,
                   "postcondition": {
                     "satisfied": true,
@@ -1914,7 +1914,7 @@
                         2097152
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "4d7c3a6e59c97b3ca624c7726861fcde2b017303c502a50180423cb8249e89ce",
+                      "logicDigest": "b468e0ab37e7362884c5eaa6afe9bc1871d650fca5c7f1a6829946a156dda666",
                       "logicVersion": 3,
                       "postcondition": {
                         "satisfied": true,
@@ -2015,8 +2015,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                  "logicVersion": 13,
+                  "logicDigest": "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
+                  "logicVersion": 18,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2065,8 +2065,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                      "logicVersion": 13,
+                      "logicDigest": "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
+                      "logicVersion": 18,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2147,8 +2147,8 @@
                     1048576
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                  "logicVersion": 13,
+                  "logicDigest": "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
+                  "logicVersion": 18,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative landed body postcondition evaluated"
@@ -2197,8 +2197,8 @@
                         1048576
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                      "logicVersion": 13,
+                      "logicDigest": "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
+                      "logicVersion": 18,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative landed body postcondition evaluated"
@@ -2279,8 +2279,8 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                  "logicVersion": 12,
+                  "logicDigest": "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
+                  "logicVersion": 15,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative task-set-lint postcondition evaluated"
@@ -2324,8 +2324,8 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "8b4aa3ac95f3f615eb902c5d4340a7b3ad094961e528ae523c7f3114fa371b51",
-                      "logicVersion": 12,
+                      "logicDigest": "d093ca4435845fa12d285f5ed2922fb8789992f26ca9530f944dd5f2e54478db",
+                      "logicVersion": 15,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative task-set-lint postcondition evaluated"
@@ -2409,8 +2409,8 @@
                     4194304
                   ],
                   "logicBuild": "<build-fingerprint>",
-                  "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
-                  "logicVersion": 4,
+                  "logicDigest": "e6d84542fd686d2025abb1ba5b3752734ad1e2ace070e42da38fde7a3041bc29",
+                  "logicVersion": 5,
                   "postcondition": {
                     "satisfied": true,
                     "summary": "authoritative requirements-trace postcondition evaluated"
@@ -2454,8 +2454,8 @@
                         4194304
                       ],
                       "logicBuild": "<build-fingerprint>",
-                      "logicDigest": "a59851dc82e054d129dc409953e20e0fac6476ecb6dd4cba36a4d06be0139224",
-                      "logicVersion": 4,
+                      "logicDigest": "e6d84542fd686d2025abb1ba5b3752734ad1e2ace070e42da38fde7a3041bc29",
+                      "logicVersion": 5,
                       "postcondition": {
                         "satisfied": true,
                         "summary": "authoritative requirements-trace postcondition evaluated"
@@ -2623,7 +2623,7 @@
           "task_coverage": []
         },
         "run_id": "<run-id>",
-        "scaffold_hash": "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5",
+        "scaffold_hash": "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e",
         "schema_version": "workflow-result-v2",
         "status": "accepted"
       }

@@ -105,6 +105,11 @@ pub enum WorkflowError {
     InvalidSchema(String),
     #[error("invalid workflow spec: {0}")]
     SpecInvalid(String),
+    /// A task body's own syntax or required task metadata is invalid. Kept
+    /// distinct from workflow construction errors so judged body defects can
+    /// cross staged gate boundaries as findings.
+    #[error("invalid task body: {0}")]
+    TaskBodyInvalid(String),
     #[error("unknown dependency '{dependency}' referenced by stage '{stage}'")]
     UnknownDependency { stage: String, dependency: String },
     #[error("dependency cycle detected: {0:?}")]

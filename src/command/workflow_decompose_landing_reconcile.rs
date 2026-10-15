@@ -7,12 +7,13 @@
 //! task root, every frozen task whose live file is not the current body of
 //! its landing lineage is rebuilt from that landing's own recorded
 //! candidate, stamped and packaged exactly as the landing was, and written
-//! back only when the rebuilt bytes hash to the landing's receipt. When they
-//! do not, the resume is refused with a message naming the receipt. Only a
-//! body some landing of this run published is put back: a live file no
-//! receipt names (an edit made outside the run) refuses the resume instead
-//! of being overwritten. A task with no accepted landing on record is left
-//! as it is.
+//! back only when the rebuilt bytes hash to the landing's receipt. An outside
+//! edit is kept as evidence, the receipt bytes are restored, and the edit is
+//! returned as a candidate for judging. A missing body is restored from a
+//! rebuildable receipt; if that receipt cannot be rebuilt, the task follows
+//! the ordinary author path. With an unrebuildable receipt and existing body
+//! bytes, those bytes remain a candidate for judging. A task with no accepted
+//! landing on record is left as it is.
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -33,6 +34,7 @@ pub(crate) struct BodyRestore {
     pub(crate) live_blake3: Option<String>,
     pub(crate) receipt_blake3: String,
     pub(crate) bytes: Vec<u8>,
+    pub(crate) displaced_bytes: Option<Vec<u8>>,
 }
 
 /// What the reconciliation found: the bodies to write back, and one line
@@ -42,6 +44,9 @@ pub(crate) struct ReconcilePlan {
     pub(crate) restores: Vec<BodyRestore>,
     pub(crate) lines: Vec<String>,
 }
+
+/// Settle one current landing under the frozen-chain lock.
+pub(crate) use settle::repair_landing_mismatch;
 
 /// Compare every frozen task's live body with its current landing.
 pub(crate) fn plan(
@@ -95,16 +100,6 @@ pub(crate) fn plan(
             ));
             continue;
         }
-        let refused = |why: String| {
-            anyhow!(
-                "resume refused: the live task file {} (blake3 {}) is not the current body of {}: the landing of call {} committed {committed_at} with blake3 {blake3}, and {why}; put {} back to blake3 {blake3} before resuming",
-                path.display(),
-                live_blake3.as_deref().unwrap_or("absent"),
-                frozen.task_id,
-                current.call.id,
-                path.display()
-            )
-        };
         // Only a body this run itself landed is put back: content no landing
         // of the task ever published (an edit made outside the run) is the
         // operator's to resolve, never overwritten. A body a landing newer
@@ -124,21 +119,48 @@ pub(crate) fn plan(
                 }
                 Some(_) => {}
                 None => {
-                    return Err(refused(
-                        "the live file is no body any landing of this run published".into(),
+                    plan.lines.push(format!(
+                        "{}: live body (blake3 {live}) is a fresh candidate; left for the normal judge path",
+                        frozen.task_id
                     ));
+                    continue;
                 }
             }
         }
-        let rebuilt = rebuild(current, frozen, &path).map_err(&refused)?;
+        let rebuilt = match rebuild(current, frozen, &path) {
+            Ok(rebuilt) => rebuilt,
+            Err(why) if live.is_none() => {
+                plan.lines.push(format!(
+                    "{}: task body is missing and its receipt cannot be rebuilt ({why}); route to the normal author path",
+                    frozen.task_id
+                ));
+                continue;
+            }
+            Err(why) => {
+                plan.lines.push(format!(
+                    "{}: current receipt cannot be rebuilt ({why}); live bytes remain the judge candidate",
+                    frozen.task_id
+                ));
+                continue;
+            }
+        };
         let rebuilt_blake3 = content_digest(&rebuilt);
         if rebuilt_blake3 != blake3 || Some(rebuilt.len() as u64) != byte_len {
-            return Err(refused(format!(
-                "its recorded candidate rebuilds to blake3 {rebuilt_blake3}, not to its receipt"
-            )));
+            if live.is_none() {
+                plan.lines.push(format!(
+                    "{}: current receipt cannot be rebuilt (recorded candidate hashes to {rebuilt_blake3}); route to the normal author path",
+                    frozen.task_id
+                ));
+            } else {
+                plan.lines.push(format!(
+                    "{}: current receipt cannot be rebuilt (recorded candidate hashes to {rebuilt_blake3}); live bytes remain the judge candidate",
+                    frozen.task_id
+                ));
+            }
+            continue;
         }
         plan.lines.push(format!(
-            "{}: RESTORE {} from blake3 {} to blake3 {blake3}, the current landing (call {}, committed {committed_at})",
+            "{}: SETTLE {} from blake3 {} against receipt {blake3}, the current landing (call {}, committed {committed_at})",
             frozen.task_id,
             path.display(),
             live_blake3.as_deref().unwrap_or("absent"),
@@ -152,6 +174,7 @@ pub(crate) fn plan(
             live_blake3,
             receipt_blake3: blake3,
             bytes: rebuilt,
+            displaced_bytes: live,
         });
     }
     Ok(plan)
@@ -325,15 +348,20 @@ pub(crate) fn reconcile_task_root(
     let records =
         archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2")).load_call_records()?;
     let plan = plan(&records, task_root, &skeleton)?;
-    if write {
-        apply_locked(&pin_path, task_root, &plan)?;
-    }
-    let verb = if write { "restored" } else { "would restore" };
-    let mut lines = vec![format!(
-        "landing reconciliation: {verb} {} of {} task bodies",
-        plan.restores.len(),
-        skeleton.tasks.len()
-    )];
+    let summary = if write {
+        format!(
+            "queued {} of {} task bodies for the live settle before judging",
+            plan.restores.len(),
+            skeleton.tasks.len()
+        )
+    } else {
+        format!(
+            "would settle {} of {} task bodies",
+            plan.restores.len(),
+            skeleton.tasks.len()
+        )
+    };
+    let mut lines = vec![format!("landing reconciliation: {summary}")];
     lines.extend(plan.lines.into_iter().map(|line| format!("  {line}")));
     Ok(lines)
 }
@@ -355,67 +383,7 @@ pub(crate) async fn resume(
     Ok(())
 }
 
-/// What a resume does with every recorded landing request: per targeted
-/// subject, each answer in start order, whether it is a rerun (neither
-/// history nor authority), the current body (the one request a resume may
-/// judge again) or a superseded round (replayed from its record, nothing
-/// published).
-pub(crate) fn landing_report(run_dir: &Path) -> Result<Vec<String>> {
-    let records =
-        archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2")).load_call_records()?;
-    let subjects: BTreeSet<(String, String)> = records
-        .iter()
-        .filter_map(|record| record.call.options.host_command.as_ref())
-        .filter_map(|request| {
-            request
-                .target
-                .as_ref()
-                .map(|target| (request.command_id.clone(), target.task_id.clone()))
-        })
-        .collect();
-    let mut lines = Vec::new();
-    for (command, subject) in &subjects {
-        let lineage = LandingLineage::of(&records, command, subject);
-        let current = lineage.current();
-        let current_occurrence =
-            current.map(archon_workflow::v2::script::landing_lineage::occurrence_of);
-        lines.push(format!(
-            "landing lineage {command} {subject}: current body {}",
-            current.map_or("none", |record| record.call.id.as_str())
-        ));
-        for record in lineage.answers() {
-            let Some(request) = record.call.options.host_command.as_ref() else {
-                continue;
-            };
-            let occurrence = archon_workflow::v2::script::landing_lineage::occurrence_of(record);
-            let replayed = lineage.superseded_answer(request, occurrence, |_| false);
-            let role = if lineage.is_rerun(record) {
-                "rerun: neither history nor authority".to_string()
-            } else if current.is_some_and(|current| {
-                current.call.options.host_command.as_ref() == Some(request)
-                    && current_occurrence == Some(occurrence)
-            }) {
-                "current body's request: the one request a resume may judge again".to_string()
-            } else {
-                format!(
-                    "superseded round: asked again it replays {} and publishes nothing",
-                    replayed.map_or("none", |answer| answer.call.id.as_str())
-                )
-            };
-            lines.push(format!(
-                "  {} {} status={} published={} stdin_blake3={}: {role}",
-                record.started_at,
-                record.call.id,
-                serde_json::to_value(record.status)?
-                    .as_str()
-                    .unwrap_or_default(),
-                !record.result.data["publicationReceipt"].is_null(),
-                content_digest(request.stdin.as_deref().unwrap_or_default().as_bytes()),
-            ));
-        }
-    }
-    Ok(lines)
-}
+pub(crate) use report::landing_report;
 
 /// Write every restore back in one publication under the set's chain lock.
 /// Test-only: it locks after the plan was read, so production goes through
@@ -432,6 +400,7 @@ pub(crate) fn apply(pin_path: &Path, task_root: &Path, plan: &ReconcilePlan) -> 
 
 /// Apply while the caller holds the chain lock from before it read records
 /// and task files.
+#[cfg(test)]
 fn apply_locked(pin_path: &Path, task_root: &Path, plan: &ReconcilePlan) -> Result<()> {
     if plan.restores.is_empty() {
         return Ok(());
@@ -450,12 +419,14 @@ fn apply_locked(pin_path: &Path, task_root: &Path, plan: &ReconcilePlan) -> Resu
     for restore in &plan.restores {
         let live = content_digest(&std::fs::read(&restore.path)?);
         if live != restore.receipt_blake3 {
-            return Err(anyhow!(
-                "restored task body {} hashes to {live}, not to the receipt of call {} ({})",
-                restore.path.display(),
-                restore.call_id,
-                restore.receipt_blake3
-            ));
+            tracing::warn!(
+                task_id = %restore.task_id,
+                path = %restore.path.display(),
+                call_id = %restore.call_id,
+                digest = %live,
+                "task body changed after restore; leave newest bytes for the live settle and judge path"
+            );
+            continue;
         }
         tracing::warn!(
             task_id = %restore.task_id,
@@ -468,6 +439,11 @@ fn apply_locked(pin_path: &Path, task_root: &Path, plan: &ReconcilePlan) -> Resu
     }
     Ok(())
 }
+
+#[path = "workflow_decompose_landing_report.rs"]
+mod report;
+#[path = "workflow_decompose_landing_settle.rs"]
+pub(crate) mod settle;
 
 #[cfg(test)]
 #[path = "workflow_decompose_landing_reconcile_tests.rs"]

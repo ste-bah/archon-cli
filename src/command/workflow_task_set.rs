@@ -27,7 +27,7 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 pub(crate) mod acceptance_reply_blocks;
 
 #[path = "workflow_acceptance_coverage_gate.rs"]
-mod coverage_gate;
+pub(crate) mod coverage_gate;
 #[path = "workflow_task_set_findings.rs"]
 mod findings;
 #[path = "workflow_judge_incremental.rs"]

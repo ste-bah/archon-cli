@@ -218,6 +218,22 @@ fn git_dash_c_names_a_setup_path_and_tar_dash_c_does_not() {
 
 #[cfg(unix)]
 #[test]
+fn a_missing_path_inside_a_copied_sibling_is_a_behavioural_result() {
+    let (_parent, cwd) = tree();
+    let command =
+        "cargo metadata --no-deps --format-version 1 --manifest-path ../code-repo/Cargo.toml";
+    let result = real(command, &cwd);
+    let output = String::from_utf8_lossy(&result.stderr);
+    assert!(output.contains("../code-repo/Cargo.toml"), "{output}");
+    let verdict = no_verdict(command, &result, &live().within(1, &["tree", "code-repo"]));
+    println!(
+        "EVIDENCE #420 copied-sibling setup BEFORE: setup-path rule would mark absence unproven; AFTER: verdict={verdict:?}"
+    );
+    assert_eq!(verdict, None);
+}
+
+#[cfg(unix)]
+#[test]
 fn a_quoted_setup_path_is_read_as_one_word() {
     let (_parent, tree) = tree();
     let command = "cd '../archon 420 absent root' && test -f feature.txt";

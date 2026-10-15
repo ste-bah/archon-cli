@@ -56,6 +56,7 @@ fn outcome(
             satisfied: true,
             summary: "fixture postcondition".into(),
         }),
+        observed_only: false,
     }
 }
 

@@ -32,6 +32,7 @@ mod coverage;
 mod declarations;
 mod fences;
 mod fidelity;
+mod fidelity_candidate_fallback;
 mod fidelity_critic;
 mod fidelity_resume;
 mod fidelity_store;

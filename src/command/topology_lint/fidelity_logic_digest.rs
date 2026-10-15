@@ -35,7 +35,10 @@
 /// `fidelity_store_legacy.rs`).
 ///
 /// 1: the logic of schema 4 and schema 5 (#434, #434c).
-pub const CRITIC_LOGIC_VERSION: u32 = 1;
+/// 2: PRD acceptance/gap context, whole-set attribution and weakening evidence change the question.
+/// #434d, same unreleased version 2: bounded quote normalization and ordered elision matching keep provenance checks literal.
+/// #441, same unreleased version 2: elided support is expanded from one unique paragraph span and requires critic confirmation; all other evidence is exact or whole-quote normalized.
+pub const CRITIC_LOGIC_VERSION: u32 = 2;
 
 /// The digest of [`FILES`] as reviewed against [`CRITIC_LOGIC_VERSION`].
 ///
@@ -50,16 +53,45 @@ pub const CRITIC_LOGIC_VERSION: u32 = 1;
 ///   answered again in the same conversation with the other meaning is
 ///   logged, naming both meanings, and nothing is recorded; the kept
 ///   verdict stays final. No acceptance rule changed.
-pub const SOURCES_DIGEST: &str = "8558044b0a09b9665085f65be84237450894456539afbc40b6ef34ad23d6bee4";
+/// - Re-pinned for #441 review, version 2: PRD source and policy context,
+///   whole-set attribution, and weakening-evidence quotes change what a
+///   verdict answers and when it blocks a body.
+/// - #441 review, same unreleased version: the extracted whole-task-set
+///   ownership lookup is included in the pinned logic files.
+/// - #441 review 2, same unreleased version: Acceptance policy headings now
+///   reach the critic question; vendor-contract acceptance headings remain excluded.
+/// - #441 review 3, same unreleased version: the critic receives the complete PRD,
+///   applies any policy anywhere in it, and sees each obligation's source heading.
+/// - #434d, same unreleased version 2: quote provenance uses bounded text
+///   normalization, elision expansion with critic confirmation, and rejection
+///   of elided evidence in all other quote fields.
+/// - #441 regression fix, version unchanged: exact supporting excerpts retain
+///   their original quote for provenance matching, so a quote cut inside an
+///   inline-code span is not rejected by re-normalizing unmatched Markdown.
+/// - #441 regression fix, version unchanged: exact and whole-quote normalized
+///   matches are checked before treating a task's literal ellipsis as elision.
+/// - #441 follow-up, version unchanged: literal matches do not create elision
+///   confirmation candidates before exact and normalized matching fails.
+/// - #441 review, version 2 unchanged: quote normalization changes prose only;
+///   Markdown code contents retain their bytes and cannot pass after alteration.
+pub const SOURCES_DIGEST: &str = "7ba773e2950be80f0f0dabdd3d5e9a30b01e2b93e9c6154957649050761d2f84";
 
-/// Hashed, sorted: the critic call, its prompt rendering, its reply reader
-/// and checks (the `#[path]` modules of `fidelity_audit.rs`).
+/// Hashed, sorted: the prompt, PRD source sections, reply checks, whole-set
+/// fallback, and task-text-specific verdict reuse rules.
 #[cfg_attr(not(test), allow(dead_code, reason = "read by the guard test"))]
 pub const FILES: &[&str] = &[
     "crates/archon-workflow/src/fidelity_audit.rs",
     "crates/archon-workflow/src/fidelity_audit_check.rs",
+    "crates/archon-workflow/src/fidelity_audit_context.rs",
+    "crates/archon-workflow/src/fidelity_audit_normalize.rs",
     "crates/archon-workflow/src/fidelity_audit_reply.rs",
+    "crates/archon-workflow/src/obligation_continuations.rs",
+    "crates/archon-workflow/src/obligation_ids.rs",
+    "crates/archon-workflow/src/obligation_source_sections.rs",
+    "src/command/topology_lint/fidelity_candidate_fallback.rs",
     "src/command/topology_lint/fidelity_critic.rs",
+    "src/command/topology_lint/fidelity_set_helpers.rs",
+    "src/command/topology_lint/fidelity_store.rs",
 ];
 
 /// Fidelity files beside [`FILES`] that are not hashed, each with the reason.
@@ -78,10 +110,6 @@ pub const EXCLUDED: &[(&str, &str)] = &[
         "src/command/topology_lint/fidelity_resume.rs",
         "chooses which obligations are asked and how they are batched; a record is per \
          obligation and deliberately does not name its batch partners",
-    ),
-    (
-        "src/command/topology_lint/fidelity_store.rs",
-        "the reuse rules themselves; a change to the record layout bumps STORE_SCHEMA",
     ),
     (
         "src/command/topology_lint/fidelity_store_legacy.rs",

@@ -301,13 +301,14 @@ pub(crate) fn snapshot_locked(
 /// Verify one frozen stage the way the launcher did, for the
 /// `verify-frozen-chain` host command. A stage that is not frozen is an
 /// error: the script only asks about a stage the launcher reported frozen.
-pub(crate) fn verify_frozen_stage(
+fn verify_frozen_stage_with_recovery(
     project_root: &Path,
     prd_path: &Path,
     task_root: &Path,
     stage: FrozenStage,
+    recover: bool,
 ) -> Result<FrozenChainSnapshot> {
-    let snapshot = frozen_chain_snapshot(project_root, prd_path, task_root)?;
+    let snapshot = frozen_chain_snapshot_with_recovery(project_root, prd_path, task_root, recover)?;
     let frozen = match stage {
         FrozenStage::Acceptance => snapshot.acceptance,
         FrozenStage::Skeleton => snapshot.skeleton,
@@ -404,6 +405,7 @@ pub(crate) fn handle_staged_verify(
     prd: &Path,
     gate_envelope: Option<&Path>,
     call_id: Option<&str>,
+    read_only: bool,
     config: &archon_core::config::ArchonConfig,
 ) -> Result<()> {
     if config.workflow.gate_mode == archon_core::config::GateMode::Off {
@@ -411,7 +413,7 @@ pub(crate) fn handle_staged_verify(
             "gate_mode=off must return before staged frozen-chain verification"
         ));
     }
-    let manifest = stage_verify(cwd, stage, tasks, prd, gate_envelope, call_id)?;
+    let manifest = stage_verify(cwd, stage, tasks, prd, gate_envelope, call_id, read_only)?;
     println!("{}", serde_json::to_string(&manifest)?);
     Ok(())
 }
@@ -425,6 +427,7 @@ pub(crate) fn stage_verify(
     prd: &Path,
     gate_envelope: Option<&Path>,
     call_id: Option<&str>,
+    read_only: bool,
 ) -> Result<archon_workflow::PreparedPublicationV1> {
     let stage = FrozenStage::parse(stage)?;
     let gate_envelope = gate_envelope.ok_or_else(|| {
@@ -440,7 +443,13 @@ pub(crate) fn stage_verify(
             cwd.join(path)
         }
     };
-    let evaluation = match verify_frozen_stage(cwd, &absolute(prd), &absolute(tasks), stage) {
+    let evaluation = match verify_frozen_stage_with_recovery(
+        cwd,
+        &absolute(prd),
+        &absolute(tasks),
+        stage,
+        !read_only,
+    ) {
         Ok(snapshot) => super::workflow_gate::GateEvaluation::new(
             format!(
                 "{} verified: acceptance={}, skeleton={}, {} frozen subject(s), {} body file(s) present",

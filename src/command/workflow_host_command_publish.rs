@@ -50,7 +50,7 @@ impl LiveMutationSentinels {
         Ok(Self { values })
     }
 
-    fn verify(&self) -> Result<()> {
+    pub(crate) fn verify(&self) -> Result<()> {
         for expected in &self.values {
             let actual = path_digest(&expected.path)?;
             if actual != expected.digest {

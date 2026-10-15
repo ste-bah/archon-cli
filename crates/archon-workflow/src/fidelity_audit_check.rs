@@ -4,6 +4,10 @@
 //! size budget; a stored verdict passes exactly this check again before it
 //! is reused (#434).
 
+#[path = "fidelity_audit_normalize.rs"]
+mod normalize;
+use normalize::normalize_text;
+
 use super::{
     ClaimingTask, FidelityVerdict, MAX_QUOTE_CHARS, MAX_REASON_CHARS, MIN_SUPPORT_CHARS,
     MIN_SUPPORT_WORDS, RefusalKind,
@@ -77,7 +81,19 @@ pub(super) fn check_verdict(
         "quoted_task_text",
         &verdict.quoted_task_text,
         weakest,
-    )
+    )?;
+    // The critic judges whether these sentences weaken the obligation; the
+    // host only verifies that each sentence came verbatim from this task.
+    for quote in &mut verdict.weakening_quotes {
+        cut_quote(quote);
+        verbatim(
+            &format!("false verdict for {id}"),
+            "weakening_quotes",
+            quote,
+            weakest,
+        )?;
+    }
+    Ok(())
 }
 
 /// Does `verdict`, as stored, still pass the check a fresh reply passes
@@ -106,14 +122,13 @@ fn verbatim(
     quote: &str,
     task: &ClaimingTask,
 ) -> Result<(), (RefusalKind, String)> {
-    let quote = collapse_whitespace(quote);
-    if quote.is_empty() {
+    if quote.trim().is_empty() {
         return Err((
             RefusalKind::BlankRequired(key),
             format!("{what} quotes nothing from the task in `{key}`"),
         ));
     }
-    if !collapse_whitespace(&task.text).contains(&quote) {
+    if !quote_occurrences(&task.text, quote).is_some_and(|count| count > 0) {
         return Err((
             RefusalKind::NotVerbatim(key),
             format!(
@@ -132,16 +147,17 @@ fn verbatim(
 /// a heading line, where words can stand without obliging anything.
 fn anchored(what: &str, quote: &str, task: &ClaimingTask) -> Result<(), (RefusalKind, String)> {
     let weak = |message: String| Err((RefusalKind::WeakAnchor, message));
-    let quote = collapse_whitespace(quote);
-    let (words, chars) = (quote.split(' ').count(), quote.chars().count());
+    let normalized = normalized_quote_for_anchor(quote);
+    let (words, chars) = (normalized.split(' ').count(), normalized.chars().count());
     if words < MIN_SUPPORT_WORDS && chars < MIN_SUPPORT_CHARS {
         return weak(format!(
             "{what} quotes {words} words ({chars} characters) in `supporting_text`; it needs at least {MIN_SUPPORT_WORDS} words or {MIN_SUPPORT_CHARS} characters of the task's prose"
         ));
     }
-    let found = collapse_whitespace(&task.text)
-        .matches(quote.as_str())
-        .count();
+    // Keep the critic's original quote for provenance matching. Re-matching
+    // its normalized form can change an exact excerpt cut inside Markdown
+    // (for example, midway through an inline-code span) into unmatched syntax.
+    let found = quote_occurrences(&task.text, quote).unwrap_or(0);
     if found != 1 {
         return weak(format!(
             "{what} quotes text in `supporting_text` that appears {found} times in task '{}'; quote a passage that appears exactly once",
@@ -149,7 +165,7 @@ fn anchored(what: &str, quote: &str, task: &ClaimingTask) -> Result<(), (Refusal
         ));
     }
     for region in [Region::Fence, Region::Comment, Region::Heading] {
-        if !collapse_whitespace(&masked(&task.text, region)).contains(quote.as_str()) {
+        if !quote_occurrences(&masked(&task.text, region), quote).is_some_and(|count| count > 0) {
             return weak(format!(
                 "{what} quotes text in `supporting_text` that lies in or across {} of task '{}'; quote the task's prose",
                 region.name(),
@@ -158,6 +174,137 @@ fn anchored(what: &str, quote: &str, task: &ClaimingTask) -> Result<(), (Refusal
         }
     }
     Ok(())
+}
+
+/// Count exact matches before whole-quote normalized matches. Only when
+/// neither matches can the critic confirmation path expand an ellipsis.
+fn quote_occurrences(task: &str, quote: &str) -> Option<usize> {
+    if task.contains(quote) {
+        return Some(task.matches(quote).count());
+    }
+    let task = normalize_text(task, false);
+    let quote = normalize_text(quote, true);
+    if quote.is_empty() {
+        return Some(0);
+    }
+    Some(task.matches(&quote).count())
+}
+
+/// Expand an elided supporting quote to its one contiguous task passage.
+/// Matches must be unique, word bounded and contained in one paragraph.
+pub fn expand_supporting_quote(task: &str, quote: &str) -> Option<String> {
+    let quote = quote.replace("...", "…");
+    let pieces = quote
+        .split('…')
+        .map(|piece| normalize_text(piece, true))
+        .filter(|piece| !piece.is_empty())
+        .collect::<Vec<_>>();
+    if pieces.len() < 2 {
+        return None;
+    }
+    let mut chains = Vec::new();
+    for paragraph in paragraphs(task) {
+        let normalized = normalize_text(paragraph, false);
+        for (start, first) in word_bounded_matches(&normalized, &pieces[0]) {
+            let ends = chain_ends(&normalized, &pieces[1..], start + first.len());
+            for end in ends {
+                chains.push((paragraph, start, end));
+                if chains.len() > 1 {
+                    return None;
+                }
+            }
+        }
+    }
+    if chains.len() != 1 {
+        return None;
+    }
+    let (paragraph, start, end) = chains.pop()?;
+    let raw_start = raw_offset_for_normalized(paragraph, start)?;
+    let raw_end = raw_offset_for_normalized(paragraph, end)?;
+    Some(paragraph.get(raw_start..raw_end)?.trim_end().to_string())
+}
+
+fn paragraphs(text: &str) -> Vec<&str> {
+    let mut paragraphs = Vec::new();
+    let mut paragraph_start = 0;
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        if line.trim().is_empty() {
+            if paragraph_start < offset {
+                paragraphs.push(&text[paragraph_start..offset]);
+            }
+            paragraph_start = offset + line.len();
+        }
+        offset += line.len();
+    }
+    if paragraph_start < text.len() {
+        paragraphs.push(&text[paragraph_start..]);
+    }
+    paragraphs
+}
+
+fn chain_ends(text: &str, pieces: &[String], cursor: usize) -> Vec<usize> {
+    if pieces.is_empty() {
+        return vec![cursor];
+    }
+    let mut ends = Vec::new();
+    for (offset, matched) in word_bounded_matches(&text[cursor..], &pieces[0]) {
+        ends.extend(chain_ends(
+            text,
+            &pieces[1..],
+            cursor + offset + matched.len(),
+        ));
+        if ends.len() > 1 {
+            ends.truncate(2);
+            break;
+        }
+    }
+    ends
+}
+
+/// Compare two complete quote strings under the provenance normalization.
+pub fn same_normalized_quote(left: &str, right: &str) -> bool {
+    normalize_text(left, true) == normalize_text(right, true)
+}
+
+/// Whether a quote already matches the task exactly or under whole-quote
+/// provenance normalization.
+pub fn task_contains_quote(task: &str, quote: &str) -> bool {
+    !quote.trim().is_empty() && quote_occurrences(task, quote).is_some_and(|count| count > 0)
+}
+
+fn word_bounded_matches<'a>(text: &'a str, piece: &str) -> Vec<(usize, &'a str)> {
+    text.match_indices(piece)
+        .filter(|(start, matched)| {
+            let before = text[..*start].chars().next_back();
+            let after = text[*start + matched.len()..].chars().next();
+            !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+        })
+        .collect()
+}
+
+fn raw_offset_for_normalized(text: &str, target: usize) -> Option<usize> {
+    let mut previous = 0;
+    for (offset, _) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), '\0')))
+    {
+        if normalize_text(&text[..offset], false).len() > target {
+            return Some(previous);
+        }
+        previous = offset;
+    }
+    Some(text.len())
+}
+
+fn normalized_quote_for_anchor(quote: &str) -> String {
+    quote
+        .replace("...", "…")
+        .split('…')
+        .map(|piece| normalize_text(piece, true))
+        .filter(|piece| !piece.is_empty())
+        .collect::<Vec<_>>()
+        .join(" … ")
 }
 
 /// A part of a task text where words are not prose a result rests on.
@@ -221,14 +368,6 @@ fn masked(text: &str, region: Region) -> String {
     }
 }
 
-/// Whitespace-insensitive comparison: a model that re-wraps a line has still
-/// quoted it, while one that paraphrases has not. A literal two-character
-/// `\n` counts as whitespace too — asked to escape newlines, a critic that
-/// escapes them twice has still copied the line, and the decoded backslash-n
-/// is packaging, not a change to the words.
-fn collapse_whitespace(text: &str) -> String {
-    text.replace("\\n", " ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+#[cfg(test)]
+#[path = "fidelity_audit_check_tests.rs"]
+mod tests;

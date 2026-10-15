@@ -60,8 +60,10 @@ use archon_knowledge::traceability::tasks::KNOWN_RUNNERS;
 /// Derived from the task's own `## Focused Tests` bullets and the shared runner
 /// list, so it needs no knowledge of the project's toolchain and holds for any
 /// PRD in any language.
-pub(super) fn task_has_runnable_test(raw: &str) -> bool {
-    focused_test_commands(raw).iter().any(|command| {
+pub(super) fn task_has_runnable_test(
+    task: &archon_workflow::task_universe::WorkflowV2TaskUniverseTask,
+) -> bool {
+    task.declared_focused_test_commands().iter().any(|command| {
         // `! grep -q marker file` asserts absence; the negation is shell
         // syntax, not the program being run.
         command
@@ -99,7 +101,7 @@ pub(super) fn tasks_without_a_runnable_test(tasks_root: Option<&Path>) -> Vec<St
         let Ok(task) = parse_task_file(path, &raw) else {
             continue; // unparseable files are blocked by the contracts gate
         };
-        if !task_has_runnable_test(&raw) {
+        if !task_has_runnable_test(&task) {
             out.push(task.canonical_task_id.clone());
         }
     }
@@ -162,14 +164,14 @@ fn checked_files(files: &[(&Path, Option<String>)]) -> String {
         checked += 1;
         let name = task.canonical_task_id.clone();
 
-        let commands = focused_test_commands(raw);
+        let commands = task.declared_focused_test_commands();
         // A task with no runnable verifier is the worse defect and used to be
         // invisible here: with nothing parsed there is no undeclared runner to
         // report, so the summary called the corpus clean. Observed live — six
         // of fifteen specs moved their commands into fenced ```bash blocks
         // while a repair drove a "prose entries" count to zero, and every
         // requirement those tasks claim became unprovable in the same stroke.
-        if !task_has_runnable_test(raw) {
+        if !task_has_runnable_test(&task) {
             no_commands.push(name.clone());
         }
         for command in commands {
@@ -252,86 +254,6 @@ fn checked_files(files: &[(&Path, Option<String>)]) -> String {
          command is wrong, and only the task's author knows which.\n",
     );
     out
-}
-
-/// Backticked spans under `## Focused Tests`.
-///
-/// Heading matched with the same tolerance the traceability reader uses —
-/// either heading may be a whole-word prefix of the other — because authors
-/// write `## Focused Tests and Evidence` and a stricter match would silently
-/// find no commands and report a clean task.
-fn focused_test_commands(raw: &str) -> Vec<String> {
-    let mut commands = Vec::new();
-    let mut inside = false;
-    let mut section_depth = 0;
-    // Commands inside a fenced block count too — the traceability reader
-    // reads them, and a lint that disagreed would report "no runnable
-    // tests" for a spec the engine parses fine. Fence lines are recognised
-    // by the shared rule; the toggle stays gated on the section, as the
-    // engine's own reader gates it, so a fence elsewhere in the body (an
-    // author's outer wrapper, a block in another section) cannot switch
-    // this reader on or off.
-    let mut in_fence = false;
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if super::fences::is_fence_line(trimmed) {
-            if inside {
-                in_fence = !in_fence;
-            }
-            continue;
-        }
-        if in_fence {
-            if inside && !trimmed.is_empty() {
-                commands.push(trimmed.to_string());
-            }
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix('#') {
-            let level = trimmed.chars().take_while(|c| *c == '#').count();
-            if !inside || level <= section_depth {
-                inside = heading_matches(rest.trim_start_matches('#').trim(), "focused tests");
-                section_depth = level;
-            }
-            continue;
-        }
-        if !inside {
-            continue;
-        }
-        let mut chars = trimmed.char_indices().peekable();
-        while let Some((start, ch)) = chars.next() {
-            if ch != '`' {
-                continue;
-            }
-            if let Some(end) = trimmed[start + 1..].find('`') {
-                let span = trimmed[start + 1..start + 1 + end].trim();
-                if !span.is_empty() {
-                    commands.push(span.to_string());
-                }
-                while let Some(&(index, _)) = chars.peek() {
-                    if index > start + end + 1 {
-                        break;
-                    }
-                    chars.next();
-                }
-            }
-        }
-    }
-    commands
-}
-
-fn heading_matches(found: &str, requested: &str) -> bool {
-    let found = found.to_ascii_lowercase();
-    if found == requested {
-        return true;
-    }
-    let (shorter, longer) = if found.len() < requested.len() {
-        (found.as_str(), requested)
-    } else {
-        (requested, found.as_str())
-    };
-    !shorter.is_empty()
-        && longer.starts_with(shorter)
-        && longer.as_bytes().get(shorter.len()) == Some(&b' ')
 }
 
 /// `$NAME` and `${NAME}` occurrences in a command.

@@ -47,6 +47,7 @@ fn outcome(stdout: &str, published: bool) -> HostCommandResult {
         }),
         subjects: Vec::new(),
         postcondition: None,
+        observed_only: false,
     }
 }
 

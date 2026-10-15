@@ -292,7 +292,7 @@ fn candidates(
 /// The probe's findings, and one more for each accepted check of `contract`
 /// that failed on the baseline in a way it cannot pass as written; each
 /// such check is refuted in `contract` (see the module docs).
-pub(super) async fn judge_baseline_failures(
+pub(crate) async fn judge_baseline_failures(
     project_root: &Path,
     tasks_root: &Path,
     prd_text: &str,

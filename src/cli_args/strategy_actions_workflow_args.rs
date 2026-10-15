@@ -197,6 +197,9 @@ pub struct WorkflowLintArgs {
     /// Exactly one decomposed-PRD TASK-*.md file to lint
     #[arg(long = "task-file", value_name = "PATH")]
     pub task_file: Option<std::path::PathBuf>,
+    /// Canonical subject path used for findings while the staged task file is private
+    #[arg(long = "task-context-file", value_name = "PATH", hide = true)]
+    pub task_context_file: Option<std::path::PathBuf>,
     /// Directory of decomposed-PRD TASK-*.md files to lint
     #[arg(long, value_name = "DIR")]
     pub tasks: Option<std::path::PathBuf>,
@@ -281,6 +284,9 @@ pub struct WorkflowVerifyFrozenChainArgs {
     /// Parent-owned canonical host-call identity
     #[arg(long, value_name = "ID")]
     pub call_id: Option<String>,
+    /// Hidden CLI flag; caller-settable but refuses to proceed while publish recovery is pending.
+    #[arg(long, hide = true)]
+    pub read_only: bool,
 }
 
 #[derive(Args, Debug)]

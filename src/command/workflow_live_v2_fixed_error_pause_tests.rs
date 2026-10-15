@@ -169,6 +169,7 @@ impl WorkflowHostCommandExecutor for RefuseThenFault {
             publication_receipt: None,
             subjects: Vec::new(),
             postcondition: None,
+            observed_only: false,
         })
     }
 }
@@ -285,6 +286,7 @@ impl WorkflowHostCommandExecutor for FaultOnce {
             publication_receipt: None,
             subjects: Vec::new(),
             postcondition: None,
+            observed_only: false,
         })
     }
 }

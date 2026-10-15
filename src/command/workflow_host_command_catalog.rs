@@ -150,6 +150,8 @@ pub(crate) fn fixed_decomposition_catalog(
                 "lint",
                 "--task-file",
                 "{FROZEN_TASK_FILE}",
+                "--task-context-file",
+                "{FROZEN_TASK_FILE}",
                 "--candidate-stdin",
                 "--call-id",
                 "{CALL_ID}",

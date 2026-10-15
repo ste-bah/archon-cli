@@ -72,6 +72,7 @@ impl WorkflowHostCommandExecutor for RefusingGate {
             publication_receipt: None,
             subjects: Vec::new(),
             postcondition: None,
+            observed_only: false,
         })
     }
 }
