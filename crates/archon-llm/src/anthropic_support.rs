@@ -52,6 +52,9 @@ pub enum ApiError {
     #[error("authentication error: {0}")]
     AuthError(String),
 
+    #[error("request rejected ({error_type}): {message}")]
+    Rejected { error_type: String, message: String },
+
     /// `from_provider`: see [`crate::provider::LlmError::RateLimited`].
     #[error("rate limited: retry after {retry_after_secs}s")]
     RateLimited {
@@ -354,12 +357,12 @@ pub(crate) fn classify_error(
     retry_after_header: Option<&str>,
 ) -> ApiError {
     match status {
-        401 => ApiError::AuthError(format!("authentication failed: {body}")),
-        403 => ApiError::AuthError(format!(
-            "authentication/identity rejected (403). If using spoof mode, check \
-             identity.spoof_version matches the current Claude Code version, or \
-             run /refresh-identity to rediscover beta headers. Body: {body}"
-        )),
+        401 | 403 => rejected_error(body).unwrap_or_else(|| ApiError::Rejected {
+            error_type: "authentication_error".into(),
+            message: archon_observability::redaction::redact_text(&format!(
+                "HTTP {status}: {body}"
+            )),
+        }),
         429 => {
             let named = retry_after_header
                 .and_then(|value| retry_after_from_header(value, chrono::Utc::now()))
@@ -374,8 +377,30 @@ pub(crate) fn classify_error(
             status,
             message: body.to_string(),
         },
-        _ => ApiError::HttpError(format!("HTTP {status}: {body}")),
+        _ => rejected_error(body)
+            .unwrap_or_else(|| ApiError::HttpError(format!("HTTP {status}: {body}"))),
     }
+}
+
+fn rejected_error(body: &str) -> Option<ApiError> {
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let error = value.get("error")?;
+    let error_type = error.get("type")?.as_str()?;
+    matches!(
+        error_type,
+        "authentication_error"
+            | "invalid_api_key"
+            | "invalid_request_error"
+            | "permission_error"
+            | "not_found_error"
+            | "request_too_large"
+            | "billing_error"
+            | "insufficient_quota"
+    )
+    .then(|| ApiError::Rejected {
+        error_type: error_type.to_string(),
+        message: archon_observability::redaction::redact_text(body),
+    })
 }
 
 /// The wait used when a 429 names none.
@@ -450,3 +475,7 @@ mod retry_after_tests {
         assert_eq!(rate_limited(None, "not json"), (30, false));
     }
 }
+
+#[cfg(test)]
+#[path = "anthropic_support_rejection_tests.rs"]
+mod rejection_tests;

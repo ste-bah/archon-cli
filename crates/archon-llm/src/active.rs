@@ -204,6 +204,10 @@ impl LlmProvider for ActiveProvider {
         self.current().models()
     }
 
+    fn request_identity(&self, request: &LlmRequest) -> Option<String> {
+        self.current().request_identity(request)
+    }
+
     fn supports_temperature(&self) -> bool {
         self.current().supports_temperature()
     }
@@ -218,6 +222,18 @@ impl LlmProvider for ActiveProvider {
 
     fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
         self.current().compaction_provider_family()
+    }
+
+    fn compaction_policy(&self) -> crate::compaction_policy::CompactionPolicy {
+        self.current().compaction_policy()
+    }
+
+    fn resolve_alias(&self, alias: &str) -> Option<String> {
+        self.current().resolve_alias(alias)
+    }
+
+    fn resolve_request_model(&self, request: &mut LlmRequest) {
+        self.current().resolve_request_model(request)
     }
 
     fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {

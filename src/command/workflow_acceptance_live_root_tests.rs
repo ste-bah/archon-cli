@@ -30,7 +30,6 @@ fn a_root_a_path_under_it_or_a_root_before_shell_syntax_is_named() {
         "cd '/work/repo' && true",
         "ls /work/repo/*.json",
         "ls /work/repo$SUFFIX",
-        "x=/work/repo;y",
     ] {
         assert_eq!(
             named_root(text, &forms),
@@ -92,7 +91,7 @@ fn every_form_the_old_substring_rule_refused_is_still_named_but_a_true_sibling()
         // printf and concatenation forms that build the root's path.
         "ls \"$(printf /work/repo%s /src)\"",
         "ls \"/work/repo\"/src",
-        "ROOT=/work/repo; ls \"$ROOT\"/src",
+        "ROOT=/work/repo ls \"$ROOT\"/src",
         "ls /work/repo@x /work/repo~ /work/repo+x",
         // A sibling's path that leads back under the root.
         "cd /work/repo-x/../repo/src",
@@ -107,6 +106,147 @@ fn every_form_the_old_substring_rule_refused_is_still_named_but_a_true_sibling()
             "{text}"
         );
     }
+}
+
+#[test]
+#[cfg(unix)]
+fn adjacent_shell_quotes_and_literal_assignments_are_checked_as_joined_words() {
+    let forms = forms();
+    for (case, text) in [
+        ("double-quote", "cat \"/work\"\"/repo\"/src"),
+        ("single-quote", "cat '/work''/repo'/src"),
+        (
+            "mixed-and-assigned",
+            "ROOT='/work'\"/repo\" cat \"$ROOT\"/src",
+        ),
+    ] {
+        let before = legacy_tokenized_root(text, &forms);
+        let after = named_root(text, &forms);
+        println!("EVIDENCE #366 {case} BEFORE: {before:?} AFTER: {after:?}");
+        assert!(
+            before.is_none(),
+            "legacy detector should expose the split-word gap: {text}"
+        );
+        assert!(after.is_some(), "{text}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn joined_prose_is_not_a_path_word_and_unused_assignment_is_ignored() {
+    let forms = forms();
+    let prose = r#"printf '%s' "example: /work""/repo is unavailable""#;
+    let before = named_root(prose, &forms);
+    println!("EVIDENCE #366 joined-prose BEFORE: {before:?} AFTER: prose must not refuse");
+    assert_eq!(before, None, "joined prose is not a path word");
+    assert!(named_root("cat \"/work\"\"/repo\"", &forms).is_some());
+
+    let unused = "ROOT=/work/repo; printf '%s' ready";
+    let before = named_root(unused, &forms);
+    println!("EVIDENCE #366 unused-assignment BEFORE: {before:?} AFTER: None");
+    assert_eq!(
+        before, None,
+        "unused assignment must not refuse the command"
+    );
+    assert!(named_root("ROOT=/work/repo cat \"$ROOT\"", &forms).is_some());
+}
+
+#[cfg(unix)]
+#[test]
+fn only_shell_assignment_words_expand_live_root_variables() {
+    let forms = forms();
+    for (case, text, expected) in [
+        (
+            "assignment-looking printf argument",
+            r#"printf '%s' "DOC=/work/repo" "$DOC""#,
+            false,
+        ),
+        (
+            "assignment followed by use",
+            "R=/work/repo; cat \"$R/x\"",
+            true,
+        ),
+        ("command-prefix assignment", "R=/work/repo cmd \"$R\"", true),
+        ("export assignment", "export R=/work/repo; ls $R", true),
+        ("readonly assignment", "readonly R=/work/repo; ls $R", true),
+        ("local assignment", "local R=/work/repo; ls $R", true),
+        ("unused assignment", "R=/work/repo", false),
+    ] {
+        let actual = named_root(text, &forms);
+        println!(
+            "EVIDENCE #366 assignment-scope {case} EXPECTED: {expected} ACTUAL: {}",
+            actual.is_some()
+        );
+        assert_eq!(actual.is_some(), expected, "{case}: {text}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn assignment_only_segments_carry_only_across_parent_shell_connectors() {
+    let forms = forms();
+    for (case, text, expected) in [
+        (
+            "pipeline",
+            "ROOT=/work/repo | printf \"%s\" \"$ROOT\"",
+            false,
+        ),
+        (
+            "background",
+            "ROOT=/work/repo & printf \"%s\" \"$ROOT\"",
+            false,
+        ),
+        (
+            "pipeline before assignment-only segment",
+            "true | ROOT=/work/repo; cat \"$ROOT\"",
+            false,
+        ),
+        (
+            "background before assignment-only segment",
+            "sleep 1 & ROOT=/work/repo; cat \"$ROOT\"",
+            true,
+        ),
+        (
+            "background after assignment-only segment",
+            "ROOT=/work/repo & cat \"$ROOT\"",
+            false,
+        ),
+        ("semicolon", "ROOT=/work/repo; cat \"$ROOT\"", true),
+        ("and", "ROOT=/work/repo && cat \"$ROOT\"", true),
+        // The right side of `||` may run, so this conservative scan carries
+        // the assignment through the following list separator.
+        (
+            "conditional",
+            "true || ROOT=/work/repo; cat \"$ROOT\"",
+            true,
+        ),
+        ("newline", "ROOT=/work/repo\ncat \"$ROOT\"", true),
+    ] {
+        let actual = named_root(text, &forms).is_some();
+        println!("EVIDENCE #366 assignment connector {case} EXPECTED: {expected} ACTUAL: {actual}");
+        assert_eq!(actual, expected, "{case}: {text}");
+    }
+}
+
+#[cfg(unix)]
+fn legacy_tokenized_root<'a>(text: &str, forms: &'a [PathBuf]) -> Option<&'a PathBuf> {
+    let text = Spelling::HOST.fold(text);
+    let ends = |c: char| Spelling::HOST.ends_token(c);
+    let paths: Vec<PathBuf> = text.split(ends).filter_map(lexical).collect();
+    forms.iter().find(|form| {
+        let root = Spelling::HOST.fold(&form.to_string_lossy());
+        let form = Path::new(&root);
+        let named_at = |at: usize| match text[at + root.len()..].chars().next() {
+            Some(next) if continues_name(next) => {
+                let token = text[at..].split(ends).next().unwrap_or_default();
+                lexical(token).is_some_and(|path| path.starts_with(form))
+            }
+            _ => true,
+        };
+        !root.is_empty()
+            && (text.match_indices(&root).any(|(at, _)| named_at(at))
+                || paths.iter().any(|path| path.starts_with(form)))
+    })
 }
 
 #[test]
@@ -249,7 +389,8 @@ fn the_windows_spelling_matches_without_case_and_either_separator() {
         (r"test -f C:\Users\Runner\Repo\out.json", &forms[1]),
         ("test -f c:/users/RUNNER/repo/out.json", &forms[1]),
         (r#"cat "C:\Users\Runner\Repo"/x"#, &forms[1]),
-        (r"x=C:\Users\Runner\Repo;y", &forms[1]),
+        (r#"cat "C:\Users\Runner""\Repo"/x"#, &forms[1]),
+        (r#"x=C:\Users\Runner\Repo cat "$x""#, &forms[1]),
     ] {
         assert_eq!(windows(text), Some(form), "{text}");
     }

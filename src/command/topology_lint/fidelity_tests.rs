@@ -122,6 +122,93 @@ fn record_files(cwd: &Path) -> Vec<PathBuf> {
     paths
 }
 
+#[test]
+fn offline_fixture_fidelity_claimants_include_named_set_tasks() {
+    let prd = include_str!("../../../tests/fixtures/offline_decomposition/prd.md");
+    let golden: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/offline_decomposition_golden.json"
+    ))
+    .expect("offline golden fixture JSON");
+    let task_bodies = golden["task_bodies"]
+        .as_array()
+        .expect("golden task bodies");
+    let mut task_texts = BTreeMap::new();
+    let mut claiming: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let obligations = obligation_texts(prd);
+    for entry in task_bodies {
+        let filename = entry[0].as_str().expect("task filename");
+        let text = entry[1].as_str().expect("task body");
+        let parsed = parse_task_file(Path::new(filename), text).expect("generated task parses");
+        let task_id = parsed.canonical_task_id;
+        task_texts.insert(task_id.clone(), (text.to_string(), PathBuf::from(filename)));
+        for id in parsed.implements {
+            if obligations.contains_key(&id) {
+                claiming.entry(id).or_default().insert(task_id.clone());
+            }
+        }
+    }
+
+    let grouped = |only_claimed_by: Option<&str>| {
+        let mut clusters: BTreeMap<Vec<String>, Vec<String>> = BTreeMap::new();
+        for (obligation, claimants) in &claiming {
+            if only_claimed_by.is_some_and(|only| !claimants.contains(only)) {
+                continue;
+            }
+            let mut tasks: Vec<String> = claimants.iter().cloned().collect();
+            for claimant in claimants {
+                tasks.extend(named_set_tasks(
+                    claimant,
+                    &task_texts[claimant].0,
+                    &task_texts,
+                ));
+            }
+            tasks.sort();
+            tasks.dedup();
+            clusters.entry(tasks).or_default().push(obligation.clone());
+        }
+        clusters
+            .into_iter()
+            .map(|(tasks, mut obligations)| {
+                obligations.sort();
+                (tasks.join("+"), obligations.join(","))
+            })
+            .collect::<Vec<_>>()
+    };
+    let actual = grouped(None);
+    assert_eq!(
+        actual,
+        vec![(
+            "TASK-X-010+TASK-X-020".into(),
+            "AC-X-001,REQ-X-001,REQ-X-002".into()
+        )]
+    );
+    assert_eq!(
+        grouped(Some("TASK-X-010")),
+        vec![("TASK-X-010+TASK-X-020".into(), "AC-X-001,REQ-X-001".into())]
+    );
+    let candidate_only =
+        BTreeMap::from([("TASK-X-010".to_string(), task_texts["TASK-X-010"].clone())]);
+    assert!(
+        named_set_tasks(
+            "TASK-X-010",
+            &candidate_only["TASK-X-010"].0,
+            &candidate_only,
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        format!(
+            "fidelity:AC-X-001,REQ-X-001:{}",
+            candidate_only.keys().cloned().collect::<Vec<_>>().join("+")
+        ),
+        "fidelity:AC-X-001,REQ-X-001:TASK-X-010"
+    );
+    assert_eq!(
+        named_set_tasks("TASK-X-020", &task_texts["TASK-X-020"].0, &task_texts,),
+        vec!["TASK-X-010".to_string()]
+    );
+}
+
 /// One PRD with two obligations, one task claiming both. Returns the cwd.
 fn corpus() -> tempfile::TempDir {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -364,7 +451,7 @@ async fn waivers_are_recorded_verbatim_in_the_pin_and_downgrade_the_finding() {
         audit.report
     );
     assert!(audit.report.contains("by operator: \"second thoughts\""));
-    let unwaived = audit_again(cwd, &tasks_root, critic.as_ref()).await;
+    let unwaived = cluster::audit_again(cwd, &tasks_root, critic.as_ref()).await;
     assert_eq!(
         unwaived.findings.len(),
         1,
@@ -372,94 +459,5 @@ async fn waivers_are_recorded_verbatim_in_the_pin_and_downgrade_the_finding() {
     );
 }
 
-async fn audit_again(
-    cwd: &Path,
-    tasks_root: &Path,
-    client: &dyn WorkflowLlmClient,
-) -> FidelityAudit {
-    audit(cwd, tasks_root, client, &[]).await.expect("audit")
-}
-
-/// One task claiming nine obligations is asked twice, eight and then one,
-/// each reply checked against exactly the ids its batch carried.
-#[tokio::test]
-async fn a_large_cluster_is_asked_in_bounded_batches() {
-    let temp = corpus();
-    let cwd = temp.path();
-    let extra: Vec<String> = (1..=7).map(|n| format!("REQ-WS-{n:03}")).collect();
-    let mut prd = std::fs::read_to_string(cwd.join("tasks/PRD-WS-001.md")).unwrap();
-    prd.push_str("\n## Requirements\n\n");
-    for id in &extra {
-        prd.push_str(&format!("- {id}: requirement {id}\n"));
-    }
-    std::fs::write(cwd.join("tasks/PRD-WS-001.md"), prd).unwrap();
-    let task = cwd.join("tasks/PRD-WS-001/TASK-WS-001.md");
-    let body = std::fs::read_to_string(&task).unwrap().replace(
-        "implements: [\"G-WS-001\", \"AC-WS-001\"]",
-        &format!(
-            "implements: [\"G-WS-001\", \"AC-WS-001\", {}]",
-            extra
-                .iter()
-                .map(|id| format!("\"{id}\""))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    );
-    std::fs::write(&task, body).unwrap();
-    let true_verdict = |id: &str| serde_json::json!({"obligation_id": id, "necessarily_true": true, "reason": "obliged", "supporting_task_id": "TASK-WS-001", "supporting_text": SUPPORT});
-    // Batches follow the sorted claim list: AC, G, REQ-001..006 then REQ-007.
-    let first: Vec<_> = ["AC-WS-001", "G-WS-001"]
-        .into_iter()
-        .chain(extra[..6].iter().map(String::as_str))
-        .map(true_verdict)
-        .collect();
-    let second = vec![true_verdict("REQ-WS-007")];
-    let critic = FakeCritic::new(vec![
-        Ok(serde_json::json!({ "verdicts": first }).to_string()),
-        Ok(serde_json::json!({ "verdicts": second }).to_string()),
-    ]);
-    let evaluation = evaluate(cwd, Ok(critic.clone())).await;
-    assert!(
-        evaluation.operational_error().is_none(),
-        "{:?}",
-        evaluation.operational_error()
-    );
-    assert_eq!(critic.calls(), 2);
-    assert!(
-        evaluation
-            .report
-            .contains("9 claimed obligation(s) in 1 cluster(s), 2 call batch(es)"),
-        "{}",
-        evaluation.report
-    );
-    assert!(
-        evaluation
-            .report
-            .contains("REQ-WS-007: necessarily true given TASK-WS-001")
-    );
-    let prompts = critic.prompts.lock().unwrap();
-    assert!(
-        prompts[0].contains("\"id\":\"REQ-WS-006\"")
-            && !prompts[0].contains("\"id\":\"REQ-WS-007\"")
-    );
-    assert!(
-        prompts[1].contains("\"id\":\"REQ-WS-007\"")
-            && !prompts[1].contains("\"id\":\"AC-WS-001\"")
-    );
-}
-
-#[test]
-fn the_decomposition_set_gate_carries_the_provider_and_the_body_scope() {
-    let catalog = crate::command::workflow_host_command_catalog::fixed_decomposition_catalog("rev")
-        .expect("catalog");
-    let gate = &catalog.capabilities["task-set-lint"];
-    assert_eq!(
-        gate.environment_profile,
-        archon_workflow::EnvironmentProfileId::FreezeProvider
-    );
-    assert!(
-        gate.remediation_scopes
-            .contains(&archon_workflow::RemediationScope::Body)
-    );
-    assert!(gate.timeout_secs > crate::command::workflow_task_set::judge::JUDGE_TIMEOUT_SECS);
-}
+#[path = "fidelity_cluster_tests.rs"]
+mod cluster;

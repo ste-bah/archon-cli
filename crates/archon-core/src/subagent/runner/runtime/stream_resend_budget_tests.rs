@@ -1,5 +1,19 @@
 use super::*;
 
+#[test]
+fn stream_error_text_is_redacted_before_logging_and_stop_text() {
+    let fake_key = format!("sk-ant-api03-{}", uuid::Uuid::new_v4().simple());
+    let mut budget = ResendBudget::new(Duration::from_secs(1));
+    budget.note_stream_error("overloaded_error", &format!("api_key={fake_key}"));
+    let logged = budget.last_error.as_deref().unwrap();
+    let stopped = budget.stop_text("no successful answer", Duration::from_secs(1), 4, "retry");
+    println!(
+        "EVIDENCE #364 post-content-log-stop BEFORE: generated key in provider error AFTER: logged={logged}; stop={stopped}"
+    );
+    assert!(!logged.contains(&fake_key));
+    assert!(!stopped.contains(&fake_key));
+}
+
 #[tokio::test]
 async fn quick_unanswered_resends_inside_the_window_never_stop_the_round() {
     let mut budget = ResendBudget::new(Duration::from_secs(3600));

@@ -160,7 +160,10 @@ pub(crate) fn is_rate_limited_error(error: &archon_llm::provider::LlmError) -> b
         archon_llm::provider::LlmError::Http(message)
         | archon_llm::provider::LlmError::Server { message, .. } => {
             let lower = message.to_ascii_lowercase();
-            lower.contains("429") || lower.contains("rate limit") || lower.contains("rate_limited")
+            lower.contains("429")
+                || lower.contains("rate limit")
+                || lower.contains("rate_limited")
+                || lower.contains("rate_limit_error")
         }
         _ => false,
     }

@@ -131,6 +131,20 @@ fn test_anthropic_provider_explicit_returns_anthropic() {
 }
 
 #[test]
+fn production_anthropic_selection_uses_the_existing_retry_policy() {
+    let wrapped = super::retry_anthropic(AnthropicProvider::new(make_test_client()));
+    assert_eq!(wrapped.inner().name(), "anthropic");
+    assert_eq!(
+        wrapped.policy().max_attempts,
+        archon_llm::retry::RetryPolicy::default().max_attempts
+    );
+    assert_eq!(
+        wrapped.policy().initial_backoff,
+        archon_llm::retry::RetryPolicy::default().initial_backoff
+    );
+}
+
+#[test]
 fn test_local_provider_constructs_without_fallback() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let cfg = LlmConfig {

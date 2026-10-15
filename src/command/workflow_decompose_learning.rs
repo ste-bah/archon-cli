@@ -13,13 +13,31 @@ mod delivery;
 pub(super) use delivery::with_fold_lock;
 
 pub(crate) fn hooks(content: &str, config: &LearningConfig) -> Vec<String> {
-    // This run has no embedding provider for SONA trajectories. DESC has a
-    // real consumer (the episode store); ReasoningBank is useful for review
-    // and diagnosis, as selected by the shared task classifier.
+    // This fold has a DESC episode-store sink, but no ReasoningBank write
+    // sink. Do not select a hook whose lessons would be silently discarded.
     crate::command::learning_workflow_hooks::derive_learning_hooks(content, None, config)
         .into_iter()
-        .filter(|hook| hook == "reasoning_bank" || hook == "desc")
+        .filter(|hook| hook == "desc")
         .collect()
+}
+
+pub(crate) fn unavailable_hook_warning(
+    configured: &[String],
+    selected: &[String],
+) -> Option<(String, String)> {
+    if configured.iter().any(|hook| hook == "reasoning_bank") {
+        return Some((
+            "reasoning_bank".into(),
+            "this fold has no write sink".into(),
+        ));
+    }
+    if selected.is_empty() {
+        return Some((
+            "none".into(),
+            "no configured learning hook matched this run".into(),
+        ));
+    }
+    None
 }
 
 pub(crate) fn stable_lesson_key(run_id: &str, call_id: &str, attempt: u32) -> String {
@@ -43,6 +61,7 @@ pub(super) fn safe_fold_context(task: &str) -> String {
     redact_lesson(task)
 }
 
+#[cfg(test)]
 pub(crate) fn lesson_records(
     run_id: &str,
     _content: &str,
@@ -51,10 +70,29 @@ pub(crate) fn lesson_records(
     source: &Value,
     hooks: &[String],
 ) -> Vec<WorkflowLearningRecord> {
+    lesson_records_with_metadata(run_id, _content, call_id, attempt, "", None, source, hooks)
+}
+
+pub(crate) fn lesson_records_with_metadata(
+    run_id: &str,
+    _content: &str,
+    call_id: &str,
+    attempt: u32,
+    role: &str,
+    capability: Option<&str>,
+    source: &Value,
+    hooks: &[String],
+) -> Vec<WorkflowLearningRecord> {
     let mut lessons = Vec::new();
     collect_lessons(source, &mut lessons);
-    let call_kind = call_id.to_ascii_lowercase();
-    if call_kind.contains("author") || call_kind.contains("body") {
+    let role = role.to_ascii_lowercase();
+    let capability = capability.unwrap_or_default().to_ascii_lowercase();
+    if role.contains("author")
+        || role.contains("writer")
+        || role == "coder"
+        || capability.contains("author")
+        || capability.contains("body")
+    {
         if let Some(text) = find_text(source, &["response", "summary", "text", "content"]) {
             lessons.push((
                 "author_attempt".into(),
@@ -63,7 +101,7 @@ pub(crate) fn lesson_records(
             ));
         }
     }
-    if call_kind.contains("probe") || call_kind.contains("baseline") {
+    if role.contains("probe") || capability.contains("probe") || capability.contains("baseline") {
         if let Some(text) = find_text(
             source,
             &[
@@ -81,7 +119,7 @@ pub(crate) fn lesson_records(
             ));
         }
     }
-    if call_kind.contains("set-gate") || call_kind.contains("set_gate") {
+    if capability.contains("set-gate") || capability.contains("set_gate") {
         if let Some(text) = find_text(source, &["finding", "findings", "reason", "summary"]) {
             lessons.push((
                 "set_gate_finding".into(),
@@ -256,7 +294,15 @@ fn fold_locked(
         content.push_str(&call.result.data.to_string());
         content
     });
+    let configured_hooks = crate::command::learning_workflow_hooks::derive_learning_hooks(
+        &classifier_content,
+        None,
+        config,
+    );
     let hooks = hooks(&classifier_content, config);
+    if let Some((hook, reason)) = unavailable_hook_warning(&configured_hooks, &hooks) {
+        tracing::warn!(%run_id, hook = %hook, reason = %reason, "learning hook unavailable");
+    }
     if hooks.is_empty() {
         return Ok(());
     }
@@ -272,11 +318,20 @@ fn fold_locked(
             )
         })
         .flat_map(|call| {
-            let mut lessons = lesson_records(
+            let capability = call
+                .call
+                .options
+                .host_command
+                .as_ref()
+                .map(|request| request.command_id.as_str());
+            let role = call.call.options.role.as_deref().unwrap_or_default();
+            let mut lessons = lesson_records_with_metadata(
                 run_id,
                 &safe_task,
                 &call.call.id,
                 call.attempt,
+                role,
+                capability,
                 &call.result.data,
                 &hooks,
             );

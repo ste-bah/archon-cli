@@ -104,8 +104,15 @@ fn a_check_naming_the_project_root_itself_is_refused() {
 #[test]
 fn a_quoted_live_root_path_is_refused() {
     let roots = roots();
+    let repository = roots.repository.display().to_string();
+    let split = repository.rfind('/').unwrap();
     for text in [
         format!("cat \"{}/a b.txt\"", roots.repository.display()),
+        format!(
+            "cat \"{}\"\"{}\"/out.txt",
+            &repository[..split],
+            &repository[split..]
+        ),
         format!("cd '{}' && test -f x", roots.project.display()),
         format!("ls {}/*.json", roots.project.display()),
     ] {
@@ -187,7 +194,13 @@ fn without_roots_only_the_shape_is_validated() {
 #[test]
 fn the_author_step_refuses_a_live_root_check_in_the_same_call() {
     let roots = roots();
-    let text = format!("test -f {}/out.json", roots.repository.display());
+    let repository = roots.repository.display().to_string();
+    let split = repository.rfind('/').unwrap();
+    let text = format!(
+        "test -f \"{}\"\"{}\"/out.json",
+        &repository[..split],
+        &repository[split..]
+    );
     let reply = serde_json::to_string(&command(&text).to_string()).unwrap();
     let body = format!(
         "args.acceptanceCriteria = {{A:'a'}};

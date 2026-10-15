@@ -262,8 +262,38 @@ fn parse_error(data: &str) -> Result<StreamEvent, StreamError> {
 
     Ok(StreamEvent::Error {
         error_type: outer.error.error_type,
-        message: outer.error.message,
+        message: archon_observability::redaction::redact_text(&outer.error.message),
     })
+}
+
+#[cfg(test)]
+mod provider_error_redaction_tests {
+    use super::*;
+
+    #[test]
+    fn post_content_sse_error_is_redacted_when_it_enters_stream_event() {
+        let secret = format!("sk-ant-api03-{}", uuid::Uuid::new_v4().simple());
+        let data = serde_json::json!({"error": {
+            "type": "overloaded_error",
+            "message": format!("api_key={secret}")
+        }})
+        .to_string();
+        let event = parse_error(&data).unwrap();
+        let StreamEvent::Error { message, .. } = event else {
+            panic!("expected error event")
+        };
+        println!(
+            "EVIDENCE #364 post-content-error BEFORE: api_key value from provider AFTER: {message}"
+        );
+        assert!(
+            !message.contains(&secret),
+            "provider error leaked: {message}"
+        );
+        assert!(
+            message.contains("REDACTED"),
+            "redaction marker missing: {message}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

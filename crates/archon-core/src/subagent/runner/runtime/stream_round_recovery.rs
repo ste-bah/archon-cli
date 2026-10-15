@@ -365,6 +365,14 @@ pub(super) async fn handle_stream_error(
             .map_err(|error| anyhow::anyhow!("rate-limit subagent compaction failed: {error}"))?;
         return Ok(true);
     }
+    if crate::agent::autocompact::is_rate_limited_error(&err)
+        && request_body_bytes < large_retry_body_bytes
+    {
+        // A small request does not need compaction. Leave the event to the
+        // runner's existing no-progress window, which owns the ordinary
+        // resend decision for a rate limit that does not qualify for recovery.
+        return Ok(false);
+    }
     runner.emit_activity_stream("error", message, None, true);
     Err(anyhow::Error::new(err))
 }

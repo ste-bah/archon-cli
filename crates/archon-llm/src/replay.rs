@@ -212,6 +212,12 @@ impl LlmProvider for ReplayProvider {
             .unwrap_or_default()
     }
 
+    fn request_identity(&self, request: &LlmRequest) -> Option<String> {
+        self.inner
+            .as_ref()
+            .and_then(|inner| inner.request_identity(request))
+    }
+
     async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         if self.mode != ReplayMode::Record {
             return Ok(self.load(&request)?.replay_events());
@@ -277,6 +283,53 @@ impl LlmProvider for ReplayProvider {
         self.inner
             .as_ref()
             .and_then(|inner| inner.resolve_alias(alias))
+    }
+
+    fn resolve_request_model(&self, request: &mut LlmRequest) {
+        if let Some(inner) = &self.inner {
+            inner.resolve_request_model(request);
+        } else {
+            LlmProvider::resolve_request_model(self, request);
+        }
+    }
+
+    fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
+        self.inner
+            .as_ref()
+            .map_or(crate::compaction_policy::ProviderFamily::Local, |inner| {
+                inner.compaction_provider_family()
+            })
+    }
+
+    fn compaction_policy(&self) -> crate::compaction_policy::CompactionPolicy {
+        self.inner.as_ref().map_or_else(
+            || {
+                crate::compaction_policy::compaction_policy_for_family(
+                    crate::compaction_policy::ProviderFamily::Local,
+                )
+            },
+            |inner| inner.compaction_policy(),
+        )
+    }
+
+    fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {
+        self.inner
+            .as_ref()
+            .map_or(crate::cache_strategy::CacheStrategy::None, |inner| {
+                inner.cache_strategy(model)
+            })
+    }
+
+    fn cache_platform(&self) -> crate::cache_models::CachePlatform {
+        self.inner
+            .as_ref()
+            .map_or(crate::cache_models::CachePlatform::Unknown, |inner| {
+                inner.cache_platform()
+            })
+    }
+
+    fn as_anthropic(&self) -> Option<&crate::anthropic::AnthropicClient> {
+        self.inner.as_ref().and_then(|inner| inner.as_anthropic())
     }
 }
 

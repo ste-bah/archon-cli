@@ -62,6 +62,7 @@ use archon_llm::providers::{
     AnthropicProvider, BedrockProvider, LocalProvider, OpenAiProvider, ProviderError,
     VertexProvider,
 };
+use archon_llm::retry::{RetryPolicy, RetryProvider};
 use archon_llm::{ActiveProvider, LlmConfig as FlatLlmConfig};
 
 use crate::runtime::llm_non_anthropic::build_llm_provider_without_anthropic_fallback;
@@ -310,7 +311,7 @@ pub(crate) fn build_llm_provider_selection(
     api_client: AnthropicClient,
 ) -> LlmProviderSelection {
     match llm_cfg.provider.as_str() {
-        "anthropic" => selected(
+        "anthropic" => selected_anthropic(
             AnthropicProvider::new(api_client).with_alias_map(models_cfg.anthropic.to_alias_map()),
             None,
         ),
@@ -320,7 +321,7 @@ pub(crate) fn build_llm_provider_selection(
             let resolved = OpenAiProvider::resolve_api_key(&inline_key);
             if resolved.is_empty() {
                 tracing::warn!("OpenAI selected but no API key found; falling back to Anthropic");
-                return selected(
+                return selected_anthropic(
                     AnthropicProvider::new(api_client)
                         .with_alias_map(models_cfg.anthropic.to_alias_map()),
                     Some("openai_missing_api_key"),
@@ -343,7 +344,7 @@ pub(crate) fn build_llm_provider_selection(
                 tracing::warn!(
                     "Bedrock selected but region/model_id missing; falling back to Anthropic"
                 );
-                return selected(
+                return selected_anthropic(
                     AnthropicProvider::new(api_client)
                         .with_alias_map(models_cfg.anthropic.to_alias_map()),
                     Some("bedrock_missing_region_or_model"),
@@ -356,7 +357,7 @@ pub(crate) fn build_llm_provider_selection(
             let project_id = llm_cfg.vertex.project_id.as_deref().unwrap_or("");
             if project_id.is_empty() {
                 tracing::warn!("Vertex selected but project_id missing; falling back to Anthropic");
-                return selected(
+                return selected_anthropic(
                     AnthropicProvider::new(api_client)
                         .with_alias_map(models_cfg.anthropic.to_alias_map()),
                     Some("vertex_missing_project_id"),
@@ -413,7 +414,7 @@ pub(crate) fn build_llm_provider_selection(
                         env_var = %var,
                         "provider credentials missing; falling back to Anthropic"
                     );
-                    selected(
+                    selected_anthropic(
                         AnthropicProvider::new(api_client)
                             .with_alias_map(models_cfg.anthropic.to_alias_map()),
                         Some(flat_provider_missing_credential_reason(&var)),
@@ -425,7 +426,7 @@ pub(crate) fn build_llm_provider_selection(
                         error = %e,
                         "provider construction failed; falling back to Anthropic"
                     );
-                    selected(
+                    selected_anthropic(
                         AnthropicProvider::new(api_client)
                             .with_alias_map(models_cfg.anthropic.to_alias_map()),
                         Some("openai_compatible_construction_failed"),
@@ -444,6 +445,21 @@ fn selected(
         provider: Arc::new(provider),
         fallback_reason,
     }
+}
+
+fn selected_anthropic(
+    provider: AnthropicProvider,
+    fallback_reason: Option<&'static str>,
+) -> LlmProviderSelection {
+    let provider = retry_anthropic(provider);
+    LlmProviderSelection {
+        provider: Arc::new(provider),
+        fallback_reason,
+    }
+}
+
+fn retry_anthropic(provider: AnthropicProvider) -> RetryProvider<AnthropicProvider> {
+    RetryProvider::new(Arc::new(provider), RetryPolicy::default())
 }
 
 fn flat_provider_missing_credential_reason(var: &str) -> &'static str {

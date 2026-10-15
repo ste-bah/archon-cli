@@ -30,6 +30,13 @@ impl From<ApiError> for LlmError {
                     .unwrap_or(LlmError::Http(msg))
             }
             ApiError::AuthError(msg) => LlmError::Auth(msg),
+            ApiError::Rejected {
+                error_type,
+                message,
+            } => LlmError::Rejected {
+                error_type,
+                message: archon_observability::redaction::redact_text(&message),
+            },
             ApiError::RateLimited {
                 retry_after_secs,
                 from_provider,

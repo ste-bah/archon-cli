@@ -3,6 +3,9 @@ use super::workflow_decompose_learning::{
     stage_journal, write_journal,
 };
 
+#[path = "workflow_decompose_learning_evidence_tests.rs"]
+mod evidence;
+
 #[test]
 fn learning_decompose_refutations_and_cannot_pass_findings_become_records() {
     let source = serde_json::json!({
@@ -84,10 +87,10 @@ fn learning_decompose_disabled_learning_yields_no_hooks() {
 }
 
 #[test]
-fn learning_decompose_run_end_emits_reasoning_records_for_judged_findings() {
+fn learning_decompose_run_end_keeps_judged_findings_without_a_sinkless_hook() {
     let mut config = archon_core::config::LearningConfig::default();
     config.reasoning_bank.enabled = true;
-    config.desc.enabled = false;
+    config.desc.enabled = true;
     let hooks = super::workflow_decompose_learning::hooks("review judge findings", &config);
     let records = lesson_records(
         "run-1",
@@ -100,12 +103,17 @@ fn learning_decompose_run_end_emits_reasoning_records_for_judged_findings() {
     assert!(
         records
             .iter()
-            .any(|record| record.hooks.contains(&"reasoning_bank".to_string()))
+            .any(|record| record.hooks.contains(&"desc".to_string()))
     );
     assert!(
         records
             .iter()
             .any(|record| record.name.contains("misses output"))
+    );
+    assert!(
+        records
+            .iter()
+            .all(|record| !record.hooks.contains(&"reasoning_bank".to_string()))
     );
 }
 

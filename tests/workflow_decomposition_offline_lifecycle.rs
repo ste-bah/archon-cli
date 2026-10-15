@@ -26,7 +26,7 @@ mod variant_cells;
 
 use std::fs;
 
-use deadline::{await_provider_boundary, progress, run, wait_for_child};
+use deadline::{await_provider_boundary, progress, run, tail, wait_for_child};
 use project::{
     assert_golden_requests, assert_no_unknown_prompts, decompose_args, final_snapshot, one_run,
     project, project_with_provider, resume, spawn_decompose,
@@ -89,6 +89,67 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
     assert_no_unknown_prompts(&project.provider);
     assert_golden_requests(&project.provider.requests.per_call());
     progress("golden", "passed");
+}
+
+#[cfg(unix)]
+#[test]
+fn sigstop_over_stream_idle_window_recovers_and_records_the_run() {
+    use std::time::Duration;
+
+    let project = project::project_with(server::Plan {
+        variant: server::Variant::HoldStreamAfterHeaders,
+        block: Some(("acceptance".into(), 1)),
+    });
+    let root = project.path();
+    let mut child = spawn_decompose(root, &[]);
+    await_provider_boundary(&project.provider, root, &mut child, "sigstop-stream");
+    let suspended_key = project.provider.requests.snapshot()[0].key.clone();
+
+    let pid = child.id() as libc::pid_t;
+    assert_eq!(
+        unsafe { libc::kill(pid, libc::SIGSTOP) },
+        0,
+        "SIGSTOP child"
+    );
+    std::thread::sleep(Duration::from_secs(
+        archon_core::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS + 1,
+    ));
+    assert_eq!(
+        unsafe { libc::kill(pid, libc::SIGCONT) },
+        0,
+        "SIGCONT child"
+    );
+    project.provider.release();
+
+    let harness = deadline::harness_root(root);
+    let stdout = harness.join("decompose.stdout");
+    let stderr = harness.join("decompose.stderr");
+    let status = wait_for_child(&mut child, &stdout, &stderr, "sigstop-stream");
+    assert!(
+        status.success(),
+        "stdout: {}; stderr: {}",
+        tail(&stdout),
+        tail(&stderr)
+    );
+
+    let requests = project.provider.requests.snapshot();
+    let recovery_requests = requests
+        .iter()
+        .filter(|request| request.key == suspended_key)
+        .count();
+    assert_eq!(
+        recovery_requests, 2,
+        "one provider error and one resend: {requests:?}"
+    );
+    let run_dir = one_run(root);
+    let state: serde_json::Value =
+        serde_json::from_slice(&fs::read(run_dir.join("state.json")).unwrap()).unwrap();
+    println!(
+        "EVIDENCE #364 sigstop-recovery BEFORE: child suspended with open stream AFTER: state={} same-call-requests={recovery_requests}",
+        state["status"]
+    );
+    assert_eq!(state["status"], "completed", "durable state: {state}");
+    assert!(root.join("tasks/PRD-X/acceptance-contract.json").exists());
 }
 
 #[test]

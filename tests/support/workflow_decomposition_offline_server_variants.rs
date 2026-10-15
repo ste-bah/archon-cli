@@ -34,6 +34,9 @@ pub enum Variant {
     Large(usize),
     /// The three launch-repair judge requests refute AC-X-001; later calls use golden replies.
     RefuteFirstJudge,
+    /// Hold the first streaming response after headers, then emit a retryable
+    /// provider event so a suspended CLI must recover through RetryProvider.
+    HoldStreamAfterHeaders,
 }
 
 pub fn answer(prompt: &str, variant: Variant) -> (&'static str, String) {

@@ -49,7 +49,44 @@ use crate::runtime::{
 use crate::streaming::StreamEvent;
 
 pub use policy::{RetryDecision, RetryPolicy, classify};
-use policy::{reason_code_for_error, stream_error_before_content, stream_error_is_retryable};
+use policy::{reason_code_for_error, stream_error_before_content};
+
+/// Whether a streaming provider error should be retried by the caller's
+/// no-progress policy. Rejections remain fail-fast; transient and unknown
+/// provider error types use the shared retry classification.
+pub fn stream_error_is_retryable(error_type: &str, message: &str) -> bool {
+    match error_type {
+        // Provider SSE errors whose semantics explicitly describe a transient
+        // failure. Other known events stay on the runner's existing route:
+        // HTTP/status failures propagate and rate limits enter compaction.
+        "parse_error"
+        | "timeout_error"
+        | "api_error"
+        | "overloaded_error"
+        // These are transport/framing markers emitted by the provider
+        // adapters; the runner has always handled them in its no-progress
+        // resend window, independently of SSE error classification.
+        | "network"
+        | "http_error" => true,
+        // Preserve the runner's original protocol recovery condition exactly.
+        "protocol" => message.contains("stream ended before message_stop"),
+        // transport_idle keeps its dedicated stall handling in the runner.
+        "transport_idle" => false,
+        "server_error"
+        | "rate_limited"
+        | "rate_limit_error"
+        | "authentication_error"
+        | "invalid_api_key"
+        | "billing_error"
+        | "insufficient_quota"
+        | "invalid_request_error"
+        | "permission_error"
+        | "not_found_error"
+        | "request_too_large" => false,
+        // Unknown SSE error names have no established permanent meaning.
+        _ => true,
+    }
+}
 
 /// Outcome of peeking at a freshly opened stream.
 enum StreamProbe {
@@ -152,6 +189,16 @@ impl<P: LlmProvider + ?Sized> RetryProvider<P> {
                 }
             }
             while let Some(event) = rx.recv().await {
+                let event = match event {
+                    StreamEvent::Error {
+                        error_type,
+                        message,
+                    } => StreamEvent::Error {
+                        error_type,
+                        message: archon_observability::redaction::redact_text(&message),
+                    },
+                    event => event,
+                };
                 if tx.send(event).await.is_err() {
                     return;
                 }
@@ -242,6 +289,10 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
         self.inner.models()
     }
 
+    fn request_identity(&self, request: &LlmRequest) -> Option<String> {
+        self.inner.request_identity(request)
+    }
+
     fn supports_temperature(&self) -> bool {
         self.inner.supports_temperature()
     }
@@ -256,6 +307,18 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
 
     fn compaction_provider_family(&self) -> crate::compaction_policy::ProviderFamily {
         self.inner.compaction_provider_family()
+    }
+
+    fn compaction_policy(&self) -> crate::compaction_policy::CompactionPolicy {
+        self.inner.compaction_policy()
+    }
+
+    fn resolve_alias(&self, alias: &str) -> Option<String> {
+        self.inner.resolve_alias(alias)
+    }
+
+    fn resolve_request_model(&self, request: &mut LlmRequest) {
+        self.inner.resolve_request_model(request)
     }
 
     fn cache_strategy(&self, model: &str) -> crate::cache_strategy::CacheStrategy {
@@ -320,10 +383,9 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
         }
     }
 
-    /// `stream()` retries only the pre-flight (the `Result` returned by
-    /// the inner provider). Once the `Receiver<StreamEvent>` is open, any
-    /// mid-stream failure is delivered as `StreamEvent::Error` and is out
-    /// of scope for this decorator (see TASK-AGS-707 notes).
+    /// The runner owns streaming retries through its no-progress window.
+    /// This wrapper only classifies pre-content rejection events and forwards
+    /// transient errors so the runner can resend them under that window.
     async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         self.record_runtime_event(
             &request,
@@ -332,131 +394,71 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
             None,
             None,
         );
-        let max = self.policy.max_attempts.max(1);
-        let mut attempt: u32 = 0;
-        loop {
-            match self.inner.stream(request.clone()).await {
-                Ok(rx) => {
-                    // `Ok(rx)` only means the stream OPENED. A transport failure
-                    // after that arrives as a StreamEvent::Error on the channel,
-                    // which this loop has already returned past and can never
-                    // see — so a long turn that dies mid-stream was never
-                    // retried by construction. A PRD decomposition died exactly
-                    // that way: one long turn, `error decoding response body`
-                    // partway through, whole run lost with nothing written.
-                    //
-                    // Retry only while the stream has produced NO content. Once
-                    // text or a tool call has been emitted the consumer has
-                    // acted on it, and replaying the request would duplicate
-                    // that work rather than recover it.
-                    match Self::drain_until_content_or_error(rx).await {
-                        StreamProbe::Usable(rx) => {
+        match self.inner.stream(request.clone()).await {
+            Ok(rx) => {
+                // Peek only to classify pre-content provider rejection. A
+                // transient error is replayed as an event for the runner's
+                // no-progress window to own the resend decision.
+                match Self::drain_until_content_or_error(rx).await {
+                    StreamProbe::Usable(rx) => {
+                        self.record_runtime_event(
+                            &request,
+                            ProviderRuntimeEventType::RequestSucceeded,
+                            ProviderRuntimeSeverity::Info,
+                            None,
+                            Some(0),
+                        );
+                        return Ok(rx);
+                    }
+                    StreamProbe::FailedBeforeContent {
+                        error_type,
+                        message,
+                    } => {
+                        // Streaming retries belong to the runner's existing
+                        // no-progress window. Classify rejections here, but
+                        // replay transient provider errors for the runner.
+                        let error = stream_error_before_content(&error_type, &message);
+                        if classify(&error) == RetryDecision::FailFast {
                             self.record_runtime_event(
                                 &request,
-                                ProviderRuntimeEventType::RequestSucceeded,
-                                ProviderRuntimeSeverity::Info,
-                                None,
-                                Some(attempt),
+                                ProviderRuntimeEventType::RequestFailed,
+                                ProviderRuntimeSeverity::Error,
+                                Some("stream_failed_before_content"),
+                                Some(0),
                             );
-                            return Ok(rx);
+                            return Err(error);
                         }
-                        StreamProbe::FailedBeforeContent {
-                            error_type,
-                            message,
-                        } => {
-                            attempt += 1;
-                            // Issue 364: classed by the provider's error type,
-                            // so a rejected request fails fast up the stack.
-                            let error = stream_error_before_content(&error_type, &message);
-                            if attempt >= max
-                                || !stream_error_is_retryable(&error_type, &message)
-                                || classify(&error) == RetryDecision::FailFast
-                            {
-                                self.record_runtime_event(
-                                    &request,
-                                    ProviderRuntimeEventType::RequestFailed,
-                                    ProviderRuntimeSeverity::Error,
-                                    Some("stream_failed_before_content"),
-                                    Some(attempt),
-                                );
-                                return Err(error);
-                            }
-                            tokio::time::sleep(self.backoff_for_attempt(attempt - 1)).await;
-                            continue;
-                        }
-                    }
-                }
-                Err(err) => {
-                    attempt += 1;
-                    if attempt >= max || classify(&err) == RetryDecision::FailFast {
-                        let reason = reason_code_for_error(&err);
+                        let (tx, rx) = tokio::sync::mpsc::channel(1);
+                        let message = archon_observability::redaction::redact_text(&message);
+                        let _ = tx
+                            .send(StreamEvent::Error {
+                                error_type,
+                                message,
+                            })
+                            .await;
                         self.record_runtime_event(
                             &request,
                             ProviderRuntimeEventType::RequestFailed,
-                            ProviderRuntimeSeverity::Error,
-                            Some(reason),
-                            Some(attempt),
+                            ProviderRuntimeSeverity::Warn,
+                            Some("stream_failed_before_content"),
+                            Some(0),
                         );
-                        return Err(err);
+                        return Ok(rx);
                     }
-                    let reason = reason_code_for_error(&err);
-                    self.record_runtime_event(
-                        &request,
-                        ProviderRuntimeEventType::RequestRetry,
-                        ProviderRuntimeSeverity::Warn,
-                        Some(reason),
-                        Some(attempt),
-                    );
-                    let sleep = self.sleep_for_error(&err, attempt - 1);
-                    tokio::time::sleep(sleep).await;
                 }
             }
+            Err(LlmError::Rejected {
+                error_type,
+                message,
+            }) => Err(LlmError::Rejected {
+                error_type,
+                message: archon_observability::redaction::redact_text(&message),
+            }),
+            Err(err) => Err(err),
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct AnthropicCacheProvider;
-
-    #[async_trait]
-    impl LlmProvider for AnthropicCacheProvider {
-        fn name(&self) -> &str {
-            "anthropic"
-        }
-
-        fn models(&self) -> Vec<ModelInfo> {
-            Vec::new()
-        }
-
-        fn supports_feature(&self, _: ProviderFeature) -> bool {
-            false
-        }
-
-        fn cache_strategy(&self, _model: &str) -> crate::cache_strategy::CacheStrategy {
-            crate::cache_strategy::ANTHROPIC_API
-        }
-
-        async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, LlmError> {
-            unreachable!()
-        }
-
-        async fn stream(&self, _: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
-            unreachable!()
-        }
-    }
-
-    /// The retry wrapper must forward the strategy. Dropping it here would
-    /// disable caching for every retried request without any error.
-    #[test]
-    fn retry_provider_preserves_anthropic_message_cache_capability() {
-        let provider = RetryProvider::new(Arc::new(AnthropicCacheProvider), RetryPolicy::default());
-
-        assert_eq!(
-            provider.cache_strategy("claude-sonnet-4-6"),
-            crate::cache_strategy::ANTHROPIC_API
-        );
-    }
-}
+#[path = "retry/tests.rs"]
+mod tests;

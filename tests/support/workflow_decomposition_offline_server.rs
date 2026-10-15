@@ -249,9 +249,15 @@ fn serve_connection(
             prompt,
             answer: answer.clone(),
         });
-        if blocked
-            .as_ref()
-            .is_some_and(|(blocked_role, blocked_nth)| blocked_role == role && *blocked_nth == nth)
+        let held_stream = variant == Variant::HoldStreamAfterHeaders
+            && body["stream"] != false
+            && blocked.as_ref().is_some_and(|(blocked_role, blocked_nth)| {
+                blocked_role == role && *blocked_nth == nth
+            });
+        if !held_stream
+            && blocked.as_ref().is_some_and(|(blocked_role, blocked_nth)| {
+                blocked_role == role && *blocked_nth == nth
+            })
         {
             *entered.0.lock().unwrap() = true;
             entered.1.notify_all();
@@ -292,6 +298,12 @@ fn serve_connection(
                 })
                 .to_string(),
             )
+        } else if held_stream && nth == 1 {
+            (
+                "200 OK",
+                "text/event-stream",
+                "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"resume after suspended stream\"}}\n\n".to_string(),
+            )
         } else {
             (
                 "200 OK",
@@ -306,10 +318,18 @@ fn serve_connection(
             "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nCache-Control: no-cache\r\nContent-Length: {}\r\nConnection: {connection}\r\n\r\n",
             response.len()
         );
-        if stream.write_all(header.as_bytes()).is_err()
-            || stream.write_all(response.as_bytes()).is_err()
-            || stream.flush().is_err()
-            || !keep_alive
+        if stream.write_all(header.as_bytes()).is_err() || stream.flush().is_err() {
+            return;
+        }
+        if held_stream {
+            *entered.0.lock().unwrap() = true;
+            entered.1.notify_all();
+            let mut is_released = release.0.lock().unwrap();
+            while !*is_released {
+                is_released = release.1.wait(is_released).unwrap();
+            }
+        }
+        if stream.write_all(response.as_bytes()).is_err() || stream.flush().is_err() || !keep_alive
         {
             return;
         }

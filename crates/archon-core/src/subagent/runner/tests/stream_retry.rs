@@ -77,6 +77,37 @@ async fn dropped_stream_retries_are_bounded_by_a_no_progress_window() {
 }
 
 #[tokio::test]
+async fn retry_provider_does_not_multiply_runner_window_overload_resends() {
+    let inner = Arc::new(MockProvider::new(vec![
+        vec![StreamEvent::Error {
+            error_type: "overloaded_error".into(),
+            message: "persistent overload".into(),
+        }];
+        200
+    ]));
+    let provider: Arc<dyn LlmProvider> = Arc::new(archon_llm::retry::RetryProvider::new(
+        inner.clone(),
+        archon_llm::retry::RetryPolicy::default(),
+    ));
+    let config = AgentConfig {
+        subagent_stream_idle_timeout_secs: 1,
+        ..AgentConfig::default()
+    };
+    let _ = make_runner_with_config(provider, 1, config)
+        .run("answer")
+        .await
+        .unwrap_err();
+    let requests = inner.requests().len();
+    println!(
+        "EVIDENCE #364 persistent-overload BEFORE: RetryProvider max_attempts=3 plus runner window AFTER: requests={requests} (runner-window sequence: 16)"
+    );
+    assert!(
+        (15..=16).contains(&requests),
+        "one open per resend allowed by the existing no-progress window: {requests}"
+    );
+}
+
+#[tokio::test]
 async fn protocol_transport_error_retries_same_round() {
     for error_type in ["network", "http_error", "protocol"] {
         let provider = Arc::new(MockProvider::new(vec![
@@ -97,6 +128,45 @@ async fn protocol_transport_error_retries_same_round() {
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].messages, requests[1].messages);
     }
+}
+
+#[tokio::test]
+async fn decided_sse_errors_and_unknown_events_resend_inside_the_existing_window() {
+    for error_type in [
+        "parse_error",
+        "timeout_error",
+        "api_error",
+        "overloaded_error",
+        "future_provider_event",
+    ] {
+        let provider = Arc::new(MockProvider::new(vec![
+            vec![StreamEvent::Error {
+                error_type: error_type.into(),
+                message: "temporary SSE failure".into(),
+            }],
+            text_response("done"),
+        ]));
+        assert_eq!(
+            make_runner(provider.clone(), 1)
+                .run("answer")
+                .await
+                .unwrap(),
+            "done",
+            "{error_type} should resend"
+        );
+        assert_eq!(provider.requests().len(), 2, "{error_type}");
+    }
+}
+
+#[tokio::test]
+async fn protocol_error_with_another_message_does_not_enter_the_resend_window() {
+    let provider = Arc::new(MockProvider::new(vec![vec![StreamEvent::Error {
+        error_type: "protocol".into(),
+        message: "invalid protocol payload".into(),
+    }]]));
+    let result = make_runner(provider.clone(), 1).run("answer").await;
+    assert!(result.is_err());
+    assert_eq!(provider.requests().len(), 1);
 }
 
 #[tokio::test]

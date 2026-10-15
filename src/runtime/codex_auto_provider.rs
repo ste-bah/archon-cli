@@ -121,6 +121,38 @@ impl LlmProvider for CodexAutoProvider {
         self.app_server.models()
     }
 
+    fn request_identity(&self, request: &LlmRequest) -> Option<String> {
+        self.app_server.request_identity(request)
+    }
+
+    fn data_flow_classification(&self) -> archon_llm::provider::DataFlowClassification {
+        self.app_server.data_flow_classification()
+    }
+
+    fn compaction_provider_family(&self) -> archon_llm::compaction_policy::ProviderFamily {
+        self.app_server.compaction_provider_family()
+    }
+
+    fn compaction_policy(&self) -> archon_llm::compaction_policy::CompactionPolicy {
+        self.app_server.compaction_policy()
+    }
+
+    fn resolve_alias(&self, alias: &str) -> Option<String> {
+        self.app_server.resolve_alias(alias)
+    }
+
+    fn resolve_request_model(&self, request: &mut LlmRequest) {
+        self.app_server.resolve_request_model(request)
+    }
+
+    fn cache_strategy(&self, model: &str) -> archon_llm::cache_strategy::CacheStrategy {
+        self.app_server.cache_strategy(model)
+    }
+
+    fn cache_platform(&self) -> archon_llm::cache_models::CachePlatform {
+        self.app_server.cache_platform()
+    }
+
     async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         let provider = self.provider_for(&request).await?;
         provider.stream(request).await

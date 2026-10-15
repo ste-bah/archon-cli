@@ -235,17 +235,22 @@ async fn logic_361_unversioned_checks_and_landing_run_again_then_reuse() {
         "task-set-lint",
         "requirements-trace",
     ] {
+        // This harness pins task-set-lint to version 4 in `launched`; other
+        // check versions come from the production catalog.
         let expected = match check {
-            "verify-frozen-acceptance" => 6,
-            "requirements-trace" => 4,
             "task-set-lint" => 4,
+            "verify-frozen-acceptance" | "requirements-trace" => {
+                u64::from(crate::command::workflow_host_command_logic::versions()[check])
+            }
             _ => unreachable!(),
         };
         assert_eq!(run.stamps(check), vec![Some(expected)], "{check}");
     }
     assert_eq!(
         run.stamps("freeze-skeleton"),
-        vec![Some(3)],
+        vec![Some(u64::from(
+            crate::command::workflow_host_command_logic::versions()["freeze-skeleton"]
+        ))],
         "landing reruns"
     );
     assert_eq!(run.run(run.upgraded(&[]), SCRIPT).await, (0, 4));

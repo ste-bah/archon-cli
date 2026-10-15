@@ -14,34 +14,6 @@ use crate::provider::LlmError;
 
 const MAX_INLINE_RATE_LIMIT_RETRY_SECS: u64 = 60;
 
-/// Whether a mid-stream error is worth another attempt.
-///
-/// Mirrors the response-status classifier the providers already use; a decode
-/// or connection fault mid-stream is the same transient class as one during
-/// the handshake, it simply surfaces later.
-///
-/// `pub(super)` rather than private: the stream retry loop in the parent
-/// module is the sole caller.
-pub(super) fn stream_error_is_retryable(error_type: &str, message: &str) -> bool {
-    let hay = format!("{error_type} {message}").to_ascii_lowercase();
-    [
-        "http_error",
-        "decoding",
-        "connection reset",
-        "connection closed",
-        "connection refused",
-        "broken pipe",
-        "timed out",
-        "overloaded",
-        "rate limit",
-        "service unavailable",
-        "upstream connect",
-        "incomplete",
-    ]
-    .iter()
-    .any(|marker| hay.contains(marker))
-}
-
 /// The error a stream that failed before any content returns, classed by the
 /// provider's error type (Issue 364).
 ///
@@ -53,9 +25,13 @@ pub(super) fn stream_error_is_retryable(error_type: &str, message: &str) -> bool
 /// `overloaded_error`, a rate limit, a transport fault. No HTTP status is
 /// invented: none is known for an error event.
 pub(super) fn stream_error_before_content(error_type: &str, message: &str) -> LlmError {
+    let message = archon_observability::redaction::redact_text(message);
     let text = || format!("stream failed before producing content ({error_type}): {message}");
     match error_type {
-        "authentication_error" | "invalid_api_key" => LlmError::Auth(text()),
+        "authentication_error" | "invalid_api_key" => LlmError::Rejected {
+            error_type: error_type.to_string(),
+            message: text(),
+        },
         "billing_error" | "insufficient_quota" => LlmError::QuotaExceeded(text()),
         "invalid_request_error" | "permission_error" | "not_found_error" | "request_too_large" => {
             LlmError::Rejected {
@@ -69,8 +45,9 @@ pub(super) fn stream_error_before_content(error_type: &str, message: &str) -> Ll
 
 /// Configuration for `RetryProvider`'s backoff loop.
 ///
-/// `max_attempts` is the *total* number of calls to `inner` per request,
-/// including the first. The default of `3` matches ERR-PROV-02.
+/// `max_attempts` is the *total* number of calls to `inner` for a non-streaming
+/// request, including the first. Streaming resends belong to the runner's
+/// no-progress window. The default of `3` matches ERR-PROV-02.
 #[derive(Debug, Clone)]
 pub struct RetryPolicy {
     pub max_attempts: u32,
@@ -197,12 +174,26 @@ mod tests {
                 "{error_type}: {error}"
             );
             let text = error.to_string();
-            assert!(text.contains(message), "{text}");
+            if error_type == "authentication_error" {
+                assert!(text.contains("invalid x-***REDACTED***"), "{text}");
+            } else {
+                assert!(text.contains(message), "{text}");
+            }
             assert!(
                 !text.contains("(400)") && !text.contains("(40"),
                 "no invented status: {text}"
             );
         }
+        let secret = "sk-ant-api03-FAKE-1234567890";
+        let before = LlmError::Auth(format!("authentication error: {secret}"));
+        let error = stream_error_before_content("authentication_error", secret);
+        println!(
+            "EVIDENCE #364 sse-rejection BEFORE: Auth ({:?}), secret_visible={} AFTER: {error}",
+            classify(&before),
+            before.to_string().contains(secret)
+        );
+        assert!(matches!(&error, LlmError::Rejected { .. }));
+        assert!(!error.to_string().contains(secret), "{error}");
     }
 
     #[test]

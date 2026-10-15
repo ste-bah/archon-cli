@@ -37,6 +37,9 @@ use std::path::{Component, Path, PathBuf, Prefix};
 
 use crate::command::acceptance_scratch_policy::NativeBinding;
 
+#[path = "workflow_acceptance_live_root_shell.rs"]
+mod shell;
+
 /// What every acceptance author is told before it writes a check, with the
 /// repository's and the project's absolute paths: where a check can run, and
 /// the relative-path rule. One text for the decomposition author
@@ -179,12 +182,6 @@ pub(crate) fn absolute_roots(roots: &[PathBuf]) -> Result<Vec<PathBuf>, String> 
     }
 }
 
-/// Whether `c` continues a path component (so the root's text is only the
-/// start of a longer name).
-fn continues_name(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')
-}
-
 /// How check text spells a path on a host: POSIX compares it exactly;
 /// Windows compares it without case and reads `/` as `\`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,9 +206,9 @@ impl Spelling {
         }
     }
 
-    /// Whether `c` ends a path token: whitespace or shell syntax. On
-    /// Windows `\` separates components, `:` ends a drive letter and `?`
-    /// marks a verbatim prefix (`\\?\`): none of them ends a path there.
+    /// The pre-tokenizer boundary rule, kept for regression tests comparing
+    /// the old detector with the shell-word detector.
+    #[cfg(test)]
     fn ends_token(self, c: char) -> bool {
         let syntax = c.is_whitespace() || "'\"`;|&<>()$=:,{}[]*?!#%\\".contains(c);
         syntax && !(self == Spelling::Windows && matches!(c, '\\' | ':' | '?'))
@@ -253,69 +250,8 @@ fn names_by_identity(path: &Path, root: &Path) -> bool {
         .any(|ancestor| ancestor == root_handle)
 }
 
-#[cfg(any(windows, test))]
-fn reconstruct_from_longest_existing_ancestor(
-    path: &Path,
-    mut canonicalize: impl FnMut(&Path) -> Option<PathBuf>,
-) -> Option<PathBuf> {
-    path.ancestors().find_map(|ancestor| {
-        let canonical = canonicalize(ancestor)?;
-        let remainder = path.strip_prefix(ancestor).ok()?;
-        Some(canonical.join(remainder))
-    })
-}
-
-#[cfg(any(windows, test))]
-fn path_starts_with(path: &Path, root: &Path) -> bool {
-    #[cfg(windows)]
-    {
-        let mut path = path.components();
-        root.components().all(|root_component| {
-            path.next().is_some_and(|path_component| {
-                path_component
-                    .as_os_str()
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case(&root_component.as_os_str().to_string_lossy())
-            })
-        })
-    }
-    #[cfg(not(windows))]
-    {
-        path.starts_with(root)
-    }
-}
-
-/// Reconstruct unresolved Windows paths from their longest existing ancestor
-/// before comparing them with the canonical live root. This expands aliases
-/// that the OS resolves, while a sibling stays outside the root. Only fail
-/// closed when no ancestor resolves and the path names the root's known volume.
-#[cfg(windows)]
-fn unresolved_on_known_volume(path: &Path, root: &Path) -> bool {
-    if path.exists() {
-        return false;
-    }
-    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    if let Some(reconstructed) =
-        reconstruct_from_longest_existing_ancestor(path, |ancestor| ancestor.canonicalize().ok())
-    {
-        return path_starts_with(&reconstructed, &canonical_root);
-    }
-    let volume = |path: &Path| match path.components().next() {
-        Some(Component::Prefix(prefix)) => Some(
-            prefix
-                .as_os_str()
-                .to_string_lossy()
-                .to_lowercase()
-                .replace('/', "\\"),
-        ),
-        _ => None,
-    };
-    matches!((volume(path), volume(root)), (Some(path_volume), Some(root_volume)) if path_volume == root_volume)
-}
-
-#[cfg(not(windows))]
-fn unresolved_on_known_volume(_path: &Path, _root: &Path) -> bool {
-    false
+fn continues_name(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')
 }
 
 /// The first of `forms` (from [`root_forms`]) that `text` names, in the
@@ -324,33 +260,9 @@ pub(crate) fn named_root<'a>(text: &str, forms: &'a [PathBuf]) -> Option<&'a Pat
     named_root_in(Spelling::HOST, text, forms)
 }
 
-/// The first of `forms` that `text` names, both compared in `spelling`.
+/// The first of `forms` that `text` names, both compared in the host spelling.
 fn named_root_in<'a>(spelling: Spelling, text: &str, forms: &'a [PathBuf]) -> Option<&'a PathBuf> {
-    let text = spelling.fold(text);
-    let ends = |c: char| spelling.ends_token(c);
-    let paths: Vec<PathBuf> = text.split(ends).filter_map(lexical).collect();
-    let textual = forms.iter().find(|form| {
-        let root = spelling.fold(&form.to_string_lossy());
-        let form = Path::new(&root);
-        let named_at = |at: usize| match text[at + root.len()..].chars().next() {
-            // A sibling name, unless its path leads back under the root.
-            Some(next) if continues_name(next) => {
-                let token = text[at..].split(ends).next().unwrap_or_default();
-                lexical(token).is_some_and(|path| path.starts_with(form))
-            }
-            _ => true,
-        };
-        !root.is_empty()
-            && (text.match_indices(&root).any(|(at, _)| named_at(at))
-                || paths.iter().any(|path| path.starts_with(form)))
-    });
-    textual.or_else(|| {
-        forms.iter().find(|form| {
-            paths
-                .iter()
-                .any(|path| names_by_identity(path, form) || unresolved_on_known_volume(path, form))
-        })
-    })
+    shell::named_root_in(spelling, text, forms)
 }
 
 /// The finding for check `id` that names live root `root`: the one text

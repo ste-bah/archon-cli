@@ -335,6 +335,10 @@ impl LlmProvider for ObservedLlmProvider {
         self.inner.resolve_alias(alias)
     }
 
+    fn resolve_request_model(&self, request: &mut LlmRequest) {
+        self.inner.resolve_request_model(request)
+    }
+
     async fn stream(&self, request: LlmRequest) -> Result<Receiver<StreamEvent>, LlmError> {
         let observed = ObservedRequest::from_request(self.inner.name(), &request);
         let request_id = uuid::Uuid::new_v4().to_string();
@@ -412,6 +416,22 @@ impl LlmProvider for ObservedLlmProvider {
     }
     fn cache_strategy(&self, model: &str) -> archon_llm::cache_strategy::CacheStrategy {
         self.inner.cache_strategy(model)
+    }
+
+    fn data_flow_classification(&self) -> archon_llm::provider::DataFlowClassification {
+        self.inner.data_flow_classification()
+    }
+
+    fn compaction_provider_family(&self) -> archon_llm::compaction_policy::ProviderFamily {
+        self.inner.compaction_provider_family()
+    }
+
+    fn compaction_policy(&self) -> archon_llm::compaction_policy::CompactionPolicy {
+        self.inner.compaction_policy()
+    }
+
+    fn cache_platform(&self) -> archon_llm::cache_models::CachePlatform {
+        self.inner.cache_platform()
     }
 
     fn as_anthropic(&self) -> Option<&archon_llm::anthropic::AnthropicClient> {

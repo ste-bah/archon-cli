@@ -171,6 +171,38 @@ fn issue443_restores_the_366d_assertion_without_the_d1d12efb6_false_negatives() 
     }
 }
 
+#[test]
+fn evidence_366_asserted_output_and_repository_claims_remain_distinct() {
+    let runtime_output =
+        "The test asserts `out/report.json` exists under its temporary output root.";
+    let beside_assertion =
+        "The test asserts `out/report.json` exists. `src/ghost.rs` exists (12 lines).";
+    let runtime_phrase_claim =
+        "`src/ghost.rs` exists under the runtime data root and is produced by the runner.";
+    let cases = [
+        (
+            runtime_output,
+            vec!["out/report.json".to_string()],
+            Vec::<String>::new(),
+        ),
+        (
+            beside_assertion,
+            vec!["out/report.json".to_string(), "src/ghost.rs".to_string()],
+            vec!["src/ghost.rs".to_string()],
+        ),
+        (
+            runtime_phrase_claim,
+            Vec::<String>::new(),
+            vec!["src/ghost.rs".to_string()],
+        ),
+    ];
+    for (case, before, expected) in cases {
+        let actual = claimed_paths(case);
+        println!("EVIDENCE #366 assertion-claim BEFORE: {before:?} AFTER: {actual:?}");
+        assert_eq!(actual, expected, "{case}");
+    }
+}
+
 fn claimed_paths(text: &str) -> Vec<String> {
     claims(text).into_iter().map(|(path, _)| path).collect()
 }

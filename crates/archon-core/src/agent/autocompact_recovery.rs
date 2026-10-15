@@ -206,11 +206,12 @@ pub fn classify_stream_error(
     error_type: &str,
     message: &str,
 ) -> archon_llm::provider::LlmError {
+    let message = archon_observability::redaction::redact_text(message);
     archon_llm::context_window::classify_context_window_error(
         None,
         Some(error_type),
         None,
-        message,
+        &message,
         Some(provider),
         None,
     )

@@ -289,7 +289,7 @@ impl AnthropicClient {
 
                 // 401 on OAuth: force-refresh once, then retry with the
                 // refreshed request-local header on the next loop iteration.
-                ApiError::AuthError(_)
+                ApiError::AuthError(_) | ApiError::Rejected { .. }
                     if status.as_u16() == 401
                         && matches!(&self.auth, AuthProvider::OAuthToken(_))
                         && !refreshed_after_401 =>

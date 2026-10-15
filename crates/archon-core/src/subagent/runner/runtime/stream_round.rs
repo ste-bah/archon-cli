@@ -117,7 +117,7 @@ pub(super) async fn collect_stream_round(
         // is resent soon after the wake.
         let received = within(stream_idle_timeout(runner), rx.recv()).await;
         let transport_failure = matches!(&received, Ok(Some(StreamEvent::Error { error_type, message }))
-            if matches!(error_type.as_str(), "network" | "http_error") || error_type == "protocol" && message.contains("stream ended before message_stop"));
+            if archon_llm::retry::stream_error_is_retryable(error_type, message));
         let empty_terminal = text_content.trim().is_empty()
             && pending_tools.is_empty()
             && !matches!(finish_reason.as_deref(), Some("max_tokens" | "length"));
