@@ -358,6 +358,11 @@ impl ExecutabilityProbe for HostProbe {
         contract: &AcceptanceContract,
         ids: &BTreeSet<String>,
     ) -> BTreeMap<String, String> {
+        let missing =
+            hermetic::siblings::missing_for_checks(&self.project, &self.repository, contract, ids);
+        if !missing.is_empty() {
+            return missing;
+        }
         self.probe(contract, ids, false).await
     }
 

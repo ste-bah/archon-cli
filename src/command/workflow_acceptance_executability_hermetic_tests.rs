@@ -157,7 +157,7 @@ fn a_separate_project_copy_keeps_its_real_top_level_path_inside_the_tree() {
         environment_note: None,
     };
     let (_, roots) = layout.site_tree().unwrap();
-    let context = super::super::verdict::Context::new(BTreeMap::new(), &contract).within(2, roots);
+    let context = super::super::verdict::Context::new(BTreeMap::new(), &contract).within(2, &roots);
     assert_eq!(
         super::super::verdict::no_verdict(command, &result, &context),
         None,
@@ -466,3 +466,6 @@ fn relative_and_symlinked_task_roots_exclude_the_same_contract() {
         data_digest(source.path(), &repository(&source), Some(&alias)).unwrap()
     );
 }
+
+#[path = "workflow_acceptance_executability_sibling_tests.rs"]
+mod sibling_tests;

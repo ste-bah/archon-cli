@@ -40,7 +40,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 20: #374 reconstructs unresolved paths from the longest existing
         // ancestor before comparing with the live root; only an unresolvable
         // same-volume path fails closed. Sibling paths can now pass.
-        version: 20,
+        // 21: #420 copies named sibling inputs into each temporary check site;
+        // absent named siblings are refused at author time and copied paths
+        // are inside the setup-path tree, changing passability verdicts.
+        version: 21,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.

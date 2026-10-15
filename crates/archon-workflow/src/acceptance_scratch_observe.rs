@@ -156,7 +156,18 @@ pub async fn observe_commands_hooked(
             }
             return Ok(());
         }
-        roots = Some(phase().run(|| ScratchRoots::prepare_inner(policy, commit))?);
+        let checks = commands
+            .iter()
+            .filter_map(|command| command.as_ref().ok())
+            .map(|command| {
+                (
+                    String::from_utf8_lossy(command.bytes()).into_owned(),
+                    command.cwd(),
+                )
+            })
+            .collect::<Vec<_>>();
+        roots =
+            Some(phase().run(|| ScratchRoots::prepare_inner_with_checks(policy, commit, &checks))?);
         let roots = roots.as_ref().expect("prepared");
         result.copied_project_manifest = phase().run(|| inventory(roots.project()))?;
         let baseline = phase().run(|| identity::capture(roots, policy))?;
@@ -228,6 +239,7 @@ pub async fn observe_commands_hooked(
             }
             result.check_evidence.push(CheckEvidence {
                 acceptance_id: reference.acceptance_id.clone(),
+                sibling_revisions: roots.sibling_revisions().to_vec(),
                 before_identity,
                 after_identity: after_identity.ok(),
                 changed_project_paths: changed_paths,
