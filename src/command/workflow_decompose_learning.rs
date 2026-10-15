@@ -16,10 +16,10 @@ pub(crate) use findings::gate_finding_records;
 mod delivery;
 pub(super) use delivery::with_fold_lock;
 #[path = "workflow_decompose_learning_journal.rs"]
-mod journal;
+pub(super) mod journal;
 #[cfg(test)]
 pub(super) use journal::finish_journal_dispatch;
-pub(super) use journal::{journal_paths, read_journal, stage_journal, write_journal};
+pub(super) use journal::{journal_paths, stage_journal, write_journal};
 
 #[cfg(test)]
 pub(crate) fn hooks(content: &str, config: &LearningConfig) -> Vec<String> {

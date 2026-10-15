@@ -350,7 +350,7 @@ fn a_fold_killed_half_way_resumes_without_duplicate_episodes() {
         "re-delivery replaced episodes, never added one"
     );
     assert!(
-        super::workflow_decompose_learning::read_journal(&pending)
+        super::workflow_decompose_learning::journal::read_journal(&pending)
             .unwrap()
             .is_empty(),
         "the spool empties once every lesson landed"

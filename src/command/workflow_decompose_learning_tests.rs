@@ -1,6 +1,7 @@
+use super::workflow_decompose_learning::journal::read_journal;
 use super::workflow_decompose_learning::{
-    finish_journal_dispatch, lesson_records, read_journal, redact_lesson, stable_lesson_key,
-    stage_journal, write_journal,
+    finish_journal_dispatch, lesson_records, redact_lesson, stable_lesson_key, stage_journal,
+    write_journal,
 };
 
 #[path = "workflow_decompose_learning_evidence_tests.rs"]
