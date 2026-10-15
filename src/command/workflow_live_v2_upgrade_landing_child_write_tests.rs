@@ -68,7 +68,10 @@ async fn rejudge_child_write_to_frozen_task_cannot_change_the_live_task() {
     let mut receipt_outcome: archon_workflow::HostCommandResult =
         serde_json::from_value(landing.result.data.clone()).unwrap();
     let receipt = receipt_outcome.publication_receipt.as_mut().unwrap();
-    let path_key = task_path.to_string_lossy();
+    // Receipt records use stored path text (forward slashes on Windows).
+    // EXPECTED BEFORE LOOKUP: the live task and receipt key identify the same
+    // file after separator normalization.
+    let path_key = archon_shell::paths::stored_text(&task_path);
     let receipt_entry = receipt
         .entries
         .iter_mut()

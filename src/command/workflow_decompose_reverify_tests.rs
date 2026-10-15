@@ -266,7 +266,7 @@ pub(super) fn archon_binary() -> std::path::PathBuf {
                 .unwrap()
                 .parent()
                 .unwrap()
-                .join("archon")
+                .join(format!("archon{}", std::env::consts::EXE_SUFFIX))
         });
     assert!(
         binary.is_file(),

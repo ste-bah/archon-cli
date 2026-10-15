@@ -137,14 +137,19 @@ impl FixedHostCommandExecutor {
             command.args[task_file_arg + 1] =
                 staging.root.join(file_name).to_string_lossy().into_owned();
         }
-        if command
-            .declared_write_set
-            .iter()
-            .any(|path| !path.starts_with(&staging.root))
-        {
-            return Err(WorkflowError::SpecInvalid(
-                "resolved host command write set escaped prepared staging root".to_string(),
-            ));
+        for path in &command.declared_write_set {
+            let contained =
+                resolved_path_is_within_root(&staging.root, path).map_err(|source| {
+                    WorkflowError::Io {
+                        path: path.clone(),
+                        source,
+                    }
+                })?;
+            if !contained {
+                return Err(WorkflowError::SpecInvalid(
+                    "resolved host command write set escaped prepared staging root".to_string(),
+                ));
+            }
         }
         let destinations = self.destinations(&context, &command, &call_id)?;
         let sentinels =
@@ -367,5 +372,69 @@ impl FixedHostCommandExecutor {
         let sealed = cleanup.finish();
         finish::settle_cleanup(result, sealed, &staging.root, &pause, &secrets)
             .map_err(|error| secrets.error(error))
+    }
+}
+
+/// Compare filesystem identities rather than path spellings. On Windows the
+/// same directory can be named through an 8.3 alias or a verbatim path.
+fn resolved_path_is_within_root(
+    root: &std::path::Path,
+    path: &std::path::Path,
+) -> std::io::Result<bool> {
+    fn resolve(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+        if path.exists() {
+            return archon_shell::paths::canonicalize(path);
+        }
+        let parent = path.parent().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent")
+        })?;
+        let name = path.file_name().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name")
+        })?;
+        Ok(archon_shell::paths::canonicalize(parent)?.join(name))
+    }
+
+    resolved_path_is_within_root_using(root, path, resolve)
+}
+
+fn resolved_path_is_within_root_using(
+    root: &std::path::Path,
+    path: &std::path::Path,
+    resolve: impl Fn(&std::path::Path) -> std::io::Result<std::path::PathBuf>,
+) -> std::io::Result<bool> {
+    let canonical_root = resolve(root)?;
+    let canonical_path = resolve(path)?;
+    Ok(canonical_path.starts_with(canonical_root))
+}
+
+#[cfg(test)]
+mod prepared_write_path_tests {
+    use super::resolved_path_is_within_root_using;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn staging_containment_uses_resolved_path_identity() {
+        // EXPECTED BEFORE CHECK: the short-name spelling resolves to the
+        // staging directory and must be contained; a sibling must not be.
+        let root = Path::new(r"C:\Users\runneradmin\AppData\Local\Temp\stage");
+        let short_child = Path::new(r"C:\Users\RUNNER~1\AppData\Local\Temp\stage\gate.json");
+        let outside = Path::new(r"C:\Users\RUNNER~1\AppData\Local\Temp\stage-other\gate.json");
+        let resolve = |path: &Path| -> std::io::Result<PathBuf> {
+            let value = path
+                .to_string_lossy()
+                .replace("RUNNER~1", "runneradmin")
+                .replace('\\', "/");
+            Ok(PathBuf::from(value))
+        };
+        assert!(!short_child.starts_with(root));
+        assert!(resolved_path_is_within_root_using(root, short_child, resolve).unwrap());
+        let resolve = |path: &Path| -> std::io::Result<PathBuf> {
+            let value = path
+                .to_string_lossy()
+                .replace("RUNNER~1", "runneradmin")
+                .replace('\\', "/");
+            Ok(PathBuf::from(value))
+        };
+        assert!(!resolved_path_is_within_root_using(root, outside, resolve).unwrap());
     }
 }

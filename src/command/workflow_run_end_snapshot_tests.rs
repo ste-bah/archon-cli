@@ -229,7 +229,10 @@ fn implementation_admission_routes_a_needs_remediation_reverify_to_resume() {
     let task_root = project.path().join("tasks/set");
     std::fs::create_dir_all(&task_root).unwrap();
     std::fs::write(task_root.join("TASK-EX-001.md"), "task").unwrap();
-    let plain_task_root = task_root.canonicalize().unwrap();
+    // EXPECTED BEFORE admission: persisted fixture identities use the same
+    // plain canonical spelling as production, including on Windows where
+    // std::fs::canonicalize otherwise adds the verbatim prefix.
+    let plain_task_root = archon_shell::paths::canonicalize(&task_root).unwrap();
     let store = WorkflowStore::project(project.path());
     let run = store
         .create_run(plan(task_universe(&task_root)).approval_metadata_spec())
