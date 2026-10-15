@@ -26,7 +26,11 @@
 //! `\\server\share\x`) and the verbatim one that `canonicalize` gives
 //! (`\\?\C:\x`, `\\?\UNC\server\share\x`). Both are forms of it. There
 //! the text is compared without case and `/` is read as `\`, as Windows
-//! resolves a path ([`Spelling`]).
+//! resolves a path ([`Spelling`]). If a path does not fully resolve, its
+//! longest existing ancestor is canonicalized and its remaining components
+//! are appended before comparing components with the canonical live root.
+//! This expands short-name and mapped or UNC aliases the OS resolves. A
+//! same-volume path fails closed only if none of its ancestors resolves.
 
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf, Prefix};
@@ -249,13 +253,52 @@ fn names_by_identity(path: &Path, root: &Path) -> bool {
         .any(|ancestor| ancestor == root_handle)
 }
 
-/// Windows paths that cannot be opened still refer to the live root if they
-/// are absolute and name the same known volume. Inaccessible or not-yet-made
-/// paths on that volume must fail closed (Issue 374).
+#[cfg(any(windows, test))]
+fn reconstruct_from_longest_existing_ancestor(
+    path: &Path,
+    mut canonicalize: impl FnMut(&Path) -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    path.ancestors().find_map(|ancestor| {
+        let canonical = canonicalize(ancestor)?;
+        let remainder = path.strip_prefix(ancestor).ok()?;
+        Some(canonical.join(remainder))
+    })
+}
+
+#[cfg(any(windows, test))]
+fn path_starts_with(path: &Path, root: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let mut path = path.components();
+        root.components().all(|root_component| {
+            path.next().is_some_and(|path_component| {
+                path_component
+                    .as_os_str()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&root_component.as_os_str().to_string_lossy())
+            })
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        path.starts_with(root)
+    }
+}
+
+/// Reconstruct unresolved Windows paths from their longest existing ancestor
+/// before comparing them with the canonical live root. This expands aliases
+/// that the OS resolves, while a sibling stays outside the root. Only fail
+/// closed when no ancestor resolves and the path names the root's known volume.
 #[cfg(windows)]
 fn unresolved_on_known_volume(path: &Path, root: &Path) -> bool {
     if path.exists() {
         return false;
+    }
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if let Some(reconstructed) =
+        reconstruct_from_longest_existing_ancestor(path, |ancestor| ancestor.canonicalize().ok())
+    {
+        return path_starts_with(&reconstructed, &canonical_root);
     }
     let volume = |path: &Path| match path.components().next() {
         Some(Component::Prefix(prefix)) => Some(

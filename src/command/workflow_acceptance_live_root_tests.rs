@@ -159,6 +159,38 @@ fn unrelated_paths_on_the_same_volume_do_not_name_the_root() {
     );
 }
 
+#[test]
+fn unresolved_paths_are_rebuilt_from_the_longest_resolvable_ancestor() {
+    let path = Path::new("/short/live/missing/child");
+    let root = Path::new("/canonical/live");
+    let canonicalize = |ancestor: &Path| match ancestor {
+        p if p == Path::new("/short/live") => Some(root.to_path_buf()),
+        p if p == Path::new("/short") => Some(PathBuf::from("/canonical")),
+        _ => None,
+    };
+
+    let rebuilt = reconstruct_from_longest_existing_ancestor(path, canonicalize);
+    assert_eq!(
+        rebuilt,
+        Some(PathBuf::from("/canonical/live/missing/child"))
+    );
+
+    let sibling = Path::new("/short/live-other/child");
+    let rebuilt_sibling = reconstruct_from_longest_existing_ancestor(sibling, |ancestor| {
+        (ancestor == Path::new("/short")).then(|| PathBuf::from("/canonical"))
+    });
+    assert_eq!(
+        rebuilt_sibling,
+        Some(PathBuf::from("/canonical/live-other/child"))
+    );
+    assert!(!path_starts_with(rebuilt_sibling.as_deref().unwrap(), root));
+    assert_eq!(
+        reconstruct_from_longest_existing_ancestor(Path::new("/unknown/missing"), |_| None),
+        None,
+        "no resolvable ancestor leaves fail-closed handling to the volume rule"
+    );
+}
+
 /// The three `repository.lock` texts no freeze may believe (Issue 366, N1):
 /// one that is not JSON, one of another schema, and one whose recorded
 /// root is gone. Each leaves the true repository root unknown.
@@ -327,6 +359,14 @@ fn windows_short_name_alias_is_matched_by_file_identity() {
     );
     let forms = root_forms([root.as_path()]);
     assert!(named_root(&format!("type {}", short.display()), &forms).is_some());
+    let unresolved_under_short_alias = short.join("not-created");
+    assert!(
+        named_root(
+            &format!("type {}", unresolved_under_short_alias.display()),
+            &forms
+        )
+        .is_some()
+    );
     println!(
         "EVIDENCE #374 short-alias BEFORE: textual path differs from live root; AFTER: identity lookup refused alias={}",
         short.display()
@@ -335,12 +375,12 @@ fn windows_short_name_alias_is_matched_by_file_identity() {
 
 #[cfg(windows)]
 #[test]
-fn windows_unresolved_path_on_live_volume_fails_closed_but_sibling_directory_is_not_live() {
+fn windows_unresolved_under_root_is_refused_and_sibling_is_allowed() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("Live Root");
     std::fs::create_dir(&root).unwrap();
     let forms = root_forms([root.as_path()]);
-    let unresolved = temp.path().join("unresolved").join("child");
+    let unresolved = root.join("unresolved").join("child");
     let sibling = temp.path().join("unrelated-missing").join("child");
     let live_volume = root
         .components()
@@ -357,20 +397,17 @@ fn windows_unresolved_path_on_live_volume_fails_closed_but_sibling_directory_is_
     let unresolved_before = names_by_identity(&unresolved, &root);
     let unresolved_after = named_root(&format!("type {}", unresolved.display()), &forms).is_some();
     println!(
-        "EVIDENCE #374 unresolved-same-volume BEFORE: identity={} and path unresolved; AFTER: fail-closed verdict={}",
+        "EVIDENCE #374 unresolved-under-root BEFORE: identity={} and path unresolved; AFTER: reconstructed live-root verdict={}",
         unresolved_before, unresolved_after
     );
     assert!(unresolved_after);
 
     let sibling_after = named_root(&format!("type {}", sibling.display()), &forms).is_some();
     println!(
-        "EVIDENCE #374 unrelated-sibling BEFORE: path unresolved on live volume; AFTER: fail-closed verdict={}",
+        "EVIDENCE #374 unrelated-sibling BEFORE: path unresolved on live volume; AFTER: ancestor reconstruction verdict={}",
         sibling_after
     );
-    assert!(
-        sibling_after,
-        "the decision treats unresolved absolute paths on a known live volume as suspect"
-    );
+    assert!(!sibling_after);
 
     let other_volume_after =
         named_root(&format!("type {}", other_volume.display()), &forms).is_some();
