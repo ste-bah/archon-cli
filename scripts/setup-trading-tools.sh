@@ -246,9 +246,9 @@ if [ "$SKIP_OPENBB" != true ]; then
     if [ -x "$OPENBB_VENV/bin/python" ] && "$OPENBB_VENV/bin/python" -c 'import openbb' >/dev/null 2>&1; then
         :
     else
+        prepare_venv_rebuild
         load_openbb_specifier
         find_python
-        prepare_venv_rebuild
         run "$PYTHON_BASE" -m venv --clear "$OPENBB_VENV"
     fi
     run "$OPENBB_VENV/bin/python" -m pip install --upgrade pip

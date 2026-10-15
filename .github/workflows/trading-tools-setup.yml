@@ -96,8 +96,7 @@ jobs:
           Show-WindowsPythonDiagnostics
           try { & $setupScript -Target $pyOnlyTarget -SkipTradingView; throw 'py-only non-venv was not refused' }
           catch { if ($_.Exception.Message -notmatch 'non-venv directory') { throw } }
-          Assert-PythonCommands @('py')
-          if ((Get-Content -LiteralPath $pythonLog -Raw) -notmatch 'py -3 .*\.py') { throw 'py -3 was not selected with a probe file in py-only PATH case' }
+          Assert-PythonCommands @()
           if (-not (Test-Path -LiteralPath (Join-Path $pyOnlyVenv 'keep.txt') -PathType Leaf)) { throw 'py-only sentinel was removed' }
           $junctionTarget = Join-Path $env:RUNNER_TEMP 'trading setup junction target'
           $junctionProject = Join-Path $env:RUNNER_TEMP 'trading setup junction project'

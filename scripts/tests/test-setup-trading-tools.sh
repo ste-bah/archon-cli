@@ -60,6 +60,9 @@ FAKE_BIN="$TEMP_ROOT/fake bin"
 mkdir -p "$FAKE_BIN"
 cat > "$FAKE_BIN/python3" <<'EOF'
 #!/bin/sh
+if [ -n "${FAKE_SETUP_LOG:-}" ]; then
+    printf '%s %s\n' "$(basename "$0")" "$*" >> "$FAKE_SETUP_LOG"
+fi
 if [ "$1" = --version ]; then echo 'Python 3.12.1'; exit 0; fi
 if [ -f "$1" ] && [ -n "$ARCHON_SETUP_PYTHON_SPECIFIER" ]; then exit 0; fi
 if [ "$1" = -c ]; then exit 0; fi
@@ -78,7 +81,7 @@ PYTHON
 printf '%s\n' "$*"
 API
     chmod +x "$VENV/bin/python" "$VENV/bin/openbb-api"
-    printf '%s\n' "$*" > "$FAKE_SETUP_LOG"
+    printf '%s\n' "$*" >> "$FAKE_SETUP_LOG"
     exit 0
 fi
 exit 8
@@ -111,12 +114,17 @@ mkdir -p "$LINK_TARGET"
 printf 'keep me\n' > "$LINK_TARGET/sentinel.txt"
 mkdir -p "$LINKED_VENV_TARGET/.archon/tools"
 ln -s "$LINK_TARGET" "$LINKED_VENV_TARGET/.archon/tools/openbb-venv"
+: > "$FAKE_SETUP_LOG"
 if link_output=$(PATH="$FAKE_BIN:$PATH" FAKE_SETUP_LOG="$FAKE_SETUP_LOG" \
     "$REPO_ROOT/scripts/setup-trading-tools.sh" --target "$LINKED_VENV_TARGET" --skip-tradingview 2>&1); then
     echo 'expected symlinked OpenBB venv to be refused' >&2
     exit 1
 fi
 printf '%s\n' "$link_output" | grep -F "$LINK_TARGET" >/dev/null
+if [ -s "$FAKE_SETUP_LOG" ]; then
+    echo "expected no interpreter calls for symlinked OpenBB venv, got: $(cat "$FAKE_SETUP_LOG")" >&2
+    exit 1
+fi
 test "$(cat "$LINK_TARGET/sentinel.txt")" = 'keep me'
 
 NON_VENV_TARGET="$TEMP_ROOT/non-venv project"
@@ -189,17 +197,18 @@ run_spec_case() {
     case_venv="$case_target/.archon/tools/openbb-venv"
     case_metadata="$case_venv/lib/python3.12/site-packages/openbb-99.dist-info"
     mkdir -p "$case_metadata"
+    printf 'home = fake-python\n' > "$case_venv/pyvenv.cfg"
     printf 'Metadata-Version: 2.1\nName: openbb\nRequires-Python: %s\n' "$spec" > "$case_metadata/METADATA"
     printf 'preserve\n' > "$case_venv/sentinel"
     case_output=$(PATH="$SPEC_BIN:/usr/bin:/bin" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO="$mock_info" \
         "$REPO_ROOT/scripts/setup-trading-tools.sh" --target "$case_target" --skip-tradingview 2>&1 || true)
-    if printf '%s\n' "$case_output" | grep -F 'non-venv directory with contents' >/dev/null; then case_status=accepted; else case_status=rejected; fi
+    if printf '%s\n' "$case_output" | grep -F -- '-m venv --clear ' >/dev/null; then case_status=accepted; else case_status=rejected; fi
     if [ "$case_status" != "$expected" ]; then
         printf 'specifier case expected %s, got %s: %s / %s\n%s\n' "$expected" "$case_status" "$spec" "$mock_info" "$case_output" >&2
         exit 1
     fi
     if [ "$expected" = accepted ]; then
-        printf '%s\n' "$case_output" | grep -F 'non-venv directory with contents' >/dev/null
+        printf '%s\n' "$case_output" | grep -F -- '-m venv --clear ' >/dev/null
     else
         printf '%s\n' "$case_output" | grep -F "specifier '$spec'" >/dev/null
         if [ "$spec" = '!===3.12' ]; then

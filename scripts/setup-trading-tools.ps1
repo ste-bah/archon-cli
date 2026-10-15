@@ -183,9 +183,9 @@ exit $LASTEXITCODE
 }
 if (-not $SkipOpenBB) {
     if ((Get-OpenBBState) -notlike 'healthy*') {
+        Assert-SafeVenvRebuild
         $specifier = Get-OpenBBSpecifier
         $basePython = Resolve-BasePython $specifier
-        Assert-SafeVenvRebuild
         Invoke-External $basePython.Program ($basePython.Prefix + @('-m', 'venv', '--clear', $Venv))
     }
     Invoke-External $Python @('-m', 'pip', 'install', '--upgrade', 'pip')
