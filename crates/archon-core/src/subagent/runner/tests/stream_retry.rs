@@ -77,33 +77,25 @@ async fn dropped_stream_retries_are_bounded_by_a_no_progress_window() {
 }
 
 #[tokio::test]
-async fn retry_provider_does_not_multiply_runner_window_overload_resends() {
-    let inner = Arc::new(MockProvider::new(vec![
-        vec![StreamEvent::Error {
-            error_type: "overloaded_error".into(),
-            message: "persistent overload".into(),
-        }];
-        200
-    ]));
-    let provider: Arc<dyn LlmProvider> = Arc::new(archon_llm::retry::RetryProvider::new(
+async fn retry_provider_adds_no_stream_open_per_invocation() {
+    let inner = Arc::new(MockProvider::new(vec![vec![StreamEvent::Error {
+        error_type: "overloaded_error".into(),
+        message: "persistent overload".into(),
+    }]]));
+    let provider = archon_llm::retry::RetryProvider::new(
         inner.clone(),
         archon_llm::retry::RetryPolicy::default(),
-    ));
-    let config = AgentConfig {
-        subagent_stream_idle_timeout_secs: 1,
-        ..AgentConfig::default()
-    };
-    let _ = make_runner_with_config(provider, 1, config)
-        .run("answer")
-        .await
-        .unwrap_err();
-    let requests = inner.requests().len();
-    println!(
-        "EVIDENCE #364 persistent-overload BEFORE: RetryProvider max_attempts=3 plus runner window AFTER: requests={requests} (runner-window sequence: 16)"
     );
-    assert!(
-        (15..=16).contains(&requests),
-        "one open per resend allowed by the existing no-progress window: {requests}"
+    let mut stream = provider.stream(LlmRequest::default()).await.unwrap();
+    assert!(matches!(
+        stream.recv().await,
+        Some(StreamEvent::Error { .. })
+    ));
+    let opens = inner.requests().len();
+    println!("EVIDENCE RetryProvider stream invocation: inner opens={opens}");
+    assert_eq!(
+        opens, 1,
+        "one wrapper stream invocation opens the inner provider once"
     );
 }
 

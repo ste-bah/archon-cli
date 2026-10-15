@@ -104,6 +104,18 @@ fn request() -> LlmRequest {
     }
 }
 
+#[test]
+fn replaying_without_an_inner_provider_keeps_the_recorded_model() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let provider = ReplayProvider::replaying(dir.path().to_path_buf());
+    let mut request = request();
+    request.model = "sonnet".into();
+
+    provider.resolve_request_model(&mut request);
+
+    assert_eq!(request.model, "sonnet");
+}
+
 async fn drain(mut rx: Receiver<StreamEvent>) -> Vec<StreamEvent> {
     let mut events = Vec::new();
     while let Some(event) = rx.recv().await {

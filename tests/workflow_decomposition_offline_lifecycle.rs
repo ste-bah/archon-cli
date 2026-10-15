@@ -96,11 +96,26 @@ fn golden_live_decomposition_uses_real_binary_and_local_provider() {
 fn sigstop_over_stream_idle_window_recovers_and_records_the_run() {
     use std::time::Duration;
 
+    const TEST_IDLE_WINDOW_SECS: u64 = 2;
     let project = project::project_with(server::Plan {
         variant: server::Variant::HoldStreamAfterHeaders,
         block: Some(("acceptance".into(), 1)),
     });
     let root = project.path();
+    // Exercise the real CLI config surface with a shorter test idle window.
+    // This keeps the real child, signals, and wall-clock sleep while avoiding
+    // waiting through the production default in this integration test.
+    for path in [root.join("config.toml"), root.join(".archon/config.toml")] {
+        let config = fs::read_to_string(&path).unwrap();
+        let config = config.replace(
+            "max_concurrent = 1",
+            &format!("max_concurrent = 1\nstream_idle_timeout_secs = {TEST_IDLE_WINDOW_SECS}"),
+        );
+        assert!(config.contains(&format!(
+            "stream_idle_timeout_secs = {TEST_IDLE_WINDOW_SECS}"
+        )));
+        fs::write(path, config).unwrap();
+    }
     let mut child = spawn_decompose(root, &[]);
     await_provider_boundary(&project.provider, root, &mut child, "sigstop-stream");
     let suspended_key = project.provider.requests.snapshot()[0].key.clone();
@@ -111,9 +126,7 @@ fn sigstop_over_stream_idle_window_recovers_and_records_the_run() {
         0,
         "SIGSTOP child"
     );
-    std::thread::sleep(Duration::from_secs(
-        archon_core::config::DEFAULT_STREAM_IDLE_TIMEOUT_SECS + 1,
-    ));
+    std::thread::sleep(Duration::from_secs(TEST_IDLE_WINDOW_SECS + 1));
     assert_eq!(
         unsafe { libc::kill(pid, libc::SIGCONT) },
         0,

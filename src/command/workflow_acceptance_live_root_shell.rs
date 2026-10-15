@@ -181,8 +181,14 @@ fn command_substitution_end(text: &str, start: usize, spelling: Spelling) -> Opt
 fn windows_path_word_names(word: &str, root: &str) -> bool {
     let word = word.to_lowercase().replace('/', "\\");
     let root = root.to_lowercase().replace('/', "\\");
-    word.strip_prefix(&root)
-        .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('\\'))
+    word.strip_prefix(&root).is_some_and(|suffix| {
+        suffix.is_empty()
+            || suffix.starts_with('\\')
+            || suffix
+                .chars()
+                .next()
+                .is_some_and(|next| !continues_name(next))
+    })
 }
 
 /// Read shell words with quote removal and adjacent-fragment concatenation.

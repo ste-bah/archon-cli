@@ -206,7 +206,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // re-pin only: verdicts are unchanged.
-        sources_digest: "966aff4b4f7341633a095b07d02477324ab85a767f73e174dc8536679dd599b3",
+        sources_digest: "45607e1be8c69a80ecf8963fe81a0f4c17dbaaab9a4c742b0ba4dad1e6c2e651",
         build_bound: false,
     },
     CapabilityLogic {
@@ -240,7 +240,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #366 re-pin only: acceptance-root detection does not judge skeleton output.
         // integration re-pin: #386 spill view cap removed (house rule: no new limits)
         // re-pin only: verdicts are unchanged.
-        sources_digest: "966aff4b4f7341633a095b07d02477324ab85a767f73e174dc8536679dd599b3",
+        sources_digest: "45607e1be8c69a80ecf8963fe81a0f4c17dbaaab9a4c742b0ba4dad1e6c2e651",
         build_bound: false,
     },
     CapabilityLogic {
@@ -373,7 +373,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: merge of #447, #446, misc2, batch3 and resume2 sources; no logic change
         // integration re-pin: file split, no logic change
         // re-pin only: verdicts are unchanged.
-        sources_digest: "90036b4574c71efcb3a3bf8737d7c336f07f404d8b60319e6c585bb6460327c8",
+        sources_digest: "3a5174480a1a82f336bc9018aebeb49d093b9e5ca9be1657199d9cbdc847428f",
         build_bound: true,
     },
     CapabilityLogic {
@@ -408,7 +408,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // integration re-pin: file split, no logic change
         // #366 re-pin only: the detector change never judges a skeleton verification.
         // re-pin only: verdicts are unchanged.
-        sources_digest: "90036b4574c71efcb3a3bf8737d7c336f07f404d8b60319e6c585bb6460327c8",
+        sources_digest: "3a5174480a1a82f336bc9018aebeb49d093b9e5ca9be1657199d9cbdc847428f",
         build_bound: true,
     },
 ];

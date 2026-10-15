@@ -52,6 +52,23 @@ fn request() -> LlmRequest {
     }
 }
 
+#[tokio::test]
+async fn retry_provider_releases_stream_on_keep_alive_without_waiting_for_content() {
+    let (tx, rx) = tokio::sync::mpsc::channel(2);
+    let probe =
+        tokio::spawn(RetryProvider::<StreamScriptProvider>::drain_until_content_or_error(rx));
+
+    tx.send(StreamEvent::Ping).await.unwrap();
+    let forwarded = tokio::time::timeout(std::time::Duration::from_secs(1), probe)
+        .await
+        .expect("keep-alive must release the wrapper while the response is still open")
+        .unwrap();
+    let StreamProbe::Usable(mut forwarded) = forwarded else {
+        panic!("keep-alive should make the stream usable");
+    };
+    assert!(matches!(forwarded.recv().await, Some(StreamEvent::Ping)));
+}
+
 struct MetadataProbeProvider {
     anthropic: AnthropicClient,
 }

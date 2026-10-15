@@ -214,6 +214,11 @@ impl<P: LlmProvider + ?Sized> RetryProvider<P> {
                 | StreamEvent::InputJsonDelta { .. }
                 | StreamEvent::ContentBlockStop { .. }
                 | StreamEvent::MessageStop
+                // Anthropic keep-alives are visible activity. Releasing the
+                // stream at the first ping keeps the caller's idle clock and
+                // HTTP read backstop in control while preserving pre-content
+                // error classification for streams that fail before activity.
+                | StreamEvent::Ping
         )
     }
 

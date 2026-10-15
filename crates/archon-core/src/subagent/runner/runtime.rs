@@ -162,7 +162,7 @@ impl SubagentRunner {
             let inference = async {
                 optional_timeout(
                     inference_deadline,
-                    collect_stream_round(
+                    Box::pin(collect_stream_round(
                         self,
                         &mut messages,
                         &mut auto_compact,
@@ -178,7 +178,7 @@ impl SubagentRunner {
                             prepared_request.large_retry_body_bytes,
                         ),
                         &prepared_request.telemetry,
-                    ),
+                    )),
                 )
                 .await
                 .map_err(|_| {

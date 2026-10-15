@@ -288,8 +288,6 @@ impl LlmProvider for ReplayProvider {
     fn resolve_request_model(&self, request: &mut LlmRequest) {
         if let Some(inner) = &self.inner {
             inner.resolve_request_model(request);
-        } else {
-            LlmProvider::resolve_request_model(self, request);
         }
     }
 

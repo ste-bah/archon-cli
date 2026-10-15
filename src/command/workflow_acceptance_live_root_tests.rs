@@ -413,6 +413,19 @@ fn the_windows_spelling_matches_without_case_and_either_separator() {
     assert!(!(['\\', ':', '?'].into_iter()).any(|c| Spelling::Windows.ends_token(c)));
 }
 
+/// Shell command words are text even when the host parses paths with Windows
+/// rules: POSIX-rooted words still name their textual root.
+#[test]
+fn windows_comparison_matches_posix_rooted_shell_words_on_every_host() {
+    let forms = [PathBuf::from("/work/repo")];
+    let windows = |text: &str| named_root_in(Spelling::Windows, text, &forms);
+
+    for text in ["ls /work/repo$SUFFIX", "ls \"$(printf /work/repo%s /src)\""] {
+        assert_eq!(windows(text), Some(&forms[0]), "{text}");
+    }
+    assert_eq!(windows("ls /work/repo-other/x"), None);
+}
+
 /// On Windows a drive root, a verbatim drive root, a UNC share root and a
 /// drive-relative path have no form; a root has its plain and its verbatim
 /// spelling, and a path that leads back under it is named.
