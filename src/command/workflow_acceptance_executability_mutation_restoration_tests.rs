@@ -186,9 +186,102 @@ fn the_mutation_moves_named_inputs_aside_and_restores_them_whatever_the_check_tr
         std::fs::read_to_string(dir.path().join("data/state.txt")).unwrap(),
         "ready"
     );
-    // A check that recreates the input it reads is undone too.
+    // A recreated input still present when restoration runs is undone too.
     let recreates = "printf 'other' > data/state.txt; exit 0";
-    sh(dir.path(), &wrap(recreates, &names, &[], &Markers::new()));
+    let recreate_markers = Markers::new();
+    let recreated = sh(dir.path(), &wrap(recreates, &names, &[], &recreate_markers));
+    assert_eq!(
+        recreate_markers.recreated(&recreated),
+        BTreeSet::from(["data/state.txt".to_string()]),
+        "{}",
+        String::from_utf8_lossy(&recreated.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("data/state.txt")).unwrap(),
+        "ready"
+    );
+}
+
+#[test]
+fn a_recreated_input_read_and_deleted_by_the_check_is_marked_recreated() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("data")).unwrap();
+    std::fs::write(dir.path().join("data/state.txt"), "ready").unwrap();
+    let names = names_of(&["data/state.txt"]);
+    let recreates = "d=data; f=state.txt; printf 'other' > \"$d/$f\"; cat \"$d/$f\" >/dev/null; rm \"$d/$f\"; exit 0";
+    let markers = Markers::new();
+    let recreated = sh(dir.path(), &wrap(recreates, &names, &[], &markers));
+    assert_eq!(recreated.exit_code, Some(0));
+    assert_eq!(
+        markers.recreated(&recreated),
+        BTreeSet::from(["data/state.txt".to_string()]),
+        "{}",
+        String::from_utf8_lossy(&recreated.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("data/state.txt")).unwrap(),
+        "ready"
+    );
+}
+
+#[test]
+fn recreating_reading_and_deleting_an_input_cannot_hide_behind_restored_parent_mtime() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("data")).unwrap();
+    std::fs::write(dir.path().join("data/state.txt"), "ready").unwrap();
+
+    // Skip only on hosts whose touch does not implement -r; the regression
+    // needs to restore the directory mtime after the transient recreation.
+    let touch_probe = sh(dir.path(), "touch -r data .parent-time-ref");
+    if touch_probe.exit_code != Some(0) {
+        let stderr = String::from_utf8_lossy(&touch_probe.stderr).to_ascii_lowercase();
+        let unsupported = ["illegal option", "invalid option", "unknown option"]
+            .iter()
+            .any(|message| stderr.contains(message));
+        assert!(
+            unsupported,
+            "touch -r probe failed for a reason other than an unsupported option (exit {:?}): {}",
+            touch_probe.exit_code, stderr
+        );
+        eprintln!("skipping: touch -r is unsupported on this host");
+        return;
+    }
+    std::fs::remove_file(dir.path().join(".parent-time-ref")).unwrap();
+
+    let names = names_of(&["data/state.txt"]);
+    let recreates = "set -e; : > .check-started; touch -r data .parent-time-ref; sleep 1; printf 'other' > data/state.txt; cat data/state.txt >/dev/null; rm data/state.txt; touch -m -r .parent-time-ref data; rm .parent-time-ref; : > .check-mtime-restored; exit 0";
+    let markers = Markers::new();
+    let project = dir.path().to_path_buf();
+    let mtime_observer = std::thread::spawn(move || {
+        let wait_for = |name: &str| {
+            let marker = project.join(name);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !marker.exists() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "timed out waiting for {name}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            std::fs::metadata(project.join("data"))
+                .unwrap()
+                .modified()
+                .unwrap()
+        };
+        let before = wait_for(".check-started");
+        let after = wait_for(".check-mtime-restored");
+        (before, after)
+    });
+    let recreated = sh(dir.path(), &wrap(recreates, &names, &[], &markers));
+    assert_eq!(recreated.exit_code, Some(0));
+    let (parent_mtime_before, parent_mtime_after) = mtime_observer.join().unwrap();
+    assert_eq!(parent_mtime_before, parent_mtime_after);
+    assert_eq!(
+        markers.recreated(&recreated),
+        BTreeSet::from(["data/state.txt".to_string()]),
+        "{}",
+        String::from_utf8_lossy(&recreated.stderr)
+    );
     assert_eq!(
         std::fs::read_to_string(dir.path().join("data/state.txt")).unwrap(),
         "ready"

@@ -86,7 +86,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; its freeze verdicts are unchanged.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not check verdicts.
         // #457: baseline-passing checks may use a bound accepted judge verdict; the can-fail proof remains required.
-        sources_digest: "1c64e2a09fde0cb9d675d25e8bbbeb561ca06e1ee55b5ccddea232a18320bc50",
+        // #457 follow-up re-pin only: transient recreation of moved check inputs invalidates a stored verdict; freeze-acceptance remains version 28 (unreleased).
+        sources_digest: "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
         build_bound: false,
     },
     CapabilityLogic {
@@ -129,7 +130,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // # resource defaults re-pin only: skeleton freeze does not judge checks.
         // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
         // #457 re-pin only: acceptance probe changes do not affect skeleton freeze verdicts.
-        sources_digest: "1c64e2a09fde0cb9d675d25e8bbbeb561ca06e1ee55b5ccddea232a18320bc50",
+        // #457 follow-up re-pin only: this closure is shared; the skeleton verdict is unchanged.
+        sources_digest: "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
         build_bound: false,
     },
     CapabilityLogic {

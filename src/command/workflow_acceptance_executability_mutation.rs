@@ -1,22 +1,10 @@
-//! The generic input mutation (A4): proving a check that passes on the
-//! pre-implementation tree can still fail.
-//!
-//! A baseline-passing check is challenged by moving aside the data paths
-//! named by its shell text. Candidate extraction excludes command mechanics,
-//! message text, manifests, generated outputs, and paths outside the copied
-//! check tree except siblings the workflow has discovered and copied.
-//!
-//! The mutation is a shell prologue and epilogue around the check's own
-//! text, which runs in a subshell so its own `trap`/`exit` cannot skip the
-//! restore. The prologue first sweeps what an earlier killed run left, then
-//! moves each input aside unless a component of its path is a symlink
-//! (following one could move a live file); the epilogue restores them in
-//! REVERSE order (a nested input comes back before its parent) and only
-//! then reports, on stdout, that everything was restored. Every marker
-//! carries a per-run nonce, so a check cannot forge one. It is only ever
-//! run in a hermetic copy, one per mutated check; the prologue refuses, with
-//! a guard marker, to move anything when its working directory is inside a
-//! live root.
+//! Generic input mutation (A4): prove that a check passing on the
+//! pre-implementation tree can fail. Move aside text-derived data paths,
+//! excluding command mechanics, manifests, generated outputs and paths
+//! outside the copied check tree (except discovered siblings). Run the check
+//! in a subshell, then restore moved paths in reverse order even when its
+//! `trap` or `exit` runs. Nonce markers prevent forged results. Each
+//! mutation uses a hermetic copy; a live-root guard prevents moving live data.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -27,6 +15,9 @@ use archon_workflow::task_set_contract::{
 };
 
 use super::executed_text;
+
+#[path = "workflow_acceptance_executability_mutation_wrapper_script.rs"]
+mod wrapper_script;
 
 /// The exit status of a run stopped at the live-root guard.
 pub(super) const GUARD_STATUS: i32 = 97;
@@ -363,6 +354,10 @@ impl Markers {
         format!("archon-mutation-generated-{}: ", self.nonce)
     }
 
+    fn recreated_prefix(&self) -> String {
+        format!("archon-mutation-recreated-{}: ", self.nonce)
+    }
+
     fn restored(&self) -> String {
         format!("archon-mutation-restored-{}", self.nonce)
     }
@@ -392,6 +387,15 @@ impl Markers {
             .collect()
     }
 
+    pub(super) fn recreated(&self, result: &CheckResult) -> BTreeSet<String> {
+        let prefix = self.recreated_prefix();
+        String::from_utf8_lossy(&result.stderr)
+            .lines()
+            .filter_map(|line| line.strip_prefix(prefix.as_str()))
+            .map(str::to_string)
+            .collect()
+    }
+
     pub(super) fn restored_all(&self, result: &CheckResult) -> bool {
         let restored = self.restored();
         String::from_utf8_lossy(&result.stdout)
@@ -414,6 +418,7 @@ pub(super) fn wrap(
     let quote = |text: &str| format!("'{}'", text.replace('\'', r"'\''"));
     let tag = markers.tag();
     let mut script = String::new();
+    script.push_str(wrapper_script::watch_prologue());
     for root in live_roots {
         let root = quote(&root.to_string_lossy());
         script.push_str(&format!(
@@ -426,25 +431,18 @@ pub(super) fn wrap(
     script.push_str(&format!(
         "{sweep} | while IFS= read -r __archon_left; do __archon_base=\"${{__archon_left%.archon-mutated-*}}\"; if [ -e \"$__archon_base\" ] || [ -L \"$__archon_base\" ]; then rm -rf -- \"$__archon_left\"; else mv -- \"$__archon_left\" \"$__archon_base\"; fi; done\n"
     ));
-    for input in inputs {
-        let mut prefix = String::new();
-        let mut plain = Vec::new();
-        for part in input.split('/') {
-            prefix = if prefix.is_empty() {
-                part.to_string()
-            } else {
-                format!("{prefix}/{part}")
-            };
-            plain.push(format!("[ ! -L {} ]", quote(&prefix)));
-        }
-        let path = quote(input);
-        script.push_str(&format!(
-            "if {} && [ -e {path} ]; then mv -- {path} {path}.{tag} 2>/dev/null && printf '%s%s\\n' {} {path} >&2; fi\n",
-            plain.join(" && "),
-            quote(&markers.moved_prefix()),
-        ));
-    }
+    script.push_str(&wrapper_script::move_inputs(
+        inputs,
+        &tag,
+        &markers.moved_prefix(),
+    ));
+    script.push_str(&wrapper_script::snapshot_parents(inputs, &tag));
+    script.push_str(&wrapper_script::wait_for_timestamp_tick(inputs));
     script.push_str(&format!("(\n{original}\n)\n__archon_status=$?\n"));
+    script.push_str(&wrapper_script::report_recreated(
+        inputs,
+        &markers.recreated_prefix(),
+    ));
     for input in inputs {
         let path = quote(input);
         script.push_str(&format!(

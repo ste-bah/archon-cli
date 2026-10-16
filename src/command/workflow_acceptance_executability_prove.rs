@@ -58,12 +58,6 @@ pub(super) async fn prove(
                         })
                 })
         });
-        if bound_accepted {
-            probe.note(format!(
-                "check '{id}': passed on the pre-implementation tree at {short}; accepted as a regression guard on its stored accepted judge verdict, bound to the current contract and check digests"
-            ));
-            continue;
-        }
         let names = (contract.acceptance.iter())
             .chain(&contract.supplementary)
             .find(|entry| &entry.id == id)
@@ -130,10 +124,13 @@ pub(super) async fn prove(
         let at = super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
         super::silent::ran(probe, &baseline.commit, &mutated, id);
         let generated = markers.generated(result);
-        let moved: Vec<String> = markers
-            .moved(result)
+        let recreated = markers.recreated(result);
+        let moved_all = markers.moved(result);
+        let moved: Vec<String> = moved_all
+            .iter()
+            .cloned()
             .into_iter()
-            .filter(|path| !generated.contains(path))
+            .filter(|path| !generated.contains(path) && !recreated.contains(path))
             .collect();
         // Issue 328: nor did a run that failed for its host (a program that
         // could not start, a tree that did not build) fail on its own terms.
@@ -141,7 +138,16 @@ pub(super) async fn prove(
             || super::silent::silent_failure_off_thread(&mutated, result, &at)
                 .await
                 .is_some();
-        if moved.is_empty() {
+        if moved.is_empty() && !recreated.is_empty() {
+            findings.insert(
+                id.clone(),
+                format!(
+                    "{}; {already}; it recreated {} while running (parent-directory metadata changed, so that path is not evidence that the check depends on the moved input)",
+                    passed_there(id),
+                    recreated.iter().cloned().collect::<Vec<_>>().join(", ")
+                ),
+            );
+        } else if moved.is_empty() {
             findings.insert(
                 id.clone(),
                 format!(
@@ -150,14 +156,20 @@ pub(super) async fn prove(
                 ),
             );
         } else if super::baseline::passed(result) {
-            findings.insert(
-                id.clone(),
-                format!(
-                    "{}; {already}; it still passed with {} moved aside, so it does not depend on them",
-                    passed_there(id),
-                    moved.join(", ")
-                ),
-            );
+            if bound_accepted && recreated.is_empty() && !crashed {
+                probe.note(format!(
+                    "check '{id}': passed on the pre-implementation tree at {short}; accepted as a regression guard on its stored accepted judge verdict, bound to the current contract and check digests (the moved text-derived paths did not make it fail)"
+                ));
+            } else {
+                findings.insert(
+                    id.clone(),
+                    format!(
+                        "{}; {already}; it still passed with {} moved aside, so it does not depend on them",
+                        passed_there(id),
+                        moved.join(", ")
+                    ),
+                );
+            }
         } else if crashed {
             findings.insert(
                 id.clone(),
