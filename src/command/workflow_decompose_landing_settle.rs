@@ -213,11 +213,18 @@ fn emit_displaced_event(
         .ok_or_else(|| anyhow!("run directory has no id"))?;
     let store = archon_workflow::WorkflowStore::project(project_root);
     let seq = store.next_event_seq(run_id)?;
-    archon_workflow::WorkflowEventLog::new(store).emit(run_id, seq, archon_workflow::WorkflowEventKind::LandingReceiptDisplaced, serde_json::json!({
-        "subject": subject, "landing_call_id": landing.call.id,
-        "receipt_blake3": receipt_digest, "disk_blake3": disk_digest,
-        "evidence_path": evidence_path.strip_prefix(run_dir).unwrap_or(evidence_path).to_string_lossy(),
-    }))?;
+    archon_workflow::WorkflowEventLog::new(store).emit(
+        run_id,
+        seq,
+        archon_workflow::WorkflowEventKind::LandingReceiptDisplaced,
+        serde_json::json!({
+            "subject": subject, "landing_call_id": landing.call.id,
+            "receipt_blake3": receipt_digest, "disk_blake3": disk_digest,
+            "evidence_path": crate::command::workflow_host_command_publish::path_text(
+                evidence_path.strip_prefix(run_dir).unwrap_or(evidence_path),
+            ),
+        }),
+    )?;
     Ok(())
 }
 

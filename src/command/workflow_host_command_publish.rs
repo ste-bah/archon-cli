@@ -414,6 +414,18 @@ mod path_comparison_key_tests {
     }
 
     #[test]
+    fn recorded_windows_shaped_relative_paths_use_forward_slashes() {
+        assert_eq!(
+            path_text(Path::new(r"landing-evidence\TASK-X-010.bin")),
+            "landing-evidence/TASK-X-010.bin"
+        );
+        assert_eq!(
+            path_text(Path::new("landing-evidence/TASK-X-010.bin")),
+            "landing-evidence/TASK-X-010.bin"
+        );
+    }
+
+    #[test]
     fn old_stored_backslash_keys_match_current_separator_keys() {
         assert_eq!(
             path_comparison_key(r"c:\work\project\x"),
