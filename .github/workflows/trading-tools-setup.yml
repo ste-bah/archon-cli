@@ -136,17 +136,32 @@ jobs:
           set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
           exit /b 0
           '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python3.cmd') -Encoding ascii
+          $nonVenvTarget = Join-Path $env:RUNNER_TEMP 'trading setup non-venv contents'
+          $nonVenv = Join-Path $nonVenvTarget '.archon/tools/openbb-venv'
+          New-Item -ItemType Directory -Force -Path $nonVenv | Out-Null
+          Set-Content -LiteralPath (Join-Path $nonVenv 'keep.txt') -Value 'keep'
+          Clear-PythonLog
+          Show-WindowsPythonDiagnostics
+          try { & $setupScript -Target $nonVenvTarget -SkipTradingView; throw 'non-venv directory with contents was not refused' }
+          catch { if ($_.Exception.Message -notmatch 'Refusing to rebuild non-venv directory with contents:') { throw } }
+          Assert-PythonCommands @()
+          if (-not (Test-Path -LiteralPath (Join-Path $nonVenv 'keep.txt') -PathType Leaf)) { throw 'non-venv sentinel was removed' }
+
           $storeTarget = Join-Path $env:RUNNER_TEMP 'trading setup Store stub'
           $storeVenv = Join-Path $storeTarget '.archon/tools/openbb-venv'
-          New-Item -ItemType Directory -Force -Path $storeVenv | Out-Null
-          Set-Content -LiteralPath (Join-Path $storeVenv 'keep.txt') -Value 'keep'
+          Clear-PythonLog
           Show-WindowsPythonDiagnostics
-          try { & $setupScript -Target $storeTarget -SkipTradingView; throw 'Store-stub non-venv was not refused' }
-          catch { if ($_.Exception.Message -notmatch 'non-venv directory') { throw } }
-          Assert-PythonCommands @('python', 'python3')
+          try { & $setupScript -Target $storeTarget -SkipTradingView; throw 'Store-stub rebuild unexpectedly completed without creating a venv' }
+          catch {
+            $expectedFailure = "The term '$storeVenv\Scripts\python.exe' is not recognized as the name of a cmdlet, function, script file, or executable program."
+            if ($_.Exception.Message -cne $expectedFailure) { throw }
+          }
           $storeLog = Read-PythonLog
-          if ($storeLog -notmatch 'python .*\.py' -or $storeLog -notmatch 'python3 .*\.py') { throw 'Store stub was not rejected before python3 fallback' }
-          if (-not (Test-Path -LiteralPath (Join-Path $storeVenv 'keep.txt') -PathType Leaf)) { throw 'Store-stub sentinel was removed' }
+          $storeCalls = @($storeLog -split "`r?`n" | Where-Object { $_ -match '^(py|python|python3) ' })
+          if ($storeCalls.Count -lt 2 -or $storeCalls[0] -notmatch '^python .*\.py$' -or $storeCalls[1] -notmatch '^python3 .*\.py$') { throw 'Store-stub probe prefix was not python then python3 with a Python file' }
+          if ($storeCalls -match '^py ') { throw 'Store-stub unexpectedly called py' }
+          if ($storeCalls.Count -lt 3 -or $storeCalls[2] -ne 'python3 -m') { throw 'Store-stub rebuild did not continue with python3 -m venv' }
+          if (Test-Path -LiteralPath $storeVenv) { throw 'Store-stub mock unexpectedly created a venv' }
 
           @'
           @echo off
@@ -183,6 +198,7 @@ jobs:
             $caseVenv = Join-Path $caseTarget '.archon/tools/openbb-venv'
             $metadataDir = Join-Path $caseVenv 'Lib/site-packages/openbb-99.dist-info'
             New-Item -ItemType Directory -Force -Path $metadataDir | Out-Null
+            Set-Content -LiteralPath (Join-Path $caseVenv 'pyvenv.cfg') -Value 'home = mocked-python'
             Set-Content -LiteralPath (Join-Path $metadataDir 'METADATA') -Value @("Metadata-Version: 2.1", "Name: openbb", "Requires-Python: $($case.Specifier)")
             Set-Content -LiteralPath (Join-Path $caseVenv 'keep.txt') -Value 'keep'
             Clear-PythonLog
@@ -192,13 +208,16 @@ jobs:
               & $setupScript -Target $caseTarget -SkipTradingView
               throw "specifier case unexpectedly passed setup: $($case.Specifier) $($case.Version)"
             } catch {
-              if ($case.Accept -and $_.Exception.Message -notmatch 'non-venv directory with contents') { throw }
+              if ($case.Accept) {
+                $expectedFailure = "The term '$caseVenv\Scripts\python.exe' is not recognized as the name of a cmdlet, function, script file, or executable program."
+                if ($_.Exception.Message -cne $expectedFailure) { throw }
+              }
               if (-not $case.Accept -and $_.Exception.Message -notmatch [regex]::Escape("specifier '$($case.Specifier)'")) { throw }
             }
             $caseLog = Read-PythonLog
             if ($caseLog -notmatch [regex]::Escape("ARCHON_SETUP_PYTHON_SPECIFIER=$($case.Specifier)")) { throw "venv Requires-Python was not passed to the interpreter for $($case.Specifier)" }
             if ($caseLog -notmatch '\.py') { throw "specifier probe did not use a Python file for $($case.Specifier)" }
-            if ($case.Accept) { Assert-PythonCommands @('py') }
+            if ($case.Accept) { Assert-PythonCommands @('py', 'py') }
             else { Assert-PythonCommands @('py', 'python', 'python3') }
             if ((Get-Content -LiteralPath (Join-Path $caseVenv 'keep.txt') -Raw).Trim() -ne 'keep') { throw 'specifier probe changed its venv sentinel' }
           }
