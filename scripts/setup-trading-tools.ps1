@@ -210,6 +210,15 @@ if (-not $SkipTradingView) {
     foreach ($bin in @('git', 'node', 'npm')) { if (-not (Get-Command $bin -ErrorAction SilentlyContinue)) { throw "Missing required binary: $bin. Run scripts/install-system-deps.ps1 -WithTradingTools." } }
     if (Test-Path -LiteralPath (Join-Path $TvDir '.git')) { Invoke-External git @('-C', $TvDir, 'pull', '--ff-only') }
     else { Invoke-External git @('clone', 'https://github.com/tradesdontlie/tradingview-mcp.git', $TvDir) }
+    if (-not $DryRun) {
+        if (-not (Test-Path -LiteralPath $TvDir -PathType Container)) {
+            throw "TradingView directory is missing after git clone or pull: $TvDir"
+        }
+        $packageJson = Join-Path $TvDir 'package.json'
+        if (-not (Test-Path -LiteralPath $packageJson -PathType Leaf)) {
+            throw "TradingView package.json is missing after git clone or pull: $TvDir (expected $packageJson)"
+        }
+    }
     Push-Location -LiteralPath $TvDir
     try { Invoke-TradingViewNpmInstall }
     finally { Pop-Location }

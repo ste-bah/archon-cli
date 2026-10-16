@@ -1,4 +1,8 @@
 $ErrorActionPreference = 'Stop'
+trap {
+    Write-Output "FAIL: PowerShell specifier and refusal checks: $($_.Exception.Message)"
+    exit 1
+}
 $scriptPath = (Resolve-Path 'scripts/setup-trading-tools.ps1').Path
 . $scriptPath -LoadFunctionsOnly
 $python = (Get-Command python -ErrorAction Stop).Source
@@ -62,11 +66,12 @@ New-Item -ItemType Directory -Force -Path $fakeBin, $fakeTarget | Out-Null
 $gitShim = @'
 @echo off
 if "%1"=="clone" (
-  mkdir "%3\src\cli" 2>nul
-  mkdir "%3\scripts" 2>nul
-  type nul > "%3\src\server.js"
-  type nul > "%3\src\cli\index.js"
-  echo {}> "%3\package.json"
+  if defined FAKE_GIT_NO_CREATE exit /b 0
+  mkdir "%~3\src\cli" 2>nul
+  mkdir "%~3\scripts" 2>nul
+  type nul > "%~3\src\server.js"
+  type nul > "%~3\src\cli\index.js"
+  if not defined FAKE_GIT_NO_PACKAGE echo {}> "%~3\package.json"
 )
 exit /b 0
 '@
@@ -84,16 +89,29 @@ Set-Content -LiteralPath (Join-Path $fakeBin 'git.cmd') -Value $gitShim
 Set-Content -LiteralPath (Join-Path $fakeBin 'npm.cmd') -Value $npmShim
 Set-Content -LiteralPath (Join-Path $fakeBin 'node.cmd') -Value @('@echo off', 'exit /b 0')
 $previousPath = $env:Path
+$previousPathExt = $env:PATHEXT
 $previousNpmLog = $env:FAKE_NPM_LOG
+$previousNoCreate = $env:FAKE_GIT_NO_CREATE
+$previousNoPackage = $env:FAKE_GIT_NO_PACKAGE
 try {
     $env:Path = "$fakeBin$([IO.Path]::PathSeparator)$previousPath"
+    $env:PATHEXT = '.CMD;.BAT;.EXE;.COM'
     $env:FAKE_NPM_LOG = $npmLog
+    $resolvedGit = Get-Command git -ErrorAction Stop
+    if ($resolvedGit.Source -notlike "$fakeBin*") {
+        throw "Mock git was not selected from '$fakeBin': $($resolvedGit.Source)"
+    }
     & $scriptPath -Target $fakeTarget -SkipOpenBB
     if ($LASTEXITCODE -ne 0) { throw "Spaced-path npm invocation exited $LASTEXITCODE" }
 } finally {
     $env:Path = $previousPath
+    $env:PATHEXT = $previousPathExt
     if ($null -eq $previousNpmLog) { Remove-Item Env:FAKE_NPM_LOG -ErrorAction SilentlyContinue }
     else { $env:FAKE_NPM_LOG = $previousNpmLog }
+    if ($null -eq $previousNoCreate) { Remove-Item Env:FAKE_GIT_NO_CREATE -ErrorAction SilentlyContinue }
+    else { $env:FAKE_GIT_NO_CREATE = $previousNoCreate }
+    if ($null -eq $previousNoPackage) { Remove-Item Env:FAKE_GIT_NO_PACKAGE -ErrorAction SilentlyContinue }
+    else { $env:FAKE_GIT_NO_PACKAGE = $previousNoPackage }
 }
 $expectedTvDir = Join-Path $fakeTarget '.archon/tools/tradingview-mcp'
 $npmInvocation = Get-Content -LiteralPath $npmLog
@@ -102,5 +120,30 @@ if ($npmInvocation.Count -lt 2 -or $npmInvocation[0] -ne $expectedTvDir -or $npm
 }
 if (-not (Test-Path -LiteralPath (Join-Path $expectedTvDir 'package.json'))) { throw 'Spaced-path npm assertion failed: package.json was not created by the fake clone' }
 Write-Output 'PASS npm install runs in the TradingView directory with spaces'
+
+$missingTarget = Join-Path $root 'missing clone target with spaces'
+$missingPackageTarget = Join-Path $root 'missing package target with spaces'
+foreach ($missingCase in @(
+    @{ Target = $missingTarget; Variable = 'FAKE_GIT_NO_CREATE'; Message = 'TradingView directory is missing after git clone or pull:' },
+    @{ Target = $missingPackageTarget; Variable = 'FAKE_GIT_NO_PACKAGE'; Message = 'TradingView package.json is missing after git clone or pull:' }
+)) {
+    $env:Path = "$fakeBin$([IO.Path]::PathSeparator)$previousPath"
+    $env:PATHEXT = '.CMD;.BAT;.EXE;.COM'
+    $env:FAKE_GIT_NO_CREATE = $null
+    $env:FAKE_GIT_NO_PACKAGE = $null
+    Set-Item -Path "Env:$($missingCase.Variable)" -Value '1'
+    try {
+        & $scriptPath -Target $missingCase.Target -SkipOpenBB 2>&1 | Out-String
+        throw "Missing clone assertion failed: setup accepted $($missingCase.Variable)"
+    } catch {
+        $expectedMissingDir = Join-Path $missingCase.Target '.archon/tools/tradingview-mcp'
+        if ($_.Exception.Message -notlike "*$($missingCase.Message)*$expectedMissingDir*") { throw }
+    } finally {
+        Remove-Item -Path "Env:$($missingCase.Variable)" -ErrorAction SilentlyContinue
+        $env:Path = $previousPath
+        $env:PATHEXT = $previousPathExt
+    }
+}
+Write-Output 'PASS missing TradingView checkout content is reported clearly'
 Write-Output 'test result: PowerShell specifier and refusal checks passed'
 exit 0

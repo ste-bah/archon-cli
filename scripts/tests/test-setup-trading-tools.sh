@@ -225,7 +225,12 @@ PATH="$CORE_BIN" FAKE_SETUP_LOG="$FAKE_SETUP_LOG" \
 # sentinel makes accepted candidates stop before any install or network call.
 REAL_PYTHON=$(command -v python3)
 SPEC_BIN="$TEMP_ROOT/spec interpreters"
+MOCK_SYSTEM_BIN="$TEMP_ROOT/mock system tools"
 mkdir -p "$SPEC_BIN"
+mkdir -p "$MOCK_SYSTEM_BIN"
+for system_tool in dirname mktemp mv rm cat find awk head grep sed mkdir chmod readlink tr; do
+    ln -s "$(command -v "$system_tool")" "$MOCK_SYSTEM_BIN/$system_tool"
+done
 cat > "$SPEC_BIN/python-mock" <<'PYTHON'
 #!/bin/sh
 if [ "$1" = --version ]; then echo 'Python 3.12.1'; exit 0; fi
@@ -252,7 +257,7 @@ run_spec_case() {
     printf 'home = fake-python\n' > "$case_venv/pyvenv.cfg"
     printf 'Metadata-Version: 2.1\nName: openbb\nRequires-Python: %s\n' "$spec" > "$case_metadata/METADATA"
     printf 'preserve\n' > "$case_venv/sentinel"
-    case_output=$(PATH="$SPEC_BIN:/usr/bin:/bin" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO="$mock_info" \
+    case_output=$(PATH="$SPEC_BIN:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" MOCK_PYTHON_INFO="$mock_info" \
         "$REPO_ROOT/scripts/setup-trading-tools.sh" --target "$case_target" --skip-tradingview 2>&1 || true)
     if printf '%s\n' "$case_output" | grep -F -- '-m venv --clear ' >/dev/null; then case_status=accepted; else case_status=rejected; fi
     if [ "$case_status" != "$expected" ]; then
@@ -307,7 +312,7 @@ run_python_order_case() {
     order_metadata="$order_venv/lib/python3.12/site-packages/openbb-99.dist-info"
     mkdir -p "$order_metadata"
     printf 'Metadata-Version: 2.1\nName: openbb\nRequires-Python: >=3.10,<3.14\n' > "$order_metadata/METADATA"
-    order_output=$(PATH="$order_path:/usr/bin:/bin" REAL_PYTHON="$REAL_PYTHON" \
+    order_output=$(PATH="$order_path:$MOCK_SYSTEM_BIN" REAL_PYTHON="$REAL_PYTHON" \
         MOCK_PYTHON_INFO='3,12,0,final,0' \
         "$REPO_ROOT/scripts/setup-trading-tools.sh" --target "$order_target" --skip-tradingview 2>&1 || true)
     printf '%s\n' "$order_output" | grep -F "OpenBB Python: $expected_interpreter (Python 3.12.1)" >/dev/null
