@@ -405,6 +405,12 @@ fn validate_run_relative_path(path: &Path) -> WorkflowResult<()> {
 mod durable;
 pub(crate) use durable::{rename_durable, sync_dir, write_atomic};
 
+/// Flush directory metadata with the platform's durable directory operation.
+/// Windows needs a backup-semantics handle; Unix flushes the directory fd.
+pub fn sync_directory(path: &Path) -> WorkflowResult<()> {
+    durable::sync_dir(path)
+}
+
 #[cfg(test)]
 #[path = "store_tail_tests.rs"]
 mod tail_tests;

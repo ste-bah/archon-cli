@@ -214,8 +214,14 @@ fn clone_head(source: &Path, destination: &Path) -> Result<String, Unrun> {
             "--shared",
             "--",
         ])
-        .arg(archon_shell::paths::plain(source.to_path_buf()))
-        .arg(archon_shell::paths::plain(destination.to_path_buf()))
+        .arg(
+            archon_shell::paths::try_plain(source.to_path_buf())
+                .map_err(|e| Unrun(format!("git clone {}: {e}", source.display())))?,
+        )
+        .arg(
+            archon_shell::paths::try_plain(destination.to_path_buf())
+                .map_err(|e| Unrun(format!("git clone {}: {e}", destination.display())))?,
+        )
         .output()
         .map_err(|error| Unrun(format!("git clone {}: {error}", source.display())))?;
     if !output.status.success() {
@@ -239,7 +245,10 @@ fn clone_head(source: &Path, destination: &Path) -> Result<String, Unrun> {
 fn git_head(path: &Path) -> Result<String, Unrun> {
     let output = archon_shell::spawn::command("git")
         .args(["-C"])
-        .arg(archon_shell::paths::plain(path.to_path_buf()))
+        .arg(
+            archon_shell::paths::try_plain(path.to_path_buf())
+                .map_err(|e| Unrun(format!("git rev-parse HEAD in {}: {e}", path.display())))?,
+        )
         .args(["rev-parse", "HEAD"])
         .output()
         .map_err(|error| Unrun(format!("git rev-parse HEAD in {}: {error}", path.display())))?;

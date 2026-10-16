@@ -84,8 +84,14 @@ pub(super) fn copy_external(
                         "--shared",
                         "--",
                     ])
-                    .arg(archon_shell::paths::plain(source.clone()))
-                    .arg(archon_shell::paths::plain(destination.clone()))
+                    .arg(
+                        archon_shell::paths::try_plain(source.clone())
+                            .map_err(|e| WorkflowError::io(&source, e))?,
+                    )
+                    .arg(
+                        archon_shell::paths::try_plain(destination.clone())
+                            .map_err(|e| WorkflowError::io(&destination, e))?,
+                    )
                     .output()
                     .map_err(|error| WorkflowError::io(&source, error))?;
                 if !output.status.success() {
@@ -139,7 +145,10 @@ pub(super) fn copy_external(
 fn git_head(path: &Path) -> WorkflowResult<String> {
     let output = archon_shell::spawn::command("git")
         .args(["-C"])
-        .arg(archon_shell::paths::plain(path.to_path_buf()))
+        .arg(
+            archon_shell::paths::try_plain(path.to_path_buf())
+                .map_err(|e| WorkflowError::io(path, e))?,
+        )
         .args(["rev-parse", "HEAD"])
         .output()
         .map_err(|error| WorkflowError::io(path, error))?;

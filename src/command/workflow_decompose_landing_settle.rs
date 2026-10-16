@@ -26,8 +26,7 @@ fn restore_with_captured_evidence(
     let result = (|| -> Result<()> {
         let evidence_dir = run_dir.join("landing-evidence");
         std::fs::create_dir_all(&evidence_dir)?;
-        std::fs::File::open(run_dir)
-            .and_then(|directory| directory.sync_all())
+        archon_workflow::store::sync_directory(run_dir)
             .with_context(|| format!("syncing run directory {}", run_dir.display()))?;
 
         #[cfg(test)]
@@ -57,22 +56,18 @@ fn restore_with_captured_evidence(
             }
             match std::fs::rename(path, &evidence_path) {
                 Ok(()) => {
-                    std::fs::File::open(task_dir)
-                        .and_then(|directory| directory.sync_all())
-                        .with_context(|| {
-                            format!("syncing task directory {}", task_dir.display())
-                        })?;
+                    archon_workflow::store::sync_directory(task_dir).with_context(|| {
+                        format!("syncing task directory {}", task_dir.display())
+                    })?;
                     let captured = std::fs::read(&evidence_path)?;
                     std::fs::File::open(&evidence_path)
                         .and_then(|file| file.sync_all())
                         .with_context(|| {
                             format!("syncing evidence file {}", evidence_path.display())
                         })?;
-                    std::fs::File::open(&evidence_dir)
-                        .and_then(|directory| directory.sync_all())
-                        .with_context(|| {
-                            format!("syncing evidence directory {}", evidence_dir.display())
-                        })?;
+                    archon_workflow::store::sync_directory(&evidence_dir).with_context(|| {
+                        format!("syncing evidence directory {}", evidence_dir.display())
+                    })?;
                     emit_displaced_event(
                         project_root,
                         run_dir,
@@ -128,8 +123,7 @@ fn restore_with_captured_evidence(
         std::fs::rename(&temp_path, path)
             .with_context(|| format!("restoring task body {}", path.display()))?;
         temp_cleanup.disarm();
-        std::fs::File::open(task_dir)
-            .and_then(|directory| directory.sync_all())
+        archon_workflow::store::sync_directory(task_dir)
             .with_context(|| format!("syncing task directory {}", task_dir.display()))?;
         Ok(())
     })();
@@ -147,8 +141,7 @@ pub(crate) fn keep_displaced_bytes(
     let disk_digest = content_digest(bytes);
     let evidence_dir = run_dir.join("landing-evidence");
     std::fs::create_dir_all(&evidence_dir)?;
-    std::fs::File::open(run_dir)
-        .and_then(|directory| directory.sync_all())
+    archon_workflow::store::sync_directory(run_dir)
         .with_context(|| format!("syncing run directory {}", run_dir.display()))?;
     let evidence_path = evidence_dir.join(format!("{subject}-{disk_digest}.bin"));
     match std::fs::OpenOptions::new()
@@ -166,14 +159,12 @@ pub(crate) fn keep_displaced_bytes(
             })?;
             // The evidence file's contents are durable only once its new
             // directory entry is durable as well.
-            std::fs::File::open(&evidence_dir)
-                .and_then(|directory| directory.sync_all())
-                .with_context(|| {
-                    format!(
-                        "syncing landing evidence directory {}",
-                        evidence_dir.display()
-                    )
-                })?;
+            archon_workflow::store::sync_directory(&evidence_dir).with_context(|| {
+                format!(
+                    "syncing landing evidence directory {}",
+                    evidence_dir.display()
+                )
+            })?;
         }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             if std::fs::read(&evidence_path)? != bytes {
@@ -187,14 +178,12 @@ pub(crate) fn keep_displaced_bytes(
                 .with_context(|| {
                     format!("syncing landing evidence file {}", evidence_path.display())
                 })?;
-            std::fs::File::open(&evidence_dir)
-                .and_then(|directory| directory.sync_all())
-                .with_context(|| {
-                    format!(
-                        "syncing landing evidence directory {}",
-                        evidence_dir.display()
-                    )
-                })?;
+            archon_workflow::store::sync_directory(&evidence_dir).with_context(|| {
+                format!(
+                    "syncing landing evidence directory {}",
+                    evidence_dir.display()
+                )
+            })?;
         }
         Err(error) => {
             return Err(error)

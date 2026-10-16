@@ -277,6 +277,11 @@ async fn each_reverify_uses_a_distinct_ledger_and_preserves_the_first() {
     let binary = archon_binary();
     let first = invoke_reverify(&binary, &fixture);
     assert!(
+        first.status.success(),
+        "first reverify must persist its remediation ledger: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(
         fixture
             .store
             .run_dir(&fixture.run_id)
@@ -291,6 +296,7 @@ async fn each_reverify_uses_a_distinct_ledger_and_preserves_the_first() {
     )
     .unwrap()
     .unwrap();
+    assert_eq!(first_report.outcome, "needs_remediation");
     let first_ledger = fixture.store.run_dir(&fixture.run_id).join(format!(
         "decomposition/reverify/remediation-{}.json",
         first_report.id

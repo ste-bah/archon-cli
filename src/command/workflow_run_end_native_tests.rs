@@ -176,7 +176,7 @@ fn killed_observer_parent_leaves_no_managed_group_or_worktree() {
         expected_pin_digest: content_digest(&std::fs::read(&pin_path).unwrap()),
         pin_path,
         evidence: evidence.clone(),
-        resource_limits: None,
+        resource_limits: Some(Default::default()),
     };
     let request_path = signals.path().join("request.json");
     std::fs::write(&request_path, serde_json::to_vec(&request).unwrap()).unwrap();

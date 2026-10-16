@@ -11,34 +11,133 @@
 //! (`//?/C:/...`) is parsed as a UNC share. Mixing the two spellings made the
 //! same directory compare unequal to itself.
 //!
-//! Every crate that exchanges workflow paths therefore canonicalizes through
-//! [`plain`]: the verbatim prefix is removed when the path is representable
-//! without it (a drive or UNC path), so one directory has one canonical
-//! spelling everywhere. Off Windows `canonicalize` never adds the prefix and
-//! [`plain`] returns its input unchanged. Rust's own filesystem calls add the
-//! long-path prefix back internally when a plain path needs it.
+//! Every crate that exchanges workflow paths canonicalizes through
+//! [`canonicalize`], whose [`try_plain`] step removes the verbatim prefix only
+//! when a valid drive or UNC spelling under MAX_PATH names the same path.
+//! [`plain`] keeps its legacy best-effort behavior for callers that accept a
+//! verbatim result; Git callers must use [`try_plain`] and surface its error.
+//! Off Windows `canonicalize` never adds the prefix. Rust's filesystem calls
+//! add the long-path prefix back internally when a plain path needs it.
 use std::path::{Path, PathBuf};
 
-/// `path` without a Windows verbatim (`\\?\C:\...`) or verbatim-UNC
-/// (`\\?\UNC\server\share\...`) prefix; any other path unchanged.
+/// Best-effort plain spelling; returns the original path when its verbatim
+/// prefix cannot safely be removed. Use [`try_plain`] when the caller cannot
+/// consume a verbatim path.
 pub fn plain(path: PathBuf) -> PathBuf {
+    try_plain(path.clone()).unwrap_or(path)
+}
+
+/// Fallible plain spelling for paths sent to tools that cannot parse Windows
+/// verbatim paths (notably Git).
+pub fn try_plain(path: PathBuf) -> std::io::Result<PathBuf> {
     let Some(text) = path.to_str() else {
-        return path;
+        return Ok(path);
     };
     if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        return PathBuf::from(format!(r"\\{rest}"));
+        let mut unc_parts = rest.split(['\\', '/']);
+        if unc_parts.next().is_none_or(str::is_empty) || unc_parts.next().is_none_or(str::is_empty)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "cannot remove verbatim prefix from {}: UNC path has no server/share pair",
+                    path.display()
+                ),
+            ));
+        }
+        return checked_verbatim(path.clone(), rest.to_owned(), true);
     }
     match text.strip_prefix(r"\\?\") {
         // Only a drive path (`C:\...`): a verbatim device or volume path
         // (`\\?\Volume{...}`) has no plain spelling.
-        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
-        _ => path,
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => {
+            if rest.as_bytes().get(2) != Some(&b'\\') {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "cannot remove verbatim prefix from {}: drive path is not rooted with a backslash",
+                        path.display()
+                    ),
+                ));
+            }
+            checked_verbatim(path.clone(), rest.to_owned(), false)
+        }
+        _ => Ok(path),
     }
 }
 
-/// `std::fs::canonicalize`, in its one plain spelling ([`plain`]).
+fn checked_verbatim(path: PathBuf, rest: String, unc: bool) -> std::io::Result<PathBuf> {
+    let plain = if unc {
+        format!(r"\\{rest}")
+    } else {
+        rest.clone()
+    };
+    let components = rest.split(['\\', '/']).skip(if unc { 0 } else { 1 });
+    let reserved = ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"];
+    let mut reason = None;
+    for component in components {
+        if matches!(component, "." | "..") {
+            reason = Some(format!(
+                "component {component:?} is normalized by a plain path"
+            ));
+            break;
+        }
+        if let Some(character) = component
+            .chars()
+            .find(|character| *character < ' ' || "<>:\"|?*".contains(*character))
+        {
+            reason = Some(format!(
+                "component {component:?} contains invalid character {character:?}"
+            ));
+            break;
+        }
+        if component.ends_with(['.', ' ']) {
+            reason = Some(format!("component {component:?} ends in a dot or space"));
+            break;
+        }
+        let stem = component
+            .split('.')
+            .next()
+            .unwrap_or(component)
+            .trim_end_matches(['.', ' ']);
+        let upper = stem.to_ascii_uppercase();
+        if reserved.contains(&upper.as_str())
+            || ["COM", "LPT"].iter().any(|prefix| {
+                upper.strip_prefix(prefix).is_some_and(|suffix| {
+                    matches!(
+                        suffix,
+                        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                    )
+                })
+            })
+        {
+            reason = Some(format!(
+                "component {component:?} is a reserved Windows device name"
+            ));
+            break;
+        }
+    }
+    if reason.is_none() && plain.encode_utf16().count() >= 260 {
+        reason = Some(format!(
+            "plain spelling is {} UTF-16 code units (must be under 260)",
+            plain.encode_utf16().count()
+        ));
+    }
+    if let Some(reason) = reason {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "cannot remove verbatim prefix from {}: {reason}",
+                path.display()
+            ),
+        ));
+    }
+    Ok(PathBuf::from(plain))
+}
+
+/// `std::fs::canonicalize`, in its one safe plain spelling ([`try_plain`]).
 pub fn canonicalize(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
-    std::fs::canonicalize(path).map(plain)
+    try_plain(std::fs::canonicalize(path)?)
 }
 
 /// `path` as a stored record spells it (Issue 438): its [`plain`] spelling
@@ -125,6 +224,26 @@ mod tests {
             ("relative/path", "relative/path"),
         ] {
             assert_eq!(plain(PathBuf::from(given)), PathBuf::from(expected));
+        }
+    }
+
+    #[test]
+    fn verbatim_paths_that_change_meaning_are_rejected_with_path_and_reason() {
+        for (given, reason) in [
+            (r"\\?\C:\work\name.\file", "ends in a dot or space"),
+            (r"\\?\C:\work\name \file", "ends in a dot or space"),
+            (r"\\?\C:\work\CON\file", "reserved Windows device name"),
+            (
+                r"\\?\UNC\server\share\NUL.txt",
+                "reserved Windows device name",
+            ),
+            (r"\\?\C:\work\folder\..\file", "normalized by a plain path"),
+            (r"\\?\UNC\server\share\bad?name", "invalid character"),
+            (&format!(r"\\?\C:\{}", "a".repeat(260)), "under 260"),
+        ] {
+            let error = try_plain(PathBuf::from(given)).unwrap_err().to_string();
+            assert!(error.contains(given), "{error}");
+            assert!(error.contains(reason), "{error}");
         }
     }
 }

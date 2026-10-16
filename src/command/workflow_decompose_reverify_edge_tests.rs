@@ -79,10 +79,9 @@ async fn live_executor_lease_refuses_reverify_without_writing_results() {
     let fixture = fixture();
     let binary = archon_binary();
     let run_dir = fixture.store.run_dir(&fixture.run_id);
+    let lease_path = run_dir.join(crate::command::workflow_executor_lease::LEASE);
     let lease =
         crate::command::workflow_executor_lease::acquire(&run_dir, &fixture.run_id).unwrap();
-    let lease_path = run_dir.join(crate::command::workflow_executor_lease::LEASE);
-    let lease_bytes = std::fs::read(&lease_path).unwrap();
     let run_bytes = std::fs::read(fixture.store.state_path(&fixture.run_id)).unwrap();
     let body_bytes = fixture
         .bodies
@@ -101,7 +100,6 @@ async fn live_executor_lease_refuses_reverify_without_writing_results() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(std::fs::read(&lease_path).unwrap(), lease_bytes);
     assert_eq!(
         std::fs::read(fixture.store.state_path(&fixture.run_id)).unwrap(),
         run_bytes
@@ -116,10 +114,18 @@ async fn live_executor_lease_refuses_reverify_without_writing_results() {
     );
     assert!(!reports.exists());
     println!(
-        "EVIDENCE reverify live_lease AFTER: refused=true lease_bytes_unchanged=true run_unchanged=true bodies_unchanged=true reports_present={}",
+        "EVIDENCE reverify live_lease AFTER: refused=true run_unchanged=true bodies_unchanged=true reports_present={}",
         reports.exists()
     );
     drop(lease);
+    let lease_record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&lease_path).unwrap()).unwrap();
+    assert_eq!(lease_record["role"], "preflight");
+    assert_eq!(lease_record["holder"]["pid"], std::process::id());
+    println!(
+        "EVIDENCE reverify live_lease SOURCE: lease file read after handle release; role={} pid_matches=true",
+        lease_record["role"]
+    );
 }
 
 #[tokio::test]

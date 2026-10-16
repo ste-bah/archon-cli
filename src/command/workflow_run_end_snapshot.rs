@@ -179,7 +179,7 @@ fn refuse_reverify_remediation(store: &WorkflowStore, task_root: &Path) -> anyho
         else {
             continue;
         };
-        let Ok(root) = std::fs::canonicalize(&state.identity.task_root_identity) else {
+        let Ok(root) = archon_shell::paths::canonicalize(&state.identity.task_root_identity) else {
             continue;
         };
         if root != task_root {

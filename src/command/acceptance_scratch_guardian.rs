@@ -157,12 +157,13 @@ async fn serve() -> WorkflowResult<()> {
         .map_err(|e| WorkflowError::SpecInvalid(e.to_string()))?;
     let _lease = acquire_lease(&lock_root, &identity.to_string_lossy())?;
     let (contract, digest, refs) = validate_selected(&request, &selection)?;
-    let hooks = request
-        .resource_limits
-        .clone()
-        .map_or_else(ObserveHooks::default, |limits| {
-            ObserveHooks::default().with_resource_limits(limits)
-        });
+    let limits = request.resource_limits.clone().ok_or_else(|| {
+        WorkflowError::SpecInvalid(format!(
+            "native observer request for {} is missing resource_limits",
+            request.pin_path.display()
+        ))
+    })?;
+    let hooks = ObserveHooks::default().with_resource_limits(limits);
     let result = observe_commands_hooked(
         &request.policy,
         &request.source_commit,
@@ -196,12 +197,24 @@ async fn serve() -> WorkflowResult<()> {
 }
 pub(crate) fn parse_request_line(line: &str) -> WorkflowResult<(Request, CheckSelection)> {
     let mut value: serde_json::Value = serde_json::from_str(line)?;
+    let request_path = value
+        .get("pin_path")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("<unknown pin_path>")
+        .to_owned();
     let selection = value
         .as_object_mut()
         .and_then(|object| object.remove(CHECK_IDS_KEY))
         .map(serde_json::from_value::<std::collections::BTreeSet<String>>)
         .transpose()?;
-    Ok((serde_json::from_value(value)?, selection))
+    let request: Request = serde_json::from_value(value)?;
+    if request.resource_limits.is_none() {
+        return Err(WorkflowError::SpecInvalid(format!(
+            "native observer request for {} is missing resource_limits",
+            request_path
+        )));
+    }
+    Ok((request, selection))
 }
 pub(crate) fn request_line(
     request: &Request,
