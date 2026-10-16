@@ -17,8 +17,9 @@ pub async fn run_frame_ocr(
     db: &DbInstance,
     ocr_provider: &dyn OcrProvider,
     document_id: &str,
+    project_root: &Path,
 ) -> Result<Option<String>, VideoError> {
-    let image_path = resolve_frame_image_path(frame)?;
+    let image_path = resolve_frame_image_path(frame, project_root)?;
     let request = OcrRequest {
         file_path: image_path.display().to_string(),
         document_id: document_id.to_string(),
@@ -51,6 +52,7 @@ pub async fn run_frame_vlm(
     db: &DbInstance,
     policy: &EffectivePolicy,
     document_id: &str,
+    project_root: &Path,
 ) -> Result<Option<String>, VideoError> {
     let decision = policy.video_vlm_decision();
     if !decision.allowed {
@@ -58,7 +60,7 @@ pub async fn run_frame_vlm(
             .map_err(store_error)?;
         return Ok(None);
     }
-    let image_bytes = tokio::fs::read(resolve_frame_image_path(frame)?)
+    let image_bytes = tokio::fs::read(resolve_frame_image_path(frame, project_root)?)
         .await
         .map_err(|e| VideoError::FrameExtractionFailed {
             message: format!("read frame image: {e}"),
@@ -156,8 +158,12 @@ fn write_visual_chunk(
     Ok(chunk_id)
 }
 
-pub fn resolve_frame_image_path(frame: &FrameDescription) -> Result<PathBuf, VideoError> {
-    let dir = PathBuf::from(".archon")
+pub fn resolve_frame_image_path(
+    frame: &FrameDescription,
+    project_root: &Path,
+) -> Result<PathBuf, VideoError> {
+    let dir = project_root
+        .join(".archon")
         .join("video-artifacts")
         .join(&frame.video_id)
         .join("frames");

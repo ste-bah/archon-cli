@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, anyhow};
 use std::path::{Path, PathBuf};
 
+pub(crate) use super::trading_venv_health::openbb_health;
+
 pub(crate) struct ToolCommandOutput {
     pub status: i32,
     pub stdout: String,
@@ -13,6 +15,7 @@ pub(crate) fn render_tools_status(target: Option<&PathBuf>) -> Result<String> {
     let venv_dir = openbb_venv_dir(&root);
     let mcp_config = root.join(".mcp.json");
     let openbb_api = openbb_bin(&root, "openbb-api");
+    let openbb_health = openbb_health(&venv_dir);
 
     let mut lines = vec![
         "Trading Lab external tools".to_string(),
@@ -20,7 +23,11 @@ pub(crate) fn render_tools_status(target: Option<&PathBuf>) -> Result<String> {
         format!("  tools dir: {}", root.join(".archon/tools").display()),
         format!("  node: {}", binary_state("node")),
         format!("  npm: {}", binary_state("npm")),
-        format!("  python3: {}", binary_state("python3")),
+        format!(
+            "  {}: {}",
+            python_command_name(),
+            binary_state(python_command_name())
+        ),
         format!("  git: {}", binary_state("git")),
         format!("  TradingView MCP: {}", path_state(&tv_dir)),
         format!(
@@ -33,8 +40,15 @@ pub(crate) fn render_tools_status(target: Option<&PathBuf>) -> Result<String> {
             "  .mcp.json tradingview entry: {}",
             tradingview_mcp_state(&mcp_config)
         ),
-        format!("  OpenBB venv: {}", path_state(&venv_dir)),
-        format!("  openbb-api: {}", path_state(&openbb_api)),
+        format!("  OpenBB venv: {openbb_health}"),
+        format!(
+            "  openbb-api: {}",
+            if openbb_health.starts_with("healthy") {
+                path_state(&openbb_api)
+            } else {
+                openbb_health.clone()
+            }
+        ),
         format!(
             "  OpenBB API URL: {}",
             std::env::var("OPENBB_API_URL").unwrap_or_else(|_| "http://127.0.0.1:6900".into())
@@ -43,24 +57,26 @@ pub(crate) fn render_tools_status(target: Option<&PathBuf>) -> Result<String> {
 
     lines.push("".into());
     lines.push("Setup command:".into());
-    lines.push(format!(
-        "  scripts/setup-trading-tools.sh --target {}",
-        shell_path(&root)
-    ));
+    lines.push(format!("  {}", setup_command(&root)));
     Ok(lines.join("\n"))
 }
 
 pub(crate) fn run_setup_script(
     target: Option<&PathBuf>,
     check: bool,
+    dry_run: bool,
     skip_tradingview: bool,
     skip_openbb: bool,
 ) -> Result<String> {
     let root = project_root(target)?;
-    let script = root.join("scripts/setup-trading-tools.sh");
+    let script = root.join("scripts").join(if cfg!(windows) {
+        "setup-trading-tools.ps1"
+    } else {
+        "setup-trading-tools.sh"
+    });
     if !script.is_file() {
         return Err(anyhow!(
-            "Trading setup script not found at {}; copy scripts/setup-trading-tools.sh into this project or run it from the archon-cli repo",
+            "Trading setup script not found at {}; copy the platform trading setup script into this project or run it from the archon-cli repo",
             script.display()
         ));
     }
@@ -68,14 +84,59 @@ pub(crate) fn run_setup_script(
     if check {
         args.push("--check".into());
     }
+    if dry_run {
+        args.push("--dry-run".into());
+    }
     if skip_tradingview {
         args.push("--skip-tradingview".into());
     }
     if skip_openbb {
         args.push("--skip-openbb".into());
     }
+    #[cfg(windows)]
+    let output = {
+        let mut powershell_args = vec![
+            "-NoProfile".into(),
+            "-ExecutionPolicy".into(),
+            "Bypass".into(),
+            "-File".into(),
+            script.display().to_string(),
+        ];
+        let mut iter = args.iter();
+        while let Some(arg) = iter.next() {
+            match arg.as_str() {
+                "--target" => {
+                    powershell_args.push("-Target".into());
+                    if let Some(value) = iter.next() {
+                        powershell_args.push(value.clone());
+                    }
+                }
+                "--check" => powershell_args.push("-Check".into()),
+                "--dry-run" => powershell_args.push("-DryRun".into()),
+                "--skip-tradingview" => powershell_args.push("-SkipTradingView".into()),
+                "--skip-openbb" => powershell_args.push("-SkipOpenBB".into()),
+                other => powershell_args.push(other.into()),
+            }
+        }
+        run_command("powershell.exe", &powershell_args, Some(&root))?
+    };
+    #[cfg(not(windows))]
     let output = run_command(script.as_path(), &args, Some(&root))?;
     checked_text(output, "setup-trading-tools")
+}
+
+pub(crate) fn setup_command(root: &Path) -> String {
+    if cfg!(windows) {
+        format!(
+            "powershell.exe -NoProfile -File scripts/setup-trading-tools.ps1 -Target {}",
+            shell_path(root)
+        )
+    } else {
+        format!(
+            "scripts/setup-trading-tools.sh --target {}",
+            shell_path(root)
+        )
+    }
 }
 
 /// Resolve the project root that owns `.archon/trading-lab`.
@@ -135,7 +196,16 @@ pub(crate) fn tradingview_dir(project_root: &Path) -> PathBuf {
 
 pub(crate) fn openbb_bin(project_root: &Path, name: &str) -> PathBuf {
     let bin_dir = if cfg!(windows) { "Scripts" } else { "bin" };
-    openbb_venv_dir(project_root).join(bin_dir).join(name)
+    let executable = if cfg!(windows) && !name.to_ascii_lowercase().ends_with(".exe") {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    };
+    openbb_venv_dir(project_root).join(bin_dir).join(executable)
+}
+
+fn python_command_name() -> &'static str {
+    if cfg!(windows) { "python" } else { "python3" }
 }
 
 pub(crate) fn openbb_venv_dir(project_root: &Path) -> PathBuf {
@@ -235,5 +305,70 @@ fn shell_path(path: &Path) -> String {
         format!("'{text}'")
     } else {
         text
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openbb_python_path_uses_platform_layout_and_name() {
+        let root = Path::new("project with spaces");
+        let path = openbb_bin(root, "python");
+        if cfg!(windows) {
+            assert!(path.ends_with("Scripts/python.exe"));
+            assert!(openbb_bin(root, "openbb-api").ends_with("Scripts/openbb-api.exe"));
+        } else {
+            assert!(path.ends_with("bin/python"));
+        }
+    }
+
+    #[test]
+    fn setup_command_selects_the_platform_installer() {
+        let command = setup_command(Path::new("project"));
+        if cfg!(windows) {
+            assert!(command.contains("setup-trading-tools.ps1"));
+            assert!(command.contains("-Target project"));
+        } else {
+            assert!(command.contains("setup-trading-tools.sh"));
+            assert!(command.contains("--target project"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn openbb_health_distinguishes_missing_and_broken_interpreters() {
+        let temp = tempfile::tempdir().unwrap();
+        let venv = temp.path().join("venv space");
+        let bin = venv.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let python = bin.join("python");
+        std::fs::write(&python, "#!/bin/sh\nexit 17\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(openbb_health(&venv).starts_with("broken"));
+        std::fs::remove_file(&python).unwrap();
+        assert!(openbb_health(&venv).starts_with("missing"));
+        std::os::unix::fs::symlink(bin.join("removed-python"), &python).unwrap();
+        assert!(openbb_health(&venv).starts_with("broken"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn openbb_health_accepts_a_working_interpreter_import() {
+        let temp = tempfile::tempdir().unwrap();
+        let venv = temp.path().join("venv with spaces");
+        let bin = venv.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let python = bin.join("python");
+        std::fs::write(
+            &python,
+            "#!/bin/sh\n[ \"$1\" = -c ] && [ \"$2\" = 'import openbb' ]\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(openbb_health(&venv).starts_with("healthy"));
     }
 }

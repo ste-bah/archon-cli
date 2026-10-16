@@ -15,9 +15,9 @@ pub async fn handle_video_command(action: VideoAction) -> Result<()> {
 
 async fn handle_video_command_inner(action: VideoAction) -> Result<()> {
     let db = open_db()?;
-    let policy = std::env::current_dir()
+    let project_root = std::env::current_dir()?;
+    let policy = archon_policy::load_effective_policy(&project_root)
         .ok()
-        .and_then(|cwd| archon_policy::load_effective_policy(&cwd).ok())
         .unwrap_or_default();
     match action {
         VideoAction::Ingest {
@@ -37,6 +37,7 @@ async fn handle_video_command_inner(action: VideoAction) -> Result<()> {
             let vlm_report = configure_video_vlm_if_needed(&policy).await;
             let result = archon_video::ingest::ingest_video(
                 archon_video::ingest::IngestOpts {
+                    project_root: project_root.clone(),
                     source,
                     transcript_path: transcript,
                     metadata_only,
@@ -97,6 +98,7 @@ async fn handle_video_command_inner(action: VideoAction) -> Result<()> {
                 &policy,
                 &vlm_report,
                 &video_id,
+                &project_root,
                 transcript,
                 frames,
                 ocr,
@@ -153,6 +155,7 @@ async fn reprocess_video(
     policy: &archon_policy::EffectivePolicy,
     vlm_report: &Option<vlm_factory::VlmProviderInitReport>,
     video_id: &str,
+    project_root: &Path,
     transcript: bool,
     frames: bool,
     ocr: bool,
@@ -180,6 +183,7 @@ async fn reprocess_video(
             policy,
             video_id,
             &source.document_id,
+            project_root,
             &mut warnings,
         )
         .await;
@@ -199,6 +203,7 @@ async fn reprocess_video(
         db,
         policy,
         archon_video::frame_pipeline::FramePipelineInput {
+            project_root,
             frames_mode_override: Some(policy.video.frames.mode.as_str()),
             local_video_path: Some(Path::new(&source.local_path)),
             video_id,

@@ -361,15 +361,8 @@ fn test_resolve_spec_path_searches_upward() {
     let deep = temp.join("a").join("b").join("c");
     std::fs::create_dir_all(&deep).unwrap();
 
-    // Run resolver from deep dir with no explicit path
-    let orig_cwd = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&deep).unwrap();
-
-    // Clear env var to avoid interference
-    unsafe { std::env::remove_var("ARCHON_SPEC_PATH") };
-
-    let result = resolve_spec_path(None);
-    std::env::set_current_dir(&orig_cwd).unwrap();
+    // Run resolver from deep dir with no explicit path or env override.
+    let result = super::spec::resolve_spec_path_from(None, None, Some(&deep));
 
     assert!(
         result.is_ok(),

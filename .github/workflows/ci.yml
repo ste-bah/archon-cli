@@ -434,6 +434,7 @@ jobs:
             }
           }
           Add-Content -Path $env:GITHUB_ENV -Value "ARCHON_8DOT3_TEST_ROOT=$testRoot"
+          exit 0
 
       - name: Run tests (nextest, Windows)
         if: runner.os == 'Windows'

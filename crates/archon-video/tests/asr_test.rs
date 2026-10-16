@@ -125,6 +125,7 @@ async fn ingest_with_mock_asr_persists_local_asr_segments() {
 
     let result = ingest_video_with_asr_provider(
         IngestOpts {
+            project_root: std::env::current_dir().unwrap(),
             source: "asr_fixture.mp4".into(),
             transcript_path: None,
             metadata_only: false,

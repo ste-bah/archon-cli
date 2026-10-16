@@ -85,5 +85,21 @@ if bash "$INIT_SCRIPT" --nonexistent 2>/dev/null; then
 fi
 echo "PASS"
 
+echo "=== Test 7: platform trading installers are copied ==="
+REPO_FIXTURE=$(mktemp -d)
+TARGET_FIXTURE=$(mktemp -d)
+trap 'rm -rf "$TMPDIR" "$TMPDIR2" "$REPO_FIXTURE" "$TARGET_FIXTURE"' EXIT
+mkdir -p "$REPO_FIXTURE/scripts"
+cp "$SCRIPT_DIR/../setup-trading-tools.sh" "$REPO_FIXTURE/scripts/"
+cp "$SCRIPT_DIR/../setup-trading-tools.ps1" "$REPO_FIXTURE/scripts/"
+bash "$INIT_SCRIPT" --target "$TARGET_FIXTURE" --archon-cli-repo "$REPO_FIXTURE"
+for installer in setup-trading-tools.sh setup-trading-tools.ps1; do
+    if [ ! -f "$TARGET_FIXTURE/scripts/$installer" ]; then
+        echo "FAIL: missing copied installer $installer"
+        exit 1
+    fi
+done
+echo "PASS"
+
 echo ""
 echo "All tests passed."

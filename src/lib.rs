@@ -21,9 +21,14 @@ pub(crate) mod command {
     #[path = "../command/trading_openbb.rs"]
     pub(crate) mod trading_openbb;
 
+    #[path = "../command/trading_venv_health.rs"]
+    pub(crate) mod trading_venv_health;
+
     pub(crate) mod trading_tools {
         use anyhow::Result;
         use std::path::{Path, PathBuf};
+
+        pub(crate) use super::trading_venv_health::openbb_health;
 
         pub(crate) fn project_root(target: Option<&PathBuf>) -> Result<PathBuf> {
             Ok(target.cloned().unwrap_or(std::env::current_dir()?))

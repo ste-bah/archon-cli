@@ -1,0 +1,40 @@
+name: Trading tools setup
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  setup-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check POSIX installer and refusal cases
+        if: runner.os != 'Windows'
+        run: sh scripts/tests/test-setup-trading-tools.sh
+      - name: Check PowerShell specifier logic and refusal cases
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/tests/test-setup-trading-tools.ps1
+      - name: Install, run, and repair real tools on POSIX
+        if: runner.os != 'Windows'
+        run: sh scripts/tests/trading-tools-e2e.sh
+      - name: Install, run, and repair real tools on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/tests/trading-tools-e2e.ps1

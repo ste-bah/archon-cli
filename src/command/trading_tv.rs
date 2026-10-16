@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::cli_args::TradingCliTvAction;
 
-use super::trading_tools::{checked_text, project_root, run_node_script, tv_cli};
+use super::trading_tools::{checked_text, project_root, run_node_script, setup_command, tv_cli};
 
 pub(crate) fn render_tv(action: &TradingCliTvAction) -> Result<String> {
     match action {
@@ -26,9 +26,9 @@ fn run_tv(target: Option<&PathBuf>, args: &[String]) -> Result<String> {
     let cli = tv_cli(&root);
     if !cli.is_file() {
         return Err(anyhow!(
-            "TradingView MCP CLI missing at {}; run scripts/setup-trading-tools.sh --target {}",
+            "TradingView MCP CLI missing at {}; run {}",
             cli.display(),
-            root.display()
+            setup_command(&root)
         ));
     }
     let output = run_node_script(&root, &cli, args)?;

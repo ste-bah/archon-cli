@@ -13,6 +13,9 @@ pub struct TradingCliSetupArgs {
     /// Check readiness only; do not clone or install
     #[arg(long)]
     pub check: bool,
+    /// Print readiness without changing the project
+    #[arg(long)]
+    pub dry_run: bool,
     /// Skip TradingView MCP clone/npm install
     #[arg(long)]
     pub skip_tradingview: bool,
