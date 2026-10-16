@@ -74,7 +74,34 @@ try {
     if (Test-Path -LiteralPath $errorLogPath) { Get-Content -LiteralPath $errorLogPath | ForEach-Object { [Console]::Error.WriteLine($_) } }
     throw
 } finally {
-    if (-not $process.HasExited) { $process.Kill($true); $process.WaitForExit() }
+    # The generated launcher invokes openbb-api.exe, which can in turn start
+    # python.exe. Stop the entire tree rooted at the launcher PowerShell.
+    $taskkillOutput = & taskkill.exe /PID $process.Id /T /F 2>&1
+    if ($taskkillOutput) { $taskkillOutput | ForEach-Object { Write-Output "API teardown: $_" } }
+    if (-not $process.HasExited) { $process.WaitForExit() }
+
+    # taskkill's tree walk normally catches every descendant. Sweep any
+    # remaining venv processes too, then wait for Windows to release the files.
+    $venvPrefix = [IO.Path]::GetFullPath($venv).TrimEnd('\') + '\'
+    $drainDeadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        $venvProcesses = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.Path -and $_.Path.StartsWith($venvPrefix, [StringComparison]::OrdinalIgnoreCase)
+        })
+        foreach ($venvProcess in $venvProcesses) {
+            Write-Output "API teardown: stopping remaining venv process $($venvProcess.ProcessName) (PID $($venvProcess.Id), $($venvProcess.Path))"
+            & taskkill.exe /PID $venvProcess.Id /T /F 2>&1 | ForEach-Object { Write-Output "API teardown: $_" }
+        }
+        if ($venvProcesses.Count -gt 0) { Start-Sleep -Milliseconds 500 }
+    } while ($venvProcesses.Count -gt 0 -and [DateTime]::UtcNow -lt $drainDeadline)
+    $remainingVenvProcesses = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.Path -and $_.Path.StartsWith($venvPrefix, [StringComparison]::OrdinalIgnoreCase)
+    })
+    if ($remainingVenvProcesses.Count -gt 0) {
+        $details = $remainingVenvProcesses | ForEach-Object { "$($_.ProcessName) (PID $($_.Id), $($_.Path))" }
+        throw "Timed out waiting for OpenBB venv processes to stop: $($details -join '; ')"
+    }
+    Write-Output 'API teardown: no processes remain from the OpenBB venv'
 }
 
 Remove-Item -LiteralPath $python -Force

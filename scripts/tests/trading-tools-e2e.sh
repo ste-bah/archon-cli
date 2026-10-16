@@ -26,8 +26,9 @@ else
     exit 1
 fi
 ARCHON_OPENBB_IMPORT_EXIT="$openbb_import_exit" ARCHON_OPENBB_IMPORT_OUTPUT="$openbb_import_output" python3 - "$TARGET" <<'PY'
-import os, pathlib, socket, subprocess, sys, time, urllib.error, urllib.request
+import os, pathlib, signal, socket, subprocess, sys, time, urllib.error, urllib.request
 target = pathlib.Path(sys.argv[1])
+venv_path = str((target / ".archon/tools/openbb-venv").resolve())
 launcher = target / "scripts/start-openbb-api.sh"
 log_path = target / "openbb-api.log"
 with socket.socket() as listener:
@@ -36,7 +37,7 @@ with socket.socket() as listener:
 env = os.environ.copy()
 env.update(OPENBB_HOST="127.0.0.1", OPENBB_PORT=str(port))
 with log_path.open("wb") as log:
-    process = subprocess.Popen([str(launcher)], cwd=target, env=env, stdout=log, stderr=subprocess.STDOUT)
+    process = subprocess.Popen([str(launcher)], cwd=target, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
 try:
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
@@ -59,9 +60,49 @@ except Exception as error:
     print(log_path.read_text(errors="replace"), file=sys.stderr)
     raise SystemExit(1)
 finally:
-    if process.poll() is None:
-        process.terminate()
-        process.wait()
+    pgid = process.pid
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+        print(f"API teardown: sent SIGTERM to process group {pgid}")
+    except ProcessLookupError:
+        print(f"API teardown: process group {pgid} had already stopped")
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        # The separate session gives the API its own group. Kill anything that
+        # remains in it, and also check process command paths for venv users.
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            group_alive = False
+        else:
+            group_alive = True
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+                print(f"API teardown: sent SIGKILL to remaining process group {pgid}")
+            except ProcessLookupError:
+                group_alive = False
+        ps = subprocess.run(["ps", "-axo", "pid=,command="], check=False, text=True, capture_output=True)
+        venv_pids = []
+        for line in ps.stdout.splitlines():
+            fields = line.strip().split(None, 1)
+            if len(fields) == 2 and fields[0].isdigit() and int(fields[0]) != os.getpid() and venv_path in fields[1]:
+                venv_pids.append((int(fields[0]), fields[1]))
+        for pid, command in venv_pids:
+            print(f"API teardown: stopping remaining venv process PID {pid}: {command}")
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if not group_alive and not venv_pids:
+            print("API teardown: no processes remain from the OpenBB venv")
+            break
+        time.sleep(0.5)
+    else:
+        raise RuntimeError("Timed out waiting for OpenBB API process group and venv processes to stop")
 PY
 rm -f "$VENV/bin/python"
 broken_status=$("$ROOT/scripts/setup-trading-tools.sh" --target "$TARGET" --check 2>&1) || {
