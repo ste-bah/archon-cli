@@ -7,7 +7,7 @@ fn preparation_failure_removes_temp_and_preserves_live_file() {
         let dir = tempfile::tempdir().unwrap();
         let live = dir.path().join("task.md");
         std::fs::write(&live, b"live task bytes").unwrap();
-        *RESTORE_TEMP_FAILURE.lock().unwrap() = Some(failure);
+        RESTORE_TEMP_FAILURE.with(|injected| *injected.borrow_mut() = Some(failure));
 
         let result = prepare_restore_temp(&live, b"restored bytes");
 

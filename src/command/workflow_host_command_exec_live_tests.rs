@@ -9,6 +9,16 @@ mod successor_reuse_tests {
         PublishedArtifactReceipt, WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2Status,
     };
 
+    #[test]
+    fn windows_landing_receipt_paths_use_publication_separator_normalization() {
+        assert_eq!(
+            crate::command::workflow_host_command_publish::path_text(std::path::Path::new(
+                r"C:\Users\RUNNER~1\AppData\Local\Temp\project\tasks\TASK-X-010.md",
+            )),
+            "C:/Users/RUNNER~1/AppData/Local/Temp/project/tasks/TASK-X-010.md"
+        );
+    }
+
     fn record(status: WorkflowV2Status, invalidated: bool) -> WorkflowV2CallRecord {
         let call = WorkflowV2HostCall {
             id: "call".into(),

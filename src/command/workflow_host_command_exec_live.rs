@@ -191,11 +191,17 @@ impl FixedHostCommandExecutor {
             Err(error) => return Err(error),
         };
         let current_digest = archon_workflow::task_set_contract::content_digest(&bytes);
-        let path_key = path.to_string_lossy();
+        let path_key = crate::command::workflow_host_command_publish::path_comparison_key(
+            &crate::command::workflow_host_command_publish::path_text(&path),
+        );
         let receipt_digest = receipt
             .entries
             .iter()
-            .find(|entry| entry.destination_path == path_key)
+            .find(|entry| {
+                crate::command::workflow_host_command_publish::path_comparison_key(
+                    &entry.destination_path,
+                ) == path_key
+            })
             .map(|entry| entry.blake3.as_str())
             .unwrap_or("missing receipt entry");
         if receipt_digest != current_digest {

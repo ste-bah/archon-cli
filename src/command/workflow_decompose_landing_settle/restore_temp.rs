@@ -13,8 +13,10 @@ pub(crate) enum RestoreTempFailure {
 }
 
 #[cfg(test)]
-pub(crate) static RESTORE_TEMP_FAILURE: std::sync::Mutex<Option<RestoreTempFailure>> =
-    std::sync::Mutex::new(None);
+thread_local! {
+    pub(crate) static RESTORE_TEMP_FAILURE: std::cell::RefCell<Option<RestoreTempFailure>> =
+        const { std::cell::RefCell::new(None) };
+}
 
 pub(crate) struct RestoreTempCleanup(Option<PathBuf>);
 
@@ -63,7 +65,7 @@ pub(crate) fn prepare_restore_temp(
             Ok(mut file) => {
                 let cleanup = RestoreTempCleanup(Some(candidate.clone()));
                 #[cfg(test)]
-                let injected_failure = RESTORE_TEMP_FAILURE.lock().unwrap().take();
+                let injected_failure = RESTORE_TEMP_FAILURE.with(|failure| failure.take());
                 #[cfg(test)]
                 if matches!(injected_failure, Some(RestoreTempFailure::Write)) {
                     file.write_all(&restored[..restored.len() / 2])?;

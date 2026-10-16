@@ -308,7 +308,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen acceptance verification is unchanged.
         // # resource defaults re-pin only: frozen verification's check execution is scheduling-only.
         // #457 re-pin only: frozen-chain verification does not run the can-fail probe or read named inputs.
-        sources_digest: "a4fb6d04fb11c40e0ab9bb0e725bf063f878f894043b951e4390c029497c6907",
+        sources_digest: "7487637b517ffe5163f624a5187ddbfc888271ffced169afbd33bf0a2d818580",
         build_bound: true,
     },
     CapabilityLogic {
@@ -350,7 +350,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen skeleton verification is unchanged.
         // # resource defaults re-pin only: frozen skeleton verification runs no checks.
         // #457 re-pin only: frozen verification runs no check and judges no probe result.
-        sources_digest: "a4fb6d04fb11c40e0ab9bb0e725bf063f878f894043b951e4390c029497c6907",
+        sources_digest: "7487637b517ffe5163f624a5187ddbfc888271ffced169afbd33bf0a2d818580",
         build_bound: true,
     },
 ];
