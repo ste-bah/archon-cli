@@ -36,7 +36,14 @@ function Show-Status {
 function Invoke-External([string]$Program, [string[]]$Arguments) {
     if ($DryRun) { Write-Output "[dry-run] $Program $($Arguments -join ' ')"; return }
     & $Program @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "$Program failed with exit $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0) {
+        $commandLine = (@($Program) + @($Arguments) | ForEach-Object {
+            $argument = [string]$_
+            if ($argument -match '[\s"]') { '"' + $argument.Replace('"', '\"') + '"' }
+            else { $argument }
+        }) -join ' '
+        throw "Command failed with exit ${LASTEXITCODE}: $commandLine"
+    }
 }
 function Invoke-TradingViewNpmInstall {
     $previousErrorAction = $ErrorActionPreference
@@ -151,7 +158,8 @@ raise SystemExit(0)
         $env:ARCHON_SETUP_PYTHON_SPECIFIER = $Specifier
         if ($VersionOverride) { $env:ARCHON_SETUP_PYTHON_VERSION = $VersionOverride }
         else { Remove-Item Env:ARCHON_SETUP_PYTHON_VERSION -ErrorAction SilentlyContinue }
-        $script:PythonProbeError = (& $Program @Prefix $probeFile 2>&1 | Out-String).Trim()
+        $pythonArguments = @($Prefix) + @($probeFile)
+        $script:PythonProbeError = (& $Program @pythonArguments 2>&1 | Out-String).Trim()
         return $LASTEXITCODE -eq 0
     } catch { return $false }
     finally {
@@ -181,7 +189,7 @@ function Resolve-BasePython([string]$Specifier) {
         foreach ($program in @(Get-PathApplications $candidate)) {
             $prefix = if ($candidate -eq 'py') { @('-3') } else { @() }
             if (Test-PythonCandidate $program $prefix $Specifier) {
-                return @{ Program = $program; Prefix = $prefix }
+                return @{ Program = $program; FixedArguments = [string[]]$prefix }
             }
         }
     }
@@ -245,12 +253,13 @@ if (-not $SkipOpenBB) {
         Assert-SafeVenvRebuild
         $specifier = Get-OpenBBSpecifier
         $basePython = Resolve-BasePython $specifier
-        $versionArguments = $basePython.Prefix + @('--version')
+        $versionArguments = @($basePython.FixedArguments) + @('--version')
         $pythonVersion = (& $basePython.Program @versionArguments 2>&1 | Out-String).Trim()
         if ($LASTEXITCODE -ne 0) { throw "Could not read Python version from '$($basePython.Program)'" }
-        $prefixText = if ($basePython.Prefix.Count) { " $($basePython.Prefix -join ' ')" } else { '' }
+        $prefixText = if ($basePython.FixedArguments.Count) { " $($basePython.FixedArguments -join ' ')" } else { '' }
         Write-Output "OpenBB Python: $($basePython.Program)$prefixText ($pythonVersion)"
-        Invoke-External $basePython.Program ($basePython.Prefix + @('-m', 'venv', '--clear', $Venv))
+        $venvArguments = @($basePython.FixedArguments) + @('-m', 'venv', '--clear', $Venv)
+        Invoke-External $basePython.Program $venvArguments
         if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
             throw "OpenBB venv creation with base interpreter '$($basePython.Program)' did not create expected interpreter '$Python' in venv '$Venv'."
         }
