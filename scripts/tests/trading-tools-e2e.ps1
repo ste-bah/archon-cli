@@ -2,29 +2,13 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path '.').Path
 $target = Join-Path $env:RUNNER_TEMP 'trading tools with spaces'
 New-Item -ItemType Directory -Force -Path $target | Out-Null
-$skipTradingView = $false
-$installFailed = $false
-try {
-    $output = & "$root/scripts/setup-trading-tools.ps1" -Target $target 2>&1 | Out-String
-    $installFailed = $LASTEXITCODE -ne 0
-} catch { $output = $_.ToString(); $installFailed = $true }
-if ($installFailed) {
+$output = & "$root/scripts/setup-trading-tools.ps1" -Target $target 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0) {
     Write-Output $output
-    if ($output -notmatch '(git|npm) failed with exit|fatal: unable to access|npm ERR!|Failed to write TradingView MCP config') {
-        throw 'Installer assertion failed: setup failed outside the TradingView clone/npm step'
-    }
-    # If the external TradingView clone or npm install is unavailable, retain
-    # real OpenBB coverage and state the skip clearly in CI output.
-    Remove-Item -LiteralPath (Join-Path $target '.archon/tools/tradingview-mcp') -Recurse -Force -ErrorAction SilentlyContinue
-    $skipTradingView = $true
-    Write-Warning 'TradingView setup skipped: its external clone/npm installation failed; retrying OpenBB with -SkipTradingView.'
-    try {
-        $output = & "$root/scripts/setup-trading-tools.ps1" -Target $target -SkipTradingView 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) { throw "Installer exited $LASTEXITCODE`n$output" }
-    } catch { throw "Installer assertion failed: real OpenBB setup did not complete`n$output`n$_" }
+    throw 'Installer assertion failed: TradingView-enabled setup did not complete'
 }
 Write-Output $output
-if (-not $skipTradingView -and -not (Test-Path -LiteralPath (Join-Path $target '.archon/tools/tradingview-mcp/src/server.js') -PathType Leaf)) {
+if (-not (Test-Path -LiteralPath (Join-Path $target '.archon/tools/tradingview-mcp/src/server.js') -PathType Leaf)) {
     throw 'TradingView assertion failed: installer completed without the server entry point'
 }
 if ($output -notmatch 'OpenBB venv: healthy') { throw 'Installer assertion failed: final OpenBB status was not healthy' }
@@ -66,12 +50,12 @@ try {
 }
 
 Remove-Item -LiteralPath $python -Force
-$brokenStatus = & "$root/scripts/setup-trading-tools.ps1" -Target $target -Check -SkipTradingView 2>&1 | Out-String
+$brokenStatus = & "$root/scripts/setup-trading-tools.ps1" -Target $target -Check 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) { throw "Repair assertion failed: status check exited $LASTEXITCODE`n$brokenStatus" }
 if ($brokenStatus -notmatch 'OpenBB venv: broken') { throw "Repair assertion failed: installer did not report the missing interpreter as broken`n$brokenStatus" }
 Write-Output 'PASS installer reported broken OpenBB venv after interpreter deletion'
 try {
-    $repairOutput = & "$root/scripts/setup-trading-tools.ps1" -Target $target -SkipTradingView 2>&1 | Out-String
+    $repairOutput = & "$root/scripts/setup-trading-tools.ps1" -Target $target 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Installer exited $LASTEXITCODE`n$repairOutput" }
 } catch { throw "Repair assertion failed: installer did not complete`n$repairOutput`n$_" }
 Write-Output $repairOutput

@@ -3,26 +3,13 @@ set -eu
 ROOT=$(CDPATH= cd "$(dirname "$0")/../.." && pwd)
 TARGET="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/trading tools with spaces"
 mkdir -p "$TARGET"
-SKIP_TV=false
 install_output=$("$ROOT/scripts/setup-trading-tools.sh" --target "$TARGET" 2>&1) || {
     printf '%s\n' "$install_output" >&2
-    case "$install_output" in
-        *"git failed with exit"*|*"npm failed with exit"*|*"fatal: unable to access"*|*"npm ERR!"*|*"Failed to write TradingView MCP config"*) ;;
-        *) echo 'Installer assertion failed: setup failed outside the TradingView clone/npm step' >&2; exit 1 ;;
-    esac
-    # If the external TradingView clone or npm install is unavailable, keep the
-    # OpenBB end-to-end coverage and state the skip clearly in CI output.
-    rm -rf "$TARGET/.archon/tools/tradingview-mcp"
-    SKIP_TV=true
-    echo 'TradingView setup skipped: its external clone/npm installation failed; retrying OpenBB with --skip-tradingview.' >&2
-    install_output=$("$ROOT/scripts/setup-trading-tools.sh" --target "$TARGET" --skip-tradingview 2>&1) || {
-        printf '%s\n' "$install_output" >&2
-        echo 'Installer assertion failed: real OpenBB setup did not complete' >&2
-        exit 1
-    }
+    echo 'Installer assertion failed: TradingView-enabled setup did not complete' >&2
+    exit 1
 }
 printf '%s\n' "$install_output"
-if [ "$SKIP_TV" = false ] && [ ! -f "$TARGET/.archon/tools/tradingview-mcp/src/server.js" ]; then
+if [ ! -f "$TARGET/.archon/tools/tradingview-mcp/src/server.js" ]; then
     echo 'TradingView assertion failed: installer completed without the server entry point' >&2; exit 1;
 fi
 printf '%s\n' "$install_output" | grep -F 'OpenBB venv: healthy' >/dev/null || {
@@ -69,7 +56,7 @@ finally:
         process.wait()
 PY
 rm -f "$VENV/bin/python"
-broken_status=$("$ROOT/scripts/setup-trading-tools.sh" --target "$TARGET" --check --skip-tradingview 2>&1) || {
+broken_status=$("$ROOT/scripts/setup-trading-tools.sh" --target "$TARGET" --check 2>&1) || {
     printf '%s\n' "$broken_status" >&2
     echo 'Repair assertion failed: status check failed for missing venv interpreter' >&2
     exit 1
@@ -80,7 +67,7 @@ printf '%s\n' "$broken_status" | grep -F 'OpenBB venv: broken' >/dev/null || {
     exit 1
 }
 echo 'PASS installer reported broken OpenBB venv after interpreter deletion'
-broken_output=$("$ROOT/scripts/setup-trading-tools.sh" --target "$TARGET" --skip-tradingview 2>&1) || {
+broken_output=$("$ROOT/scripts/setup-trading-tools.sh" --target "$TARGET" 2>&1) || {
     printf '%s\n' "$broken_output" >&2
     echo 'Repair assertion failed: installer failed to rebuild a broken OpenBB venv' >&2
     exit 1
