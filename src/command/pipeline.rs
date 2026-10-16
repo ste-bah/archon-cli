@@ -43,6 +43,7 @@ pub async fn handle_pipeline_command(
                 config,
                 env_vars,
                 *force_quality_gate,
+                dirs::home_dir().as_deref(),
             )
             .await?;
         }

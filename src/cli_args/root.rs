@@ -214,11 +214,11 @@ pub struct Cli {
     #[arg(long)]
     pub bare: bool,
 
-    /// Run initialization hooks, install missing bundled pipeline agent profiles, and start interactive mode (differing files are reported; use `archon agents sync --update` to replace)
+    /// Install missing bundled pipeline agent profiles and start interactive mode (differing files are reported; use `archon agents sync --update` to replace)
     #[arg(long)]
     pub init: bool,
 
-    /// Run initialization hooks, install missing bundled pipeline agent profiles, and exit (differing files are reported; use `archon agents sync --update` to replace)
+    /// Install missing bundled pipeline agent profiles and exit (differing files are reported; use `archon agents sync --update` to replace)
     #[arg(long)]
     pub init_only: bool,
 

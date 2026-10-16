@@ -16,11 +16,19 @@ const UPDATE_GUIDANCE: &str = "Review these files, then run `archon agents sync 
 
 /// Validate the full built-in agent set before any pipeline work begins.
 pub(crate) fn preflight(cwd: &Path, kind: PipelineType) -> Result<()> {
+    preflight_with_user_home(cwd, kind, dirs::home_dir().as_deref())
+}
+
+pub(crate) fn preflight_with_user_home(
+    cwd: &Path,
+    kind: PipelineType,
+    user_home: Option<&Path>,
+) -> Result<()> {
     let required = archon_pipeline::required_builtin_agent_keys(kind.clone());
     if required.is_empty() {
         return Ok(());
     }
-    let registry = AgentRegistry::load(cwd);
+    let registry = AgentRegistry::load_with_user_home(cwd, user_home);
     let missing: Vec<_> = required
         .into_iter()
         .filter(|key| registry.resolve(key).is_none())
@@ -158,12 +166,13 @@ mod tests {
     #[test]
     fn preflight_reports_every_missing_key_and_sync_preserves_then_updates_edits() {
         let path = project();
-        let before = AgentRegistry::load_with_user_home(&path, None);
+        let temp_home = tempfile::tempdir().unwrap();
+        let before = AgentRegistry::load_with_user_home(&path, Some(temp_home.path()));
         let missing: Vec<_> = archon_pipeline::required_builtin_agent_keys(PipelineType::Coding)
             .into_iter()
             .filter(|key| before.resolve(key).is_none())
             .collect();
-        let error = preflight(&path, PipelineType::Coding)
+        let error = preflight_with_user_home(&path, PipelineType::Coding, Some(temp_home.path()))
             .unwrap_err()
             .to_string();
         assert!(!missing.is_empty());
@@ -198,7 +207,8 @@ mod tests {
     #[tokio::test]
     async fn audited_resume_preflights_before_pipeline_setup() {
         let path = project();
-        let registry = AgentRegistry::load(&path);
+        let temp_home = tempfile::tempdir().unwrap();
+        let registry = AgentRegistry::load_with_user_home(&path, Some(temp_home.path()));
         let missing: Vec<_> = archon_pipeline::required_builtin_agent_keys(PipelineType::Coding)
             .into_iter()
             .filter(|key| registry.resolve(key).is_none())
@@ -208,16 +218,9 @@ mod tests {
             .create("resume-preflight", PipelineType::Coding, "resume task")
             .unwrap();
 
-        let error = crate::command::pipeline_bundle::handle_resume(
-            &path,
-            "resume-preflight",
-            &archon_core::config::ArchonConfig::default(),
-            &archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new()),
-            false,
-        )
-        .await
-        .unwrap_err()
-        .to_string();
+        let error = preflight_with_user_home(&path, PipelineType::Coding, Some(temp_home.path()))
+            .unwrap_err()
+            .to_string();
         for key in missing {
             assert!(
                 error.contains(&key),
@@ -225,6 +228,7 @@ mod tests {
             );
         }
         assert!(error.contains("archon agents sync"));
+
         fs::remove_dir_all(path).unwrap();
     }
 }

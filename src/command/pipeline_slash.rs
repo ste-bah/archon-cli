@@ -70,6 +70,20 @@ fn handle_tui_resume(
     session_id: &str,
     force_quality_gate: bool,
 ) -> Result<()> {
+    handle_tui_resume_with_user_home(
+        ctx,
+        session_id,
+        force_quality_gate,
+        dirs::home_dir().as_deref(),
+    )
+}
+
+fn handle_tui_resume_with_user_home(
+    ctx: &mut CommandContext,
+    session_id: &str,
+    force_quality_gate: bool,
+    user_home: Option<&Path>,
+) -> Result<()> {
     let cwd = ctx
         .working_dir
         .clone()
@@ -85,7 +99,11 @@ fn handle_tui_resume(
             return crate::command::cli_mirror::spawn_cli_mirror(ctx, "pipeline", &mirror_args);
         }
     };
-    crate::command::pipeline_agents::preflight(&cwd, state.pipeline_type.clone())?;
+    crate::command::pipeline_agents::preflight_with_user_home(
+        &cwd,
+        state.pipeline_type.clone(),
+        user_home,
+    )?;
 
     match state.status {
         BundleStatus::Running => {
@@ -367,7 +385,8 @@ mod tests {
 
         let temp = tempfile::tempdir().unwrap();
         let cwd = temp.path();
-        let registry = AgentRegistry::load(cwd);
+        let temp_home = tempfile::tempdir().unwrap();
+        let registry = AgentRegistry::load_with_user_home(cwd, Some(temp_home.path()));
         let missing: Vec<_> = archon_pipeline::required_builtin_agent_keys(PipelineType::Coding)
             .into_iter()
             .filter(|key| registry.resolve(key).is_none())
@@ -383,13 +402,14 @@ mod tests {
         let (mut ctx, _rx) = CtxBuilder::new()
             .with_working_dir(cwd.to_path_buf())
             .build();
-        let error = PipelineSlashHandler
-            .execute(
-                &mut ctx,
-                &["resume".to_string(), "missing-agent-resume".to_string()],
-            )
-            .unwrap_err()
-            .to_string();
+        let error = handle_tui_resume_with_user_home(
+            &mut ctx,
+            "missing-agent-resume",
+            false,
+            Some(temp_home.path()),
+        )
+        .unwrap_err()
+        .to_string();
         for key in missing {
             assert!(
                 error.contains(&key),
