@@ -119,9 +119,10 @@ Example: `archon docs ingest ~/corpus --jobs auto --yes && archon docs verify-in
 
 Upstream archon had **no** prose fingerprinting. Its only style machinery is
 coarse and hand-configured: `research/style.rs` injects US/UK spelling +
-citation-style + formality boilerplate into research prompts, and
-`research/final_stage/style_applier.rs::apply_style` is an explicit pass-through
-stub (`TODO(REQ-RESEARCH-007)`) that returns the paper unchanged.
+citation-style + formality guidance into research prompts. Research phase 8
+runs through the dynamic final-assembly agents in
+`crates/archon-pipeline/src/research/final_assembly.rs`; style is applied as
+prompt guidance.
 
 ### 2.2 What archon-lanham adds
 
@@ -208,6 +209,5 @@ The analyzer is pure Rust (`regex`, `once_cell`, `serde`) — no external tools.
 - Rust-trained profiles are leaner than the full god-agent reference (empty
   hedges/transitions → the `## CLAIMS` / `## TRANSITIONS` output-style sections
   are omitted unless a rich profile is supplied).
-- The multi-agent research pipeline's `style_applier` is still a stub — the
-  Lanham output-style feeds the interactive session prompt, not the research
-  pipeline. Wiring them together is future work.
+- Research phase 8 runs through the dynamic final-assembly agents in
+  `research/final_assembly.rs`; style is applied as prompt guidance.

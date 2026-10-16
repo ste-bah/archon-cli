@@ -24,7 +24,7 @@ pub fn is_dynamic_final_key(key: &str) -> bool {
         || is_dynamic_chapter_key(key)
 }
 
-pub fn next_final_stage_agent(session: &PipelineSession) -> Result<Option<AgentInfo>> {
+pub fn next_final_assembly_agent(session: &PipelineSession) -> Result<Option<AgentInfo>> {
     let Some(structure) = structure_from_session(session).unwrap_or(None) else {
         return Ok(None);
     };
@@ -61,7 +61,7 @@ pub fn next_final_stage_agent(session: &PipelineSession) -> Result<Option<AgentI
     Ok(None)
 }
 
-pub fn build_final_stage_prompt(
+pub fn build_final_assembly_prompt(
     session: &PipelineSession,
     agent_key: &str,
     task: &str,
@@ -77,7 +77,7 @@ pub fn build_final_stage_prompt(
     }
 }
 
-pub fn score_final_stage_output(
+pub fn score_final_assembly_output(
     session: &PipelineSession,
     agent_key: &str,
     output: &str,

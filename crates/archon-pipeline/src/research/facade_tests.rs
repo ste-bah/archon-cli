@@ -119,7 +119,7 @@ async fn next_agent_sequence() {
 }
 
 #[tokio::test]
-async fn next_agent_runs_dynamic_final_stage_steps() {
+async fn next_agent_runs_dynamic_final_assembly_steps() {
     let facade = make_facade();
     let mut session = facade.init_session("test").await.unwrap();
     let architecture = "\

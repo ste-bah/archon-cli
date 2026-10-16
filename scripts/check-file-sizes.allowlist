@@ -73,7 +73,6 @@ crates/archon-pipeline/src/research/facade.rs
 crates/archon-pipeline/src/research/quality.rs
 crates/archon-pipeline/src/research/style.rs
 crates/archon-pipeline/src/runner.rs
-crates/archon-pipeline/tests/final_stage.rs
 crates/archon-pipeline/tests/layered_context.rs
 crates/archon-pipeline/tests/learning_schema.rs
 crates/archon-pipeline/tests/runner.rs
