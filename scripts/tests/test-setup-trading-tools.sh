@@ -3,7 +3,20 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd "$SCRIPT_DIR/../.." && pwd)
 TEMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/trading setup.XXXXXX")
-trap 'rm -rf "$TEMP_ROOT"' EXIT HUP INT TERM
+TEST_CASE='harness setup'
+cleanup() {
+    status=$?
+    trap - EXIT HUP INT TERM
+    rm -rf "$TEMP_ROOT"
+    if [ "$status" -ne 0 ]; then
+        printf 'FAIL: %s (exit %s)\n' "$TEST_CASE" "$status" >&2
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 mkdir -p "$TEMP_ROOT/home"
 HOME="$TEMP_ROOT/home"
 export HOME
@@ -12,6 +25,7 @@ mkdir -p "$TARGET"
 TARGET=$(cd "$TARGET" && pwd)
 
 for mode in --check --dry-run; do
+    TEST_CASE="status $mode with spaced target"
     output=$($REPO_ROOT/scripts/setup-trading-tools.sh --target "$TARGET" "$mode" --skip-tradingview --skip-openbb)
     printf '%s\n' "$output" | grep -F "target=$TARGET" >/dev/null
     printf '%s\n' "$output" | grep -F 'OpenBB venv: missing' >/dev/null
@@ -20,6 +34,7 @@ for mode in --check --dry-run; do
 done
 
 # The installer must source a user's profile before checking the tool PATH.
+TEST_CASE='profile PATH loading'
 PROFILE_BIN="$TEMP_ROOT/profile bin"
 mkdir -p "$PROFILE_BIN"
 cat > "$PROFILE_BIN/node" <<'EOF'
@@ -34,6 +49,7 @@ rm -f "$HOME/.profile"
 
 # Nounset in a profile must not abort setup, and a later profile command can
 # still add tools to PATH even when sourcing eventually returns non-zero.
+TEST_CASE='profile nounset and non-zero handling'
 unset UNSET_VAR_FOR_TEST
 cat > "$HOME/.profile" <<EOF
 echo "\$UNSET_VAR_FOR_TEST" >/dev/null
@@ -52,6 +68,7 @@ printf '%s\n' "$profile_output" | grep -F "warning: could not fully source profi
 rm -f "$HOME/.profile"
 
 if "$REPO_ROOT/scripts/setup-trading-tools.sh" --target 2>/dev/null; then
+    TEST_CASE='missing --target argument refusal'
     echo 'expected missing --target argument to fail' >&2
     exit 1
 fi
@@ -96,6 +113,7 @@ for versioned_python in 3.20 3.19 3.18 3.17 3.16 3.15 3.14 3.13 3.12 3.11 3.10; 
     chmod +x "$FAKE_BIN/python$versioned_python"
 done
 BROKEN_TARGET="$TEMP_ROOT/broken target"
+TEST_CASE='broken OpenBB venv repair'
 BROKEN_VENV="$BROKEN_TARGET/.archon/tools/openbb-venv"
 mkdir -p "$BROKEN_VENV/bin"
 printf 'home = fake-python\n' > "$BROKEN_VENV/pyvenv.cfg"
@@ -108,6 +126,7 @@ grep -F -- '-m venv --clear ' "$FAKE_SETUP_LOG" >/dev/null
 # A successful base-interpreter exit without a created venv must name the
 # base interpreter, venv path, and missing interpreter file clearly.
 STORE_TARGET="$TEMP_ROOT/store stub target"
+TEST_CASE='missing venv interpreter diagnostic'
 STORE_VENV="$STORE_TARGET/.archon/tools/openbb-venv"
 mkdir -p "$STORE_TARGET"
 STORE_TARGET=$(cd "$STORE_TARGET" && pwd)
@@ -135,6 +154,7 @@ start_output=$(OPENBB_HOST=0.0.0.0 OPENBB_PORT=7011 "$BROKEN_TARGET/scripts/star
 test "$start_output" = '--host 0.0.0.0 --port 7011'
 
 LINK_TARGET="$TEMP_ROOT/linked venv target"
+TEST_CASE='symlinked OpenBB venv refusal'
 LINKED_VENV_TARGET="$TEMP_ROOT/linked project"
 mkdir -p "$LINK_TARGET"
 printf 'keep me\n' > "$LINK_TARGET/sentinel.txt"
@@ -154,6 +174,7 @@ fi
 test "$(cat "$LINK_TARGET/sentinel.txt")" = 'keep me'
 
 NON_VENV_TARGET="$TEMP_ROOT/non-venv project"
+TEST_CASE='non-venv directory refusal'
 NON_VENV="$NON_VENV_TARGET/.archon/tools/openbb-venv"
 mkdir -p "$NON_VENV"
 NON_VENV=$(cd "$NON_VENV" && pwd)
@@ -167,6 +188,7 @@ printf '%s\n' "$non_venv_output" | grep -F "$NON_VENV" >/dev/null
 test "$(cat "$NON_VENV/sentinel.txt")" = 'keep non-venv data'
 
 HEALTHY_TARGET="$TEMP_ROOT/healthy project"
+TEST_CASE='healthy OpenBB venv preservation'
 HEALTHY_VENV="$HEALTHY_TARGET/.archon/tools/openbb-venv"
 mkdir -p "$HEALTHY_VENV/bin"
 printf 'home = fake-python\n' > "$HEALTHY_VENV/pyvenv.cfg"
@@ -191,6 +213,7 @@ fi
 
 # A healthy venv must not need any base Python on PATH.
 CORE_BIN="$TEMP_ROOT/core tools"
+TEST_CASE='healthy venv without base Python on PATH'
 mkdir -p "$CORE_BIN"
 for core_tool in mkdir cat chmod; do
     ln -s "$(command -v "$core_tool")" "$CORE_BIN/$core_tool"
@@ -220,6 +243,7 @@ run_spec_case() {
     spec=$1
     mock_info=$2
     expected=$3
+    TEST_CASE="Python specifier $spec with $mock_info"
     case_name=$(printf '%s' "$spec-$mock_info" | tr -c 'A-Za-z0-9' '_')
     case_target="$TEMP_ROOT/spec $case_name"
     case_venv="$case_target/.archon/tools/openbb-venv"
@@ -275,6 +299,7 @@ chmod +x "$UNSAT_DEFAULT_BIN/python3"
 run_python_order_case() {
     order_path=$1
     expected_interpreter=$2
+    TEST_CASE="Python interpreter order prefers $expected_interpreter"
     order_target="$TEMP_ROOT/python order $expected_interpreter"
     order_venv="$order_target/.archon/tools/openbb-venv"
     mkdir -p "$order_venv"
@@ -301,6 +326,11 @@ fi
 EOF
 cat > "$FAKE_BIN/npm" <<'EOF'
 #!/bin/sh
+if [ "$1" = install ]; then
+    printf '%s\n' "$PWD" "$*" > "$FAKE_NPM_LOG"
+else
+    echo 'npm 10.0.0'
+fi
 exit 0
 EOF
 cat > "$FAKE_BIN/node" <<'EOF'
@@ -309,13 +339,23 @@ if [ "$1" = - ]; then printf '{}\n' > "$2"; fi
 EOF
 chmod +x "$FAKE_BIN/git" "$FAKE_BIN/npm" "$FAKE_BIN/node"
 TV_TARGET="$TEMP_ROOT/tv target"
+TEST_CASE='TradingView install with spaced target'
 mkdir -p "$TV_TARGET"
-PATH="$FAKE_BIN:$PATH" "$REPO_ROOT/scripts/setup-trading-tools.sh" \
+TV_TARGET=$(cd "$TV_TARGET" && pwd)
+FAKE_NPM_LOG="$TEMP_ROOT/npm invocation.log" PATH="$FAKE_BIN:$PATH" "$REPO_ROOT/scripts/setup-trading-tools.sh" \
     --target "$TV_TARGET" --skip-openbb
+TV_DIR="$TV_TARGET/.archon/tools/tradingview-mcp"
+NPM_CWD=$(sed -n '1p' "$TEMP_ROOT/npm invocation.log")
+NPM_ARGS=$(sed -n '2p' "$TEMP_ROOT/npm invocation.log")
+if [ "$NPM_CWD" != "$TV_DIR" ] || [ "$NPM_ARGS" != 'install --omit=dev' ]; then
+    printf 'npm invocation expected cwd=%s args=%s, got cwd=%s args=%s\n' "$TV_DIR" 'install --omit=dev' "$NPM_CWD" "$NPM_ARGS" >&2
+    exit 1
+fi
 test -f "$TV_TARGET/scripts/start-tradingview-cdp.sh"
 test -f "$TV_TARGET/scripts/start-tradingview-cdp.ps1"
 grep -F 'launch_tv_debug_windows.ps1' "$TV_TARGET/scripts/start-tradingview-cdp.ps1" >/dev/null
 grep -F '9222' "$TV_TARGET/scripts/start-tradingview-cdp.ps1" >/dev/null
+TEST_CASE='missing external TradingView launcher refusal'
 if tv_output=$("$TV_TARGET/scripts/start-tradingview-cdp.sh" 9222 2>&1); then
     echo 'expected missing external TradingView launcher to fail' >&2
     exit 1

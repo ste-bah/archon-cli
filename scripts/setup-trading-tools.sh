@@ -239,7 +239,7 @@ if [ "$SKIP_TRADINGVIEW" != true ]; then
     else
         run git clone "$TV_REPO" "$TV_DIR"
     fi
-    run npm --prefix "$TV_DIR" install --omit=dev
+    (cd "$TV_DIR" && run npm install --omit=dev)
     chmod +x "$TV_DIR/scripts/"*.sh "$TV_DIR/src/cli/index.js" 2>/dev/null || true
 fi
 

@@ -38,6 +38,38 @@ function Invoke-External([string]$Program, [string[]]$Arguments) {
     & $Program @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Program failed with exit $LASTEXITCODE" }
 }
+function Invoke-TradingViewNpmInstall {
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $npmOutput = @(& npm install --omit=dev 2>&1)
+        $npmExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousErrorAction }
+    foreach ($line in $npmOutput) { [Console]::Out.WriteLine($line.ToString()) }
+    if ($npmExit -eq 0) { return }
+
+    $packageJson = Join-Path $TvDir 'package.json'
+    Write-Output "npm package.json: $packageJson (exists: $(Test-Path -LiteralPath $packageJson -PathType Leaf))"
+    $logPath = ''
+    foreach ($line in $npmOutput) {
+        if ($line.ToString() -match 'log of this run can be found in:\s*(.+)$') { $logPath = $Matches[1].Trim() }
+    }
+    if (-not $logPath) {
+        $cache = if ($env:npm_config_cache) { $env:npm_config_cache } elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'npm-cache' } else { '' }
+        if ($cache) {
+            $log = Get-ChildItem -LiteralPath (Join-Path $cache '_logs') -Filter '*-debug-0.log' -File -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($log) { $logPath = $log.FullName }
+        }
+    }
+    if ($logPath -and (Test-Path -LiteralPath $logPath -PathType Leaf)) {
+        Write-Output "npm debug log: $logPath"
+        Get-Content -LiteralPath $logPath -Tail 30 | ForEach-Object { Write-Output $_ }
+    } else {
+        Write-Output "npm debug log: no log file found (reported path: $logPath)"
+    }
+    throw "npm failed with exit $npmExit"
+}
 function Get-OpenBBSpecifier {
     $metadata = Get-ChildItem -LiteralPath $Venv -Filter 'openbb-*.dist-info' -Directory -Recurse -ErrorAction SilentlyContinue |
         ForEach-Object { Join-Path $_.FullName 'METADATA' } |
@@ -178,7 +210,9 @@ if (-not $SkipTradingView) {
     foreach ($bin in @('git', 'node', 'npm')) { if (-not (Get-Command $bin -ErrorAction SilentlyContinue)) { throw "Missing required binary: $bin. Run scripts/install-system-deps.ps1 -WithTradingTools." } }
     if (Test-Path -LiteralPath (Join-Path $TvDir '.git')) { Invoke-External git @('-C', $TvDir, 'pull', '--ff-only') }
     else { Invoke-External git @('clone', 'https://github.com/tradesdontlie/tradingview-mcp.git', $TvDir) }
-    Invoke-External npm @('--prefix', $TvDir, 'install', '--omit=dev')
+    Push-Location -LiteralPath $TvDir
+    try { Invoke-TradingViewNpmInstall }
+    finally { Pop-Location }
     $configScript = @'
 const fs=require('fs'), file=process.argv[2], server=process.argv[3];
 let c={}; if(fs.existsSync(file)) c=JSON.parse(fs.readFileSync(file,'utf8'));

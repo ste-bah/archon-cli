@@ -54,5 +54,53 @@ if ((Get-Content -LiteralPath $nonVenvSentinel -Raw).Trim() -ne 'preserve') {
     throw 'Refusal assertion failed: non-venv sentinel changed'
 }
 Write-Output 'PASS non-venv directory with contents refused with sentinel intact'
+
+$fakeBin = Join-Path $root 'fake npm bin'
+$fakeTarget = Join-Path $root 'TradingView target with spaces'
+$npmLog = Join-Path $root 'npm invocation.log'
+New-Item -ItemType Directory -Force -Path $fakeBin, $fakeTarget | Out-Null
+$gitShim = @'
+@echo off
+if "%1"=="clone" (
+  mkdir "%3\src\cli" 2>nul
+  mkdir "%3\scripts" 2>nul
+  type nul > "%3\src\server.js"
+  type nul > "%3\src\cli\index.js"
+  echo {}> "%3\package.json"
+)
+exit /b 0
+'@
+$npmShim = @'
+@echo off
+if "%1"=="install" (
+  echo %CD%> "%FAKE_NPM_LOG%"
+  echo %*>> "%FAKE_NPM_LOG%"
+  exit /b 0
+)
+echo 10.0.0
+exit /b 0
+'@
+Set-Content -LiteralPath (Join-Path $fakeBin 'git.cmd') -Value $gitShim
+Set-Content -LiteralPath (Join-Path $fakeBin 'npm.cmd') -Value $npmShim
+Set-Content -LiteralPath (Join-Path $fakeBin 'node.cmd') -Value @('@echo off', 'exit /b 0')
+$previousPath = $env:Path
+$previousNpmLog = $env:FAKE_NPM_LOG
+try {
+    $env:Path = "$fakeBin$([IO.Path]::PathSeparator)$previousPath"
+    $env:FAKE_NPM_LOG = $npmLog
+    & $scriptPath -Target $fakeTarget -SkipOpenBB
+    if ($LASTEXITCODE -ne 0) { throw "Spaced-path npm invocation exited $LASTEXITCODE" }
+} finally {
+    $env:Path = $previousPath
+    if ($null -eq $previousNpmLog) { Remove-Item Env:FAKE_NPM_LOG -ErrorAction SilentlyContinue }
+    else { $env:FAKE_NPM_LOG = $previousNpmLog }
+}
+$expectedTvDir = Join-Path $fakeTarget '.archon/tools/tradingview-mcp'
+$npmInvocation = Get-Content -LiteralPath $npmLog
+if ($npmInvocation.Count -lt 2 -or $npmInvocation[0] -ne $expectedTvDir -or $npmInvocation[1] -ne 'install --omit=dev') {
+    throw "Spaced-path npm assertion failed; expected cwd '$expectedTvDir' and arguments 'install --omit=dev', got: $($npmInvocation -join ' | ')"
+}
+if (-not (Test-Path -LiteralPath (Join-Path $expectedTvDir 'package.json'))) { throw 'Spaced-path npm assertion failed: package.json was not created by the fake clone' }
+Write-Output 'PASS npm install runs in the TradingView directory with spaces'
 Write-Output 'test result: PowerShell specifier and refusal checks passed'
 exit 0
