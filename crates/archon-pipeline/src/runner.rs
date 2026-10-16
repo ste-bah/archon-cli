@@ -422,6 +422,15 @@ use execution::{
     fail_audit, is_context_window_error, is_retryable_pipeline_attempt_error,
     pipeline_attempt_retry_delay, quality_gate_failure, relative_to_bundle,
 };
+
+pub(super) async fn sleep_before_pipeline_retry<F, Fut>(delay: Duration, sleep: F)
+where
+    F: FnOnce(Duration) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    sleep(delay).await;
+}
+
 pub use execution::{
     resume_pipeline_audited, resume_pipeline_audited_with_options, run_pipeline,
     run_pipeline_audited,

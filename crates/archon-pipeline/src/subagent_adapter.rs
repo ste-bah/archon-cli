@@ -18,6 +18,8 @@ use archon_tools::provider_env::{
     ProviderEnvPolicy, ProviderEnvSource, provider_env_policy_from_marker,
 };
 use archon_tools::subagent_executor::SubagentOutcome;
+
+mod provider_failure;
 use archon_tools::tool::ToolContext;
 use archon_tools::workflow_read_guard::{TreeWideMutator, WorkflowReadGuardSettings};
 // The read-only vocabulary is shared with the workflow host's native-tool
@@ -198,12 +200,7 @@ impl SubagentPipelineClient {
     /// `SubagentRequest` and never come through here at all, so an interactive
     /// subagent cannot reach this code by any route.
     ///
-    /// **Declared or nothing.** An enabled knob over an undeclared run confines
-    /// nothing, and warns. The tempting alternative is to fall back to the
-    /// agent's working directory; that is what an earlier attempt did, and it
-    /// refuses the deliverable of every workflow whose artifacts live outside
-    /// the tree the agent runs in — which is the normal shape, not the exotic
-    /// one.
+    /// Writes stay within declared targets plus the host-derived workspace.
     ///
     /// **The workspace is added, not substituted.** An agent must be able to
     /// write where it was told to work, whether or not the declaration happened
@@ -400,11 +397,7 @@ impl LlmClient for SubagentPipelineClient {
     }
 }
 
-/// Map a terminal [`SubagentOutcome`] onto the pipeline's response type.
-///
-/// `Completed` says the runner returned content, but it does not establish a
-/// provider stop reason. Preserve the provider's value so callers that require
-/// a complete author reply can refuse an absent reason.
+/// Map a terminal subagent outcome while preserving provider metadata.
 pub(crate) fn llm_response_for_subagent_outcome(
     outcome: SubagentOutcome,
     timed_out: bool,
@@ -419,6 +412,22 @@ pub(crate) fn llm_response_for_subagent_outcome(
             stop_reason: completion.stop_reason,
         }),
         SubagentOutcome::Failed(error) => Err(anyhow!("subagent failed: {error}")),
+        SubagentOutcome::FailedWithProvider {
+            message,
+            status,
+            retry_after_secs,
+            overloaded,
+        } => {
+            let Some(error) = provider_failure::to_llm_error(
+                status,
+                retry_after_secs,
+                overloaded,
+                message.clone(),
+            ) else {
+                return Err(anyhow!("subagent failed: {message}"));
+            };
+            Err(anyhow::Error::new(error).context(format!("subagent failed: {message}")))
+        }
         SubagentOutcome::Cancelled if timed_out => Err(anyhow!(
             "subagent timed out after {}s",
             timeout_secs.unwrap_or(SubagentRequest::DEFAULT_TIMEOUT_SECS)

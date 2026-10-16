@@ -275,8 +275,12 @@ pub(super) fn is_retryable_pipeline_attempt_error(error: &anyhow::Error) -> bool
             err,
             archon_llm::provider::LlmError::Http(_)
                 | archon_llm::provider::LlmError::RateLimited { .. }
-                | archon_llm::provider::LlmError::Overloaded
-                | archon_llm::provider::LlmError::Server { .. }
+                | archon_llm::provider::LlmError::Overloaded { .. }
+                | archon_llm::provider::LlmError::Server { status: 429, .. }
+                | archon_llm::provider::LlmError::Server {
+                    status: 500..=599,
+                    ..
+                }
         );
     }
 
@@ -290,9 +294,6 @@ pub(super) fn is_retryable_pipeline_attempt_error(error: &anyhow::Error) -> bool
         "timed out",
         "timeout",
         "temporarily unavailable",
-        "server overloaded",
-        "rate limited",
-        "429",
         "500",
         "502",
         "503",
@@ -300,12 +301,102 @@ pub(super) fn is_retryable_pipeline_attempt_error(error: &anyhow::Error) -> bool
     ]
     .iter()
     .any(|marker| message.contains(marker))
+        || has_pipeline_overload_error_code(&message)
 }
 
-pub(super) fn pipeline_attempt_retry_delay(attempt: usize) -> Duration {
+const PIPELINE_OVERLOAD_BACKOFF_CAP: Duration = Duration::from_secs(300); // Keep provider overload waits within five minutes.
+
+pub(super) fn pipeline_attempt_retry_delay(attempt: usize, error: &anyhow::Error) -> Duration {
+    if let Some(retry_after) = provider_retry_after(error) {
+        return retry_after.min(PIPELINE_OVERLOAD_BACKOFF_CAP);
+    }
+    if is_pipeline_overload_error(error) {
+        let exponent = (attempt as u32).saturating_sub(1);
+        let delay = Duration::from_secs(10u64.saturating_mul(2u64.saturating_pow(exponent)));
+        return delay.min(PIPELINE_OVERLOAD_BACKOFF_CAP);
+    }
     let exponent = (attempt as u32).saturating_sub(1);
     let delay_ms = 250u64.saturating_mul(2u64.saturating_pow(exponent));
     Duration::from_millis(delay_ms.min(2_000))
+}
+
+fn provider_retry_after(error: &anyhow::Error) -> Option<Duration> {
+    use archon_llm::provider::LlmError;
+
+    if let Some(LlmError::Server {
+        status: 529,
+        pipeline_retry_after_secs: Some(retry_after_secs),
+        ..
+    }) = error.downcast_ref::<LlmError>()
+    {
+        return Some(Duration::from_secs(*retry_after_secs).min(PIPELINE_OVERLOAD_BACKOFF_CAP));
+    }
+    if let Some(LlmError::Overloaded {
+        status,
+        retry_after_secs: Some(retry_after_secs),
+    }) = error.downcast_ref::<LlmError>()
+    {
+        if matches!(status, None | Some(429 | 529)) {
+            return Some(Duration::from_secs(*retry_after_secs).min(PIPELINE_OVERLOAD_BACKOFF_CAP));
+        }
+    }
+    if let Some(LlmError::RateLimited {
+        pipeline_retry_after_secs: Some(retry_after_secs),
+        ..
+    }) = error.downcast_ref::<LlmError>()
+    {
+        return Some(Duration::from_secs(*retry_after_secs).min(PIPELINE_OVERLOAD_BACKOFF_CAP));
+    }
+    if let Some(LlmError::RateLimited {
+        retry_after_secs,
+        from_provider: true,
+        ..
+    }) = error.downcast_ref::<LlmError>()
+    {
+        return Some(Duration::from_secs(*retry_after_secs).min(PIPELINE_OVERLOAD_BACKOFF_CAP));
+    }
+    None
+}
+
+fn is_pipeline_overload_error(error: &anyhow::Error) -> bool {
+    use archon_llm::provider::LlmError;
+
+    if let Some(err) = error.downcast_ref::<LlmError>() {
+        return matches!(err, LlmError::RateLimited { .. })
+            || matches!(
+                err,
+                LlmError::Overloaded {
+                    status: None | Some(429 | 529),
+                    ..
+                }
+            )
+            || matches!(
+                err,
+                LlmError::Server {
+                    status: 429 | 529,
+                    ..
+                }
+            );
+    }
+    let message = error.to_string().to_ascii_lowercase();
+    has_pipeline_overload_error_code(&message)
+}
+
+fn has_pipeline_overload_error_code(message: &str) -> bool {
+    [
+        "overloaded_error",
+        "server_is_overloaded",
+        "rate_limit_error",
+    ]
+    .iter()
+    .any(|code| {
+        message.match_indices(code).any(|(index, _)| {
+            let before = message[..index].chars().next_back();
+            let after = message[index + code.len()..].chars().next();
+            before.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_')
+                && after.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_')
+        })
+    })
 }
 
 pub(super) fn quality_gate_failure(agent: &AgentInfo, score: f64, attempt: usize) -> String {
@@ -321,3 +412,7 @@ pub(super) fn fail_audit(audit: &mut Option<PipelineAuditRun>, error: &str) -> R
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "execution_tests.rs"]
+mod retry_delay_tests;

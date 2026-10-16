@@ -33,6 +33,9 @@ pub enum LlmError {
     RateLimited {
         retry_after_secs: u64,
         from_provider: bool,
+        /// Optional provider wait hint for the pipeline's outer retry loop.
+        /// The provider retry decorator deliberately ignores this field.
+        pipeline_retry_after_secs: Option<u64>,
     },
 
     /// The provider rejected the request itself (an error event such as
@@ -41,11 +44,22 @@ pub enum LlmError {
     #[error("provider rejected the request ({error_type}): {message}")]
     Rejected { error_type: String, message: String },
 
+    /// Provider status and optional Retry-After metadata; this error keeps the
+    /// same retry semantics and display text regardless of those fields.
     #[error("server overloaded")]
-    Overloaded,
+    Overloaded {
+        status: Option<u16>,
+        retry_after_secs: Option<u64>,
+    },
 
     #[error("server error ({status}): {message}")]
-    Server { status: u16, message: String },
+    Server {
+        status: u16,
+        message: String,
+        /// Provider wait hint consumed by the pipeline outer retry loop only.
+        /// RetryProvider and inline retry policy continue to use `status`.
+        pipeline_retry_after_secs: Option<u64>,
+    },
 
     #[error("serialization error: {0}")]
     Serialize(String),

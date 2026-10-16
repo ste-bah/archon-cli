@@ -164,7 +164,7 @@ fn error_reason(error: &LlmError) -> &'static str {
         LlmError::RateLimited { .. } => "rate_limited",
         LlmError::QuotaExceeded(_) => "quota_exceeded",
         LlmError::Auth(_) => "auth_error",
-        LlmError::Overloaded => "overloaded",
+        LlmError::Overloaded { .. } => "overloaded",
         LlmError::Server { .. } => "server_error",
         LlmError::Unsupported(_) => "unsupported_feature",
         LlmError::ProviderNotFound { .. } => "provider_not_found",
@@ -288,6 +288,7 @@ mod tests {
             &LlmError::RateLimited {
                 retry_after_secs: 60,
                 from_provider: true,
+                pipeline_retry_after_secs: None,
             },
         );
 

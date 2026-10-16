@@ -131,7 +131,7 @@ fn test_anthropic_provider_explicit_returns_anthropic() {
 }
 
 #[test]
-fn production_anthropic_selection_uses_the_existing_retry_policy() {
+fn retry_anthropic_uses_the_shared_retry_provider_policy() {
     let wrapped = super::retry_anthropic(AnthropicProvider::new(make_test_client()));
     assert_eq!(wrapped.inner().name(), "anthropic");
     assert_eq!(

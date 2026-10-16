@@ -237,6 +237,9 @@ impl Tool for AgentTool {
                         (AgentStatus::Finished, Ok(completion.content.clone()))
                     }
                     SubagentOutcome::Failed(err) => (AgentStatus::Failed, Err(err.clone())),
+                    SubagentOutcome::FailedWithProvider { message, .. } => {
+                        (AgentStatus::Failed, Err(message.clone()))
+                    }
                     SubagentOutcome::AutoBackgrounded => {
                         // The runner is still executing — mark Running here
                         // so registry watchers don't see a premature
@@ -437,6 +440,10 @@ impl Tool for AgentTool {
                 );
                 let prefixed = format!("{} {}", classify_failure_prefix(&err), err);
                 ToolResult::error(prefixed)
+            }
+            SubagentOutcome::FailedWithProvider { message, .. } => {
+                error!(subagent_id = %subagent_id, error = %message, "AgentTool: subagent run failed");
+                ToolResult::error(format!("{} {}", classify_failure_prefix(&message), message))
             }
             SubagentOutcome::AutoBackgrounded => {
                 let ms = exec.auto_background_ms();

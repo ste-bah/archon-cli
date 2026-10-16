@@ -241,7 +241,9 @@ impl Tool for TaskCreateTool {
         fn map_outcome_to_status(outcome: &SubagentOutcome) -> Option<TaskStatus> {
             match outcome {
                 SubagentOutcome::Completed(_) => Some(TaskStatus::Completed),
-                SubagentOutcome::Failed(_) => Some(TaskStatus::Failed),
+                SubagentOutcome::Failed(_) | SubagentOutcome::FailedWithProvider { .. } => {
+                    Some(TaskStatus::Failed)
+                }
                 SubagentOutcome::Cancelled => Some(TaskStatus::Stopped),
                 // Inner runner keeps executing in a detached task. The
                 // TaskCreate-owned completion receiver applies final status.
@@ -340,6 +342,9 @@ impl Tool for TaskCreateTool {
                         }
                     }
                     SubagentOutcome::Failed(err) => ToolResult::error(err),
+                    SubagentOutcome::FailedWithProvider { message, .. } => {
+                        ToolResult::error(message)
+                    }
                     SubagentOutcome::AutoBackgrounded => {
                         let response = json!({
                             "task_id": task_id,

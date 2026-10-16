@@ -778,10 +778,12 @@ fn map_codex_error(status: u16, body: String, refreshed: bool) -> LlmError {
         429 => LlmError::RateLimited {
             retry_after_secs: 1,
             from_provider: false,
+            pipeline_retry_after_secs: None,
         },
         500..=599 => LlmError::Server {
             status,
             message: body,
+            pipeline_retry_after_secs: None,
         },
         _ => LlmError::Http(format!("status {status}: {body}")),
     }

@@ -43,8 +43,12 @@ impl From<ApiError> for LlmError {
             } => LlmError::RateLimited {
                 retry_after_secs,
                 from_provider,
+                pipeline_retry_after_secs: from_provider.then_some(retry_after_secs),
             },
-            ApiError::Overloaded => LlmError::Overloaded,
+            ApiError::Overloaded { retry_after_secs } => LlmError::Overloaded {
+                status: Some(529),
+                retry_after_secs,
+            },
             ApiError::ServerError { status, message } => classify_context_window_error(
                 Some(status),
                 None,
@@ -53,7 +57,11 @@ impl From<ApiError> for LlmError {
                 Some("anthropic"),
                 None,
             )
-            .unwrap_or(LlmError::Server { status, message }),
+            .unwrap_or(LlmError::Server {
+                status,
+                message,
+                pipeline_retry_after_secs: None,
+            }),
             ApiError::SerializeError(msg) => LlmError::Serialize(msg),
         }
     }

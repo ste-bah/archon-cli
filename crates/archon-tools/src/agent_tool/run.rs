@@ -28,6 +28,17 @@ impl ExecutionResult {
         } else {
             match &self.result {
                 Ok(completion) => SubagentOutcome::Completed(completion.clone()),
+                Err(ExecutorError::ProviderFailure {
+                    message,
+                    status,
+                    retry_after_secs,
+                    overloaded,
+                }) => SubagentOutcome::FailedWithProvider {
+                    message: message.clone(),
+                    status: *status,
+                    retry_after_secs: *retry_after_secs,
+                    overloaded: *overloaded,
+                },
                 Err(error) => SubagentOutcome::Failed(error.to_string()),
             }
         }
@@ -388,6 +399,11 @@ async fn run_subagent_owned(
         SubagentOutcome::Failed(err) => {
             let _ = exec
                 .on_visible_complete(subagent_id.clone(), Err(err.clone()), nested)
+                .await;
+        }
+        SubagentOutcome::FailedWithProvider { message, .. } => {
+            let _ = exec
+                .on_visible_complete(subagent_id.clone(), Err(message.clone()), nested)
                 .await;
         }
         // Still no visible hooks and no worktree cleanup — PRESERVE-D5 holds.

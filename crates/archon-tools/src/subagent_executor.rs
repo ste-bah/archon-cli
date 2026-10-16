@@ -46,6 +46,13 @@ pub enum ExecutorError {
     /// An internal executor error. The string is the user-facing
     /// reason surfaced in the resulting `ToolResult::error`.
     Internal(String),
+    /// Provider retry metadata preserved across the subagent result boundary.
+    ProviderFailure {
+        message: String,
+        status: Option<u16>,
+        retry_after_secs: Option<u64>,
+        overloaded: bool,
+    },
 }
 
 impl std::fmt::Display for ExecutorError {
@@ -53,6 +60,7 @@ impl std::fmt::Display for ExecutorError {
         match self {
             Self::NotInstalled => write!(f, "subagent executor not installed"),
             Self::Internal(m) => write!(f, "{m}"),
+            Self::ProviderFailure { message, .. } => write!(f, "{message}"),
         }
     }
 }
@@ -84,6 +92,13 @@ pub enum SubagentOutcome {
     /// Runner finished with an error before the timer (or with no
     /// timer). Carries the user-facing reason.
     Failed(String),
+    /// A provider failure with retry semantics kept as structured data.
+    FailedWithProvider {
+        message: String,
+        status: Option<u16>,
+        retry_after_secs: Option<u64>,
+        overloaded: bool,
+    },
     /// Timer fired before the runner finished; the join handle was
     /// abandoned. The runner continues executing in its own task;
     /// `on_inner_complete` fires from its tail when it eventually

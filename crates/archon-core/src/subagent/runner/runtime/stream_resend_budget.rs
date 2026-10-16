@@ -252,6 +252,7 @@ fn rate_limit_retry_after(error: &anyhow::Error) -> Option<(Duration, bool)> {
         LlmError::RateLimited {
             retry_after_secs,
             from_provider,
+            ..
         } => Some((Duration::from_secs(*retry_after_secs), *from_provider)),
         _ => None,
     }
@@ -271,9 +272,14 @@ fn redacted(error: anyhow::Error) -> anyhow::Error {
         LlmError::QuotaExceeded(text) => LlmError::QuotaExceeded(clean(text)),
         LlmError::Unsupported(text) => LlmError::Unsupported(clean(text)),
         LlmError::Serialize(text) => LlmError::Serialize(clean(text)),
-        LlmError::Server { status, message } => LlmError::Server {
+        LlmError::Server {
+            status,
+            message,
+            pipeline_retry_after_secs,
+        } => LlmError::Server {
             status,
             message: clean(message),
+            pipeline_retry_after_secs,
         },
         LlmError::Rejected {
             error_type,

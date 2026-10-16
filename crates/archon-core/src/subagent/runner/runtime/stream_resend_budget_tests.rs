@@ -86,6 +86,7 @@ async fn the_stop_names_the_last_provider_error_bounded_and_redacted() {
         anyhow::Error::new(LlmError::Server {
             status: 500,
             message: body.clone(),
+            pipeline_retry_after_secs: None,
         })
     };
     tokio::time::sleep(Duration::from_millis(30)).await;
@@ -117,6 +118,7 @@ async fn a_rate_limit_is_waited_inside_the_window_and_paused_past_it() {
         anyhow::Error::new(LlmError::RateLimited {
             retry_after_secs: secs,
             from_provider: true,
+            pipeline_retry_after_secs: None,
         })
     };
     let mut budget = ResendBudget::new(Duration::from_secs(600));
@@ -147,6 +149,7 @@ async fn a_rejected_open_ends_the_round_at_once_redacted() {
             anyhow::Error::new(LlmError::Server {
                 status: 400,
                 message: "invalid body api_key=sk-ant-secret123".into(),
+                pipeline_retry_after_secs: None,
             }),
             "first open could not open",
         )
@@ -197,6 +200,7 @@ async fn an_answer_clears_the_last_provider_error() {
     let server = anyhow::Error::new(LlmError::Server {
         status: 500,
         message: "model not loaded".into(),
+        pipeline_retry_after_secs: None,
     });
     assert!(
         budget
@@ -243,6 +247,7 @@ async fn a_default_rate_limit_wait_is_not_called_the_providers() {
     let limited = anyhow::Error::new(LlmError::RateLimited {
         retry_after_secs: 60,
         from_provider: false,
+        pipeline_retry_after_secs: None,
     });
     let stop = budget
         .open_failed(limited, "first open could not open")
@@ -260,6 +265,7 @@ async fn an_open_clears_the_old_error_but_does_not_renew_the_window() {
     let server = anyhow::Error::new(LlmError::Server {
         status: 500,
         message: "model not loaded".into(),
+        pipeline_retry_after_secs: None,
     });
     assert!(
         budget

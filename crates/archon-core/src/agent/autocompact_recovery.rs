@@ -159,7 +159,7 @@ pub fn compaction_failure_disposition(error: &CompactionError) -> CompactionFail
         }) => CompactionFailureDisposition::Transient {
             cooldown: std::time::Duration::from_secs(*retry_after_secs),
         },
-        CompactionError::Provider(archon_llm::provider::LlmError::Overloaded)
+        CompactionError::Provider(archon_llm::provider::LlmError::Overloaded { .. })
         | CompactionError::Provider(archon_llm::provider::LlmError::Server {
             status: 500..=599,
             ..

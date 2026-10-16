@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use archon_llm::provider::LlmError;
 use archon_pipeline::learning::{
     desc::{DescEpisode, DescEpisodeStore},
     gnn::auto_trainer_runtime::query_trajectories_for_training,
@@ -71,6 +72,12 @@ struct AgentPathLlmClient {
 struct FlakyAgentLlmClient {
     calls: Arc<AtomicUsize>,
     failures_before_success: usize,
+}
+
+struct FlakyWaveLlmClient {
+    calls: Arc<AtomicUsize>,
+    failures_before_success: usize,
+    error: LlmError,
 }
 
 impl DelayedLlmClient {
@@ -133,6 +140,20 @@ impl FlakyAgentLlmClient {
         Self {
             calls: Arc::new(AtomicUsize::new(0)),
             failures_before_success,
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl FlakyWaveLlmClient {
+    fn new(failures_before_success: usize, error: LlmError) -> Self {
+        Self {
+            calls: Arc::new(AtomicUsize::new(0)),
+            failures_before_success,
+            error,
         }
     }
 
@@ -261,6 +282,43 @@ impl LlmClient for FlakyAgentLlmClient {
         }
         Ok(LlmResponse {
             content: "agent path output".into(),
+            tool_uses: vec![],
+            tokens_in: Some(11),
+            tokens_out: Some(7),
+            stop_reason: None,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmClient for FlakyWaveLlmClient {
+    async fn send_message(
+        &self,
+        _messages: Vec<serde_json::Value>,
+        _system: Vec<serde_json::Value>,
+        _tools: Vec<serde_json::Value>,
+        _model: &str,
+    ) -> anyhow::Result<LlmResponse> {
+        anyhow::bail!("runner should call run_agent for this test")
+    }
+
+    async fn run_agent(&self, _request: AgentExecutionRequest) -> anyhow::Result<LlmResponse> {
+        let call = self.calls.fetch_add(1, Ordering::SeqCst);
+        if call < self.failures_before_success {
+            return Err(anyhow::Error::new(match &self.error {
+                LlmError::Overloaded {
+                    status,
+                    retry_after_secs,
+                } => LlmError::Overloaded {
+                    status: *status,
+                    retry_after_secs: *retry_after_secs,
+                },
+                LlmError::Http(message) => LlmError::Http(message.clone()),
+                _ => LlmError::Http("unexpected test error".into()),
+            }));
+        }
+        Ok(LlmResponse {
+            content: "wave retry output".into(),
             tool_uses: vec![],
             tokens_in: Some(11),
             tokens_out: Some(7),
@@ -960,6 +1018,71 @@ async fn test_parallel_wave_retries_low_quality_outputs_before_commit() {
         .map(|(_, result)| result.output.as_str())
         .collect::<Vec<_>>();
     assert_eq!(outputs, vec!["retry-ok", "retry-ok"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_parallel_wave_retries_529_with_overload_policy_and_succeeds() {
+    let facade = WaveFacade;
+    let llm = FlakyWaveLlmClient::new(
+        1,
+        LlmError::Overloaded {
+            status: Some(529),
+            retry_after_secs: Some(17),
+        },
+    );
+    let started = tokio::time::Instant::now();
+
+    let result = run_pipeline(&facade, &llm, "parallel wave overload", None, None, None)
+        .await
+        .expect("the wave member should retry and succeed");
+
+    assert_eq!(result.agent_results.len(), 2);
+    assert_eq!(llm.calls(), 3, "one of two wave members should retry once");
+    assert_eq!(started.elapsed(), Duration::from_secs(17));
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_parallel_wave_retries_ordinary_transient_error_and_exhausts_budget() {
+    let facade = WaveFacade;
+    let succeeds = FlakyWaveLlmClient::new(1, LlmError::Http("connection reset".into()));
+    let started = tokio::time::Instant::now();
+    run_pipeline(
+        &facade,
+        &succeeds,
+        "parallel wave transient",
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("ordinary transient wave error should retry");
+    assert_eq!(succeeds.calls(), 3);
+    assert_eq!(started.elapsed(), Duration::from_millis(250));
+
+    let exhausted = FlakyWaveLlmClient::new(
+        usize::MAX,
+        LlmError::Overloaded {
+            status: Some(529),
+            retry_after_secs: None,
+        },
+    );
+    assert!(
+        run_pipeline(
+            &facade,
+            &exhausted,
+            "parallel wave exhaustion",
+            None,
+            None,
+            None
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        exhausted.calls(),
+        6,
+        "each wave member uses the pipeline attempt budget independently"
+    );
 }
 
 #[tokio::test]
