@@ -70,12 +70,13 @@ async fn disk_change_after_judgement_is_published_as_the_new_candidate() {
     .current()
     .unwrap()
     .clone();
-    let receipt_digest = landing.result.data["publicationReceipt"]["entries"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|entry| entry["destination_path"] == task_path.to_string_lossy().as_ref())
-        .unwrap()["blake3"]
+    let receipt_digest = receipt_entry(
+        landing.result.data["publicationReceipt"]["entries"]
+            .as_array()
+            .unwrap(),
+        &task_path,
+    )
+    .unwrap()["blake3"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -278,11 +279,7 @@ async fn run_unrebuildable_receipt_candidate(findings: bool, missing: bool) {
     let disk_after = std::fs::read(&task_path).unwrap();
     let receipt_digest = result["publicationReceipt"]["entries"]
         .as_array()
-        .and_then(|entries| {
-            entries
-                .iter()
-                .find(|entry| entry["destination_path"] == task_path.to_string_lossy().as_ref())
-        })
+        .and_then(|entries| receipt_entry(entries, &task_path))
         .and_then(|entry| entry["blake3"].as_str());
     let evidence_dir = run.store.run_dir(&run.run_id).join("landing-evidence");
     let evidence = match std::fs::read_dir(&evidence_dir) {

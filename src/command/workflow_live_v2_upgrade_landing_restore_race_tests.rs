@@ -124,12 +124,12 @@ async fn a_second_write_after_restore_is_judged_as_a_candidate_without_a_loop() 
         newest_judged,
         answer["publicationReceipt"]["entries"]
             .as_array()
-            .is_some_and(
-                |entries| entries.iter().any(|entry| entry["destination_path"]
-                    == task_path.to_string_lossy().as_ref()
-                    && entry["blake3"]
-                        == archon_workflow::task_set_contract::content_digest(&disk_after))
-            ),
+            .is_some_and(|entries| {
+                receipt_entry(entries, &task_path).is_some_and(|entry| {
+                    entry["blake3"]
+                        == archon_workflow::task_set_contract::content_digest(&disk_after)
+                })
+            }),
         evidence_first == displaced,
         evidence_race == between_read_and_restore,
         evidence_latest == newest,

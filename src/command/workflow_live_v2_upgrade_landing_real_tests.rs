@@ -1,5 +1,22 @@
 use super::*;
 
+fn receipt_entry<'a>(
+    entries: &'a [serde_json::Value],
+    path: &std::path::Path,
+) -> Option<&'a serde_json::Value> {
+    let path_key = crate::command::workflow_host_command_publish::path_comparison_key(
+        &crate::command::workflow_host_command_publish::path_text(path),
+    );
+    entries.iter().find(|entry| {
+        entry["destination_path"]
+            .as_str()
+            .is_some_and(|destination| {
+                crate::command::workflow_host_command_publish::path_comparison_key(destination)
+                    == path_key
+            })
+    })
+}
+
 struct RealLandingProcess {
     executed: Arc<Mutex<Vec<String>>>,
     staged_task_reads: Arc<Mutex<Vec<(std::path::PathBuf, Vec<u8>)>>>,

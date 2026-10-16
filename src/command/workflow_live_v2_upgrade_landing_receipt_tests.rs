@@ -231,12 +231,11 @@ async fn a_stale_current_landing_is_rejudged_from_disk_without_publishing() {
     let staged_reads = staged_task_reads.lock().unwrap();
     assert_eq!(staged_reads.len(), 1);
     let (_staged_path, staged_bytes) = &staged_reads[0];
-    let receipt_task_digest = outcome["publicationReceipt"]["entries"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|entry| entry["destination_path"] == task_path.to_string_lossy().as_ref())
-        .unwrap()["blake3"]
+    let receipt_task_digest = receipt_entry(
+        outcome["publicationReceipt"]["entries"].as_array().unwrap(),
+        &task_path,
+    )
+    .unwrap()["blake3"]
         .as_str()
         .unwrap();
     assert_eq!(
@@ -356,12 +355,13 @@ async fn a_write_between_restore_and_rejudge_becomes_the_new_candidate() {
     .current()
     .unwrap()
     .clone();
-    let receipt_digest = landing.result.data["publicationReceipt"]["entries"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|entry| entry["destination_path"] == task_path.to_string_lossy().as_ref())
-        .unwrap()["blake3"]
+    let receipt_digest = receipt_entry(
+        landing.result.data["publicationReceipt"]["entries"]
+            .as_array()
+            .unwrap(),
+        &task_path,
+    )
+    .unwrap()["blake3"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -439,12 +439,11 @@ async fn a_write_between_restore_and_rejudge_becomes_the_new_candidate() {
         "mismatch self-heals: {result:?}"
     );
     assert_eq!(evidence_bytes, b"operator edit");
-    let answer_receipt_digest = result["publicationReceipt"]["entries"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|entry| entry["destination_path"] == task_path.to_string_lossy().as_ref())
-        .unwrap()["blake3"]
+    let answer_receipt_digest = receipt_entry(
+        result["publicationReceipt"]["entries"].as_array().unwrap(),
+        &task_path,
+    )
+    .unwrap()["blake3"]
         .as_str()
         .unwrap();
     assert_eq!(
