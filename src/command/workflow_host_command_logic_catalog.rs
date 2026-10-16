@@ -60,7 +60,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 27: freeze persists reusable probe observations and resumes their
         // judge verdicts across passability failures; reuse identity and
         // which probe/judge results complete authoring can differ.
-        version: 27,
+        // 28: baseline-passing checks use a stored semantic judgment only
+        // when its frozen contract and exact command digests still match;
+        // otherwise the input-mutation proof and findings still apply.
+        version: 28,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -82,8 +85,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not acceptance verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; its freeze verdicts are unchanged.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not check verdicts.
-        // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
-        sources_digest: "1a828ff747f9a5d17715ee898c2c72d7aedf7ea7e0c6a53af8e9bfcf5d55248a",
+        // #457: baseline-passing checks may use a bound accepted judge verdict; the can-fail proof remains required.
+        sources_digest: "1c64e2a09fde0cb9d675d25e8bbbeb561ca06e1ee55b5ccddea232a18320bc50",
         build_bound: false,
     },
     CapabilityLogic {
@@ -125,8 +128,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; skeleton freeze verdicts are unchanged.
         // # resource defaults re-pin only: skeleton freeze does not judge checks.
         // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
-        // Re-pin only: acceptance sibling-copy paths are outside skeleton checks.
-        sources_digest: "1a828ff747f9a5d17715ee898c2c72d7aedf7ea7e0c6a53af8e9bfcf5d55248a",
+        // #457 re-pin only: acceptance probe changes do not affect skeleton freeze verdicts.
+        sources_digest: "1c64e2a09fde0cb9d675d25e8bbbeb561ca06e1ee55b5ccddea232a18320bc50",
         build_bound: false,
     },
     CapabilityLogic {
@@ -302,8 +305,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain acceptance verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen acceptance verification is unchanged.
         // # resource defaults re-pin only: frozen verification's check execution is scheduling-only.
-        // Re-pin only: frozen verification executes no sibling check.
-        sources_digest: "e277d816ea66b2f6a2423c8489e69ba9b002d7c015c9b15c02643aa5390cee47",
+        // #457 re-pin only: frozen-chain verification does not run the can-fail probe or read named inputs.
+        sources_digest: "a4fb6d04fb11c40e0ab9bb0e725bf063f878f894043b951e4390c029497c6907",
         build_bound: true,
     },
     CapabilityLogic {
@@ -344,8 +347,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain skeleton verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen skeleton verification is unchanged.
         // # resource defaults re-pin only: frozen skeleton verification runs no checks.
-        // Re-pin only: frozen verification executes no sibling check.
-        sources_digest: "e277d816ea66b2f6a2423c8489e69ba9b002d7c015c9b15c02643aa5390cee47",
+        // #457 re-pin only: frozen verification runs no check and judges no probe result.
+        sources_digest: "a4fb6d04fb11c40e0ab9bb0e725bf063f878f894043b951e4390c029497c6907",
         build_bound: true,
     },
 ];

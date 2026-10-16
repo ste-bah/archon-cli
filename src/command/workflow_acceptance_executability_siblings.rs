@@ -12,6 +12,28 @@ use super::Unrun;
 
 const SKIP: &[&str] = &[".git", "target", "node_modules"];
 
+pub(crate) fn manifest_relative_input(token: &str, command: &str, cwd: &Path) -> Option<String> {
+    archon_workflow::acceptance_sibling_paths::scan(command)
+        .into_iter()
+        .filter(|named| {
+            named.required
+                && named
+                    .path
+                    .file_name()
+                    .is_some_and(|name| name == "Cargo.toml")
+        })
+        .find_map(|named| {
+            let root = cwd.join(&named.path).parent()?.canonicalize().ok()?;
+            root.join(token).exists().then(|| {
+                format!(
+                    "{}/{}",
+                    named.path.parent().expect("manifest parent").display(),
+                    token
+                )
+            })
+        })
+}
+
 pub(super) fn copy_for_checks(
     copied_project: &Path,
     live_project: &Path,

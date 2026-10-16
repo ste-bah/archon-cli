@@ -23,6 +23,8 @@ pub(super) async fn prove(
     probe: &HostProbe,
     baseline: &Baseline,
     contract: &AcceptanceContract,
+    digest: &str,
+    refs: &[FrozenCommandRef],
     passing: &[String],
 ) -> BTreeMap<String, String> {
     let short: String = baseline.commit.chars().take(12).collect();
@@ -43,10 +45,29 @@ pub(super) async fn prove(
     ];
     let live: Vec<&Path> = live.iter().flatten().map(PathBuf::as_path).collect();
     for id in passing {
+        let entry = (contract.acceptance.iter())
+            .chain(&contract.supplementary)
+            .find(|entry| &entry.id == id);
+        let bound_accepted = entry.is_some_and(|entry| {
+            entry.judgment.verdict == JudgeDecision::Accepted
+                && refs.iter().any(|reference| {
+                    reference.acceptance_id == *id
+                        && reference.chain_digest == digest
+                        && executed_text(entry).is_some_and(|(_, text)| {
+                            reference.command_digest == content_digest(text.as_bytes())
+                        })
+                })
+        });
+        if bound_accepted {
+            probe.note(format!(
+                "check '{id}': passed on the pre-implementation tree at {short}; accepted as a regression guard on its stored accepted judge verdict, bound to the current contract and check digests"
+            ));
+            continue;
+        }
         let names = (contract.acceptance.iter())
             .chain(&contract.supplementary)
             .find(|entry| &entry.id == id)
-            .map(named_inputs)
+            .map(|entry| named_inputs(entry, &probe.project, &baseline.repository))
             .unwrap_or_default();
         if names.is_empty() {
             findings.insert(
@@ -108,7 +129,12 @@ pub(super) async fn prove(
         let result = result.expect("a result when the run completed");
         let at = super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
         super::silent::ran(probe, &baseline.commit, &mutated, id);
-        let moved = markers.moved(result);
+        let generated = markers.generated(result);
+        let moved: Vec<String> = markers
+            .moved(result)
+            .into_iter()
+            .filter(|path| !generated.contains(path))
+            .collect();
         // Issue 328: nor did a run that failed for its host (a program that
         // could not start, a tree that did not build) fail on its own terms.
         let crashed = !super::crash_findings(&mutated, [&result.result]).is_empty()

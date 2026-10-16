@@ -398,7 +398,7 @@ pub(super) async fn cannot_fail_findings(
             }
         }
     }
-    findings.extend(prove::prove(probe, baseline, contract, &passing).await);
+    findings.extend(prove::prove(probe, baseline, contract, digest, refs, &passing).await);
     findings
 }
 
