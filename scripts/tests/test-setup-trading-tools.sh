@@ -68,6 +68,10 @@ if [ -f "$1" ] && [ -n "$ARCHON_SETUP_PYTHON_SPECIFIER" ]; then exit 0; fi
 if [ "$1" = -c ]; then exit 0; fi
 if [ "$1" = -m ] && [ "$2" = venv ]; then
     [ "$3" = --clear ] || exit 9
+    if [ "${FAKE_VENV_CREATE:-}" = fail ]; then
+        printf '%s\n' "$*" >> "$FAKE_SETUP_LOG"
+        exit 0
+    fi
     VENV="$4"
     mkdir -p "$VENV/bin"
     printf 'home = fake-python\n' > "$VENV/pyvenv.cfg"
@@ -100,6 +104,28 @@ FAKE_SETUP_LOG="$TEMP_ROOT/venv invocation.log"
 PATH="$FAKE_BIN:$PATH" FAKE_SETUP_LOG="$FAKE_SETUP_LOG" \
     "$REPO_ROOT/scripts/setup-trading-tools.sh" --target "$BROKEN_TARGET" --skip-tradingview
 grep -F -- '-m venv --clear ' "$FAKE_SETUP_LOG" >/dev/null
+
+# A successful base-interpreter exit without a created venv must name the
+# base interpreter, venv path, and missing interpreter file clearly.
+STORE_TARGET="$TEMP_ROOT/store stub target"
+STORE_VENV="$STORE_TARGET/.archon/tools/openbb-venv"
+mkdir -p "$STORE_TARGET"
+STORE_TARGET=$(cd "$STORE_TARGET" && pwd)
+STORE_VENV="$STORE_TARGET/.archon/tools/openbb-venv"
+expected_store_error="setup-trading-tools.sh: venv creation with base interpreter 'python3.20' did not create expected interpreter '$STORE_VENV/bin/python' in venv '$STORE_VENV'."
+if store_output=$(PATH="$FAKE_BIN:$PATH" FAKE_SETUP_LOG="$FAKE_SETUP_LOG" FAKE_VENV_CREATE=fail \
+    "$REPO_ROOT/scripts/setup-trading-tools.sh" --target "$STORE_TARGET" --skip-tradingview 2>&1); then
+    echo 'expected missing venv interpreter to fail' >&2
+    exit 1
+fi
+if ! printf '%s\n' "$store_output" | grep -Fx "$expected_store_error" >/dev/null; then
+    printf 'expected exact missing-interpreter diagnostic:\n%s\nactual output:\n%s\n' \
+        "$expected_store_error" "$store_output" >&2
+    exit 1
+fi
+grep -F -- "python3.20 -m venv --clear $STORE_VENV" "$FAKE_SETUP_LOG" >/dev/null
+test ! -e "$STORE_VENV/bin/python"
+
 test -f "$BROKEN_TARGET/scripts/start-openbb-api.sh"
 test -f "$BROKEN_TARGET/scripts/start-openbb-api.ps1"
 grep -F "OPENBB_HOST" "$BROKEN_TARGET/scripts/start-openbb-api.ps1" >/dev/null

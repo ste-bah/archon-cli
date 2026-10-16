@@ -187,6 +187,9 @@ if (-not $SkipOpenBB) {
         $specifier = Get-OpenBBSpecifier
         $basePython = Resolve-BasePython $specifier
         Invoke-External $basePython.Program ($basePython.Prefix + @('-m', 'venv', '--clear', $Venv))
+        if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+            throw "OpenBB venv creation with base interpreter '$($basePython.Program)' did not create expected interpreter '$Python' in venv '$Venv'."
+        }
     }
     Invoke-External $Python @('-m', 'pip', 'install', '--upgrade', 'pip')
     Invoke-External $Python @('-m', 'pip', 'install', 'openbb', 'openbb-platform-api')

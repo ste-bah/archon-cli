@@ -149,11 +149,12 @@ jobs:
 
           $storeTarget = Join-Path $env:RUNNER_TEMP 'trading setup Store stub'
           $storeVenv = Join-Path $storeTarget '.archon/tools/openbb-venv'
+          $storeBasePython = Join-Path $interpreterBin 'python3.CMD'
           Clear-PythonLog
           Show-WindowsPythonDiagnostics
           try { & $setupScript -Target $storeTarget -SkipTradingView; throw 'Store-stub rebuild unexpectedly completed without creating a venv' }
           catch {
-            $expectedFailure = "The term '$storeVenv\Scripts\python.exe' is not recognized as the name of a cmdlet, function, script file, or executable program."
+            $expectedFailure = "OpenBB venv creation with base interpreter '$storeBasePython' did not create expected interpreter '$storeVenv\Scripts\python.exe' in venv '$storeVenv'."
             if ($_.Exception.Message -cne $expectedFailure) { throw }
           }
           $storeLog = Read-PythonLog
@@ -209,7 +210,8 @@ jobs:
               throw "specifier case unexpectedly passed setup: $($case.Specifier) $($case.Version)"
             } catch {
               if ($case.Accept) {
-                $expectedFailure = "The term '$caseVenv\Scripts\python.exe' is not recognized as the name of a cmdlet, function, script file, or executable program."
+                $acceptedBasePython = Join-Path $interpreterBin 'py.CMD'
+                $expectedFailure = "OpenBB venv creation with base interpreter '$acceptedBasePython' did not create expected interpreter '$caseVenv\Scripts\python.exe' in venv '$caseVenv'."
                 if ($_.Exception.Message -cne $expectedFailure) { throw }
               }
               if (-not $case.Accept -and $_.Exception.Message -notmatch [regex]::Escape("specifier '$($case.Specifier)'")) { throw }

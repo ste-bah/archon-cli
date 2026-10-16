@@ -250,6 +250,10 @@ if [ "$SKIP_OPENBB" != true ]; then
         load_openbb_specifier
         find_python
         run "$PYTHON_BASE" -m venv --clear "$OPENBB_VENV"
+        if [ ! -f "$OPENBB_VENV/bin/python" ]; then
+            echo "setup-trading-tools.sh: venv creation with base interpreter '$PYTHON_BASE' did not create expected interpreter '$OPENBB_VENV/bin/python' in venv '$OPENBB_VENV'." >&2
+            exit 1
+        fi
     fi
     run "$OPENBB_VENV/bin/python" -m pip install --upgrade pip
     run "$OPENBB_VENV/bin/python" -m pip install openbb openbb-platform-api
