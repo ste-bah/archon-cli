@@ -2,9 +2,29 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path '.').Path
 $target = Join-Path $env:RUNNER_TEMP 'trading tools with spaces'
 New-Item -ItemType Directory -Force -Path $target | Out-Null
+function Get-OpenBBEnvironmentDiagnostics {
+    $venvPath = Join-Path $target '.archon/tools/openbb-venv'
+    $pythonPath = Join-Path $venvPath 'Scripts/python.exe'
+    $lines = @("OpenBB paths: target=$target (length $($target.Length)); venv=$venvPath (length $($venvPath.Length)); interpreter=$pythonPath (length $($pythonPath.Length)); USERPROFILE=$env:USERPROFILE; HOME=$env:HOME; TEMP=$env:TEMP; TMP=$env:TMP; RUNNER_TEMP=$env:RUNNER_TEMP")
+    foreach ($name in @('USERPROFILE', 'HOME', 'TEMP', 'TMP', 'RUNNER_TEMP')) {
+        $path = [Environment]::GetEnvironmentVariable($name)
+        if (-not $path) { continue }
+        $exists = Test-Path -LiteralPath $path -PathType Container
+        $writable = $false
+        if ($exists) {
+            $probe = Join-Path $path ('.archon-write-probe-' + [Guid]::NewGuid().ToString('N'))
+            try { [IO.File]::WriteAllText($probe, 'probe'); $writable = $true }
+            catch { $writable = $false }
+            finally { Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue }
+        }
+        $lines += "  $name exists=$exists writable=$writable pathLength=$($path.Length)"
+    }
+    return $lines -join [Environment]::NewLine
+}
 $output = & "$root/scripts/setup-trading-tools.ps1" -Target $target 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) {
     Write-Output $output
+    Write-Output (Get-OpenBBEnvironmentDiagnostics)
     throw 'Installer assertion failed: TradingView-enabled setup did not complete'
 }
 Write-Output $output
@@ -14,8 +34,14 @@ if (-not (Test-Path -LiteralPath (Join-Path $target '.archon/tools/tradingview-m
 if ($output -notmatch 'OpenBB venv: healthy') { throw 'Installer assertion failed: final OpenBB status was not healthy' }
 $venv = Join-Path $target '.archon/tools/openbb-venv'
 $python = Join-Path $venv 'Scripts/python.exe'
-& $python -c 'import openbb'
-if ($LASTEXITCODE -ne 0) { throw 'Import assertion failed: venv Python could not import openbb' }
+$openbbImportOutput = @(& $python -c 'import openbb' 2>&1 | ForEach-Object { $_.ToString() })
+$openbbImportExit = $LASTEXITCODE
+if ($openbbImportExit -ne 0) {
+    Write-Output "OpenBB import failed with exit $openbbImportExit; last output lines:"
+    $openbbImportOutput | Select-Object -Last 20 | ForEach-Object { Write-Output $_ }
+    Write-Output (Get-OpenBBEnvironmentDiagnostics)
+    throw 'Import assertion failed: venv Python could not import openbb'
+}
 
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $listener.Start()
@@ -41,6 +67,8 @@ try {
     Write-Output "PASS OpenBB API /docs returned HTTP 200 on port $port"
 } catch {
     [Console]::Error.WriteLine("API assertion failed: $($_.Exception.Message)")
+    [Console]::Error.WriteLine("OpenBB import probe exit: $openbbImportExit")
+    $openbbImportOutput | Select-Object -Last 20 | ForEach-Object { [Console]::Error.WriteLine($_) }
     [Console]::Error.WriteLine('OpenBB API server log:')
     if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath | ForEach-Object { [Console]::Error.WriteLine($_) } }
     if (Test-Path -LiteralPath $errorLogPath) { Get-Content -LiteralPath $errorLogPath | ForEach-Object { [Console]::Error.WriteLine($_) } }
@@ -60,8 +88,13 @@ try {
 } catch { throw "Repair assertion failed: installer did not complete`n$repairOutput`n$_" }
 Write-Output $repairOutput
 if ($repairOutput -notmatch 'OpenBB venv: healthy') { throw 'Repair assertion failed: rebuilt OpenBB status was not healthy' }
-& $python -c 'import openbb'
-if ($LASTEXITCODE -ne 0) { throw 'Repair assertion failed: rebuilt interpreter could not import openbb' }
+$openbbImportOutput = @(& $python -c 'import openbb' 2>&1 | ForEach-Object { $_.ToString() })
+$openbbImportExit = $LASTEXITCODE
+if ($openbbImportExit -ne 0) {
+    Write-Output "Repair OpenBB import failed with exit $openbbImportExit; last output lines:"
+    $openbbImportOutput | Select-Object -Last 20 | ForEach-Object { Write-Output $_ }
+    throw 'Repair assertion failed: rebuilt interpreter could not import openbb'
+}
 Write-Output 'PASS broken OpenBB interpreter rebuilt and reported healthy'
 Write-Output 'test result: trading tools Windows end-to-end passed'
 exit 0

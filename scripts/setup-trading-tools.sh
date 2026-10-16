@@ -204,6 +204,24 @@ state() {
     fi
 }
 
+openbb_state() {
+    if [ ! -d "$OPENBB_VENV" ]; then
+        printf 'missing (%s)' "$OPENBB_VENV"
+        return
+    fi
+    if [ ! -x "$OPENBB_VENV/bin/python" ]; then
+        printf 'broken (missing interpreter: %s)' "$OPENBB_VENV/bin/python"
+        return
+    fi
+    if output=$("$OPENBB_VENV/bin/python" -c 'import openbb' 2>&1); then
+        printf 'healthy (%s)' "$OPENBB_VENV/bin/python"
+    else
+        probe_exit=$?
+        printf 'broken (%s; import exit %s; last output lines):\n%s' \
+            "$OPENBB_VENV/bin/python" "$probe_exit" "$(printf '%s\n' "$output" | tail -n 20)"
+    fi
+}
+
 check_status() {
     echo "setup-trading-tools: target=$TARGET"
     command -v node >/dev/null 2>&1 && node --version || echo "node: missing"
@@ -212,13 +230,7 @@ check_status() {
     command -v git >/dev/null 2>&1 && git --version || echo "git: missing"
     state "$TV_DIR/src/server.js"
     state "$TV_DIR/src/cli/index.js"
-    if [ -x "$OPENBB_VENV/bin/python" ] && "$OPENBB_VENV/bin/python" -c 'import openbb' >/dev/null 2>&1; then
-        echo "OpenBB venv: healthy ($OPENBB_VENV/bin/python)"
-    elif [ -d "$OPENBB_VENV" ]; then
-        echo "OpenBB venv: broken ($OPENBB_VENV)"
-    else
-        echo "OpenBB venv: missing ($OPENBB_VENV)"
-    fi
+    printf 'OpenBB venv: %s\n' "$(openbb_state)"
     state "$OPENBB_VENV/bin/openbb-api"
     state "$MCP_FILE"
 }
@@ -244,9 +256,12 @@ if [ "$SKIP_TRADINGVIEW" != true ]; then
 fi
 
 if [ "$SKIP_OPENBB" != true ]; then
-    if [ -x "$OPENBB_VENV/bin/python" ] && "$OPENBB_VENV/bin/python" -c 'import openbb' >/dev/null 2>&1; then
+    openbb_status=$(openbb_state)
+    case "$openbb_status" in
+      healthy*)
         :
-    else
+        ;;
+      *)
         prepare_venv_rebuild
         load_openbb_specifier
         find_python
@@ -257,13 +272,22 @@ if [ "$SKIP_OPENBB" != true ]; then
             echo "setup-trading-tools.sh: venv creation with base interpreter '$PYTHON_BASE' did not create expected interpreter '$OPENBB_VENV/bin/python' in venv '$OPENBB_VENV'." >&2
             exit 1
         fi
-    fi
+        ;;
+    esac
     run "$OPENBB_VENV/bin/python" -m pip install --upgrade pip
     run "$OPENBB_VENV/bin/python" -m pip install openbb openbb-platform-api
-    if ! "$OPENBB_VENV/bin/python" -c 'import openbb' >/dev/null 2>&1; then
-        echo "setup-trading-tools.sh: OpenBB environment is still broken after installation: $OPENBB_VENV" >&2
-        exit 1
+    if [ -x "$OPENBB_VENV/bin/openbb-build" ]; then
+        run "$OPENBB_VENV/bin/openbb-build"
     fi
+    openbb_status=$(openbb_state)
+    case "$openbb_status" in
+      healthy*) : ;;
+      *)
+        printf 'setup-trading-tools.sh: OpenBB environment is still broken after installation: %s\n%s\n' \
+            "$OPENBB_VENV" "$openbb_status" >&2
+        exit 1
+        ;;
+    esac
 fi
 
 if [ "$SKIP_TRADINGVIEW" != true ]; then

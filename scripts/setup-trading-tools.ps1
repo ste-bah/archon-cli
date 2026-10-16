@@ -18,9 +18,15 @@ $McpFile = Join-Path $Target '.mcp.json'
 function Get-OpenBBState {
     if (-not (Test-Path -LiteralPath $Venv -PathType Container)) { return "missing ($Venv)" }
     if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) { return "broken (missing interpreter: $Python)" }
-    & $Python -c 'import openbb' 2>$null
-    if ($LASTEXITCODE -eq 0) { return "healthy ($Python)" }
-    return "broken ($Python)"
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $probeOutput = @(& $Python -c 'import openbb' 2>&1 | ForEach-Object { $_.ToString() })
+        $probeExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousErrorAction }
+    if ($probeExit -eq 0) { return "healthy ($Python)" }
+    $tail = @($probeOutput | Select-Object -Last 20) -join [Environment]::NewLine
+    return "broken ($Python; import exit $probeExit; last output lines):$([Environment]::NewLine)$tail"
 }
 function Show-Status {
     Write-Output "setup-trading-tools: target=$Target"
@@ -266,7 +272,10 @@ if (-not $SkipOpenBB) {
     }
     Invoke-External $Python @('-m', 'pip', 'install', '--upgrade', 'pip')
     Invoke-External $Python @('-m', 'pip', 'install', 'openbb', 'openbb-platform-api')
-    if ((Get-OpenBBState) -notlike 'healthy*') { throw "OpenBB environment remains broken after installation: $Venv" }
+    $openbbBuilder = Join-Path $Venv 'Scripts/openbb-build.exe'
+    if (Test-Path -LiteralPath $openbbBuilder -PathType Leaf) { Invoke-External $openbbBuilder @() }
+    $openbbState = Get-OpenBBState
+    if ($openbbState -notlike 'healthy*') { throw "OpenBB environment remains broken after installation: $Venv`n$openbbState" }
     @'
 $ErrorActionPreference='Stop'
 $Root=Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)

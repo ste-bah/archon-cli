@@ -16,10 +16,16 @@ printf '%s\n' "$install_output" | grep -F 'OpenBB venv: healthy' >/dev/null || {
     echo 'Installer assertion failed: final OpenBB status was not healthy' >&2; exit 1;
 }
 VENV="$TARGET/.archon/tools/openbb-venv"
-"$VENV/bin/python" -c 'import openbb' || {
-    echo 'Import assertion failed: venv Python could not import openbb' >&2; exit 1;
-}
-python3 - "$TARGET" <<'PY'
+if openbb_import_output=$("$VENV/bin/python" -c 'import openbb' 2>&1); then
+    openbb_import_exit=0
+else
+    openbb_import_exit=$?
+    printf 'OpenBB import failed with exit %s; last output lines:\n%s\n' \
+        "$openbb_import_exit" "$(printf '%s\n' "$openbb_import_output" | tail -n 20)" >&2
+    echo 'Import assertion failed: venv Python could not import openbb' >&2
+    exit 1
+fi
+ARCHON_OPENBB_IMPORT_EXIT="$openbb_import_exit" ARCHON_OPENBB_IMPORT_OUTPUT="$openbb_import_output" python3 - "$TARGET" <<'PY'
 import os, pathlib, socket, subprocess, sys, time, urllib.error, urllib.request
 target = pathlib.Path(sys.argv[1])
 launcher = target / "scripts/start-openbb-api.sh"
@@ -47,6 +53,8 @@ try:
         raise RuntimeError("OpenBB API /docs did not return HTTP 200 within 90 seconds")
 except Exception as error:
     print(f"API assertion failed: {error}", file=sys.stderr)
+    print("OpenBB import probe exit:", os.environ.get("ARCHON_OPENBB_IMPORT_EXIT", "unknown"), file=sys.stderr)
+    print("\n".join(os.environ.get("ARCHON_OPENBB_IMPORT_OUTPUT", "").splitlines()[-20:]), file=sys.stderr)
     print("OpenBB API server log:", file=sys.stderr)
     print(log_path.read_text(errors="replace"), file=sys.stderr)
     raise SystemExit(1)
@@ -76,8 +84,14 @@ printf '%s\n' "$broken_output"
 printf '%s\n' "$broken_output" | grep -F 'OpenBB venv: healthy' >/dev/null || {
     echo 'Repair assertion failed: rebuilt OpenBB status was not healthy' >&2; exit 1;
 }
-"$VENV/bin/python" -c 'import openbb' || {
-    echo 'Repair assertion failed: rebuilt interpreter could not import openbb' >&2; exit 1;
-}
+if openbb_import_output=$("$VENV/bin/python" -c 'import openbb' 2>&1); then
+    :
+else
+    openbb_import_exit=$?
+    printf 'Repair OpenBB import failed with exit %s; last output lines:\n%s\n' \
+        "$openbb_import_exit" "$(printf '%s\n' "$openbb_import_output" | tail -n 20)" >&2
+    echo 'Repair assertion failed: rebuilt interpreter could not import openbb' >&2
+    exit 1
+fi
 echo 'PASS broken OpenBB interpreter rebuilt and reported healthy'
 echo 'test result: trading tools POSIX end-to-end passed'
