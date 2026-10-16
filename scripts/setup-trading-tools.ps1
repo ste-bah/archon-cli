@@ -202,6 +202,11 @@ if (-not $SkipOpenBB) {
         Assert-SafeVenvRebuild
         $specifier = Get-OpenBBSpecifier
         $basePython = Resolve-BasePython $specifier
+        $versionArguments = $basePython.Prefix + @('--version')
+        $pythonVersion = (& $basePython.Program @versionArguments 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { throw "Could not read Python version from '$($basePython.Program)'" }
+        $prefixText = if ($basePython.Prefix.Count) { " $($basePython.Prefix -join ' ')" } else { '' }
+        Write-Output "OpenBB Python: $($basePython.Program)$prefixText ($pythonVersion)"
         Invoke-External $basePython.Program ($basePython.Prefix + @('-m', 'venv', '--clear', $Venv))
         if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
             throw "OpenBB venv creation with base interpreter '$($basePython.Program)' did not create expected interpreter '$Python' in venv '$Venv'."

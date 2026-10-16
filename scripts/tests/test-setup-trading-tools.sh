@@ -112,7 +112,7 @@ STORE_VENV="$STORE_TARGET/.archon/tools/openbb-venv"
 mkdir -p "$STORE_TARGET"
 STORE_TARGET=$(cd "$STORE_TARGET" && pwd)
 STORE_VENV="$STORE_TARGET/.archon/tools/openbb-venv"
-expected_store_error="setup-trading-tools.sh: venv creation with base interpreter 'python3.20' did not create expected interpreter '$STORE_VENV/bin/python' in venv '$STORE_VENV'."
+expected_store_error="setup-trading-tools.sh: venv creation with base interpreter 'python3' did not create expected interpreter '$STORE_VENV/bin/python' in venv '$STORE_VENV'."
 if store_output=$(PATH="$FAKE_BIN:$PATH" FAKE_SETUP_LOG="$FAKE_SETUP_LOG" FAKE_VENV_CREATE=fail \
     "$REPO_ROOT/scripts/setup-trading-tools.sh" --target "$STORE_TARGET" --skip-tradingview 2>&1); then
     echo 'expected missing venv interpreter to fail' >&2
@@ -123,7 +123,7 @@ if ! printf '%s\n' "$store_output" | grep -Fx "$expected_store_error" >/dev/null
         "$expected_store_error" "$store_output" >&2
     exit 1
 fi
-grep -F -- "python3.20 -m venv --clear $STORE_VENV" "$FAKE_SETUP_LOG" >/dev/null
+grep -F -- "python3 -m venv --clear $STORE_VENV" "$FAKE_SETUP_LOG" >/dev/null
 test ! -e "$STORE_VENV/bin/python"
 
 test -f "$BROKEN_TARGET/scripts/start-openbb-api.sh"
@@ -205,6 +205,8 @@ SPEC_BIN="$TEMP_ROOT/spec interpreters"
 mkdir -p "$SPEC_BIN"
 cat > "$SPEC_BIN/python-mock" <<'PYTHON'
 #!/bin/sh
+if [ "$1" = --version ]; then echo 'Python 3.12.1'; exit 0; fi
+if [ "$1" = -m ] && [ "$2" = venv ]; then exit 0; fi
 if [ -f "$1" ] && [ -n "$ARCHON_SETUP_PYTHON_SPECIFIER" ]; then
     exec "$REAL_PYTHON" -c 'import os,sys,collections; p=os.environ["MOCK_PYTHON_INFO"].split(","); v=collections.namedtuple("VersionInfo","major minor micro releaselevel serial"); sys.version_info=v(*([int(x) for x in p[:3]]+[p[3],int(p[4])])); probe=sys.argv[1]; sys.argv=[probe]; exec(compile(open(probe).read(),probe,"exec"))' "$1"
 fi
@@ -256,6 +258,38 @@ run_spec_case '>=3.13rc1' '3,12,9,final,0' rejected
 run_spec_case '>=3.13.0b2' '3,13,0,beta,1' rejected
 run_spec_case '<3.14a1' '3,14,0,alpha,1' rejected
 run_spec_case '!===3.12' '3,13,0,final,0' rejected
+
+FALLBACK_BIN="$TEMP_ROOT/versioned-only interpreters"
+mkdir -p "$FALLBACK_BIN"
+for versioned_python in python3.20 python3.19 python3.18 python3.17 python3.16 python3.15 python3.14 python3.13 python3.12 python3.11 python3.10; do
+    ln -s "$SPEC_BIN/python-mock" "$FALLBACK_BIN/$versioned_python"
+done
+UNSAT_DEFAULT_BIN="$TEMP_ROOT/unsatisfied default interpreter"
+cp -R "$FALLBACK_BIN" "$UNSAT_DEFAULT_BIN"
+cat > "$UNSAT_DEFAULT_BIN/python3" <<'PYTHON'
+#!/bin/sh
+if [ -f "$1" ] && [ -n "$ARCHON_SETUP_PYTHON_SPECIFIER" ]; then exit 1; fi
+exit 8
+PYTHON
+chmod +x "$UNSAT_DEFAULT_BIN/python3"
+run_python_order_case() {
+    order_path=$1
+    expected_interpreter=$2
+    order_target="$TEMP_ROOT/python order $expected_interpreter"
+    order_venv="$order_target/.archon/tools/openbb-venv"
+    mkdir -p "$order_venv"
+    printf 'home = fake-python\n' > "$order_venv/pyvenv.cfg"
+    order_metadata="$order_venv/lib/python3.12/site-packages/openbb-99.dist-info"
+    mkdir -p "$order_metadata"
+    printf 'Metadata-Version: 2.1\nName: openbb\nRequires-Python: >=3.10,<3.14\n' > "$order_metadata/METADATA"
+    order_output=$(PATH="$order_path:/usr/bin:/bin" REAL_PYTHON="$REAL_PYTHON" \
+        MOCK_PYTHON_INFO='3,12,0,final,0' \
+        "$REPO_ROOT/scripts/setup-trading-tools.sh" --target "$order_target" --skip-tradingview 2>&1 || true)
+    printf '%s\n' "$order_output" | grep -F "OpenBB Python: $expected_interpreter (Python 3.12.1)" >/dev/null
+}
+run_python_order_case "$SPEC_BIN" python3
+run_python_order_case "$FALLBACK_BIN" python3.20
+run_python_order_case "$UNSAT_DEFAULT_BIN" python3.20
 
 cat > "$FAKE_BIN/git" <<'EOF'
 #!/bin/sh

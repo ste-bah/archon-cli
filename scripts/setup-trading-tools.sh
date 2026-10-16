@@ -165,8 +165,9 @@ PYTHON
 
 find_python() {
     unknown_operator=''
-    for candidate in python3.20 python3.19 python3.18 python3.17 python3.16 python3.15 \
-        python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
+    # Prefer the user's default Python; scan versioned names only if it is unavailable or incompatible.
+    for candidate in python3 python3.20 python3.19 python3.18 python3.17 python3.16 python3.15 \
+        python3.14 python3.13 python3.12 python3.11 python3.10; do
         if ! command -v "$candidate" >/dev/null 2>&1; then continue; fi
         if output=$(python_satisfies_specifier "$candidate"); then
             PYTHON_BASE="$candidate"
@@ -249,6 +250,8 @@ if [ "$SKIP_OPENBB" != true ]; then
         prepare_venv_rebuild
         load_openbb_specifier
         find_python
+        python_version=$($PYTHON_BASE --version 2>&1)
+        echo "OpenBB Python: $PYTHON_BASE ($python_version)"
         run "$PYTHON_BASE" -m venv --clear "$OPENBB_VENV"
         if [ ! -f "$OPENBB_VENV/bin/python" ]; then
             echo "setup-trading-tools.sh: venv creation with base interpreter '$PYTHON_BASE' did not create expected interpreter '$OPENBB_VENV/bin/python' in venv '$OPENBB_VENV'." >&2

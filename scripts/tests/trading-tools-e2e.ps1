@@ -64,3 +64,4 @@ if ($repairOutput -notmatch 'OpenBB venv: healthy') { throw 'Repair assertion fa
 if ($LASTEXITCODE -ne 0) { throw 'Repair assertion failed: rebuilt interpreter could not import openbb' }
 Write-Output 'PASS broken OpenBB interpreter rebuilt and reported healthy'
 Write-Output 'test result: trading tools Windows end-to-end passed'
+exit 0

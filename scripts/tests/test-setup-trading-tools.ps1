@@ -55,3 +55,4 @@ if ((Get-Content -LiteralPath $nonVenvSentinel -Raw).Trim() -ne 'preserve') {
 }
 Write-Output 'PASS non-venv directory with contents refused with sentinel intact'
 Write-Output 'test result: PowerShell specifier and refusal checks passed'
+exit 0
