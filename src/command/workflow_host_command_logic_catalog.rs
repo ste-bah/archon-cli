@@ -57,7 +57,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // observations without a configured build cache.
         // 26: only meaning-preserving Windows verbatim paths reach Git;
         // unsafe plain spellings are refused, changing acceptance findings.
-        version: 26,
+        // 27: freeze persists reusable probe observations and resumes their
+        // judge verdicts across passability failures; reuse identity and
+        // which probe/judge results complete authoring can differ.
+        version: 27,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -80,7 +83,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; its freeze verdicts are unchanged.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not check verdicts.
         // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
-        sources_digest: "cdf657439f254613df6b76fcdadf139e500846b22b9ba3b7b2be8a28c6421052",
+        sources_digest: "1a828ff747f9a5d17715ee898c2c72d7aedf7ea7e0c6a53af8e9bfcf5d55248a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -123,7 +126,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // # resource defaults re-pin only: skeleton freeze does not judge checks.
         // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
         // Re-pin only: acceptance sibling-copy paths are outside skeleton checks.
-        sources_digest: "cdf657439f254613df6b76fcdadf139e500846b22b9ba3b7b2be8a28c6421052",
+        sources_digest: "1a828ff747f9a5d17715ee898c2c72d7aedf7ea7e0c6a53af8e9bfcf5d55248a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -180,7 +183,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not body landing verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not body verdicts.
-        sources_digest: "2fb24a9832fd45596bf5450eb509f6ae7e03ce321ae334c0c035232fd34c0b7e",
+        sources_digest: "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
         build_bound: false,
     },
     CapabilityLogic {
@@ -229,7 +232,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not lint verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not lint verdicts.
-        sources_digest: "2fb24a9832fd45596bf5450eb509f6ae7e03ce321ae334c0c035232fd34c0b7e",
+        sources_digest: "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
         build_bound: false,
     },
     CapabilityLogic {
@@ -300,7 +303,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen acceptance verification is unchanged.
         // # resource defaults re-pin only: frozen verification's check execution is scheduling-only.
         // Re-pin only: frozen verification executes no sibling check.
-        sources_digest: "424945c71f315ab0658669b5a15c7ed5d77d45082e5b94b5044b467623459714",
+        sources_digest: "e277d816ea66b2f6a2423c8489e69ba9b002d7c015c9b15c02643aa5390cee47",
         build_bound: true,
     },
     CapabilityLogic {
@@ -342,7 +345,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen skeleton verification is unchanged.
         // # resource defaults re-pin only: frozen skeleton verification runs no checks.
         // Re-pin only: frozen verification executes no sibling check.
-        sources_digest: "424945c71f315ab0658669b5a15c7ed5d77d45082e5b94b5044b467623459714",
+        sources_digest: "e277d816ea66b2f6a2423c8489e69ba9b002d7c015c9b15c02643aa5390cee47",
         build_bound: true,
     },
 ];

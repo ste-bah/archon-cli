@@ -141,6 +141,38 @@ fn frozen_check_plan_accounts_for_nonaccepted_supplementary_entries() {
 }
 
 #[test]
+fn reverify_progress_reports_each_check_in_a_two_check_plan() {
+    // EXPECTED BEFORE RUN: both accepted entries get a visible start and a
+    // terminal outcome with elapsed seconds, so a long check cannot hide the
+    // number of checks in the reverify plan.
+    let mut contract = contract();
+    contract.supplementary[0].judgment.verdict = JudgeDecision::Accepted;
+    let plan = frozen_check_plan(&contract);
+    assert_eq!(plan.len(), 2);
+    let mut progress = CheckProgress::new(plan.len());
+    let lines = plan
+        .iter()
+        .enumerate()
+        .map(|(index, (id, _, _))| {
+            progress.start(index + 1, id);
+            progress.start_line(index + 1, id)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        lines,
+        ["check 1/2 AC-X-001 started", "check 2/2 SUP-X-002 started"]
+    );
+    assert_eq!(
+        progress.finish_line(1, "AC-X-001", "passed", 1.26),
+        "check 1/2 AC-X-001 passed elapsed=1.3s"
+    );
+    assert_eq!(
+        progress.finish_line(2, "SUP-X-002", "reused from cache", 0.0),
+        "check 2/2 SUP-X-002 reused from cache elapsed=0.0s"
+    );
+}
+
+#[test]
 fn missing_implementation_failure_is_accepted_without_a_passability_finding() {
     // EXPECTED BEFORE RUN: the check ran and failed on the pre-implementation
     // tree; when the freeze judge attributes that failure to missing
@@ -251,4 +283,24 @@ fn baseline_pass_that_cannot_fail_keeps_the_freeze_probe_finding() {
         check.findings,
         ["check cannot fail on the pre-implementation tree"]
     );
+}
+
+#[test]
+fn reverify_incomplete_advice_names_the_retry_command() {
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    let incomplete = crate::command::workflow_freeze_budget::FreezeIncomplete::awaiting_judge(
+        &resume.budget,
+        &resume.progress,
+        vec!["AC-X-001".into()],
+        "operational: provider authentication_error: invalid credential",
+    );
+    let error = anyhow::Error::new(incomplete);
+    let text = super::reverify_incomplete_advice(error).to_string();
+    assert!(text.contains("archon workflow reverify <run>"), "{text}");
+    assert!(
+        text.contains("saved observations and verdicts are reused"),
+        "{text}"
+    );
+    assert!(text.contains("authentication_error"), "{text}");
+    assert!(!text.contains("Retry the freeze"), "{text}");
 }

@@ -216,8 +216,11 @@ async fn assess(
         decided.len()
     );
     if !pending.is_empty() {
+        // `ask` handles all pending candidates in one request, so this is the
+        // only batch and its index/count are intentionally omitted.
+        eprintln!("acceptance judge batch started checks={}", pending.len());
         let mut judged = ask(client, model, contract, &pending, resume).await?;
-        for candidate in pending {
+        for candidate in &pending {
             let mut decision = judged.remove(&candidate.id).expect("one decision per id");
             // The judge's prose is model output: what it repeats of a
             // credential is never kept.
@@ -228,6 +231,7 @@ async fn assess(
             }
             decided.insert(candidate.id.clone(), decision);
         }
+        eprintln!("acceptance judge batch completed checks={}", pending.len());
     }
     Ok((candidates.iter())
         .filter_map(|candidate| {
@@ -243,6 +247,20 @@ async fn assess(
                 .then_some((candidate.id.clone(), (decision, text)))
         })
         .collect())
+}
+
+pub(super) fn incomplete_judge_error(
+    error: anyhow::Error,
+    resume: &FreezeResume,
+    deferred: Vec<String>,
+) -> anyhow::Error {
+    let cause = archon_observability::redaction::redact_text(&format!("{error:#}"));
+    anyhow::Error::from(FreezeIncomplete::awaiting_judge(
+        &resume.budget,
+        &resume.progress,
+        deferred,
+        cause,
+    ))
 }
 
 /// The candidates among `ids` of `contract` that failed in `runs`.
@@ -415,14 +433,7 @@ async fn ask(
         .iter()
         .map(|candidate| candidate.id.as_str())
         .collect();
-    let incomplete = || {
-        let ids = ids.iter().map(|id| id.to_string()).collect();
-        anyhow::Error::from(FreezeIncomplete::awaiting_judge(
-            &resume.budget,
-            &resume.progress,
-            ids,
-        ))
-    };
+    let deferred = ids.iter().map(|id| id.to_string()).collect();
     let mut subset = contract.clone();
     subset
         .acceptance
@@ -435,7 +446,7 @@ async fn ask(
         .await
         .map_err(|error| {
             if super::judge::JudgeIncomplete::caused(&error).is_some() {
-                incomplete()
+                incomplete_judge_error(error, resume, deferred)
             } else {
                 error
             }

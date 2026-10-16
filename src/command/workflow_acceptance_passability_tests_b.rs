@@ -7,6 +7,19 @@ use archon_workflow::task_set_contract::AcceptanceCriterion;
 use std::collections::BTreeMap;
 
 #[test]
+fn provider_authentication_failure_survives_the_freeze_incomplete_message() {
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    let error = anyhow::Error::new(super::super::judge::JudgeIncomplete(
+        "the provider gave no reply: authentication_error: invalid API key".into(),
+    ));
+    let error =
+        super::super::passability::incomplete_judge_error(error, &resume, vec!["AC-X-001".into()]);
+    let message = error.to_string();
+    assert!(message.contains("authentication_error"), "{message}");
+    assert!(message.contains("invalid API key"), "{message}");
+}
+
+#[test]
 fn passability_key_uses_probe_inputs_and_outcome_not_output_text() {
     let client = EvidenceJudge::default();
     let requirements = BTreeMap::new();

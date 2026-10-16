@@ -101,6 +101,17 @@ impl HostProbe {
         probe
     }
 
+    /// Reverify uses the same staged cache and host no-progress window as
+    /// freeze-acceptance, while still probing the completed tree.
+    pub(crate) fn for_reverify_with_limits(
+        project: &std::path::Path,
+        tasks_root: &std::path::Path,
+        resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+        resume: &crate::command::workflow_freeze_budget::FreezeResume,
+    ) -> Self {
+        Self::for_task_set_with_limits(project, tasks_root, resource_limits).with_resume(resume)
+    }
+
     #[cfg(test)]
     pub(super) fn new(project: PathBuf, repository: PathBuf, site: Site) -> Self {
         Self::new_with_limits(

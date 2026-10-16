@@ -60,11 +60,9 @@ fn restore_with_captured_evidence(
                         format!("syncing task directory {}", task_dir.display())
                     })?;
                     let captured = std::fs::read(&evidence_path)?;
-                    std::fs::File::open(&evidence_path)
-                        .and_then(|file| file.sync_all())
-                        .with_context(|| {
-                            format!("syncing evidence file {}", evidence_path.display())
-                        })?;
+                    archon_workflow::store::sync_file(&evidence_path).with_context(|| {
+                        format!("syncing evidence file {}", evidence_path.display())
+                    })?;
                     archon_workflow::store::sync_directory(&evidence_dir).with_context(|| {
                         format!("syncing evidence directory {}", evidence_dir.display())
                     })?;
@@ -173,11 +171,9 @@ pub(crate) fn keep_displaced_bytes(
                     evidence_path.display()
                 ));
             }
-            std::fs::File::open(&evidence_path)
-                .and_then(|file| file.sync_all())
-                .with_context(|| {
-                    format!("syncing landing evidence file {}", evidence_path.display())
-                })?;
+            archon_workflow::store::sync_file(&evidence_path).with_context(|| {
+                format!("syncing landing evidence file {}", evidence_path.display())
+            })?;
             archon_workflow::store::sync_directory(&evidence_dir).with_context(|| {
                 format!(
                     "syncing landing evidence directory {}",

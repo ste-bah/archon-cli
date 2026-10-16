@@ -191,6 +191,20 @@ pub(crate) struct BaselineRuns {
 }
 
 impl HostProbe {
+    /// Whether the latest check-copy observation reused durable evidence.
+    pub(crate) fn reused_check(&self, id: &str) -> bool {
+        self.reuse_audit
+            .lock()
+            .ok()
+            .and_then(|audit| audit.get(id).map(|entry| entry.reused))
+            .unwrap_or(false)
+    }
+
+    /// The per-check stable reuse keys observed by the latest probe run.
+    pub(crate) fn take_reuse_audit(&self) -> BTreeMap<String, ReuseAudit> {
+        std::mem::take(&mut *self.reuse_audit.lock().expect("reuse audit lock"))
+    }
+
     fn failed_on_baseline(&self, result: &super::hermetic::CheckEvidence) {
         (self
             .baseline_failures

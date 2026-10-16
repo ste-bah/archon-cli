@@ -49,6 +49,17 @@ pub struct WorkflowStore {
     executor: Option<(String, u64)>,
 }
 
+/// Flush an existing file using a handle with write access. Windows requires
+/// write access for `FlushFileBuffers`, even when only syncing existing bytes.
+pub fn sync_file(path: impl AsRef<Path>) -> WorkflowResult<()> {
+    let path = path.as_ref();
+    OpenOptions::new()
+        .write(true)
+        .open(path)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| WorkflowError::io(path, error))
+}
+
 impl WorkflowStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {

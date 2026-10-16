@@ -179,6 +179,7 @@ enum IncompleteCause {
         saved: u64,
         reused: u64,
         deferred: Vec<String>,
+        judge_error: Option<String>,
         /// The verdict each deferred check still lacks.
         lacking: &'static str,
     },
@@ -204,6 +205,7 @@ impl FreezeIncomplete {
                 saved: progress.saved.load(SeqCst),
                 reused: progress.reused.load(SeqCst),
                 deferred,
+                judge_error: None,
                 lacking: "probe verdict",
             },
             progress: progress.line(),
@@ -235,10 +237,17 @@ impl FreezeIncomplete {
         budget: &FreezeBudget,
         progress: &FreezeProgress,
         deferred: Vec<String>,
+        judge_error: impl Into<String>,
     ) -> Self {
         let mut incomplete = Self::new(budget, progress, deferred);
-        if let IncompleteCause::Budget { lacking, .. } = &mut incomplete.cause {
+        if let IncompleteCause::Budget {
+            lacking,
+            judge_error: cause,
+            ..
+        } = &mut incomplete.cause
+        {
             *lacking = "judge verdict on its pre-implementation output";
+            *cause = Some(judge_error.into());
         }
         incomplete
     }
@@ -265,9 +274,14 @@ impl std::fmt::Display for FreezeIncomplete {
                 reused,
                 deferred,
                 lacking,
+                judge_error,
             } => write!(
                 f,
-                "{FREEZE_INCOMPLETE_RESUMABLE}: {budget}, and a step made no progress; {saved} probe result(s) were saved by this attempt and {reused} reused from earlier ones, and the judge's verdicts are saved; {} check(s) still have no {lacking} ({}). Retry the freeze with the same candidate (resume the run): it continues from the saved results",
+                "{FREEZE_INCOMPLETE_RESUMABLE}: {budget}, and a step made no progress{}; {saved} probe result(s) were saved by this attempt and {reused} reused from earlier ones, and the judge's verdicts are saved; {} check(s) still have no {lacking} ({}). Retry the freeze with the same candidate (resume the run): it continues from the saved results",
+                judge_error
+                    .as_ref()
+                    .map(|error| format!(" ({error})"))
+                    .unwrap_or_default(),
                 deferred.len(),
                 deferred.join(", ")
             ),

@@ -36,6 +36,50 @@ pub(super) struct ReverifyChecks {
     pub(super) operational_failure: bool,
 }
 
+struct CheckProgress {
+    total: usize,
+    started: std::collections::BTreeMap<String, std::time::Instant>,
+}
+
+impl CheckProgress {
+    fn new(total: usize) -> Self {
+        Self {
+            total,
+            started: BTreeMap::new(),
+        }
+    }
+
+    fn start(&mut self, index: usize, check_id: &str) {
+        self.started
+            .insert(check_id.to_string(), std::time::Instant::now());
+        eprintln!("{}", self.start_line(index, check_id));
+    }
+
+    fn start_line(&self, index: usize, check_id: &str) -> String {
+        format!("check {index}/{} {check_id} started", self.total)
+    }
+
+    fn finish(&self, index: usize, check_id: &str, outcome: &str) {
+        let elapsed = self
+            .started
+            .get(check_id)
+            .map(std::time::Instant::elapsed)
+            .unwrap_or_default()
+            .as_secs_f64();
+        eprintln!("{}", self.finish_line(index, check_id, outcome, elapsed));
+    }
+
+    fn finish_line(&self, index: usize, check_id: &str, outcome: &str, elapsed: f64) -> String {
+        // These lines are emitted by `archon workflow reverify` from the
+        // direct CLI path (workflow_decompose_reverify::reverify), not by a
+        // recorded `freeze-acceptance` host command.
+        format!(
+            "check {index}/{} {check_id} {outcome} elapsed={elapsed:.1}s",
+            self.total
+        )
+    }
+}
+
 #[cfg(test)]
 #[path = "workflow_decompose_reverify_acceptance_tests.rs"]
 mod tests;
@@ -136,6 +180,18 @@ fn remediation_task_subjects(
     subjects
 }
 
+fn reverify_incomplete_advice(error: anyhow::Error) -> anyhow::Error {
+    let Some(incomplete) = crate::command::workflow_freeze_budget::FreezeIncomplete::caused(&error)
+    else {
+        return error;
+    };
+    let message = incomplete.to_string().replace(
+        "Retry the freeze with the same candidate (resume the run): it continues from the saved results",
+        "run `archon workflow reverify <run>` again; saved observations and verdicts are reused",
+    );
+    anyhow!(message)
+}
+
 pub(super) async fn reverify_checks(
     project_root: &Path,
     prd_path: &Path,
@@ -165,6 +221,7 @@ pub(super) async fn reverify_checks(
         ));
     }
     let check_plan = frozen_check_plan(&contract);
+    let mut progress = CheckProgress::new(check_plan.len());
     let accepted_ids = check_plan
         .iter()
         .filter(|(_, accepted, _)| *accepted)
@@ -174,11 +231,19 @@ pub(super) async fn reverify_checks(
         &std::fs::read(task_root.join(TASK_SKELETON_FILE))
             .with_context(|| format!("reading {}", task_root.join(TASK_SKELETON_FILE).display()))?,
     )?;
+    let resume = crate::command::workflow_freeze_budget::FreezeResume::staged("freeze-acceptance");
+    eprintln!("{}", resume.progress.line());
+    for (index, (id, accepted, _)) in check_plan.iter().enumerate() {
+        if *accepted {
+            progress.start(index + 1, id);
+        }
+    }
     let probe =
-        crate::command::workflow_task_set::executability::HostProbe::for_task_set_with_limits(
+        crate::command::workflow_task_set::executability::HostProbe::for_reverify_with_limits(
             project_root,
             task_root,
             config.tools.cargo.to_limits(),
+            &resume,
         );
     let (evidence, commit, missing, mut baseline_findings) = if accepted_ids.is_empty() {
         (Vec::new(), None, BTreeMap::new(), BTreeMap::new())
@@ -202,6 +267,11 @@ pub(super) async fn reverify_checks(
         !accepted_ids.is_empty() && (commit.is_none() || !missing.is_empty());
     let mut baseline_failures = BTreeMap::new();
     let mut results = not_run_checks(&check_plan);
+    let check_indexes = check_plan
+        .iter()
+        .enumerate()
+        .map(|(index, (id, _, _))| (id.as_str(), index + 1))
+        .collect::<BTreeMap<_, _>>();
     for id in &accepted_ids {
         let Some(item) = by_id.remove(id) else {
             results.push(CheckResult {
@@ -219,6 +289,11 @@ pub(super) async fn reverify_checks(
                 ],
                 not_run_reason: None,
             });
+            progress.finish(
+                *check_indexes.get(id.as_str()).unwrap_or(&0),
+                id,
+                "setup failure",
+            );
             continue;
         };
         let classification = item.classification.clone();
@@ -234,7 +309,7 @@ pub(super) async fn reverify_checks(
                     .siblings
                     .iter()
                     .map(|sibling| SiblingResult {
-                        path: sibling.path.to_string_lossy().into_owned(),
+                        path: sibling.path.to_string_lossy().replace('\\', "/"),
                         commit: sibling.commit.clone(),
                     })
                     .collect::<Vec<_>>()
@@ -261,11 +336,25 @@ pub(super) async fn reverify_checks(
             findings: Vec::new(),
             not_run_reason: None,
         });
+        let outcome = if probe.reused_check(id) {
+            "reused from cache"
+        } else if !really_ran {
+            "setup failure"
+        } else if failed {
+            "failed"
+        } else {
+            "passed"
+        };
+        progress.finish(*check_indexes.get(id.as_str()).unwrap_or(&0), id, outcome);
     }
 
     let mut setup_findings = BTreeMap::new();
     let failed_ids = baseline_failures.keys().cloned().collect::<BTreeSet<_>>();
     if !baseline_failures.is_empty() {
+        eprintln!(
+            "reverify judge phase started checks={}",
+            baseline_failures.len()
+        );
         let scope = crate::command::workflow_task_set::reauthor::AuthorScope::for_task_set(
             project_root,
             task_root,
@@ -281,7 +370,7 @@ pub(super) async fn reverify_checks(
         )
         .await?;
         let runs = crate::command::workflow_task_set::executability::BaselineRuns {
-            reuse: BTreeMap::new(),
+            reuse: probe.take_reuse_audit(),
             commit: commit.ok_or_else(|| anyhow!("check-copy has no commit to judge"))?,
             failures: baseline_failures,
             environment: BTreeMap::new(),
@@ -298,9 +387,10 @@ pub(super) async fn reverify_checks(
                 findings: Vec::new(),
                 baseline: Some(runs),
             },
-            &crate::command::workflow_freeze_budget::FreezeResume::none(),
+            &resume,
         )
-        .await?;
+        .await
+        .map_err(reverify_incomplete_advice)?;
         for finding in findings {
             setup_findings.insert(finding.subject, finding.text);
         }
