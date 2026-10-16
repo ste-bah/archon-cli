@@ -25,6 +25,16 @@ pub fn load_spec(path: &Path) -> Result<GameTheorySpec, GameTheoryError> {
 /// Returns the first path that exists, or a `SpecNotFound` error listing all
 /// locations searched.
 pub fn resolve_spec_path(explicit_path: Option<&Path>) -> Result<PathBuf, GameTheoryError> {
+    let env_path = std::env::var("ARCHON_SPEC_PATH").ok();
+    let start_dir = std::env::current_dir().ok();
+    resolve_spec_path_from(explicit_path, env_path, start_dir.as_deref())
+}
+
+pub(crate) fn resolve_spec_path_from(
+    explicit_path: Option<&Path>,
+    env_path: Option<String>,
+    start_dir: Option<&Path>,
+) -> Result<PathBuf, GameTheoryError> {
     let mut searched = Vec::new();
 
     // 1. Explicit CLI flag
@@ -36,8 +46,8 @@ pub fn resolve_spec_path(explicit_path: Option<&Path>) -> Result<PathBuf, GameTh
     }
 
     // 2. Env var
-    if let Ok(env_path) = std::env::var("ARCHON_SPEC_PATH") {
-        let p = PathBuf::from(&env_path);
+    if let Some(env_path) = env_path {
+        let p = PathBuf::from(env_path);
         searched.push(p.clone());
         if p.exists() {
             return Ok(p);
@@ -45,8 +55,8 @@ pub fn resolve_spec_path(explicit_path: Option<&Path>) -> Result<PathBuf, GameTh
     }
 
     // 3. Walk up from CWD (max 5 levels)
-    if let Ok(cwd) = std::env::current_dir() {
-        let mut current = cwd.as_path();
+    if let Some(start_dir) = start_dir {
+        let mut current = start_dir;
         for _ in 0..5 {
             let candidate = current.join(".archon/specs/gametheory.yaml");
             searched.push(candidate.clone());
