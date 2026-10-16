@@ -37,10 +37,10 @@ pub(super) fn copy_external(
     checks: &[(String, crate::task_set_contract::TrustedCwd)],
     remaining: &mut u64,
 ) -> WorkflowResult<Vec<crate::acceptance_sibling_paths::SiblingRevision>> {
-    let project =
-        std::fs::canonicalize(project).map_err(|error| WorkflowError::io(project, error))?;
-    let repository =
-        std::fs::canonicalize(repository).map_err(|error| WorkflowError::io(repository, error))?;
+    let project = archon_shell::paths::canonicalize(project)
+        .map_err(|error| WorkflowError::io(project, error))?;
+    let repository = archon_shell::paths::canonicalize(repository)
+        .map_err(|error| WorkflowError::io(repository, error))?;
     let mut siblings = Vec::new();
     for (check, cwd) in checks {
         let (root, copied_root) = match cwd {
@@ -84,8 +84,8 @@ pub(super) fn copy_external(
                         "--shared",
                         "--",
                     ])
-                    .arg(&source)
-                    .arg(&destination)
+                    .arg(archon_shell::paths::plain(source.clone()))
+                    .arg(archon_shell::paths::plain(destination.clone()))
                     .output()
                     .map_err(|error| WorkflowError::io(&source, error))?;
                 if !output.status.success() {
@@ -139,7 +139,7 @@ pub(super) fn copy_external(
 fn git_head(path: &Path) -> WorkflowResult<String> {
     let output = archon_shell::spawn::command("git")
         .args(["-C"])
-        .arg(path)
+        .arg(archon_shell::paths::plain(path.to_path_buf()))
         .args(["rev-parse", "HEAD"])
         .output()
         .map_err(|error| WorkflowError::io(path, error))?;
@@ -271,17 +271,21 @@ mod tests {
             &mut remaining,
         )
         .unwrap();
+        #[cfg(unix)]
         let command = std::process::Command::new("/bin/sh")
             .args(["-c", "cd ../a/b && sh check.sh"])
             .current_dir(&copied)
             .output()
             .unwrap();
-        println!(
-            "EVIDENCE #420 scratch-sibling BEFORE: sibling absent; AFTER: tracked sibling status={:?}; target copied={}",
-            command.status.code(),
-            copied.parent().unwrap().join("a/b/target").exists()
-        );
-        assert_eq!(command.status.code(), Some(23));
+        #[cfg(unix)]
+        {
+            println!(
+                "EVIDENCE #420 scratch-sibling BEFORE: sibling absent; AFTER: tracked sibling status={:?}; target copied={}",
+                command.status.code(),
+                copied.parent().unwrap().join("a/b/target").exists()
+            );
+            assert_eq!(command.status.code(), Some(23));
+        }
         assert!(!copied.parent().unwrap().join("a/b/target").exists());
         let copied_head = git_head(&copied.parent().unwrap().join("a/b")).unwrap();
         println!(

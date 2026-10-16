@@ -51,7 +51,11 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // later commands when detecting live-root acceptance checks.
         // #366 Windows fix: POSIX path comparison stays case-sensitive on Windows.
         // re-pin only: verdicts are unchanged.
-        version: 23,
+        // 24: sibling discovery and copies use plain canonical paths, so
+        // verbatim Windows paths do not break containment, git, or root names.
+        // 25: every native check applies its resolved cargo limits, including
+        // observations without a configured build cache.
+        version: 25,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -74,7 +78,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; its freeze verdicts are unchanged.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not check verdicts.
         // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
-        sources_digest: "f1fcec7926043ec6c4c5d1a9d52db674041c9c78d625912c8232a011766c229e",
+        sources_digest: "2de57ffb1f21c9c753b7c4afbfbab56248414344d2c982b1fe5a4429106c978a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -116,7 +120,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; skeleton freeze verdicts are unchanged.
         // # resource defaults re-pin only: skeleton freeze does not judge checks.
         // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
-        sources_digest: "f1fcec7926043ec6c4c5d1a9d52db674041c9c78d625912c8232a011766c229e",
+        // Re-pin only: acceptance sibling-copy paths are outside skeleton checks.
+        sources_digest: "2de57ffb1f21c9c753b7c4afbfbab56248414344d2c982b1fe5a4429106c978a",
         build_bound: false,
     },
     CapabilityLogic {
@@ -172,7 +177,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not body landing verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not body verdicts.
-        sources_digest: "4c085d85b868d7ce83e82dd559165199a4ed4118f726e6f9afea0e3b19917586",
+        sources_digest: "b7eae6be0699c8dc3aecd06a73e94243e881b05e6ee1e5ec83b4e57867ce3eb6",
         build_bound: false,
     },
     CapabilityLogic {
@@ -221,7 +226,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not lint verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not lint verdicts.
-        sources_digest: "4c085d85b868d7ce83e82dd559165199a4ed4118f726e6f9afea0e3b19917586",
+        sources_digest: "b7eae6be0699c8dc3aecd06a73e94243e881b05e6ee1e5ec83b4e57867ce3eb6",
         build_bound: false,
     },
     CapabilityLogic {
@@ -256,7 +261,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #434c re-pin only: validated fidelity-cache reuse does not alter frozen-chain verification verdicts.
         // 8: #366 rechecks frozen acceptance paths using shell assignment scope when locating live roots (POSIX spelling case-sensitive on Windows too).
         // re-pin only: verdicts are unchanged.
-        version: 8,
+        // 9: every spawned check receives resolved resource limits.
+        version: 9,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
@@ -288,7 +294,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain acceptance verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen acceptance verification is unchanged.
         // # resource defaults re-pin only: frozen verification's check execution is scheduling-only.
-        sources_digest: "49f6188fe4e8041c960267bc5750b15c3effeba9398cc3bfa56a3ea2c5c12dbe",
+        // Re-pin only: frozen verification executes no sibling check.
+        sources_digest: "f0ccf9eecd70bbcbc0de895cac69b5982a1f35fc7790ffd2cc1605de386a1bd6",
         build_bound: true,
     },
     CapabilityLogic {
@@ -329,7 +336,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not frozen-chain skeleton verdicts.
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen skeleton verification is unchanged.
         // # resource defaults re-pin only: frozen skeleton verification runs no checks.
-        sources_digest: "49f6188fe4e8041c960267bc5750b15c3effeba9398cc3bfa56a3ea2c5c12dbe",
+        // Re-pin only: frozen verification executes no sibling check.
+        sources_digest: "f0ccf9eecd70bbcbc0de895cac69b5982a1f35fc7790ffd2cc1605de386a1bd6",
         build_bound: true,
     },
 ];

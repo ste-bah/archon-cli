@@ -25,7 +25,7 @@ pub struct SiblingSource {
 /// path spelling the check uses; `source` follows symlinks for materializing
 /// their content.
 pub fn discover(project: &std::path::Path, checks: &[String]) -> Vec<SiblingSource> {
-    let Ok(project) = project.canonicalize() else {
+    let Ok(project) = archon_shell::paths::canonicalize(project) else {
         return Vec::new();
     };
     let mut siblings = Vec::new();
@@ -45,7 +45,7 @@ pub fn discover(project: &std::path::Path, checks: &[String]) -> Vec<SiblingSour
                 continue;
             };
             if !alias.starts_with(&project)
-                && let Ok(source) = alias.canonicalize()
+                && let Ok(source) = archon_shell::paths::canonicalize(&alias)
                 && !source.starts_with(&project)
                 && (source.is_dir() || source.is_file())
             {

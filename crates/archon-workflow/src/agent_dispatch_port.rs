@@ -256,7 +256,7 @@ pub struct HostCommandEnv {
     pub vars: Vec<(String, String)>,
     /// The run's resolved cargo limits, kept separate from policy-forwarded
     /// host values so archon, not the operator environment, owns them.
-    pub resource_limits: Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
+    pub resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
     pub hold: Option<Box<dyn std::any::Any + Send>>,
 }
 
@@ -269,11 +269,14 @@ pub trait WorkflowAgentDispatch: Send + Sync {
     }
 
     /// The environment for a command the host itself runs in `working_root`
-    /// (see [`HostCommandEnv`]). The default adds nothing: a host with no
-    /// build-cache pool builds where the command would anyway.
+    /// (see [`HostCommandEnv`]). The default adds no cache values; a host with
+    /// no build-cache pool still applies the run's resource limits.
     async fn host_command_env(&self, working_root: &std::path::Path) -> HostCommandEnv {
         let _ = working_root;
-        HostCommandEnv::default()
+        HostCommandEnv {
+            resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+            ..HostCommandEnv::default()
+        }
     }
 
     /// Wall clock one baseline test command may take before it is recorded

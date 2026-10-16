@@ -43,7 +43,7 @@ impl WorkflowAgentDispatch for Shell {
     async fn host_command_env(&self, _: &Path) -> HostCommandEnv {
         HostCommandEnv {
             vars: Vec::new(),
-            resource_limits: None,
+            resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
             hold: None,
         }
     }

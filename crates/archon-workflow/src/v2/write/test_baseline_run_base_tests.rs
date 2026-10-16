@@ -14,7 +14,7 @@ use crate::{WorkflowError, WorkflowResult, WorkflowV2Result};
 /// A host whose runner environment puts a fake `cargo` first on `PATH`.
 pub(crate) struct FakeCargo {
     pub(crate) bin: PathBuf,
-    pub(crate) resource_limits: Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
+    pub(crate) resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 }
 
 #[async_trait::async_trait]
@@ -125,7 +125,7 @@ pub(crate) fn world(dir: &Path) -> (PathBuf, String, FakeCargo, PathBuf) {
         base,
         FakeCargo {
             bin,
-            resource_limits: None,
+            resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         },
         counter,
     )

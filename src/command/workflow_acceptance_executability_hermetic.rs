@@ -438,7 +438,7 @@ pub(super) async fn run_in_copy(
         project: copy.project.clone(),
         host: probe.host.clone(),
         policy: None,
-        resource_limits: Some(probe.resource_limits.clone()),
+        resource_limits: probe.resource_limits.clone(),
         target: Some(target),
         fresh_home: true,
         timeout_secs: probe.check_bound_secs(),

@@ -101,6 +101,15 @@ async fn scratch_check_receives_archon_resource_defaults() {
 }
 
 #[tokio::test]
+async fn public_observer_applies_cargo_resource_defaults() {
+    let (t, p, commit, c, refs) = fixture("test -n \"$CARGO_BUILD_JOBS\"");
+    let out = observe_commands(&p, &commit, &c, "chain", &refs, &t.path().join("evidence"))
+        .await
+        .unwrap();
+    assert_eq!(out.checks[0].exit_code, Some(0), "{:?}", out.checks[0]);
+}
+
+#[tokio::test]
 async fn a_check_command_can_override_the_archon_cargo_default() {
     let (t, p, commit, c, refs) = fixture("CARGO_BUILD_JOBS=7; test \"$CARGO_BUILD_JOBS\" = 7");
     let hooks = archon_workflow::acceptance_scratch::ObserveHooks::default().with_resource_limits(

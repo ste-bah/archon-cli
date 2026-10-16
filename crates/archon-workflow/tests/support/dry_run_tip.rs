@@ -24,7 +24,7 @@ impl archon_workflow::agent_dispatch_port::WorkflowAgentDispatch for TipDispatch
                 ("CARGO_TARGET_DIR".into(), self.target.display().to_string()),
                 ("RUST_MIN_STACK".into(), "8388608".into()),
             ],
-            resource_limits: None,
+            resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
             hold: None,
         }
     }

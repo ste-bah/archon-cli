@@ -178,13 +178,7 @@ pub(crate) fn copied_root_names(
                 std::slice::from_ref(command),
             ) {
                 if let Some(relative) = relative_path(root, &sibling.alias)
-                    && let Some(name) =
-                        relative.components().find_map(|component| match component {
-                            std::path::Component::Normal(name) => {
-                                Some(name.to_string_lossy().into_owned())
-                            }
-                            _ => None,
-                        })
+                    && let Some(name) = sibling_root_name(&relative)
                 {
                     names.push(name);
                 }
@@ -194,6 +188,15 @@ pub(crate) fn copied_root_names(
     names.sort();
     names.dedup();
     names
+}
+
+fn sibling_root_name(relative: &Path) -> Option<String> {
+    relative.components().find_map(|component| match component {
+        Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+        Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir => {
+            None
+        }
+    })
 }
 
 fn git_repository(path: &Path) -> bool {
@@ -211,8 +214,8 @@ fn clone_head(source: &Path, destination: &Path) -> Result<String, Unrun> {
             "--shared",
             "--",
         ])
-        .arg(source)
-        .arg(destination)
+        .arg(archon_shell::paths::plain(source.to_path_buf()))
+        .arg(archon_shell::paths::plain(destination.to_path_buf()))
         .output()
         .map_err(|error| Unrun(format!("git clone {}: {error}", source.display())))?;
     if !output.status.success() {
@@ -236,7 +239,7 @@ fn clone_head(source: &Path, destination: &Path) -> Result<String, Unrun> {
 fn git_head(path: &Path) -> Result<String, Unrun> {
     let output = archon_shell::spawn::command("git")
         .args(["-C"])
-        .arg(path)
+        .arg(archon_shell::paths::plain(path.to_path_buf()))
         .args(["rev-parse", "HEAD"])
         .output()
         .map_err(|error| Unrun(format!("git rev-parse HEAD in {}: {error}", path.display())))?;

@@ -382,7 +382,7 @@ fn check_site<'a>(
     policy: &ScratchPolicy,
     target: &'a Path,
     timeout_secs: u64,
-    resource_limits: Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
+    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> super::process::CommandSite<'a> {
     super::process::CommandSite {
         project: roots.project(),

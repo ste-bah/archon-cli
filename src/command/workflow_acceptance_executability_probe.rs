@@ -139,7 +139,7 @@ impl HostProbe {
                     // The round's own direct site: the default policy.
                     host: self.host.clone(),
                     policy: None,
-                    resource_limits: Some(self.resource_limits.clone()),
+                    resource_limits: self.resource_limits.clone(),
                     target: None,
                     fresh_home: false,
                     // Issue 323: the probe's one per-check bound.

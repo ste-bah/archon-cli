@@ -27,9 +27,9 @@ pub enum CheckAllowance {
     Defer,
 }
 
-/// A caller's hooks into one observation. The default changes nothing:
-/// every check runs under the policy's timeout and nobody is told early.
-#[derive(Clone, Default)]
+/// A caller's hooks into one observation. By default, checks use the policy's
+/// timeout and nobody is told early; resource limits still apply.
+#[derive(Clone)]
 pub struct ObserveHooks {
     /// Asked before each check starts.
     pub allowance: Option<AllowanceHook>,
@@ -40,7 +40,17 @@ pub struct ObserveHooks {
     /// then discard it.
     pub on_check: Option<CheckHook>,
     /// Resolved run configuration, applied by archon at every spawned check.
-    pub resource_limits: Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
+    pub resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+}
+
+impl Default for ObserveHooks {
+    fn default() -> Self {
+        Self {
+            allowance: None,
+            on_check: None,
+            resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+        }
+    }
 }
 
 impl ObserveHooks {
@@ -50,7 +60,7 @@ impl ObserveHooks {
         mut self,
         limits: archon_tools::workflow_resource_env::CargoResourceLimits,
     ) -> Self {
-        self.resource_limits = Some(limits);
+        self.resource_limits = limits;
         self
     }
 }

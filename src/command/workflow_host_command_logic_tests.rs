@@ -236,9 +236,8 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
     let baseline = executor(None);
     assert!(!holds(&baseline, "freeze-skeleton", &unstamped));
     assert!(!holds(&baseline, "land-task-body", &unstamped));
-    // freeze-acceptance is at merged unreleased version 23: #366 adds joined
-    // shell-word and assignment rules; #420 and reverify add sibling-copy and
-    // reverify verdict behavior.
+    // freeze-acceptance version 25 includes the shell-word, sibling-copy,
+    // reverify, and required resource-limit verdict behavior.
     assert!(!holds(&baseline, "freeze-acceptance", &unstamped));
     let acceptance = HostCommandRequest::new("freeze-acceptance", Some("c".into())).unwrap();
     let current_acceptance_version = CAPABILITY_LOGIC
@@ -246,7 +245,7 @@ fn logic_361_fixed_executor_judges_records_by_their_logic() {
         .find(|logic| logic.id == "freeze-acceptance")
         .expect("freeze-acceptance catalog entry")
         .version;
-    assert_eq!(current_acceptance_version, 23);
+    assert_eq!(current_acceptance_version, 25);
     assert_eq!(
         baseline.logic_version(&acceptance).unwrap(),
         Some(current_acceptance_version)
