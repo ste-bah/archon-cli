@@ -3,7 +3,8 @@ param(
     [switch]$Check,
     [switch]$DryRun,
     [switch]$SkipTradingView,
-    [switch]$SkipOpenBB
+    [switch]$SkipOpenBB,
+    [switch]$LoadFunctionsOnly
 )
 $ErrorActionPreference = 'Stop'
 $Target = [IO.Path]::GetFullPath($Target)
@@ -48,11 +49,20 @@ function Get-OpenBBSpecifier {
     }
     return '>=3.10,<4'
 }
-function Test-PythonCandidate([string]$Program, [string[]]$Prefix, [string]$Specifier) {
+function Test-PythonCandidate([string]$Program, [string[]]$Prefix, [string]$Specifier, [string]$VersionOverride = '') {
     $probe = @'
 import os, re, sys
 spec = os.environ['ARCHON_SETUP_PYTHON_SPECIFIER']
 version = sys.version_info
+override = os.environ.get("ARCHON_SETUP_PYTHON_VERSION", "")
+if override:
+    match = re.fullmatch(r"(\d+(?:\.\d+){1,2})(a|b|rc)?(\d+)?", override)
+    if not match: raise SystemExit("invalid test version override: " + override)
+    parts = [int(part) for part in match.group(1).split(".")]
+    parts += [0] * (3 - len(parts))
+    label, serial = match.group(2), match.group(3)
+    level = {"a": "alpha", "b": "beta", "rc": "candidate"}.get(label, "final")
+    version = type("Version", (), {"__getitem__": lambda self, key: (parts + [level, int(serial or 0)])[key], "releaselevel": level, "serial": int(serial or 0)})()
 release = tuple(version[:3])
 pre = {"alpha": (0, version.serial), "beta": (1, version.serial), "candidate": (2, version.serial)}.get(version.releaselevel, (3, 0))
 def compare(left, right):
@@ -102,16 +112,21 @@ raise SystemExit(0)
     $probeTemp = New-TemporaryFile
     $probeFile = "$($probeTemp.FullName).py"
     $previousSpecifier = $env:ARCHON_SETUP_PYTHON_SPECIFIER
+    $previousVersion = $env:ARCHON_SETUP_PYTHON_VERSION
     try {
         Move-Item -LiteralPath $probeTemp.FullName -Destination $probeFile
         Set-Content -LiteralPath $probeFile -Value $probe -Encoding utf8
         $env:ARCHON_SETUP_PYTHON_SPECIFIER = $Specifier
+        if ($VersionOverride) { $env:ARCHON_SETUP_PYTHON_VERSION = $VersionOverride }
+        else { Remove-Item Env:ARCHON_SETUP_PYTHON_VERSION -ErrorAction SilentlyContinue }
         $script:PythonProbeError = (& $Program @Prefix $probeFile 2>&1 | Out-String).Trim()
         return $LASTEXITCODE -eq 0
     } catch { return $false }
     finally {
         if ($null -eq $previousSpecifier) { Remove-Item Env:ARCHON_SETUP_PYTHON_SPECIFIER -ErrorAction SilentlyContinue }
         else { $env:ARCHON_SETUP_PYTHON_SPECIFIER = $previousSpecifier }
+        if ($null -eq $previousVersion) { Remove-Item Env:ARCHON_SETUP_PYTHON_VERSION -ErrorAction SilentlyContinue }
+        else { $env:ARCHON_SETUP_PYTHON_VERSION = $previousVersion }
         Remove-Item -LiteralPath $probeFile, $probeTemp.FullName -Force -ErrorAction SilentlyContinue
     }
 }
@@ -156,6 +171,7 @@ function Assert-SafeVenvRebuild {
     }
 }
 
+if ($LoadFunctionsOnly) { return }
 if ($Check -or $DryRun) { Show-Status; exit 0 }
 New-Item -ItemType Directory -Force -Path $ToolsDir, (Join-Path $Target 'scripts') | Out-Null
 if (-not $SkipTradingView) {

@@ -18,208 +18,23 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Check POSIX installer without writes
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check POSIX installer and refusal cases
         if: runner.os != 'Windows'
         run: sh scripts/tests/test-setup-trading-tools.sh
-      - name: Check Windows installer without writes
+      - name: Check PowerShell specifier logic and refusal cases
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $env:PATHEXT = '.COM;.EXE;.BAT;.CMD'
-          $target = Join-Path $env:RUNNER_TEMP 'trading setup with spaces'
-          New-Item -ItemType Directory -Force -Path $target | Out-Null
-          & scripts/setup-trading-tools.ps1 -Target $target -Check -SkipTradingView -SkipOpenBB
-          & scripts/setup-trading-tools.ps1 -Target $target -DryRun -SkipTradingView -SkipOpenBB
-          if (Test-Path (Join-Path $target '.archon/tools')) { throw 'check/dry-run changed the target' }
-
-          $fakeBin = Join-Path $env:RUNNER_TEMP 'trading setup fake tools'
-          New-Item -ItemType Directory -Force -Path $fakeBin | Out-Null
-          @'
-          @echo off
-          setlocal EnableDelayedExpansion
-          if "%1"=="clone" (
-            set "DEST=%~3"
-            mkdir "!DEST!\src\cli" "!DEST!\scripts" 2>nul
-            type nul > "!DEST!\src\server.js"
-            type nul > "!DEST!\src\cli\index.js"
-          )
-          exit /b 0
-          '@ | Set-Content -LiteralPath (Join-Path $fakeBin 'git.cmd') -Encoding ascii
-          '@echo off
-          exit /b 0' | Set-Content -LiteralPath (Join-Path $fakeBin 'npm.cmd') -Encoding ascii
-          '@echo off
-          exit /b 0' | Set-Content -LiteralPath (Join-Path $fakeBin 'node.cmd') -Encoding ascii
-          $env:PATH = "$fakeBin;$env:SystemRoot\System32"
-          & scripts/setup-trading-tools.ps1 -Target $target -SkipOpenBB
-          $launcher = Join-Path $target 'scripts/start-tradingview-cdp.ps1'
-          if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw 'Windows TradingView start script was not generated' }
-          $launcherText = Get-Content -LiteralPath $launcher -Raw
-          if ($launcherText -notmatch '9222') { throw 'Windows TradingView default port is missing' }
-          try { & $launcher 9223; throw 'missing external launcher did not fail' }
-          catch { if ($_.Exception.Message -notmatch 'Install the external TradingView launcher project') { throw } }
-
-          $setupScript = (Resolve-Path 'scripts/setup-trading-tools.ps1').Path
-          $pythonLog = Join-Path $env:RUNNER_TEMP 'trading setup interpreter log'
-          $interpreterBin = Join-Path $env:RUNNER_TEMP 'trading setup interpreter mocks'
-          New-Item -ItemType Directory -Force -Path $interpreterBin | Out-Null
-          function Show-WindowsPythonDiagnostics {
-            Write-Output "PATH=$env:PATH"
-            Write-Output "PATHEXT=$env:PATHEXT"
-            Get-ChildItem -Force -LiteralPath $interpreterBin -ErrorAction SilentlyContinue | Select-Object Name, Length
-            Get-Command -All py,python,python3 -ErrorAction SilentlyContinue | Format-Table Name,CommandType,Source
-          }
-          function Clear-PythonLog {
-            if (Test-Path -LiteralPath $pythonLog -PathType Leaf) {
-              Remove-Item -LiteralPath $pythonLog -Force
-            }
-          }
-          function Read-PythonLog {
-            if (Test-Path -LiteralPath $pythonLog -PathType Leaf) {
-              return Get-Content -LiteralPath $pythonLog -Raw
-            }
-            return ''
-          }
-          trap { Show-WindowsPythonDiagnostics; break }
-          function Assert-PythonCommands([string[]]$Expected) {
-            Show-WindowsPythonDiagnostics
-            $actual = @()
-            if (Test-Path -LiteralPath $pythonLog -PathType Leaf) {
-              $actual = @((Get-Content -LiteralPath $pythonLog | Where-Object { $_ -match '^(py|python|python3) ' } | ForEach-Object { ($_ -split ' ')[0] }))
-            }
-            if (($actual -join ',') -ne ($Expected -join ',')) {
-              throw "Expected interpreter calls '$($Expected -join ',')', got '$($actual -join ',')'"
-            }
-          }
-          @'
-          @echo off
-          echo py %1 %2>>"%TRADING_PYTHON_LOG%"
-          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
-          exit /b 0
-          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'py.cmd') -Encoding ascii
-          $env:TRADING_PYTHON_LOG = $pythonLog
-          $env:PATH = "$interpreterBin;$env:SystemRoot\System32"
-          $pyOnlyTarget = Join-Path $env:RUNNER_TEMP 'trading setup py-only'
-          $pyOnlyVenv = Join-Path $pyOnlyTarget '.archon/tools/openbb-venv'
-          New-Item -ItemType Directory -Force -Path $pyOnlyVenv | Out-Null
-          Set-Content -LiteralPath (Join-Path $pyOnlyVenv 'keep.txt') -Value 'keep'
-          Clear-PythonLog
-          Show-WindowsPythonDiagnostics
-          try { & $setupScript -Target $pyOnlyTarget -SkipTradingView; throw 'py-only non-venv was not refused' }
-          catch { if ($_.Exception.Message -notmatch 'non-venv directory') { throw } }
-          Assert-PythonCommands @()
-          if (-not (Test-Path -LiteralPath (Join-Path $pyOnlyVenv 'keep.txt') -PathType Leaf)) { throw 'py-only sentinel was removed' }
-          $junctionTarget = Join-Path $env:RUNNER_TEMP 'trading setup junction target'
-          $junctionProject = Join-Path $env:RUNNER_TEMP 'trading setup junction project'
-          $junctionVenv = Join-Path $junctionProject '.archon/tools/openbb-venv'
-          New-Item -ItemType Directory -Force -Path $junctionTarget, (Split-Path -Parent $junctionVenv) | Out-Null
-          Set-Content -LiteralPath (Join-Path $junctionTarget 'keep.txt') -Value 'keep'
-          New-Item -ItemType Junction -Path $junctionVenv -Target $junctionTarget | Out-Null
-          Clear-PythonLog
-          Show-WindowsPythonDiagnostics
-          try { & $setupScript -Target $junctionProject -SkipTradingView; throw 'junctioned venv was not refused' }
-          catch { if ($_.Exception.Message -notmatch 'reparse-point OpenBB venv') { throw } }
-          Assert-PythonCommands @()
-          if (-not (Test-Path -LiteralPath (Join-Path $junctionTarget 'keep.txt') -PathType Leaf)) { throw 'junction target file was removed' }
-
-          Clear-PythonLog
-          Remove-Item -LiteralPath (Join-Path $interpreterBin 'py.cmd') -Force
-          @'
-          @echo off
-          echo python %1>>"%TRADING_PYTHON_LOG%"
-          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
-          exit /b 1
-          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python.cmd') -Encoding ascii
-          @'
-          @echo off
-          echo python3 %1>>"%TRADING_PYTHON_LOG%"
-          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
-          exit /b 0
-          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python3.cmd') -Encoding ascii
-          $nonVenvTarget = Join-Path $env:RUNNER_TEMP 'trading setup non-venv contents'
-          $nonVenv = Join-Path $nonVenvTarget '.archon/tools/openbb-venv'
-          New-Item -ItemType Directory -Force -Path $nonVenv | Out-Null
-          Set-Content -LiteralPath (Join-Path $nonVenv 'keep.txt') -Value 'keep'
-          Clear-PythonLog
-          Show-WindowsPythonDiagnostics
-          try { & $setupScript -Target $nonVenvTarget -SkipTradingView; throw 'non-venv directory with contents was not refused' }
-          catch { if ($_.Exception.Message -notmatch 'Refusing to rebuild non-venv directory with contents:') { throw } }
-          Assert-PythonCommands @()
-          if (-not (Test-Path -LiteralPath (Join-Path $nonVenv 'keep.txt') -PathType Leaf)) { throw 'non-venv sentinel was removed' }
-
-          $storeTarget = Join-Path $env:RUNNER_TEMP 'trading setup Store stub'
-          $storeVenv = Join-Path $storeTarget '.archon/tools/openbb-venv'
-          $storeBasePython = Join-Path $interpreterBin 'python3.CMD'
-          Clear-PythonLog
-          Show-WindowsPythonDiagnostics
-          try { & $setupScript -Target $storeTarget -SkipTradingView; throw 'Store-stub rebuild unexpectedly completed without creating a venv' }
-          catch {
-            $expectedFailure = "OpenBB venv creation with base interpreter '$storeBasePython' did not create expected interpreter '$storeVenv\Scripts\python.exe' in venv '$storeVenv'."
-            if ($_.Exception.Message -cne $expectedFailure) { throw }
-          }
-          $storeLog = Read-PythonLog
-          $storeCalls = @($storeLog -split "`r?`n" | Where-Object { $_ -match '^(py|python|python3) ' })
-          if ($storeCalls.Count -lt 2 -or $storeCalls[0] -notmatch '^python .*\.py$' -or $storeCalls[1] -notmatch '^python3 .*\.py$') { throw 'Store-stub probe prefix was not python then python3 with a Python file' }
-          if ($storeCalls -match '^py ') { throw 'Store-stub unexpectedly called py' }
-          if ($storeCalls.Count -lt 3 -or $storeCalls[2] -ne 'python3 -m') { throw 'Store-stub rebuild did not continue with python3 -m venv' }
-          if (Test-Path -LiteralPath $storeVenv) { throw 'Store-stub mock unexpectedly created a venv' }
-
-          @'
-          @echo off
-          echo py %1 %2>>"%TRADING_PYTHON_LOG%"
-          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
-          if "%TRADING_PYTHON_ACCEPT%"=="1" exit /b 0
-          exit /b 1
-          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'py.cmd') -Encoding ascii
-          @'
-          @echo off
-          echo python %1>>"%TRADING_PYTHON_LOG%"
-          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
-          if "%TRADING_PYTHON_ACCEPT%"=="1" exit /b 0
-          exit /b 1
-          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python.cmd') -Encoding ascii
-          @'
-          @echo off
-          echo python3 %1>>"%TRADING_PYTHON_LOG%"
-          set ARCHON_SETUP_PYTHON_SPECIFIER>>"%TRADING_PYTHON_LOG%"
-          if "%TRADING_PYTHON_ACCEPT%"=="1" exit /b 0
-          exit /b 1
-          '@ | Set-Content -LiteralPath (Join-Path $interpreterBin 'python3.cmd') -Encoding ascii
-          $specifierCases = @(
-            @{ Specifier = '>=3.10,<3.13'; Version = '3.12'; Accept = $true },
-            @{ Specifier = '>=3.10,<3.13'; Version = '3.13'; Accept = $false },
-            @{ Specifier = '>=3.11.17'; Version = '3.11.0'; Accept = $false },
-            @{ Specifier = '>=3.11.17'; Version = '3.11.17'; Accept = $true },
-            @{ Specifier = '!=3.12.*'; Version = '3.12.4'; Accept = $false },
-            @{ Specifier = '>=3.13'; Version = '3.13.0rc1'; Accept = $false }
-          )
-          foreach ($case in $specifierCases) {
-            $caseName = ($case.Specifier + '-' + $case.Version) -replace '[^A-Za-z0-9]', '_'
-            $caseTarget = Join-Path $env:RUNNER_TEMP "trading setup spec $caseName"
-            $caseVenv = Join-Path $caseTarget '.archon/tools/openbb-venv'
-            $metadataDir = Join-Path $caseVenv 'Lib/site-packages/openbb-99.dist-info'
-            New-Item -ItemType Directory -Force -Path $metadataDir | Out-Null
-            Set-Content -LiteralPath (Join-Path $caseVenv 'pyvenv.cfg') -Value 'home = mocked-python'
-            Set-Content -LiteralPath (Join-Path $metadataDir 'METADATA') -Value @("Metadata-Version: 2.1", "Name: openbb", "Requires-Python: $($case.Specifier)")
-            Set-Content -LiteralPath (Join-Path $caseVenv 'keep.txt') -Value 'keep'
-            Clear-PythonLog
-            $env:TRADING_PYTHON_ACCEPT = if ($case.Accept) { '1' } else { '0' }
-            Show-WindowsPythonDiagnostics
-            try {
-              & $setupScript -Target $caseTarget -SkipTradingView
-              throw "specifier case unexpectedly passed setup: $($case.Specifier) $($case.Version)"
-            } catch {
-              if ($case.Accept) {
-                $acceptedBasePython = Join-Path $interpreterBin 'py.CMD'
-                $expectedFailure = "OpenBB venv creation with base interpreter '$acceptedBasePython' did not create expected interpreter '$caseVenv\Scripts\python.exe' in venv '$caseVenv'."
-                if ($_.Exception.Message -cne $expectedFailure) { throw }
-              }
-              if (-not $case.Accept -and $_.Exception.Message -notmatch [regex]::Escape("specifier '$($case.Specifier)'")) { throw }
-            }
-            $caseLog = Read-PythonLog
-            if ($caseLog -notmatch [regex]::Escape("ARCHON_SETUP_PYTHON_SPECIFIER=$($case.Specifier)")) { throw "venv Requires-Python was not passed to the interpreter for $($case.Specifier)" }
-            if ($caseLog -notmatch '\.py') { throw "specifier probe did not use a Python file for $($case.Specifier)" }
-            if ($case.Accept) { Assert-PythonCommands @('py', 'py') }
-            else { Assert-PythonCommands @('py', 'python', 'python3') }
-            if ((Get-Content -LiteralPath (Join-Path $caseVenv 'keep.txt') -Raw).Trim() -ne 'keep') { throw 'specifier probe changed its venv sentinel' }
-          }
+        run: ./scripts/tests/test-setup-trading-tools.ps1
+      - name: Install, run, and repair real tools on POSIX
+        if: runner.os != 'Windows'
+        run: sh scripts/tests/trading-tools-e2e.sh
+      - name: Install, run, and repair real tools on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/tests/trading-tools-e2e.ps1
