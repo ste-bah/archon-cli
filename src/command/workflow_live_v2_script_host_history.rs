@@ -243,31 +243,26 @@ impl WorkflowScriptHost {
                         None => self.result_view(&answer)?,
                     }));
                 }
-                let outcome = loop {
-                    let judged = executor
-                        .rejudge_landing(&current, generation, !receipt_restore_used)
-                        .await?;
-                    let Some(judged) = judged else {
-                        return Ok(None);
-                    };
-                    if judged.candidate {
-                        let answer = self.rejudged_answer(&current, judged.outcome)?;
-                        return Ok(Some(match generation {
-                            Some(generation) => {
-                                self.result_view_in_generation(&answer, generation)?
-                            }
-                            None => self.result_view(&answer)?,
-                        }));
-                    }
-                    let outcome = judged.outcome;
-                    let receipt_matches = match executor.landing_receipt_matches_disk(&current) {
-                        Ok(true) => true,
-                        Ok(false) | Err(WorkflowError::HostOperational(_)) => false,
-                        Err(error) => return Err(error),
-                    };
-                    if receipt_matches {
-                        break outcome;
-                    }
+                let judged = executor
+                    .rejudge_landing(&current, generation, !receipt_restore_used)
+                    .await?;
+                let Some(judged) = judged else {
+                    return Ok(None);
+                };
+                if judged.candidate {
+                    let answer = self.rejudged_answer(&current, judged.outcome)?;
+                    return Ok(Some(match generation {
+                        Some(generation) => self.result_view_in_generation(&answer, generation)?,
+                        None => self.result_view(&answer)?,
+                    }));
+                }
+                let outcome = judged.outcome;
+                let receipt_matches = match executor.landing_receipt_matches_disk(&current) {
+                    Ok(true) => true,
+                    Ok(false) | Err(WorkflowError::HostOperational(_)) => false,
+                    Err(error) => return Err(error),
+                };
+                if !receipt_matches {
                     let (_restored, candidate, superseded) = executor
                         // A judge has already run in this pass. Treat any
                         // newer bytes as its own candidate rather than
@@ -308,7 +303,7 @@ impl WorkflowScriptHost {
                     // its author when no bytes exist and the receipt cannot
                     // be rebuilt.
                     return Ok(None);
-                };
+                }
                 let mut persisted_observation = observation;
                 persisted_observation.outcome = Some(outcome.clone());
                 if let Some(outcome_without_publication) = persisted_observation.outcome.as_mut() {

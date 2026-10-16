@@ -148,11 +148,11 @@ async fn a_second_write_after_restore_is_judged_as_a_candidate_without_a_loop() 
         .expect("captured evidence digest is recorded in its event");
     assert_eq!(
         race_event["detail"]["evidence_path"],
-        evidence_race_path
-            .strip_prefix(run.store.run_dir(&run.run_id))
-            .unwrap()
-            .to_string_lossy()
-            .as_ref()
+        crate::command::workflow_host_command_publish::path_text(
+            evidence_race_path
+                .strip_prefix(run.store.run_dir(&run.run_id))
+                .unwrap(),
+        )
     );
     assert_eq!(call_count, 1);
     assert!(newest_judged);
