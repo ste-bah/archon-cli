@@ -6,7 +6,7 @@ pub(super) fn error_kind(error: &LlmError) -> &'static str {
         LlmError::Http(_) => "http_error",
         LlmError::Auth(_) => "auth_error",
         LlmError::RateLimited { .. } => "rate_limited",
-        LlmError::Overloaded => "overloaded",
+        LlmError::Overloaded { .. } => "overloaded",
         LlmError::Server { .. } => "server_error",
         LlmError::Serialize(_) => "serialization_error",
         LlmError::Unsupported(_) => "unsupported_feature",
@@ -29,7 +29,7 @@ pub(super) fn error_message(error: &LlmError) -> &'static str {
         LlmError::Unsupported(_) => "provider does not support the requested feature",
         LlmError::Aborted => "provider request was aborted",
         LlmError::Http(_) => "provider HTTP request failed",
-        LlmError::Overloaded => "provider reported overload",
+        LlmError::Overloaded { .. } => "provider reported overload",
         LlmError::Serialize(_) => "provider request or response serialization failed",
         LlmError::ContextWindowExceeded { .. } => "provider context window was exceeded",
         LlmError::Rejected { .. } => "provider rejected the request",
@@ -39,7 +39,7 @@ pub(super) fn error_message(error: &LlmError) -> &'static str {
 
 pub(super) fn error_severity(error: &LlmError) -> ProviderRuntimeSeverity {
     match error {
-        LlmError::RateLimited { .. } | LlmError::QuotaExceeded(_) | LlmError::Overloaded => {
+        LlmError::RateLimited { .. } | LlmError::QuotaExceeded(_) | LlmError::Overloaded { .. } => {
             ProviderRuntimeSeverity::Warn
         }
         _ => ProviderRuntimeSeverity::Error,
@@ -59,6 +59,7 @@ pub(super) fn error_metadata(error: &LlmError) -> serde_json::Value {
         LlmError::RateLimited {
             retry_after_secs,
             from_provider,
+            ..
         } => serde_json::json!({
             "error_kind": error_kind(error),
             "retry_after_secs": retry_after_secs,

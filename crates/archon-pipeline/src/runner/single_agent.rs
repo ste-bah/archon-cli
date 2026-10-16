@@ -243,7 +243,7 @@ async fn run_agent_attempts(
     }
 }
 
-async fn should_retry_single_agent_transport(
+pub(super) async fn should_retry_single_agent_transport(
     audit: &Option<PipelineAuditRun>,
     agent: &AgentInfo,
     ordinal: usize,
@@ -263,7 +263,7 @@ async fn should_retry_single_agent_transport(
             audit.record_attempt_failed(ordinal, agent, attempt, &reason)?;
             audit.record_agent_retry(ordinal, agent, attempt, &reason)?;
         }
-        let delay = pipeline_attempt_retry_delay(attempt);
+        let delay = pipeline_attempt_retry_delay(attempt, error);
         tracing::warn!(
             agent_key = %agent.key,
             attempt = attempt,
@@ -271,7 +271,7 @@ async fn should_retry_single_agent_transport(
             error = %reason,
             "pipeline agent attempt failed with retryable transport error"
         );
-        tokio::time::sleep(delay).await;
+        sleep_before_pipeline_retry(delay, tokio::time::sleep).await;
         return Ok(true);
     }
     Ok(false)

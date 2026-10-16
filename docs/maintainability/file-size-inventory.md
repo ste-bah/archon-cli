@@ -295,7 +295,6 @@ Historical baseline before the later refactor groups:
 | 600 | `src/command/doctor.rs` |
 | 596 | `crates/archon-plugin/src/host.rs` |
 | 593 | `crates/archon-pipeline/tests/runner.rs` |
-| 591 | `crates/archon-pipeline/tests/final_stage.rs` |
 | 587 | `src/command/help.rs` |
 | 587 | `crates/archon-llm/src/providers/registry.rs` |
 | 585 | `src/command/pipeline.rs` |
@@ -377,7 +376,6 @@ Historical baseline before the later refactor groups:
 | 603 | `crates/archon-core/src/agents/definition.rs` | Group 4 |
 | 600 | `src/command/doctor.rs` | Group 11 |
 | 593 | `crates/archon-pipeline/tests/runner.rs` | Group 11 |
-| 591 | `crates/archon-pipeline/tests/final_stage.rs` | Group 11 |
 | 587 | `src/command/help.rs` | Group 11 |
 | 587 | `crates/archon-llm/src/providers/registry.rs` | Group 10 |
 | 585 | `src/command/pipeline.rs` | Group 11 |

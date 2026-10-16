@@ -76,11 +76,20 @@ fn transient_provider_failures_enter_cooldown_without_disabling_compaction() {
         CompactionError::Provider(LlmError::RateLimited {
             retry_after_secs: 30,
             from_provider: true,
+            pipeline_retry_after_secs: None,
         }),
-        CompactionError::Provider(LlmError::Overloaded),
+        CompactionError::Provider(LlmError::Overloaded {
+            status: None,
+            retry_after_secs: None,
+        }),
+        CompactionError::Provider(LlmError::Overloaded {
+            status: Some(529),
+            retry_after_secs: Some(37),
+        }),
         CompactionError::Provider(LlmError::Server {
             status: 503,
             message: "temporary outage".into(),
+            pipeline_retry_after_secs: None,
         }),
     ] {
         state.on_failure(&error);
@@ -88,7 +97,7 @@ fn transient_provider_failures_enter_cooldown_without_disabling_compaction() {
 
     assert!(!state.disabled);
     assert_eq!(state.structural_failures, 0);
-    assert_eq!(state.transient_failures, 3);
+    assert_eq!(state.transient_failures, 4);
     assert!(state.cooldown_until.is_some());
     assert!(!state.should_attempt());
 }
@@ -99,6 +108,7 @@ fn expired_transient_cooldown_allows_later_successful_compaction() {
     state.on_failure(&CompactionError::Provider(LlmError::RateLimited {
         retry_after_secs: 30,
         from_provider: true,
+        pipeline_retry_after_secs: None,
     }));
     state.cooldown_until = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
 
@@ -128,6 +138,7 @@ fn ordinary_success_resets_transient_compaction_state() {
     state.on_failure(&CompactionError::Provider(LlmError::RateLimited {
         retry_after_secs: 30,
         from_provider: true,
+        pipeline_retry_after_secs: None,
     }));
 
     state.on_ordinary_success();

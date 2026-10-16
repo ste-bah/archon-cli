@@ -77,7 +77,7 @@ async fn dropped_stream_retries_are_bounded_by_a_no_progress_window() {
 }
 
 #[tokio::test]
-async fn retry_provider_adds_no_stream_open_per_invocation() {
+async fn retry_provider_forwards_pre_content_error_for_runner_resend() {
     let inner = Arc::new(MockProvider::new(vec![vec![StreamEvent::Error {
         error_type: "overloaded_error".into(),
         message: "persistent overload".into(),
@@ -92,10 +92,9 @@ async fn retry_provider_adds_no_stream_open_per_invocation() {
         Some(StreamEvent::Error { .. })
     ));
     let opens = inner.requests().len();
-    println!("EVIDENCE RetryProvider stream invocation: inner opens={opens}");
     assert_eq!(
         opens, 1,
-        "one wrapper stream invocation opens the inner provider once"
+        "RetryProvider forwards pre-content errors for the runner's resend window"
     );
 }
 

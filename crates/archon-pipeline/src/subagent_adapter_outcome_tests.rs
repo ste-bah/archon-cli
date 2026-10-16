@@ -91,6 +91,50 @@ fn abnormal_subagent_endings_stay_errors_rather_than_typed_turns() {
 }
 
 #[test]
+fn provider_retry_metadata_crosses_the_subagent_boundary_as_typed_error() {
+    let error = llm_response_for_subagent_outcome(
+        SubagentOutcome::FailedWithProvider {
+            message: "provider throttled".into(),
+            status: Some(429),
+            retry_after_secs: Some(41),
+            overloaded: false,
+        },
+        false,
+        None,
+    )
+    .expect_err("provider failure should remain an error");
+    assert!(matches!(
+        error.downcast_ref::<archon_llm::provider::LlmError>(),
+        Some(archon_llm::provider::LlmError::Overloaded {
+            status: Some(429),
+            retry_after_secs: Some(41)
+        })
+    ));
+}
+
+#[test]
+fn typed_429_with_or_without_hint_and_529_are_pipeline_overloads() {
+    for (status, hint) in [(Some(429), None), (Some(429), Some(41)), (Some(529), None)] {
+        let error = llm_response_for_subagent_outcome(
+            SubagentOutcome::FailedWithProvider {
+                message: "provider overloaded".into(),
+                status,
+                retry_after_secs: hint,
+                overloaded: false,
+            },
+            false,
+            None,
+        )
+        .expect_err("provider failure should remain an error");
+        assert!(matches!(
+            error.downcast_ref::<archon_llm::provider::LlmError>(),
+            Some(archon_llm::provider::LlmError::Overloaded { status: actual, retry_after_secs })
+                if *actual == status && *retry_after_secs == hint
+        ));
+    }
+}
+
+#[test]
 fn run_agent_returns_the_mapped_outcome_rather_than_building_a_response_inline() {
     let source = include_str!("subagent_adapter.rs");
     let execution = include_str!("subagent_adapter/continuation.rs");

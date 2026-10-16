@@ -222,6 +222,7 @@ impl LocalProvider {
             return Err(LlmError::Server {
                 status,
                 message: msg,
+                pipeline_retry_after_secs: None,
             });
         }
 

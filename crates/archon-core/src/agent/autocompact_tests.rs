@@ -161,6 +161,7 @@ impl LlmProvider for RateLimitedProvider {
         Err(LlmError::RateLimited {
             retry_after_secs: 30,
             from_provider: true,
+            pipeline_retry_after_secs: None,
         })
     }
 
@@ -335,6 +336,7 @@ impl LlmProvider for RateLimitThenSuccessProvider {
             (RateLimitFailureMode::PreStream, 0) => Err(LlmError::RateLimited {
                 retry_after_secs: 30,
                 from_provider: true,
+                pipeline_retry_after_secs: None,
             }),
             (RateLimitFailureMode::MidStream, 0) => Ok(stream_from_events(vec![
                 StreamEvent::ThinkingDelta {

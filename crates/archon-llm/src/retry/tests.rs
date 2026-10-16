@@ -259,7 +259,7 @@ async fn streaming_error_redacts_after_content_and_leaves_retries_to_the_runner(
 }
 
 #[tokio::test]
-async fn persistent_overload_is_opened_once_per_runner_resend() {
+async fn persistent_overload_is_forwarded_for_runner_resend() {
     let inner = Arc::new(StreamScriptProvider {
         calls: AtomicUsize::new(0),
         events: vec![StreamEvent::Error {
@@ -269,9 +269,10 @@ async fn persistent_overload_is_opened_once_per_runner_resend() {
     });
     let provider = RetryProvider::new(inner.clone(), RetryPolicy::default());
     let mut events = provider.stream(request()).await.unwrap();
-    assert!(
-        matches!(events.recv().await, Some(StreamEvent::Error { error_type, .. }) if error_type == "overloaded_error")
-    );
+    assert!(matches!(
+        events.recv().await,
+        Some(StreamEvent::Error { error_type, .. }) if error_type == "overloaded_error"
+    ));
     assert_eq!(inner.calls.load(Ordering::SeqCst), 1);
 }
 

@@ -467,3 +467,7 @@ impl<P: LlmProvider + ?Sized> LlmProvider for RetryProvider<P> {
 #[cfg(test)]
 #[path = "retry/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "retry/metadata_retry_tests.rs"]
+mod metadata_retry_tests;

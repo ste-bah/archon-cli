@@ -428,16 +428,22 @@ pub(super) fn map_http_error(status: u16, body: String) -> LlmError {
         400 => LlmError::Server {
             status,
             message: format!("Bad request: {body}"),
+            pipeline_retry_after_secs: None,
         },
         401 | 403 => LlmError::Auth(body),
         429 => LlmError::RateLimited {
             retry_after_secs: 60,
             from_provider: false,
+            pipeline_retry_after_secs: None,
         },
-        500 | 503 => LlmError::Overloaded,
+        500 | 503 => LlmError::Overloaded {
+            status: Some(status),
+            retry_after_secs: None,
+        },
         _ => LlmError::Server {
             status,
             message: body,
+            pipeline_retry_after_secs: None,
         },
     }
 }

@@ -19,6 +19,7 @@ impl LlmProvider for FailingCompactionProvider {
             return Err(LlmError::RateLimited {
                 retry_after_secs: 30,
                 from_provider: true,
+                pipeline_retry_after_secs: None,
             });
         }
         unreachable!("fixture only invokes compaction summary")

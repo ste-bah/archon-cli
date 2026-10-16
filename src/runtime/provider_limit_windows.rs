@@ -173,6 +173,7 @@ mod tests {
             &LlmError::RateLimited {
                 retry_after_secs: 90,
                 from_provider: true,
+                pipeline_retry_after_secs: None,
             },
         );
 

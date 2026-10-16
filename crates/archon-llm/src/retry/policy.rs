@@ -86,7 +86,7 @@ pub fn classify(err: &LlmError) -> RetryDecision {
             retry_after_secs, ..
         } if *retry_after_secs <= MAX_INLINE_RATE_LIMIT_RETRY_SECS => RetryDecision::Retry,
         LlmError::RateLimited { .. } => RetryDecision::FailFast,
-        LlmError::Overloaded => RetryDecision::Retry,
+        LlmError::Overloaded { .. } => RetryDecision::Retry,
         LlmError::Server { status, .. } if *status >= 500 => RetryDecision::Retry,
 
         LlmError::Auth(_)
@@ -110,7 +110,7 @@ pub(super) fn reason_code_for_error(err: &LlmError) -> &'static str {
         LlmError::Http(_) => "http",
         LlmError::Auth(_) => "auth",
         LlmError::RateLimited { .. } => "rate_limited",
-        LlmError::Overloaded => "overloaded",
+        LlmError::Overloaded { .. } => "overloaded",
         LlmError::Server { .. } => "server",
         LlmError::Rejected { .. } => "rejected",
         LlmError::Serialize(_) => "serialize",
@@ -210,6 +210,7 @@ mod tests {
         let err = LlmError::RateLimited {
             retry_after_secs: 30,
             from_provider: true,
+            pipeline_retry_after_secs: None,
         };
 
         assert_eq!(classify(&err), RetryDecision::Retry);
@@ -220,6 +221,7 @@ mod tests {
         let err = LlmError::RateLimited {
             retry_after_secs: 8_004,
             from_provider: true,
+            pipeline_retry_after_secs: None,
         };
 
         assert_eq!(classify(&err), RetryDecision::FailFast);

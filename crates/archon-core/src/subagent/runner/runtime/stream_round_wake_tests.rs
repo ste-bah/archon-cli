@@ -154,12 +154,14 @@ impl LlmProvider for WakeNetworkProvider {
                 return Err(LlmError::Server {
                     status: 500,
                     message: body.into(),
+                    pipeline_retry_after_secs: None,
                 });
             }
             WakeOpen::RateLimited(secs) => {
                 return Err(LlmError::RateLimited {
                     retry_after_secs: secs,
                     from_provider: true,
+                    pipeline_retry_after_secs: None,
                 });
             }
             WakeOpen::ErrorEvent(error_type) => {

@@ -138,10 +138,22 @@ impl CommandHandler for ResumeHandler {
                     )));
                 }
                 Ok(None) => {
-                    ctx.emit(TuiEvent::TextDelta(format!(
-                        "\nNo session matching '{arg}'. Use \
-                                     /sessions to list.\n"
-                    )));
+                    let pipeline_match = ctx.working_dir.as_deref().is_some_and(|working_dir| {
+                        archon_pipeline::session::list_sessions(working_dir)
+                            .ok()
+                            .is_some_and(|sessions| {
+                                sessions.iter().any(|session| session.session_id == arg)
+                            })
+                    });
+                    let message = if pipeline_match {
+                        format!("\nNo session matching '{arg}'. Use /pipeline resume {arg}.\n")
+                    } else {
+                        format!(
+                            "\nNo session matching '{arg}'. Use \
+                                         /sessions to list.\n"
+                        )
+                    };
+                    ctx.emit(TuiEvent::TextDelta(message));
                 }
                 Err(e) => {
                     ctx.emit(TuiEvent::Error(format!("Lookup failed: {e}")));
@@ -261,6 +273,50 @@ mod tests {
             emitted,
             "ResumeHandler must emit at least one TextDelta or Error \
              event for a named-arg miss path"
+        );
+    }
+
+    fn execute_resume_miss(arg: &str, working_dir: &std::path::Path) -> String {
+        let (mut ctx, mut rx) = crate::command::test_support::CtxBuilder::new()
+            .with_working_dir(working_dir.to_path_buf())
+            .build();
+        ctx.session_store = Some(std::sync::Arc::new(
+            archon_session::storage::SessionStore::open(&working_dir.join("sessions.db"))
+                .expect("session store"),
+        ));
+        ResumeHandler
+            .execute(&mut ctx, &[arg.to_string()])
+            .expect("resume handler");
+        while let Ok(event) = rx.try_recv() {
+            if let TuiEvent::TextDelta(text) = event {
+                return text;
+            }
+        }
+        panic!("resume miss should emit a text message");
+    }
+
+    #[test]
+    fn resume_miss_for_pipeline_session_suggests_pipeline_resume() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut checkpoint = archon_pipeline::session::new_session(
+            archon_pipeline::runner::PipelineType::Research,
+            "test pipeline",
+        );
+        checkpoint.session_id = "pipeline-session-454".into();
+        archon_pipeline::session::checkpoint(&checkpoint, dir.path()).expect("checkpoint");
+
+        assert_eq!(
+            execute_resume_miss("pipeline-session-454", dir.path()),
+            "\nNo session matching 'pipeline-session-454'. Use /pipeline resume pipeline-session-454.\n"
+        );
+    }
+
+    #[test]
+    fn resume_miss_for_unknown_id_keeps_the_existing_message() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(
+            execute_resume_miss("unknown-454", dir.path()),
+            "\nNo session matching 'unknown-454'. Use /sessions to list.\n"
         );
     }
 }

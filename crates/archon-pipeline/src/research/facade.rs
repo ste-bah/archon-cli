@@ -256,7 +256,7 @@ impl PipelineFacade for ResearchFacade {
                 &self.models,
             )));
         }
-        if let Some(agent) = final_assembly::next_final_stage_agent(session)? {
+        if let Some(agent) = final_assembly::next_final_assembly_agent(session)? {
             return Ok(NextAgent::Continue(agent));
         }
         if idx >= RESEARCH_AGENTS.len() || final_idx < idx {
@@ -294,7 +294,7 @@ impl PipelineFacade for ResearchFacade {
         let style = self.style_prompt.as_deref();
 
         let prompt_text = if final_assembly::is_dynamic_final_key(&agent.key) {
-            final_assembly::build_final_stage_prompt(session, &agent.key, &session.task, style)?
+            final_assembly::build_final_assembly_prompt(session, &agent.key, &session.task, style)?
         } else {
             let research_agent = get_agent_by_key(&agent.key)
                 .with_context(|| format!("Unknown research agent key: {}", agent.key))?;
@@ -365,7 +365,7 @@ impl PipelineFacade for ResearchFacade {
         result: &AgentResult,
     ) -> Result<QualityScore> {
         if final_assembly::is_dynamic_final_key(&agent.key) {
-            return Ok(final_assembly::score_final_stage_output(
+            return Ok(final_assembly::score_final_assembly_output(
                 session,
                 &agent.key,
                 &result.output,

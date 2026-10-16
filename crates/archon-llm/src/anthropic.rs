@@ -258,7 +258,7 @@ impl AnthropicClient {
                 }
 
                 // 529: overloaded, use longer backoff
-                ApiError::Overloaded => {
+                ApiError::Overloaded { .. } => {
                     if attempt < MAX_RETRIES {
                         let delay = OVERLOAD_BASE_DELAY_SECS * (attempt as u64 + 1);
                         tracing::warn!(
@@ -271,7 +271,6 @@ impl AnthropicClient {
                     }
                     return Err(err);
                 }
-
                 // 500/502/503: exponential backoff
                 ApiError::ServerError { status, .. } => {
                     if attempt < MAX_RETRIES {

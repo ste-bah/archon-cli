@@ -317,6 +317,7 @@ impl LlmProvider for CompactionFailsProvider {
             return Err(archon_llm::provider::LlmError::RateLimited {
                 retry_after_secs: 30,
                 from_provider: true,
+                pipeline_retry_after_secs: None,
             });
         }
         let events = text_response("survived");

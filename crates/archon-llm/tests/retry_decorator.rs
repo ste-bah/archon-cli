@@ -237,6 +237,7 @@ async fn fails_fast_on_server_4xx() {
     let inner = Arc::new(MockProvider::new(vec![Err(LlmError::Server {
         status: 400,
         message: "bad request".into(),
+        pipeline_retry_after_secs: None,
     })]));
     let inner_for_count = inner.clone();
     let provider = RetryProvider::new(Arc::new(ArcDelegate(inner)), tight_policy());
@@ -389,20 +390,25 @@ fn classify_retry_variants() {
     assert_eq!(
         classify(&LlmError::RateLimited {
             retry_after_secs: 1,
-            from_provider: true
+            from_provider: true,
+            pipeline_retry_after_secs: None,
         }),
         RetryDecision::Retry,
         "RateLimited -> Retry"
     );
     assert_eq!(
-        classify(&LlmError::Overloaded),
+        classify(&LlmError::Overloaded {
+            status: None,
+            retry_after_secs: None
+        }),
         RetryDecision::Retry,
         "Overloaded -> Retry"
     );
     assert_eq!(
         classify(&LlmError::Server {
             status: 500,
-            message: "x".into()
+            message: "x".into(),
+            pipeline_retry_after_secs: None,
         }),
         RetryDecision::Retry,
         "Server 500 -> Retry"
@@ -410,7 +416,8 @@ fn classify_retry_variants() {
     assert_eq!(
         classify(&LlmError::Server {
             status: 503,
-            message: "x".into()
+            message: "x".into(),
+            pipeline_retry_after_secs: None,
         }),
         RetryDecision::Retry,
         "Server 503 -> Retry"
@@ -437,7 +444,8 @@ fn classify_fail_fast_variants() {
     assert_eq!(
         classify(&LlmError::Server {
             status: 400,
-            message: "x".into()
+            message: "x".into(),
+            pipeline_retry_after_secs: None,
         }),
         RetryDecision::FailFast,
         "Server 4xx -> FailFast"
@@ -445,7 +453,8 @@ fn classify_fail_fast_variants() {
     assert_eq!(
         classify(&LlmError::Server {
             status: 404,
-            message: "x".into()
+            message: "x".into(),
+            pipeline_retry_after_secs: None,
         }),
         RetryDecision::FailFast,
         "Server 404 -> FailFast"
@@ -497,6 +506,7 @@ async fn rate_limited_sleeps_for_retry_after() {
         Err(LlmError::RateLimited {
             retry_after_secs: 2,
             from_provider: true,
+            pipeline_retry_after_secs: None,
         }),
         Ok(ok_response()),
     ]));

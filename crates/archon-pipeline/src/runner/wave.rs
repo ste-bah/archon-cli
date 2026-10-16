@@ -34,6 +34,8 @@ pub(super) async fn run_parallel_wave(
     agents: Vec<AgentInfo>,
     options: PipelineRunOptions,
 ) -> Result<()> {
+    // Each member owns its retry loop inside the joined future, so its backoff
+    // does not pause peers; the wave still waits for every member before commit.
     if let Err(error) = validate_wave(&session.id, &agents) {
         fail_audit(audit, &error.to_string())?;
         return Err(error);
@@ -49,18 +51,33 @@ pub(super) async fn run_parallel_wave(
     let completed = join_all(
         prepared
             .into_iter()
-            .map(|prepared| execute_prepared_wave_agent(facade, llm, prepared)),
+            .map(|prepared| execute_prepared_wave_agent(facade, llm, audit, prepared)),
     )
     .await;
 
     for item in completed {
         let (prepared, mut result, mut quality, mut attempt, mut accepted_prompt) = match item {
-            Ok((prepared, result, quality)) => {
+            Ok((prepared, result, quality, completed_attempt)) => {
                 let accepted_prompt = prepared.prompt.clone();
-                (prepared, result, quality, 1usize, accepted_prompt)
+                (
+                    prepared,
+                    result,
+                    quality,
+                    completed_attempt,
+                    accepted_prompt,
+                )
             }
-            Err((prepared, error)) => {
-                recover_wave_initial_failure(facade, llm, audit, prepared, error).await?
+            Err((prepared, error, failed_attempt)) => {
+                if let Some(audit) = audit.as_ref() {
+                    audit.record_attempt_failed(
+                        prepared.ordinal,
+                        &prepared.agent,
+                        failed_attempt,
+                        &error.to_string(),
+                    )?;
+                }
+                fail_audit(audit, &error.to_string())?;
+                return Err(error);
             }
         };
 
@@ -263,11 +280,56 @@ async fn prepare_wave_agents(
 async fn execute_prepared_wave_agent(
     facade: &dyn PipelineFacade,
     llm: &dyn LlmClient,
+    audit: &Option<PipelineAuditRun>,
     prepared: PreparedWaveAgent,
 ) -> std::result::Result<
-    (PreparedWaveAgent, AgentResult, QualityScore),
-    (PreparedWaveAgent, anyhow::Error),
+    (PreparedWaveAgent, AgentResult, QualityScore, usize),
+    (PreparedWaveAgent, anyhow::Error, usize),
 > {
+    let mut attempt = 1;
+    let mut prepared = prepared;
+    loop {
+        let result = if attempt == 1 {
+            execute_prepared_wave_attempt(facade, llm, &prepared, attempt)
+                .await
+                .map(|(result, quality)| (result, quality, prepared.prompt.clone()))
+        } else {
+            run_wave_attempt(facade, llm, audit, &prepared, attempt, None).await
+        };
+        match result {
+            Ok((result, quality, prompt)) => {
+                prepared.prompt = prompt;
+                return Ok((prepared, result, quality, attempt));
+            }
+            Err(error) => {
+                let retry = match super::single_agent::should_retry_single_agent_transport(
+                    audit,
+                    &prepared.agent,
+                    prepared.ordinal,
+                    attempt,
+                    &error,
+                )
+                .await
+                {
+                    Ok(retry) => retry,
+                    Err(audit_error) => return Err((prepared, audit_error, attempt)),
+                };
+                if retry {
+                    attempt += 1;
+                    continue;
+                }
+                return Err((prepared, error, attempt));
+            }
+        }
+    }
+}
+
+async fn execute_prepared_wave_attempt(
+    facade: &dyn PipelineFacade,
+    llm: &dyn LlmClient,
+    prepared: &PreparedWaveAgent,
+    attempt: usize,
+) -> Result<(AgentResult, QualityScore)> {
     let start = Instant::now();
     let response = match llm
         .run_agent(AgentExecutionRequest {
@@ -276,7 +338,7 @@ async fn execute_prepared_wave_agent(
             task: prepared.session.task.clone(),
             cwd: None,
             ordinal: prepared.ordinal,
-            attempt: 1,
+            attempt,
             agent: prepared.agent.clone(),
             messages: prepared.messages.clone(),
             system: prepared.system.clone(),
@@ -291,7 +353,7 @@ async fn execute_prepared_wave_agent(
         .await
     {
         Ok(response) => response,
-        Err(error) => return Err((prepared, error)),
+        Err(error) => return Err(error),
     };
     let mut result = AgentResult {
         output: response.content,
@@ -307,84 +369,10 @@ async fn execute_prepared_wave_agent(
         .await
     {
         Ok(quality) => quality,
-        Err(error) => return Err((prepared, error)),
+        Err(error) => return Err(error),
     };
     result.quality = Some(quality.clone());
-    Ok((prepared, result, quality))
-}
-
-async fn recover_wave_initial_failure(
-    facade: &dyn PipelineFacade,
-    llm: &dyn LlmClient,
-    audit: &mut Option<PipelineAuditRun>,
-    prepared: PreparedWaveAgent,
-    error: anyhow::Error,
-) -> Result<(
-    PreparedWaveAgent,
-    AgentResult,
-    QualityScore,
-    usize,
-    Option<PromptHashes>,
-)> {
-    if !is_context_window_error(&error) {
-        if let Some(audit) = audit.as_ref() {
-            audit.record_attempt_failed(
-                prepared.ordinal,
-                &prepared.agent,
-                1,
-                &error.to_string(),
-            )?;
-        }
-        fail_audit(audit, &error.to_string())?;
-        return Err(error);
-    }
-    tracing::warn!(
-        agent_key = %prepared.agent.key,
-        "pipeline parallel-wave prompt exceeded context; rebuilding with retry budget"
-    );
-    let mut attempt = 1usize;
-    loop {
-        if attempt >= PIPELINE_MAX_ATTEMPTS {
-            if let Some(audit) = audit.as_ref() {
-                audit.record_attempt_failed(
-                    prepared.ordinal,
-                    &prepared.agent,
-                    attempt,
-                    &error.to_string(),
-                )?;
-            }
-            fail_audit(audit, &error.to_string())?;
-            return Err(error);
-        }
-        attempt += 1;
-        match run_wave_attempt(facade, llm, audit, &prepared, attempt, None).await {
-            Ok((result, quality, prompt)) => {
-                break Ok((prepared, result, quality, attempt, prompt));
-            }
-            Err(retry_error)
-                if is_context_window_error(&retry_error) && attempt < PIPELINE_MAX_ATTEMPTS =>
-            {
-                tracing::warn!(
-                    agent_key = %prepared.agent.key,
-                    attempt = attempt,
-                    "pipeline parallel-wave prompt exceeded context; rebuilding with tighter retry budget"
-                );
-                continue;
-            }
-            Err(retry_error) => {
-                if let Some(audit) = audit.as_ref() {
-                    audit.record_attempt_failed(
-                        prepared.ordinal,
-                        &prepared.agent,
-                        attempt,
-                        &retry_error.to_string(),
-                    )?;
-                }
-                fail_audit(audit, &retry_error.to_string())?;
-                return Err(retry_error);
-            }
-        }
-    }
+    Ok((result, quality))
 }
 
 async fn run_wave_attempt(

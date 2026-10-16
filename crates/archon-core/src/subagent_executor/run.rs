@@ -224,6 +224,27 @@ impl AgentSubagentExecutor {
         ))
         .catch_unwind()
         .await;
+        let provider_failure = match &runner_result {
+            Ok(Err(error)) => error
+                .downcast_ref::<archon_llm::provider::LlmError>()
+                .and_then(|error| match error {
+                    archon_llm::provider::LlmError::RateLimited {
+                        pipeline_retry_after_secs,
+                        ..
+                    } => Some((Some(429), *pipeline_retry_after_secs, true)),
+                    archon_llm::provider::LlmError::Overloaded {
+                        status,
+                        retry_after_secs,
+                    } => Some((*status, *retry_after_secs, true)),
+                    archon_llm::provider::LlmError::Server { status, .. }
+                        if matches!(status, 429 | 529) =>
+                    {
+                        Some((Some(*status), None, true))
+                    }
+                    _ => None,
+                }),
+            _ => None,
+        };
         let inner_result = match runner_result {
             Ok(result) => result
                 .map(
@@ -249,7 +270,18 @@ impl AgentSubagentExecutor {
                 .map_err(Clone::clone),
         );
 
-        inner_result.map_err(ExecutorError::Internal)
+        match (inner_result, provider_failure) {
+            (Err(message), Some((status, retry_after_secs, overloaded))) => {
+                Err(ExecutorError::ProviderFailure {
+                    message,
+                    status,
+                    retry_after_secs,
+                    overloaded,
+                })
+            }
+            (Err(message), None) => Err(ExecutorError::Internal(message)),
+            (Ok(completion), _) => Ok(completion),
+        }
     }
 }
 

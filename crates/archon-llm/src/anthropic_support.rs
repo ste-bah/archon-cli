@@ -63,7 +63,7 @@ pub enum ApiError {
     },
 
     #[error("server overloaded (529)")]
-    Overloaded,
+    Overloaded { retry_after_secs: Option<u64> },
 
     #[error("server error ({status}): {message}")]
     ServerError { status: u16, message: String },
@@ -372,7 +372,10 @@ pub(crate) fn classify_error(
                 from_provider: named.is_some(),
             }
         }
-        529 => ApiError::Overloaded,
+        529 => ApiError::Overloaded {
+            retry_after_secs: retry_after_header
+                .and_then(|value| retry_after_from_header(value, chrono::Utc::now())),
+        },
         500 | 502 | 503 => ApiError::ServerError {
             status,
             message: body.to_string(),
@@ -475,6 +478,10 @@ mod retry_after_tests {
         assert_eq!(rate_limited(None, "not json"), (30, false));
     }
 }
+
+#[cfg(test)]
+#[path = "anthropic_support_overload_tests.rs"]
+mod overload_tests;
 
 #[cfg(test)]
 #[path = "anthropic_support_rejection_tests.rs"]

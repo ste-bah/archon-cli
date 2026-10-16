@@ -43,7 +43,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ALLOWLIST="$SCRIPT_DIR/check-deferral-markers.allowlist"
 
 # A ticket is an uppercase prefix, a dash, then anything wordish:
-# TUI-620-followup, TASK-AGS-801, REQ-RESEARCH-007, P0B-3.
+# TUI-620-followup, TASK-AGS-801, P0B-3.
 TICKET='[A-Z][A-Z0-9]*-[A-Za-z0-9._-]+'
 PATTERN="(TODO|FIXME)\\(${TICKET}\\)|[Dd]eferred \\(${TICKET}\\)"
 
