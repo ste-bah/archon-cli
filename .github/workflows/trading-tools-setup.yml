@@ -69,6 +69,17 @@ jobs:
             Get-ChildItem -Force -LiteralPath $interpreterBin -ErrorAction SilentlyContinue | Select-Object Name, Length
             Get-Command -All py,python,python3 -ErrorAction SilentlyContinue | Format-Table Name,CommandType,Source
           }
+          function Clear-PythonLog {
+            if (Test-Path -LiteralPath $pythonLog -PathType Leaf) {
+              Remove-Item -LiteralPath $pythonLog -Force
+            }
+          }
+          function Read-PythonLog {
+            if (Test-Path -LiteralPath $pythonLog -PathType Leaf) {
+              return Get-Content -LiteralPath $pythonLog -Raw
+            }
+            return ''
+          }
           trap { Show-WindowsPythonDiagnostics; break }
           function Assert-PythonCommands([string[]]$Expected) {
             Show-WindowsPythonDiagnostics
@@ -92,7 +103,7 @@ jobs:
           $pyOnlyVenv = Join-Path $pyOnlyTarget '.archon/tools/openbb-venv'
           New-Item -ItemType Directory -Force -Path $pyOnlyVenv | Out-Null
           Set-Content -LiteralPath (Join-Path $pyOnlyVenv 'keep.txt') -Value 'keep'
-          Remove-Item -LiteralPath $pythonLog -Force -ErrorAction SilentlyContinue
+          Clear-PythonLog
           Show-WindowsPythonDiagnostics
           try { & $setupScript -Target $pyOnlyTarget -SkipTradingView; throw 'py-only non-venv was not refused' }
           catch { if ($_.Exception.Message -notmatch 'non-venv directory') { throw } }
@@ -104,14 +115,14 @@ jobs:
           New-Item -ItemType Directory -Force -Path $junctionTarget, (Split-Path -Parent $junctionVenv) | Out-Null
           Set-Content -LiteralPath (Join-Path $junctionTarget 'keep.txt') -Value 'keep'
           New-Item -ItemType Junction -Path $junctionVenv -Target $junctionTarget | Out-Null
-          Remove-Item -LiteralPath $pythonLog -Force -ErrorAction SilentlyContinue
+          Clear-PythonLog
           Show-WindowsPythonDiagnostics
           try { & $setupScript -Target $junctionProject -SkipTradingView; throw 'junctioned venv was not refused' }
           catch { if ($_.Exception.Message -notmatch 'reparse-point OpenBB venv') { throw } }
           Assert-PythonCommands @()
           if (-not (Test-Path -LiteralPath (Join-Path $junctionTarget 'keep.txt') -PathType Leaf)) { throw 'junction target file was removed' }
 
-          Remove-Item -LiteralPath $pythonLog -Force
+          Clear-PythonLog
           Remove-Item -LiteralPath (Join-Path $interpreterBin 'py.cmd') -Force
           @'
           @echo off
@@ -133,7 +144,7 @@ jobs:
           try { & $setupScript -Target $storeTarget -SkipTradingView; throw 'Store-stub non-venv was not refused' }
           catch { if ($_.Exception.Message -notmatch 'non-venv directory') { throw } }
           Assert-PythonCommands @('python', 'python3')
-          $storeLog = Get-Content -LiteralPath $pythonLog -Raw
+          $storeLog = Read-PythonLog
           if ($storeLog -notmatch 'python .*\.py' -or $storeLog -notmatch 'python3 .*\.py') { throw 'Store stub was not rejected before python3 fallback' }
           if (-not (Test-Path -LiteralPath (Join-Path $storeVenv 'keep.txt') -PathType Leaf)) { throw 'Store-stub sentinel was removed' }
 
@@ -174,7 +185,7 @@ jobs:
             New-Item -ItemType Directory -Force -Path $metadataDir | Out-Null
             Set-Content -LiteralPath (Join-Path $metadataDir 'METADATA') -Value @("Metadata-Version: 2.1", "Name: openbb", "Requires-Python: $($case.Specifier)")
             Set-Content -LiteralPath (Join-Path $caseVenv 'keep.txt') -Value 'keep'
-            Remove-Item -LiteralPath $pythonLog -Force -ErrorAction SilentlyContinue
+            Clear-PythonLog
             $env:TRADING_PYTHON_ACCEPT = if ($case.Accept) { '1' } else { '0' }
             Show-WindowsPythonDiagnostics
             try {
@@ -184,7 +195,7 @@ jobs:
               if ($case.Accept -and $_.Exception.Message -notmatch 'non-venv directory with contents') { throw }
               if (-not $case.Accept -and $_.Exception.Message -notmatch [regex]::Escape("specifier '$($case.Specifier)'")) { throw }
             }
-            $caseLog = Get-Content -LiteralPath $pythonLog -Raw
+            $caseLog = Read-PythonLog
             if ($caseLog -notmatch [regex]::Escape("ARCHON_SETUP_PYTHON_SPECIFIER=$($case.Specifier)")) { throw "venv Requires-Python was not passed to the interpreter for $($case.Specifier)" }
             if ($caseLog -notmatch '\.py') { throw "specifier probe did not use a Python file for $($case.Specifier)" }
             if ($case.Accept) { Assert-PythonCommands @('py') }
