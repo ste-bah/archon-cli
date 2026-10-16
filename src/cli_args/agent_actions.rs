@@ -2,6 +2,12 @@ use clap::Subcommand;
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum AgentAction {
+    /// Install missing bundled pipeline agent profiles; report differing files and replace them with --update
+    Sync {
+        /// Replace every differing bundled profile
+        #[arg(long)]
+        update: bool,
+    },
     /// Inspect governed agent profile evolution
     Evolve {
         #[command(subcommand)]

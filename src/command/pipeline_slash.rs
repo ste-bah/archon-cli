@@ -85,6 +85,7 @@ fn handle_tui_resume(
             return crate::command::cli_mirror::spawn_cli_mirror(ctx, "pipeline", &mirror_args);
         }
     };
+    crate::command::pipeline_agents::preflight(&cwd, state.pipeline_type.clone())?;
 
     match state.status {
         BundleStatus::Running => {
@@ -318,6 +319,7 @@ mod tests {
     #[tokio::test]
     async fn running_resume_attaches_without_appending_run_resumed() {
         let temp = tempfile::tempdir().unwrap();
+        crate::command::pipeline_agents::sync(temp.path(), false).unwrap();
         let store = PipelineBundleStore::new(temp.path());
         let state = store
             .create(
@@ -360,8 +362,47 @@ mod tests {
     }
 
     #[test]
+    fn slash_resume_preflights_and_reports_every_missing_agent_key() {
+        use archon_core::agents::AgentRegistry;
+
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = temp.path();
+        let registry = AgentRegistry::load(cwd);
+        let missing: Vec<_> = archon_pipeline::required_builtin_agent_keys(PipelineType::Coding)
+            .into_iter()
+            .filter(|key| registry.resolve(key).is_none())
+            .collect();
+        assert!(
+            !missing.is_empty(),
+            "test project must be missing bundled profiles"
+        );
+        PipelineBundleStore::new(cwd)
+            .create("missing-agent-resume", PipelineType::Coding, "coding task")
+            .unwrap();
+
+        let (mut ctx, _rx) = CtxBuilder::new()
+            .with_working_dir(cwd.to_path_buf())
+            .build();
+        let error = PipelineSlashHandler
+            .execute(
+                &mut ctx,
+                &["resume".to_string(), "missing-agent-resume".to_string()],
+            )
+            .unwrap_err()
+            .to_string();
+        for key in missing {
+            assert!(
+                error.contains(&key),
+                "missing key {key} must be reported: {error}"
+            );
+        }
+        assert!(error.contains("archon agents sync"));
+    }
+
+    #[test]
     fn completed_resume_reports_artifacts_without_spawning_cli() {
         let temp = tempfile::tempdir().unwrap();
+        crate::command::pipeline_agents::sync(temp.path(), false).unwrap();
         let store = PipelineBundleStore::new(temp.path());
         let mut state = store
             .create("session-2", PipelineType::Coding, "coding task")

@@ -61,6 +61,7 @@ pub(crate) async fn handle_resume(
 ) -> Result<()> {
     let bundle = PipelineBundleStore::new(cwd);
     if let Ok(manifest) = bundle.load_manifest(session_id) {
+        crate::command::pipeline_agents::preflight(cwd, manifest.pipeline_type.clone())?;
         let adapter = build_pipeline_adapter(config, env_vars, "pipeline_resume").await?;
         let options = PipelineRunOptions { force_quality_gate };
         match manifest.pipeline_type {
@@ -319,13 +320,14 @@ async fn handle_legacy_resume(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
 ) -> Result<()> {
-    ensure_active_provider_supports(
-        config,
-        archon_llm::providers::ProviderCapability::PipelineCoding,
-        "archon pipeline resume",
-    )?;
     match archon_pipeline::session::resume(session_id, cwd) {
         Ok(session) => {
+            crate::command::pipeline_agents::preflight(cwd, session.pipeline_type.clone())?;
+            ensure_active_provider_supports(
+                config,
+                archon_llm::providers::ProviderCapability::PipelineCoding,
+                "archon pipeline resume",
+            )?;
             println!("Resumed session: {}", session.session_id);
             println!("Completed agents: {}", session.completed_agents.len());
             let adapter = build_pipeline_adapter(config, env_vars, "pipeline_resume").await?;
@@ -344,6 +346,49 @@ async fn handle_legacy_resume(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod legacy_resume_preflight_tests {
+    use super::*;
+    use archon_core::agents::AgentRegistry;
+    use archon_pipeline::runner::PipelineType;
+
+    #[tokio::test]
+    async fn legacy_resume_preflights_and_reports_every_missing_agent_key() {
+        let temp = tempfile::tempdir().unwrap();
+        let cwd = temp.path();
+        let registry = AgentRegistry::load(cwd);
+        let missing: Vec<_> = archon_pipeline::required_builtin_agent_keys(PipelineType::Coding)
+            .into_iter()
+            .filter(|key| registry.resolve(key).is_none())
+            .collect();
+        assert!(
+            !missing.is_empty(),
+            "test project must be missing bundled profiles"
+        );
+        let session = archon_pipeline::session::new_session(PipelineType::Coding, "legacy resume");
+        let session_id = session.session_id.clone();
+        archon_pipeline::session::checkpoint(&session, cwd).unwrap();
+
+        let error = handle_resume(
+            cwd,
+            &session_id,
+            &ArchonConfig::default(),
+            &archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new()),
+            false,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        for key in missing {
+            assert!(
+                error.contains(&key),
+                "missing key {key} must be reported: {error}"
+            );
+        }
+        assert!(error.contains("archon agents sync"));
+    }
 }
 
 async fn legacy_resume_coding(

@@ -32,6 +32,14 @@ impl CommandHandler for ArchonCodeHandler {
         }
 
         let task = args.join(" ");
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        if let Err(error) = crate::command::pipeline_agents::preflight(
+            &cwd,
+            archon_pipeline::runner::PipelineType::Coding,
+        ) {
+            ctx.emit(TuiEvent::Error(error.to_string()));
+            return Ok(());
+        }
         let coding: Arc<CodingFacade> = match ctx.coding_pipeline.clone() {
             Some(f) => f,
             None => {
@@ -59,8 +67,6 @@ impl CommandHandler for ArchonCodeHandler {
             build_interactive_learning_stack(config, ctx.cozo_db.clone(), ctx.auto_trainer.clone())
         });
         let mut reflexion = loaded_config.as_ref().and_then(build_reflexion_injector);
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-
         // Facade emits per-agent progress as Strings; forward to TUI as TextDelta.
         let (string_tx, mut string_rx) = tokio::sync::mpsc::channel::<String>(1);
         let coding: Arc<dyn PipelineFacade> = coding;

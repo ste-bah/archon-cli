@@ -18,6 +18,28 @@ pub mod memory;
 pub mod prompt_cap;
 pub mod rehydration;
 pub mod research;
+
+/// Complete agent key sets declared by the built-in pipelines.
+///
+/// Keep this derived from the definitions so callers can preflight a run
+/// without maintaining a second list of required agents.
+pub fn required_builtin_agent_keys(kind: runner::PipelineType) -> Vec<&'static str> {
+    match kind {
+        runner::PipelineType::Research => research::agents::get_all_agents()
+            .iter()
+            .map(|agent| agent.key)
+            .collect(),
+        runner::PipelineType::Coding => coding::agents::AGENTS
+            .iter()
+            .map(|agent| agent.key)
+            .collect(),
+        runner::PipelineType::GameTheory => gametheory::GAMETHEORY_AGENTS
+            .iter()
+            .map(|agent| agent.key)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
 pub mod retry;
 pub mod runner;
 pub mod session;

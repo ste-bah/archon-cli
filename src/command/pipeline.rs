@@ -134,6 +134,7 @@ async fn handle_code(
         return Ok(());
     }
 
+    crate::command::pipeline_agents::preflight(cwd, archon_pipeline::runner::PipelineType::Coding)?;
     ensure_active_provider_supports(
         config,
         archon_llm::providers::ProviderCapability::PipelineCoding,
@@ -263,6 +264,10 @@ async fn handle_research(
         return Ok(());
     }
 
+    crate::command::pipeline_agents::preflight(
+        cwd,
+        archon_pipeline::runner::PipelineType::Research,
+    )?;
     ensure_active_provider_supports(
         config,
         archon_llm::providers::ProviderCapability::PipelineResearch,

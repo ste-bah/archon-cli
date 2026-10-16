@@ -17,6 +17,9 @@ pub(super) fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()>
     if situation_args.is_empty() {
         return emit(ctx, render_usage_line("run requires <situation>"));
     }
+    if !require_gametheory_agents(ctx)? {
+        return Ok(());
+    }
 
     let situation = situation_args.join(" ");
     let tui_tx = ctx.tui_tx.clone();
@@ -127,6 +130,9 @@ pub(super) fn start_replay(ctx: &mut CommandContext, args: &[String]) -> Result<
     }
 
     if reclassify || rerun_specialist.is_some() {
+        if !require_gametheory_agents(ctx)? {
+            return Ok(());
+        }
         return start_async_replay(ctx, run_id.clone(), reclassify, rerun_specialist);
     }
 
@@ -139,6 +145,18 @@ pub(super) fn start_replay(ctx: &mut CommandContext, args: &[String]) -> Result<
             routing.skipped_specialists.len()
         ))
     })
+}
+
+fn require_gametheory_agents(ctx: &mut CommandContext) -> Result<bool> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    if let Err(error) = crate::command::pipeline_agents::preflight(
+        &cwd,
+        archon_pipeline::runner::PipelineType::GameTheory,
+    ) {
+        ctx.emit(TuiEvent::Error(error.to_string()));
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 fn start_async_replay(

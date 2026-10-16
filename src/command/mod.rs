@@ -147,6 +147,8 @@ pub(crate) mod permissions_cli;
 /// `/permissions presets` and `/permissions preset <name>` (#200 Phase 3).
 pub(crate) mod permissions_presets;
 pub(crate) mod pipeline;
+mod pipeline_agent_assets;
+pub(crate) mod pipeline_agents;
 pub(crate) mod pipeline_bundle;
 pub(crate) mod pipeline_declarative;
 pub(crate) mod pipeline_learning_migration;
