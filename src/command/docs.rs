@@ -544,6 +544,7 @@ async fn handle_ingest_inner(path_str: &str, yes: bool, jobs: Option<&str>) -> R
         if is_video_path(&path) {
             let result = archon_video::ingest::ingest_video(
                 archon_video::ingest::IngestOpts {
+                    project_root: std::env::current_dir()?,
                     source: path.display().to_string(),
                     transcript_path: None,
                     metadata_only: false,

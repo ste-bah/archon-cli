@@ -105,6 +105,7 @@ async fn ingest_with_mock_diarizer_persists_speaker_labels() {
 
     let result = ingest_video_with_providers(
         IngestOpts {
+            project_root: std::env::current_dir().unwrap(),
             source: "diarized_fixture.mp4".into(),
             transcript_path: None,
             metadata_only: false,

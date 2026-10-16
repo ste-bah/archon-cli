@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use archon_policy::EffectivePolicy;
 use cozo::DbInstance;
@@ -10,6 +10,7 @@ use crate::store::list_frame_descriptions_for_video;
 use crate::visual::{run_frame_ocr, run_frame_vlm};
 
 pub struct FramePipelineInput<'a> {
+    pub project_root: &'a Path,
     pub frames_mode_override: Option<&'a str>,
     pub local_video_path: Option<&'a Path>,
     pub video_id: &'a str,
@@ -42,8 +43,11 @@ pub async fn process_frame_pipeline(
         ));
         return;
     }
-    let extraction =
-        extract_frames(video_path, &extraction_opts(policy, input.video_id, mode)).await;
+    let extraction = extract_frames(
+        video_path,
+        &extraction_opts(policy, input.project_root, input.video_id, mode),
+    )
+    .await;
     let groups = match extraction
         .and_then(|frames| deduplicate_frames(frames, policy.video.dedupe_threshold))
     {
@@ -65,7 +69,15 @@ pub async fn process_frame_pipeline(
         warnings.push(format!("frame persistence failed: {error}"));
         return;
     }
-    run_visual_steps(db, policy, input.video_id, input.document_id, warnings).await;
+    run_visual_steps(
+        db,
+        policy,
+        input.video_id,
+        input.document_id,
+        input.project_root,
+        warnings,
+    )
+    .await;
 }
 
 pub async fn process_existing_frame_visuals(
@@ -73,9 +85,10 @@ pub async fn process_existing_frame_visuals(
     policy: &EffectivePolicy,
     video_id: &str,
     document_id: &str,
+    project_root: &Path,
     warnings: &mut Vec<String>,
 ) {
-    run_visual_steps(db, policy, video_id, document_id, warnings).await;
+    run_visual_steps(db, policy, video_id, document_id, project_root, warnings).await;
 }
 
 async fn run_visual_steps(
@@ -83,6 +96,7 @@ async fn run_visual_steps(
     policy: &EffectivePolicy,
     video_id: &str,
     document_id: &str,
+    project_root: &Path,
     warnings: &mut Vec<String>,
 ) {
     let frames = match list_frame_descriptions_for_video(db, video_id) {
@@ -97,14 +111,16 @@ async fn run_visual_steps(
             archon_docs::ocr::provider::get_provider()
                 .unwrap_or_else(|| std::sync::Arc::new(archon_docs::ocr::local::LocalOcrProvider));
         for frame in &frames {
-            if let Err(error) = run_frame_ocr(frame, db, provider.as_ref(), document_id).await {
+            if let Err(error) =
+                run_frame_ocr(frame, db, provider.as_ref(), document_id, project_root).await
+            {
                 warnings.push(format!("frame OCR failed for {}: {error}", frame.frame_id));
             }
         }
     }
     if policy.video.frames.vlm {
         for frame in &frames {
-            if let Err(error) = run_frame_vlm(frame, db, policy, document_id).await {
+            if let Err(error) = run_frame_vlm(frame, db, policy, document_id, project_root).await {
                 warnings.push(format!("frame VLM failed for {}: {error}", frame.frame_id));
             }
         }
@@ -113,6 +129,7 @@ async fn run_visual_steps(
 
 fn extraction_opts(
     policy: &EffectivePolicy,
+    project_root: &Path,
     video_id: &str,
     mode: FrameExtractionMode,
 ) -> FrameExtractionOpts {
@@ -122,7 +139,8 @@ fn extraction_opts(
         scene_threshold: policy.video.scene_change_threshold,
         max_frames: policy.video.max_frames,
         ffmpeg_bin: "ffmpeg".into(),
-        output_dir: PathBuf::from(".archon")
+        output_dir: project_root
+            .join(".archon")
             .join("video-artifacts")
             .join(video_id)
             .join("frames"),

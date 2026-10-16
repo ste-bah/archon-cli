@@ -25,6 +25,7 @@ use crate::transcript::parse_transcript;
 
 #[derive(Debug, Clone)]
 pub struct IngestOpts {
+    pub project_root: PathBuf,
     pub source: String,
     pub transcript_path: Option<PathBuf>,
     pub metadata_only: bool,
@@ -206,6 +207,7 @@ pub async fn ingest_video_with_providers(
         db,
         policy,
         FramePipelineInput {
+            project_root: &opts.project_root,
             frames_mode_override: opts.frames_mode.as_deref(),
             local_video_path: resolution.local_path.as_deref(),
             video_id: &video_id,

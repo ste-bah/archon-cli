@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 
@@ -11,15 +11,6 @@ use archon_video::schema::create_video_schema;
 use archon_video::store::list_frame_descriptions_for_video;
 use archon_video::visual::run_frame_vlm;
 use cozo::DbInstance;
-
-struct CwdGuard(PathBuf);
-
-impl Drop for CwdGuard {
-    fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.0);
-        archon_docs::vlm::clear_provider();
-    }
-}
 
 struct PromptRecordingVlm {
     prompts: Arc<Mutex<Vec<Option<String>>>>,
@@ -60,15 +51,13 @@ fn vlm_test_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-fn setup() -> (tempfile::TempDir, CwdGuard, DbInstance) {
+fn setup() -> (tempfile::TempDir, DbInstance) {
     archon_docs::vlm::clear_provider();
     let dir = tempfile::tempdir().unwrap();
-    let previous = std::env::current_dir().unwrap();
-    std::env::set_current_dir(dir.path()).unwrap();
     let db = DbInstance::new("mem", "", "").unwrap();
     archon_docs::schema::ensure_doc_schema(&db).unwrap();
     create_video_schema(&db).unwrap();
-    (dir, CwdGuard(previous), db)
+    (dir, db)
 }
 
 fn policy() -> archon_policy::EffectivePolicy {
@@ -82,9 +71,9 @@ fn policy() -> archon_policy::EffectivePolicy {
     policy
 }
 
-fn persist_test_frame(db: &DbInstance) {
-    let frame_dir = Path::new(".archon/video-artifacts/video-1/frames");
-    std::fs::create_dir_all(frame_dir).unwrap();
+fn persist_test_frame(root: &Path, db: &DbInstance) {
+    let frame_dir = root.join(".archon/video-artifacts/video-1/frames");
+    std::fs::create_dir_all(&frame_dir).unwrap();
     let image_path = frame_dir.join("frame_0001.jpg");
     image::RgbImage::from_pixel(8, 8, image::Rgb([0, 0, 255]))
         .save(&image_path)
@@ -123,8 +112,8 @@ fn persist_test_frame(db: &DbInstance) {
 #[tokio::test]
 async fn frame_vlm_uses_video_prompt_and_writes_chunk() {
     let _lock = vlm_test_lock().lock().await;
-    let (_dir, _guard, db) = setup();
-    persist_test_frame(&db);
+    let (dir, db) = setup();
+    persist_test_frame(dir.path(), &db);
     let prompts = Arc::new(Mutex::new(Vec::new()));
     archon_docs::vlm::set_provider(Box::new(PromptRecordingVlm {
         prompts: Arc::clone(&prompts),
@@ -133,7 +122,7 @@ async fn frame_vlm_uses_video_prompt_and_writes_chunk() {
         .unwrap()
         .remove(0);
 
-    let text = run_frame_vlm(&frame, &db, &policy(), "doc-1")
+    let text = run_frame_vlm(&frame, &db, &policy(), "doc-1", dir.path())
         .await
         .unwrap()
         .unwrap();
@@ -155,14 +144,14 @@ async fn frame_vlm_uses_video_prompt_and_writes_chunk() {
 #[tokio::test]
 async fn frame_vlm_failure_marks_frame_and_keeps_chunks_empty() {
     let _lock = vlm_test_lock().lock().await;
-    let (_dir, _guard, db) = setup();
-    persist_test_frame(&db);
+    let (dir, db) = setup();
+    persist_test_frame(dir.path(), &db);
     archon_docs::vlm::set_provider(Box::new(FailingVlm));
     let frame = list_frame_descriptions_for_video(&db, "video-1")
         .unwrap()
         .remove(0);
 
-    let result = run_frame_vlm(&frame, &db, &policy(), "doc-1")
+    let result = run_frame_vlm(&frame, &db, &policy(), "doc-1", dir.path())
         .await
         .unwrap();
 

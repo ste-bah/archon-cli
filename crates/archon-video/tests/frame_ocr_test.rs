@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use archon_docs::errors::DocsError;
 use archon_docs::ocr::provider::{OcrExtractResult, OcrProvider, OcrRequest};
@@ -10,14 +10,6 @@ use archon_video::store::list_frame_descriptions_for_video;
 use archon_video::visual::run_frame_ocr;
 use async_trait::async_trait;
 use cozo::{DbInstance, ScriptMutability};
-
-struct CwdGuard(PathBuf);
-
-impl Drop for CwdGuard {
-    fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.0);
-    }
-}
 
 struct MockOcr;
 
@@ -55,19 +47,17 @@ impl OcrProvider for FailingOcr {
     }
 }
 
-fn setup() -> (tempfile::TempDir, CwdGuard, DbInstance) {
+fn setup() -> (tempfile::TempDir, DbInstance) {
     let dir = tempfile::tempdir().unwrap();
-    let previous = std::env::current_dir().unwrap();
-    std::env::set_current_dir(dir.path()).unwrap();
     let db = DbInstance::new("mem", "", "").unwrap();
     archon_docs::schema::ensure_doc_schema(&db).unwrap();
     create_video_schema(&db).unwrap();
-    (dir, CwdGuard(previous), db)
+    (dir, db)
 }
 
-fn persist_test_frame(db: &DbInstance) {
-    let frame_dir = Path::new(".archon/video-artifacts/video-1/frames");
-    std::fs::create_dir_all(frame_dir).unwrap();
+fn persist_test_frame(root: &Path, db: &DbInstance) {
+    let frame_dir = root.join(".archon/video-artifacts/video-1/frames");
+    std::fs::create_dir_all(&frame_dir).unwrap();
     let image_path = frame_dir.join("frame_0001.jpg");
     image::RgbImage::from_pixel(8, 8, image::Rgb([255, 255, 255]))
         .save(&image_path)
@@ -105,13 +95,13 @@ fn persist_test_frame(db: &DbInstance) {
 
 #[tokio::test]
 async fn frame_ocr_writes_chunks_timeref_and_text() {
-    let (_dir, _guard, db) = setup();
-    persist_test_frame(&db);
+    let (dir, db) = setup();
+    persist_test_frame(dir.path(), &db);
     let frame = list_frame_descriptions_for_video(&db, "video-1")
         .unwrap()
         .remove(0);
 
-    let text = run_frame_ocr(&frame, &db, &MockOcr, "doc-1")
+    let text = run_frame_ocr(&frame, &db, &MockOcr, "doc-1", dir.path())
         .await
         .unwrap()
         .unwrap();
@@ -136,13 +126,13 @@ async fn frame_ocr_writes_chunks_timeref_and_text() {
 
 #[tokio::test]
 async fn frame_ocr_failure_updates_status_without_chunks() {
-    let (_dir, _guard, db) = setup();
-    persist_test_frame(&db);
+    let (dir, db) = setup();
+    persist_test_frame(dir.path(), &db);
     let frame = list_frame_descriptions_for_video(&db, "video-1")
         .unwrap()
         .remove(0);
 
-    let result = run_frame_ocr(&frame, &db, &FailingOcr, "doc-1")
+    let result = run_frame_ocr(&frame, &db, &FailingOcr, "doc-1", dir.path())
         .await
         .unwrap();
 

@@ -31,6 +31,7 @@ async fn ingests_local_video_transcript_into_docs_and_video_relations() {
     let db = test_db();
     let result = ingest_video(
         IngestOpts {
+            project_root: std::env::current_dir().unwrap(),
             source: "mini_lecture.mp4".into(),
             transcript_path: Some(fixture("mini_lecture.vtt")),
             metadata_only: false,
@@ -75,6 +76,7 @@ async fn ingests_local_video_transcript_into_docs_and_video_relations() {
 
     let duplicate = ingest_video(
         IngestOpts {
+            project_root: std::env::current_dir().unwrap(),
             source: "mini_lecture.mp4".into(),
             transcript_path: Some(fixture("mini_lecture.vtt")),
             metadata_only: false,
@@ -97,6 +99,7 @@ async fn transcript_only_youtube_does_not_require_acquisition() {
     let db = test_db();
     let result = ingest_video(
         IngestOpts {
+            project_root: std::env::current_dir().unwrap(),
             source: "https://www.youtube.com/watch?v=abc123".into(),
             transcript_path: Some(fixture("mini_lecture.vtt")),
             metadata_only: true,
