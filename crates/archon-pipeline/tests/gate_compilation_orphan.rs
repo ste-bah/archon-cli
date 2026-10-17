@@ -24,7 +24,7 @@ mod compilation_tests {
         // Create a valid Rust project
         std::fs::write(
             tmp.path().join("Cargo.toml"),
-            "[package]\nname = \"test-proj\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            "[workspace]\n\n[package]\nname = \"test-proj\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -51,7 +51,7 @@ mod compilation_tests {
 
         std::fs::write(
             tmp.path().join("Cargo.toml"),
-            "[package]\nname = \"bad-proj\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            "[workspace]\n\n[package]\nname = \"bad-proj\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         )
         .unwrap();
         // Intentional syntax error
@@ -75,7 +75,7 @@ mod compilation_tests {
 
         std::fs::write(
             tmp.path().join("Cargo.toml"),
-            "[package]\nname = \"err-proj\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            "[workspace]\n\n[package]\nname = \"err-proj\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         )
         .unwrap();
         std::fs::write(

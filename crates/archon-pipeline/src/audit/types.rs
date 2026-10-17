@@ -195,6 +195,35 @@ pub enum PipelineEvent {
         path: String,
         content_hash: String,
     },
+    ArtifactRepaired {
+        agent_key: String,
+        attempt: usize,
+        input_hash: String,
+        output_hash: String,
+    },
+    ArtifactRepairCommitted {
+        agent_key: String,
+        attempt: usize,
+        output_path: String,
+        input_hash: String,
+        output_hash: String,
+    },
+    ArtifactRepairPending {
+        agent_key: String,
+        validator_key: String,
+        attempt: usize,
+        findings_hash: String,
+        findings: String,
+    },
+    ValidatorProgress {
+        agent_key: String,
+        attempt: usize,
+    },
+    ArtifactRepairRejected {
+        agent_key: String,
+        attempt: usize,
+        reason: String,
+    },
     RunCompleted {
         final_output_hash: String,
         completed_agent_count: usize,
@@ -205,6 +234,9 @@ pub enum PipelineEvent {
     RunAborted {
         reason: String,
     },
+    /// Forward compatibility for audit events written by newer binaries.
+    #[serde(other)]
+    Unknown,
 }
 
 #[cfg(test)]
@@ -241,6 +273,22 @@ mod usage_serialization_tests {
         let value = serde_json::to_value(record).expect("record serializes");
         assert!(value["tokens_in"].is_null());
         assert!(value["tokens_out"].is_null());
+
+        let measured: AgentAttemptRecord = serde_json::from_value(serde_json::json!({
+            "attempt": 1,
+            "output_hash": "hash",
+            "tokens_in": 17,
+            "tokens_out": 9,
+            "duration_ms": 1,
+            "quality": null,
+            "accepted": true,
+            "failure_reason": null,
+            "created_at": "2026-10-14T00:00:00Z"
+        }))
+        .expect("measured usage deserializes");
+        let value = serde_json::to_value(measured).expect("measured record serializes");
+        assert_eq!(value["tokens_in"], 17);
+        assert_eq!(value["tokens_out"], 9);
 
         let reported_zero = serde_json::from_value::<AgentAttemptRecord>(serde_json::json!({
             "attempt": 1,

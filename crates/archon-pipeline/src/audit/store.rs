@@ -177,6 +177,27 @@ impl PipelineBundleStore {
         Ok(path)
     }
 
+    pub fn write_artifact_repair(
+        &self,
+        session_id: &str,
+        ordinal: usize,
+        agent_key: &str,
+        attempt: usize,
+        output: &str,
+    ) -> Result<PathBuf> {
+        let path = self
+            .bundle_dir(session_id)
+            .join("outputs")
+            .join("repairs")
+            .join(record_file_name(
+                ordinal,
+                &format!("{agent_key}-repair-{attempt}"),
+                "txt",
+            ));
+        write_text_atomic(&path, output)?;
+        Ok(path)
+    }
+
     pub fn write_agent(&self, session_id: &str, record: &AgentAuditRecord) -> Result<PathBuf> {
         let path = self
             .bundle_dir(session_id)

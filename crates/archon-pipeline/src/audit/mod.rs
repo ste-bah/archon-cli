@@ -1,6 +1,7 @@
 //! Audited bundles for built-in coding/research pipeline runs.
 
 pub mod export;
+mod repair;
 pub mod rewind;
 pub mod runtime;
 pub mod store;

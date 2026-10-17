@@ -34,6 +34,10 @@ use super::prompt_builder::ResearchPromptBuilder;
 use super::quality::PhDQualityCalculator;
 use super::rlm::{ResearchRlm, research_output_namespaces};
 
+#[macro_use]
+#[path = "facade_critical.rs"]
+mod critical_artifact_hooks;
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -449,6 +453,14 @@ impl PipelineFacade for ResearchFacade {
     async fn finalize(&self, session: PipelineSession) -> Result<PipelineResult> {
         final_assembly::assemble_result(session)
     }
+
+    async fn after_run_completed(
+        &self,
+        bundle_dir: &std::path::Path,
+    ) -> Result<Vec<(String, std::path::PathBuf, String)>> {
+        super::draft_artifact::supersede_draft_research_artifacts(bundle_dir)
+    }
+    critical_artifact_methods!();
 }
 
 // ===========================================================================

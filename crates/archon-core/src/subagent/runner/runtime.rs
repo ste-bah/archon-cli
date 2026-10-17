@@ -1,6 +1,7 @@
 use super::*;
 
 mod cargo_credit;
+mod completion_usage;
 mod context_fit;
 #[cfg(test)]
 mod context_fit_tests;
@@ -86,10 +87,7 @@ impl SubagentRunner {
                 .shutdown_flag
                 .load(std::sync::atomic::Ordering::Relaxed)
             {
-                return Ok(super::SubagentCompletion {
-                    content: "[Agent shutdown requested]".to_string(),
-                    stop_reason: None,
-                });
+                return Ok(completion_usage::shutdown());
             }
 
             if !inspection_tools_withdrawn
@@ -280,10 +278,11 @@ impl SubagentRunner {
                     }));
                 }
                 self.emit_activity_stream("final", "subagent turn complete", None, false);
-                return Ok(super::SubagentCompletion {
-                    content: stream.text_content,
-                    stop_reason: stream.stop_reason,
-                });
+                return Ok(completion_usage::from_stream(
+                    stream.text_content,
+                    stream.stop_reason,
+                    self.progress.as_ref(),
+                ));
             }
 
             let round_cancel = self
