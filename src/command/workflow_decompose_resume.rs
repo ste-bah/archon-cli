@@ -1,40 +1,18 @@
 use super::*;
 use crate::command::workflow_decompose_landing_reconcile as landing_reconcile;
 
+#[path = "workflow_decompose_resume_recovery.rs"]
+pub(crate) mod recovery;
+
 #[path = "workflow_decompose_resume_dry_run.rs"]
 mod dry_run;
 pub(crate) use dry_run::dry_run_fixed_decomposition;
 
 #[path = "workflow_decompose_resume_entry.rs"]
 mod entry;
-pub(crate) use entry::resume_fixed_decomposition_with_factory;
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
-    cwd: &Path,
-    run_id: &str,
-    yes: bool,
-    config: &ArchonConfig,
-    env_vars: &ArchonEnvVars,
-    factory: &dyn WorkflowLlmClientFactory,
-    ui_sink: archon_workflow::SharedWorkflowUiSink,
-    interactive_owner: Option<&str>,
-    cancellation_requested: Option<&std::sync::atomic::AtomicBool>,
-) -> Result<String> {
-    resume_fixed_decomposition_at_binary_revision(
-        cwd,
-        run_id,
-        yes,
-        config,
-        env_vars,
-        factory,
-        ui_sink,
-        interactive_owner,
-        cancellation_requested,
-        &crate::command::workflow_test_seams::binary_revision(),
-    )
-    .await
-}
+pub(crate) use entry::{
+    resume_fixed_decomposition_with_factory, resume_fixed_decomposition_with_factory_and_sink,
+};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
@@ -302,6 +280,11 @@ pub(crate) async fn resume_fixed_decomposition_at_binary_revision(
         anchored_digest,
     )?;
     upgrade::validate_result_state(&store, run_id)?;
+    if let Some(recovery) =
+        recovery::accepted_reverify(&store, run_id, &execution_lease, run.status.clone())?
+    {
+        return Ok(recovery);
+    }
     landing_reconcile::resume(&project_root, &store.run_dir(run_id), &task_root, &ui_sink).await?;
     let resume_chain = crate::command::workflow_decompose_frozen_chain::resume_chain_decision(
         &store,

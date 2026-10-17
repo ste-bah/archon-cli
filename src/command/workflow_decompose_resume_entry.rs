@@ -1,5 +1,32 @@
 use super::*;
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn resume_fixed_decomposition_with_factory_and_sink(
+    cwd: &Path,
+    run_id: &str,
+    yes: bool,
+    config: &ArchonConfig,
+    env_vars: &ArchonEnvVars,
+    factory: &dyn WorkflowLlmClientFactory,
+    ui_sink: archon_workflow::SharedWorkflowUiSink,
+    interactive_owner: Option<&str>,
+    cancellation_requested: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<String> {
+    super::resume_fixed_decomposition_at_binary_revision(
+        cwd,
+        run_id,
+        yes,
+        config,
+        env_vars,
+        factory,
+        ui_sink,
+        interactive_owner,
+        cancellation_requested,
+        &crate::command::workflow_test_seams::binary_revision(),
+    )
+    .await
+}
+
 pub(crate) async fn resume_fixed_decomposition_with_factory(
     cwd: &Path,
     run_id: &str,

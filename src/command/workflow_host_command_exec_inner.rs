@@ -309,10 +309,11 @@ impl FixedHostCommandExecutor {
             );
             let (receipt, subjects, postcondition) = store.with_run_lock(&run_id, |locked| {
                 // A sibling stopped by a pause reports "paused", not "cancelled".
-                crate::command::workflow_host_command_operational::require_run_owned_locked(
+                crate::command::workflow_host_command_operational::require_run_owned_locked_authorized(
                     locked,
                     &run_id,
                     expected_generation,
+                    self.paused_run_authorization.as_ref(),
                 )?;
                 // The audit reads by path: refuse a tree swapped since creation.
                 staging.anchor.verify().map_err(|error| {

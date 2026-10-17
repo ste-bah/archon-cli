@@ -6,6 +6,8 @@ mod deadline;
 mod diagnostics;
 #[path = "support/workflow_decomposition_offline_faults.rs"]
 mod faults;
+#[path = "support/workflow_decomposition_reverify_paused_second.rs"]
+mod paused_second;
 #[path = "support/workflow_decomposition_offline_project.rs"]
 mod project;
 #[path = "support/workflow_decomposition_offline_server.rs"]
@@ -280,7 +282,7 @@ fn reverify_uses_local_provider_for_accepted_and_real_finding_paths() {
         "{}",
         String::from_utf8_lossy(&finding.stderr)
     );
-    let (finding_path, finding_report) = newest_report(&run_dir);
+    let (_finding_path, finding_report) = newest_report(&run_dir);
     assert_eq!(finding_report["outcome"], "needs_remediation");
     assert_eq!(finding_report["supersedes_id"], accepted_report["id"]);
     let subject = finding_report["subjects"]
@@ -389,6 +391,8 @@ fn reverify_uses_local_provider_for_accepted_and_real_finding_paths() {
         finding_report["id"]
     );
 
+    let (finding_path, finding_report) =
+        paused_second::run_second_reverify(root, &run_id, &run_dir, &finding_report);
     let ids_before_resume = archon_workflow::WorkflowV2ResultStore::new(run_dir.join("v2"))
         .load_call_records()
         .unwrap()

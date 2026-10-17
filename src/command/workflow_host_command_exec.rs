@@ -91,6 +91,8 @@ pub(crate) struct FixedHostCommandExecutor {
     context: HostCommandResolutionContext,
     run_root: PathBuf,
     process: Arc<dyn HostCommandProcessAdapter>,
+    paused_run_authorization:
+        Option<super::workflow_host_command_operational::PausedRunAuthorization>,
 }
 
 impl FixedHostCommandExecutor {
@@ -124,7 +126,16 @@ impl FixedHostCommandExecutor {
             context,
             run_root,
             process,
+            paused_run_authorization: None,
         }
+    }
+
+    pub(crate) fn authorize_paused_run(
+        mut self,
+        authorization: super::workflow_host_command_operational::PausedRunAuthorization,
+    ) -> Self {
+        self.paused_run_authorization = Some(authorization);
+        self
     }
 
     fn unbound_context(&self) -> HostCommandResolutionContext {
