@@ -12,7 +12,7 @@ pub(crate) struct SyncSummary {
     pub(crate) update_guidance: Option<&'static str>,
 }
 
-const UPDATE_GUIDANCE: &str = "Review these files, then run `archon agents sync --update` to replace all differing bundled files.";
+const UPDATE_GUIDANCE: &str = "Review these files, then run `archon agent sync --update` to replace all differing bundled files.";
 
 /// Validate the full built-in agent set before any pipeline work begins.
 pub(crate) fn preflight(cwd: &Path, kind: PipelineType) -> Result<()> {
@@ -33,10 +33,38 @@ pub(crate) fn preflight_with_user_home(
         .into_iter()
         .filter(|key| registry.resolve(key).is_none())
         .collect();
+    let invalid_assets: Vec<_> = archon_pipeline::required_builtin_agent_assets(kind.clone())
+        .into_iter()
+        .filter_map(|(key, relative)| {
+            archon_pipeline::validate_builtin_agent_asset(kind.clone(), key, cwd)
+                .err()
+                .map(|error| (key, relative, error.to_string()))
+        })
+        .collect();
+    let missing_asset_keys: Vec<_> = invalid_assets.iter().map(|(key, _, _)| *key).collect();
+    let mut missing = missing;
+    for key in missing_asset_keys {
+        if !missing.contains(&key) {
+            missing.push(key);
+        }
+    }
     if !missing.is_empty() {
+        let missing_asset_details = invalid_assets
+            .iter()
+            .map(|(key, relative, error)| format!("{key} ({relative}): {error}"))
+            .collect::<Vec<_>>();
+        let missing_asset_details = if missing_asset_details.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "; invalid prompt files: {}",
+                missing_asset_details.join(", ")
+            )
+        };
         bail!(
-            "Missing required {kind:?} pipeline agents: {}. Install them with `archon agents sync`.",
-            missing.join(", ")
+            "Missing required {kind:?} pipeline agents: {}{}. Install them with `archon agent sync`.",
+            missing.join(", "),
+            missing_asset_details
         );
     }
     Ok(())
@@ -179,7 +207,7 @@ mod tests {
         for key in &missing {
             assert!(error.contains(key), "missing key {key} must be reported");
         }
-        assert!(error.contains("archon agents sync"));
+        assert!(error.contains("archon agent sync"));
 
         let (relative, bundled) = super::super::pipeline_agent_assets::all().next().unwrap();
         let edited = path.join(relative);
@@ -195,12 +223,69 @@ mod tests {
             preserved
                 .update_guidance
                 .unwrap()
-                .contains("archon agents sync --update")
+                .contains("archon agent sync --update")
         );
         sync(&path, true).unwrap();
         assert_eq!(fs::read_to_string(&edited).unwrap(), bundled);
         sync(&path, false).unwrap();
         assert!(preflight(&path, PipelineType::Coding).is_ok());
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn preflight_requires_the_pipeline_specific_shared_key_asset() {
+        let path = project();
+        sync(&path, false).unwrap();
+        let research = archon_pipeline::required_builtin_agent_assets(PipelineType::Research)
+            .into_iter()
+            .find(|(key, _)| *key == "research-planner")
+            .unwrap()
+            .1;
+        let coding = archon_pipeline::required_builtin_agent_assets(PipelineType::Coding)
+            .into_iter()
+            .find(|(key, _)| *key == "research-planner")
+            .unwrap()
+            .1;
+        assert_ne!(research, coding);
+        std::fs::remove_file(path.join(research)).unwrap();
+        assert!(preflight(&path, PipelineType::Coding).is_ok());
+        let error = preflight(&path, PipelineType::Research)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("research-planner"));
+        assert!(error.contains(research));
+        assert!(error.contains("archon agent sync"));
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn preflight_rejects_frontmatter_only_assets_for_each_pipeline() {
+        let path = project();
+        sync(&path, false).unwrap();
+        for kind in [
+            PipelineType::Research,
+            PipelineType::Coding,
+            PipelineType::GameTheory,
+        ] {
+            let (key, relative) = archon_pipeline::required_builtin_agent_assets(kind.clone())
+                .into_iter()
+                .next()
+                .unwrap();
+            fs::write(path.join(relative), "---\nname: test\n---\n \n").unwrap();
+            let error = preflight(&path, kind.clone()).unwrap_err().to_string();
+            assert!(error.contains(&format!("{kind:?}")), "{error}");
+            assert!(error.contains(key), "{error}");
+            assert!(error.contains(relative), "{error}");
+            assert!(error.contains("archon agent sync"), "{error}");
+            fs::write(
+                path.join(relative),
+                super::super::pipeline_agent_assets::all()
+                    .find(|(bundled_path, _)| *bundled_path == relative)
+                    .unwrap()
+                    .1,
+            )
+            .unwrap();
+        }
         fs::remove_dir_all(path).unwrap();
     }
 
@@ -218,17 +303,53 @@ mod tests {
             .create("resume-preflight", PipelineType::Coding, "resume task")
             .unwrap();
 
-        let error = preflight_with_user_home(&path, PipelineType::Coding, Some(temp_home.path()))
-            .unwrap_err()
-            .to_string();
+        let before = snapshot_project_files(&path);
+        let error = crate::command::pipeline_bundle::handle_resume(
+            &path,
+            "resume-preflight",
+            &archon_core::config::ArchonConfig::default(),
+            &archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new()),
+            false,
+            Some(temp_home.path()),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
         for key in missing {
             assert!(
                 error.contains(&key),
                 "missing key {key} must be reported: {error}"
             );
         }
-        assert!(error.contains("archon agents sync"));
+        assert!(error.contains("archon agent sync"));
+        assert_eq!(
+            snapshot_project_files(&path),
+            before,
+            "resume changed saved project state"
+        );
+        assert!(!path.join(".archon/archon-data.db").exists());
 
         fs::remove_dir_all(path).unwrap();
+    }
+
+    fn snapshot_project_files(root: &Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+        fn visit(root: &Path, dir: &Path, files: &mut Vec<(std::path::PathBuf, Vec<u8>)>) {
+            for entry in fs::read_dir(dir).unwrap() {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if path.is_dir() {
+                    visit(root, &path, files);
+                } else if path.is_file() {
+                    files.push((
+                        path.strip_prefix(root).unwrap().to_path_buf(),
+                        fs::read(path).unwrap(),
+                    ));
+                }
+            }
+        }
+        let mut files = Vec::new();
+        visit(root, root, &mut files);
+        files.sort_by(|left, right| left.0.cmp(&right.0));
+        files
     }
 }

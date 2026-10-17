@@ -6,6 +6,7 @@
 //! strings when learning systems are not active.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -45,6 +46,7 @@ pub struct CodingFacade {
     /// `[api] max_tokens` resolved: what the server holds back for the answer.
     /// 0 means "unknown", which leaves `output_reserve_tokens` in charge.
     response_reserve_tokens: u64,
+    project_root: PathBuf,
 }
 
 impl CodingFacade {
@@ -57,6 +59,7 @@ impl CodingFacade {
             models: AnthropicModelsConfig::default(),
             context: ContextConfig::default(),
             response_reserve_tokens: 0,
+            project_root: PathBuf::from("."),
         }
     }
 
@@ -72,6 +75,7 @@ impl CodingFacade {
             models: AnthropicModelsConfig::default(),
             context: ContextConfig::default(),
             response_reserve_tokens: 0,
+            project_root: PathBuf::from("."),
         }
     }
 
@@ -94,6 +98,12 @@ impl CodingFacade {
     /// answer ceiling, and the two disagreeing is what overflowed a live run.
     pub fn with_response_reserve_tokens(mut self, tokens: u64) -> Self {
         self.response_reserve_tokens = tokens;
+        self
+    }
+
+    /// Set the project root used to load this project's coding agent prompts.
+    pub fn with_project_root(mut self, project_root: impl Into<PathBuf>) -> Self {
+        self.project_root = project_root.into();
         self
     }
 }

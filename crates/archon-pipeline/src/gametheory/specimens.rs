@@ -4,7 +4,7 @@
 //! `.archon/agents/gametheory/game-classifier.md`.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use cozo::{DataValue, DbInstance, ScriptMutability};
@@ -368,15 +368,6 @@ fn resolve_specimen_source_path() -> Result<PathBuf> {
     if let Some(path) = find_from_current_dir()? {
         return Ok(path);
     }
-
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    for ancestor in manifest.ancestors() {
-        let candidate = ancestor.join(SPECIMEN_SOURCE_RELATIVE);
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-
     anyhow::bail!("could not find {SPECIMEN_SOURCE_RELATIVE}");
 }
 

@@ -11,8 +11,9 @@ pub async fn classify(
     db: &DbInstance,
     situation: &str,
     llm: Option<&dyn LlmClient>,
+    project_root: &std::path::Path,
 ) -> Result<GameTheoryFingerprint, GameTheoryError> {
-    classify_with_learning(db, situation, llm, None).await
+    classify_with_learning(db, situation, llm, None, project_root).await
 }
 
 pub async fn classify_with_learning(
@@ -20,6 +21,7 @@ pub async fn classify_with_learning(
     situation: &str,
     llm: Option<&dyn LlmClient>,
     learning: Option<&mut LearningIntegration>,
+    project_root: &std::path::Path,
 ) -> Result<GameTheoryFingerprint, GameTheoryError> {
     let (fingerprint, _) = classify_internal(
         db,
@@ -28,6 +30,7 @@ pub async fn classify_with_learning(
         &GameTheoryMemoryContext::default(),
         true,
         learning,
+        project_root,
     )
     .await?;
     Ok(fingerprint)
@@ -40,6 +43,7 @@ pub(super) async fn classify_internal(
     memory_ctx: &GameTheoryMemoryContext,
     allow_keyword_fallback: bool,
     learning: Option<&mut LearningIntegration>,
+    project_root: &std::path::Path,
 ) -> Result<(GameTheoryFingerprint, Vec<MemoryRecallAudit>), GameTheoryError> {
     let situation = situation.trim();
     if situation.is_empty() {
@@ -66,7 +70,17 @@ pub(super) async fn classify_internal(
     // Attempt real Tier 1 classification, fall back to keyword analysis
     let mut memory_audits = Vec::new();
     let fingerprint = if let Some(llm_client) = llm {
-        match execute_tier1_real(llm_client, &run_id, situation, &now, memory_ctx, learning).await {
+        match execute_tier1_real(
+            llm_client,
+            &run_id,
+            situation,
+            &now,
+            memory_ctx,
+            project_root,
+            learning,
+        )
+        .await
+        {
             Ok((fp, audits)) => {
                 memory_audits.extend(audits);
                 fp

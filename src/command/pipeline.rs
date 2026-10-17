@@ -191,6 +191,7 @@ async fn handle_code(
     let adapter = build_pipeline_adapter(config, env_vars, "pipeline_code").await?;
     let (mut learning, _) = build_pipeline_learning_stack(config, cwd);
     let facade = archon_pipeline::coding::facade::CodingFacade::new()
+        .with_project_root(cwd)
         .with_models(config.models.anthropic.clone())
         .with_context(config.context.clone())
         .with_response_reserve_tokens(u64::from(config.api.resolved_max_tokens()));

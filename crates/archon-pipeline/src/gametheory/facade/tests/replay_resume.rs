@@ -48,6 +48,7 @@ fn test_replay_determinism() {
         situation,
         Some(spec_path),
         Some(&llm1),
+        super::test_project_root(),
     ))
     .unwrap();
     let r2 = block_on(run_full_pipeline(
@@ -55,6 +56,7 @@ fn test_replay_determinism() {
         situation,
         Some(spec_path),
         Some(&llm2),
+        super::test_project_root(),
     ))
     .unwrap();
 
@@ -124,7 +126,7 @@ fn test_replay_single_specialist_updates_source_of_truth() {
         "nash-equilibrium-finder",
         Some(&llm),
         GameTheoryMemoryContext::default(),
-        GameTheoryRunOptions::default(),
+        super::test_options(),
     ))
     .unwrap();
     assert_eq!(replayed.status, "completed");
@@ -173,7 +175,7 @@ fn test_replay_single_specialist_requires_provider_and_writes_no_output() {
         "nash-equilibrium-finder",
         None,
         GameTheoryMemoryContext::default(),
-        GameTheoryRunOptions::default(),
+        super::test_options(),
     ))
     .unwrap_err();
     assert!(matches!(err, GameTheoryError::LlmUnavailable { .. }));
@@ -271,7 +273,7 @@ fn test_resume_run_completes_missing_specialists_from_checkpoint() {
         None,
         Some(&llm),
         GameTheoryMemoryContext::default(),
-        GameTheoryRunOptions::default(),
+        super::test_options(),
     ))
     .unwrap();
     assert_eq!(result.resumed_specialists, 1);
@@ -312,7 +314,7 @@ fn test_resume_rejects_non_in_progress_run() {
         None,
         None,
         GameTheoryMemoryContext::default(),
-        GameTheoryRunOptions::default(),
+        super::test_options(),
     ))
     .unwrap_err();
     assert!(err.to_string().contains("not resumable"));
@@ -354,7 +356,7 @@ fn test_resume_failure_marks_run_partial_in_source_of_truth() {
         None,
         Some(&llm),
         GameTheoryMemoryContext::default(),
-        GameTheoryRunOptions::default(),
+        super::test_options(),
     ))
     .unwrap();
     assert_eq!(result.status, "partial");
@@ -439,7 +441,7 @@ tiers:
         Some(&spec_path),
         None,
         GameTheoryMemoryContext::default(),
-        GameTheoryRunOptions::default(),
+        super::test_options(),
     ))
     .unwrap();
     assert_eq!(result.resumed_specialists, 0);
@@ -450,3 +452,4 @@ tiers:
         == "cohesion-discipline-devotion-auditor"
         && reason.contains("Tier 11 disabled")));
 }
+use super::classify_test as classify;

@@ -86,6 +86,7 @@ pub async fn run_full_pipeline(
     situation: &str,
     spec_path: Option<&Path>,
     llm: Option<&dyn LlmClient>,
+    project_root: &Path,
 ) -> Result<FullPipelineResult, GameTheoryError> {
     run_full_pipeline_with_memory(
         db,
@@ -93,6 +94,7 @@ pub async fn run_full_pipeline(
         spec_path,
         llm,
         GameTheoryMemoryContext::default(),
+        project_root,
     )
     .await
 }
@@ -103,6 +105,7 @@ pub async fn run_full_pipeline_with_memory(
     spec_path: Option<&Path>,
     llm: Option<&dyn LlmClient>,
     memory_ctx: GameTheoryMemoryContext,
+    project_root: &Path,
 ) -> Result<FullPipelineResult, GameTheoryError> {
     run_full_pipeline_with_options(
         db,
@@ -110,7 +113,10 @@ pub async fn run_full_pipeline_with_memory(
         spec_path,
         llm,
         memory_ctx,
-        GameTheoryRunOptions::default(),
+        GameTheoryRunOptions {
+            project_root: project_root.to_path_buf(),
+            ..GameTheoryRunOptions::default()
+        },
     )
     .await
 }
@@ -154,6 +160,7 @@ pub async fn run_full_pipeline_with_learning_options(
         &memory_ctx,
         false,
         learning.as_deref_mut(),
+        &options.project_root,
     )
     .await?;
     update_gt_run_status(

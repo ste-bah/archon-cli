@@ -33,10 +33,11 @@ pub(crate) fn install(config: ArchonConfig, env_vars: ArchonEnvVars) {
 #[async_trait]
 impl GameTheoryExecutor for PipelineGameTheoryExecutor {
     async fn run(&self, request: GameTheoryRunRequest) -> Result<String> {
+        let cwd = std::env::current_dir()?;
+        cli_gametheory::preflight_run(&cwd)?;
         let db = cli_gametheory::open_db()?;
         let llm = self.build_llm().await;
         let llm_ref = llm.as_ref().map(|client| client as &dyn LlmClient);
-        let cwd = std::env::current_dir()?;
         let (mut learning, _) = build_pipeline_learning_stack(&self.config, &cwd);
         let result = gametheory::run_full_pipeline_with_learning_options(
             &db,
@@ -45,6 +46,7 @@ impl GameTheoryExecutor for PipelineGameTheoryExecutor {
             llm_ref,
             cli_gametheory::open_memory_context(false)?,
             gametheory::GameTheoryRunOptions {
+                project_root: cwd.clone(),
                 budget_usd: request.budget_usd.unwrap_or(20.0),
                 max_concurrent: request.max_concurrent.unwrap_or(4),
                 style_profile_id: Some(request.style.unwrap_or_else(|| "executive".into())),
@@ -123,14 +125,20 @@ impl GameTheoryExecutor for PipelineGameTheoryExecutor {
     }
 
     async fn classify(&self, request: GameTheoryClassifyRequest) -> Result<String> {
+        let cwd = std::env::current_dir()?;
+        cli_gametheory::preflight_run(&cwd)?;
         let db = cli_gametheory::open_db()?;
         let llm = self.build_llm().await;
         let llm_ref = llm.as_ref().map(|client| client as &dyn LlmClient);
-        let cwd = std::env::current_dir()?;
         let (mut learning, _) = build_pipeline_learning_stack(&self.config, &cwd);
-        let fingerprint =
-            gametheory::classify_with_learning(&db, &request.situation, llm_ref, learning.as_mut())
-                .await?;
+        let fingerprint = gametheory::classify_with_learning(
+            &db,
+            &request.situation,
+            llm_ref,
+            learning.as_mut(),
+            &cwd,
+        )
+        .await?;
         let artifact_id = format!("fingerprint:{}", fingerprint.run_id);
         let persisted = gametheory_inspect::render_inspect_artifact(&db, &artifact_id)?;
         Ok(format!(
@@ -151,6 +159,8 @@ impl PipelineGameTheoryExecutor {
     }
 
     async fn reclassify_run(&self, run_id: &str) -> Result<String> {
+        let cwd = std::env::current_dir()?;
+        cli_gametheory::preflight_run(&cwd)?;
         let db = cli_gametheory::open_db()?;
         let Some(situation) = gametheory_inspect::load_run_situation(&db, run_id)? else {
             anyhow::bail!("run not found: {run_id}");
@@ -165,10 +175,11 @@ impl PipelineGameTheoryExecutor {
     }
 
     async fn rerun_specialist(&self, run_id: &str, agent_key: &str) -> Result<String> {
+        let cwd = std::env::current_dir()?;
+        cli_gametheory::preflight_run(&cwd)?;
         let db = cli_gametheory::open_db()?;
         let llm = self.build_llm().await;
         let llm_ref = llm.as_ref().map(|client| client as &dyn LlmClient);
-        let cwd = std::env::current_dir()?;
         let (mut learning, _) = build_pipeline_learning_stack(&self.config, &cwd);
         let result = gametheory::replay_single_specialist_with_learning(
             &db,
@@ -176,7 +187,10 @@ impl PipelineGameTheoryExecutor {
             agent_key,
             llm_ref,
             cli_gametheory::open_memory_context(false)?,
-            gametheory::GameTheoryRunOptions::default(),
+            gametheory::GameTheoryRunOptions {
+                project_root: cwd,
+                ..gametheory::GameTheoryRunOptions::default()
+            },
             learning.as_mut(),
         )
         .await?;

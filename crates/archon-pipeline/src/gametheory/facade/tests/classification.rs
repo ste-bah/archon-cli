@@ -255,3 +255,4 @@ fn test_classify_only_keyword_fallback_when_no_provider() {
         ).unwrap();
     assert_eq!(rows.rows.len(), 1, "fingerprint must be persisted to Cozo");
 }
+use super::classify_test as classify;

@@ -78,6 +78,7 @@ pub(crate) async fn handle_resume(
                 )?;
                 let (mut learning, _) = build_pipeline_learning_stack(config, cwd);
                 let facade = archon_pipeline::coding::facade::CodingFacade::new()
+                    .with_project_root(cwd)
                     .with_models(config.models.anthropic.clone())
                     .with_context(config.context.clone())
                     .with_response_reserve_tokens(u64::from(config.api.resolved_max_tokens()));
@@ -326,13 +327,19 @@ async fn handle_legacy_resume_with_user_home(
     env_vars: &ArchonEnvVars,
     user_home: Option<&Path>,
 ) -> Result<()> {
+    let checkpoint_path = cwd
+        .join(".pipeline-state")
+        .join(session_id)
+        .join("checkpoint.json");
+    let data = std::fs::read_to_string(&checkpoint_path)?;
+    let saved: archon_pipeline::session::PipelineCheckpoint = serde_json::from_str(&data)?;
+    crate::command::pipeline_agents::preflight_with_user_home(
+        cwd,
+        saved.pipeline_type.clone(),
+        user_home,
+    )?;
     match archon_pipeline::session::resume(session_id, cwd) {
         Ok(session) => {
-            crate::command::pipeline_agents::preflight_with_user_home(
-                cwd,
-                session.pipeline_type.clone(),
-                user_home,
-            )?;
             ensure_active_provider_supports(
                 config,
                 archon_llm::providers::ProviderCapability::PipelineCoding,
@@ -359,46 +366,8 @@ async fn handle_legacy_resume_with_user_home(
 }
 
 #[cfg(test)]
-mod legacy_resume_preflight_tests {
-    use archon_core::agents::AgentRegistry;
-    use archon_pipeline::runner::PipelineType;
-
-    #[tokio::test]
-    async fn legacy_resume_preflights_and_reports_every_missing_agent_key() {
-        let temp = tempfile::tempdir().unwrap();
-        let cwd = temp.path();
-        let temp_home = tempfile::tempdir().unwrap();
-        let registry = AgentRegistry::load_with_user_home(cwd, Some(temp_home.path()));
-        let missing: Vec<_> = archon_pipeline::required_builtin_agent_keys(PipelineType::Coding)
-            .into_iter()
-            .filter(|key| registry.resolve(key).is_none())
-            .collect();
-        assert!(
-            !missing.is_empty(),
-            "test project must be missing bundled profiles"
-        );
-        let session = archon_pipeline::session::new_session(PipelineType::Coding, "legacy resume");
-        archon_pipeline::session::checkpoint(&session, cwd).unwrap();
-
-        let error = super::handle_legacy_resume_with_user_home(
-            cwd,
-            &session.session_id,
-            &archon_core::config::ArchonConfig::default(),
-            &archon_core::env_vars::load_env_vars_from(&std::collections::HashMap::new()),
-            Some(temp_home.path()),
-        )
-        .await
-        .unwrap_err()
-        .to_string();
-        for key in missing {
-            assert!(
-                error.contains(&key),
-                "missing key {key} must be reported: {error}"
-            );
-        }
-        assert!(error.contains("archon agents sync"));
-    }
-}
+#[path = "pipeline_bundle_tests.rs"]
+mod legacy_resume_preflight_tests;
 
 async fn legacy_resume_coding(
     cwd: &Path,
@@ -409,6 +378,7 @@ async fn legacy_resume_coding(
     let (mut learning, _) = build_pipeline_learning_stack(config, cwd);
     let mut reflexion = build_reflexion_injector(config);
     let facade = archon_pipeline::coding::facade::CodingFacade::new()
+        .with_project_root(cwd)
         .with_context(config.context.clone())
         .with_response_reserve_tokens(u64::from(config.api.resolved_max_tokens()));
     println!("Resuming coding pipeline...");

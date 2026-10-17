@@ -2,10 +2,31 @@ use super::*;
 use crate::coding::agents::Phase;
 use crate::runner::AgentResult;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 fn make_facade() -> CodingFacade {
-    CodingFacade::new()
+    CodingFacade::new().with_project_root(coding_test_project_root())
+}
+
+fn coding_test_project_root() -> &'static std::path::Path {
+    static ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
+    ROOT.get_or_init(|| {
+        let root = std::env::temp_dir().join(format!(
+            "archon-coding-facade-test-project-{}",
+            uuid::Uuid::new_v4()
+        ));
+        for agent in crate::coding::agents::AGENTS {
+            let path = root.join(agent.prompt_source_path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                path,
+                format!("---\nname: {}\n---\nCoding test project prompt.", agent.key),
+            )
+            .unwrap();
+        }
+        root
+    })
 }
 
 fn make_result(output: &str) -> AgentResult {
@@ -456,6 +477,7 @@ fn default_creates_valid_facade() {
 fn facade_with_learning_implements_trait() {
     use crate::learning::integration::{LearningIntegration, LearningIntegrationConfig};
     let learning = LearningIntegration::new(None, None, LearningIntegrationConfig::default(), None);
-    let facade = CodingFacade::with_learning(learning);
+    let facade =
+        CodingFacade::with_learning(learning).with_project_root(coding_test_project_root());
     let _boxed: Box<dyn PipelineFacade> = Box::new(facade);
 }
