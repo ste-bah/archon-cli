@@ -50,7 +50,7 @@ impl LiveMutationSentinels {
         Ok(Self { values })
     }
 
-    fn verify(&self) -> Result<()> {
+    pub(crate) fn verify(&self) -> Result<()> {
         for expected in &self.values {
             let actual = path_digest(&expected.path)?;
             if actual != expected.digest {
@@ -270,7 +270,7 @@ pub(crate) fn publish_audited(
         }
         receipts.push(PublishedArtifactReceipt {
             relative_path: entry.relative_path.clone(),
-            destination_path: destination.to_string_lossy().replace('\\', "/"),
+            destination_path: path_text(destination),
             byte_len: bytes.len() as u64,
             blake3: live_digest,
             prior_blake3: prior.remove(&entry.relative_path).flatten(),
@@ -354,8 +354,84 @@ fn normalize_relative(raw: &str) -> Result<String> {
     Ok(path_text(path))
 }
 
-fn path_text(path: &Path) -> String {
+pub(crate) fn path_text(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+/// Normalizes receipt destinations for comparison across resumed runs. The
+/// serialized receipt continues to use `path_text` so this does not migrate
+/// existing receipt data.
+pub(crate) fn path_comparison_key(path: &str) -> String {
+    let mut key = path.replace('\\', "/");
+
+    // A verbatim prefix is equivalent to an ordinary absolute drive path only
+    // for this plain drive form. In particular, preserve verbatim UNC paths.
+    if key.starts_with("//?/") && is_absolute_drive_path(&key[4..]) {
+        key.drain(..4);
+    }
+
+    if key.as_bytes().get(1) == Some(&b':') && key.as_bytes()[0].is_ascii_alphabetic() {
+        key.replace_range(..1, &key[..1].to_ascii_uppercase());
+    }
+    key
+}
+
+fn is_absolute_drive_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
+}
+
+#[cfg(test)]
+mod path_comparison_key_tests {
+    use super::{path_comparison_key, path_text};
+    use std::path::Path;
+
+    #[test]
+    fn receipt_comparison_normalizes_windows_drive_spellings() {
+        assert_eq!(path_comparison_key("c:"), "C:");
+        assert_eq!(path_comparison_key("C:"), "C:");
+        assert_eq!(path_comparison_key("c:/x"), "C:/x");
+        assert_eq!(path_comparison_key("C:/x"), "C:/x");
+        assert_eq!(path_comparison_key(r"\\?\C:\x"), "C:/x");
+        assert_eq!(path_comparison_key("//?/C:/x"), "C:/x");
+    }
+
+    #[test]
+    fn receipt_comparison_keeps_unc_and_posix_paths_stable() {
+        assert_eq!(
+            path_comparison_key(r"\\?\UNC\server\share\x"),
+            "//?/UNC/server/share/x"
+        );
+        assert_eq!(
+            path_comparison_key("//?/UNC/server/share/x"),
+            "//?/UNC/server/share/x"
+        );
+        assert_eq!(path_comparison_key("/tmp/project/x"), "/tmp/project/x");
+        assert_eq!(
+            path_comparison_key("/tmp/project/x"),
+            path_text(Path::new("/tmp/project/x"))
+        );
+    }
+
+    #[test]
+    fn recorded_windows_shaped_relative_paths_use_forward_slashes() {
+        assert_eq!(
+            path_text(Path::new(r"landing-evidence\TASK-X-010.bin")),
+            "landing-evidence/TASK-X-010.bin"
+        );
+        assert_eq!(
+            path_text(Path::new("landing-evidence/TASK-X-010.bin")),
+            "landing-evidence/TASK-X-010.bin"
+        );
+    }
+
+    #[test]
+    fn old_stored_backslash_keys_match_current_separator_keys() {
+        assert_eq!(
+            path_comparison_key(r"c:\work\project\x"),
+            path_comparison_key("C:/work/project/x")
+        );
+    }
 }
 
 fn path_digest(path: &Path) -> Result<Option<String>> {

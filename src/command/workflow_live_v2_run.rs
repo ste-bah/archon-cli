@@ -34,7 +34,18 @@ mod round8_terminal_tests;
 #[path = "workflow_live_v2_terminal_test_support.rs"]
 pub(super) mod terminal_test_support;
 
-pub(crate) async fn run_generated_v2_workflow(
+#[cfg(test)]
+#[path = "workflow_live_v2_run_test_compat.rs"]
+mod test_compat;
+#[cfg(test)]
+pub(crate) use test_compat::{
+    execute_generated_v2_run, resume_generated_v2_workflow, run_generated_v2_workflow,
+};
+#[path = "workflow_live_v2_run_bundle.rs"]
+mod bundle;
+use bundle::live_plan_from_generated_bundle;
+
+pub(crate) async fn run_generated_v2_workflow_with_limits(
     cwd: &Path,
     store: &WorkflowStore,
     plan: WorkflowScriptPlan,
@@ -46,6 +57,7 @@ pub(crate) async fn run_generated_v2_workflow(
     workspace_boundary_supported: bool,
     script_lifecycle: bool,
     learning: &archon_core::config::LearningConfig,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<String> {
     run_v2_workflow_with_origin(
         cwd,
@@ -60,6 +72,7 @@ pub(crate) async fn run_generated_v2_workflow(
         WorkflowBundleOrigin::GeneratedHarness,
         script_lifecycle,
         learning,
+        cargo_limits,
     )
     .await
 }
@@ -75,6 +88,7 @@ pub(crate) async fn run_saved_v2_workflow(
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
     learning: &archon_core::config::LearningConfig,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<String> {
     run_v2_workflow_with_origin(
         cwd,
@@ -89,6 +103,7 @@ pub(crate) async fn run_saved_v2_workflow(
         WorkflowBundleOrigin::SavedCommand,
         script_lifecycle_from_env(),
         learning,
+        cargo_limits,
     )
     .await
 }
@@ -107,6 +122,7 @@ async fn run_v2_workflow_with_origin(
     origin: WorkflowBundleOrigin,
     script_lifecycle: bool,
     learning: &archon_core::config::LearningConfig,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<String> {
     let snapshot = super::workflow_run_end_snapshot::refuse_launch(store, &plan, script_lifecycle)?;
     let run = store.create_run(plan.approval_metadata_spec())?;
@@ -130,6 +146,7 @@ async fn run_v2_workflow_with_origin(
     }
     WorkflowBundle::create_for_run(store, &run, &plan.harness_source, origin)?;
     save_generated_v2_metadata(store, &run.id, &plan, snapshot)?;
+    super::workflow_live_v2_metadata::save_cargo_resource_limits(store, &run.id, &cargo_limits)?;
     super::workflow_run_end_snapshot::toolchain::warn(store, &run.id, &ui_sink).await;
     let run = match gate_live_approval(cwd, store, run, approval_mode, &ui_sink).await? {
         LiveApprovalOutcome::Proceed(run) => *run,
@@ -139,7 +156,7 @@ async fn run_v2_workflow_with_origin(
     };
     let run_id = run.id.clone();
     lease.record_executor()?;
-    let result = execute_generated_v2_run(
+    let result = execute_generated_v2_run_with_limits(
         store,
         run,
         plan,
@@ -150,13 +167,14 @@ async fn run_v2_workflow_with_origin(
         workspace_boundary_supported,
         false,
         Arc::clone(&lease),
+        cargo_limits,
     )
     .await;
     fold_run_topology(cwd, store, &run_id, &task, learning).await;
     result
 }
 
-pub(crate) async fn resume_generated_v2_workflow(
+pub(crate) async fn resume_generated_v2_workflow_with_limits(
     cwd: &Path,
     store: &WorkflowStore,
     run_id: &str,
@@ -166,6 +184,7 @@ pub(crate) async fn resume_generated_v2_workflow(
     approval_mode: LiveApprovalMode,
     workspace_boundary_supported: bool,
     learning: &archon_core::config::LearningConfig,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<Option<String>> {
     let run = store.load_state(run_id)?;
     let Some(plan) = live_plan_from_generated_bundle(store, &run).await? else {
@@ -196,7 +215,7 @@ pub(crate) async fn resume_generated_v2_workflow(
     let task = run.spec.task.clone();
     let run_id = run.id.clone();
     lease.record_executor()?;
-    let result = execute_generated_v2_run(
+    let result = execute_generated_v2_run_with_limits(
         store,
         run,
         plan,
@@ -207,89 +226,15 @@ pub(crate) async fn resume_generated_v2_workflow(
         workspace_boundary_supported,
         true,
         Arc::clone(&lease),
+        cargo_limits,
     )
     .await;
     fold_run_topology(cwd, store, &run_id, &task, learning).await;
     result.map(Some)
 }
 
-async fn live_plan_from_generated_bundle(
-    store: &WorkflowStore,
-    run: &WorkflowRun,
-) -> Result<Option<WorkflowScriptPlan>> {
-    let manifest = match WorkflowBundle::verify(store, &run.id) {
-        Ok(manifest) => manifest,
-        Err(err) => {
-            return Err(WorkflowError::SpecInvalid(format!(
-                "workflow bundle verification failed for generated V2 run '{}': {err}",
-                run.id
-            ))
-            .into());
-        }
-    };
-    if !matches!(
-        manifest.origin,
-        WorkflowBundleOrigin::GeneratedHarness | WorkflowBundleOrigin::SavedCommand
-    ) {
-        return Ok(None);
-    }
-    let harness_path = archon_workflow::bundle::record_path(&store.run_dir(&run.id));
-    let harness_source = fs::read_to_string(&harness_path).map_err(|err| WorkflowError::Io {
-        path: harness_path.clone(),
-        source: err,
-    })?;
-    // One source of truth for the plan: the host-call manifest persisted at
-    // approval time. Scripts without one (older saved runs) are re-planned by
-    // the QuickJS dry-run; a script that fails it is a hard error.
-    let metadata = load_generated_v2_metadata(store, &run.id)?;
-    let calls = match metadata
-        .as_ref()
-        .and_then(|metadata| metadata.generated_scaffold.as_ref())
-        .map(|scaffold| scaffold.host_call_manifest.clone())
-        .filter(|calls| !calls.is_empty())
-    {
-        Some(calls) => calls,
-        None => dry_run_workflow_plan(&harness_source, None).await?,
-    };
-    let mut script_plan =
-        WorkflowScriptPlan::from_template(run.spec.clone(), &harness_source, calls);
-    if let Some(metadata) = metadata {
-        let current_hash = workflow_scaffold_hash(&harness_source);
-        if let Some(scaffold_hash) = metadata.scaffold_hash.as_deref()
-            && scaffold_hash != current_hash
-        {
-            return Err(WorkflowError::ArtifactInvalid(format!(
-                "generated V2 scaffold hash mismatch for run '{}': metadata {}, {} {}",
-                run.id,
-                scaffold_hash,
-                harness_path.display(),
-                current_hash
-            ))
-            .into());
-        }
-        if let Some(scaffold) = metadata.generated_scaffold.as_ref()
-            && scaffold.scaffold_hash != current_hash
-        {
-            return Err(WorkflowError::ArtifactInvalid(format!(
-                "generated V2 scaffold record hash mismatch for run '{}': metadata {}, {} {}",
-                run.id,
-                scaffold.scaffold_hash,
-                harness_path.display(),
-                current_hash
-            ))
-            .into());
-        }
-        script_plan.task_universe = metadata.task_universe;
-        script_plan.script_args = metadata.script_args;
-        script_plan.governed_learning_context = metadata.governed_learning_context;
-        if let Some(generated_config) = metadata.generated_config {
-            script_plan.generated_config = generated_config;
-        }
-    }
-    Ok(Some(script_plan))
-}
-
-async fn execute_generated_v2_run(
+#[allow(clippy::too_many_arguments)]
+async fn execute_generated_v2_run_with_limits(
     store: &WorkflowStore,
     run: WorkflowRun,
     plan: WorkflowScriptPlan,
@@ -300,6 +245,7 @@ async fn execute_generated_v2_run(
     workspace_boundary_supported: bool,
     adopt_accepted_cache: bool,
     executor_lease: Arc<crate::command::workflow_executor_lease::ExecutionLease>,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<String> {
     if let Err(WorkflowError::ControlCancelled(refused)) =
         archon_workflow::control_pause::require_executor(
@@ -317,6 +263,7 @@ async fn execute_generated_v2_run(
     let runtime = WorkflowV2ScriptRuntime {
         target_repository_root: plan.target_repository_root.clone(),
         generated_config: plan.generated_config.clone(),
+        cargo_limits: cargo_limits.clone(),
     };
     let provider_env_resolution =
         workflow_live_provider_env::resolve_generated_workflow_provider_env(
@@ -352,6 +299,7 @@ async fn execute_generated_v2_run(
         runtime.target_repository_root.clone(),
         Some(u64::from(runtime.generated_config.host_call_timeout_secs)),
     )
+    .with_cargo_limits(cargo_limits.clone())
     .with_provider_env_resolution(provider_env_resolution)
     .with_owner_store(store.clone());
     let v2_store = WorkflowV2ResultStore::new(store.run_dir(&run.id).join("v2"));
@@ -457,6 +405,7 @@ async fn execute_generated_v2_run(
         &v2_store,
         Some((&runtime, Some(&*client.llm), plan.task_universe.as_ref())),
         Some(run.generation),
+        cargo_limits,
     )
     .await?;
     // Issue 329: appended only while this executor owns the run.

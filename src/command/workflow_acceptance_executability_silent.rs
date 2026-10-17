@@ -35,8 +35,8 @@ const EVIDENCE_BYTES: usize = 800;
 /// declared deliverables.
 pub(super) fn context(probe: &HostProbe, contract: &AcceptanceContract) -> Context {
     let at = Context::new(super::sites::listing_environment(probe), contract);
-    match scratch_copy_tree(probe) {
-        Some((depth, roots)) => at.within(depth, roots),
+    match scratch_copy_tree(probe, contract) {
+        Some((depth, roots)) => at.within(depth, &roots),
         None => at,
     }
 }
@@ -51,11 +51,11 @@ pub(super) fn baseline_context(
     let at = Context::new(super::sites::listing_environment(probe), contract);
     let tree = match probe.site {
         Site::Direct | Site::Hermetic => layout.and_then(|layout| layout.site_tree()),
-        Site::Scratch(_) => scratch_copy_tree(probe),
+        Site::Scratch(_) => scratch_copy_tree(probe, contract),
         Site::Unavailable(_) => None,
     };
     match tree {
-        Some((depth, roots)) => at.within(depth, roots),
+        Some((depth, roots)) => at.within(depth, &roots),
         None => at,
     }
 }
@@ -67,7 +67,10 @@ pub(super) fn baseline_context(
 /// holds `repo` and `project` (`HermeticCopy::at`), or keeps a project its
 /// repository tracks inside `repo`, at its depth there. The live tree is no
 /// copy (`None`): a path above a check's directory may be real there.
-fn scratch_copy_tree(probe: &HostProbe) -> Option<(usize, &'static [&'static str])> {
+fn scratch_copy_tree(
+    probe: &HostProbe,
+    contract: &AcceptanceContract,
+) -> Option<(usize, Vec<String>)> {
     const SCRATCH: &[&str] = &[
         "repo",
         "project",
@@ -78,7 +81,15 @@ fn scratch_copy_tree(probe: &HostProbe) -> Option<(usize, &'static [&'static str
         "project-baseline",
     ];
     match probe.site {
-        Site::Scratch(_) => Some((1, SCRATCH)),
+        Site::Scratch(_) => {
+            let mut roots: Vec<String> = SCRATCH.iter().map(|root| (*root).to_string()).collect();
+            roots.extend(hermetic::siblings::copied_root_names(
+                &probe.project,
+                &probe.repository,
+                contract,
+            ));
+            Some((1, roots))
+        }
         Site::Direct | Site::Hermetic | Site::Unavailable(_) => None,
     }
 }

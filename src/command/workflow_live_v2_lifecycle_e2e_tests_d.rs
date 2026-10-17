@@ -1,5 +1,53 @@
 use super::*;
 
+pub(super) fn lifecycle_timeout_detail(
+    store: &WorkflowV2ResultStore,
+    llm: &CannedLifecycleLlm,
+) -> String {
+    let completed = store
+        .load_call_records()
+        .map(|records| {
+            records
+                .iter()
+                .rev()
+                .take(12)
+                .map(|record| record.call.id.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let requested = llm
+        .calls
+        .lock()
+        .map(|calls| calls.clone())
+        .unwrap_or_default();
+    format!(
+        "completed calls (newest first)={completed:?}; latest agent calls={:?}",
+        requested.iter().rev().take(12).collect::<Vec<_>>()
+    )
+}
+
+pub(super) async fn run_full_lifecycle_with_diagnostics(
+    runner: WorkflowV2ScriptRunner,
+    store: &WorkflowV2ResultStore,
+    llm: &CannedLifecycleLlm,
+) -> WorkflowV2ScriptSummary {
+    tokio::time::timeout(
+        Duration::from_secs(120),
+        runner.run_decomposed_lifecycle(
+            "# Archon decomposed-PRD workflow (native lifecycle e2e fixture)",
+            serde_json::json!([]),
+        ),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "lifecycle harness timeout; {}",
+            lifecycle_timeout_detail(store, llm)
+        )
+    })
+    .expect("lifecycle summary")
+}
+
 pub(super) fn noop_proof_result(call_id: &str) -> serde_json::Value {
     if call_id.ends_with("noop-legit") {
         serde_json::json!({

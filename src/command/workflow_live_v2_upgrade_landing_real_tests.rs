@@ -1,8 +1,28 @@
 use super::*;
 
+fn receipt_entry<'a>(
+    entries: &'a [serde_json::Value],
+    path: &std::path::Path,
+) -> Option<&'a serde_json::Value> {
+    let path_key = crate::command::workflow_host_command_publish::path_comparison_key(
+        &crate::command::workflow_host_command_publish::path_text(path),
+    );
+    entries.iter().find(|entry| {
+        entry["destination_path"]
+            .as_str()
+            .is_some_and(|destination| {
+                crate::command::workflow_host_command_publish::path_comparison_key(destination)
+                    == path_key
+            })
+    })
+}
+
 struct RealLandingProcess {
     executed: Arc<Mutex<Vec<String>>>,
+    staged_task_reads: Arc<Mutex<Vec<(std::path::PathBuf, Vec<u8>)>>>,
     refuse_first_two: bool,
+    mutate_frozen_task: bool,
+    mutate_destination_on_execute: Option<std::path::PathBuf>,
 }
 
 #[async_trait::async_trait]
@@ -20,6 +40,33 @@ impl crate::command::workflow_host_command_exec::HostCommandProcessAdapter for R
 
         let candidate =
             String::from_utf8_lossy(&request.stdin.clone().unwrap_or_default()).into_owned();
+        let argument = |name: &str| {
+            request
+                .args
+                .windows(2)
+                .find(|pair| pair[0] == name)
+                .map(|pair| std::path::PathBuf::from(&pair[1]))
+                .unwrap()
+        };
+        let task_file = argument("--task-file");
+        let task_context_file = argument("--task-context-file");
+        if task_file != task_context_file {
+            let staging_root = argument("--staging-root");
+            assert_ne!(task_file, task_context_file);
+            assert!(task_file.starts_with(staging_root));
+            let staged_bytes = std::fs::read(&task_file).unwrap();
+            assert_eq!(staged_bytes, candidate.as_bytes());
+            self.staged_task_reads
+                .lock()
+                .unwrap()
+                .push((task_file.clone(), staged_bytes));
+        }
+        if self.mutate_frozen_task {
+            std::fs::write(task_file, b"child mutation during rejudge").unwrap();
+        }
+        if let Some(path) = &self.mutate_destination_on_execute {
+            std::fs::write(path, b"disk changed during rejudge").unwrap();
+        }
         self.executed.lock().unwrap().push(candidate.clone());
         let refused = self.refuse_first_two && self.executed.lock().unwrap().len() <= 2;
         let findings = refused
@@ -145,6 +192,57 @@ async fn an_old_round_asked_alone_replays_and_never_runs_over_the_current_body()
     assert_eq!(outcome["gateEnvelope"]["report"], "refused round 1");
 }
 
+/// An accepted superseded round cannot stand in for the subject's later
+/// accepted landing: the answer must attest the current landing's bytes.
+#[tokio::test]
+async fn accepted_superseded_round_answers_with_the_current_landing_verdict() {
+    let run = Run::new();
+    const ACCEPTED_LANDINGS: &str = r#"async function workflow(w) {
+        const target = {taskId: "TASK-X-001", fileName: "TASK-X-001.md"};
+        for (const body of ["old accepted", "current accepted"]) {
+            await w.hostCommand("land-task-body", {stdin: body, target});
+        }
+        return "seeded";
+    }"#;
+    const REPLAY_OLD: &str = r#"async function workflow(w) {
+        const target = {taskId: "TASK-X-001", fileName: "TASK-X-001.md"};
+        return await w.hostCommand("land-task-body", {stdin: "old accepted", target});
+    }"#;
+    run.run(run.build(9), ACCEPTED_LANDINGS).await;
+    let host = run.build(9);
+    let outcome = run.run(host.clone(), REPLAY_OLD).await;
+    assert_eq!(outcome["gateEnvelope"]["report"], "current accepted");
+    assert!(host.executed.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn stale_current_landing_is_rejudged_once_then_replayed() {
+    let run = Run::new();
+    const ACCEPTED_LANDINGS: &str = r#"async function workflow(w) {
+        const target = {taskId: "TASK-X-001", fileName: "TASK-X-001.md"};
+        for (const body of ["old accepted", "current accepted"]) {
+            await w.hostCommand("land-task-body", {stdin: body, target});
+        }
+        return "seeded";
+    }"#;
+    const REPLAY_OLD: &str = r#"async function workflow(w) {
+        const target = {taskId: "TASK-X-001", fileName: "TASK-X-001.md"};
+        return await w.hostCommand("land-task-body", {stdin: "old accepted", target});
+    }"#;
+    run.run(run.build(9), ACCEPTED_LANDINGS).await;
+    let first_resume = run.build(13);
+    let outcome = run.run(first_resume.clone(), REPLAY_OLD).await;
+    assert_eq!(outcome["gateEnvelope"]["report"], "current accepted");
+    assert_eq!(
+        first_resume.executed.lock().unwrap().as_slice(),
+        ["current accepted"]
+    );
+
+    let second_resume = run.build(13);
+    run.run(second_resume.clone(), REPLAY_OLD).await;
+    assert!(second_resume.executed.lock().unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn without_a_bump_the_current_body_is_not_judged_again() {
     let run = Run::new();
@@ -174,7 +272,10 @@ async fn a_real_landing_host_and_resume_keep_the_accepted_task_bytes_after_a_log
             run.store.run_dir(&run.run_id),
             Arc::new(RealLandingProcess {
                 executed: Arc::clone(&executed),
+                staged_task_reads: Arc::new(Mutex::new(Vec::new())),
                 refuse_first_two: true,
+                mutate_frozen_task: false,
+                mutate_destination_on_execute: None,
             }),
         )
         .with_logic_version("land-task-body", Some(9)),
@@ -248,7 +349,10 @@ async fn a_real_landing_host_and_resume_keep_the_accepted_task_bytes_after_a_log
             run.store.run_dir(&run.run_id),
             Arc::new(RealLandingProcess {
                 executed: Arc::clone(&executed),
+                staged_task_reads: Arc::new(Mutex::new(Vec::new())),
                 refuse_first_two: false,
+                mutate_frozen_task: false,
+                mutate_destination_on_execute: None,
             }),
         )
         .with_logic_version("land-task-body", Some(13)),
@@ -291,3 +395,13 @@ async fn a_real_landing_host_and_resume_keep_the_accepted_task_bytes_after_a_log
     assert_eq!(count_occurrence(&after_records, 1), before_round_1);
     assert_eq!(count_occurrence(&after_records, 2), before_round_2);
 }
+
+#[path = "workflow_live_v2_upgrade_landing_child_write_tests.rs"]
+mod child_write_tests;
+
+#[path = "workflow_live_v2_upgrade_landing_race_tests.rs"]
+mod race_tests;
+#[path = "workflow_live_v2_upgrade_landing_receipt_tests.rs"]
+mod receipt_tests;
+#[path = "workflow_live_v2_upgrade_landing_restore_race_tests.rs"]
+mod restore_race_tests;

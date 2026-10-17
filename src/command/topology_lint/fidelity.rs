@@ -3,61 +3,23 @@
 //!
 //! # Where this sits among the lint sections
 //!
-//! Coverage (`coverage.rs`) is a set comparison: is every obligation claimed.
-//! It holds for any PRD because it never reads prose. This section reads
-//! prose, so it cannot be deterministic, and it costs tokens, so `workflow
-//! lint` runs it only on `--fidelity`. The set gate the decomposition drives
-//! (`workflow lint --tasks … --gate-envelope …`) runs it always: that gate is
-//! where a task set with bodies is accepted, and a body that honours its claim
-//! only inside a temporary root is exactly what it exists to refuse.
+//! Coverage (`coverage.rs`) is a prose-free set comparison; this section reads prose and costs tokens, so ordinary `workflow lint` runs it only with `--fidelity`. The staged set gate always runs it: that is where a task set with bodies is accepted, and a body that honours its claim only inside a temporary root is exactly what it exists to refuse.
 //!
 //! # Clusters, cache, waivers
 //!
-//! Obligations are grouped by the exact set of tasks audited for them, so
-//! each task's full text travels once per cluster rather than once per
-//! obligation. Each verdict is saved under the project's `.archon/lint-cache`
-//! the moment it arrives, one record per obligation keyed by its text, the
-//! binary and the critic (`fidelity_store.rs`, #434). A verdict, true or
-//! false, is reused only over the same cluster with byte-identical task
-//! texts; only the obligations with no standing verdict are asked, so an
-//! edited task re-asks only the obligations whose cluster holds it, and two
-//! standing verdicts that disagree are one blocking finding quoting both.
-//! The staged set gate runs the calls under its host wall clock and stops
-//! resumable before it, so a retry continues from the saved batches
-//! (`fidelity_resume.rs`, Issue 259). A false verdict blocks
-//! unless the operator has waived that obligation id; the waiver is recorded
-//! verbatim in the freeze pin so the override is as auditable as the stamp it
-//! overrides.
+//! Obligations are grouped by the exact set of tasks audited for them, so each task's full text travels once per cluster. Each verdict is saved under `.archon/lint-cache` as soon as it arrives, one record per obligation keyed by its text, the binary and critic (`fidelity_store.rs`, #434). A verdict is reused only over the same cluster with byte-identical task texts; edited tasks re-ask only affected obligations, and disagreeing standing verdicts produce one finding quoting both. The staged set gate stops resumably before its host wall clock; retries continue from saved batches (`fidelity_resume.rs`, Issue 259). False verdicts block unless waived, and waivers are recorded verbatim in the freeze pin.
 //!
 //! # The ownership chain (Issue-43)
 //!
-//! A cluster's tasks are the claiming tasks plus every task of the same set
-//! that a claiming task names in its text — one hop, never recursive. Live,
-//! twelve of eighteen blocking verdicts read "the claiming task says task X
-//! produces this, and X is not listed": the result was deferred to a named
-//! sibling the critic never saw, so an owned result read as a gap. A named
-//! sibling that does not itself claim the obligation earns a non-blocking
-//! `NOTE`, so a chain that ends nowhere is still visible.
+//! A cluster includes claimants plus each task they name as owning the result, one hop only. This addresses gaps deferred to named siblings the critic never saw. A named sibling that does not claim the obligation earns a non-blocking `NOTE`, keeping chains that end nowhere visible.
 //!
 //! # The per-body audit (Issue-44)
 //!
-//! The set gate has no repair loop: a false verdict there stops the run, and
-//! live that was six blocking obligations found after seven hours of body
-//! authoring, with no path back to any author. So the body gate
-//! (`land-task-body`) asks the same question of the candidate body first,
-//! for the obligations that body claims, while its author still has attempts:
-//! [`audit_task_file_candidate`]. Clusters are built exactly as the set gate
-//! builds them over the bodies landed so far plus the candidate, so a cluster
-//! nothing later touches is served from the cache when the set gate re-asks.
+//! The set gate has no repair loop; the body gate (`land-task-body`) asks the same question of the candidate for its claimed obligations while its author still has attempts: [`audit_task_file_candidate`]. Clusters are built over bodies landed so far plus the candidate, so a cluster nothing later touches can be served from cache at the set gate.
 //!
 //! # The frozen skeleton (Issue-45)
 //!
-//! Every audit reads `task-skeleton.json` beside the tasks once and puts the
-//! whole set's frozen ordering and ownership in front of the critic, so a
-//! sibling whose body is not yet written is still a known task with known
-//! dependencies rather than a gap. A set without a frozen skeleton (legacy
-//! `workflow lint --tasks`) is still audited; the prompt says so. The
-//! skeleton section is part of every cluster digest.
+//! Every audit reads `task-skeleton.json` once and gives the critic the whole set's frozen ordering and ownership, so unwritten sibling bodies are known tasks rather than gaps. Legacy sets without a skeleton remain audited; the skeleton section is part of every cluster digest.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -81,6 +43,9 @@ use super::fidelity_store::{Standing, StoreIdentity, VerdictStore, store_dir};
 use crate::command::topology_task_graph::task_requirement_claims_tolerant;
 use crate::command::workflow_freeze_budget::FreezeResume;
 use crate::command::workflow_gate::{GateEvaluation, GateFinding, GateId};
+#[cfg(test)]
+use set_helpers::mentions_whole;
+use set_helpers::named_set_tasks;
 
 pub(super) struct FidelityFinding {
     pub(super) text: String,
@@ -271,7 +236,6 @@ async fn audit_scoped(
         candidate_text = Some((task.canonical_task_id, text.to_string()));
     }
     let skeleton = read_skeleton_summary(tasks_root)?;
-    let skeleton = &skeleton;
     let prd_path = super::coverage::resolve_prd(tasks_root, &claims)?
         .ok_or_else(|| anyhow!("no PRD resolves for {}", tasks_root.display()))?;
     let prd = std::fs::read_to_string(&prd_path)
@@ -298,6 +262,9 @@ async fn audit_scoped(
             }
         }
     }
+    let claimed_ids: Vec<String> = claiming.keys().cloned().collect();
+    let skeleton = skeleton.with_prd_context_for(&prd, &claimed_ids);
+    let skeleton = &skeleton;
     drop(read);
     // Issue-43: each obligation is audited over its claimants plus the set
     // tasks a claimant names, so a result deferred to a sibling is read where
@@ -361,18 +328,57 @@ async fn audit_scoped(
         scope.resume.unwrap_or(&unlimited),
     )
     .await?;
+    let whole_set_outcomes = super::fidelity_candidate_fallback::resolve_whole_set(
+        client,
+        &store,
+        &inputs,
+        &resolved.standings,
+        &task_texts,
+        skeleton,
+        scope.resume.unwrap_or(&unlimited),
+        scope.only_claimed_by,
+        scope.candidate.map(|(_, body)| body),
+    )
+    .await?;
     let mut report = String::from("\n## obligation fidelity\n");
     let mut findings = Vec::new();
     for ((_, tasks), standings) in inputs.iter().zip(resolved.standings) {
         let task_ids: Vec<String> = tasks.iter().map(|task| task.task_id.clone()).collect();
-        for standing in standings {
+        for original_standing in standings {
+            let obligation_id = match &original_standing {
+                Standing::Verdict(verdict) => &verdict.obligation_id,
+                Standing::Contradiction { refuted, .. } => &refuted.obligation_id,
+            };
+            let standing = whole_set_outcomes
+                .set_standings
+                .get(obligation_id)
+                .cloned()
+                .unwrap_or(original_standing);
             let (verdict, text) = match standing {
                 Standing::Verdict(verdict) if verdict.necessarily_true => {
-                    report.push_str(&format!(
-                        "  {}: necessarily true given {}\n",
-                        verdict.obligation_id,
-                        task_ids.join(", ")
-                    ));
+                    if scope.only_claimed_by.is_some()
+                        && whole_set_outcomes
+                            .set_established
+                            .contains(&verdict.obligation_id)
+                    {
+                        report.push_str(&format!(
+                            "  NOTE obligation {} is established by the whole task set\n",
+                            verdict.obligation_id
+                        ));
+                    } else {
+                        let tasks = if whole_set_outcomes
+                            .set_standings
+                            .contains_key(&verdict.obligation_id)
+                        {
+                            task_texts.keys().cloned().collect::<Vec<_>>().join(", ")
+                        } else {
+                            task_ids.join(", ")
+                        };
+                        report.push_str(&format!(
+                            "  {}: necessarily true given {}\n",
+                            verdict.obligation_id, tasks
+                        ));
+                    }
                     continue;
                 }
                 Standing::Verdict(verdict) => {
@@ -388,6 +394,31 @@ async fn audit_scoped(
                     (refuted, text)
                 }
             };
+            if scope.only_claimed_by.is_some()
+                && !verdict.necessarily_true
+                && scope
+                    .only_claimed_by
+                    .is_some_and(|tasks| tasks.contains(&verdict.weakest_task_id))
+                && !whole_set_outcomes
+                    .body_defect
+                    .contains(&verdict.obligation_id)
+            {
+                if whole_set_outcomes
+                    .set_established
+                    .contains(&verdict.obligation_id)
+                {
+                    report.push_str(&format!(
+                        "  NOTE obligation {} is established by the whole task set\n",
+                        verdict.obligation_id
+                    ));
+                } else {
+                    report.push_str(&format!(
+                        "  NOTE obligation {} has a set-level gap; candidate text does not establish a body defect\n",
+                        verdict.obligation_id
+                    ));
+                }
+                continue;
+            }
             if let Some(waiver) = waivers
                 .iter()
                 .find(|w| w.obligation_id == verdict.obligation_id)
@@ -461,29 +492,8 @@ fn read_skeleton_summary(tasks_root: &Path) -> Result<SkeletonSummary> {
     Ok(SkeletonSummary::from_skeleton(&skeleton))
 }
 
-/// The canonical ids of the other tasks in the set that `text` names — the
-/// one hop of the ownership chain (Issue-43). An id counts only whole: a text
-/// naming `TASK-A-0021` does not name `TASK-A-002`, and an id outside the set
-/// is not a task the audit can read, so it is never pulled in.
-fn named_set_tasks(
-    own_id: &str,
-    text: &str,
-    set: &BTreeMap<String, (String, PathBuf)>,
-) -> Vec<String> {
-    set.keys()
-        .filter(|id| id.as_str() != own_id && mentions_whole(text, id))
-        .cloned()
-        .collect()
-}
-
-fn mentions_whole(text: &str, id: &str) -> bool {
-    let bounded = |c: Option<char>| c.is_none_or(|c| !c.is_ascii_alphanumeric());
-    text.match_indices(id).any(|(start, _)| {
-        bounded(text[..start].chars().next_back())
-            && bounded(text[start + id.len()..].chars().next())
-    })
-}
-
+#[path = "fidelity_set_helpers.rs"]
+mod set_helpers;
 #[cfg(test)]
 #[path = "fidelity_tests.rs"]
 mod tests;

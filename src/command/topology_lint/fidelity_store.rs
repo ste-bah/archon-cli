@@ -82,7 +82,7 @@ pub(super) use logic_digest::CRITIC_LOGIC_VERSION;
 /// [`CRITIC_LOGIC_VERSION`] instead of that digest, so an edit that leaves
 /// a verdict's meaning alone reuses every verdict; schema-4 and schema-5
 /// records are migrated once by [`legacy`] (#434d).
-const STORE_SCHEMA: u32 = 6;
+const STORE_SCHEMA: u32 = 7;
 
 /// Where the saved verdicts live: under the project, outside the host
 /// command's call staging directory, which the executor clears before every
@@ -329,16 +329,18 @@ impl VerdictStore {
             return Ok((Standing::Verdict(verdict.clone()), false));
         }
         let key = self.key(question);
-        // Read, merge and rename under one exclusive lock: a verdict another
-        // gate saved for this obligation a moment ago is merged, never lost.
+        // Read, merge and rename under one exclusive lock. Keep separate task
+        // text digests for the claimant cluster and whole-set question; a
+        // later gate reuses only the entry whose exact task texts it asks.
         let standing = self.locked(&key, || {
             let mut entries: Vec<Entry> = self
                 .read(question)
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|entry| {
-                    entry.verdict.necessarily_true != verdict.necessarily_true
-                        && holds(entry, question)
+                    entry.tasks != *question.texts
+                        || (entry.verdict.necessarily_true != verdict.necessarily_true
+                            && holds(entry, question))
                 })
                 .collect();
             entries.push(Entry {
@@ -369,26 +371,21 @@ fn holds(entry: &Entry, question: Question<'_>) -> bool {
         && verdict_holds(&entry.verdict, question.tasks)
 }
 
-/// What a record's entries say now. One verdict stands while it holds. A
-/// record holding both a true and a false verdict is a contradiction while
-/// both hold; once either stops holding, the obligation is asked again.
+/// The latest verdict of each meaning that still holds for these exact task
+/// texts. A record with both is a contradiction for this question only.
 fn standing(entries: &[Entry], question: Question<'_>) -> Option<Standing> {
     let latest = |truth: bool| {
         entries
             .iter()
             .rev()
-            .find(|entry| entry.verdict.necessarily_true == truth)
+            .find(|entry| entry.verdict.necessarily_true == truth && holds(entry, question))
     };
     match (latest(true), latest(false)) {
-        (Some(supported), Some(refuted)) => (holds(supported, question)
-            && holds(refuted, question))
-        .then(|| Standing::Contradiction {
+        (Some(supported), Some(refuted)) => Some(Standing::Contradiction {
             refuted: refuted.verdict.clone(),
             supported: supported.verdict.clone(),
         }),
-        (Some(only), None) | (None, Some(only)) => {
-            holds(only, question).then(|| Standing::Verdict(only.verdict.clone()))
-        }
+        (Some(only), None) | (None, Some(only)) => Some(Standing::Verdict(only.verdict.clone())),
         (None, None) => None,
     }
 }

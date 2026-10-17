@@ -85,7 +85,8 @@ impl ResearchFacade {
     ) -> Self {
         Self {
             quality_calculator: PhDQualityCalculator::new(),
-            prompt_builder: ResearchPromptBuilder::new(),
+            prompt_builder: ResearchPromptBuilder::new()
+                .with_project_root(std::path::PathBuf::from(&project_path)),
             memory,
             leann_searcher,
             project_path,
@@ -108,7 +109,8 @@ impl ResearchFacade {
     ) -> Self {
         Self {
             quality_calculator: PhDQualityCalculator::new(),
-            prompt_builder: ResearchPromptBuilder::new(),
+            prompt_builder: ResearchPromptBuilder::new()
+                .with_project_root(std::path::PathBuf::from(&project_path)),
             memory,
             leann_searcher,
             project_path,
@@ -310,7 +312,7 @@ impl PipelineFacade for ResearchFacade {
                 &session.task,
                 &prior_context,
                 style,
-            )
+            )?
         };
         let context_window = archon_llm::context_window::resolve_context_window(
             &agent.model,

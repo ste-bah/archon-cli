@@ -192,6 +192,7 @@ fn context<'a>(
         terminal_status: WorkflowV2Status::Accepted,
         snapshot: &fixture.snapshot,
         pre_commit: false,
+        cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     }
 }
 
@@ -495,6 +496,5 @@ fn read_events(store: &WorkflowStore, run_id: &str) -> Vec<WorkflowEvent> {
         .collect()
 }
 
-#[cfg(unix)]
 #[path = "workflow_run_end_native_tests.rs"]
 mod native_tests;

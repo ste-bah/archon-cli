@@ -40,7 +40,7 @@ pub(super) fn body_reply(necessarily_true: bool) -> String {
     let verdict = if necessarily_true {
         serde_json::json!({"obligation_id": "AC-WS-001", "necessarily_true": true, "weakest_task_id": "", "reason": "the task must write the entry", "quoted_task_text": "", "supporting_task_id": "TASK-WS-002", "supporting_text": REGISTERS})
     } else {
-        serde_json::json!({"obligation_id": "AC-WS-001", "necessarily_true": false, "weakest_task_id": "TASK-WS-002", "reason": "a fixture registry leaves the shared store empty", "quoted_task_text": HOLLOW})
+        serde_json::json!({"obligation_id": "AC-WS-001", "necessarily_true": false, "weakest_task_id": "TASK-WS-002", "reason": "a fixture registry leaves the shared store empty", "quoted_task_text": HOLLOW, "weakening_quotes": [HOLLOW]})
     };
     serde_json::json!({ "verdicts": [verdict] }).to_string()
 }
@@ -57,7 +57,7 @@ pub(super) async fn audit_candidate(
 async fn a_false_verdict_on_the_candidate_is_a_body_finding_naming_obligation_and_task() {
     let temp = split_corpus();
     let cwd = temp.path();
-    let critic = FakeCritic::new(vec![Ok(body_reply(false))]);
+    let critic = FakeCritic::new(vec![Ok(body_reply(false)), Ok(body_reply(false))]);
     let (report, findings) = audit_candidate(cwd, &candidate_body(HOLLOW), Ok(critic.clone()))
         .await
         .expect("a false verdict is a finding, not an error");
@@ -88,7 +88,11 @@ async fn a_false_verdict_on_the_candidate_is_a_body_finding_naming_obligation_an
             .ends_with("TASK-WS-002.md")
     );
     assert!(report.contains("BLOCKING obligation AC-WS-001"), "{report}");
-    assert_eq!(critic.calls(), 1);
+    assert_eq!(
+        critic.calls(),
+        2,
+        "a false cluster answer is checked over the whole set"
+    );
     assert!(
         !candidate_path(cwd).exists(),
         "the audit read the candidate from stdin, never from a file it does not publish"
@@ -107,12 +111,13 @@ async fn a_cross_task_gap_is_a_note_in_the_body_gate_and_blocks_at_the_set_gate_
             "necessarily_true": false,
             "weakest_task_id": "TASK-WS-001",
             "reason": "the sibling leaves the shared store empty",
-            "quoted_task_text": LOOPHOLE
+            "quoted_task_text": LOOPHOLE,
+            "weakening_quotes": []
         }]
     })
     .to_string();
-    let body_critic = FakeCritic::new(vec![Ok(cross_task_false)]);
-    let (body_report, findings) = audit_candidate(cwd, &body, Ok(body_critic))
+    let body_critic = FakeCritic::new(vec![Ok(cross_task_false.clone())]);
+    let (body_report, findings) = audit_candidate(cwd, &body, Ok(body_critic.clone()))
         .await
         .expect("cross-task verdict is recorded");
     assert!(findings.is_empty(), "{body_report}");
@@ -121,6 +126,11 @@ async fn a_cross_task_gap_is_a_note_in_the_body_gate_and_blocks_at_the_set_gate_
         "{body_report}"
     );
     assert!(!body_report.contains("BLOCKING obligation AC-WS-001"));
+    assert_eq!(
+        body_critic.calls(),
+        1,
+        "the shared fallback asks every task body"
+    );
     assert!(!body_report.contains(LOOPHOLE), "the note is redacted");
 
     std::fs::write(candidate_path(cwd), body).expect("land candidate body");
@@ -163,6 +173,64 @@ async fn a_cross_task_gap_is_a_note_in_the_body_gate_and_blocks_at_the_set_gate_
 }
 
 #[tokio::test]
+async fn a_remaining_whole_set_gap_does_not_become_a_finding_on_an_accurate_candidate() {
+    let temp = split_corpus();
+    let cwd = temp.path();
+    let candidate_claim = "Registration writes every entry to the shared registry.";
+    let candidate = candidate_body(candidate_claim);
+    let cluster_false = serde_json::json!({
+        "verdicts": [{
+            "obligation_id": "AC-WS-001",
+            "necessarily_true": false,
+            "weakest_task_id": "TASK-WS-002",
+            "reason": "the claimant cluster is insufficient",
+            "quoted_task_text": candidate_claim,
+            "weakening_quotes": []
+        }]
+    })
+    .to_string();
+    let set_false = serde_json::json!({
+        "verdicts": [{
+            "obligation_id": "AC-WS-001",
+            "necessarily_true": false,
+            "weakest_task_id": "TASK-WS-001",
+            "reason": "the set still permits an empty shared store",
+            "quoted_task_text": LOOPHOLE,
+            "weakening_quotes": []
+        }]
+    })
+    .to_string();
+    let critic = FakeCritic::new(vec![Ok(cluster_false), Ok(set_false)]);
+    let (report, findings) = audit_candidate(cwd, &candidate, Ok(critic.clone()))
+        .await
+        .expect("a remaining gap belongs to the set gate");
+    assert!(findings.is_empty(), "{report}");
+    assert!(
+        report.contains("cross-task gap assigned to TASK-WS-001"),
+        "{report}"
+    );
+    assert_eq!(
+        critic.calls(),
+        2,
+        "the wider set is checked after the cluster"
+    );
+}
+
+#[tokio::test]
+async fn a_full_set_verdict_resolves_a_candidate_cluster_gap_without_blocking_the_body() {
+    let temp = split_corpus();
+    let cwd = temp.path();
+    let cluster_false = body_reply(false);
+    let critic = FakeCritic::new(vec![Ok(cluster_false), Ok(body_reply(true))]);
+    let (report, findings) = audit_candidate(cwd, &candidate_body(HOLLOW), Ok(critic.clone()))
+        .await
+        .expect("the whole set establishes the obligation");
+    assert!(findings.is_empty(), "{report}");
+    assert_eq!(critic.calls(), 2);
+    assert!(report.contains("set-level gap") == false, "{report}");
+}
+
+#[tokio::test]
 async fn a_true_verdict_on_the_candidate_adds_no_finding() {
     let temp = split_corpus();
     let cwd = temp.path();
@@ -171,6 +239,7 @@ async fn a_true_verdict_on_the_candidate_adds_no_finding() {
         .await
         .expect("audit");
     assert!(findings.is_empty(), "{report}");
+    assert!(!record_files(cwd).is_empty(), "the body verdict was saved");
     assert!(
         report.contains("AC-WS-001: necessarily true given TASK-WS-002"),
         "{report}"
@@ -228,6 +297,10 @@ async fn a_co_claimant_on_disk_joins_the_candidates_cluster_and_the_set_gate_reu
         .await
         .expect("audit");
     assert!(findings.is_empty(), "{report}");
+    assert!(
+        !record_files(cwd).is_empty(),
+        "body verdict record missing: {report}"
+    );
     let prompt = critic.prompts.lock().unwrap()[0].clone();
     assert!(
         prompt.contains("===== BEGIN TASK TASK-WS-001 =====")
@@ -243,14 +316,20 @@ async fn a_co_claimant_on_disk_joins_the_candidates_cluster_and_the_set_gate_reu
     // only G-WS-001 (claimed by TASK-WS-001 alone) is a new question.
     std::fs::write(candidate_path(cwd), candidate_body(HOLLOW)).unwrap();
     let only_g = serde_json::json!({ "verdicts": [{"obligation_id": "G-WS-001", "necessarily_true": true, "reason": "obliged", "supporting_task_id": "TASK-WS-001", "supporting_text": SUPPORT}] });
-    let set_critic = FakeCritic::new(vec![Ok(only_g.to_string())]);
+    let set_critic = FakeCritic::new(vec![Ok(only_g.to_string()), Ok(body_reply(true))]);
     let evaluation = evaluate(cwd, Ok(set_critic.clone())).await;
     assert!(
         evaluation.operational_error().is_none(),
         "{:?}",
         evaluation.operational_error()
     );
-    assert_eq!(set_critic.calls(), 1);
+    assert_eq!(
+        set_critic.calls(),
+        1,
+        "set prompts: {:?}; body prompt: {}",
+        *set_critic.prompts.lock().unwrap(),
+        prompt
+    );
     assert!(
         evaluation.report.contains("1 asked of") && evaluation.report.contains("1 served from"),
         "{}",
@@ -304,3 +383,6 @@ fn the_decomposition_body_gate_carries_the_provider_and_the_freeze_clock() {
         "the same audit runs on the same clock"
     );
 }
+
+#[path = "fidelity_body_fallback_tests.rs"]
+mod fallback_tests;

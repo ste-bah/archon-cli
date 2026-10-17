@@ -118,6 +118,39 @@ fn prompt_carries_the_typed_question_every_obligation_and_every_task_text() {
     assert!(prompt.contains("You are not shown the repository"));
 }
 
+#[test]
+fn prompt_judges_obligations_under_prd_acceptance_and_gap_context() {
+    let context = "# Done definition\nDone definition: required artifact exists.\n\n# Residual gap policy\nResidual gaps may be explicitly scoped and fail-closed.";
+    let summary = SkeletonSummary::absent().with_prd_context(context);
+    let prompt = fidelity_prompt(&obligations(), &tasks(), &summary);
+    assert!(prompt.contains("FULL PRD CONTEXT"));
+    assert!(prompt.contains("Done definition: required artifact exists."));
+    assert!(prompt.contains("Residual gaps may be explicitly scoped and fail-closed."));
+    assert!(prompt.contains("judge it under the PRD's own definition of done and any scope, gap, or acceptance policy anywhere in the full PRD"));
+}
+
+#[test]
+fn context_contains_the_whole_prd_and_points_to_each_obligation_source_section() {
+    let prd = "# Operational Contract\n\n- REQ-WS-009: The release manifest records each completed widget.\n\n# Acceptance of vendor contract\n\nVendor signatures are checked by procurement.\n\n# Residual Gap Policy\n\nUnavailable widgets are listed as scoped residual gaps.\n";
+    let ids = vec!["REQ-WS-009".to_string()];
+    let summary = SkeletonSummary::absent().with_prd_context_for(prd, &ids);
+    let prompt = fidelity_prompt(&obligations(), &tasks(), &summary);
+    assert!(prompt.contains("The release manifest records each completed widget."));
+    assert!(prompt.contains("Vendor signatures are checked by procurement."));
+    assert!(prompt.contains("Unavailable widgets are listed as scoped residual gaps."));
+    assert!(prompt.contains("REQ-WS-009: # Operational Contract"));
+}
+
+#[test]
+fn policy_under_permitted_scope_heading_reaches_the_critic() {
+    let prd = "# Miscellaneous Requirements\n\n- REQ-WS-009: The release manifest records each completed widget.\n\n## Permitted scope\n\nA scoped subset is acceptable only when named in the release manifest.\n";
+    let ids = vec!["REQ-WS-009".to_string()];
+    let summary = SkeletonSummary::absent().with_prd_context_for(prd, &ids);
+    let prompt = fidelity_prompt(&obligations(), &tasks(), &summary);
+    assert!(prompt.contains("## Permitted scope\n\nA scoped subset is acceptable only when named in the release manifest."));
+    assert!(prompt.contains("The release manifest records each completed widget."));
+}
+
 /// The skeleton section sits after the obligations and before the task
 /// texts, and the instruction says what it establishes.
 #[test]
@@ -242,7 +275,7 @@ fn malformed_replies_are_errors_not_passes() {
 /// verdict type serializes.
 #[test]
 fn prompt_lists_the_exact_verdict_keys_and_parse_errors_name_their_path() {
-    let keys = "obligation_id, necessarily_true, weakest_task_id, reason, quoted_task_text, supporting_task_id, supporting_text";
+    let keys = "obligation_id, necessarily_true, weakest_task_id, reason, quoted_task_text, weakening_quotes, supporting_task_id, supporting_text";
     let prompt = fidelity_prompt(&obligations(), &tasks(), &SkeletonSummary::absent());
     assert!(
         prompt.contains(&format!(
@@ -256,6 +289,7 @@ fn prompt_lists_the_exact_verdict_keys_and_parse_errors_name_their_path() {
         weakest_task_id: String::new(),
         reason: String::new(),
         quoted_task_text: String::new(),
+        weakening_quotes: Vec::new(),
         supporting_task_id: String::new(),
         supporting_text: String::new(),
     };
@@ -430,9 +464,28 @@ fn cluster_digest_changes_with_any_text_or_the_skeleton_and_nothing_else() {
         base,
         fidelity_cluster_digest(&obligations(), &tasks(), &SkeletonSummary::absent())
     );
+    let prd = SkeletonSummary::absent().with_prd_context("# Permitted scope\nScope is limited.\n");
+    let changed_prd =
+        SkeletonSummary::absent().with_prd_context("# Permitted scope\nScope is unrestricted.\n");
+    assert_ne!(
+        fidelity_cluster_digest(&obligations(), &tasks(), &prd),
+        fidelity_cluster_digest(&obligations(), &tasks(), &changed_prd)
+    );
 }
 
 #[path = "fidelity_audit_reply_tests.rs"]
 mod reply;
 #[path = "fidelity_audit_support_tests.rs"]
 mod support;
+
+#[test]
+fn context_includes_acceptance_heading_and_acceptance_criteria_subheading() {
+    let ids = Vec::new();
+    let acceptance =
+        super::context::prd_acceptance_context("## Acceptance\nPolicy applies.\n", &ids);
+    let criteria =
+        super::context::prd_acceptance_context("### Acceptance Criteria\nAll checks pass.\n", &ids);
+
+    assert!(acceptance.contains("## Acceptance\nPolicy applies."));
+    assert!(criteria.contains("### Acceptance Criteria\nAll checks pass."));
+}

@@ -63,11 +63,10 @@ use regex::Regex;
 
 use super::verdict_shell::{Simple, expands, simple_commands};
 
-#[path = "workflow_acceptance_executability_verdict_shell_setup.rs"]
-mod shell_setup;
-
 #[path = "workflow_acceptance_executability_verdict_setup_path.rs"]
 pub(super) mod setup_path;
+#[path = "workflow_acceptance_executability_verdict_shell_setup.rs"]
+mod shell_setup;
 
 #[path = "workflow_acceptance_executability_verdict_subcommand.rs"]
 mod subcommand;
@@ -180,7 +179,7 @@ impl Context {
     }
 
     /// Checks ran `depth` levels below the top of a copy holding `roots`.
-    pub(crate) fn within(mut self, depth: usize, roots: &[&str]) -> Self {
+    pub(crate) fn within<S: AsRef<str>>(mut self, depth: usize, roots: &[S]) -> Self {
         self.tree = Some(setup_path::SiteTree::new(depth, roots));
         self
     }

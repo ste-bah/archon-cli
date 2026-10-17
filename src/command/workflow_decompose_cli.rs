@@ -8,7 +8,7 @@ use archon_core::env_vars::ArchonEnvVars;
 
 use crate::cli_args::WorkflowAction;
 use crate::cli_args::{
-    WorkflowDecomposeArgs, WorkflowReclaimTaskRootArgs, WorkflowResumeArgs,
+    WorkflowDecomposeArgs, WorkflowReclaimTaskRootArgs, WorkflowResumeArgs, WorkflowStatusArgs,
     WorkflowVerifyFrozenChainArgs,
 };
 
@@ -32,6 +32,7 @@ pub(super) async fn handle(
             prd,
             gate_envelope,
             call_id,
+            read_only,
         }) => {
             crate::command::workflow_decompose_frozen_chain::handle_staged_verify(
                 cwd,
@@ -40,6 +41,7 @@ pub(super) async fn handle(
                 prd,
                 gate_envelope.as_deref(),
                 call_id.as_deref(),
+                *read_only,
                 config,
             )?;
             Ok(true)
@@ -109,6 +111,12 @@ pub(super) async fn handle(
         WorkflowAction::Resume(WorkflowResumeArgs { dry_run: true, .. }) => Err(anyhow!(
             "--dry-run is supported only for fixed decomposition resumes"
         )),
+        WorkflowAction::Reverify(WorkflowStatusArgs { run_id }) => {
+            let output =
+                super::workflow_decompose_reverify::reverify(cwd, run_id, config, env_vars).await?;
+            println!("{output}");
+            Ok(true)
+        }
         _ => Ok(false),
     }
 }

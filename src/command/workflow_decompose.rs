@@ -318,6 +318,7 @@ pub(crate) async fn run_fixed_decomposition_with_factory_and_sink(
             &mut frozen_chain,
             (&store, &run_id, &log_path, &ui_sink),
             (&project_root, &prd_path, &task_root, &repository.root),
+            config.tools.cargo.to_limits(),
         )
         .await?;
         if !frozen_chain.acceptance {

@@ -20,7 +20,7 @@ fn real_specialist_execution_keeps_unknown_usage_cost_unknown() {
         &test_fingerprint("fp-unknown-cost"),
         "Two firms choose prices.",
         &GameTheoryMemoryContext::default(),
-        &GameTheoryRunOptions::default(),
+        &super::test_options(),
         None,
     ))
     .unwrap();
@@ -36,7 +36,7 @@ fn real_specialist_execution_keeps_unknown_usage_cost_unknown() {
 #[test]
 fn test_specialist_fixture_outputs_non_empty() {
     let db = test_db();
-    let fp = block_on(classify(
+    let fp = block_on(classify_test(
         &db,
         "Two firms set quantities simultaneously.",
         None,
@@ -84,7 +84,7 @@ fn test_specialist_fixture_outputs_non_empty() {
 #[test]
 fn test_failure_isolation_with_force_fail_suffix() {
     let db = test_db();
-    let fp = block_on(classify(
+    let fp = block_on(classify_test(
         &db,
         "Two firms set quantities simultaneously.",
         None,
@@ -265,7 +265,7 @@ fn test_no_recall_when_memory_keys_empty() {
     let rd = RoutingDecision {
         run_id: "run-empty".into(),
         fingerprint_id: "fp-empty".into(),
-        enabled_specialists: vec!["agent-with-no-memory-keys".into()],
+        enabled_specialists: vec!["business-strategy-gamifier".into()],
         skipped_specialists: vec![],
         evaluated_conditions: vec![],
         created_at: "2026-05-03T00:00:00Z".into(),
@@ -286,6 +286,38 @@ fn test_no_recall_when_memory_keys_empty() {
     assert_eq!(leann.calls(), 0);
     assert!(!llm.prompts()[0].contains("## Prior Context"));
 }
+
+#[test]
+fn unknown_specialist_fails_before_provider_call() {
+    let graph = archon_memory::MemoryGraph::in_memory().unwrap();
+    let memory: std::sync::Arc<dyn archon_memory::MemoryTrait> = std::sync::Arc::new(graph);
+    let leann = std::sync::Arc::new(MockLeannSearcher::new("should not be used"));
+    let ctx = GameTheoryMemoryContext::new(memory, Some(leann.clone()), true);
+    let llm = canned_specialist_llm();
+    let rd = RoutingDecision {
+        run_id: "run-unknown-agent".into(),
+        fingerprint_id: "fp-unknown-agent".into(),
+        enabled_specialists: vec!["agent-with-no-memory-keys".into()],
+        skipped_specialists: vec![],
+        evaluated_conditions: vec![],
+        created_at: "2026-05-03T00:00:00Z".into(),
+    };
+
+    let error = block_on(execute_specialists_real(
+        &llm,
+        &rd,
+        &test_fingerprint("fp-unknown-agent"),
+        "Two firms choose prices.",
+        &ctx,
+    ))
+    .unwrap_err()
+    .to_string();
+
+    assert!(error.contains("agent-with-no-memory-keys"));
+    assert!(error.contains("archon agent sync"));
+    assert_eq!(leann.calls(), 0);
+    assert!(llm.prompts().is_empty());
+}
 #[test]
 fn test_cost_tracked_per_specialist() {
     let llm = canned_specialist_llm();
@@ -304,7 +336,7 @@ fn test_cost_tracked_per_specialist() {
         &test_fingerprint("fp-cost"),
         "Two firms choose prices.",
         &GameTheoryMemoryContext::default(),
-        &GameTheoryRunOptions::default(),
+        &super::test_options(),
         None,
     ))
     .unwrap();
@@ -336,6 +368,7 @@ fn test_concurrency_cap_respected_per_run_flag() {
         "Two firms choose prices.",
         &GameTheoryMemoryContext::default(),
         &GameTheoryRunOptions {
+            project_root: super::test_project_root().to_path_buf(),
             budget_usd: 20.0,
             max_concurrent: 1,
             style_profile_id: None,
@@ -372,6 +405,7 @@ fn test_specialists_dispatch_in_parallel_waves() {
         "Two firms choose prices.",
         &GameTheoryMemoryContext::default(),
         &GameTheoryRunOptions {
+            project_root: super::test_project_root().to_path_buf(),
             budget_usd: 20.0,
             max_concurrent: 2,
             style_profile_id: None,
@@ -401,6 +435,7 @@ fn test_tier1_foundation_agents_run_as_parallel_wave() {
         "Two firms simultaneously set prices in a Bertrand duopoly.",
         "2026-05-04T00:00:00Z",
         &GameTheoryMemoryContext::default(),
+        super::test_project_root(),
         None,
     ))
     .unwrap();
@@ -419,7 +454,7 @@ fn test_tier1_foundation_agents_run_as_parallel_wave() {
 #[test]
 fn test_real_specialist_execution_with_failure_isolation() {
     let db = test_db();
-    let fp = block_on(classify(
+    let fp = block_on(classify_test(
         &db,
         "Two firms set quantities simultaneously.",
         None,

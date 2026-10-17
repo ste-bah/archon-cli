@@ -11,7 +11,8 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use archon_workflow::fidelity_audit::{
     ClaimedObligation, ClaimingTask, DOCUMENT_KEYS, FidelityRefusal, FidelityVerdict, RefusalKind,
-    SkeletonSummary, VERDICT_KEYS, fidelity_prompt, parse_fidelity_verdicts,
+    SkeletonSummary, VERDICT_KEYS, expand_supporting_quote, fidelity_prompt,
+    parse_fidelity_verdicts, same_normalized_quote, task_contains_quote,
 };
 use archon_workflow::llm_client_port::{WorkflowAgentOutcome, WorkflowLlmClient};
 
@@ -76,6 +77,7 @@ pub(super) enum Asked {
 enum Refused {
     Document(FidelityRefusal),
     Verdict(String, FidelityRefusal),
+    Expanded(String, FidelityRefusal, String),
 }
 
 /// What a refusal's class is judged by: see [`FIDELITY_NO_PROGRESS_WINDOW`].
@@ -86,12 +88,15 @@ impl Refused {
         match self {
             Refused::Document(refusal) => (None, refusal.verdict, refusal.kind),
             Refused::Verdict(id, refusal) => (Some(id.clone()), None, refusal.kind),
+            Refused::Expanded(id, refusal, _) => (Some(id.clone()), None, refusal.kind),
         }
     }
 
     fn message(&self) -> &str {
         match self {
-            Refused::Document(refusal) | Refused::Verdict(_, refusal) => &refusal.message,
+            Refused::Document(refusal)
+            | Refused::Verdict(_, refusal)
+            | Refused::Expanded(_, refusal, _) => &refusal.message,
         }
     }
 }
@@ -144,6 +149,7 @@ pub(super) async fn ask(
             .collect()
     };
     let mut seen: BTreeSet<Class> = BTreeSet::new();
+    let mut pending_confirmation = std::collections::BTreeMap::<String, String>::new();
     let mut stalled = 0;
     let mut attempt = 0;
     let last = loop {
@@ -175,6 +181,7 @@ pub(super) async fn ask(
             outcome.content.trim().as_bytes(),
         );
         let document = String::from_utf8_lossy(&document);
+        let expansions = expanded_supports(&document, tasks);
         let before = open(&answered).len();
         let mut refused = Vec::new();
         match parse_fidelity_verdicts(&document, obligations, tasks) {
@@ -198,11 +205,38 @@ pub(super) async fn ask(
                     }
                     match result {
                         Ok(verdict) => {
-                            accept(index, &verdict)?;
-                            answered[index] = Some(verdict.necessarily_true);
+                            if let Some(expanded) =
+                                pending_confirmation.remove(&verdict.obligation_id)
+                            {
+                                if verdict.necessarily_true
+                                    && same_normalized_quote(&verdict.supporting_text, &expanded)
+                                {
+                                    accept(index, &verdict)?;
+                                    answered[index] = Some(verdict.necessarily_true);
+                                } else {
+                                    refused.push(Refused::Verdict(
+                                        verdict.obligation_id.clone(),
+                                        FidelityRefusal {
+                                            message: format!("{} changed its verdict or did not quote the expanded supporting passage verbatim", verdict.obligation_id),
+                                            verdict: Some(index),
+                                            kind: RefusalKind::NotVerbatim("supporting_text"),
+                                        },
+                                    ));
+                                }
+                            } else {
+                                accept(index, &verdict)?;
+                                answered[index] = Some(verdict.necessarily_true);
+                            }
                         }
                         Err(refusal) => {
-                            refused.push(Refused::Verdict(obligations[index].id.clone(), refusal))
+                            let id = obligations[index].id.clone();
+                            let was_confirmation = pending_confirmation.remove(&id).is_some();
+                            if !was_confirmation && let Some(expanded) = expansions.get(&id) {
+                                pending_confirmation.insert(id.clone(), expanded.clone());
+                                refused.push(Refused::Expanded(id, refusal, expanded.clone()));
+                            } else {
+                                refused.push(Refused::Verdict(id, refusal))
+                            }
                         }
                     }
                 }
@@ -255,6 +289,9 @@ pub(super) async fn ask(
 /// have. A verdict already kept is not named again.
 fn reask(refused: &[Refused], open: &[String]) -> String {
     let refusal = match refused {
+        [Refused::Expanded(id, _, expanded)] => format!(
+            "Your supporting quote, in full, reads: {expanded}. Judge obligation {id} again; if you keep the verdict, quote this text verbatim."
+        ),
         [Refused::Document(refusal)] => format!(
             "Your reply above was refused, and no verdict was taken from it: {}",
             refusal.message
@@ -265,6 +302,9 @@ fn reask(refused: &[Refused], open: &[String]) -> String {
                 .map(|refusal| match refusal {
                     Refused::Verdict(id, refusal) => format!("- {id}: {}", refusal.message),
                     Refused::Document(refusal) => format!("- {}", refusal.message),
+                    Refused::Expanded(id, _, expanded) => format!(
+                        "- {id}: Your supporting quote, in full, reads: {expanded}. Judge the obligation again; if you keep the verdict, quote this text verbatim."
+                    ),
                 })
                 .collect();
             format!(
@@ -279,6 +319,36 @@ fn reask(refused: &[Refused], open: &[String]) -> String {
         DOCUMENT_KEYS.join(", "),
         VERDICT_KEYS.join(", "),
     )
+}
+
+fn expanded_supports(
+    document: &str,
+    tasks: &[ClaimingTask],
+) -> std::collections::BTreeMap<String, String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(document) else {
+        return std::collections::BTreeMap::new();
+    };
+    value["verdicts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|verdict| {
+            if verdict["necessarily_true"].as_bool() != Some(true) {
+                return None;
+            }
+            let id = verdict["obligation_id"].as_str()?;
+            let quote = verdict["supporting_text"].as_str()?;
+            if !quote.contains('…') && !quote.contains("...") {
+                return None;
+            }
+            let task_id = verdict["supporting_task_id"].as_str()?;
+            let task = tasks.iter().find(|task| task.task_id == task_id)?;
+            if task_contains_quote(&task.text, quote) {
+                return None;
+            }
+            Some((id.to_string(), expand_supporting_quote(&task.text, quote)?))
+        })
+        .collect()
 }
 
 fn require_complete(outcome: &WorkflowAgentOutcome) -> Result<()> {

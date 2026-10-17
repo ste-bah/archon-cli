@@ -122,6 +122,7 @@ pub(crate) fn spawn_live_workflow(
             true,
             LiveApprovalMode::InteractiveSurface,
             check_policy,
+            config.tools.cargo.to_limits(),
         )
         .await;
         match result {
@@ -202,6 +203,7 @@ pub(crate) async fn run_live_cli_action(
         true,
         LiveApprovalMode::CliYes,
         check_policy,
+        config.tools.cargo.to_limits(),
     )
     .await;
     drain.abort();

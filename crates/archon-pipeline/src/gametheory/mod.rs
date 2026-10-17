@@ -18,6 +18,47 @@ pub mod sections;
 pub mod spec;
 pub mod specimens;
 
+/// Load and validate a game-theory specialist prompt. Shared by preflight and
+/// specialist runtime loading so both enforce the same parsed body.
+pub fn load_agent_prompt_body(
+    agent: &agents::GameTheoryAgent,
+    root: &std::path::Path,
+) -> Result<String, GameTheoryError> {
+    let declared_path = agent.prompt_source_path;
+    let path = root.join(declared_path);
+    if !path.is_file() {
+        return Err(GameTheoryError::MissingAgentFile {
+            path: format!(
+                "GameTheory pipeline agent '{}' prompt '{}' is unavailable; run `archon agent sync`",
+                agent.key, declared_path
+            ),
+        });
+    }
+    let content = std::fs::read_to_string(&path).map_err(|error| GameTheoryError::Io {
+        message: format!(
+            "GameTheory pipeline agent '{}' prompt '{}' is unavailable: {error}; run `archon agent sync`",
+            agent.key, declared_path
+        ),
+    })?;
+    let (_frontmatter, body) = crate::agent_loader::parse_frontmatter(&content).map_err(|error| {
+        GameTheoryError::Validation {
+            message: format!(
+                "GameTheory pipeline agent '{}' prompt '{}' is invalid: {error}; run `archon agent sync`",
+                agent.key, declared_path
+            ),
+        }
+    })?;
+    if body.trim().is_empty() {
+        return Err(GameTheoryError::Validation {
+            message: format!(
+                "GameTheory pipeline agent '{}' prompt '{}' has an empty body; run `archon agent sync`",
+                agent.key, declared_path
+            ),
+        });
+    }
+    Ok(body)
+}
+
 pub use agents::{GameTheoryAgent, GameTheoryTier, GameTheoryToolAccess};
 pub use errors::GameTheoryError;
 pub use facade::{

@@ -49,8 +49,15 @@ pub(super) fn handle(
         })?;
     let evaluation = match evaluate_trace_for_published_bodies(cwd, options) {
         Ok(evaluation) => evaluation,
-        Err(error) => crate::command::workflow_gate::GateEvaluation::new("", Vec::new())
-            .with_operational_error(error.to_string()),
+        Err(error) => crate::command::workflow_gate::task_body_input_finding(
+            &error,
+            crate::command::workflow_gate::GateId::RequirementsTrace,
+            "requirements trace",
+        )
+        .unwrap_or_else(|| {
+            crate::command::workflow_gate::GateEvaluation::new("", Vec::new())
+                .with_operational_error(error.to_string())
+        }),
     };
     let staging_root = gate_envelope
         .parent()

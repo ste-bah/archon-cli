@@ -4,15 +4,61 @@ pub(super) use crate::gametheory::fingerprint::{
 pub(super) use crate::gametheory::routing::RoutingDecision;
 use crate::leann_searcher::LeannSearcher;
 use crate::runner::{LlmClient, LlmResponse};
+use crate::gametheory::GameTheoryRunOptions;
 use async_trait::async_trait;
 use cozo::DbInstance;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 
 mod classification;
 mod execution_memory;
 mod pipeline;
 mod prompt_source;
 mod replay_resume;
+
+pub(super) async fn classify_test(
+    db: &cozo::DbInstance,
+    situation: &str,
+    llm: Option<&dyn LlmClient>,
+) -> Result<GameTheoryFingerprint, crate::gametheory::GameTheoryError> {
+    super::classification::classify(db, situation, llm, test_project_root()).await
+}
+
+pub(super) fn test_project_root() -> &'static std::path::Path {
+    static ROOT: OnceLock<std::path::PathBuf> = OnceLock::new();
+    ROOT.get_or_init(|| {
+        let root = std::env::temp_dir().join(format!(
+            "archon-gametheory-test-project-{}",
+            uuid::Uuid::new_v4()
+        ));
+        for agent in crate::gametheory::GAMETHEORY_AGENTS {
+            let path = root.join(agent.prompt_source_path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                path,
+                format!(
+                    "---\nname: {}\n---\n{} test project prompt for {}.",
+                    agent.key,
+                    if agent.key == "nash-equilibrium-finder" {
+                        "Nash-Seeker"
+                    } else {
+                        agent.display_name
+                    },
+                    agent.key
+                ),
+            )
+            .unwrap();
+        }
+        root
+    })
+}
+
+pub(super) fn test_options() -> GameTheoryRunOptions {
+    GameTheoryRunOptions {
+        project_root: test_project_root().to_path_buf(),
+        ..GameTheoryRunOptions::default()
+    }
+}
 
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     tokio::runtime::Runtime::new().unwrap().block_on(f)

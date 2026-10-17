@@ -320,27 +320,14 @@ pub fn artifact_views(run: &WorkflowRun) -> Vec<WorkflowArtifactView> {
 
 fn read_events(store: &WorkflowStore, run_id: &str) -> WorkflowResult<(Vec<WorkflowEvent>, usize)> {
     let path = store.events_path(run_id);
-    let raw = fs::read(&path).map_err(|e| WorkflowError::io(&path, e))?;
-    let mut events = Vec::new();
-    let mut damaged_event_lines = 0;
-    for (index, line) in raw.split(|byte| *byte == b'\n').enumerate() {
-        if line.iter().all(u8::is_ascii_whitespace) {
-            continue;
-        }
-        let event = match serde_json::from_slice::<WorkflowEvent>(line) {
-            Ok(event) => event,
-            Err(error) => {
-                damaged_event_lines += 1;
-                tracing::warn!(path = %path.display(), line = index + 1, %error,
-                    "Skipping malformed workflow event during history lookup");
-                continue;
-            }
-        };
-        if !contains_forbidden_field(&event.detail) {
-            events.push(event);
-        }
-    }
-    Ok((events, damaged_event_lines))
+    let (events, damaged_event_lines) = crate::events::read_event_log(&path)?;
+    Ok((
+        events
+            .into_iter()
+            .filter(|event| !contains_forbidden_field(&event.detail))
+            .collect(),
+        damaged_event_lines,
+    ))
 }
 
 fn read_harness(store: &WorkflowStore, run_id: &str) -> WorkflowResult<String> {

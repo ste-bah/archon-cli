@@ -24,6 +24,7 @@ fn test_full_pipeline_produces_report() {
         "Two firms simultaneously set prices in a Bertrand duopoly with asymmetric costs.",
         Some(spec_path),
         Some(&llm),
+        super::test_project_root(),
     ));
     assert!(
         result.is_ok(),
@@ -151,6 +152,7 @@ fn test_full_pipeline_records_sona_when_learning_supplied() {
         Some(&llm),
         GameTheoryMemoryContext::default(),
         GameTheoryRunOptions {
+            project_root: super::test_project_root().to_path_buf(),
             budget_usd: 20.0,
             max_concurrent: 1,
             style_profile_id: Some("technical".to_string()),
@@ -188,6 +190,7 @@ fn test_full_pipeline_partial_status_on_failure() {
         "Two firms simultaneously set prices in a Bertrand duopoly.",
         Some(spec_path),
         Some(&llm),
+        super::test_project_root(),
     ))
     .unwrap();
     assert_eq!(result.status, "completed");
@@ -204,6 +207,7 @@ fn test_full_pipeline_requires_llm_provider_and_writes_no_run() {
         "Two firms simultaneously set prices in a Bertrand duopoly.",
         Some(spec_path),
         None,
+        super::test_project_root(),
     ))
     .unwrap_err();
     assert!(matches!(err, GameTheoryError::LlmUnavailable { .. }));
@@ -234,6 +238,7 @@ fn test_budget_cap_halts_pipeline_gracefully_with_partial_report() {
         Some(&llm),
         GameTheoryMemoryContext::default(),
         GameTheoryRunOptions {
+            project_root: super::test_project_root().to_path_buf(),
             budget_usd: 0.0001,
             max_concurrent: 1,
             style_profile_id: Some("executive".to_string()),
@@ -299,6 +304,7 @@ fn test_style_flag_applied_to_section_writers() {
         Some(&llm),
         GameTheoryMemoryContext::default(),
         GameTheoryRunOptions {
+            project_root: super::test_project_root().to_path_buf(),
             budget_usd: 20.0,
             max_concurrent: 1,
             style_profile_id: Some("technical".to_string()),
@@ -332,6 +338,7 @@ fn test_kb_flag_reads_doc_chunks_into_llm_context_and_checkpoint() {
         Some(&llm),
         GameTheoryMemoryContext::default(),
         GameTheoryRunOptions {
+            project_root: super::test_project_root().to_path_buf(),
             budget_usd: 20.0,
             max_concurrent: 1,
             style_profile_id: Some("executive".to_string()),

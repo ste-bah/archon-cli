@@ -27,7 +27,7 @@ use crate::command::workflow_gate::{GateFinding, GateId};
 pub(crate) mod acceptance_reply_blocks;
 
 #[path = "workflow_acceptance_coverage_gate.rs"]
-mod coverage_gate;
+pub(crate) mod coverage_gate;
 #[path = "workflow_task_set_findings.rs"]
 mod findings;
 #[path = "workflow_judge_incremental.rs"]
@@ -107,6 +107,7 @@ pub(crate) fn acceptance_pin_path(project_root: &Path, tasks_root: &Path) -> Pat
     archon_workflow::task_set_lineage::pin_store_dir(project_root).join(format!("{key}.json"))
 }
 
+#[cfg(test)]
 pub(crate) async fn prepare_acceptance_freeze(
     project_root: &Path,
     tasks_root: &Path,
@@ -114,21 +115,42 @@ pub(crate) async fn prepare_acceptance_freeze(
     mode: GateMode,
     client: Arc<dyn WorkflowLlmClient>,
 ) -> Result<PreparedAcceptanceFreeze> {
+    prepare_acceptance_freeze_with_limits(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        client,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+}
+
+pub(crate) async fn prepare_acceptance_freeze_with_limits(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    mode: GateMode,
+    client: Arc<dyn WorkflowLlmClient>,
+    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+) -> Result<PreparedAcceptanceFreeze> {
     let contract_path = tasks_root.join(ACCEPTANCE_CONTRACT_FILE);
     let candidate = std::fs::read(&contract_path)
         .with_context(|| format!("reading acceptance contract at {}", contract_path.display()))?;
-    prepare_acceptance_freeze_from_candidate(
+    prepare_acceptance_freeze_from_candidate_with_limits(
         project_root,
         tasks_root,
         prd_path,
         mode,
         candidate,
         client,
+        resource_limits,
     )
     .await
 }
 
 /// The unstaged freeze of a candidate: unlimited, nothing saved.
+#[cfg(test)]
 pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     project_root: &Path,
     tasks_root: &Path,
@@ -137,8 +159,29 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
     candidate: Vec<u8>,
     client: Arc<dyn WorkflowLlmClient>,
 ) -> Result<PreparedAcceptanceFreeze> {
+    prepare_acceptance_freeze_from_candidate_with_limits(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        candidate,
+        client,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+}
+
+pub(crate) async fn prepare_acceptance_freeze_from_candidate_with_limits(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    mode: GateMode,
+    candidate: Vec<u8>,
+    client: Arc<dyn WorkflowLlmClient>,
+    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+) -> Result<PreparedAcceptanceFreeze> {
     let resume = crate::command::workflow_freeze_budget::FreezeResume::none();
-    prepare_acceptance_freeze_resumable(
+    prepare_acceptance_freeze_resumable_with_limits(
         project_root,
         tasks_root,
         prd_path,
@@ -146,6 +189,7 @@ pub(crate) async fn prepare_acceptance_freeze_from_candidate(
         candidate,
         client,
         &resume,
+        resource_limits,
     )
     .await
 }
@@ -172,6 +216,7 @@ fn resumable(
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn prepare_acceptance_freeze_resumable(
     project_root: &Path,
     tasks_root: &Path,
@@ -180,6 +225,29 @@ pub(crate) async fn prepare_acceptance_freeze_resumable(
     candidate: Vec<u8>,
     client: Arc<dyn WorkflowLlmClient>,
     resume: &crate::command::workflow_freeze_budget::FreezeResume,
+) -> Result<PreparedAcceptanceFreeze> {
+    prepare_acceptance_freeze_resumable_with_limits(
+        project_root,
+        tasks_root,
+        prd_path,
+        mode,
+        candidate,
+        client,
+        resume,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
+    )
+    .await
+}
+
+pub(crate) async fn prepare_acceptance_freeze_resumable_with_limits(
+    project_root: &Path,
+    tasks_root: &Path,
+    prd_path: &Path,
+    mode: GateMode,
+    candidate: Vec<u8>,
+    client: Arc<dyn WorkflowLlmClient>,
+    resume: &crate::command::workflow_freeze_budget::FreezeResume,
+    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> Result<PreparedAcceptanceFreeze> {
     let freeze_mode = freeze_mode(mode)?;
     let original = candidate;
@@ -212,12 +280,13 @@ pub(crate) async fn prepare_acceptance_freeze_resumable(
 
     // A4: a check that crashes, or passes before any implementation, is
     // never published; it goes back to its author.
-    let probed = coverage_gate::pre_implementation_findings(
+    let probed = coverage_gate::pre_implementation_findings_with_limits(
         project_root,
         tasks_root,
         prd_path,
         &contract,
         resume,
+        resource_limits,
     )
     .await?;
     // Issue 328: the lock records the tree the checks were proven on.
@@ -315,8 +384,10 @@ pub(crate) mod reauthor;
 pub(crate) mod republish;
 #[path = "workflow_acceptance_check_reuse.rs"]
 pub(super) mod workflow_acceptance_check_reuse;
+#[cfg(test)]
+pub(crate) use findings::prepare_acceptance_freeze_reauthoring;
 pub(crate) use findings::{
-    non_accepted_ids, prepare_acceptance_freeze_reauthoring, prepare_from_judged,
+    non_accepted_ids, prepare_acceptance_freeze_reauthoring_with_limits, prepare_from_judged,
     unproven_incomplete,
 };
 #[cfg(test)]

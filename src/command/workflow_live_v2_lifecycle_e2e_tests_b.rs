@@ -1,28 +1,31 @@
 use super::*;
 
-/// The shared board, installed as session boot and `workflow_live_board.rs` do.
-///
-/// The graph itself lives in `workflow_live_test_support` rather than here, so
-/// that it is genuinely one board per binary: the fixtures in this file are no
-/// longer its only users, and a second `OnceLock` anywhere else in the binary
-/// would silently lose the install race and leave whoever lost asserting against
-/// a board the run never wrote to.
+/// Install the shared in-memory board used by the live workflow fixtures.
 pub(super) fn installed_board() -> Arc<archon_memory::MemoryGraph> {
     crate::command::workflow_live::workflow_live_test_support::installed_board()
 }
 
-/// Everything the FullLifecycle fixture needs on disk and in memory, up to the
-/// point of running it.
-///
-/// Extracted from the test below so the board-drain coverage can drive the SAME
-/// production entry point rather than a second hand-built approximation of it —
-/// a drain test that ran against its own harness would prove the harness.
+/// The disk, runner, and LLM state needed to drive a complete lifecycle.
 pub(super) struct FullLifecycleFixture {
     pub(super) runner: WorkflowV2ScriptRunner,
     pub(super) run_id: String,
     pub(super) v2_store: WorkflowV2ResultStore,
     pub(super) llm: Arc<CannedLifecycleLlm>,
     pub(super) repo: std::path::PathBuf,
+}
+
+/// Drive the fixture through the real production entry point.
+pub(super) async fn run_full_lifecycle(runner: WorkflowV2ScriptRunner) -> WorkflowV2ScriptSummary {
+    tokio::time::timeout(
+        Duration::from_secs(120),
+        runner.run_decomposed_lifecycle(
+            "# Archon decomposed-PRD workflow (native lifecycle e2e fixture)",
+            serde_json::json!([]),
+        ),
+    )
+    .await
+    .expect("lifecycle harness timeout")
+    .expect("lifecycle summary")
 }
 
 pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFixture {
@@ -88,6 +91,7 @@ pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFix
     );
     let runtime = WorkflowV2ScriptRuntime {
         target_repository_root: spec.target_repository_root.clone(),
+        cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
         generated_config: archon_core::config::GeneratedWorkflowConfig {
             max_repair_iterations: 1,
             max_investigation_iterations: 1,
@@ -131,20 +135,6 @@ pub(super) fn full_lifecycle_fixture(root: &std::path::Path) -> FullLifecycleFix
     }
 }
 
-/// Drive the fixture through the real production entry point.
-pub(super) async fn run_full_lifecycle(runner: WorkflowV2ScriptRunner) -> WorkflowV2ScriptSummary {
-    tokio::time::timeout(
-        Duration::from_secs(120),
-        runner.run_decomposed_lifecycle(
-            "# Archon decomposed-PRD workflow (native lifecycle e2e fixture)",
-            serde_json::json!([]),
-        ),
-    )
-    .await
-    .expect("lifecycle harness timeout")
-    .expect("lifecycle summary")
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_terminal() {
     let started = Instant::now();
@@ -155,11 +145,22 @@ async fn real_decomposed_lifecycle_normalizes_reclassified_ids_and_reaches_termi
         fixture.v2_store.clone(),
         Arc::clone(&fixture.llm),
     );
-    let summary = run_full_lifecycle(fixture.runner).await;
+    let summary =
+        super::workflow_live_v2_lifecycle_e2e_tests_d::run_full_lifecycle_with_diagnostics(
+            fixture.runner,
+            &v2_store,
+            &llm,
+        )
+        .await;
+    let failed_result = summary
+        .failed_call
+        .as_deref()
+        .and_then(|call_id| v2_store.load_call_record(call_id).ok().flatten())
+        .map(|record| (record.result.summary, record.result.commands_run));
     assert_eq!(
         summary.status,
         WorkflowV2Status::Accepted,
-        "failed_call={:?} next_action={:?} calls={:?} llm_calls={:?}",
+        "failed_call={:?} next_action={:?} calls={:?} llm_calls={:?} {failed_result:?}",
         summary.failed_call,
         summary.next_action,
         summary
@@ -331,6 +332,7 @@ async fn failed_final_report_emits_host_built_fallback() {
     let runner = WorkflowV2ScriptRunner::new(
         spec.task,
         WorkflowV2ScriptRuntime {
+            cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
             target_repository_root: None,
             generated_config: generated_config.clone(),
         },

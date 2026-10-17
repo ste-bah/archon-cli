@@ -103,7 +103,7 @@ async fn tests_run_gate_exit_zero_passes() {
     // Write minimal Cargo.toml
     std::fs::write(
         project_root.join("Cargo.toml"),
-        "[workspace]\n\n[package]\nname = \"gate_test_fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        "[package]\nname = \"gate_test_fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n",
     )
     .expect("write Cargo.toml");
 

@@ -346,24 +346,6 @@ pub(super) fn package_name(manifest: &str) -> Option<String> {
     None
 }
 
-/// The command(s) one declared item holds: its backticked spans, else its
-/// whole text.
-fn commands_of(item: &str) -> Vec<String> {
-    let spans: Vec<String> = item
-        .split('`')
-        .skip(1)
-        .step_by(2)
-        .map(str::trim)
-        .filter(|span| !span.is_empty())
-        .map(str::to_string)
-        .collect();
-    if spans.is_empty() {
-        vec![item.trim().to_string()]
-    } else {
-        spans
-    }
-}
-
 /// Whether some owned path covers `required`.
 fn covered(required: &Required, owned: &BTreeSet<String>) -> bool {
     required.alternatives.iter().any(|path| {
@@ -413,8 +395,9 @@ pub(super) fn set_findings(root: &Path) -> Result<Vec<GateFinding>> {
                 continue;
             }
         };
-        // A declared item is its backticked command(s), or its whole text.
-        for command in task.focused_tests.iter().flat_map(|item| commands_of(item)) {
+        // Use the task model's runtime command rule so prose in later spans
+        // cannot become a command the host never runs.
+        for command in task.declared_focused_test_commands() {
             let command = &command;
             let words: Vec<&str> = command.split_whitespace().collect();
             let packages = if cargo_test_start(&words).is_some() {

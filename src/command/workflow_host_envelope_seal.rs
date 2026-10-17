@@ -24,6 +24,7 @@ pub(crate) struct EnvelopeCleanup {
     pub(crate) secrets: Arc<HostSecrets>,
     pub(crate) pause: Arc<StagingPause>,
     pub(crate) teardown: TeardownLatch,
+    pub(crate) remove_after_teardown: Vec<std::path::PathBuf>,
     pub(crate) armed: bool,
 }
 
@@ -38,19 +39,25 @@ impl EnvelopeCleanup {
             .seal_staged_evidence(&self.anchor, None, &self.pause);
         if self.teardown.pending() {
             self.teardown.after_teardown(self.reseal());
-        } else if sealed.is_ok() && self.teardown.confirmed() {
-            self.pause.sealed();
+        } else if self.teardown.confirmed() {
+            remove_temporary_files(&self.anchor, &self.pause, &self.remove_after_teardown)?;
+            if sealed.is_ok() {
+                self.pause.sealed();
+            }
         }
         sealed
     }
 
     fn reseal(&self) -> Box<dyn FnOnce(bool) + Send> {
-        let (anchor, secrets, pause) = (
+        let (anchor, secrets, pause, remove_after_teardown) = (
             self.anchor.clone(),
             self.secrets.clone(),
             self.pause.clone(),
+            self.remove_after_teardown.clone(),
         );
-        Box::new(move |confirmed| seal_after_teardown(&anchor, &secrets, &pause, confirmed))
+        Box::new(move |confirmed| {
+            seal_after_teardown(&anchor, &secrets, &pause, confirmed, &remove_after_teardown)
+        })
     }
 }
 
@@ -76,15 +83,24 @@ fn seal_after_teardown(
     secrets: &HostSecrets,
     pause: &StagingPause,
     confirmed: bool,
+    remove_after_teardown: &[std::path::PathBuf],
 ) {
-    match secrets.seal_staged_evidence(anchor, None, pause) {
-        Err(error) => {
-            let evidence = secrets.text(&error.to_string());
-            tracing::warn!(error = %evidence, "sealing a cancelled call's staging failed");
-        }
-        // Only now does the residue record go (#297 round 9).
-        Ok(()) if confirmed => pause.sealed(),
-        Ok(()) => {}
+    let sealed = secrets.seal_staged_evidence(anchor, None, pause);
+    if let Err(error) = &sealed {
+        let evidence = secrets.text(&error.to_string());
+        tracing::warn!(error = %evidence, "sealing a cancelled call's staging failed");
+    }
+    let removed = if confirmed {
+        remove_temporary_files(anchor, pause, remove_after_teardown)
+    } else {
+        Ok(())
+    };
+    if let Err(error) = &removed {
+        tracing::warn!(%error, "temporary staging files could not be removed");
+    }
+    // Only now does the residue record go (#297 round 9).
+    if sealed.is_ok() && removed.is_ok() && confirmed {
+        pause.sealed();
     }
     if !confirmed {
         let error = pause.pause(
@@ -95,6 +111,24 @@ fn seal_after_teardown(
         );
         tracing::warn!(%error, "a cancelled call's staging may still be written");
     }
+}
+
+fn remove_temporary_files(
+    anchor: &StagingAnchor,
+    pause: &StagingPause,
+    files: &[std::path::PathBuf],
+) -> WorkflowResult<()> {
+    for file in files {
+        anchor.remove_file(file).map_err(|source| {
+            pause.pause(
+                &anchor.root().join(file),
+                "temporary task body staging could not be removed",
+                &source.to_string(),
+                true,
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn io_at(path: &Path) -> impl Fn(std::io::Error) -> WorkflowError + '_ {

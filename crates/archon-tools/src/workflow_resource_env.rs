@@ -19,7 +19,7 @@
 /// Held by value on `BashTool` rather than looked up per command: the Bash tool
 /// is already the thing that owns its limits, and a per-call lookup would need
 /// either a global or a config handle threaded through the tool trait.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CargoResourceLimits {
     /// `CARGO_BUILD_JOBS`. Already resolved — `0` never reaches here.
     pub build_jobs: u32,
@@ -59,7 +59,7 @@ fn default_build_jobs() -> u32 {
 /// cargo's variables just because this engine happens to be written in Rust.
 const CARGO_MARKER: &str = "Cargo.toml";
 
-pub(crate) fn apply_workflow_resource_defaults(
+pub fn apply_workflow_resource_defaults(
     env: &mut Vec<(String, String)>,
     command: &str,
     repository_root: &std::path::Path,

@@ -7,6 +7,43 @@
 
 use super::agents::{RESEARCH_AGENTS, get_phase_by_id};
 use super::style::StyleInjector;
+use anyhow::{Context, Result, bail};
+use std::path::{Path, PathBuf};
+
+/// Load and validate a research agent's source prompt. Shared by preflight and
+/// runtime prompt construction so both reject the same files.
+pub fn load_agent_prompt_body(agent: &super::agents::ResearchAgent, root: &Path) -> Result<String> {
+    let declared_path = agent.prompt_source_path;
+    let read_path = root.join(declared_path);
+    let content = std::fs::read_to_string(&read_path).with_context(|| {
+        format!(
+            "Research pipeline agent '{}' prompt '{}' is unavailable; run `archon agent sync`.",
+            agent.key, declared_path
+        )
+    })?;
+    if content.trim().is_empty() {
+        bail!(
+            "Research pipeline agent '{}' prompt '{}' is empty; run `archon agent sync`.",
+            agent.key,
+            declared_path
+        );
+    }
+    let (_frontmatter, body) =
+        crate::agent_loader::parse_frontmatter(&content).with_context(|| {
+            format!(
+                "Research pipeline agent '{}' prompt '{}' is invalid; run `archon agent sync`.",
+                agent.key, declared_path
+            )
+        })?;
+    if body.trim().is_empty() {
+        bail!(
+            "Research pipeline agent '{}' prompt '{}' has an empty body; run `archon agent sync`.",
+            agent.key,
+            declared_path
+        );
+    }
+    Ok(body)
+}
 
 // ---------------------------------------------------------------------------
 // Safe string helpers
@@ -42,11 +79,21 @@ pub fn escape_backticks(text: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// Builds the 5-part prompt for research pipeline agents.
-pub struct ResearchPromptBuilder;
+pub struct ResearchPromptBuilder {
+    project_root: PathBuf,
+}
 
 impl ResearchPromptBuilder {
     pub fn new() -> Self {
-        Self
+        Self {
+            project_root: PathBuf::from("."),
+        }
+    }
+
+    /// Set the project root used to load research agent prompt assets.
+    pub fn with_project_root(mut self, project_root: impl Into<PathBuf>) -> Self {
+        self.project_root = project_root.into();
+        self
     }
 
     /// Build the full prompt for the given research agent.
@@ -66,11 +113,11 @@ impl ResearchPromptBuilder {
         task: &str,
         prior_context: &str,
         style_prompt: Option<&str>,
-    ) -> String {
+    ) -> Result<String> {
         let mut parts: Vec<String> = Vec::with_capacity(5);
 
         // Part 1: Agent Instructions
-        parts.push(self.build_agent_instructions(agent));
+        parts.push(self.build_agent_instructions(agent, &self.project_root)?);
 
         // Part 2: Workflow Context
         parts.push(self.build_workflow_context(agent, agent_index, total_agents));
@@ -96,31 +143,19 @@ impl ResearchPromptBuilder {
             prompt = injector.build_styled_prompt(&prompt, style);
         }
 
-        prompt
+        Ok(prompt)
     }
 
     // -----------------------------------------------------------------------
     // Part builders
     // -----------------------------------------------------------------------
 
-    fn build_agent_instructions(&self, agent: &super::agents::ResearchAgent) -> String {
-        // Try to load from file, parsing frontmatter to get just the body
-        let path = agent.prompt_source_path;
-        if let Ok(content) = std::fs::read_to_string(path)
-            && !content.trim().is_empty()
-        {
-            if let Ok((_frontmatter, body)) = crate::agent_loader::parse_frontmatter(&content)
-                && !body.trim().is_empty()
-            {
-                return body;
-            }
-            // Fallback: if frontmatter parsing fails, use raw content
-            return content;
-        }
-        format!(
-            "You are the {} agent for the PhD research pipeline.",
-            agent.display_name,
-        )
+    fn build_agent_instructions(
+        &self,
+        agent: &super::agents::ResearchAgent,
+        root: &Path,
+    ) -> Result<String> {
+        load_agent_prompt_body(agent, root)
     }
 
     fn build_workflow_context(
@@ -231,259 +266,5 @@ impl Default for ResearchPromptBuilder {
 // ===========================================================================
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::research::agents::RESEARCH_AGENTS;
-
-    fn builder() -> ResearchPromptBuilder {
-        ResearchPromptBuilder::new()
-    }
-
-    #[test]
-    fn prompt_has_all_5_sections_phase4() {
-        let b = builder();
-        let agent = &RESEARCH_AGENTS[14];
-        assert_eq!(agent.key, "evidence-synthesizer");
-
-        let prompt = b.build(
-            agent,
-            14,
-            47,
-            "AI in healthcare",
-            "some prior context",
-            None,
-        );
-
-        assert!(
-            prompt.contains("## Workflow Context"),
-            "missing workflow context"
-        );
-        assert!(prompt.contains("## Prior Context"), "missing prior context");
-        assert!(
-            prompt.contains("## Output Expectations"),
-            "missing output expectations"
-        );
-        assert!(
-            prompt.contains("## Task Completion"),
-            "missing task completion"
-        );
-        assert!(
-            prompt.contains("Evidence Synthesizer") || prompt.contains("evidence-synthesizer"),
-            "missing agent instructions reference"
-        );
-    }
-
-    #[test]
-    fn workflow_context_correct_position() {
-        let b = builder();
-        let agent = &RESEARCH_AGENTS[14];
-        let prompt = b.build(agent, 14, 47, "test query", "", None);
-
-        assert!(
-            prompt.contains("Agent #15 of 47"),
-            "should show 1-based index: Agent #15 of 47"
-        );
-        assert!(
-            prompt.contains("Phase: 4 - Synthesis"),
-            "should show phase name"
-        );
-    }
-
-    #[test]
-    fn prior_context_truncation() {
-        let b = builder();
-        let agent = &RESEARCH_AGENTS[0];
-        let long_context: String = "x".repeat(15_000);
-        let prompt = b.build(agent, 0, 47, "test", &long_context, None);
-
-        assert!(
-            prompt.contains("... [truncated]"),
-            "should have truncation marker"
-        );
-        let prior_section = prompt.split("## Prior Context").nth(1).unwrap_or("");
-        assert!(
-            prior_section.chars().count() < 12_000,
-            "truncated section should be well under 15000 chars"
-        );
-    }
-
-    #[test]
-    fn empty_prior_context_omitted() {
-        let b = builder();
-        let agent = &RESEARCH_AGENTS[0];
-        let prompt = b.build(agent, 0, 47, "test", "", None);
-
-        assert!(
-            !prompt.contains("## Prior Context"),
-            "empty prior context should be omitted"
-        );
-    }
-
-    #[test]
-    fn backtick_escaping() {
-        let b = builder();
-        let agent = &RESEARCH_AGENTS[0];
-        let context_with_backticks = "Here is code: ```python\nprint('hello')\n```";
-        let prompt = b.build(agent, 0, 47, "test", context_with_backticks, None);
-
-        assert!(
-            !prompt.contains("```python"),
-            "triple backticks should be escaped"
-        );
-        assert!(
-            prompt.contains("\\`\\`\\`python"),
-            "should contain escaped backticks"
-        );
-    }
-
-    #[test]
-    fn output_expectations_memory_key() {
-        let b = builder();
-        let agent = &RESEARCH_AGENTS[0];
-        let prompt = b.build(agent, 0, 47, "test", "", None);
-
-        assert!(
-            prompt.contains("Store output at: research/foundation/framing"),
-            "should reference memory_keys[0]"
-        );
-        assert!(
-            prompt.contains("Expected artifacts: high-level-framing.md, abstraction-analysis.md"),
-            "should list output artifacts"
-        );
-    }
-
-    #[test]
-    fn phase6_style_injection() {
-        let b = builder();
-        let agent = &RESEARCH_AGENTS[28];
-        assert_eq!(agent.key, "introduction-writer");
-        assert_eq!(agent.phase, 6);
-
-        let prompt = b.build(
-            agent,
-            28,
-            47,
-            "test",
-            "",
-            Some("Use American English spelling conventions"),
-        );
-
-        assert!(
-            prompt.contains("## STYLE GUIDELINES"),
-            "Phase 6 should have style guidelines"
-        );
-        assert!(
-            prompt.contains("American English"),
-            "should include style content"
-        );
-    }
-
-    #[test]
-    fn final_assembly_gets_larger_prior_context_budget() {
-        let b = builder();
-        let agent = RESEARCH_AGENTS.last().unwrap();
-        assert_eq!(agent.key, "chapter-synthesizer");
-        assert_eq!(agent.phase, 8);
-
-        let long_context: String = "x".repeat(20_000);
-        let prompt = b.build(agent, 46, 47, "test", &long_context, None);
-
-        assert!(
-            !prompt.contains("... [truncated]"),
-            "final assembly should be able to see chapter-scale context"
-        );
-    }
-
-    #[test]
-    fn final_assembly_gets_style_injection() {
-        let b = builder();
-        let agent = RESEARCH_AGENTS.last().unwrap();
-        assert_eq!(agent.key, "chapter-synthesizer");
-
-        let prompt = b.build(agent, 46, 47, "test", "", Some("Use APA 7 formatting"));
-
-        assert!(
-            prompt.contains("## STYLE GUIDELINES"),
-            "final assembly should receive style guidelines"
-        );
-        assert!(prompt.contains("APA 7"));
-    }
-
-    #[test]
-    fn missing_instruction_file_fallback() {
-        let b = builder();
-        let agent = &RESEARCH_AGENTS[0];
-        let prompt = b.build(agent, 0, 47, "test", "", None);
-
-        assert!(
-            prompt.contains("Step-Back Analyzer") || prompt.contains("step-back-analyzer"),
-            "should contain agent reference either from file or fallback"
-        );
-    }
-
-    #[test]
-    fn safe_truncate_char_boundary() {
-        let text = "🎉🎊🎈🎆🎇";
-        let result = safe_truncate(text, 3);
-        assert!(result.starts_with("🎉🎊🎈"));
-        assert!(result.contains("... [truncated]"));
-    }
-
-    #[test]
-    fn safe_truncate_no_op() {
-        let text = "short";
-        let result = safe_truncate(text, 100);
-        assert_eq!(result, "short");
-    }
-
-    #[test]
-    fn escape_backticks_works() {
-        let input = "before ``` middle ``` after";
-        let result = escape_backticks(input);
-        assert_eq!(result, "before \\`\\`\\` middle \\`\\`\\` after");
-    }
-
-    #[test]
-    fn phase6_no_style_prompt_no_injection() {
-        let b = builder();
-        let agent = &RESEARCH_AGENTS[28];
-        let prompt = b.build(agent, 28, 47, "test", "", None);
-        assert!(
-            !prompt.contains("## STYLE GUIDELINES"),
-            "no style_prompt means no STYLE GUIDELINES section"
-        );
-    }
-
-    #[test]
-    fn workflow_context_prev_next() {
-        let b = builder();
-        let agent = &RESEARCH_AGENTS[1];
-        let prompt = b.build(agent, 1, 47, "test", "", None);
-
-        assert!(
-            prompt.contains("Previous agent: step-back-analyzer"),
-            "should show previous agent key"
-        );
-        assert!(
-            prompt.contains("Next agent: ambiguity-clarifier"),
-            "should show next agent key"
-        );
-    }
-
-    #[test]
-    fn first_agent_prev_none() {
-        let b = builder();
-        let agent = &RESEARCH_AGENTS[0];
-        let prompt = b.build(agent, 0, 47, "test", "", None);
-        assert!(prompt.contains("Previous agent: none (first agent)"));
-    }
-
-    #[test]
-    fn last_agent_next_none() {
-        let b = builder();
-        let last_idx = RESEARCH_AGENTS.len() - 1;
-        let agent = &RESEARCH_AGENTS[last_idx];
-        let prompt = b.build(agent, last_idx, 47, "test", "", None);
-        assert!(prompt.contains("Next agent: none (final agent)"));
-    }
-}
+#[path = "prompt_builder_tests.rs"]
+mod tests;

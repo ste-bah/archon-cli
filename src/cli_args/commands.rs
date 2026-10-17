@@ -86,6 +86,7 @@ pub enum Commands {
         action: BehaviourAction,
     },
     /// Inspect agent definitions and governed agent evolution
+    #[command(alias = "agents")]
     Agent {
         #[command(subcommand)]
         action: AgentAction,

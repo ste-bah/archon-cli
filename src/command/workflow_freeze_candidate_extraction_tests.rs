@@ -46,6 +46,7 @@ fn chat_before_a_fence_is_recorded_in_host_result_stderr() {
         publication_receipt: None,
         subjects: Vec::new(),
         postcondition: None,
+        observed_only: false,
     };
     assert!(stored_result.stderr.contains("I could not verify X."));
     assert!(stored_result.stderr.contains("discarded_before="));

@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "task_universe_task_body_error_tests.rs"]
+mod task_body_error_tests;
+
 /// A task file in the standard shape: a fenced YAML block declaring every
 /// contract-bearing key.
 ///
@@ -413,25 +416,6 @@ fn a_task_file_with_no_yaml_block_fails_naming_the_path_and_the_required_keys() 
     for key in super::parsing::REQUIRED_TASK_KEYS {
         assert!(error.contains(key), "error must name '{key}': {error}");
     }
-}
-
-/// An unterminated fence is not a block. Parsing the truncated remainder would
-/// be exactly the partial parse the parser exists to refuse.
-#[test]
-fn an_unterminated_yaml_fence_is_not_a_block() {
-    let error = parse_failure("# Loud\n\n```yaml\ntask_id: TASK-DEMO-017\n");
-    assert!(error.contains("no fenced ```yaml task block"), "{error}");
-}
-
-/// Malformed YAML used to be swallowed into an empty mapping.
-#[test]
-fn unparseable_yaml_fails_instead_of_becoming_an_empty_mapping() {
-    let error = parse_failure("```yaml\ntask_id: [unclosed\n```\n");
-    assert!(
-        error.contains("could not parse the task YAML block"),
-        "{error}"
-    );
-    assert!(error.contains("TASK-DEMO-017-loud.md"), "{error}");
 }
 
 /// A well-formed block that omits contract-bearing keys must name exactly the

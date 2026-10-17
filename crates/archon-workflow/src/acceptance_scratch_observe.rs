@@ -156,7 +156,18 @@ pub async fn observe_commands_hooked(
             }
             return Ok(());
         }
-        roots = Some(phase().run(|| ScratchRoots::prepare_inner(policy, commit))?);
+        let checks = commands
+            .iter()
+            .filter_map(|command| command.as_ref().ok())
+            .map(|command| {
+                (
+                    String::from_utf8_lossy(command.bytes()).into_owned(),
+                    command.cwd(),
+                )
+            })
+            .collect::<Vec<_>>();
+        roots =
+            Some(phase().run(|| ScratchRoots::prepare_inner_with_checks(policy, commit, &checks))?);
         let roots = roots.as_ref().expect("prepared");
         result.copied_project_manifest = phase().run(|| inventory(roots.project()))?;
         let baseline = phase().run(|| identity::capture(roots, policy))?;
@@ -191,7 +202,13 @@ pub async fn observe_commands_hooked(
             let project_before = phase().run(|| inventory(roots.project()))?;
             let cache_before = phase().run(|| cargo_home.digest(&cargo_home_path))?;
             let target = roots.target();
-            let site = check_site(roots, policy, &target, timeout_secs);
+            let site = check_site(
+                roots,
+                policy,
+                &target,
+                timeout_secs,
+                hooks.resource_limits.clone(),
+            );
             let attempt =
                 execute_check_at(&site, contract, reference, &command, cancel.clone()).await;
             let mut check =
@@ -228,6 +245,7 @@ pub async fn observe_commands_hooked(
             }
             result.check_evidence.push(CheckEvidence {
                 acceptance_id: reference.acceptance_id.clone(),
+                sibling_revisions: roots.sibling_revisions().to_vec(),
                 before_identity,
                 after_identity: after_identity.ok(),
                 changed_project_paths: changed_paths,
@@ -364,11 +382,13 @@ fn check_site<'a>(
     policy: &ScratchPolicy,
     target: &'a Path,
     timeout_secs: u64,
+    resource_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 ) -> super::process::CommandSite<'a> {
     super::process::CommandSite {
         project: roots.project(),
         repository: roots.repository(),
         environment: roots.command_environment(policy),
+        resource_limits,
         audit_root: Some(roots.root()),
         audit_target: Some(target),
         scratch_bytes: policy.scratch_bytes,

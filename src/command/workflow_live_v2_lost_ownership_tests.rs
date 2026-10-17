@@ -169,6 +169,7 @@ async fn a_fixed_executor_is_fenced_from_its_launch_not_from_its_script_start() 
         Arc::new(NoHostCommands),
         &store,
         &v2,
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     );
     take_over(&store, &run.id);
 

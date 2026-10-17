@@ -23,6 +23,8 @@ pub(super) async fn prove(
     probe: &HostProbe,
     baseline: &Baseline,
     contract: &AcceptanceContract,
+    digest: &str,
+    refs: &[FrozenCommandRef],
     passing: &[String],
 ) -> BTreeMap<String, String> {
     let short: String = baseline.commit.chars().take(12).collect();
@@ -43,10 +45,23 @@ pub(super) async fn prove(
     ];
     let live: Vec<&Path> = live.iter().flatten().map(PathBuf::as_path).collect();
     for id in passing {
+        let entry = (contract.acceptance.iter())
+            .chain(&contract.supplementary)
+            .find(|entry| &entry.id == id);
+        let bound_accepted = entry.is_some_and(|entry| {
+            entry.judgment.verdict == JudgeDecision::Accepted
+                && refs.iter().any(|reference| {
+                    reference.acceptance_id == *id
+                        && reference.chain_digest == digest
+                        && executed_text(entry).is_some_and(|(_, text)| {
+                            reference.command_digest == content_digest(text.as_bytes())
+                        })
+                })
+        });
         let names = (contract.acceptance.iter())
             .chain(&contract.supplementary)
             .find(|entry| &entry.id == id)
-            .map(named_inputs)
+            .map(|entry| named_inputs(entry, &probe.project, &baseline.repository))
             .unwrap_or_default();
         if names.is_empty() {
             findings.insert(
@@ -108,14 +123,31 @@ pub(super) async fn prove(
         let result = result.expect("a result when the run completed");
         let at = super::silent::baseline_context(probe, &mutated, result.copy_layout.as_ref());
         super::silent::ran(probe, &baseline.commit, &mutated, id);
-        let moved = markers.moved(result);
+        let generated = markers.generated(result);
+        let recreated = markers.recreated(result);
+        let moved_all = markers.moved(result);
+        let moved: Vec<String> = moved_all
+            .iter()
+            .cloned()
+            .into_iter()
+            .filter(|path| !generated.contains(path) && !recreated.contains(path))
+            .collect();
         // Issue 328: nor did a run that failed for its host (a program that
         // could not start, a tree that did not build) fail on its own terms.
         let crashed = !super::crash_findings(&mutated, [&result.result]).is_empty()
             || super::silent::silent_failure_off_thread(&mutated, result, &at)
                 .await
                 .is_some();
-        if moved.is_empty() {
+        if moved.is_empty() && !recreated.is_empty() {
+            findings.insert(
+                id.clone(),
+                format!(
+                    "{}; {already}; it recreated {} while running (parent-directory metadata changed, so that path is not evidence that the check depends on the moved input)",
+                    passed_there(id),
+                    recreated.iter().cloned().collect::<Vec<_>>().join(", ")
+                ),
+            );
+        } else if moved.is_empty() {
             findings.insert(
                 id.clone(),
                 format!(
@@ -124,14 +156,20 @@ pub(super) async fn prove(
                 ),
             );
         } else if super::baseline::passed(result) {
-            findings.insert(
-                id.clone(),
-                format!(
-                    "{}; {already}; it still passed with {} moved aside, so it does not depend on them",
-                    passed_there(id),
-                    moved.join(", ")
-                ),
-            );
+            if bound_accepted && recreated.is_empty() && !crashed {
+                probe.note(format!(
+                    "check '{id}': passed on the pre-implementation tree at {short}; accepted as a regression guard on its stored accepted judge verdict, bound to the current contract and check digests (the moved text-derived paths did not make it fail)"
+                ));
+            } else {
+                findings.insert(
+                    id.clone(),
+                    format!(
+                        "{}; {already}; it still passed with {} moved aside, so it does not depend on them",
+                        passed_there(id),
+                        moved.join(", ")
+                    ),
+                );
+            }
         } else if crashed {
             findings.insert(
                 id.clone(),

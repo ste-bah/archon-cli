@@ -173,8 +173,8 @@ async fn a_verdict_is_reused_only_while_its_cluster_texts_are_byte_identical() {
     let evaluation = evaluate(cwd, Ok(critic.clone())).await;
     assert_eq!(
         critic.asked(),
-        vec![ids(&["G-WS-001"])],
-        "changed text, re-asked"
+        vec![ids(&["AC-WS-001", "G-WS-001"])],
+        "a changed shared PRD source section changes both obligations' context"
     );
     assert!(
         !evaluation
@@ -295,7 +295,9 @@ async fn standing_verdicts_that_contradict_each_other_are_one_finding_quoting_bo
         task_id: "TASK-WS-001".into(),
         text: std::fs::read_to_string(task_path(cwd, "TASK-WS-001")).unwrap(),
     }];
-    let skeleton = archon_workflow::fidelity_audit::SkeletonSummary::absent();
+    let prd = std::fs::read_to_string(cwd.join("tasks/PRD-WS-001.md")).unwrap();
+    let skeleton = archon_workflow::fidelity_audit::SkeletonSummary::absent()
+        .with_prd_context_for(&prd, &["AC-WS-001".into(), "G-WS-001".into()]);
     let request = crate::command::topology_lint::fidelity_critic::request(&[], &[], &skeleton);
     let store = VerdictStore::new(store_dir(cwd), StoreIdentity::of(critic.as_ref()))
         .for_request(critic.message_request_identity(&request));
@@ -310,6 +312,7 @@ async fn standing_verdicts_that_contradict_each_other_are_one_finding_quoting_bo
         weakest_task_id: "TASK-WS-001".into(),
         reason: "a loophole".into(),
         quoted_task_text: LOOPHOLE.into(),
+        weakening_quotes: vec![LOOPHOLE.into()],
         supporting_task_id: String::new(),
         supporting_text: String::new(),
     };

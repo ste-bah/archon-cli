@@ -28,6 +28,7 @@ fn relative(root: &Path, file: &Path) -> String {
 /// among `files`.
 fn unlisted_children(root: &Path, files: &[&str]) -> BTreeSet<String> {
     let listed: BTreeSet<&str> = files.iter().copied().collect();
+    let excluded: BTreeSet<&str> = EXCLUDED.iter().map(|(file, _)| *file).collect();
     let mut missing = BTreeSet::new();
     for file in files {
         let path = root.join(file);
@@ -49,7 +50,10 @@ fn unlisted_children(root: &Path, files: &[&str]) -> BTreeSet<String> {
         }
         for child in children {
             let child = relative(root, &child);
-            if !is_test_file(Path::new(&child)) && !listed.contains(child.as_str()) {
+            if !is_test_file(Path::new(&child))
+                && !listed.contains(child.as_str())
+                && !excluded.contains(child.as_str())
+            {
                 missing.insert(child);
             }
         }
@@ -97,8 +101,8 @@ fn fidelity_a_source_edit_without_a_re_pin_trips_the_guard() {
     assert_ne!(re_pinned, SOURCES_DIGEST);
     assert_eq!(pin_check(&re_pinned, edited), Ok(()));
     assert_eq!(
-        CRITIC_LOGIC_VERSION, 1,
-        "#434d keeps the meaning of every verdict"
+        CRITIC_LOGIC_VERSION, 2,
+        "#441 changes the question with PRD acceptance context and whole-set fallback"
     );
 }
 

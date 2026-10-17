@@ -37,9 +37,9 @@ pub(crate) fn contract_bytes(prd_digest: &str) -> Vec<u8> {
         },
         acceptance: vec![AcceptanceCriterion {
             id: "AC-X-001".into(),
-            criterion: "The fixture is proven.".into(),
+            criterion: "The project PRD file exists and is nonempty.".into(),
             check: AcceptanceCheck::Command {
-                command: "true".into(),
+                command: "test -s prds/PRD-X.md && printf 'probe passed\\n'".into(),
                 cwd: TrustedCwd::ProjectRoot,
             },
             gap_permitted: false,

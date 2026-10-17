@@ -37,6 +37,8 @@ pub enum Variant {
     /// Hold the first streaming response after headers, then emit a retryable
     /// provider event so a suspended CLI must recover through RetryProvider.
     HoldStreamAfterHeaders,
+    /// AC-X-001 also reads a committed sibling outside the project root.
+    SiblingCheck,
 }
 
 pub fn answer(prompt: &str, variant: Variant) -> (&'static str, String) {
@@ -53,6 +55,17 @@ pub fn answer(prompt: &str, variant: Variant) -> (&'static str, String) {
     let entry: serde_json::Value = serde_json::from_str(&answer).unwrap();
     let id = entry["id"].as_str().unwrap_or_default();
     match (variant, id) {
+        (Variant::SiblingCheck, "AC-X-001") => {
+            let mut sibling = entry;
+            let command = sibling["check"]["command"].as_str().unwrap().replace(
+                ".archon/proof/outcome.json",
+                "repository/.archon/proof/outcome.json",
+            );
+            sibling["check"]["command"] =
+                serde_json::json!(format!("{command} && test -f ../shared-check/marker.txt"));
+            sibling["check"]["cwd"] = serde_json::json!("project_root");
+            (role, sibling.to_string())
+        }
         (Variant::SecretInAcceptanceReply, "AC-X-001") => (
             role,
             format!("```json\n{answer}\n```\nUnused deployment credential: {SECRET_TOKEN}\n"),

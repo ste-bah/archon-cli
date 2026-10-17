@@ -19,6 +19,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
+#[path = "obligation_source_sections.rs"]
+mod source_sections;
+pub use source_sections::obligation_source_sections;
+
 use regex::Regex;
 
 #[path = "obligation_continuations.rs"]

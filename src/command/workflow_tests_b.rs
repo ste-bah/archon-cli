@@ -373,6 +373,7 @@ async fn off_mode_cli_analysis_commands_skip_inputs_and_model_construction() {
             staging_root: None,
             gate_envelope: None,
             call_id: None,
+            task_context_file: None,
             fidelity: false,
             waive_obligation: Vec::new(),
             waive_reason: None,

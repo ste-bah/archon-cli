@@ -248,6 +248,40 @@ fn test_gametheory_classify_then_status_same_session_reads_fresh_db() {
     });
 }
 
+#[test]
+fn classify_only_preflights_before_database_creation_in_empty_project() {
+    let project = tempfile::tempdir().unwrap();
+    let (mut ctx, mut rx) = CtxBuilder::new()
+        .with_working_dir(project.path().to_path_buf())
+        .build();
+    let result = GameTheorySlashHandler.execute(
+        &mut ctx,
+        &[
+            "classify-only".to_string(),
+            "a market entry game".to_string(),
+        ],
+    );
+    result.unwrap();
+    let events = drain_tui_events(&mut rx);
+    assert_eq!(
+        events.len(),
+        1,
+        "no async classify task should be scheduled"
+    );
+    let [TuiEvent::Error(error)] = events.as_slice() else {
+        panic!("expected a missing-agent error, got {events:?}");
+    };
+    assert!(
+        error.contains("Missing required GameTheory pipeline agents"),
+        "{error}"
+    );
+    assert!(error.contains("archon agent sync"), "{error}");
+    assert!(
+        !project.path().join(".archon").exists(),
+        "preflight must fail before opening the project database"
+    );
+}
+
 fn test_db() -> crate::command::test_db::TestDb<Arc<DbInstance>> {
     crate::command::test_db::guarded_test_db("test-gt-slash", "open game-theory slash test db")
 }

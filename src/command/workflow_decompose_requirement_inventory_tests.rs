@@ -18,6 +18,19 @@ fn texts(ids: &[&str]) -> BTreeMap<String, String> {
 }
 
 #[test]
+fn fixed_resume_wires_inventory_drift_into_its_output() {
+    let source = include_str!("workflow_decompose_resume.rs");
+    assert!(
+        source.contains("workflow_decompose_requirement_inventory::check_on_resume("),
+        "fixed resume must run the requirement inventory check"
+    );
+    assert!(
+        source.contains(".chain(inventory)"),
+        "fixed resume must emit inventory drift lines"
+    );
+}
+
+#[test]
 fn the_launch_freezes_the_ids_its_parser_derives() {
     let (_temp, store, run_id) = run_store();
     record_launch(&store, run_id, "prd-digest", PRD).unwrap();

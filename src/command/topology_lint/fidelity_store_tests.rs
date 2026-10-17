@@ -49,6 +49,7 @@ fn supported() -> FidelityVerdict {
         weakest_task_id: String::new(),
         reason: "the writer must store it".into(),
         quoted_task_text: String::new(),
+        weakening_quotes: Vec::new(),
         supporting_task_id: "TASK-A-001".into(),
         supporting_text: OBLIGES.into(),
     }
@@ -60,6 +61,7 @@ fn refuted() -> FidelityVerdict {
         weakest_task_id: "TASK-A-002".into(),
         reason: "a temporary registry is allowed".into(),
         quoted_task_text: LOOPHOLE.into(),
+        weakening_quotes: vec![LOOPHOLE.into()],
         supporting_task_id: String::new(),
         supporting_text: String::new(),
         ..supported()
@@ -162,6 +164,29 @@ fn a_changed_critic_logic_version_reasks_new_schema_records() {
     );
 }
 
+#[test]
+fn critic_logic_version_two_does_not_reuse_version_one_verdicts() {
+    let temp = tempfile::tempdir().unwrap();
+    let prior = VerdictStore::new(
+        temp.path().join("verdicts"),
+        identity().with_critic_logic_version(1),
+    );
+    let asked = Asked::new(
+        obligation_with("The registry holds every entry."),
+        tasks(OBLIGES, "Second task."),
+    );
+    prior.save(asked.question(), &supported()).unwrap();
+    let next = VerdictStore::new(
+        prior.dir().into(),
+        identity().with_critic_logic_version(super::CRITIC_LOGIC_VERSION),
+    );
+    assert_eq!(
+        next.load(asked.question()),
+        None,
+        "version 2 must ask the new question again"
+    );
+}
+
 /// A true verdict stands only over the same tasks with byte-identical texts:
 /// any edit to any of them, a task joining or leaving the cluster, or a
 /// changed obligation text re-asks it — its quote being still present is
@@ -244,6 +269,40 @@ fn a_false_verdict_stands_only_over_the_identical_cluster() {
         store.load(edited.question()),
         None,
         "another claimer's edit can close the loophole, so it is asked again"
+    );
+}
+
+#[test]
+fn claimant_and_whole_set_verdicts_are_kept_for_their_exact_task_texts() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = store(temp.path());
+    let obligation = obligation_with("The registry holds every entry.");
+    let claimant = Asked::new(obligation.clone(), tasks(OBLIGES, LOOPHOLE));
+    let whole_set = Asked::new(
+        obligation,
+        vec![
+            ClaimingTask {
+                task_id: "TASK-A-001".into(),
+                text: OBLIGES.into(),
+            },
+            ClaimingTask {
+                task_id: "TASK-A-002".into(),
+                text: format!(
+                    "{} The second task contributes its full implementation.",
+                    LOOPHOLE
+                ),
+            },
+        ],
+    );
+    store.save(claimant.question(), &refuted()).unwrap();
+    store.save(whole_set.question(), &refuted()).unwrap();
+    assert_eq!(
+        store.load(claimant.question()),
+        Some(Standing::Verdict(refuted()))
+    );
+    assert_eq!(
+        store.load(whole_set.question()),
+        Some(Standing::Verdict(refuted()))
     );
 }
 

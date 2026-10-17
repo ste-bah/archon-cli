@@ -96,7 +96,7 @@ async fn an_unknown_envelope_is_reasked_without_claiming_saved_progress() {
 
 /// The catalog identity changes with #356 (schema 2: timeout semantics); rebuilding
 /// schema 1 reproduces the old catalog. The fixed script digest moves by design
-/// (Issues 261, 288 four times, 337, 357, 360, 366, 379, 381, 383, 384, 385, 389, 392, 423); older runs resume via #358 and the #360 seed.
+/// (Issues 261, 288 four times, 337, 357, 360, 366, 379, 381, 383, 384, 385, 389, 392, 423, 441 remediation body forcing); older runs resume via #358 and the #360 seed.
 #[test]
 fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     let catalog =
@@ -104,6 +104,13 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
     let old_digest = "c59953c92b47b59b10c4b6b0cf19e6ae736c88aa037bef173cb141d25dd7b6c7";
     let mut old = catalog.clone();
     old.schema_version = 1;
+    let landing = old.capabilities.get_mut("land-task-body").unwrap();
+    let context_arg = landing
+        .argv_template
+        .windows(2)
+        .position(|pair| pair[0] == "--task-context-file")
+        .unwrap();
+    landing.argv_template.drain(context_arg..context_arg + 2);
     old.recompute_digest().unwrap();
     assert_eq!(old.digest, old_digest);
     assert_ne!(
@@ -114,6 +121,6 @@ fn issue356_catalog_identity_changes_and_script_matches_the_release() {
         archon_workflow::workflow_scaffold_hash(
             crate::command::workflow_decompose::FIXED_SCRIPT_SOURCE
         ),
-        "441ea3951ee10b716e90b864a3329ce608cb155de0706d87041cde5a2e6722c5"
+        "a6414fb1a01d1080db5ed9b1a766ee5ed761374c6b7bab63bf10f30b5374628e"
     );
 }

@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 
 use super::super::fingerprint::GameTheoryFingerprint;
 use super::super::routing::RoutingDecision;
@@ -7,6 +8,8 @@ use super::memory_context::MemoryRecallAudit;
 /// Runtime controls for a full game-theory run.
 #[derive(Debug, Clone)]
 pub struct GameTheoryRunOptions {
+    /// Project root used to load this project's agent prompts.
+    pub project_root: PathBuf,
     pub budget_usd: f64,
     pub max_concurrent: usize,
     pub style_profile_id: Option<String>,
@@ -17,6 +20,7 @@ pub struct GameTheoryRunOptions {
 impl Default for GameTheoryRunOptions {
     fn default() -> Self {
         Self {
+            project_root: PathBuf::from("."),
             budget_usd: 20.0,
             max_concurrent: 4,
             style_profile_id: None,

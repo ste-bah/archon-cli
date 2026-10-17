@@ -3,31 +3,23 @@
 //!
 //! # Why a set comparison was not enough
 //!
-//! Coverage asks whether some task *claims* each obligation. Observed live: a
-//! PRD obliged native ingestion into a shared registry, four tasks claimed the
-//! criterion, and each scoped itself to "library-level tests against a
-//! temporary root" — every task passed, the registry held nothing, the claim
-//! was honoured to the letter and the obligation was never delivered. Whether
-//! a task's own allowances (temporary roots, pending statuses, minimum counts
-//! of zero, optional lanes, fail-closed gaps) leave the obligation standing is
-//! a reading of prose, so it is asked of a model — but asked one typed
-//! question, answered in one strict shape, checked here before anything
-//! downstream believes it.
+//! Coverage asks whether some task *claims* each obligation. In a live case,
+//! four tasks scoped themselves to temporary roots, all passed, and a shared
+//! registry remained empty. Whether task allowances leave an obligation
+//! standing is a reading of prose, so one typed question is sent to a model
+//! and its strict answer is checked here before downstream code believes it.
 //!
-//! This module carries the prompt, the verdict shape, and the parser. It knows
-//! no domain: it reads only the PRD's obligation text, the task files' own
-//! text and the set's frozen skeleton, and every rule below is about shape
-//! and provenance, never content.
+//! This module carries the prompt, verdict shape and parser. It knows no
+//! domain: it reads PRD obligation and acceptance text, task text, and the
+//! frozen skeleton; its rules concern shape and provenance, never content.
 //!
 //! # Why the skeleton travels with the question (Issue-45)
 //!
-//! Ordering and ownership between tasks are frozen before any body is
-//! written (`depends_on`, `blocks`, `implements`, `deliverable_contracts`),
-//! and the body gate rejects an edit to them. Asked without the skeleton, the
-//! critic refuted an obligation on the ground that the chain "only blocks B,
-//! leaving C unordered" while the frozen graph had C depend on B — a verdict
-//! no author could act on. The per-body audit runs before sibling bodies
-//! exist, so the skeleton is the only place those facts can be read from.
+//! Ordering and ownership (`depends_on`, `blocks`, `implements`, and
+//! `deliverable_contracts`) are frozen before bodies are written. Asked without
+//! that skeleton, the critic once refuted an obligation on ordering grounds
+//! contradicted by the frozen graph. Body lint runs before sibling bodies
+//! exist, so the skeleton supplies those facts.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -49,12 +41,13 @@ pub const MIN_SUPPORT_WORDS: usize = 8;
 pub const MIN_SUPPORT_CHARS: usize = 40;
 /// The keys of one verdict, exactly: the fields of [`FidelityVerdict`],
 /// which refuses any other. The prompt and the re-ask name them.
-pub const VERDICT_KEYS: [&str; 7] = [
+pub const VERDICT_KEYS: [&str; 8] = [
     "obligation_id",
     "necessarily_true",
     "weakest_task_id",
     "reason",
     "quoted_task_text",
+    "weakening_quotes",
     "supporting_task_id",
     "supporting_text",
 ];
@@ -167,10 +160,29 @@ impl SkeletonSummary {
         }
     }
 
+    /// Add completion, acceptance, and residual-gap sections from generic PRD Markdown.
+    pub fn with_prd_context(self, markdown: &str) -> Self {
+        self.with_prd_context_for(markdown, &[])
+    }
+
+    pub fn with_prd_context_for(mut self, markdown: &str, obligation_ids: &[String]) -> Self {
+        let context = context::prd_acceptance_context(markdown, obligation_ids);
+        if !context.is_empty() {
+            self.text
+                .push_str("\nFULL PRD CONTEXT (complete Markdown, with obligation source section pointers):\n");
+            self.text.push_str(&context);
+            self.text.push('\n');
+        }
+        self
+    }
+
     pub fn as_str(&self) -> &str {
         &self.text
     }
 }
+
+#[path = "fidelity_audit_context.rs"]
+mod context;
 
 /// The typed answer for one obligation, as checked and as stored: every
 /// field is present. A critic's reply is read as [`ReplyVerdict`] first, and
@@ -196,6 +208,8 @@ pub struct FidelityVerdict {
     pub weakest_task_id: String,
     pub reason: String,
     pub quoted_task_text: String,
+    #[serde(default)]
+    pub weakening_quotes: Vec<String>,
     pub supporting_task_id: String,
     pub supporting_text: String,
 }
@@ -208,6 +222,9 @@ use reply::{ReplyVerdict, checked_verdict, json_kind, shape_class};
 #[path = "fidelity_audit_check.rs"]
 mod check;
 use check::check_verdict;
+pub use check::expand_supporting_quote;
+pub use check::same_normalized_quote;
+pub use check::task_contains_quote;
 pub use check::verdict_holds;
 
 #[derive(Debug, Deserialize)]
@@ -238,7 +255,7 @@ pub fn fidelity_prompt(
     skeleton: &SkeletonSummary,
 ) -> String {
     let mut prompt = format!(
-        "You are auditing whether a task decomposition is faithful to its PRD. Below are PRD obligations, each with the exact text the PRD states, followed by the FROZEN SKELETON of the whole task set, followed by the FULL text of every task file that claims to implement them or that a claiming task names as owning part of the result. Assume every listed task passes its own acceptance criteria and focused tests exactly as written, including every allowance the task text grants itself (temporary roots, pending/deferred statuses, fail-closed residual gaps, minimum counts of zero, optional lanes). For each obligation: is the PRD obligation then necessarily true? Answer strictly: it is necessarily true only when no reading of the task texts lets every task pass while the obligation stays false in the project the PRD describes; a task that satisfies itself somewhere other than where the PRD requires the result, or that permits the result to be absent, deferred or empty, does not make the obligation true. Return JSON only as {{\"verdicts\":[{{\"obligation_id\":\"...\",\"necessarily_true\":true,\"weakest_task_id\":\"...\",\"reason\":\"...\",\"quoted_task_text\":\"...\",\"supporting_task_id\":\"...\",\"supporting_text\":\"...\"}}]}} with exactly one verdict for every obligation id and no extra ids or fields. Each verdict has exactly these keys and no others: {verdict_keys}. reason: one line of at most {MAX_REASON_CHARS} characters saying why, never empty — for a true verdict it names what in the task text obliges the result. When necessarily_true is false, weakest_task_id names the listed task whose allowance grants the loophole and quoted_task_text is an excerpt of at most {MAX_QUOTE_CHARS} characters copied verbatim from that task's text, exactly as it appears; supporting_task_id and supporting_text are empty strings. When necessarily_true is true, supporting_task_id names the listed task whose text obliges the result and supporting_text is an excerpt of at most {MAX_QUOTE_CHARS} characters copied verbatim from that task's text, exactly as it appears: at least {MIN_SUPPORT_WORDS} words of the task's prose that oblige the result and occur only once in that task, never a heading, a code block or an HTML comment; weakest_task_id and quoted_task_text are empty strings. Every string is a single line with newlines escaped as \\n; emit the JSON document alone.\n\nThe FROZEN SKELETON lists every task in the set with its frozen depends_on, blocks, implements and deliverable_contracts. Inter-task ordering and result ownership are FACTS established by the frozen skeleton, not allowances in task prose: depends_on is transitive, so a task runs after everything its dependencies depend on, and a task's implements and deliverable_contracts say what it owns. A task listed in the skeleton whose full text is not included below is not yet written; it will be audited when it is written and again at the set gate, so its absence is never by itself a ground to refute an obligation. Judge the allowances in the task texts that ARE included, against the ordering and ownership the skeleton establishes, and never refute an obligation on ordering or ownership grounds the skeleton already guarantees. When the set has no frozen skeleton the section says so, and only the task texts establish ordering and ownership.\n\nREPOSITORY PATH CLAIMS: the task set was decomposed against one code repository at one recorded base commit, and a task text that says a backticked repository path exists, or does not exist and will be created, is making a claim the host checks deterministically against that repository and refuses when it is wrong. You are not shown the repository. Never refute or accept an obligation on your own belief about whether a named file exists; take a task's existence claims as the host-checked facts they are and judge only whether, given them, the task text obliges the result where the PRD requires it.\n\nObligations: {}\n\n{}",
+        "You are auditing whether a task decomposition is faithful to its PRD. Below are PRD obligations, each with the exact text the PRD states, followed by the FROZEN SKELETON of the whole task set, followed by the FULL text of every task file that claims to implement them or that a claiming task names as owning part of the result. Assume every listed task passes its own acceptance criteria and focused tests exactly as written, including every allowance the task text grants itself (temporary roots, pending/deferred statuses, fail-closed residual gaps, minimum counts of zero, optional lanes). For each obligation: judge it under the PRD's own definition of done and any scope, gap, or acceptance policy anywhere in the full PRD; is the PRD obligation then necessarily true? Answer strictly: it is necessarily true only when no reading of the task texts lets every task pass while the obligation stays false in the project the PRD describes; a task that satisfies itself somewhere other than where the PRD requires the result, or that permits the result to be absent, deferred or empty, does not make the obligation true. Return JSON only as {{\"verdicts\":[{{\"obligation_id\":\"...\",\"necessarily_true\":true,\"weakest_task_id\":\"...\",\"reason\":\"...\",\"quoted_task_text\":\"...\",\"weakening_quotes\":[\"...\"],\"supporting_task_id\":\"...\",\"supporting_text\":\"...\"}}]}} with exactly one verdict for every obligation id and no extra ids or fields. Each verdict has exactly these keys and no others: {verdict_keys}. reason: one line of at most {MAX_REASON_CHARS} characters saying why, never empty — for a true verdict it names what in the task text obliges the result. When necessarily_true is false, weakest_task_id names the listed task whose allowance grants the loophole and quoted_task_text is an excerpt of at most {MAX_QUOTE_CHARS} characters copied verbatim from that task's text, exactly as it appears; weakening_quotes is a list of one or more complete sentences copied verbatim from that same task that weaken or contradict its claimed obligation, or an empty list when there is no such evidence. Several sentences may be needed when the weakening is spread across sections. When necessarily_true is true, weakening_quotes is an empty list and supporting_task_id names the listed task whose text obliges the result and supporting_text is an excerpt of at most {MAX_QUOTE_CHARS} characters copied verbatim from that task's text, exactly as it appears: at least {MIN_SUPPORT_WORDS} words of the task's prose that oblige the result and occur only once in that task, never a heading, a code block or an HTML comment; weakest_task_id and quoted_task_text are empty strings. Every string is a single line with newlines escaped as \\n; emit the JSON document alone.\n\nThe FULL PRD CONTEXT contains the complete PRD text without section extraction or size limits, plus a pointer to the source section for each claimed obligation. Apply each obligation under the PRD's own definition of done and any scope, gap, or acceptance policy anywhere in the PRD. The FROZEN SKELETON lists every task in the set with its frozen depends_on, blocks, implements and deliverable_contracts. For a false claimant-cluster verdict, evaluate the same obligation over all task bodies before deciding attribution. A body finding requires at least one weakening_quotes sentence from the candidate; the host verifies that each is verbatim, while you judge whether it weakens the obligation. If the full set still has a gap, attribute the set finding to the weakest task named by the full-set verdict. Inter-task ordering and result ownership are FACTS established by the frozen skeleton, not allowances in task prose: depends_on is transitive, so a task runs after everything its dependencies depend on, and a task's implements and deliverable_contracts say what it owns. A task listed in the skeleton whose full text is not included below is not yet written; it will be audited when it is written and again at the set gate, so its absence is never by itself a ground to refute an obligation. Judge the allowances in the task texts that ARE included, against the ordering and ownership the skeleton establishes, and never refute an obligation on ordering or ownership grounds the skeleton already guarantees. When the set has no frozen skeleton the section says so, and only the task texts establish ordering and ownership.\n\nREPOSITORY PATH CLAIMS: the task set was decomposed against one code repository at one recorded base commit, and a task text that says a backticked repository path exists, or does not exist and will be created, is making a claim the host checks deterministically against that repository and refuses when it is wrong. You are not shown the repository. Never refute or accept an obligation on your own belief about whether a named file exists; take a task's existence claims as the host-checked facts they are and judge only whether, given them, the task text obliges the result where the PRD requires it.\n\nObligations: {}\n\n{}",
         serde_json::to_string(obligations).unwrap_or_default(),
         skeleton.as_str(),
         verdict_keys = VERDICT_KEYS.join(", "),
@@ -404,13 +421,18 @@ fn checked(
 /// the reader sees that the obligation is owned and still not delivered, and
 /// quotes the loophole so the fix is the sentence, not a search.
 pub fn fidelity_finding(verdict: &FidelityVerdict, claiming_task_ids: &[String]) -> String {
+    let evidence = if verdict.weakening_quotes.is_empty() {
+        verdict.quoted_task_text.trim().to_string()
+    } else {
+        verdict.weakening_quotes.join(" … ")
+    };
     format!(
         "obligation {} is claimed by {} but none is obliged to make it true — {} — task {}: \"{}\"",
         verdict.obligation_id,
         claiming_task_ids.join(", "),
         verdict.reason.trim(),
         verdict.weakest_task_id,
-        verdict.quoted_task_text.trim()
+        evidence
     )
 }
 

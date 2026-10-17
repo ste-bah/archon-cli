@@ -9,7 +9,7 @@ use crate::command::gametheory_inspect;
 use crate::command::pipeline_support::build_interactive_learning_stack;
 use crate::command::registry::CommandContext;
 
-use super::{emit, emit_db, open_db, render_usage_line};
+use super::{emit, emit_db, open_db_at, render_usage_line, working_dir};
 
 pub(super) fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()> {
     let kb_pack_id = parse_kb(args)?;
@@ -17,8 +17,12 @@ pub(super) fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()>
     if situation_args.is_empty() {
         return emit(ctx, render_usage_line("run requires <situation>"));
     }
+    if !require_gametheory_agents(ctx)? {
+        return Ok(());
+    }
 
     let situation = situation_args.join(" ");
+    let cwd = working_dir(ctx);
     let tui_tx = ctx.tui_tx.clone();
     let llm = ctx.llm_adapter.clone();
     let loaded_config = archon_core::config::load_config().ok();
@@ -36,7 +40,7 @@ pub(super) fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()>
 
     archon_observability::spawn_named("gametheory-slash-run", async move {
         let result = async {
-            let db = open_db()?;
+            let db = open_db_at(&cwd)?;
             let llm_ref = llm.as_ref().map(|arc| arc.as_ref() as &dyn LlmClient);
             gametheory::run_full_pipeline_with_learning_options(
                 &db,
@@ -45,6 +49,7 @@ pub(super) fn start_run(ctx: &mut CommandContext, args: &[String]) -> Result<()>
                 llm_ref,
                 gametheory::GameTheoryMemoryContext::default(),
                 gametheory::GameTheoryRunOptions {
+                    project_root: cwd.clone(),
                     kb_pack_id,
                     ..gametheory::GameTheoryRunOptions::default()
                 },
@@ -74,8 +79,12 @@ pub(super) fn start_classify_only(ctx: &mut CommandContext, args: &[String]) -> 
     if args.is_empty() {
         return emit(ctx, render_usage_line("classify-only requires <situation>"));
     }
+    if !require_gametheory_agents(ctx)? {
+        return Ok(());
+    }
 
     let situation = args.join(" ");
+    let cwd = working_dir(ctx);
     let tui_tx = ctx.tui_tx.clone();
     let llm = ctx.llm_adapter.clone();
     let loaded_config = archon_core::config::load_config().ok();
@@ -89,13 +98,14 @@ pub(super) fn start_classify_only(ctx: &mut CommandContext, args: &[String]) -> 
 
     archon_observability::spawn_named("gametheory-slash-classify", async move {
         let result = async {
-            let db = open_db()?;
+            let db = open_db_at(&cwd)?;
             let llm_ref = llm.as_ref().map(|arc| arc.as_ref() as &dyn LlmClient);
             let fingerprint = gametheory::classify_with_learning(
                 &db,
                 &situation,
                 llm_ref,
                 learning.as_mut(),
+                &cwd,
             )
                 .await
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -127,7 +137,11 @@ pub(super) fn start_replay(ctx: &mut CommandContext, args: &[String]) -> Result<
     }
 
     if reclassify || rerun_specialist.is_some() {
-        return start_async_replay(ctx, run_id.clone(), reclassify, rerun_specialist);
+        if !require_gametheory_agents(ctx)? {
+            return Ok(());
+        }
+        let cwd = working_dir(ctx);
+        return start_async_replay(ctx, cwd, run_id.clone(), reclassify, rerun_specialist);
     }
 
     emit_db(ctx, |db| {
@@ -141,8 +155,21 @@ pub(super) fn start_replay(ctx: &mut CommandContext, args: &[String]) -> Result<
     })
 }
 
+fn require_gametheory_agents(ctx: &mut CommandContext) -> Result<bool> {
+    let cwd = working_dir(ctx);
+    if let Err(error) = crate::command::pipeline_agents::preflight(
+        &cwd,
+        archon_pipeline::runner::PipelineType::GameTheory,
+    ) {
+        ctx.emit(TuiEvent::Error(error.to_string()));
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 fn start_async_replay(
     ctx: &mut CommandContext,
+    cwd: std::path::PathBuf,
     run_id: String,
     reclassify: bool,
     rerun_specialist: Option<String>,
@@ -157,7 +184,7 @@ fn start_async_replay(
 
     archon_observability::spawn_named("gametheory-slash-replay", async move {
         let result = async {
-            let db = open_db()?;
+            let db = open_db_at(&cwd)?;
             if reclassify {
                 let Some(situation) = gametheory_inspect::load_run_situation(&db, &run_id)? else {
                     anyhow::bail!("run not found: {run_id}");
@@ -169,7 +196,10 @@ fn start_async_replay(
                     None,
                     llm_ref,
                     gametheory::GameTheoryMemoryContext::default(),
-                    gametheory::GameTheoryRunOptions::default(),
+                    gametheory::GameTheoryRunOptions {
+                        project_root: cwd.clone(),
+                        ..gametheory::GameTheoryRunOptions::default()
+                    },
                     learning.as_mut(),
                 )
                 .await
@@ -190,7 +220,10 @@ fn start_async_replay(
                 &agent_key,
                 llm_ref,
                 gametheory::GameTheoryMemoryContext::default(),
-                gametheory::GameTheoryRunOptions::default(),
+                gametheory::GameTheoryRunOptions {
+                    project_root: cwd,
+                    ..gametheory::GameTheoryRunOptions::default()
+                },
                 learning.as_mut(),
             )
             .await

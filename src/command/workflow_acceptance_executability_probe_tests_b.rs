@@ -196,6 +196,9 @@ async fn a_host_failure_is_never_fed_to_the_author() {
     );
 }
 
+#[path = "workflow_acceptance_executability_probe_tests_b_regression.rs"]
+mod regression_tests;
+
 /// Fix 7: a configured policy that cannot be captured runs nothing, in any
 /// copy; the checks are unproven, never published.
 #[tokio::test]

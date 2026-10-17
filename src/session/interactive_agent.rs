@@ -149,7 +149,8 @@ pub(super) async fn build(
 
     let auto_trainer = build_auto_trainer(config, &learning_cozo_db, memory.as_ref());
 
-    let coding_pipeline_facade = archon_pipeline::coding::facade::CodingFacade::new();
+    let coding_pipeline_facade =
+        archon_pipeline::coding::facade::CodingFacade::new().with_project_root(&working_dir);
     let coding_pipeline: Arc<archon_pipeline::coding::facade::CodingFacade> = Arc::new(
         coding_pipeline_facade
             .with_models(config.models.anthropic.clone())

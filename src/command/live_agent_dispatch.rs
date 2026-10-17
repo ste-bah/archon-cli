@@ -43,17 +43,20 @@ pub(super) struct LiveAgentDispatch {
     /// verifier's run of a declared test lives under, and so the bound the
     /// host's own baseline run of the same command gets (Obs-31).
     verification_branch_timeout: Option<std::time::Duration>,
+    cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits,
 }
 
 impl LiveAgentDispatch {
     pub(super) fn new(client: LiveV2AgentClient) -> Self {
         let defaults = archon_core::config::GeneratedWorkflowConfig::default();
+        let cargo_limits = client.cargo_limits().cloned().unwrap_or_default();
         Self {
             client,
             submit_grace_calls: defaults.submit_grace_calls,
             timeout_retry_budget: budget_override(defaults.timeout_retry_budget_secs),
             resume_memory_calls: defaults.resume_memory_calls as usize,
             verification_branch_timeout: budget_override(defaults.verification_branch_timeout_secs),
+            cargo_limits,
         }
     }
 
@@ -121,26 +124,33 @@ impl WorkflowAgentDispatch for LiveAgentDispatch {
     /// build and test calls do: a slot leased from the shared build-cache
     /// pool (`bash_build_cache`), with the toolchain variables the repository
     /// markers under `working_root` call for. The lease is held in `hold`
-    /// until the caller drops the environment. No pool (an interactive
-    /// session, or none installed yet) means no overrides.
+    /// until the caller drops the environment. Resource limits are independent
+    /// of the optional shared build-cache lease.
     async fn host_command_env(
         &self,
         working_root: &std::path::Path,
     ) -> archon_workflow::agent_dispatch_port::HostCommandEnv {
         let Some(pool) = archon_tools::build_cache_lease::shared_build_cache_pool() else {
-            return Default::default();
+            return archon_workflow::agent_dispatch_port::HostCommandEnv {
+                resource_limits: self.cargo_limits.clone(),
+                ..Default::default()
+            };
         };
         let lease = match pool.acquire().await {
             Ok(lease) => lease,
             Err(error) => {
                 tracing::warn!(%error, "baseline tests: build cache lease unavailable");
-                return Default::default();
+                return archon_workflow::agent_dispatch_port::HostCommandEnv {
+                    resource_limits: self.cargo_limits.clone(),
+                    ..Default::default()
+                };
             }
         };
         let vars =
             archon_tools::build_cache_env::cache_env_for_repository(working_root, lease.dir(), &[]);
         archon_workflow::agent_dispatch_port::HostCommandEnv {
             vars,
+            resource_limits: self.cargo_limits.clone(),
             hold: Some(Box::new(lease)),
         }
     }

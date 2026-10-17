@@ -4,6 +4,11 @@ use archon_workflow::{
 };
 use async_trait::async_trait;
 
+pub(crate) struct LandingRejudgeOutcome {
+    pub(crate) outcome: HostCommandResult,
+    pub(crate) candidate: bool,
+}
+
 #[async_trait]
 pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     fn call_identity(&self, request: &HostCommandRequest) -> WorkflowResult<String>;
@@ -26,6 +31,30 @@ pub(crate) trait WorkflowHostCommandExecutor: Send + Sync {
     /// Defaults to the stricter reuse test.
     fn record_is_live(&self, record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
         self.record_is_reusable(record)
+    }
+    /// Whether a landing's own publication receipt still names the bytes on
+    /// disk, independently of whether its verdict uses this build's logic.
+    fn landing_receipt_matches_disk(&self, _record: &WorkflowV2CallRecord) -> WorkflowResult<bool> {
+        Ok(false)
+    }
+    /// Judge the current receipt's bytes under this build without publishing.
+    async fn rejudge_landing(
+        &self,
+        _record: &WorkflowV2CallRecord,
+        _expected_generation: Option<u64>,
+        _allow_restore: bool,
+    ) -> WorkflowResult<Option<LandingRejudgeOutcome>> {
+        Ok(None)
+    }
+    /// Preserve a displaced body and either restore the current landing's
+    /// receipt-verified bytes or run the displaced bytes as a new candidate.
+    async fn repair_landing_mismatch(
+        &self,
+        _record: &WorkflowV2CallRecord,
+        _expected_generation: Option<u64>,
+        _allow_restore: bool,
+    ) -> WorkflowResult<(bool, Option<HostCommandResult>, bool)> {
+        Ok((false, None, false))
     }
     /// Whether a recorded outcome that a limit cut short was cut by the
     /// limits this build applies; replay paths ask before answering from it.

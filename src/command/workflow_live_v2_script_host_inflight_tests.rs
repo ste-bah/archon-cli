@@ -79,6 +79,7 @@ async fn start_run(workflow_store: WorkflowStore, v2_store: WorkflowV2ResultStor
     let runner = WorkflowV2ScriptRunner::new(
         "orphaned call".to_string(),
         WorkflowV2ScriptRuntime {
+            cargo_limits: archon_tools::workflow_resource_env::CargoResourceLimits::default(),
             target_repository_root: None,
             generated_config: archon_core::config::GeneratedWorkflowConfig::default(),
         },

@@ -118,14 +118,16 @@ fn execute_single_specialist_fixture(
         return Err(format!("forced failure for test: {agent_key}"));
     }
 
-    let _prompt = prompt_builder::build_specialist_prompt_with_prior_context(
+    let _prompt = prompt_builder::build_specialist_prompt_with_template(
         agent_key,
         agent_key,
+        "Test fixture specialist instructions.",
         situation,
         fingerprint_summary,
         prior_context,
         &[],
-    );
+    )
+    .map_err(|error| error.to_string())?;
 
     let prior_context_section = if prior_context.trim().is_empty() {
         String::new()
@@ -163,13 +165,17 @@ pub(super) async fn execute_specialists_real(
     ),
     GameTheoryError,
 > {
+    let project_root = runtime_prompt_tests::test_project_root_for(routing)?;
     let outcome = execute_specialists_real_with_options(
         llm,
         routing,
         fingerprint,
         situation,
         memory_ctx,
-        &GameTheoryRunOptions::default(),
+        &GameTheoryRunOptions {
+            project_root,
+            ..GameTheoryRunOptions::default()
+        },
         None,
     )
     .await?;
@@ -235,10 +241,20 @@ pub(super) async fn execute_specialists_real_with_options(
                 memory_ctx,
                 &system,
                 learning_contexts.get(agent_key),
+                &options.project_root,
             )
         });
         let results = join_all(calls).await;
         for result in results {
+            if let Some(error) = result.error.as_deref()
+                && error.contains("GameTheory pipeline agent")
+                && error.contains("archon agent sync")
+            {
+                return Err(GameTheoryError::SpecialistFailed {
+                    agent_key: result.agent_key,
+                    message: error.to_string(),
+                });
+            }
             if let Some(li) = learning.as_deref_mut() {
                 let quality = if result.output.is_some() { 0.9 } else { 0.0 };
                 let summary = result
@@ -283,36 +299,9 @@ async fn execute_specialist_call(
     memory_ctx: &GameTheoryMemoryContext,
     system: &[serde_json::Value],
     learning_context: Option<&LearningContext>,
+    project_root: &std::path::Path,
 ) -> SpecialistCallOutput {
     let recalled = recall_prior_context_for_agent(agent_key, memory_ctx);
-    let agent = registry_agent(agent_key);
-    let (display_name, model, source_body) = match agent {
-        Some(agent) => match load_agent_prompt_body(agent) {
-            Ok(body) => (agent.display_name, agent.model, body),
-            Err(error) => {
-                return SpecialistCallOutput {
-                    agent_key: agent_key.to_string(),
-                    output: None,
-                    error: Some(error.to_string()),
-                    audit: recalled.audit,
-                    cost_usd: None,
-                };
-            }
-        },
-        None => {
-            // Tier alias, not a model ID: the provider resolves it from
-            // `[models.anthropic]` at request time, so this fallback follows
-            // the operator's configured Sonnet instead of pinning an agent
-            // with no definition to whichever release was current when this
-            // line was written.
-            tracing::warn!(
-                agent_key,
-                model = "sonnet",
-                "gametheory.agent.model_override"
-            );
-            (agent_key, "sonnet", String::new())
-        }
-    };
     if agent_key.ends_with("-FORCE-FAIL-FOR-TEST") {
         return SpecialistCallOutput {
             agent_key: agent_key.to_string(),
@@ -322,10 +311,40 @@ async fn execute_specialist_call(
             cost_usd: None,
         };
     }
-
+    let agent = registry_agent(agent_key);
+    let (display_name, model, source_body) = match agent {
+        Some(agent) => match load_agent_prompt_body(agent, project_root) {
+            Ok(body) => (agent.display_name, agent.model, body),
+            Err(error) => {
+                return SpecialistCallOutput {
+                    agent_key: agent_key.to_string(),
+                    output: None,
+                    error: Some(format!(
+                        "GameTheory pipeline agent '{}' prompt '{}' failed: {error}; run `archon agent sync`.",
+                        agent_key, agent.prompt_source_path
+                    )),
+                    audit: recalled.audit,
+                    cost_usd: None,
+                };
+            }
+        },
+        None => {
+            let expected = format!(".archon/agents/gametheory/{agent_key}.md");
+            return SpecialistCallOutput {
+                agent_key: agent_key.to_string(),
+                output: None,
+                error: Some(format!(
+                    "GameTheory pipeline agent '{}' has no registry definition; expected prompt '{}'; run `archon agent sync`.",
+                    agent_key, expected
+                )),
+                audit: recalled.audit,
+                cost_usd: None,
+            };
+        }
+    };
     let combined_prior_context =
         combine_prior_and_learning_context(&recalled.text, learning_context);
-    let prompt = prompt_builder::build_specialist_prompt_with_template(
+    let prompt = match prompt_builder::build_specialist_prompt_with_template(
         agent_key,
         display_name,
         &source_body,
@@ -333,7 +352,22 @@ async fn execute_specialist_call(
         fingerprint_summary,
         &combined_prior_context,
         &[],
-    );
+    ) {
+        Ok(prompt) => prompt,
+        Err(error) => {
+            let path = agent.map(|agent| agent.prompt_source_path).unwrap_or("");
+            return SpecialistCallOutput {
+                agent_key: agent_key.to_string(),
+                output: None,
+                error: Some(format!(
+                    "GameTheory pipeline agent '{}' prompt '{}' failed: {error}; run `archon agent sync`.",
+                    agent_key, path
+                )),
+                audit: recalled.audit,
+                cost_usd: None,
+            };
+        }
+    };
     let messages = vec![serde_json::json!({
         "role": "user",
         "content": prompt
@@ -441,3 +475,7 @@ fn registry_agent(agent_key: &str) -> Option<&'static GameTheoryAgent> {
         .iter()
         .find(|agent| agent.key == agent_key)
 }
+
+#[cfg(test)]
+#[path = "specialists/runtime_prompt_tests.rs"]
+mod runtime_prompt_tests;

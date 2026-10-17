@@ -488,3 +488,6 @@ async fn injected_probe_ignores_process_cargo_home_changes() {
     }
     reuse_after_environment_change("CARGO_HOME").await;
 }
+
+#[path = "workflow_acceptance_executability_resume_reverify_tests.rs"]
+mod reverify_tests;

@@ -130,6 +130,7 @@ pub(super) async fn finalize_with(
         None,
         None,
         Some(reentry),
+        archon_tools::workflow_resource_env::CargoResourceLimits::default(),
     )
     .await
 }

@@ -15,6 +15,42 @@ fn finding(text: &str) -> GateFinding {
 }
 
 #[test]
+fn typed_task_body_parse_errors_are_body_findings_for_each_staged_gate() {
+    let error = anyhow::Error::new(archon_workflow::WorkflowError::TaskBodyInvalid(
+        "no fenced task block in /tmp/tasks/TASK-X-010.md".into(),
+    ));
+    for gate_id in [
+        GateId::WorkflowLintTaskFile,
+        GateId::WorkflowLintTaskSet,
+        GateId::RequirementsTrace,
+    ] {
+        let evaluation = task_body_input_finding(&error, gate_id, "TASK-X-999")
+            .expect("typed task body errors are policy findings");
+        let envelope = evaluation.into_envelope().unwrap();
+        assert_eq!(envelope.policy_findings.len(), 1);
+        assert_eq!(envelope.policy_findings[0].subject, "TASK-X-010");
+        assert!(
+            envelope.policy_findings[0]
+                .text
+                .contains("no fenced task block")
+        );
+        assert_eq!(
+            envelope.policy_findings[0].remediation_scope,
+            archon_workflow::RemediationScope::Body
+        );
+        assert!(envelope.operational_error.is_none());
+    }
+}
+
+#[test]
+fn non_task_body_errors_are_not_converted_to_policy_findings() {
+    let error = anyhow::Error::new(archon_workflow::WorkflowError::SpecInvalid(
+        "gate setup failed".into(),
+    ));
+    assert!(task_body_input_finding(&error, GateId::WorkflowLintTaskFile, "TASK-X-010").is_none());
+}
+
+#[test]
 fn gate_evaluation_serializes_explicit_scope_without_prose_inference() {
     let exact = "mentions PRD and skeleton but belongs to this body";
     let evaluation = GateEvaluation::new("report", vec![finding(exact)]);
@@ -135,6 +171,13 @@ fn canonical_ids_become_shadow_subjects_when_present() {
     assert_eq!(
         finding_subject("no canonical id here", "task directory x"),
         "task directory x"
+    );
+    assert_eq!(
+        finding_subject(
+            "invalid task body in /tmp/project/tasks/TASK-X-010.md; repair it",
+            "task-set"
+        ),
+        "TASK-X-010"
     );
 }
 

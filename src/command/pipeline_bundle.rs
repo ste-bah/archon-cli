@@ -58,9 +58,15 @@ pub(crate) async fn handle_resume(
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
     force_quality_gate: bool,
+    user_home: Option<&Path>,
 ) -> Result<()> {
     let bundle = PipelineBundleStore::new(cwd);
     if let Ok(manifest) = bundle.load_manifest(session_id) {
+        crate::command::pipeline_agents::preflight_with_user_home(
+            cwd,
+            manifest.pipeline_type.clone(),
+            user_home,
+        )?;
         let adapter = build_pipeline_adapter(config, env_vars, "pipeline_resume").await?;
         let options = PipelineRunOptions { force_quality_gate };
         match manifest.pipeline_type {
@@ -72,6 +78,7 @@ pub(crate) async fn handle_resume(
                 )?;
                 let (mut learning, _) = build_pipeline_learning_stack(config, cwd);
                 let facade = archon_pipeline::coding::facade::CodingFacade::new()
+                    .with_project_root(cwd)
                     .with_models(config.models.anthropic.clone())
                     .with_context(config.context.clone())
                     .with_response_reserve_tokens(u64::from(config.api.resolved_max_tokens()));
@@ -134,7 +141,7 @@ pub(crate) async fn handle_resume(
             }
         }
     }
-    handle_legacy_resume(cwd, session_id, config, env_vars).await
+    handle_legacy_resume_with_user_home(cwd, session_id, config, env_vars, user_home).await
 }
 
 fn print_resume_mode(kind: &str, force_quality_gate: bool) {
@@ -313,19 +320,31 @@ fn handle_legacy_status(cwd: &Path, session_id: &str) -> Result<()> {
     Ok(())
 }
 
-async fn handle_legacy_resume(
+async fn handle_legacy_resume_with_user_home(
     cwd: &Path,
     session_id: &str,
     config: &ArchonConfig,
     env_vars: &ArchonEnvVars,
+    user_home: Option<&Path>,
 ) -> Result<()> {
-    ensure_active_provider_supports(
-        config,
-        archon_llm::providers::ProviderCapability::PipelineCoding,
-        "archon pipeline resume",
+    let checkpoint_path = cwd
+        .join(".pipeline-state")
+        .join(session_id)
+        .join("checkpoint.json");
+    let data = std::fs::read_to_string(&checkpoint_path)?;
+    let saved: archon_pipeline::session::PipelineCheckpoint = serde_json::from_str(&data)?;
+    crate::command::pipeline_agents::preflight_with_user_home(
+        cwd,
+        saved.pipeline_type.clone(),
+        user_home,
     )?;
     match archon_pipeline::session::resume(session_id, cwd) {
         Ok(session) => {
+            ensure_active_provider_supports(
+                config,
+                archon_llm::providers::ProviderCapability::PipelineCoding,
+                "archon pipeline resume",
+            )?;
             println!("Resumed session: {}", session.session_id);
             println!("Completed agents: {}", session.completed_agents.len());
             let adapter = build_pipeline_adapter(config, env_vars, "pipeline_resume").await?;
@@ -346,6 +365,10 @@ async fn handle_legacy_resume(
     Ok(())
 }
 
+#[cfg(test)]
+#[path = "pipeline_bundle_tests.rs"]
+mod legacy_resume_preflight_tests;
+
 async fn legacy_resume_coding(
     cwd: &Path,
     config: &ArchonConfig,
@@ -355,6 +378,7 @@ async fn legacy_resume_coding(
     let (mut learning, _) = build_pipeline_learning_stack(config, cwd);
     let mut reflexion = build_reflexion_injector(config);
     let facade = archon_pipeline::coding::facade::CodingFacade::new()
+        .with_project_root(cwd)
         .with_context(config.context.clone())
         .with_response_reserve_tokens(u64::from(config.api.resolved_max_tokens()));
     println!("Resuming coding pipeline...");

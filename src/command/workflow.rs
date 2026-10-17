@@ -29,10 +29,29 @@ use crate::command::workflow_live::{run_live_cli_action, should_spawn_live, spaw
 mod workflow_cli_lint;
 #[path = "workflow_decompose_cli.rs"]
 mod workflow_decompose_cli;
+#[path = "workflow_decompose_reverify.rs"]
+mod workflow_decompose_reverify;
+#[path = "workflow_decompose_reverify_assessment.rs"]
+mod workflow_decompose_reverify_assessment;
+#[cfg(test)]
+#[path = "workflow_decompose_reverify_edge_tests.rs"]
+mod workflow_decompose_reverify_edge_tests;
+#[cfg(test)]
+#[path = "workflow_decompose_reverify_executor_tests.rs"]
+mod workflow_decompose_reverify_executor_tests;
+#[path = "workflow_decompose_reverify_gates.rs"]
+mod workflow_decompose_reverify_gates;
+#[cfg(test)]
+#[path = "workflow_decompose_reverify_persistence_tests.rs"]
+mod workflow_decompose_reverify_persistence_tests;
+#[cfg(test)]
+#[path = "workflow_decompose_reverify_tests.rs"]
+mod workflow_decompose_reverify_tests;
 #[path = "workflow_freeze_cli.rs"]
 mod workflow_freeze_cli;
 pub(crate) use workflow_freeze_cli::{
-    entry_defects, install_entry_validator, refusal_text, skeleton_document,
+    entry_defects, install_entry_validator, refusal_text, reverify_acceptance_client,
+    skeleton_document,
 };
 #[path = "workflow_staged_cli.rs"]
 mod workflow_staged_cli;
@@ -190,6 +209,7 @@ pub(crate) async fn handle_workflow_command(
         staging_root,
         gate_envelope,
         call_id,
+        task_context_file,
         fidelity,
         waive_obligation,
         waive_reason,
@@ -203,6 +223,7 @@ pub(crate) async fn handle_workflow_command(
                 spec_file.as_deref(),
                 graph.as_deref(),
                 *candidate_stdin,
+                task_context_file.as_deref(),
                 staging_root.as_deref(),
                 gate_envelope.as_deref(),
                 call_id.as_deref(),
@@ -434,6 +455,7 @@ fn cli_action(action: &WorkflowAction) -> Result<(CommandAction, CliExecutionMod
         }
         WorkflowAction::Decompose(WorkflowDecomposeArgs { .. })
         | WorkflowAction::DecompositionIdentity
+        | WorkflowAction::Reverify(WorkflowStatusArgs { .. })
         | WorkflowAction::ReclaimTaskRoot(WorkflowReclaimTaskRootArgs { .. })
         | WorkflowAction::VerifyFrozenChain(WorkflowVerifyFrozenChainArgs { .. }) => {
             return Err(anyhow!(

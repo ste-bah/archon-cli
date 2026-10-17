@@ -14,12 +14,10 @@
 //! asked for no learning, and inventing one would make the field decorative
 //! again.
 //!
-//! Not every hook a spec can name has a consumer. `LearningIntegration` exposes
-//! SONA trajectories, a ReasoningBank query, and the DESC episode store;
-//! `world_model`, `jepa`, `rlm` and `reflexion` have no write-side entry point
-//! on it. Those names are counted as unrouted and reported, not silently
-//! dropped — a hook that quietly does nothing is how `learning_hooks` became
-//! dead in the first place.
+//! `reasoning_bank` writes a durable pattern row here, while `LearningIntegration`
+//! handles SONA trajectories and DESC episodes. `world_model`, `jepa`, `rlm`
+//! and `reflexion` have no write-side entry point; those names are counted as
+//! unrouted and reported, not silently dropped.
 //!
 //! # One recorded outcome per record, keyed by the record
 //!
@@ -34,14 +32,16 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use archon_pipeline::learning::integration::{
     LearningIntegration, LearningIntegrationConfig, RecordedOutcome,
 };
 use archon_workflow::{WorkflowLearningRecord, WorkflowStore};
+use cozo::{DataValue, DbInstance, ScriptMutability};
 use std::io::Write;
 
-/// Hook names that name a subsystem reachable through `LearningIntegration`.
+/// Hook names routed to a write-side sink by this fold.
 ///
 /// Compared after [`normalize_hook`], so `"reasoning-bank"`, `"ReasoningBank"`
 /// and `"reasoning_bank"` are one name.
@@ -60,6 +60,8 @@ pub(crate) struct DispatchCall {
     pub pipeline_id: String,
     pub quality: f64,
     pub summary: String,
+    /// Whether the record explicitly selected the durable ReasoningBank sink.
+    pub reasoning_bank: bool,
 }
 
 /// What a record stream routes to, before anything is dispatched.
@@ -222,12 +224,22 @@ fn fold_workflow_learning_each(
         return outcome;
     }
 
-    let Some(mut learning) = build_fold_learning(project_root) else {
+    let Some((mut learning, db)) = build_fold_learning(project_root) else {
         tracing::debug!(%run_id, "learning stack unavailable; workflow records not dispatched");
         outcome.integration_unavailable = true;
         return outcome;
     };
-    outcome.dispatched = apply_dispatch_each(&plan, &mut learning, on_delivered);
+    let reasoning_bank_enabled =
+        crate::command::workflow_live::load_learning_config_for_fixed(project_root)
+            .reasoning_bank
+            .enabled;
+    outcome.dispatched = apply_dispatch_each(
+        &plan,
+        &mut learning,
+        &db,
+        |db, call| write_reasoning_bank_record(db, call, reasoning_bank_enabled),
+        on_delivered,
+    );
     outcome
 }
 
@@ -266,13 +278,20 @@ pub(crate) fn plan_dispatch(records: &[WorkflowLearningRecord]) -> DispatchPlan 
 /// Replay every planned call against a learning stack. Returns how many the
 /// learning stack accepted; a call whose episode could not be stored is
 /// logged and not counted.
-fn apply_dispatch_each(
+pub(super) fn apply_dispatch_each(
     plan: &DispatchPlan,
     learning: &mut LearningIntegration,
+    db: &DbInstance,
+    mut write_reasoning_bank: impl FnMut(&DbInstance, &DispatchCall) -> anyhow::Result<()>,
     on_delivered: &mut dyn FnMut(&DispatchCall),
 ) -> usize {
     let mut delivered = 0;
     for call in &plan.calls {
+        if call.reasoning_bank
+            && let Err(error) = write_reasoning_bank(db, call)
+        {
+            tracing::warn!(%error, stage_id = %call.stage_id, "workflow ReasoningBank record not stored");
+        }
         let recorded = learning.record_outcome(&RecordedOutcome {
             episode_id: &call.episode_id,
             agent: &call.agent,
@@ -303,6 +322,10 @@ pub(crate) fn episode_key(run_id: &str, stage_id: &str) -> String {
 }
 
 fn dispatch_call(record: &WorkflowLearningRecord) -> DispatchCall {
+    let reasoning_bank = record
+        .hooks
+        .iter()
+        .any(|hook| normalize_hook(hook) == "reasoningbank");
     DispatchCall {
         stage_id: record.stage_id.clone(),
         episode_id: episode_key(&record.run_id, &record.stage_id),
@@ -329,6 +352,7 @@ fn dispatch_call(record: &WorkflowLearningRecord) -> DispatchCall {
                 if record.durable { "; durable" } else { "" }
             )
         },
+        reasoning_bank,
     }
 }
 
@@ -346,11 +370,14 @@ fn normalize_hook(hook: &str) -> String {
 /// SONA trajectories are left off: they need an embedding provider and a GNN
 /// input dimension that only the interactive/pipeline construction sites carry,
 /// and claiming a trajectory we cannot embed would be worse than not recording
-/// one. DESC is the part that closes the loop from here — episodes written now
-/// are what `InjectionFilter` feeds back into a later `on_agent_start`.
+/// one. DESC episodes and ReasoningBank pattern rows are written from the same
+/// selected records; the latter uses an empty embedding because no provider is
+/// available in this fold.
 ///
 /// `None` when the store will not open or its schema will not initialise.
-fn build_fold_learning(project_root: &Path) -> Option<LearningIntegration> {
+pub(super) fn build_fold_learning(
+    project_root: &Path,
+) -> Option<(LearningIntegration, Arc<DbInstance>)> {
     let path = project_root.join(".archon").join("learning-state.db");
     let db = super::open_store(&path, "learning")
         .map_err(|error| tracing::debug!(%error, "learning store unavailable for dispatch"))
@@ -364,9 +391,51 @@ fn build_fold_learning(project_root: &Path) -> Option<LearningIntegration> {
         route_prefix: "workflow/".to_string(),
         ..LearningIntegrationConfig::default()
     };
-    Some(
-        LearningIntegration::new(None, None, config, None).with_desc_store(
-            archon_pipeline::learning::desc::DescEpisodeStore::from_arc(db),
-        ),
+    let learning = LearningIntegration::new(None, None, config, None).with_desc_store(
+        archon_pipeline::learning::desc::DescEpisodeStore::from_arc(Arc::clone(&db)),
+    );
+    Some((learning, db))
+}
+
+/// Persist one selected lesson in the existing ReasoningBank relation.
+/// The episode key is shared with DESC, so retrying a fold replaces its row.
+fn write_reasoning_bank_record(
+    db: &DbInstance,
+    call: &DispatchCall,
+    enabled: bool,
+) -> anyhow::Result<()> {
+    if !enabled {
+        return Ok(());
+    }
+    let safe_lesson = crate::command::workflow_decompose_learning::redact_lesson(&call.task);
+    let safe_outcome = crate::command::workflow_decompose_learning::redact_lesson(&call.summary);
+    let description = serde_json::to_string(&serde_json::json!({
+        "run_id": call.pipeline_id,
+        "stage_id": call.stage_id,
+        "phase": call.phase,
+        "outcome": safe_outcome,
+        "lesson": safe_lesson,
+        "quality": call.quality,
+    }))?;
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut params = std::collections::BTreeMap::new();
+    params.insert("id".into(), DataValue::from(call.episode_id.as_str()));
+    params.insert("description".into(), DataValue::from(description));
+    params.insert("confidence".into(), DataValue::from(call.quality));
+    params.insert("now".into(), DataValue::from(now));
+    db.run_script(
+        r#"
+        ?[pattern_id, pattern_type, description, embedding, frequency, confidence, created_at, updated_at] <-
+            [[$id, "workflow_lesson", $description, [], 1, $confidence, $now, $now]]
+        :put patterns {
+            pattern_id
+            =>
+            pattern_type, description, embedding, frequency, confidence, created_at, updated_at
+        }
+        "#,
+        params,
+        ScriptMutability::Mutable,
     )
+    .map_err(|error| anyhow::anyhow!("ReasoningBank pattern write failed: {error:?}"))?;
+    Ok(())
 }

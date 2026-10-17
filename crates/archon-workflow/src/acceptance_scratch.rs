@@ -16,6 +16,8 @@ pub use direct::{
 };
 #[path = "acceptance_scratch_inputs.rs"]
 mod inputs;
+#[path = "acceptance_scratch_siblings.rs"]
+mod siblings;
 use control::git;
 
 #[path = "acceptance_scratch_paths.rs"]
@@ -24,8 +26,7 @@ pub use paths::relative_key;
 #[cfg(test)]
 pub(crate) use paths::shell_arg;
 
-/// The project paths never copied out of the project (credentials, engine
-/// configuration, workflows, git), whatever the inputs name.
+/// Project paths never copied out: credentials, engine config, workflows and git.
 pub(crate) use inputs::excluded as project_input_excluded;
 pub fn acceptance_input_excluded(
     path: &Path,
@@ -37,8 +38,7 @@ pub fn acceptance_input_excluded(
 
 /// Issue 440: the one nested-repository rule of every project-input walk.
 pub use inputs::{nested_repository, nested_repository_skipped};
-/// Whether a project-relative path is host-owned run state excluded from
-/// acceptance inputs and their hermetic digest.
+/// Whether a project-relative path is host-owned state excluded from acceptance inputs.
 pub fn harness_run_state_path(path: &Path) -> bool {
     inputs::acceptance_harness_run_state(path)
 }
@@ -87,9 +87,7 @@ pub struct ScratchPolicy {
     pub timeout_secs: u64,
     pub output_bytes: usize,
     pub scratch_bytes: u64,
-    /// Batch J2: a persistent compiled-artifact cache shared by every
-    /// observation made with this policy (`acceptance_scratch_cache`);
-    /// `None` builds each observation cold in its own scratch.
+    /// Persistent compiled-artifact cache; `None` builds each observation cold.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build_cache: Option<PathBuf>,
 }
@@ -152,6 +150,7 @@ pub struct ScratchRoots {
     cleaned: bool,
     cleanup_timeout_secs: u64,
     host_environment: BTreeMap<String, String>,
+    sibling_revisions: Vec<crate::acceptance_sibling_paths::SiblingRevision>,
 }
 impl ScratchRoots {
     pub fn prepare(policy: &ScratchPolicy, commit: &str) -> WorkflowResult<Self> {
@@ -162,6 +161,13 @@ impl ScratchRoots {
         control.run(|| Self::prepare_inner(policy, commit))
     }
     pub(super) fn prepare_inner(policy: &ScratchPolicy, commit: &str) -> WorkflowResult<Self> {
+        Self::prepare_inner_with_checks(policy, commit, &[])
+    }
+    pub(super) fn prepare_inner_with_checks(
+        policy: &ScratchPolicy,
+        commit: &str,
+        checks: &[(String, crate::task_set_contract::TrustedCwd)],
+    ) -> WorkflowResult<Self> {
         policy.validate()?;
         // Issue 345: the one check-environment rule's forwarded values.
         let host_environment = crate::acceptance_check_environment::forwarded_values(
@@ -207,12 +213,9 @@ impl ScratchRoots {
             None => None,
         };
         let root = match &lease {
-            // One fixed path per cache, so every path Cargo fingerprints is
-            // stable; a slot left by a holder that never tore down goes.
+            // Keep Cargo paths stable; reclaim slots left by holders that did not tear down.
             Some(lease) => {
-                // Slots of holders that never tore down (the cache moved to
-                // a new generation for them): unregistered and removed if
-                // they can be; nothing of theirs is reused.
+                // Unregistered stale slots are removed and never reused.
                 for stale in lease.leftovers("scratch-") {
                     let _ = git(
                         &live_repository,
@@ -242,11 +245,11 @@ impl ScratchRoots {
             cleaned: false,
             cleanup_timeout_secs: policy.timeout_secs.max(5),
             host_environment,
+            sibling_revisions: Vec::new(),
         };
         let setup = (|| {
             roots.registered = true;
-            // A cache's fixed slot may still be registered by a holder that
-            // never tore down: `-f` reclaims it.
+            // Reclaim a fixed slot still registered by a stale holder.
             let reclaim: &[&str] = if roots.lease.is_some() { &["-f"] } else { &[] };
             let add = [
                 "-c",
@@ -274,7 +277,6 @@ impl ScratchRoots {
             let mut remaining = policy.scratch_bytes;
             if policy.combined {
                 io::copy_tree(&roots.repository, &roots.project, &mut remaining, true)?;
-                // Linked worktree metadata points to this same recorded source commit.
                 std::fs::copy(roots.repository.join(".git"), roots.project.join(".git"))
                     .map_err(|e| WorkflowError::io(roots.project.join(".git"), e))?;
             }
@@ -314,6 +316,14 @@ impl ScratchRoots {
                 task_relative,
                 task_relative,
                 (&project_excludes, nested.as_deref()),
+                &mut remaining,
+            )?;
+            roots.sibling_revisions = siblings::copy_external(
+                &project,
+                &policy.repository,
+                &roots.project,
+                &roots.repository,
+                checks,
                 &mut remaining,
             )?;
             io::readonly(&roots.project.join(task_relative))?;
@@ -400,18 +410,6 @@ impl ScratchRoots {
             }
         }
         Ok(result)
-    }
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-    pub fn project(&self) -> &Path {
-        &self.project
-    }
-    pub fn repository(&self) -> &Path {
-        &self.repository
-    }
-    pub fn target(&self) -> PathBuf {
-        self.target.clone()
     }
     /// A check's variables here but the forwarded values (Issue 345's one
     /// rule, `acceptance_check_environment`): the policy's, and this

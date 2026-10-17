@@ -40,6 +40,7 @@ pub(super) struct LiveV2AgentClient {
     fixed_raw_tool_policy: Option<Vec<String>>,
     pub(super) owner_store: Option<archon_workflow::WorkflowStore>,
     pub(super) audit: Option<archon_workflow::repository_audit::runtime::AuditRuntime>,
+    cargo_limits: Option<archon_tools::workflow_resource_env::CargoResourceLimits>,
 }
 
 impl LiveV2AgentClient {
@@ -64,11 +65,26 @@ impl LiveV2AgentClient {
             fixed_raw_tool_policy: None,
             audit: None,
             owner_store: None,
+            cargo_limits: None,
         }
     }
 
     pub(super) fn audit_provenance(&self) -> Option<serde_json::Value> {
         self.llm.repository_audit_provenance()
+    }
+
+    pub(super) fn with_cargo_limits(
+        mut self,
+        limits: archon_tools::workflow_resource_env::CargoResourceLimits,
+    ) -> Self {
+        self.cargo_limits = Some(limits);
+        self
+    }
+
+    pub(super) fn cargo_limits(
+        &self,
+    ) -> Option<&archon_tools::workflow_resource_env::CargoResourceLimits> {
+        self.cargo_limits.as_ref()
     }
     pub(super) fn audit_min_progress_secs(&self) -> u64 {
         self.llm.audit_min_progress_secs()
@@ -123,6 +139,7 @@ impl LiveV2AgentClient {
             fixed_raw_tool_policy: self.fixed_raw_tool_policy.clone(),
             audit: self.audit.clone(),
             owner_store: self.owner_store.clone(),
+            cargo_limits: self.cargo_limits.clone(),
         }
     }
 
