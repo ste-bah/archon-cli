@@ -105,10 +105,9 @@ async fn a_read_only_shell_on_a_host_with_no_boundary_is_refused_not_run() {
     assert!(!marker.exists(), "the command never started");
 }
 
-/// An isolated write branch's shell was always best effort without a
-/// boundary (its landing re-checks what it touched): it still runs.
+/// An isolated write branch fails closed when no boundary can be applied.
 #[tokio::test]
-async fn a_write_branch_shell_on_a_host_with_no_boundary_still_runs() {
+async fn a_write_branch_shell_on_a_host_with_no_boundary_is_refused_without_running() {
     let layout = layout();
     let guard = WorkflowReadGuard::new(40, 20, false, false)
         .with_declared_targets(
@@ -121,14 +120,37 @@ async fn a_write_branch_shell_on_a_host_with_no_boundary_still_runs() {
         )
         .with_run_store(run_store(&layout, &layout.worktree));
     let ctx = ctx(guard, &layout.worktree);
+    let marker = layout.worktree.join("must-not-run.txt");
     unavailable_for_tests(true);
-    let result = bash(&ctx, "printf ok > own.txt").await;
+    let result = bash(&ctx, &format!("printf ran > {}", marker.display())).await;
     unavailable_for_tests(false);
-    assert!(!result.is_error, "{}", result.content);
-    assert_eq!(
-        std::fs::read_to_string(layout.worktree.join("own.txt")).unwrap(),
-        "ok"
+    assert!(result.is_error, "{}", result.content);
+    assert!(
+        result.content.contains("shell boundary"),
+        "{}",
+        result.content
     );
+    assert!(
+        result.content.contains("no boundary on this host"),
+        "{}",
+        result.content
+    );
+    assert!(!marker.exists(), "the command never started");
+}
+
+#[tokio::test]
+async fn an_unstamped_isolated_write_branch_fails_closed_without_running() {
+    let layout = layout();
+    let guard = WorkflowReadGuard::new(40, 20, false, false).with_declared_targets(
+        DeclaredTargetScope::new(&["own.txt".to_string()], layout.worktree.to_str())
+            .in_isolated_worktree(true),
+    );
+    let ctx = ctx(guard, &layout.worktree);
+    let marker = layout.worktree.join("must-not-run-unstamped.txt");
+    let result = bash(&ctx, &format!("printf ran > {}", marker.display())).await;
+    assert!(result.is_error, "{}", result.content);
+    assert!(result.content.contains("host stamp"), "{}", result.content);
+    assert!(!marker.exists(), "the command never started");
 }
 
 /// Issue-234/213: on the host-snapshot path (Windows, no kernel boundary) a

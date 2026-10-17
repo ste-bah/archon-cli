@@ -70,7 +70,8 @@ fn repairable_agent_contract_error(error: &WorkflowV2AgentError) -> bool {
         | WorkflowV2AgentError::AcceptedWithIllegitimateProjectData(_)
         | WorkflowV2AgentError::ImplementationNoopMissingProjectArtifactEvidence
         | WorkflowV2AgentError::ImplementationChangedFilesOutsideOwnership(_)
-        | WorkflowV2AgentError::DeclaredArtifactAbsent(_) => false,
+        | WorkflowV2AgentError::DeclaredArtifactAbsent(_)
+        | WorkflowV2AgentError::CriterionResultsMalformed(_) => false,
     }
 }
 

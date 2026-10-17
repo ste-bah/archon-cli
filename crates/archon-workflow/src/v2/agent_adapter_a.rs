@@ -182,7 +182,11 @@ impl WorkflowV2AgentAdapter {
         }
         // Batch O (C6b): an accepted write answers for every criterion.
         if request.is_write_capable() {
-            super::criterion_results::enforce(&request.input, result);
+            super::criterion_results::validate_envelope(&request.input, &result.data)
+                .map_err(WorkflowV2AgentError::CriterionResultsMalformed)?;
+            if result.status == WorkflowV2Status::Accepted {
+                super::criterion_results::enforce(&request.input, result);
+            }
         }
         crate::repository_audit::contract::enforce(request, result)
     }

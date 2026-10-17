@@ -210,6 +210,75 @@ pub fn enforce(input: &Value, result: &mut WorkflowV2Result) {
     }
 }
 
+/// Validate the required envelope shape before `enforce` classifies a valid
+/// `unmet` answer as work needing review. Shape errors are contract errors so
+/// the adapter can route them through its existing bounded repair path.
+pub fn validate_envelope(input: &Value, data: &Value) -> Result<(), String> {
+    let criteria = claimed_criteria(input);
+    if criteria.is_empty() {
+        return Ok(());
+    }
+    let entries = data
+        .get(CRITERION_RESULTS_KEY)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("data.{CRITERION_RESULTS_KEY} must be an array"))?;
+    let single_task = criteria.iter().all(|c| c.task_id == criteria[0].task_id);
+    for criterion in &criteria {
+        let entry = entries.iter().rev().find(|entry| {
+            let task = entry.get("task_id").and_then(Value::as_str).map(str::trim);
+            let task_ok = task.map_or(single_task, |task| task == criterion.task_id);
+            let index = entry
+                .get("criterion_index")
+                .or_else(|| entry.get("index"))
+                .and_then(Value::as_u64);
+            let text = entry
+                .get("criterion")
+                .and_then(Value::as_str)
+                .map(str::trim);
+            task_ok
+                && (index == Some(criterion.index as u64)
+                    || (index.is_none() && text == Some(criterion.text.as_str())))
+        });
+        let Some(entry) = entry else {
+            return Err(format!(
+                "data.{CRITERION_RESULTS_KEY} is missing an entry for {} criterion #{} ({})",
+                criterion.task_id, criterion.index, criterion.text
+            ));
+        };
+        if !entry.is_object() {
+            return Err(format!(
+                "data.{CRITERION_RESULTS_KEY} entry for {} criterion #{} must be an object",
+                criterion.task_id, criterion.index
+            ));
+        }
+        let status = entry
+            .get("status")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .filter(|status| matches!(status.as_str(), "met" | "unmet"))
+            .ok_or_else(|| {
+                format!(
+                    "data.{CRITERION_RESULTS_KEY} entry for {} criterion #{} must have status `met` or `unmet` as a string",
+                    criterion.task_id, criterion.index
+                )
+            })?;
+        let evidenced = match entry.get("evidence") {
+            Some(Value::String(text)) => !text.trim().is_empty(),
+            Some(Value::Array(items)) => !items.is_empty(),
+            Some(Value::Object(object)) => !object.is_empty(),
+            _ => false,
+        };
+        if !evidenced {
+            return Err(format!(
+                "data.{CRITERION_RESULTS_KEY} entry for {} criterion #{} ({status}) must include non-empty evidence",
+                criterion.task_id, criterion.index
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn sanitize(raw: &str) -> String {
     raw.chars()
         .map(|ch| {
