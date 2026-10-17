@@ -1,20 +1,23 @@
 use super::*;
 
 #[test]
-fn redacted_bytes_are_capped_before_persistence_and_credit() {
+fn ordinary_words_do_not_expand_redacted_bytes_before_credit() {
     let temp = tempfile::tempdir().unwrap();
     let progress = FreezeProgress::default();
     let partial = PartialReply::new(temp.path(), "batch", &progress);
     let text = format!("{{\"reason\":\"{}", "token ".repeat(700_000));
     assert!(text.len() < MAX_PARTIAL_REPLY_BYTES);
-    assert!(archon_observability::redaction::redact_text(&text).len() > MAX_PARTIAL_REPLY_BYTES);
-    partial.extended(&text, 1, text.len());
+    assert_eq!(archon_observability::redaction::redact_text(&text), text);
+    assert!(partial.extended(&text, 1, text.len()));
     assert_eq!(
         progress.total(),
-        0,
-        "oversized persisted work earns no credit"
+        1,
+        "the bounded reply earns its chunk credit"
     );
-    assert!(!partial.path.exists(), "no oversized cache on disk");
+    assert_eq!(
+        partial.open_reply().as_ref().map(|(reply, _)| reply),
+        Some(&text)
+    );
 }
 
 #[test]

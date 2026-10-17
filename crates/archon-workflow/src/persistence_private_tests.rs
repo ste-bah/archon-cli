@@ -97,6 +97,11 @@ fn agent_output_keeps_unknown_usage_null_and_reported_zero_zero() {
     }));
     assert!(string_usage.get("tokens_in").is_none());
     assert!(string_usage["tokens_out"].is_null());
+    assert!(crate::events::contains_forbidden_field(
+        &serde_json::json!({
+            "tokens_in": "credential-shaped value"
+        })
+    ));
     println!(
         "EVIDENCE #369 sanitize-redact BEFORE: mixed public output tokens_in=19/tokens_out=null and string tokens_in; AFTER: persisted tokens_in={}, tokens_out={}, string-key-present={}",
         mixed_record["tokens_in"],

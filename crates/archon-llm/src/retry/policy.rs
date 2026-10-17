@@ -174,11 +174,7 @@ mod tests {
                 "{error_type}: {error}"
             );
             let text = error.to_string();
-            if error_type == "authentication_error" {
-                assert!(text.contains("invalid x-***REDACTED***"), "{text}");
-            } else {
-                assert!(text.contains(message), "{text}");
-            }
+            assert!(text.contains(message), "{text}");
             assert!(
                 !text.contains("(400)") && !text.contains("(40"),
                 "no invented status: {text}"

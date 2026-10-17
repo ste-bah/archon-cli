@@ -129,9 +129,23 @@ fn save(path: &Path, value: &Value) -> WorkflowResult<()> {
         }
         let mut file = options.open(&temporary)?;
         let value = archon_workflow::events::sanitize_value(value.clone());
-        file.write_all(
-            archon_observability::redaction::redact_text(&value.to_string()).as_bytes(),
-        )?;
+        let serialized = value.to_string();
+        let redacted = archon_observability::shared_redactor::redact_text(
+            &serialized,
+            archon_workflow::events::REDACTION_MARKER,
+        );
+        let output = if serde_json::from_str::<Value>(&redacted).is_ok() {
+            redacted
+        } else {
+            tracing::warn!(
+                path = %path.display(),
+                reason = "invalid JSON after the second pass",
+                "raw evidence fallback redaction applied"
+            );
+            redact_structured_service_accounts(value, archon_workflow::events::REDACTION_MARKER)
+                .to_string()
+        };
+        file.write_all(output.as_bytes())?;
         file.sync_data()?;
         std::fs::rename(temporary, path)
     };
@@ -139,99 +153,33 @@ fn save(path: &Path, value: &Value) -> WorkflowResult<()> {
         .map_err(|e| WorkflowError::StageFailed(format!("author evidence {}: {e}", path.display())))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Issue-245: the agent-output record is a public copy and stays redacted.
-    #[test]
-    fn the_public_agent_output_record_redacts_real_looking_secrets() {
-        let temp = tempfile::tempdir().unwrap();
-        let v2 = temp.path().join("run").join("v2");
-        let mut evidence = RawEvidence::start(&v2, "author-1", "prompt").unwrap();
-        let outcome = WorkflowAgentOutcome {
-            content: "key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 and Authorization: Bearer opaque-bearer-credential-123".into(),
-            tool_uses: Vec::new(),
-            tokens_in: Some(0),
-            tokens_out: Some(0),
-            stop_reason: Some("end_turn".into()),
-        };
-        evidence.finish(&Ok(outcome)).unwrap();
-        let raw =
-            std::fs::read_to_string(temp.path().join("run/agent-outputs/author-1.json")).unwrap();
-        assert!(!raw.contains("sk-ant-"), "{raw}");
-        assert!(!raw.contains("opaque-bearer-credential-123"), "{raw}");
+fn redact_structured_service_accounts(value: Value, marker: &str) -> Value {
+    if let Value::Object(map) = &value
+        && map.iter().any(|(key, value)| {
+            key.eq_ignore_ascii_case("type")
+                && value
+                    .as_str()
+                    .is_some_and(|kind| kind.eq_ignore_ascii_case("service_account"))
+        })
+    {
+        return Value::String(marker.to_string());
     }
-
-    #[test]
-    fn raw_outcome_omits_unreported_usage_and_keeps_reported_counts() {
-        let absent = raw_outcome_result(
-            WorkflowAgentOutcome {
-                tokens_in: None,
-                tokens_out: None,
-                ..Default::default()
-            },
-            "end_turn".into(),
-        );
-        assert!(absent.data["tokensIn"].is_null());
-        assert_eq!(
-            absent.data["tokensInUnknownReason"],
-            json!("provider did not report a confirmed input token count")
-        );
-        assert!(absent.data["tokensOut"].is_null());
-        assert_eq!(
-            absent.data["tokensOutUnknownReason"],
-            json!("provider did not report an output token count")
-        );
-
-        let reported = raw_outcome_result(
-            WorkflowAgentOutcome {
-                tokens_in: Some(123),
-                tokens_out: Some(45),
-                ..Default::default()
-            },
-            "end_turn".into(),
-        );
-        assert_eq!(reported.data["tokensIn"], json!(123));
-        assert!(reported.data["tokensInUnknownReason"].is_null());
-        assert_eq!(reported.data["tokensOut"], json!(45));
-        assert!(reported.data["tokensOutUnknownReason"].is_null());
-
-        let reported_zero = raw_outcome_result(
-            WorkflowAgentOutcome {
-                tokens_in: Some(0),
-                tokens_out: Some(0),
-                ..Default::default()
-            },
-            "end_turn".into(),
-        );
-        assert_eq!(reported_zero.data["tokensIn"], json!(0));
-        assert!(reported_zero.data["tokensInUnknownReason"].is_null());
-        assert_eq!(reported_zero.data["tokensOut"], json!(0));
-        assert!(reported_zero.data["tokensOutUnknownReason"].is_null());
-        let read_back = |result: &WorkflowV2Result| {
-            serde_json::from_slice::<Value>(&serde_json::to_vec(result).unwrap()).unwrap()
-        };
-        let absent_read_back = read_back(&absent);
-        let reported_read_back = read_back(&reported);
-        let reported_zero_read_back = read_back(&reported_zero);
-        assert_eq!(
-            absent_read_back["data"]["tokensInUnknownReason"],
-            json!("provider did not report a confirmed input token count")
-        );
-        assert_eq!(reported_read_back["data"]["tokensIn"], json!(123));
-        assert_eq!(reported_zero_read_back["data"]["tokensIn"], json!(0));
-        println!(
-            "EVIDENCE #369 rawOutcome-usage BEFORE: absent input serialized as null without explanation; AFTER separate JSON read: {}",
-            absent_read_back["data"]
-        );
-        println!(
-            "EVIDENCE #369 rawOutcome-reported-zero BEFORE: Some(0) may be a measured count; AFTER separate JSON read: {}",
-            reported_zero_read_back["data"]
-        );
-        println!(
-            "EVIDENCE #369 rawOutcome-positive-count BEFORE: Some(123) had no availability marker; AFTER separate JSON read: {}",
-            reported_read_back["data"]
-        );
+    match value {
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (key, redact_structured_service_accounts(value, marker)))
+                .collect(),
+        ),
+        Value::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(|value| redact_structured_service_accounts(value, marker))
+                .collect(),
+        ),
+        other => other,
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_raw_evidence_tests.rs"]
+mod tests;

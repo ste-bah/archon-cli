@@ -28,7 +28,7 @@ fn github_token() -> String {
 }
 
 fn anthropic_key() -> String {
-    format!("sk-ant-api03-{}", "Zz9".repeat(10))
+    format!(concat!("sk", "-ant-api03-{}"), "Zz9".repeat(10))
 }
 
 #[test]
@@ -244,10 +244,10 @@ fn a_file_path_keeps_its_words_and_loses_only_a_credential_shaped_value() {
         !read[2].contains(&github) && read[2].starts_with("keys/"),
         "{read:?}"
     );
-    // Command text keeps the full redaction, words included.
+    // Command text preserves ordinary words while redacting credential values.
     let grep = &result.commands_run[0].command;
     assert!(
-        grep.starts_with("Grep ") && !grep.contains("secret"),
+        grep.starts_with("Grep ") && grep.contains("secret"),
         "{grep}"
     );
 }

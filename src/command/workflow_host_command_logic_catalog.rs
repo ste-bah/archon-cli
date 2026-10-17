@@ -63,7 +63,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 28: baseline-passing checks use a stored semantic judgment only
         // when its frozen contract and exact command digests still match;
         // otherwise the input-mutation proof and findings still apply.
-        version: 28,
+        // 29: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
+        version: 29,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -87,7 +88,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not check verdicts.
         // #457: baseline-passing checks may use a bound accepted judge verdict; the can-fail proof remains required.
         // #457 follow-up re-pin only: transient recreation of moved check inputs invalidates a stored verdict; freeze-acceptance remains version 28 (unreleased).
-        sources_digest: "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
+        sources_digest: "af3d7e9aca2af5f146a10f422bb98d3f482a92835cbc1ab01b9c8d20d631ff15",
         build_bound: false,
     },
     CapabilityLogic {
@@ -102,7 +103,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #424 #369 #383 #438 re-pin only: stream usage counting, the acceptance author's refusal redaction and Windows-only stored path spelling changed; no verdict changes, and on macOS/Linux this subcommand's findings and report text are unchanged.
         // #366 re-pin only: skeleton freeze performs no check path classification.
         // re-pin only: verdicts are unchanged.
-        version: 3,
+        // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
+        version: 4,
         sources: &[GATE, CONTRACT, FREEZE],
         // #434d re-pin only: the fidelity critic keeps each passing verdict of a reply and its store keys on a critic logic version; freeze never asks the critic, so its verdicts are unchanged.
         // #422 re-pin only: a resume after SIGKILL probes the recorded process scope of a host command; no freeze verdict reads it.
@@ -131,7 +133,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
         // #457 re-pin only: acceptance probe changes do not affect skeleton freeze verdicts.
         // #457 follow-up re-pin only: this closure is shared; the skeleton verdict is unchanged.
-        sources_digest: "426e7cad12ecd7204a8fb9b8b026528a66fd2f7add9364f353a4a992ca3759c6",
+        sources_digest: "af3d7e9aca2af5f146a10f422bb98d3f482a92835cbc1ab01b9c8d20d631ff15",
         build_bound: false,
     },
     CapabilityLogic {
@@ -161,7 +163,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // that landing's recorded logic is stale.
         // 18: malformed task-body parse failures are now classified as body findings, changing landing verdicts.
         // 19: landing repair uses the store's platform-aware directory flush, so recovered bodies can be judged on Windows.
-        version: 19,
+        // 20: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; task-body lint can therefore give a different verdict.
+        version: 20,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -188,7 +191,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not body landing verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not body verdicts.
-        sources_digest: "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+        sources_digest: "f94ba0239dffc0fdd4257dfcea56c9f512f6510937d482e26e38add7a9e91fcb",
         build_bound: false,
     },
     CapabilityLogic {
@@ -209,7 +212,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #441 review, same unreleased version: PRD context and shared whole-set attribution change set-gate findings.
         // #441: the set gate checks exactly the focused test commands the runtime records.
         // 15: malformed task-body parse failures are now body findings, changing task-set lint verdicts.
-        version: 15,
+        // 16: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; task-body lint can therefore give a different verdict.
+        version: 16,
         sources: &[GATE, CONTRACT, LINT],
         // #386 re-pin only: the staged lint reads a spilled candidate whole; a candidate that fits the pipe is read as before.
         // #387 re-pin only: the entry validator is re-exported for the launch decision; lint verdicts are unchanged.
@@ -237,7 +241,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not lint verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not lint verdicts.
-        sources_digest: "1a1970e9e1ee272f817304211ec3aa7b63e6ff4f0d98eaf3a9d24620975c9ce1",
+        sources_digest: "f94ba0239dffc0fdd4257dfcea56c9f512f6510937d482e26e38add7a9e91fcb",
         build_bound: false,
     },
     CapabilityLogic {
@@ -275,7 +279,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 9: every spawned check receives resolved resource limits.
         // 10: a legacy guardian request without resource_limits is rejected,
         // instead of silently running with default limits.
-        version: 10,
+        // 11: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
+        version: 11,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: skeleton verification never reads excluded run state or pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
@@ -308,7 +313,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen acceptance verification is unchanged.
         // # resource defaults re-pin only: frozen verification's check execution is scheduling-only.
         // #457 re-pin only: frozen-chain verification does not run the can-fail probe or read named inputs.
-        sources_digest: "7487637b517ffe5163f624a5187ddbfc888271ffced169afbd33bf0a2d818580",
+        sources_digest: "7eb980ca7a92bd918c454eb07f41ae4c05abdb83c3b1afadfcb5bf7eb3ebf821",
         build_bound: true,
     },
     CapabilityLogic {
@@ -316,7 +321,8 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // 3: #386 an output overrun no longer fails the command; the verdict uses the full output.
         // #366 re-pin only: frozen skeleton verification does not classify check paths.
         // re-pin only: verdicts are unchanged.
-        version: 3,
+        // 4: #444 redaction now preserves ordinary prose such as "Bearer authentication" instead of inserting a marker; freeze marker validation can therefore give a different verdict.
+        version: 4,
         sources: &[GATE, CONTRACT, VERIFY],
         // #434 and #417 re-pin only: verify never asks the fidelity critic or reads pipeline outputs.
         // #439 re-pin only: resume phase selection does not change verification verdicts.
@@ -350,7 +356,7 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen skeleton verification is unchanged.
         // # resource defaults re-pin only: frozen skeleton verification runs no checks.
         // #457 re-pin only: frozen verification runs no check and judges no probe result.
-        sources_digest: "7487637b517ffe5163f624a5187ddbfc888271ffced169afbd33bf0a2d818580",
+        sources_digest: "7eb980ca7a92bd918c454eb07f41ae4c05abdb83c3b1afadfcb5bf7eb3ebf821",
         build_bound: true,
     },
 ];
