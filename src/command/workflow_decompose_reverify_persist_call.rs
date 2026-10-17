@@ -2,19 +2,34 @@
 
 use anyhow::{Result, anyhow};
 use archon_workflow::{
-    HostCommandRequest, HostCommandResult, WorkflowV2CallRecord, WorkflowV2HostCall,
-    WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result, WorkflowV2ResultStore,
-    WorkflowV2Status, task_set_contract::content_digest,
+    HostCommandRequest, HostCommandResult, RunStatus, WorkflowStore, WorkflowV2CallRecord,
+    WorkflowV2HostCall, WorkflowV2HostMethod, WorkflowV2HostOptions, WorkflowV2Result,
+    WorkflowV2ResultStore, WorkflowV2Status, task_set_contract::content_digest,
 };
 
 use super::gate_assessment;
 use crate::command::workflow_host_command_exec::WorkflowHostCommandExecutor;
 use crate::command::workflow_host_command_outcome_stamp;
 
+#[cfg(test)]
+thread_local! {
+    static AFTER_PERSIST: std::cell::RefCell<Option<Box<dyn FnOnce() -> bool>>> = std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(crate) fn set_after_persist_hook(hook: impl FnOnce() -> bool + 'static) {
+    AFTER_PERSIST.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+}
+
 pub fn persist_call(
     executor: &dyn WorkflowHostCommandExecutor,
+    store: &WorkflowStore,
     v2: &WorkflowV2ResultStore,
     run_id: &str,
+    run_dir: &std::path::Path,
+    lease: &crate::command::workflow_executor_lease::ExecutionLease,
+    generation: u64,
+    status: &RunStatus,
     call_id: &str,
     request: HostCommandRequest,
     result: &HostCommandResult,
@@ -60,6 +75,22 @@ pub fn persist_call(
     if v2.result_path(call_id).exists() {
         return Err(anyhow!("reverify call record already exists: {call_id}"));
     }
-    v2.save_call_record(&record)?;
+    super::publish::persist_owned_call(
+        store, run_id, run_dir, lease, generation, status, v2, &record,
+    )?;
+    #[cfg(test)]
+    let stop = AFTER_PERSIST.with(|slot| {
+        if let Some(hook) = slot.borrow_mut().take() {
+            hook()
+        } else {
+            false
+        }
+    });
+    #[cfg(test)]
+    if stop {
+        return Err(anyhow!(
+            "reverify stopped at test crash seam after persisting a call"
+        ));
+    }
     Ok(stamped_data)
 }

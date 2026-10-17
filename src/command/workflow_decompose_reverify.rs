@@ -20,51 +20,22 @@ use crate::command::workflow_host_command_exec::FixedHostCommandExecutor;
 const REPORT_PATH: &str = "decomposition/reverify/reports";
 const STATE_PATH: &str = "decomposition/state.json";
 
+#[path = "workflow_decompose_reverify_eligibility.rs"]
+pub(crate) mod eligibility;
+
 #[path = "workflow_decompose_reverify_persist_call.rs"]
-mod persist;
+pub(crate) mod persist;
 pub(super) use persist::persist_call;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct ReverifyReport {
-    schema_version: u32,
-    id: String,
-    supersedes_id: String,
-    supersedes_digest: String,
-    outcome: String,
-    calls: Vec<String>,
-    subjects: Vec<SubjectResult>,
-    set_gates: Vec<GateResult>,
-    frozen_gates: Vec<GateResult>,
-    checks: Vec<acceptance::CheckResult>,
-}
+#[path = "workflow_decompose_reverify_publish.rs"]
+pub(crate) mod publish;
 
 #[path = "workflow_decompose_reverify_acceptance.rs"]
 mod acceptance;
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct SubjectResult {
-    task_id: String,
-    file_name: String,
-    disk_digest: String,
-    judged_digest: String,
-    logic_version: Option<u32>,
-    logic_digest: Option<String>,
-    build: Option<String>,
-    verdict: String,
-    findings: Vec<String>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(super) struct GateResult {
-    pub(super) command_id: String,
-    pub(super) call_id: String,
-    pub(super) logic_version: Option<u32>,
-    pub(super) logic_digest: Option<String>,
-    pub(super) build: Option<String>,
-    pub(super) verdict: String,
-    pub(super) findings: Vec<String>,
-    pub(super) subjects: Vec<String>,
-}
+#[path = "workflow_decompose_reverify_types.rs"]
+mod types;
+pub(super) use types::GateResult;
+use types::{ReverifyReport, SubjectResult};
 
 pub(crate) async fn reverify(
     cwd: &Path,
@@ -80,9 +51,8 @@ pub(crate) async fn reverify(
     let run_dir = store.run_dir(run_id);
     let _lease = crate::command::workflow_executor_lease::acquire(&run_dir, run_id)?;
     let run = store.load_state(run_id)?;
-    if run.status != RunStatus::Completed {
-        return Err(anyhow!("workflow {run_id} is not completed"));
-    }
+    let invocation_generation = run.generation;
+    let invocation_status = run.status.clone();
     let state_path = run_dir.join(STATE_PATH);
     let state: FixedDecompositionStateV1 = serde_json::from_slice(
         &std::fs::read(&state_path).with_context(|| format!("reading {}", state_path.display()))?,
@@ -95,8 +65,28 @@ pub(crate) async fn reverify(
         ));
     }
     let v2 = WorkflowV2ResultStore::new(run_dir.join("v2"));
-    let latest = crate::command::workflow_decompose_latest_report::latest_report(&store, run_id)?
-        .ok_or_else(|| anyhow!("workflow {run_id} has no valid prior final report"))?;
+    let latest = crate::command::workflow_decompose_latest_report::latest_report(&store, run_id)?;
+    let reverify_paused = eligibility::check_run_status(
+        &store,
+        &run_dir,
+        run_id,
+        &_lease,
+        run.status,
+        latest.as_ref(),
+        &v2,
+    )?;
+    if let Some(response) = eligibility::recover_accepted_report_status(
+        &store,
+        run_id,
+        reverify_paused,
+        invocation_generation,
+        &invocation_status,
+        latest.as_ref(),
+    )? {
+        return Ok(response);
+    }
+    let latest =
+        latest.ok_or_else(|| anyhow!("workflow {run_id} has no valid prior final report"))?;
     let prior = v2
         .load_call_records()?
         .into_iter()
@@ -161,15 +151,29 @@ pub(crate) async fn reverify(
             .unwrap_or_default(),
         gate_mode: config.workflow.gate_mode,
     };
-    let executor =
-        FixedHostCommandExecutor::new(catalog.clone(), base_context.clone(), run_dir.clone());
     let event_seq = store.next_event_seq(run_id)?;
+    let invocation_id = format!("reverify-{event_seq}");
     WorkflowEventLog::new(store.clone()).emit(
         run_id,
         event_seq,
         WorkflowEventKind::DecompositionReverifyStarted,
-        serde_json::json!({"invocation_id": format!("reverify-{event_seq}")}),
+        serde_json::json!({"invocation_id": invocation_id,
+            "lease_pid": _lease.holder().pid, "lease_acquired_at": _lease.holder().acquired_at}),
     )?;
+    let paused_authorization = reverify_paused.then(|| {
+        crate::command::workflow_host_command_operational::PausedRunAuthorization::new(
+            invocation_id.clone(),
+            run.generation,
+            &_lease,
+        )
+    });
+    let executor =
+        FixedHostCommandExecutor::new(catalog.clone(), base_context.clone(), run_dir.clone());
+    let executor = if let Some(authorization) = paused_authorization.clone() {
+        executor.authorize_paused_run(authorization)
+    } else {
+        executor
+    };
     let mut call_ids = Vec::new();
     let mut subjects = Vec::new();
     let mut set_gates = Vec::new();
@@ -202,8 +206,13 @@ pub(crate) async fn reverify(
                 let call_id = format!("reverify-{event_seq}-body-{index}");
                 let stamped = persist_call(
                     &executor,
+                    &store,
                     &v2,
                     run_id,
+                    &run_dir,
+                    &_lease,
+                    invocation_generation,
+                    &invocation_status,
                     &call_id,
                     request,
                     &result,
@@ -233,6 +242,11 @@ pub(crate) async fn reverify(
         context.frozen_task_file = Some(path);
         let body_executor =
             FixedHostCommandExecutor::new(catalog.clone(), context, run_dir.clone());
+        let body_executor = if let Some(authorization) = paused_authorization.clone() {
+            body_executor.authorize_paused_run(authorization)
+        } else {
+            body_executor
+        };
         eprintln!(
             "reverify gate started subject={} capability=land-task-body",
             frozen.task_id
@@ -255,8 +269,13 @@ pub(crate) async fn reverify(
         let call_id = format!("reverify-{event_seq}-body-{index}");
         let stamped = persist_call(
             &body_executor,
+            &store,
             &v2,
             run_id,
+            &run_dir,
+            &_lease,
+            invocation_generation,
+            &invocation_status,
             &call_id,
             request,
             &result,
@@ -288,9 +307,13 @@ pub(crate) async fn reverify(
     {
         let (result, gate) = execute_gate(
             &executor,
+            &store,
             &v2,
             run_id,
+            &run_dir,
+            &_lease,
             run.generation,
+            &invocation_status,
             event_seq,
             index,
             command_id,
@@ -311,9 +334,13 @@ pub(crate) async fn reverify(
     {
         let (result, gate) = execute_gate(
             &executor,
+            &store,
             &v2,
             run_id,
+            &run_dir,
+            &_lease,
             run.generation,
+            &invocation_status,
             event_seq,
             index,
             command_id,
@@ -335,13 +362,23 @@ pub(crate) async fn reverify(
     } else {
         "needs_remediation"
     };
+    let report_event_seq = store.next_event_seq(run_id)?;
     let report_id = format!("reverify-{event_seq}-report");
+    let mut call_record_ids_at_report = v2
+        .load_call_records()?
+        .into_iter()
+        .map(|record| record.call.id)
+        .collect::<Vec<_>>();
+    call_record_ids_at_report.push(report_id.clone());
+    call_record_ids_at_report.sort();
     let report = ReverifyReport {
         schema_version: 1,
         id: report_id.clone(),
         supersedes_id: prior.call.id.clone(),
         supersedes_digest: prior_digest,
         outcome: outcome.to_string(),
+        report_event_seq,
+        call_record_ids_at_report,
         calls: call_ids.clone(),
         subjects,
         set_gates,
@@ -356,11 +393,6 @@ pub(crate) async fn reverify(
     {
         return Err(anyhow!("reverify report already exists: {report_id}"));
     }
-    store.write_run_file(
-        run_id,
-        format!("{REPORT_PATH}/{report_id}.json"),
-        &report_bytes,
-    )?;
     let report_digest = content_digest(&report_bytes);
     let report_record = WorkflowV2CallRecord::new(
         run_id,
@@ -389,58 +421,49 @@ pub(crate) async fn reverify(
             "reverify report call record already exists: {report_id}"
         ));
     }
-    v2.save_call_record(&report_record)?;
-    let seq = store.next_event_seq(run_id)?;
-    WorkflowEventLog::new(store.clone()).emit(
+    let failed_subjects = if !operational_failure && !failed_subjects.is_empty() {
+        Some(crate::command::workflow_decompose_remediation::deduplicate_subjects(failed_subjects))
+    } else {
+        None
+    };
+    let operational_cause = publish::operational_failure_cause(&report, operational_failure);
+    let report_path = format!("{REPORT_PATH}/{report_id}.json");
+    let ledger_path = format!("decomposition/reverify/remediation-{report_id}.json");
+    let report_event = serde_json::json!({"report_id": report_id, "invocation_id": invocation_id,
+        "report_digest": report_digest,
+        "supersedes_id": prior.call.id, "outcome": outcome});
+    let next_status = if all_accepted && reverify_paused {
+        Some(RunStatus::Completed)
+    } else if !operational_failure && outcome == "needs_remediation" {
+        Some(RunStatus::Paused)
+    } else {
+        None
+    };
+    let ledger = failed_subjects.as_ref().map(|subjects| {
+        serde_json::json!({
+            "schema_version": 1, "report_id": report_id, "subjects": subjects,
+        })
+    });
+    publish::final_report(
+        &store,
         run_id,
-        seq,
-        WorkflowEventKind::DecompositionReverified,
-        serde_json::json!({"report_id": report_id, "report_digest": report_digest,
-            "supersedes_id": prior.call.id, "outcome": outcome}),
+        &run_dir,
+        &_lease,
+        invocation_generation,
+        &invocation_status,
+        &v2,
+        &report_path,
+        &report_bytes,
+        &report_record,
+        report_event_seq,
+        report_event,
+        ledger.as_ref().map(|value| (ledger_path.as_str(), value)),
+        next_status,
     )?;
-    if !operational_failure && !failed_subjects.is_empty() {
-        let failed_subjects =
-            crate::command::workflow_decompose_remediation::deduplicate_subjects(failed_subjects);
-        let ledger_path = format!("decomposition/reverify/remediation-{report_id}.json");
-        store.write_run_json(
-            run_id,
-            ledger_path,
-            &serde_json::json!({
-                "schema_version": 1, "report_id": report_id, "subjects": failed_subjects,
-            }),
-        )?;
-        store.with_run_lock(run_id, |locked| {
-            let mut latest = locked.load_state(run_id)?;
-            latest.status = RunStatus::Paused;
-            latest.updated_at = chrono::Utc::now();
-            locked.save_state(&latest)
-        })?;
-    }
-    if operational_failure {
-        let causes = report
-            .subjects
-            .iter()
-            .flat_map(|subject| subject.findings.iter())
-            .chain(
-                report
-                    .set_gates
-                    .iter()
-                    .chain(&report.frozen_gates)
-                    .flat_map(|gate| gate.findings.iter()),
-            )
-            .chain(report.checks.iter().flat_map(|check| check.findings.iter()))
-            .cloned()
-            .collect::<Vec<_>>();
-        let cause = causes
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "gate gave no verdict".to_string());
+    if let Some(cause) = operational_cause {
         return Err(anyhow!(
             "reverify recorded operational_failure: {cause}; run reverify again"
         ));
-    }
-    if all_accepted {
-        // Completion remains authoritative only when the current disk passes.
     }
     let verdicts = report
         .subjects

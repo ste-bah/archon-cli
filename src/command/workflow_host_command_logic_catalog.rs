@@ -87,8 +87,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not check verdicts.
         // #457: baseline-passing checks may use a bound accepted judge verdict; the can-fail proof remains required.
         // #457 follow-up re-pin only: transient recreation of moved check inputs invalidates a stored verdict; freeze-acceptance remains version 28 (unreleased).
+        // Re-pin only: the held executor lease now authenticates paused-run
+        // recovery; acceptance-freeze verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs, acceptance_scratch_observe.rs, acceptance_scratch_guardian.rs and workflow_decompose.rs route resolved cargo limits into check execution; these limits affect execution environment and parallelism, not verdict rules.
-        sources_digest: "4e68b2ef7550ede680dea308d750afc11a01ee903f112bf373cf14b9ae048e1f",
+        sources_digest: "54bff6b50a0fe38a57005248c1d9cfdc6653651cb5923c9343f7ebde83fc4285",
         build_bound: false,
     },
     CapabilityLogic {
@@ -132,8 +134,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // Re-pin only: terminal finalizer helpers moved into sibling modules; freeze verdicts are unchanged.
         // #457 re-pin only: acceptance probe changes do not affect skeleton freeze verdicts.
         // #457 follow-up re-pin only: this closure is shared; the skeleton verdict is unchanged.
+        // Re-pin only: the held executor lease now authenticates paused-run
+        // recovery; skeleton-freeze verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs, acceptance_scratch_observe.rs, acceptance_scratch_guardian.rs and workflow_decompose.rs route resolved cargo limits into scratch checks; skeleton freeze runs no checks, so its verdict is unchanged.
-        sources_digest: "4e68b2ef7550ede680dea308d750afc11a01ee903f112bf373cf14b9ae048e1f",
+        sources_digest: "54bff6b50a0fe38a57005248c1d9cfdc6653651cb5923c9343f7ebde83fc4285",
         build_bound: false,
     },
     CapabilityLogic {
@@ -190,8 +194,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not body landing verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not body verdicts.
+        // Re-pin only: the held executor lease now authenticates paused-run
+        // recovery; body-landing verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; staged body lint verdict rules are unchanged.
-        sources_digest: "aa69b9d93419e99a63b897c1ece4b129a94a633a50bc2bf8d5132c9d9f637566",
+        sources_digest: "a7f9ed5a841b426224c2f6cadadd4ef9209a12d9aeea9cc01f2798d5b765f279",
         build_bound: false,
     },
     CapabilityLogic {
@@ -240,8 +246,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #369 re-pin only: usage availability and cost recording affect telemetry; sanitizing persisted records changes representation, not lint verdicts.
         // #386 re-pin only: staged lint reads spill-backed candidates whole; inline candidates follow the existing path.
         // # resource defaults re-pin only: configured build parallelism changes scheduling, not lint verdicts.
+        // Re-pin only: the held executor lease now authenticates paused-run
+        // recovery; lint verdicts are unchanged.
         // #448 re-pin only: acceptance_scratch_hooks.rs and workflow_decompose.rs forward resolved cargo limits to observation commands; lint verdict rules are unchanged.
-        sources_digest: "aa69b9d93419e99a63b897c1ece4b129a94a633a50bc2bf8d5132c9d9f637566",
+        sources_digest: "a7f9ed5a841b426224c2f6cadadd4ef9209a12d9aeea9cc01f2798d5b765f279",
         build_bound: false,
     },
     CapabilityLogic {
@@ -312,8 +320,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen acceptance verification is unchanged.
         // # resource defaults re-pin only: frozen verification's check execution is scheduling-only.
         // #457 re-pin only: frozen-chain verification does not run the can-fail probe or read named inputs.
+        // Re-pin only: the held executor lease now authenticates paused-run
+        // recovery; frozen acceptance verification is unchanged.
         // #448 re-pin only: acceptance_scratch_observe.rs and workflow_decompose.rs pass resolved cargo limits into frozen check execution; limits change execution environment and parallelism, not verification verdict rules.
-        sources_digest: "62ed6d131498054f1ae2e167ee600a464c2f187c373ace76b550f12a04053d6d",
+        sources_digest: "c5b890e757495976deb577fb036d1455de93208eb965b71d25172d9bf3110c08",
         build_bound: true,
     },
     CapabilityLogic {
@@ -355,8 +365,10 @@ pub(crate) const CAPABILITY_LOGIC: &[CapabilityLogic] = &[
         // #340 re-pin only: the acceptance scratch uses the stdio-only spawn helper for Git; frozen skeleton verification is unchanged.
         // # resource defaults re-pin only: frozen skeleton verification runs no checks.
         // #457 re-pin only: frozen verification runs no check and judges no probe result.
+        // Re-pin only: the held executor lease now authenticates paused-run
+        // recovery; frozen skeleton verification is unchanged.
         // #448 re-pin only: acceptance_scratch_observe.rs and workflow_decompose.rs pass resolved cargo limits into shared observation code; skeleton verification runs no checks, so its verdict is unchanged.
-        sources_digest: "62ed6d131498054f1ae2e167ee600a464c2f187c373ace76b550f12a04053d6d",
+        sources_digest: "c5b890e757495976deb577fb036d1455de93208eb965b71d25172d9bf3110c08",
         build_bound: true,
     },
 ];
