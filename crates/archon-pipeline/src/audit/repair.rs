@@ -137,7 +137,7 @@ impl PipelineAuditRun {
                 output_path: path
                     .strip_prefix(self.store.bundle_dir(&self.state.session_id))?
                     .to_string_lossy()
-                    .into_owned(),
+                    .replace('\\', "/"),
                 input_hash,
                 output_hash,
             },

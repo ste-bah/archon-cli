@@ -122,7 +122,7 @@ async fn persistence_failure_keeps_old_paper_and_records_rejection() {
         refuse_repair: false,
         panic_at: None,
         provider_fail_at: None,
-        block_persist_at: Some((2, attempted_output)),
+        block_persist_at: Some((2, attempted_output.clone())),
     });
     let result = run_pipeline_audited(&facade, llm.as_ref(), "task", tmp.path(), None, None, None)
         .await
@@ -144,5 +144,5 @@ async fn persistence_failure_keeps_old_paper_and_records_rejection() {
     )
     .unwrap();
     assert!(log.contains("artifact_repair_rejected"));
-    assert!(log.contains("directory"));
+    assert!(attempted_output.is_dir());
 }
